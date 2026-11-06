@@ -3,8 +3,9 @@ import { expect, it } from "vitest";
 import { apiPost } from "../src/api.ts";
 import { HoldForm } from "../src/comms/HoldForm.tsx";
 import { ACTIONS } from "../src/data.ts";
-import { AskedOfYou } from "../src/flight/AskedOfYou.tsx";
 import { holdConditionText } from "../src/flight/HeldNeeds.tsx";
+import { NeedsYouTab } from "../src/flight/NeedsYouTab.tsx";
+import { Needs } from "../src/pages/Needs.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { item } from "./fixtures.ts";
 
@@ -52,7 +53,12 @@ it("lists a held item with its reason and condition, and Release returns it to N
       return { status: 200, body: { ok: true } };
     },
   });
-  render(<AskedOfYou />);
+  render(
+    <>
+      <NeedsYouTab />
+      <Needs item={null} />
+    </>,
+  );
   const row = await screen.findByTestId("held-row");
   expect(row.textContent).toContain("Choose");
   expect(row.textContent).toContain("Waiting · until mc#9 merges");
@@ -61,7 +67,11 @@ it("lists a held item with its reason and condition, and Release returns it to N
     expect(fetch).toHaveBeenCalledWith("/api/attention/held-demo/hold/release", expect.anything()),
   );
   await waitFor(() => expect(screen.queryByTestId("held-row")).toBeNull());
-  expect((await screen.findByTestId("ask-row")).textContent).toContain("Choose");
+  expect(
+    ((await screen.findAllByRole("link", { name: /Choose/ }))[0] as HTMLElement).getAttribute(
+      "href",
+    ),
+  ).toBe("/needs-you/held-demo");
 });
 
 it("words each release condition", () => {

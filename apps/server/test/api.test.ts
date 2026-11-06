@@ -102,10 +102,12 @@ import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
+import { DesignPreviews } from "../src/design-previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
+import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
@@ -1401,6 +1403,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/limits/github"],
   ["GET", "/api/repos"],
   ["GET", "/api/previews"],
+  ["GET", "/api/design-previews"],
+  ["POST", "/api/design-previews/41/open", {}],
   ["POST", "/api/previews", { pr: 41 }],
   ["DELETE", "/api/previews/41", {}],
   ["POST", "/api/previews/41/activity", {}],
@@ -2320,6 +2324,7 @@ describe("local access", () => {
     for (const [method, url, body] of API_ROUTES) {
       if (url.startsWith("/api/qa-reports") || url.startsWith("/api/qa-report-assets")) continue; // durable archive auth/reads have their own tests
       if (url === "/api/stream") continue; // never ends; the SSE tests cover it
+      if (url.startsWith("/api/design-previews")) continue; // the design preview tests below cover them
       if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
@@ -2652,6 +2657,25 @@ describe("local access", () => {
     expect(gqlCalls).toEqual([]);
   });
 
+  it("refuses a same-site request under /api (403): a design preview on another port is same-site", async () => {
+    const headers = { "sec-fetch-site": "same-site" };
+    for (const url of ["/api/crew", "/api/boards/shop-app/setup"]) {
+      const r = await app.inject({ method: "GET", url, headers });
+      expect(r.statusCode, url).toBe(403);
+      expect(r.json()).toEqual({ error: "cross-site request refused" });
+    }
+    // a beacon posts text/plain: it is refused as same-site, before the content-type check can answer 415
+    for (const site of ["same-site", "cross-site"]) {
+      const beacon = await app.inject({
+        method: "POST",
+        url: "/api/flight/approvals",
+        headers: { "sec-fetch-site": site, "content-type": "text/plain;charset=UTF-8" },
+        payload: "{}",
+      });
+      expect(beacon.statusCode, site).toBe(403);
+    }
+  });
+
   it("lets same-origin, none and header-less GETs reach the handler", async () => {
     for (const headers of [{ "sec-fetch-site": "same-origin" }, { "sec-fetch-site": "none" }, {}]) {
       const r = await app.inject({ method: "GET", url: "/api/boards/shop-app/setup", headers });
@@ -2742,6 +2766,7 @@ describe("local access", () => {
             .replace(/\/comms:\d+(?=\/|$)/, "/:id")
             .replace("/claude-main/", "/:id/")
             .replace(/\/accounts\/claude-main$/, "/accounts/:id")
+            .replace("/design-previews/41/open", "/design-previews/:ticket/open")
             .replace("/previews/41/activity", "/previews/:pr/activity")
             .replace("/previews/41", "/previews/:pr")
             .replace("/shop-app", "/:repoId")
@@ -6633,6 +6658,13 @@ describe("crew routes", () => {
     });
   });
 
+  it("marks an interrupting message read, as its text reached the seat", async () => {
+    expect((await post5("message", { text: "now", interrupt: true })).statusCode).toBe(200);
+    expect(store.unreadCommsFrom("CAPCOM", "guido-1", 0)).toEqual([]);
+    expect((await post5("message", { text: "fyi" })).statusCode).toBe(200);
+    expect(store.unreadCommsFrom("CAPCOM", "guido-1", 0)).toHaveLength(1);
+  });
+
   it("stores FYI messages without waking the seat, while interrupt and end still emit agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
@@ -7050,6 +7082,32 @@ describe("crew routes", () => {
         "tool_results",
       ]);
       expect(body.promptWakes?.[1]?.sections).toEqual(sections(100));
+    });
+
+    it("GET /api/flight carries FLIGHT's cost and how long a seat's call waited", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      store.upsertRun(
+        run({ id: "flight-run", agentId: "flight-1", costUsd: 7, startedAt: now - 3600_000 }),
+      );
+      const repoId = config.crew?.sessions[0]?.repoId ?? "";
+      recordSeatCall(store, repoId, {
+        seat: "guido-1",
+        ref: null,
+        reason: "stuck",
+        at: now - 600_000,
+      });
+      store.addFlightWake("flight-run", now - 540_000, ["signals"]);
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.wakeCost?.totalUsd).toBeCloseTo(7);
+      expect(body.wakeCost?.weekShare).toBeCloseTo(1);
+      expect(body.wakeWaits?.blockerMedianMs).toBe(60_000);
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
@@ -7898,6 +7956,189 @@ describe("the first loop's engine", () => {
     expect((await message(none.a)).statusCode).toBe(200);
     expect(none.told).toEqual([]);
     await none.a.close();
+  });
+
+  it("answers a passed question by its set-aside run, not the run now on the seat (#1451)", async () => {
+    store.upsertRun(
+      run({
+        id: "parked",
+        agentId: "guido-1",
+        ticket: "shop-app#9",
+        loop: { ...loop, phase: "working", aside: { worktree: "/w/parked", wake: false, ask: 1 } },
+      }),
+    );
+    store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+    const qid = store.addQuestion({
+      agentId: "guido-1",
+      runId: "parked",
+      text: "Which provider?",
+      at: NOW,
+    });
+    store.passQuestion(qid, NOW);
+    const otherId = store.addQuestion({
+      agentId: "guido-1",
+      runId: "next",
+      text: "Own question?",
+      at: NOW,
+    });
+    const reconciled: string[] = [];
+    const sup = stubSupervisor();
+    sup.seat = () => ({
+      seatId: "guido-1",
+      runId: "next",
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    supervisorCalls.length = 0;
+    const a = buildApp({
+      config,
+      store,
+      bus,
+      supervisor: sup,
+      engine: {
+        onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+        status: () => ({ on: true, note: null }),
+        reconcileRun: async (runId: string) => void reconciled.push(runId),
+      },
+    });
+    const r = await a.inject({
+      method: "POST",
+      url: "/api/seats/guido-1/message",
+      headers: json,
+      payload: { text: "Use Stripe.", question: qid },
+    });
+    expect(r.statusCode).toBe(200);
+    // only the parked run's question closes, the reply is addressed to that run, and the run now
+    // on the seat is not written to
+    expect(store.openQuestions().map((q) => q.id)).toEqual([otherId]);
+    expect(store.comms(0, "parked")).toEqual([
+      expect.objectContaining({ to: "guido-1", text: "Use Stripe." }),
+    ]);
+    expect(store.comms(0, "next")).toEqual([]);
+    expect(supervisorCalls.filter(([name]) => name === "message")).toEqual([]);
+    expect(reconciled).toEqual(["parked"]);
+    await a.close();
+  });
+
+  describe("a reply while runs wait off the seat on passed questions (#1451)", () => {
+    const parkedRun = (id: string, ticket: string) =>
+      store.upsertRun(
+        run({
+          id,
+          agentId: "guido-1",
+          ticket,
+          loop: { ...loop, phase: "working", aside: { worktree: `/w/${id}`, wake: false } },
+        }),
+      );
+    const passed = (runId: string, text: string) => {
+      const q = store.addQuestion({ agentId: "guido-1", runId, text, at: NOW });
+      store.passQuestion(q, NOW);
+      return q;
+    };
+    const appOnSeat = () => {
+      const reconciled: string[] = [];
+      supervisorCalls.length = 0;
+      const sup = stubSupervisor();
+      sup.seat = () => ({
+        seatId: "guido-1",
+        runId: "next",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      const a = buildApp({
+        config,
+        store,
+        bus,
+        supervisor: sup,
+        engine: {
+          onOperatorMessage: async () => ({ lifted: false, reason: "not-parked" }),
+          status: () => ({ on: true, note: null }),
+          reconcileRun: async (runId: string) => void reconciled.push(runId),
+        },
+      });
+      return { a, reconciled };
+    };
+    const post = (a: FastifyInstance, payload: Record<string, unknown>) =>
+      a.inject({ method: "POST", url: "/api/seats/guido-1/message", headers: json, payload });
+
+    it.each([
+      ["a plain message", { text: "Carry on with the migration." }],
+      ["an interrupt", { text: "Stop, wrong branch.", interrupt: true }],
+    ])(
+      "sends %s that names no question to the run on the seat, leaving the parked question open",
+      async (_name, payload) => {
+        parkedRun("parked", "shop-app#9");
+        store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+        const q = passed("parked", "Which provider?");
+        const { a, reconciled } = appOnSeat();
+        const r = await post(a, payload);
+        expect(r.statusCode).toBe(200);
+        // an interrupt is a labelled handoff and wakes the seat; a plain message waits in its inbox
+        expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(
+          "interrupt" in payload ? 1 : 0,
+        );
+        expect(store.comms(0, "next").map((m) => m.text)).toEqual([payload.text]);
+        expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
+        expect(reconciled).toEqual([]);
+        await a.close();
+      },
+    );
+
+    it("sends a message that names no question to the run on the seat when none waits", async () => {
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const { a } = appOnSeat();
+      const r = await post(a, { text: "Stop, wrong branch.", interrupt: true });
+      expect(r.statusCode).toBe(200);
+      expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(1);
+      await a.close();
+    });
+
+    it("refuses an answer that names another seat's question", async () => {
+      store.upsertRun(run({ id: "other", agentId: "inco-1", ticket: "shop-app#12" }));
+      const q = store.addQuestion({ agentId: "inco-1", runId: "other", text: "Hm?", at: NOW });
+      store.passQuestion(q, NOW);
+      const { a } = appOnSeat();
+      const r = await post(a, { text: "yes", question: q });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("another seat");
+      expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
+      await a.close();
+    });
+
+    it("answers the question it names, with two runs waiting", async () => {
+      parkedRun("p1", "shop-app#9");
+      parkedRun("p2", "shop-app#11");
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q1 = passed("p1", "Which provider?");
+      const q2 = passed("p2", "Delete the old table?");
+      const { a, reconciled } = appOnSeat();
+      const r = await post(a, { text: "Yes, delete it.", question: q2 });
+      expect(r.statusCode).toBe(200);
+      expect(store.openQuestions().map((x) => x.id)).toEqual([q1]);
+      expect(store.comms(0, "p2").map((m) => m.text)).toEqual(["Yes, delete it."]);
+      expect(store.comms(0, "p1")).toEqual([]);
+      expect(supervisorCalls.filter(([name]) => name === "message")).toEqual([]);
+      expect(reconciled).toEqual(["p2"]);
+      await a.close();
+    });
+
+    it("refuses an answer to a question that has already closed", async () => {
+      parkedRun("p1", "shop-app#9");
+      const q = passed("p1", "Which provider?");
+      store.answerQuestion(q, NOW);
+      const { a } = appOnSeat();
+      const r = await post(a, { text: "late", question: q });
+      expect(r.statusCode).toBe(409);
+      expect(r.json().error).toContain("already closed");
+      expect(store.comms(0, "p1")).toEqual([]);
+      await a.close();
+    });
   });
 
   it("resumes a parked looped run through the engine, though its seat holds no run (#477)", async () => {
@@ -9490,6 +9731,7 @@ describe("operator token", () => {
     expect(bare.statusCode).toBe(403);
     expect(bare.json()).toEqual({ error: BOOTSTRAP_REFUSED });
     expect((await boot({ "sec-fetch-site": "cross-site" })).statusCode).toBe(403);
+    expect((await boot({ "sec-fetch-site": "same-site" })).statusCode).toBe(403);
     const fromAddress = (remoteAddress: string) =>
       guarded.inject({
         method: "GET",
@@ -10183,5 +10425,44 @@ describe("lighter reads and compressed responses", () => {
       });
       expect(health.headers["content-encoding"]).toBeUndefined();
     });
+  });
+});
+
+describe("design preview routes", () => {
+  it("list and open need the operator token, and open answers 404 for a ticket with no stored preview", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mc-dp-api-"));
+    const previews = new DesignPreviews({
+      root: join(dir, "store"),
+      port: 7440,
+      hubPort: 7420,
+      prOf: () => null,
+    });
+    const a = buildApp({ config, store, bus, designPreviews: previews, operatorToken: "tok" });
+    try {
+      const key = { [OPERATOR_HEADER]: "tok" };
+      expect((await a.inject("/api/design-previews")).statusCode).toBe(401);
+      expect(
+        (
+          await a.inject({
+            method: "POST",
+            url: "/api/design-previews/1/open",
+            headers: json,
+            payload: {},
+          })
+        ).statusCode,
+      ).toBe(401);
+      expect((await a.inject({ url: "/api/design-previews", headers: key })).json()).toEqual([]);
+      const none = await a.inject({
+        method: "POST",
+        url: "/api/design-previews/1/open",
+        headers: { ...key, ...json },
+        payload: {},
+      });
+      expect(none.statusCode).toBe(404);
+      expect(none.json()).toEqual({ error: "No stored preview for this ticket." });
+    } finally {
+      await a.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

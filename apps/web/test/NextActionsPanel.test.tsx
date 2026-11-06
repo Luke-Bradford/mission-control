@@ -16,6 +16,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/");
 });
 afterEach(() => {
+  window.history.replaceState(null, "", "/");
   cleanup();
   hub.clear();
   vi.useRealTimers();
@@ -97,7 +98,7 @@ describe("NextActionsPanel", () => {
     expect(container.querySelector(".ph")?.textContent).toContain("1 waiting on you");
   });
 
-  it("opens the item's panel when its row is chosen", async () => {
+  it("opens the item on the Needs you page when its row is chosen", async () => {
     stubFetch({ "/api/attention": [item({ key: "esc:shop-app#4001" })] });
     const { container } = render(
       <>
@@ -108,7 +109,8 @@ describe("NextActionsPanel", () => {
     await screen.findByText("Choose a cache eviction policy");
     expect(screen.getByTestId("item").textContent).toBe("none");
     fireEvent.click(rows(container)[0] as HTMLElement);
-    expect(screen.getByTestId("item").textContent).toBe("esc:shop-app#4001");
+    expect(window.location.pathname).toBe("/needs-you/esc%3Ashop-app%234001");
+    expect(screen.getByTestId("item").textContent).toBe("none");
   });
 
   it("shows the operator's items, and leaves out FLIGHT's and the lanes'", async () => {
@@ -155,7 +157,7 @@ describe("NextActionsPanel", () => {
     const more = within(container.querySelector(".needs-more") as HTMLElement).getByRole("link", {
       name: "3 more waiting on you",
     });
-    expect(more.getAttribute("href")).toMatch(/^\/flight/);
+    expect(more.getAttribute("href")).toBe("/needs-you");
     expect(screen.queryByText("Item 4")).toBeNull();
   });
 
@@ -179,6 +181,6 @@ describe("NextActionsPanel", () => {
       within(container.querySelector("#overviewNextP") as HTMLElement)
         .getByRole("link", { name: "Needs you" })
         .getAttribute("href"),
-    ).toMatch(/^\/flight/);
+    ).toBe("/needs-you");
   });
 });

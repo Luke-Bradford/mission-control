@@ -13,6 +13,8 @@ export function asideWakeDue(store: Store, run: Run): boolean {
   const aside = run.loop?.aside;
   if (!aside || run.endedAt !== null || run.loop?.phase === "done") return false;
   if (aside.wake) return true;
+  // parked on the operator's question: not due back until it is answered (the loop then wakes it)
+  if (aside.ask !== undefined) return false;
   const pushed = store.runPush(run.id);
   if (pushed === null || run.loop === null || run.loop === undefined) return false;
   if (run.loop.phase === "ci") {
@@ -43,9 +45,13 @@ export function asideWakeDue(store: Store, run: Run): boolean {
   );
 }
 
-/** A run set aside while it was still being built (never pushed), to make way for rework. */
+/**
+ * A run set aside to make way for rework: one still being built (never pushed), or one that
+ * pushed and holds a refused newer commit.
+ */
 const isDisplaced = (store: Store, run: Run): boolean =>
-  run.loop?.phase === "working" && store.runPush(run.id) === null;
+  run.loop?.aside?.displaced === true ||
+  (run.loop?.phase === "working" && store.runPush(run.id) === null);
 
 /** Only a run eligible under its own pause state may displace or hold up another run. */
 function unpausedAsideRuns(store: Store, seatId: string): Run[] {

@@ -3,6 +3,8 @@ import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 export {
   CATCH_UP_KINDS,
   type CatchUpKind,
+  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   FLIGHT_NOT_TRIAGING_CAUSES,
   type FlightNotTriagingCause,
 } from "./flight-model.ts";
@@ -124,6 +126,10 @@ export interface FlightView {
   wake?: FlightWakeStatus;
   /** The last day's wakes by reason and by hour, for the FLIGHT page. */
   wakeHistory?: FlightWakeHistory;
+  /** What FLIGHT cost in the last FLIGHT_COST_DAYS days, per day and per wake reason, and its share of the crew's. */
+  wakeCost?: FlightWakeCost;
+  /** How long an operator message or a blocker waited for a wake, per day. */
+  wakeWaits?: FlightWakeWaits;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
   blocked?: FlightBlocked[];
   /** What each of FLIGHT's last-day prompts took by section, newest first. */
@@ -181,6 +187,34 @@ export interface FlightWakeHistory {
   idle: number;
   byReason: { reason: string; n: number }[];
   perHour: { at: number; n: number; byReason: Record<string, number> }[];
+}
+
+export interface FlightWakeCost {
+  since: number;
+  /** FLIGHT's API-equivalent cost in the window, and the whole crew's. */
+  totalUsd: number;
+  crewUsd: number;
+  /** FLIGHT's fraction of the crew's cost (0..1); null when the crew spent nothing. */
+  share: number | null;
+  /** The same over the last 7 days only: read this against the 20% target after a week. */
+  weekShare: number | null;
+  /** Per 24 hours, oldest first, the last ending at `now`. */
+  byDay: { at: number; usd: number; crewUsd: number }[];
+  /** A wake's cost split evenly over its reasons; "start" is the turn before the first wake. */
+  byReason: { reason: string; usd: number; wakes: number }[];
+}
+
+export interface FlightWakeWaits {
+  since: number;
+  operatorMedianMs: number | null;
+  blockerMedianMs: number | null;
+  byDay: {
+    at: number;
+    operatorMedianMs: number | null;
+    operatorN: number;
+    blockerMedianMs: number | null;
+    blockerN: number;
+  }[];
 }
 
 /** A wake with no decision this soon after it led to nothing. */
@@ -919,6 +953,8 @@ export interface FlightSeatState {
 
 export const FLIGHT_SIGNAL_KEEP_MS = 7 * 24 * FLIGHT_HOUR_MS;
 export const FLIGHT_IDLE_MS = 10 * 60_000;
+/** While a free build seat has open tickets near it and nothing starts, the hub wakes FLIGHT this often. */
+export const FLIGHT_IDLE_SEAT_WAKE_MS = 30 * 60_000;
 /** A build seat idle this long with nothing startable queued for it wakes FLIGHT to promote work. */
 export const FLIGHT_IDLE_NO_WORK_MS = 5 * 60_000;
 /** A park this old, still unsettled, is a wake reason. */
@@ -1021,6 +1057,8 @@ export interface FlightState {
     priority: string | null;
     labels: string[];
     ready: boolean;
+    /** The ticket has no board status at all: it has not been triaged. */
+    noStatus?: boolean;
     blockedBy: string[];
     laneLabel: string | null;
     assignees: string[];
@@ -1120,7 +1158,38 @@ export interface FlightWakeInputs {
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
+  /**
+   * Free build seats with open tickets near their area and no FLIGHT wait on them, and how long
+   * that has stood. Absent when no seat is in that state.
+   */
+  idle?: FlightIdleSeats;
+  /** Ids of the operator's messages to FLIGHT that its inbox has not read; they wake it at once. */
+  operator?: string[];
 }
+
+/** Free build seats that sit idle while tickets are open near them. */
+export interface FlightIdleSeats {
+  /** Each seat with when its own idle spell began (the hub's record) and how long it has stood. */
+  seats: { id: string; since: number; ms: number }[];
+  /** Every open ticket near one of the seats. */
+  open: string[];
+  /** The open tickets with no board status: work to triage. */
+  untriaged: string[];
+  /** The Ready tickets among them that no seat has started. */
+  ready: string[];
+}
+
+/** The 30-minute period a seat's idle spell is in once it has stood FLIGHT_IDLE_MS; null before. */
+export const idlePeriod = (ms: number): number | null =>
+  ms < FLIGHT_IDLE_MS ? null : Math.floor((ms - FLIGHT_IDLE_MS) / FLIGHT_IDLE_SEAT_WAKE_MS);
+
+/** The seats idle long enough to wake FLIGHT for. */
+export const idleLong = (idle: FlightIdleSeats | undefined): FlightIdleSeats["seats"] =>
+  idle?.seats.filter((x) => idlePeriod(x.ms) !== null) ?? [];
+
+/** The sentence FLIGHT is told when seats idle with tickets open: act, never wait on a person. */
+export const IDLE_SEAT_ASK =
+  "A free seat has stood idle while tickets are open. Do not report that you are waiting. Promote a ticket to Ready and start it, triage the tickets with no board status, or log with wait_on why none can start. A wait on a person is never the answer: go round it, take other work, or decide it yourself. Only money, direction, irreversible actions and security exceptions go to the operator, and those are parked with a brief while the seat takes the next ticket.";
 
 export interface FlightWakeList<T> {
   entries: T[];
@@ -1185,10 +1254,19 @@ export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
  * second or two. A wake due sooner waits for the gap.
  */
 export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
+/**
+ * Routine wake facts (a free seat, a PR moving) wait this long after the last wake and are sent
+ * together. Anything else wakes at once.
+ */
+export const FLIGHT_BATCH_MS = 15 * 60_000;
+/** An operator message to FLIGHT unread this long after it was sent no longer wakes it. */
+export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
+/** How many days back the cost and wait telemetry looks. */
+export const FLIGHT_COST_DAYS = 14;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
-export const FLIGHT_CONTEXT_ROTATE_TOKENS = 300_000;
+export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
@@ -1203,7 +1281,7 @@ export const freshStartLine = (handover: { body: string; updatedAt: number } | n
       ? " No handover is on file."
       : ` Handover written ${new Date(handover.updatedAt).toISOString()}: ${handover.body.trim().replace(/\s*\n\s*/g, " · ")}`
   }`;
-/** "context 142K · fresh session at 300K"; null while the context is unknown. */
+/** "context 142K · fresh session at 150K"; null while the context is unknown. */
 export const flightContextText = (tokens: number | null, rotateAt: number): string | null =>
   tokens === null
     ? null
@@ -1304,6 +1382,9 @@ export function wakeSummary(s: FlightState): string {
     s.triage.length > 0 ? `${counted(s.triage.length, "ticket", "tickets")} to triage` : "",
     s.questions.length > 0 ? counted(s.questions.length, "question", "questions") : "",
     free > 0 ? counted(free, "free seat", "free seats") : "",
+    idleLong(s.wake?.idle).length > 0 && s.wake?.idle
+      ? `${counted(idleLong(s.wake.idle).length, "seat", "seats")} idle, longest ${Math.floor(Math.max(...idleLong(s.wake.idle).map((x) => x.ms)) / 60_000)} min, with ${counted(s.wake.idle.open.length, "open ticket", "open tickets")}${s.wake.idle.untriaged.length > 0 ? ` (${s.wake.idle.untriaged.length} with no board status to triage)` : ""}`
+      : "",
     stopped > 0 ? `${stopped} stopped` : "",
     parked > 0 ? `${parked} parked` : "",
     inReview > 0 ? counted(inReview, "PR in review", "PRs in review") : "",
@@ -1327,7 +1408,8 @@ export function wakeLine(
     (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
       ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
       : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
+  const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

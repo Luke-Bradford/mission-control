@@ -687,18 +687,18 @@ select {
   font-weight: 600;
 }
 
-.needs-btn {
+.tabs a.needs-tab {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
 }
 
-.needs-btn b {
+.tabs a.needs-tab b {
   font-variant-numeric: tabular-nums;
 }
 
-.needs-btn.has {
-  border-color: var(--warn-mark);
+.tabs a.needs-tab.has {
+  color: var(--warn);
 }
 
 .mach-btn {

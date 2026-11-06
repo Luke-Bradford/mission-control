@@ -27,7 +27,17 @@ import { setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { LANE_KEY, writeKey } from "../src/storage.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
-import { boardItem, CONFIG, crewRow, HOUR, item, METRICS_VIEW, NOW, REPOS } from "./fixtures.ts";
+import {
+  boardItem,
+  CONFIG,
+  crewRow,
+  HOUR,
+  item,
+  METRICS_VIEW,
+  NOW,
+  OVERVIEW,
+  REPOS,
+} from "./fixtures.ts";
 
 const DAY = 86_400_000;
 const GH = "https://github.com/octo-org/shop-app";
@@ -535,6 +545,86 @@ describe("cards", () => {
     const { container } = await open();
     await screen.findByText("Ticket 1");
     expect(within(card(container, "shop-app#1") as HTMLElement).getByText(NOT_QUEUED)).toBeTruthy();
+  });
+
+  describe("rework from the server's pipeline facts", () => {
+    const pipeline = (cards: unknown[]) => ({
+      ...OVERVIEW,
+      pipeline: [{ stage: "building", count: cards.length, oldestAt: NOW, cards }],
+    });
+    const base = { repoId: "shop-app", title: "t", ci: [], since: NOW, who: null };
+
+    it("an In progress card shows round, blockers and seat", async () => {
+      const rework = { round: 2, blockers: 1, seat: "guido-2", seatBusy: false };
+      stub({
+        shopApp: [todo(7, { status: "In progress", state: "in progress" })],
+        extra: { "/api/overview": pipeline([{ ...base, ticket: 7, pr: 70, rework }]) },
+      });
+      const { container } = await open();
+      await screen.findByText("Ticket 7");
+      expect(
+        within(card(container, "shop-app#7") as HTMLElement).getByText(
+          "Rework · round 2 · 1 blocker · GUIDO-2",
+        ),
+      ).toBeTruthy();
+    });
+
+    it("says queued for the seat while the seat is busy elsewhere", async () => {
+      const rework = { round: 2, blockers: 1, seat: "guido-2", seatBusy: true };
+      stub({
+        shopApp: [todo(7, { status: "In progress", state: "in progress" })],
+        extra: { "/api/overview": pipeline([{ ...base, ticket: 7, pr: 70, rework }]) },
+      });
+      const { container } = await open();
+      await screen.findByText("Ticket 7");
+      expect(
+        within(card(container, "shop-app#7") as HTMLElement).getByText(
+          "Rework · queued for GUIDO-2",
+        ),
+      ).toBeTruthy();
+    });
+
+    it("a seat busy on this very ticket is working it: the full label, not queued", async () => {
+      const rework = { round: 2, blockers: 1, seat: "guido-2", seatBusy: true };
+      stub({
+        shopApp: [todo(7, { status: "In progress", state: "in progress" })],
+        crew: [crewRow({ id: "guido-2", ticket: "shop-app#7" })],
+        extra: { "/api/overview": pipeline([{ ...base, ticket: 7, pr: 70, rework }]) },
+      });
+      const { container } = await open();
+      await screen.findByText("Ticket 7");
+      const inCard = within(card(container, "shop-app#7") as HTMLElement);
+      expect(inCard.getByText("Rework · round 2 · 1 blocker · GUIDO-2")).toBeTruthy();
+      expect(inCard.queryByText(/queued/)).toBeNull();
+    });
+
+    it("a Ready card from an ended run shows the reviewed label and its PR", async () => {
+      const rework = { round: 1, blockers: 1, seat: "guido-2", seatBusy: false };
+      stub({
+        shopApp: [todo(7)],
+        prs: [pr({ number: 1432, ticket: "shop-app#7" })],
+        extra: { "/api/overview": pipeline([{ ...base, ticket: 7, pr: 1432, rework }]) },
+      });
+      const { container } = await open();
+      await screen.findByText("Ticket 7");
+      expect(
+        within(card(container, "shop-app#7") as HTMLElement).getByText(
+          "Reviewed · 1 blocker · PR 1432",
+        ),
+      ).toBeTruthy();
+    });
+
+    it("a card with no rework facts shows no label", async () => {
+      stub({
+        shopApp: [todo(7, { status: "In progress", state: "in progress" })],
+        extra: { "/api/overview": pipeline([{ ...base, ticket: 7, pr: 70 }]) },
+      });
+      const { container } = await open();
+      await screen.findByText("Ticket 7");
+      expect(
+        within(card(container, "shop-app#7") as HTMLElement).queryByText(/Rework|Reviewed/),
+      ).toBeNull();
+    });
   });
 
   it("a queued Ready card says which seat takes it and its place", async () => {

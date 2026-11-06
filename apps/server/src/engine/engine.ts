@@ -20,7 +20,10 @@ import {
   AWAY_STATUS_ADDED,
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
+  answeredLineText,
+  answerLineKey,
   asideEventText,
+  asideForAnswerEventText,
   asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
@@ -186,6 +189,15 @@ import { overrunText, tickLogOf } from "./ticks.ts";
 
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
+
+/** The Comms copy of the seat's CI message: the intro, then the excerpt from its start, cut to a Comms message. */
+export function ciSeatText(intro: string, excerpt: string): string {
+  const shortened = "\n[CI output shortened; inspect the CI log.]";
+  const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
+  return Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
+    ? intro + excerpt
+    : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
+}
 
 /** What `ciExcerpt` says when it has no excerpt to give: not kept, but asked for again. */
 const NOT_EXCERPTS = [NO_FAILED_RUN, CI_LOG_UNREADABLE, EMPTY_LOG];
@@ -953,6 +965,8 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      // a question FLIGHT passed to the operator: the run waits off its seat for the answer
+      operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
       reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
@@ -1431,14 +1445,10 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
         const intro = fillLoopText(head, { sha7: a.sha.slice(0, 7) });
-        const shortened = "\n[CI output shortened; inspect the CI log.]";
-        const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
-        const text =
-          Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
-            ? intro + excerpt
-            : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
-        const sent = await send(run.id, a.key, text);
-        if (sent === "sent") handOff(COMMS_MC, text);
+        // the seat gets the whole excerpt (already cut to CI_EXCERPT_MAX bytes); only the Comms
+        // copy is held to a Comms message
+        const sent = await send(run.id, a.key, intro + excerpt);
+        if (sent === "sent") handOff(COMMS_MC, ciSeatText(intro, excerpt));
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);
@@ -1565,7 +1575,15 @@ export function createEngine(deps: EngineDeps): Engine {
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
         // (a run set aside mid-build is due back as soon as the rework is out of the way)
-        cur.aside = { worktree, wake: cur.phase === "working" };
+        // (not while the run waits for the operator's answer: that wakes it)
+        const asked = store.openQuestions().find((q) => q.runId === run.id && q.passedAt !== null);
+        const waitsOnPerson = asked !== undefined;
+        cur.aside = {
+          worktree,
+          wake: (cur.phase === "working" || a.displaced === true) && !waitsOnPerson,
+          ...(a.displaced ? { displaced: true as const } : {}),
+          ...(asked ? { ask: asked.id } : {}),
+        };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
         if (r === null) {
@@ -1577,11 +1595,13 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "working"
-            ? asideForReworkEventText(call)
-            : cur.phase === "ci"
-              ? asideInCiEventText(call)
-              : asideEventText(call),
+          waitsOnPerson
+            ? asideForAnswerEventText(call)
+            : cur.phase === "working" || a.displaced
+              ? asideForReworkEventText(call)
+              : cur.phase === "ci"
+                ? asideInCiEventText(call)
+                : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1633,6 +1653,15 @@ export function createEngine(deps: EngineDeps): Engine {
           );
           out.again = true;
           return;
+        }
+        // a run parked on the operator's question gets one line to carry on with the answer
+        // (only when it was answered: if FLIGHT took the question back, its answer reaches the run
+        // on the seat as any other)
+        if (cur.aside?.ask !== undefined && store.question(cur.aside.ask)?.answeredAt != null) {
+          cur.pendingLine = {
+            key: answerLineKey(run.id, cur.aside.ask),
+            text: answeredLineText,
+          };
         }
         cur.aside = null;
         store.addLoopEvent(
@@ -2865,15 +2894,26 @@ export function createEngine(deps: EngineDeps): Engine {
         let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
           if (by === "CAPCOM" && opts.action !== "accept") return refuse("not-permitted");
-          const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
+          // A push the push gate refused and a person made later is never recorded on a CI step.
+          // When the PR's head is the run's newest commit, origin holds exactly what the seat has,
+          // so a stuck lift records it.
+          if (opts.action === "lift" && kind === "stuck") {
+            const newest = store.newestRunCommit(run.id)?.sha;
+            if (newest && pr?.state === "open" && pr.headSha === newest)
+              store.setRunPush({ runId: run.id, sha: newest, at: now() });
+          }
+          const pushed = store.runPush(run.id);
           if (!pushed) return refuse("head-moved");
           if (opts.action !== "lift" && pr?.state !== "open") return refuse("pr-not-open");
           if (opts.action !== "lift" && pr?.headSha !== pushed.sha) return refuse("head-moved");
           if (opts.action === "lift") {
             if (kind !== "stuck") return refuse("wrong-action");
             const head = store.newestRunCommit(run.id)?.sha;
-            if (!head || !(await publisher.isDescendant(run, pushed.sha, head)))
+            if (
+              !head ||
+              (head !== pushed.sha && !(await publisher.isDescendant(run, pushed.sha, head)))
+            )
               return refuse("head-moved");
           } else if (
             kind !== "review" &&

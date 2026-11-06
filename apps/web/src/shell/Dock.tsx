@@ -7,7 +7,7 @@ import {
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { needsYouItems, openNeedsYou, sortNeeds, useNeedsYou } from "../attention.ts";
+import { needsYouItems, openNeed, sortNeeds, useNeedsYou } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
@@ -35,7 +35,6 @@ import { BuildChips } from "./buildStatus.tsx";
 import { DockSummary } from "./DockSummary.tsx";
 import { useOlderEvents } from "./olderEvents.ts";
 import {
-  openItem,
   setDockCollapsed,
   setFlightUnread,
   toggleDock,
@@ -303,7 +302,7 @@ export function FlightChat({
                   type="button"
                   className="sm"
                   // "FLIGHT is not triaging" lists its items on Needs you's home
-                  onClick={() => (i.notTriaging ? openNeedsYou() : openItem(i.key))}
+                  onClick={() => openNeed(i)}
                 >
                   {i.notTriaging ? "Show them" : "Open"}
                 </button>

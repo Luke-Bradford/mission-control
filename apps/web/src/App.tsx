@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useNeedsCount } from "./attention.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
@@ -56,6 +57,7 @@ const BoardPage = lazy(() =>
 );
 const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
 const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
+const Needs = lazy(() => import("./pages/Needs.tsx").then((m) => ({ default: m.Needs })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
 const TicketPage = lazy(() =>
@@ -163,14 +165,16 @@ function Shell({
     .filter(Boolean)
     .join(" ");
   const agentId = shown.page === "agent" ? shown.id : null;
+  // The tab title carries the count, so a waiting ask shows from another tab or a background window.
+  const waiting = useNeedsCount().n;
   useEffect(() => {
     const base = demo ? DEMO_TITLE : TITLE;
-    if (!popout && !demo) return;
-    document.title = popout && agentId !== null ? `${agentId} · ${base}` : base;
+    const lead = waiting && !demo ? `(${waiting}) ` : "";
+    document.title = popout && agentId !== null ? `${agentId} · ${base}` : `${lead}${base}`;
     return () => {
       document.title = TITLE;
     };
-  }, [popout, agentId, demo]);
+  }, [popout, agentId, demo, waiting]);
   // Popped out (the Agent header's Pop out): the Agent page alone, with its toasts.
   if (popout) {
     return (
@@ -292,6 +296,9 @@ function PageView({ route: r }: { route: Route }) {
   switch (r.page) {
     case "overview":
       page = <Overview />;
+      break;
+    case "needs":
+      page = <Needs item={r.item} />;
       break;
     case "flight":
       page = <Flight />;

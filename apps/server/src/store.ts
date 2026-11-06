@@ -37,6 +37,8 @@ import {
   type BriefOption,
   type ChosenProfile,
   type CiRunView,
+  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_CAPCOM,
   COMMS_CHATTER_ROUNDS,
   COMMS_CHATTER_WINDOW_MS,
@@ -143,6 +145,7 @@ import {
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
+import { CodeHealthReadError } from "./code-health/error.ts";
 import {
   failGitFileSource,
   gitFileMetrics,
@@ -152,16 +155,24 @@ import {
   recordGitFileSource,
 } from "./code-health/git-store.ts";
 import {
+  installMergedReviews,
+  mergedReviewRecords,
+  recordMergedReviews,
+} from "./code-health/merged-reviews.ts";
+import {
   installRecommendations,
   linkRecommendation,
   type Mutation,
   mutateRecommendation,
+  openRepeatedRoundsRows,
+  RecommendationMutation,
   recommendationProposals,
   recommendationRow,
   recommendationRows,
   recommendationRowsForFiles,
   upsertRecommendation,
 } from "./code-health/recommendations.ts";
+import { remeasureDue } from "./code-health/remeasure.ts";
 import {
   aggregateDatedRisk,
   datedPrFiles,
@@ -1298,6 +1309,7 @@ export class Store {
     installGitFileSources(this.db);
     installFileSizes(this.db);
     installRecommendations(this.db);
+    installMergedReviews(this.db);
     installTestReports(this.db);
     installTestQa(this.db);
     installCodeHealthRevisions(this.db);
@@ -1336,6 +1348,9 @@ export class Store {
 
   codeHealthRecommendations(repoId: string, openAt?: number) {
     return recommendationRows(this.db, repoId, openAt);
+  }
+  codeHealthOpenRepeatedRounds(repoId: string, at: number) {
+    return openRepeatedRoundsRows(this.db, repoId, at);
   }
   codeHealthRecommendationPage(repoId: string, offset: number) {
     const rows = this.db
@@ -1421,6 +1436,47 @@ export class Store {
     }, true);
     if (!response) throw new Error("Recommendation transaction returned no result");
     return response;
+  }
+  /**
+   * FLIGHT's own accept: only a FLIGHT-tier rule, with the seat as owner and the default review
+   * date. The same transition, decision record and idempotency as the operator's accept.
+   */
+  flightAcceptCodeHealth(repoId: string, id: string, seatId: string, basis: string, at: number) {
+    const row = recommendationRow(this.db, repoId, id);
+    if (!row) throw new CodeHealthReadError(404, "Unknown code-health recommendation.");
+    if (!CODE_HEALTH_FLIGHT_TIER_RULES.includes(row.rule))
+      throw new CodeHealthReadError(
+        403,
+        "FLIGHT may not accept this kind of proposal; it stays with the operator.",
+      );
+    const request = RecommendationMutation.parse({
+      requestId: randomUUID(),
+      basis,
+      expectedUpdatedAt: row.updatedAt,
+      change: {
+        action: "accept",
+        owner: `FLIGHT (${seatId})`,
+        reviewAt: at + CODE_HEALTH_FLIGHT_REVIEW_DAYS * DAY_MS,
+      },
+    });
+    return this.decideCodeHealthRecommendation(repoId, id, request, seatId, at);
+  }
+  recordCodeHealthMergedReviews(repoId: string, at: number) {
+    let changed = 0;
+    this.transaction(() => {
+      changed = recordMergedReviews(this.db, repoId, at);
+    }, true);
+    return changed;
+  }
+  codeHealthMergedReviews(repoId: string) {
+    return mergedReviewRecords(this.db, repoId);
+  }
+  remeasureCodeHealth(repoId: string, at: number, checkout?: string) {
+    let done: string[] = [];
+    this.transaction(() => {
+      done = remeasureDue(this, this.db, repoId, at, checkout);
+    }, true);
+    return done;
   }
   linkCodeHealthRecommendation(
     repoId: string,
@@ -2297,6 +2353,14 @@ export class Store {
         )
         .all(agentId) as Row[]
     ).map(toRun);
+  }
+
+  /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
+  runBranches(repoId: RepoId): Set<string> {
+    const rows = this.statement(
+      "SELECT DISTINCT branch FROM runs WHERE repo_id = ? AND review_id IS NULL AND branch IS NOT NULL",
+    ).all(repoId) as { branch: string }[];
+    return new Set(rows.map((r) => r.branch));
   }
 
   /** Runs still open or ended at or after `since`, across seats and repos. */
@@ -4051,6 +4115,17 @@ export class Store {
     return this.pullRequestRows(rows);
   }
 
+  /** The newest PR of a branch, as its number and state: one narrow row, for the design previews. */
+  pullRequestOfBranch(
+    repoId: RepoId,
+    branch: string,
+  ): { number: number; state: PullRequestView["state"] } | null {
+    const row = this.statement(
+      "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1",
+    ).get(repoId, branch) as { number: number; state: PullRequestView["state"] } | undefined;
+    return row ?? null;
+  }
+
   /** The queue needs only open PRs, without decoding historical checks and bodies. */
   openPullRequests(repoId: RepoId): PullRequestView[] {
     const rows = this.statement(
@@ -4874,6 +4949,18 @@ export class Store {
         "UPDATE run_handoffs SET claim_token = ? WHERE run_id = ? AND claim_token IS NULL AND accepted_run_id IS NULL",
       ).run(token, runId).changes === 1
     );
+  }
+
+  /** Handoffs a seat has claimed and not yet accepted into a run row: a seat is starting on them. */
+  claimedHandoffs(repoId: string): RunHandoff[] {
+    return (
+      this.statement(
+        "SELECT run_id FROM run_handoffs WHERE repo_id = ? AND claim_token IS NOT NULL AND accepted_run_id IS NULL",
+      ).all(repoId) as Row[]
+    ).flatMap((r) => {
+      const h = this.handoff(r.run_id as string);
+      return h ? [h] : [];
+    });
   }
 
   releaseHandoff(runId: string, token: string): void {
@@ -6410,6 +6497,17 @@ export class Store {
         .get(seatId, id) !== undefined
     );
   }
+  /** Ids of messages `from` sent `to` at or after `since` that `to` has not read, oldest first. */
+  unreadCommsFrom(from: string, to: string, since: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND at >= ?
+           AND id NOT IN (SELECT message_id FROM comms_inbox_reads WHERE seat_id = ?)
+         ORDER BY id`,
+      )
+      .all(from, to, since, to) as { id: number }[];
+    return rows.map((r) => String(r.id));
+  }
   markCommsInboxRead(seatId: string, messageIds: readonly string[]): void {
     const insert = this.db.prepare(
       "INSERT OR IGNORE INTO comms_inbox_reads(seat_id,message_id) VALUES (?,?)",
@@ -6452,6 +6550,15 @@ export class Store {
       ticket: r.ticket as string | null,
       text: r.text as string,
     })) as CommsRow[];
+  }
+
+  /** Messages to `to` at or after `since`, with their label: the times FLIGHT's callers began to wait. */
+  commsTo(to: string, since: number): { at: number; from: string; label: string | null }[] {
+    return (
+      this.db
+        .prepare("SELECT at, from_id, label FROM comms WHERE to_id = ? AND at >= ? ORDER BY at, id")
+        .all(to, since) as { at: number; from_id: string; label: string | null }[]
+    ).map((r) => ({ at: r.at, from: r.from_id, label: r.label }));
   }
 
   /** How many hand-offs `from` sent `to` at or after `since`. */
@@ -7506,6 +7613,20 @@ export class Store {
         }`,
       )
       .run(at, agentId);
+  }
+
+  /**
+   * Marks every open question of one run answered at `at`; with `unpassedOnly`, leaves the ones
+   * passed to the operator open. Another run of the same seat keeps its own questions.
+   */
+  answerRunQuestions(runId: string, at: number, unpassedOnly = false): void {
+    this.db
+      .prepare(
+        `UPDATE seat_questions SET answered_at = ? WHERE run_id = ? AND answered_at IS NULL${
+          unpassedOnly ? " AND passed_at IS NULL" : ""
+        }`,
+      )
+      .run(at, runId);
   }
 
   /** Records an mc tool failure for the operator; returns its id. */

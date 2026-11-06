@@ -2373,6 +2373,15 @@ button.quota-details {
   font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
   color: var(--fg-2);
 }
+/* a card sent back by review: its own line under the title, wrapping with the card */
+.board-rework {
+  display: block;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
 .board-age {
   margin-left: auto;
 }

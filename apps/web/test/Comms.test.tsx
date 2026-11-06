@@ -1,3 +1,4 @@
+import { COMMS_CAPCOM } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
@@ -255,7 +256,7 @@ describe("Comms routes", () => {
     const earlier = document.getElementById("comms-message-comms:earlier") as HTMLElement;
     const later = document.getElementById("comms-message-comms:later") as HTMLElement;
     expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(within(earlier).getAllByRole("button", { name: "PR 44" })[0]);
+    fireEvent.click(within(earlier).getAllByRole("button", { name: "Filter chat to PR 44" })[0]);
     expect(window.location.pathname).toBe("/comms/tickets/PR%2044");
     fireEvent.change(ticketComposer, { target: { value: "Ticket update" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -266,6 +267,113 @@ describe("Comms routes", () => {
         text: "Ticket update",
         ref: "#707",
       });
+    });
+  });
+
+  describe("a ticket number in a message", () => {
+    const base = {
+      id: "comms:ref",
+      at: NOW,
+      from: "alpha",
+      to: "crew",
+      text: "Look at #707 now",
+      ticket: "shop-app#707",
+      label: null,
+      ref: "#707",
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const stub = (message: object, repos = CONFIG.repos) =>
+      stubFetch({
+        "/api/config": { ...CONFIG, repos },
+        "/api/crew?shape=summary": {
+          rows: [crewRow({ id: "sender", repoId: "shop-app" })],
+          firstRunToday: null,
+        },
+        "/api/comms/crew": { messages: [message] },
+        "/api/comms/mentions": { mentions: [] },
+        "/api/comms/pins": { messages: [] },
+        "/api/flight": { seat: null, decisions: [] },
+      });
+    const open = async (message: object, repos?: typeof CONFIG.repos) => {
+      stub(message, repos);
+      window.history.replaceState(null, "", "/comms/crew");
+      render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    };
+
+    it("opens the ticket and leaves the conversation filter alone", async () => {
+      await open(base);
+      const links = await screen.findAllByRole("link", { name: "#707" });
+      expect(links.length).toBe(2);
+      for (const link of links) {
+        expect(link.getAttribute("href")).toBe("/tickets/shop-app/707");
+        fireEvent.click(link);
+        expect(window.location.pathname).toBe("/tickets/shop-app/707");
+        window.history.replaceState(null, "", "/comms/crew");
+      }
+      expect(window.location.pathname).not.toMatch(/^\/comms\/tickets/);
+    });
+
+    it("filters from a separate control and opens nothing", async () => {
+      await open(base);
+      await screen.findAllByRole("link", { name: "#707" });
+      const filters = screen.getAllByRole("button", { name: "Filter chat to #707" });
+      expect(filters.length).toBe(2);
+      expect(filters[0]?.textContent).toBe("⌕");
+      fireEvent.click(filters[0] as HTMLElement);
+      expect(window.location.pathname).toBe("/comms/tickets/%23707");
+    });
+
+    it("opens another ticket of the message's repo, not only its own", async () => {
+      await open({ ...base, ref: null, text: "see #708" });
+      const link = await screen.findByRole("link", { name: "#708" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/708");
+      expect(screen.getByRole("button", { name: "Filter chat to #708" }).textContent).toBe("⌕");
+    });
+
+    it("uses the sender's repo when the message has no ticket", async () => {
+      await open({ ...base, from: "sender", ticket: null, ref: null, text: "check #5" });
+      const link = await screen.findByRole("link", { name: "#5" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
+    });
+
+    it("uses the recipient's repo when the sender, CAPCOM, has none", async () => {
+      await open({
+        ...base,
+        from: COMMS_CAPCOM,
+        to: "sender",
+        ticket: null,
+        ref: null,
+        text: "check #5",
+      });
+      const link = await screen.findByRole("link", { name: "#5" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
+      expect(screen.getByRole("button", { name: "Filter chat to #5" }).textContent).toBe("⌕");
+    });
+
+    it("leaves a number with no known repo as plain text with only the filter button", async () => {
+      await open({ ...base, ticket: null, ref: null, text: "check #5" });
+      await screen.findByRole("button", { name: "Filter chat to #5" });
+      expect(screen.queryByRole("link", { name: "#5" })).toBeNull();
+      expect(document.querySelector("button.comms-ref")).toBeNull();
+      expect(document.querySelector(".comms-ref-plain")?.textContent).toBe("#5");
+    });
+
+    it("opens a PR on GitHub from the message's repo, with a separate filter", async () => {
+      await open({ ...base, ref: null, text: "see PR 12" });
+      const link = await screen.findByRole("link", { name: "PR 12 on GitHub" });
+      expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/12");
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(screen.getByRole("button", { name: "Filter chat to PR 12" })).toBeTruthy();
+    });
+
+    it("keeps a PR with no GitHub repo configured as the filter alone", async () => {
+      await open({ ...base, ref: null, text: "see PR 12" }, []);
+      await screen.findByRole("button", { name: "Filter chat to PR 12" });
+      expect(screen.queryByRole("link", { name: /PR 12/ })).toBeNull();
     });
   });
 
@@ -1023,8 +1131,6 @@ describe("Decisions", () => {
           }),
         ]}
         rows={ROWS}
-        flightSeat={null}
-        onDiscuss={() => {}}
       />,
     );
 

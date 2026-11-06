@@ -26,6 +26,7 @@ import {
   pipelineStage,
   priorityRank,
   type QueueRow,
+  reworkLabel,
   sortCards,
   statusOutOfDateTitle,
   ticketRef,
@@ -393,5 +394,38 @@ describe("pipelineStage", () => {
     const prs = [pr({ mergedAt: NOW - 1000 })];
     expect(pipelineStage(boardItem(), [agent], prs, NOW, today, [])).toBe("building");
     expect(pipelineStage(boardItem(), [agent], prs, NOW, today, [], "merged")).toBe("merged");
+  });
+});
+
+describe("reworkLabel", () => {
+  const facts = { round: 2, blockers: 1, seat: "guido-2", seatBusy: false };
+  it("a building card names the round, blockers and seat", () => {
+    expect(reworkLabel(facts, { ready: false, onTicket: true, pr: 1432 })).toBe(
+      "Rework · round 2 · 1 blocker · GUIDO-2",
+    );
+    expect(
+      reworkLabel(
+        { ...facts, blockers: 3, seat: null },
+        { ready: false, onTicket: false, pr: null },
+      ),
+    ).toBe("Rework · round 2 · 3 blockers");
+  });
+  it("says queued when the seat is busy on something else", () => {
+    expect(
+      reworkLabel({ ...facts, seatBusy: true }, { ready: false, onTicket: false, pr: 1432 }),
+    ).toBe("Rework · queued for GUIDO-2");
+  });
+  it("a seat busy on this very ticket is working it, not queued", () => {
+    expect(
+      reworkLabel({ ...facts, seatBusy: true }, { ready: false, onTicket: true, pr: 1432 }),
+    ).toBe("Rework · round 2 · 1 blocker · GUIDO-2");
+  });
+  it("a Ready card whose run ended says it was reviewed, with its PR", () => {
+    expect(reworkLabel(facts, { ready: true, onTicket: false, pr: 1432 })).toBe(
+      "Reviewed · 1 blocker · PR 1432",
+    );
+    expect(reworkLabel(facts, { ready: true, onTicket: false, pr: null })).toBe(
+      "Reviewed · 1 blocker",
+    );
   });
 });

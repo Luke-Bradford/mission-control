@@ -52,6 +52,23 @@ service does not risk a second issue. Partial recovery writes count toward the r
 changes still need their existing proposal and approval paths. No recommendation action
 applies them directly. An unavailable FLIGHT leaves accepted work visibly pending.
 
+**FLIGHT's own accept.** When `create_ticket` is given a `recommendationId` whose proposal is still
+`proposed` and whose rule is in `CODE_HEALTH_FLIGHT_TIER_RULES` (packages/core `flight-model.ts`, a hard rule, so widening it needs operator clearance; today
+`repeatedly-changed-large-file`), the hub accepts it for FLIGHT first: owner `FLIGHT (<seat>)`, review
+date 30 days on, the call's `basis` as the reason, recorded in the flight decision audit with the
+seat as actor. Any other rule is left proposed and the call is refused; the operator's token, typed
+owner and date stay the only way to accept it. This is no new GitHub write.
+
+**Unprompted audit work.** Once an hour (and a minute after start) the hub runs `runCodeHealthAudit`.
+It records every merged PR in `code_health_merged_reviews`: how it merged (`crew-run`, `ended-run` or
+`hand`) and the last review the hub reported for it (`reviewId`, null when none exists; a review that
+lands later is linked on the next pass). It also re-measures each accepted proposal whose review date
+has passed, once, against its accepted baseline, and stores the result as `remeasure`
+(`improved`, `unchanged`, `worse` or `unmeasured`, with the baseline, current value and a note).
+Re-measuring never ends the work; `assess` stays a manual, evidence-backed decision.
+The recommendation history reply also carries `groups`: one-per-PR proposals (repeated review rounds)
+with the same rule and cause (the PR's most common finding category) read as one group listing each PR.
+
 Granted read-only FLIGHT/FAO sessions can call `mc code_health` with tab, optional window,
 issued evidence/cursor, or a recommendation ID. The authenticated session repo bounds every
 read. Tool responses use the same reader and credential cleaning as HTTP. Stored evidence and
@@ -1244,6 +1261,18 @@ fact FLIGHT must act on is still open, never for a digest change. Each wake stor
 categories, e.g. `q`, `signals`, `reminder`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
 by reason and by hour over the last day.
 
+**A free seat with open tickets (#1451).** The hub checks this itself, with no FLIGHT tokens: a free
+build seat, open tickets near its area (all open tickets, not only the 30 the digest lists; Backlog, Refinement or Ready; an area label that is the seat's,
+or none or several, which need triage), and no `wait_on` on the seat or the ticket. A ticket with no
+board status counts as work to triage, and the wake says how many. Each seat is timed on its own. Once a seat has stood 10 minutes the
+`idle` wake fact names it, and it changes every 30 minutes (`FLIGHT_IDLE_SEAT_WAKE_MS`), so FLIGHT
+is woken then and every 30 minutes after, until a seat starts, no ticket is open, or FLIGHT logs a wait
+with `wait_on`. An empty Ready with a free seat is a reason to promote, not to wait. The hub records when each seat's
+spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
+line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`.
+The wake text tells FLIGHT to go round a wait on a person, take other work or decide; only money,
+direction, irreversible actions and security exceptions go to the operator, parked with a brief.
+
 | Signal | Raised when |
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
@@ -1401,12 +1430,23 @@ its one-day observation of cleared stalls and counted manual controller actions.
 `mc merge_pr` also merges controller and personal PRs with no crew author run. It reads fresh
 same-repository/default-branch provenance, the complete changed-file list, linked ticket rules,
 GitHub reviews and CI, and the independent exact-head QA report. GitHub receives a merge request
-with `--match-head-commit`; branch protection stays in force. A branch with a live or parked build
-run keeps its normal engine path. Once that run has ended (a controller pushed the head and FLIGHT
-ended the run to free the seat), the PR is reviewed and merged like one with no crew author; a
+with `--match-head-commit`; branch protection stays in force. A branch keeps its normal engine path
+while a build run is live or parked on it, while a run is live on the same ticket under another
+branch, while a seat has claimed the ticket's handoff and has no run row yet, and for every run of a
+configured (observed) loop. Once that run has ended (a controller pushed the head and FLIGHT ended the
+run to free the seat), the PR is reviewed and merged like one with no crew author; a
 hard-rule PR then needs the same head-bound `merge-floor` approval below. A merge hold on the branch's
 latest build run still refuses the merge after that run ends, until the hold is released. An operator's
 Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
+This is decided, not an oversight: a hold that outlived the run could be cleared only by starting a
+seat. A clean review reads only the pushed head, so uncommitted work the ended run left in its
+worktree is not seen by the review or by `merge_pr`; the ticket's open handoff lists it.
+
+An ended run's PR with review findings goes back to a seat with `reassign_ticket`. The seat works on
+the PR's own head: when the run opened a PR whose head ref differs from the run's branch, the seat
+starts on that ref, and a handed-over branch behind origin's is moved to origin's tip (a diverged one
+is refused, and nothing is changed). A stuck run whose newest commit is the PR's head, pushed by hand
+after the push gate refused it, is recorded as pushed when FLIGHT lifts the park, so it reaches review.
 No build run is invented and no board card is marked Done by this path.
 
 Protected repository rules require the existing head-bound `merge-floor` controller approval.
@@ -1574,6 +1614,12 @@ check, a CI failure) comes first, oldest first, ahead of any new ticket. If it l
 building a new ticket, that ticket is set aside at the seat's next turn end (its worktree, with its commits and any
 uncommitted work, is kept as it is; nothing is pushed) and comes back after the rework; the rework's
 wait reads "rework waiting on GUIDO-1 (behind #N)" until it starts.
+A ticket waiting on a person is parked the same way: when a seat's question has been passed to the
+operator and the seat is between turns, the run leaves its seat (worktree and commits kept) and the seat
+takes its next ticket. The run does not wake while the question is open. A reply that names the question
+(`question` on `POST /api/seats/:id/message`, sent with a Needs-you ask reply) is stored for that run, not the run now on
+the seat, and closes only that question; a message with no `question` goes to the run on the seat as before, and leaves the parked question open (the web sends the id once ticket 1474 lands). A question of another seat, or one already closed, is refused too. The run
+comes back with one line telling it to read the answer, in any phase it was parked in (working, CI or review). Ending the parked run closes its question. Another run's end or message on the seat leaves the question open.
 An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
 use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
 `300000`, because Codex counts more tokens for the same PR (7 of 142 Codex reviews went over `120000`;
@@ -1757,8 +1803,12 @@ scrolls sideways. Reduced motion stops every pulse and leaves a still ring.
 
 FLIGHT's `screenshot_hud` tool renders one HUD page at 1600×1000 in the
 system Chrome. The render runs in an owned helper process in its own process group with a minimal
-environment (no tokens); the hub kills the whole group when the render ends or its 30 s deadline
-passes, so no Chrome outlives a call. Chrome is started with `launch()` (a private pipe, no control
+environment (no tokens); when the render ends, is stopped or its 30 s deadline passes, the hub sends SIGTERM to
+the helper's group. Chrome runs in a group of its own, so the helper must close it: it exits half a
+second later, and Playwright's exit handler kills Chrome and removes its profile folder. The hub
+sends SIGKILL to the helper's group after one second as a backstop for a stuck helper, and the call
+settles only after that, so the helper and, unless the helper was stuck, its Chrome are gone when a call returns. A render that times out names the selector it was
+waiting for. Chrome is started with `launch()` (a private pipe, no control
 socket) and every request it makes, loopback included, goes through a loopback-only proxy that
 connects to the hub's own host and port and refuses everything else, on top of the Playwright
 routes (GET only, no bootstrap, no event stream, no WebSockets, no service workers, popups closed).
@@ -2262,12 +2312,18 @@ touched.
   or closed PR refuses the push, naming the PR; a run with no PR of its own yet is refused when the
   last PR on its branch merged; nothing is sent, so a merged branch is not
   recreated. If GitHub cannot say, the push is refused as a transient failure and tried again.
-- **Delete on close.** Every 10 minutes the hub deletes the branch of a crew PR (a `feature/<n>-…`
-  branch) that closed without merging. The PR page keeps its commits.
-- **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes every
-  remote branch with no open PR, no live run, and no commit for 24 hours. A branch that is the base
-  of an open PR stays. A run parked on a closed PR does not hold its branch; any other unended run
-  does. Each deletion is a hub event on the Activity page.
+- **Only its own branches.** The sweep deletes only a branch that one of this hub's work runs worked
+  on (a review run does not count). A run that adopted a branch already on origin counts, and that
+  branch's tip must still be merged. A second hub on the same repo has runs this hub cannot see, so a
+  branch with no run in this hub's store is left alone; a hub with no runs of its own deletes nothing.
+  FLIGHT's `delete_branch` is a separate, explicit action with its own checks.
+- **A closed PR deletes nothing.** The hub does not remove the branch of a PR that closed without
+  merging; the agents decide what to do with it.
+- **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes a remote
+  branch with no open PR, no live run, no commit for 24 hours, and a tip that a merged PR carried as
+  its head, so unmerged commits are never swept. A branch that is the base of an open PR stays. Any
+  unended run holds its branch, a run parked on a closed PR included. Each deletion is a hub event on
+  the Activity page.
 - **Never touched:** the default branch, `archive/*`, and `repos[].keep_branches`. If any read of
   branches or PRs fails, nothing is deleted for that repo.
 - **Local.** Every 10 minutes the hub fetches each seat clone with `--prune` and drops the local
@@ -2324,9 +2380,12 @@ the pairs for its current head exist, so the reviewer always has them and a PR a
 draft cannot merge on a new head without them. Each pass that is held records a loop event naming
 the pages still missing; the run is not parked, and moves on at the next pass once the capture
 lands. A capture that fails (or runs past its 15-minute deadline) is retried after ten minutes and
-the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme, head side: <reason>`; the review is let through at that point, with a line
-in RETRO's brief saying no pairs were made, but mark-ready and merge keep waiting. A push makes a
+the hold then says `capture failed: <reason>`, and a failed render names its page, colour scheme and side (main or head) first, as in `board page, dark scheme, head side: <reason>`. A capture stopped by a hub shutdown says so and names no page. The review is held at that point too, not let through: the engine asks for no review, marks nothing ready and merges nothing until the pairs exist, so a capture that keeps failing stops the PR visibly, with that reason in the loop event, instead of reaching RETRO without pictures. A push makes a
 new head, which needs its own pairs.
+
+**After a restart.** A hub that stops in the middle of a capture leaves database copies in `capture-*` folders and side checkouts (with their git worktree registrations) under `pr-evidence-work/` in the data dir. At start the live hub deletes both, runs `git worktree prune` on its checkout, and logs what it removed; nothing else uses that folder. To see what a capture would store without a PR, run `node --experimental-strip-types apps/server/src/pr-evidence/probe.ts http://127.0.0.1:<port> [out dir]` against a preview hub: it saves `<page>-<scheme>.png` for every page.
+
+**Audit tabs.** The Readiness and Hotspots shots click the page's own controls, found by the labels in `mc/core` (`QA_VIEW_LABEL`, `QA_DISCLOSURE_LABEL`, `QA_TAB_LABELS`). `apps/server/test/qa-labels.test.ts` reads the web source and fails when either side renames one. Once the tab has loaded, the shot scrolls the section that holds the QA control to the top of the viewport (the control itself on an older baseline), so the tab's content is not cropped by the 1600×1000 viewport.
 
 **Limits.** Anything on a page that depends on the clock (relative times, live counts) differs
 between the two renders and shows as a changed region; read the regions against the diff. A PR
@@ -2348,14 +2407,20 @@ branch previews do.
 
 The route only reads data the hub already stores.
 
+**Batching.** A wake whose only new facts are routine (a free seat, a startable ticket, a hold to release, an idle reviewer, a PR moving through its steps) waits until `FLIGHT_BATCH_MS` (15 minutes) after the last wake and goes out together with whatever else has built up. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. Everything else wakes at once, under the 2-minute gap: an unread plain message from the operator (the `operator` wake fact, cleared once FLIGHT's inbox reads it), operator holds in force, discussions, questions, triage, blockers and parks, signals, planned entries, stopped seats, instruction changes and the breaker. The safety floor is never held back.
+
+**Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list. An item FLIGHT has a live `wait_on` for (its full key) raises no `item_stale` signal until the wait ends. A `wait_on` whose target is a reason's whole key (an item's full key, or a `repeat_park` key with spaces) counts as handling that reason, including an `item_stale` signal for the item.
+
+**What FLIGHT costs.** `GET /api/flight` `wakeCost` has the last 14 days: `totalUsd` (FLIGHT), `crewUsd`, `share` (0..1, the whole 14 days) and `weekShare` (the last 7 days only; read this one against the 0.2 target after a week of live work), `byDay`, and `byReason` (a run's cost spread over its messages by tokens, each message given to the latest wake before it, a wake's cost split over its reasons; `start` is the turn before a run's first wake). `wakeWaits` has the median milliseconds an operator message, a blocker to FLIGHT and a seat's `call_flight` waited, per day and overall. A wait ends at the first recorded wake after it or the first message FLIGHT's run produced after it, whichever is earlier; seat calls come from the signal record, which keeps them for the 14 days the figures cover. Compare the days before and after a change to see that decisions did not slow down.
+
 ## FLIGHT's fresh session
 
-FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (300K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
+FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (150K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
 
 - **Over the limit.** At its next idle point the watch sends one handover wake (not counted as a wake): FLIGHT writes what it is in the middle of, promised and waits on with `track` and `remember` (topic `handover`), then ends its turn. The turn after that ends the run and the next start is a fresh session, not counted against the hourly start cap.
 - **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
-- **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 300K" (null with no turn yet).
+- **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 150K" (null with no turn yet).
 
 ## Repeating a suspected flaky test
 

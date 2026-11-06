@@ -177,6 +177,8 @@ import {
 import type { ReviewPreviews } from "../review-preview.ts";
 import {
   enrichHandoff,
+  handoffForBrief,
+  handoffTarget,
   inheritedHandoffLoop,
   publicHandoff,
   recordRunHandoff,
@@ -1187,7 +1189,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
     recordEnded(l.run.id, l.run.endedAt as number, l.run.status, l.endedBy ?? "exit");
     removeRunFiles(l.run.id);
-    closeRunItems(l.info);
+    closeRunItems(l.info, l.run.id);
     // read before the seat row changes
     const worktree = store.seatSession(seatId)?.worktree ?? null;
     if (l.run.reviewId != null) void dropScratch(l.info, l.run.id, l.run.seq, worktree);
@@ -1482,7 +1484,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * A run has ended (however it ended): its open questions close and its strays go. Never throws;
    * the end itself is already recorded.
    */
-  function closeRunItems(info: SeatInfo): void {
+  function closeRunItems(info: SeatInfo, runId: string | null): void {
     try {
       const seatId = info.seat.id;
       const mine = store
@@ -1490,7 +1492,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         .filter((x) => x.sessionId === info.session.id && x.agentId === seatId)
         .map((x) => x.path);
       store.clearStrays(info.session.id, mine);
-      store.answerQuestions(seatId, now());
+      // only this run's questions: another run of the seat, set aside, may still wait on the operator
+      if (runId === null) store.answerQuestions(seatId, now());
+      else store.answerRunQuestions(runId, now());
       bus.emit("attention");
     } catch (e) {
       log(`${info.seat.id}: could not close the run's questions and strays: ${errText(e)}`);
@@ -2391,7 +2395,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       void endAndRemoveKeeper(row.seatId, row.runId);
     }
     const info = findSeat(row.seatId);
-    if (info) closeRunItems(info);
+    if (info) closeRunItems(info, run?.id ?? null);
     if (open) emit({ kind: "run-ended", seatId: row.seatId, runId: run.id, endedBy: "exit" });
     if (info && run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
   }
@@ -3513,9 +3517,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             : await prepareCheckout({
                 ...where,
                 title,
-                ...(handoff
-                  ? { handoff: { branch: handoff.branch, worktree: handoff.worktree } }
-                  : {}),
+                ...(handoff ? { handoff: handoffTarget(store, handoff) } : {}),
                 pending: {
                   isPending: (path) => store.checkoutPending(path),
                   markPending: (path) => store.markCheckoutPending(path, now()),
@@ -3728,7 +3730,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
-      if (handoff) brief += `\n\n${wrapExternalText(handoffText(publicHandoff(handoff)))}`;
+      if (handoff)
+        brief += `\n\n${wrapExternalText(
+          handoffText(publicHandoff(handoffForBrief(store, handoff, checkout))),
+        )}`;
       if (installNote) brief += `\n\n${installNote}`;
       if (synced?.kind === "conflict") brief += `\n\n${conflictText(synced.files)}`;
       const briefPieces = [
@@ -4323,7 +4328,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       removeRunFiles(run.id);
     }
     setSeat(seatId, { state: hold ? "stopped" : "idle", reason: null, runId: null });
-    closeRunItems(info);
+    closeRunItems(info, run?.id ?? null);
     if (open) emit({ kind: "run-ended", seatId, runId: run.id, endedBy: "operator" });
     if (run?.reviewId != null) void dropScratch(info, run.id, run.seq, row.worktree);
   }
@@ -4349,6 +4354,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     removeRunFiles(run.id);
     transcripts.delete(run.transcriptPath);
     digests.delete(run.id);
+    // a run set aside on the operator's question leaves no one to answer it
+    store.answerRunQuestions(run.id, at);
+    bus.emit("attention");
     emit({ kind: "run-ended", seatId: run.agentId, runId: run.id, endedBy });
     await dropScratch(info, run.id, run.seq, worktree);
   }
@@ -4415,7 +4423,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       removeRunFiles(runId);
     }
     setSeat(seatId, { state: "idle", reason: null, runId: null });
-    closeRunItems(info);
+    closeRunItems(info, runId);
     await closing;
     if (l && live.get(seatId) === l) live.delete(seatId);
     // Closing can replay late turn events; the engine's final seat state must stand.
@@ -4527,6 +4535,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         recordEnded(runId, at, "failed", "exit");
         removeRunFiles(runId);
+        store.answerRunQuestions(runId, at);
+        bus.emit("attention");
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         throw new SupervisorError(500, reason, { cause });
       };
@@ -4917,7 +4927,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         // reply to FLIGHT's brief)
         try {
           if (opts.questions !== "none") {
-            store.answerQuestions(seatId, now(), opts.questions === "unpassed");
+            store.answerRunQuestions(l.run.id, now(), opts.questions === "unpassed");
             bus.emit("attention");
           }
         } catch (e) {
