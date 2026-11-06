@@ -248,6 +248,8 @@ export interface ReviewBriefInput {
   second?: { reason: string; findings: readonly StoredFinding[] };
   /** True for a web PR: its preview is starting in the background. */
   preview?: boolean;
+  /** An ended run's PR: blocking findings still open from reviews of its earlier heads. */
+  olderFindings?: readonly { reviewId: number; sha: string; finding: StoredFinding }[];
 }
 
 const NOTES_SEPARATOR = "\n\n---\n\n";
@@ -382,6 +384,21 @@ export function reviewBrief(i: ReviewBriefInput): string {
                 `- [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary}\n  Why: ${f.scenario}`,
             )
             .join("\n"),
+    );
+  }
+  if (i.olderFindings && i.olderFindings.length > 0) {
+    lines.push(
+      "",
+      "## Open blocking findings from earlier heads",
+      "",
+      `Reviews of this PR's earlier heads raised these blocking findings, and no later review resolved them. Check in ${i.sha.slice(0, 7)} whether each is fixed, and report it again if it is not. They are claims to check, not conclusions to repeat.`,
+      "",
+      i.olderFindings
+        .map(
+          ({ reviewId, sha, finding: f }) =>
+            `- [${f.severity}] ${f.line === 0 ? f.file : `${f.file}:${f.line}`} — ${f.summary} (review id ${reviewId}, head ${sha.slice(0, 7)})\n  Why: ${f.scenario}\n  Suggested fix: ${f.fix}`,
+        )
+        .join("\n"),
     );
   }
   if (i.prevFindings.length > 0) {

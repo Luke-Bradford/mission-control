@@ -780,6 +780,119 @@ describe("startReview", () => {
     expect(subject).toHaveBeenCalledTimes(2);
   });
 
+  describe("an ended run's PR, reviewed at a newer head", () => {
+    const OLD_SHA = "a".repeat(40);
+    const finding = (
+      summary: string,
+      severity: "Critical" | "Important" | "Minor",
+      file: string,
+    ) => ({
+      severity,
+      file,
+      line: 7,
+      summary,
+      scenario: `why ${summary}`,
+      fix: "f",
+    });
+    /** A reported crew review of PR 10 at OLD_SHA, then the external review of the new head. */
+    function seed(findings: ReturnType<typeof finding>[]) {
+      const seeded = reviewOfPush();
+      const old = store.requestReview({
+        authorRunId: seeded.author.id,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: OLD_SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 1,
+      })!;
+      store.setReviewState(old, ["queued"], "running", { at: 2, runId: "retro:old" });
+      store.recordFindings(old, "retro:old", {
+        verdict: { spec: "fail", quality: "fail" },
+        summary: "s",
+        findings,
+        at: 3,
+      });
+      const id = store.requestReview({
+        authorRunId: externalReviewKey("mc", 10),
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: seeded.sha,
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: 4,
+      })!;
+      store.setReviewState(id, ["queued"], "starting", { at: 5 });
+      return { old, id, sha: seeded.sha };
+    }
+    async function briefOf(id: number, sha: string) {
+      const subject = async () => ({ sha, branch: "pr", ticket: TICKET });
+      const { sup } = make({ scratchRetro: true, externalReviewSubject: subject });
+      sup.start();
+      await sup.startReview("retro", id);
+      await until(() => expect(userLines()).toHaveLength(1));
+      return userLines()[0] as string;
+    }
+
+    it("lists the blocking findings still open from the older head", async () => {
+      const s = seed([
+        finding("race on the queue", "Critical", "src/q.ts"),
+        finding("a nit", "Minor", "src/n.ts"),
+      ]);
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).toContain("## Open blocking findings from earlier heads");
+      expect(brief).toContain(`review id ${s.old}, head ${OLD_SHA.slice(0, 7)}`);
+      expect(brief).toContain("[Critical] src/q.ts:7 — race on the queue");
+      expect(brief).toContain("why race on the queue");
+      expect(brief).not.toContain("a nit");
+    });
+
+    it("leaves out a finding fixed or waived at a later head", async () => {
+      const s = seed([
+        finding("fixed one", "Critical", "src/a.ts"),
+        finding("waived one", "Important", "src/b.ts"),
+        finding("still open", "Important", "src/c.ts"),
+      ]);
+      // a later review of the same PR resolved the first two
+      const middle = store.requestReview({
+        authorRunId: externalReviewKey("mc", 10),
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: "b".repeat(40),
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: 4,
+      })!;
+      store.setReviewState(middle, ["queued"], "running", { at: 4, runId: "retro:mid" });
+      store.recordFindings(middle, "retro:mid", {
+        verdict: { spec: "fail", quality: "fail" },
+        summary: "s",
+        findings: [finding("new problem", "Critical", "src/d.ts")],
+        resolutions: [
+          { findingRef: { reviewId: s.old, pos: 0 }, outcome: "fixed" },
+          { findingRef: { reviewId: s.old, pos: 1 }, outcome: "waived" },
+        ],
+        at: 5,
+      });
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).not.toContain("fixed one");
+      expect(brief).not.toContain("waived one");
+      expect(brief).toContain("still open");
+    });
+
+    it("adds nothing when no earlier head has findings", async () => {
+      const s = seed([finding("a nit", "Minor", "src/n.ts")]);
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).not.toContain("Open blocking findings from earlier heads");
+    });
+  });
+
   it.each(["changed", "unavailable"])(
     "removes a controller scratch copy when fresh PR metadata is %s",
     async (failure) => {
