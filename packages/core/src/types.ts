@@ -190,8 +190,9 @@ export interface RunLoop {
    * Off its seat while in review; `wake`: rework or a park is due, so it goes back first.
    * `displaced`: it left to make way for rework on the seat (a pushed run holds a refused newer
    * commit), so that rework comes back before it.
+   * `ask`: the operator question this run waits on; the run wakes once it is answered.
    */
-  aside?: { worktree: string; wake: boolean; displaced?: true } | null;
+  aside?: { worktree: string; wake: boolean; displaced?: true; ask?: number } | null;
   /**
    * The engine's reads for the pushed sha: origin's default-branch tip, whether it is an ancestor
    * of `sha`, whether every commit in `sha --not mainSha` is in run_commits, and the changed

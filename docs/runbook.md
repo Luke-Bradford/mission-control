@@ -1261,6 +1261,18 @@ fact FLIGHT must act on is still open, never for a digest change. Each wake stor
 categories, e.g. `q`, `signals`, `reminder`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
 by reason and by hour over the last day.
 
+**A free seat with open tickets (#1451).** The hub checks this itself, with no FLIGHT tokens: a free
+build seat, open tickets near its area (all open tickets, not only the 30 the digest lists; Backlog, Refinement or Ready; an area label that is the seat's,
+or none or several, which need triage), and no `wait_on` on the seat or the ticket. A ticket with no
+board status counts as work to triage, and the wake says how many. Each seat is timed on its own. Once a seat has stood 10 minutes the
+`idle` wake fact names it, and it changes every 30 minutes (`FLIGHT_IDLE_SEAT_WAKE_MS`), so FLIGHT
+is woken then and every 30 minutes after, until a seat starts, no ticket is open, or FLIGHT logs a wait
+with `wait_on`. An empty Ready with a free seat is a reason to promote, not to wait. The hub records when each seat's
+spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
+line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`.
+The wake text tells FLIGHT to go round a wait on a person, take other work or decide; only money,
+direction, irreversible actions and security exceptions go to the operator, parked with a brief.
+
 | Signal | Raised when |
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
@@ -1602,6 +1614,12 @@ check, a CI failure) comes first, oldest first, ahead of any new ticket. If it l
 building a new ticket, that ticket is set aside at the seat's next turn end (its worktree, with its commits and any
 uncommitted work, is kept as it is; nothing is pushed) and comes back after the rework; the rework's
 wait reads "rework waiting on GUIDO-1 (behind #N)" until it starts.
+A ticket waiting on a person is parked the same way: when a seat's question has been passed to the
+operator and the seat is between turns, the run leaves its seat (worktree and commits kept) and the seat
+takes its next ticket. The run does not wake while the question is open. A reply that names the question
+(`question` on `POST /api/seats/:id/message`, sent with a Needs-you ask reply) is stored for that run, not the run now on
+the seat, and closes only that question; a message with no `question` goes to the run on the seat as before, and leaves the parked question open (the web sends the id once ticket 1474 lands). A question of another seat, or one already closed, is refused too. The run
+comes back with one line telling it to read the answer, in any phase it was parked in (working, CI or review). Ending the parked run closes its question. Another run's end or message on the seat leaves the question open.
 An account's `review_token_budget` (optional) is the input + output tokens one review run on it may
 use; the review fails when it goes over. Unset, a `claude` account gets `120000` and a `codex` account
 `300000`, because Codex counts more tokens for the same PR (7 of 142 Codex reviews went over `120000`;

@@ -13,6 +13,8 @@ export function asideWakeDue(store: Store, run: Run): boolean {
   const aside = run.loop?.aside;
   if (!aside || run.endedAt !== null || run.loop?.phase === "done") return false;
   if (aside.wake) return true;
+  // parked on the operator's question: not due back until it is answered (the loop then wakes it)
+  if (aside.ask !== undefined) return false;
   const pushed = store.runPush(run.id);
   if (pushed === null || run.loop === null || run.loop === undefined) return false;
   if (run.loop.phase === "ci") {
