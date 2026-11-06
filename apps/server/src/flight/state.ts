@@ -1794,6 +1794,33 @@ export function wakeReasons(
   });
 }
 
+/**
+ * A wake reason in words for the operator: a PR flow fact names the PR, its step and the time it
+ * began; any other fact keeps its text with each epoch (13 digits) turned into a time. Never the
+ * raw `kind:key:epoch`.
+ */
+export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
+  const at = (ms: number): string => {
+    const day = new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      timeZone,
+    }).format(ms);
+    return `${day} ${clockHm(ms, timeZone)}`;
+  };
+  const flow = /^prFlow ["[]*(\d+):(unowned|stage|waiting):?([^"\]]*)/.exec(reason.label);
+  if (flow) {
+    const [, pr, what, rest = ""] = flow;
+    const parts = rest.split(":").filter((x) => x !== "");
+    const since = Number(parts.at(-1));
+    const when = Number.isFinite(since) && since > 1e11 ? ` since ${at(since)}` : "";
+    if (what === "unowned") return `PR #${pr} has had no owner${when}`;
+    if (what === "waiting") return `PR #${pr} has waited on the ${parts[0] ?? "operator"}${when}`;
+    return `PR #${pr} has stood at the ${parts[0] ?? "same"} step${when}`;
+  }
+  return reason.label.replace(/\d{13}/g, (ms) => at(Number(ms)));
+}
+
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */
 const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker", "holdsInForce"]);
 

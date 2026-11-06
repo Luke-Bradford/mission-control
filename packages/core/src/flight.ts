@@ -283,6 +283,10 @@ export const FLIGHT_HEADLINE_TITLE = "Headline";
 export const FLIGHT_NOTE_SECTIONS = ["project", "crew", "operator", "lessons"] as const;
 export const FOR_THE_CONTROLLER = "For the controller:";
 
+/** Whether a message from FLIGHT is addressed to the controller, not the operator (until #1508's own address). */
+export const isForTheController = (text: string): boolean =>
+  text.trimStart().toLowerCase().startsWith(FOR_THE_CONTROLLER.toLowerCase());
+
 export interface FlightLedgerEntry {
   kind: FlightLedgerKind;
   key: string;

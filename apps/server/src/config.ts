@@ -75,7 +75,12 @@ export interface AdoptedLoop {
   worktree: string;
   launchdLabel: string;
   logsDir?: string;
+  /** How the loop is paused besides a TA loop's PAUSE file: a stop file, or the issue that pauses it. */
+  pausedBy?: LoopPausedBy;
 }
+
+/** A watched loop's configured pause: the stop file it checks, or the issue that pauses it. */
+export type LoopPausedBy = { stopFile: string } | { issue: { repoId: RepoId; number: number } };
 
 /** Editable display metadata stays separate from the seat's stable identity. */
 export interface ConfigSeatInput extends SeatInput {
@@ -544,6 +549,15 @@ const fileSchema = z
         worktree: nonEmpty,
         launchd_label: z.string().regex(LAUNCHD_LABEL, "letters, digits, dot, underscore, hyphen"),
         logs_dir: nonEmpty.optional(),
+        // read-only: how the loop is paused, so its card says so and its issues stay on it
+        paused_by: z
+          .union([
+            z.strictObject({ stop_file: nonEmpty }),
+            z.strictObject({
+              issue: z.string().regex(/^[^#\s]+#\d+$/, "a repo id and issue number: repo#123"),
+            }),
+          ])
+          .optional(),
       }),
     ),
     poll: z.strictObject({
@@ -715,6 +729,21 @@ const fileSchema = z
         worktree: expandHome(l.worktree),
         launchdLabel: l.launchd_label,
         ...(l.logs_dir === undefined ? {} : { logsDir: expandHome(l.logs_dir) }),
+        ...(l.paused_by === undefined
+          ? {}
+          : {
+              pausedBy:
+                "stop_file" in l.paused_by
+                  ? { stopFile: expandHome(l.paused_by.stop_file) }
+                  : {
+                      issue: {
+                        repoId: l.paused_by.issue.slice(0, l.paused_by.issue.lastIndexOf("#")),
+                        number: Number(
+                          l.paused_by.issue.slice(l.paused_by.issue.lastIndexOf("#") + 1),
+                        ),
+                      },
+                    },
+            }),
       })),
       poll: {
         usageMinutes: f.poll.usage_minutes,

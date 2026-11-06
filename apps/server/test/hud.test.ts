@@ -927,7 +927,8 @@ describe("attentionItems: PRs waiting on you", () => {
       worktree: null,
       updatedAt: NOW,
     });
-    expect(prItems()[0]?.owner).toBe("operator");
+    // an unowned review is FLIGHT's even when FLIGHT is stopped (#1537): the operator's count skips it
+    expect(prItems()[0]).toMatchObject({ owner: "flight", flightTriage: "down" });
   });
 
   it("a 9-day-old draft on a board ticket is a pr item", () => {

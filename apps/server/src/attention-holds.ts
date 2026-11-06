@@ -107,6 +107,9 @@ export function evaluateHolds(
   }
   return changed;
 }
+/** An item or hold that says it has nothing for the operator ("None for the operator."). */
+const NOTHING_FOR_OPERATOR = /\bnone for the operator\.?\s*$/i;
+
 export function partitionAttention(
   store: Store,
   items: AttentionItem[],
@@ -117,8 +120,11 @@ export function partitionAttention(
   const held: AttentionItem[] = [];
   for (const item of items) {
     const hold = all[item.key];
-    if (hold && hold.at >= item.at && hold.releasedAt === undefined) held.push({ ...item, hold });
-    else
+    if (hold && hold.at >= item.at && hold.releasedAt === undefined) {
+      // a hold whose reason says there is nothing for the operator is not shown to them
+      if (NOTHING_FOR_OPERATOR.test(hold.reason) || NOTHING_FOR_OPERATOR.test(item.text)) continue;
+      held.push({ ...item, hold });
+    } else
       active.push(
         hold?.releasedAt !== undefined && hold.at >= item.at
           ? {

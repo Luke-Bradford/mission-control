@@ -47,6 +47,7 @@ import {
   hudState,
   isCleanupNoteKey,
   isFlakeNoteKey,
+  isForTheController,
   isHardRulesFlagKey,
   isNoReportNoteKey,
   LOCK_WAITING_TEXT,
@@ -90,7 +91,6 @@ import { claudeVersion } from "./cli-version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
-import { isPaused } from "./collectors/ta-loop.ts";
 import { attentionChatter, resolvedCommsReason } from "./comms.ts";
 import {
   agentIds,
@@ -106,6 +106,7 @@ import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
+import { loopPause } from "./loop-pause.ts";
 import { loopTries } from "./loophistory.ts";
 import { reviewCheckFor } from "./review-check.ts";
 import {
@@ -206,7 +207,7 @@ export function stateInputs(config: CcConfig, store: Store): string {
         status.get(collectorName(loop.kind, loop.id))?.ok,
         status.get(collectorName(loop.kind, loop.id))?.error,
         status.get(noteCollectorName(loop.kind, loop.id))?.error,
-        loop.kind === "ta-loop" ? isPaused(loop) : false,
+        loopPause(loop, store),
         loop.kind === "studio-loop" ? store.getSetting(driverStopKey(loop.id)) : null,
         // a late line can turn the newest ended run blocked
         store.runs(agent.id, 1).map((r) => [r.id, r.status, r.endedAt]),
@@ -263,6 +264,7 @@ function loopViews(
         stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
         currentRun: latest ? runSummary(latest) : null,
         paused: false,
+        pausedBy: null,
         sourceError: hud === "error" ? (reason ?? "seat error") : null,
         // The seat's reason is its doing line, unless it is already the error text.
         note: hud === "error" ? null : reason,
@@ -274,7 +276,7 @@ function loopViews(
     const loop = agent.loop;
     const st = status.get(collectorName(loop.kind, loop.id));
     const sourceError = st && !st.ok ? (st.error ?? "collector failed") : null;
-    const paused = loop.kind === "ta-loop" ? isPaused(loop) : false;
+    const { paused, by: pausedBy } = loopPause(loop, store);
     // Only a title marker (`[operator-decision]` / `[loop-blocked]` / `[mvp-ready]`) means the
     // loop waits on the operator; a label-only escalation is listed in Needs you and nothing more.
     const waitingOnOperator = escalations.some(
@@ -293,6 +295,7 @@ function loopViews(
       stateSince: since,
       currentRun: latest ? runSummary(latest) : null,
       paused,
+      pausedBy,
       sourceError,
       note,
       stop,
@@ -749,6 +752,7 @@ function buildCrew(
               };
             })()),
         paused: view.paused,
+        ...(view.pausedBy ? { pausedBy: view.pausedBy } : {}),
         note: view.note,
         stop: view.stop,
         sourceError: view.sourceError,
@@ -1162,10 +1166,12 @@ function buildAttentionItems(
       ) !== null
     )
       continue;
+    // FLIGHT's message for the controller is the controller's, never a stuck run the operator keeps
+    const forController = message.from === flight?.seat.id && isForTheController(message.text);
     items.push({
-      owner: OWNER_OPERATOR,
+      owner: forController ? OWNER_CONTROLLER : OWNER_OPERATOR,
       key: `${COMMS_OPEN_PREFIX}${message.id}`,
-      kind: message.label === "blocker" ? "blocked" : "question",
+      kind: message.label === "blocker" && !forController ? "blocked" : "question",
       agentId: message.from,
       repoId: repoId ?? null,
       text: message.text,
@@ -1254,6 +1260,7 @@ function buildAttentionItems(
   // A PR waits on you when it is linked to a ticket on a configured board and no agent is running
   // on that ticket (the loops merge their own PRs; see PR_WAIT_MS). A ticket whose run is still
   // open is the crew's, whether or not a seat is running on it (set aside, queued, held).
+  const unownedReviews = new Set<string>();
   const working = new Set(
     rows.filter((r) => r.run?.status === "running" && r.ticket !== null).map((r) => r.ticket),
   );
@@ -1284,6 +1291,9 @@ function buildAttentionItems(
         loopRow && (!crewed || pr.branch === loopRow.run?.branch || pr.ticket === loopRow.ticket)
           ? loopRow
           : null;
+      // A review no run owns is FLIGHT's to route (whatever the PR's login), never the operator's.
+      const flightReview = !loopOwner && !pr.isDraft && action === "review" && flightId !== null;
+      if (flightReview) unownedReviews.add(`pr:${pr.repoId}#${pr.number}:${pr.updatedAt}`);
       items.push({
         owner: loopOwner
           ? OWNER_LOOP
@@ -1371,6 +1381,8 @@ function buildAttentionItems(
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
     const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
     const unansweredComms = i.key.startsWith(COMMS_OPEN_PREFIX);
+    // FLIGHT's message for the controller stays the controller's, whatever FLIGHT's triage state
+    if (unansweredComms && i.owner === OWNER_CONTROLLER) return item;
     if (unansweredComms && triage !== null) {
       if (brief !== undefined && brief.for !== "flight") return item;
       if (!triaging) return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
@@ -1395,8 +1407,16 @@ function buildAttentionItems(
       return { ...item, owner: OWNER_FLIGHT, flightTriage: triaging ? "handling" : "down" };
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
     // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
-    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
+    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) {
+      // one late wake is FLIGHT's own watch; several left undecided are the operator's alert
+      return /^FLIGHT left 1 wake reason\b/.test(i.text)
+        ? { ...item, owner: OWNER_FLIGHT, flightTriage: triaging ? "handling" : "down" }
+        : item;
+    }
     if (brief !== undefined && brief.for !== "flight") return item;
+    // FLIGHT's review queue, even when FLIGHT is not triaging: the count item carries it
+    if (unownedReviews.has(i.key) && (!live || !triaging))
+      return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
     if (!live || (!triaging && keptRaw(i, store))) return item;
     if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
