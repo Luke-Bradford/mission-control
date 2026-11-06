@@ -7,13 +7,13 @@ The operator asked what is using the tokens and how to fix it at the root. The a
 running for longer.
 
 **Terms.** The CLI is Claude Code's command-line tool, which runs each agent. The cache holds a
-session's earlier context, so a model call can re-read it at a tenth of the price of new text.
+session's earlier context. A model call re-reads it at a tenth of the price of new text.
 Audit is the hub page that lists things to improve.
 
 ## The short answer
 
 - **Almost all spend is agents re-reading their own context.** Every step a model takes, it reads
-  everything already in its session. Writing output is a tenth to a quarter of the cost.
+  everything already in its session. Writing output is a tenth to just over a quarter of the cost.
 - **Sessions only grow.** No run's context dropped by more than 5,000 tokens in the transcripts
   measured.
 - **Four things account for most of it.** Developer runs keep one session through build, fixes
@@ -44,7 +44,7 @@ the call. A token added early in a run is paid for again at every later step.
 | **Crew total** | | | **$1,103** | $5.84 a merged PR |
 
 **Controller sessions are outside that table.** The controller is a Claude Code session on this
-Mac that helps run the repo, such as the one that wrote this. Counted by message time over the
+Mac that helps run the repo. This report came from one. Counted by message time over the
 same seven days, each message once:
 
 | | Model calls | Context re-read |
@@ -69,11 +69,12 @@ it.
 ### 1. Controller sessions run for days at up to a million tokens
 
 - **Evidence:** above. One session made 1,682 calls in the seven days, at up to 967,000 tokens
-  each. That one session re-read more than any crew seat.
+  each. That one session re-read more than any crew seat: the largest, FLIGHT, re-read 836 million in
+  the same seven days.
 - **Why:** one session is kept open across many tasks, so every tool result stays in it.
 - **Fix:** a new session per task, started from the saved notes. The hub does not run the
-  controller, so its own instructions set the cap: hand over at about 150,000 tokens, as FLIGHT
-  does. Gathering goes to short-lived helpers whose context is thrown away. #1504 lets the hub
+  controller, so its own instructions set the cap. It hands over at about 150,000 tokens, as
+  FLIGHT does. Gathering goes to short-lived helpers whose context is thrown away. #1504 lets the hub
   record controller use, off by default.
 - **Information risk:** none, if the handover notes are written.
 
@@ -82,7 +83,7 @@ it.
 - **Evidence:** 98 developer runs. Median 80 model calls a run. Context at each call: median
   121,000 tokens, and 317,000 at the 90th percentile. The last third of a run is 48% of its
   re-reading.
-- **62% of a developer's context reads and writes come after its first report.** By then the run
+- **62% of the context a developer reads or writes to cache comes after its first report.** By then the run
   is fixing CI, reworking or waiting. A run reports a median of 4 times, and 9 at the 90th percentile. Each fix is made on a
   context already full from the build.
 - **Fix:** work in phases, each in a fresh session: build, then each fix. The hub already writes a
@@ -109,7 +110,7 @@ output 10%, file reads 4%. Inside shell output:
 - **Lint is pure waste.** In two days, 299 lint calls printed a median of 16,196 characters. 257
   had no error. On main today it prints 20,671 characters: 68 standing warnings and 7 notes. The
   table counts more lint calls because it includes every seat and chained commands.
-- **Fix for lint:** clear the 60 warnings once, or print errors only. A pass then prints one line.
+- **Fix for lint:** clear the 68 warnings once, or print errors only. A pass then prints one line.
 - **Fix for checks in general:** the hub runs a check and returns "passed", or only the failures,
   with the full log by id on request.
 - **Fix for reading:** the planner's plan names the files and line ranges, so the developer reads
@@ -121,8 +122,8 @@ output 10%, file reads 4%. Inside shell output:
 
 - **Evidence:** 251 wakes and 59 sessions in 24 hours, so 4.3 wakes a session. The first call of
   a session is about 117,000 tokens. FLIGHT moves to a fresh session past 150,000 tokens, after 40 wakes, or when its tools
-  change. Its sessions rose from 5 a day on 29 October to 39 on 5 November. Why was not looked
-  into.
+  change. By the hub's run table, its sessions rose from 5 a day on 29 October to 39 on
+  5 November. The 59 above counts the 24 hours to midday on 6 November. The cause is not yet known.
 - **So FLIGHT has about 44,000 tokens of working room**, and pays to write about 95,000 tokens to
   cache 59 times a day, on Opus. Every call re-reads at least 106,000.
 - **The hub's own figure agrees.** Since 22 October, starting sessions cost $357 of FLIGHT's $701,
@@ -183,12 +184,19 @@ output 10%, file reads 4%. Inside shell output:
 
 Yes, in two groups.
 
-**No loss, do now:** lint noise and passing-check output (hole 3); the repeated direction text (#1469); `comms_read` by
-ticket; notice text; repeated report text; controller session length; the output count.
+**No loss, do now:**
+- lint noise and passing-check output (hole 3, #1503);
+- the repeated direction text (#1469);
+- `comms_read` by ticket, and notice text (#1506);
+- repeated report text;
+- controller session length;
+- the output count (#1504).
 
-**Needs a trial first, because it changes how an agent works:** fresh sessions per phase, which
-also covers hole 6; a small
-FLIGHT context; a second review round that reads only the change; a scout.
+**Needs a trial first,** because it changes how an agent works:
+- fresh sessions per phase, which also covers hole 6;
+- a small FLIGHT context;
+- a second review round that reads only the change;
+- a scout.
 
 A trial is ten tickets each way. It compares tokens, rework rounds, CI failures, review findings,
 and bugs found after merge. The operator sees the figures and decides.
