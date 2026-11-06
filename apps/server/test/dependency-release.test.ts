@@ -283,6 +283,43 @@ describe("release on merge", () => {
     expect(moves).toEqual([{ runId: "dep:mc#50", repoId: REPO, issue: 50, column: "Ready" }]);
   });
 
+  /** A Blocked card 50 with no run on its ticket, waiting on PR 900 that then merges. */
+  const waitOnMerged900 = async () => {
+    store.replaceBoard(REPO, [
+      card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
+    ]);
+    store.upsertPullRequests(REPO, [pr(900)], T0);
+    await release(T0);
+    store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 + MIN })], T0 + MIN);
+    await release(T0 + 2 * MIN);
+  };
+  const boardMove = (runId: string, state: "done" | "failed") =>
+    store.addBoardMove({
+      runId,
+      repoId: REPO,
+      issue: 50,
+      column: "Blocked",
+      state,
+      detail: null,
+      at: T0,
+    });
+
+  it("releases a card a run here moved, though no run has its ticket", async () => {
+    store.upsertRun(run("r-flight", "mc#99", 901));
+    boardMove("r-flight", "done");
+    await waitOnMerged900();
+    expect(moves).toEqual([{ runId: "dep:mc#50", repoId: REPO, issue: 50, column: "Ready" }]);
+  });
+
+  it("does not count another hub's pr: and dep: rows, or a failed move, as ownership", async () => {
+    store.upsertRun(run("r-flight", "mc#99", 901));
+    boardMove("pr:mc#900", "done");
+    boardMove("dep:mc#50", "done");
+    boardMove("r-flight", "failed");
+    await waitOnMerged900();
+    expect(moves).toEqual([]);
+  });
+
   it("leaves a Blocked card no run here touched, and does not mark it released", async () => {
     store.replaceBoard(REPO, [
       card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),

@@ -10,6 +10,7 @@ import {
   type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "./config.ts";
+import { externalReviewAsked } from "./external-pr-control.ts";
 import type { GhRunner } from "./mcp/gh.ts";
 import { ownsPr } from "./ownership.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
@@ -147,7 +148,8 @@ export function createExternalReviews(deps: {
   let syncing = false;
   /** A review is this hub's work: its branch has a run here, or someone asked it to review this head. */
   const mine = (repoId: string, pr: Pick<PullRequestView, "number" | "branch" | "headSha">) =>
-    ownsPr(store, repoId, pr);
+    ownsPr(store, repoId, pr) ||
+    (pr.headSha != null && externalReviewAsked(store, repoId, pr.number, pr.headSha, true));
   function wanted(row: ReviewRow): boolean {
     const repo = deps.config.repos.find((r) => r.id === row.repoId);
     const pr = store.pullRequests(row.repoId).find((p) => p.number === row.prNumber);

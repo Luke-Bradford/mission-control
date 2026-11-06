@@ -17,6 +17,7 @@ import {
 } from "../src/external-pr-control.ts";
 import { branchOwned, createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import { ownsPr } from "../src/ownership.ts";
 import { prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
@@ -159,11 +160,32 @@ describe("external PR review subjects", () => {
     await createExternalReviews(h.deps).sync();
     store.deleteSetting("external-review-ask:sample#7");
     seedExternalReviewAsks(store, 5);
-    expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
-    expect(externalReviewAsked(store, "sample", 7, NEXT)).toBe(false);
+    expect(externalReviewAsked(store, "sample", 7, SHA, true)).toBe(true);
+    expect(externalReviewAsked(store, "sample", 7, NEXT, true)).toBe(false);
+    // it counts for finishing that review only: not for card moves or PR body edits
+    expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+    expect(ownsPr(store, "sample", pr())).toBe(false);
     withdrawExternalReview(store, "sample", 7);
     seedExternalReviewAsks(store, 6);
-    expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+    expect(externalReviewAsked(store, "sample", 7, SHA, true)).toBe(false);
+  });
+
+  it.each([
+    ["reported", ["starting", "running", "reported"]],
+    ["failed", ["starting", "running", "failed"]],
+  ] as const)("Update seeds no ask for a %s review", async (_name, path) => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    let from: "queued" | "starting" | "running" = "queued";
+    for (const to of path) {
+      store.setReviewState(row.id, [from], to, { at: 3, runId: "retro:x", failure: "x" });
+      from = to as typeof from;
+    }
+    expect(store.review(row.id)?.state).toBe(path.at(-1));
+    store.deleteSetting("external-review-ask:sample#7");
+    seedExternalReviewAsks(store, 5);
+    expect(externalReviewAsked(store, "sample", 7, SHA, true)).toBe(false);
   });
 
   it("Update seeds no ask when no review is in flight", () => {

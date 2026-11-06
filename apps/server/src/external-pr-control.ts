@@ -78,6 +78,9 @@ export function externalControlReason(
 
 const askKey = (repo: string, pr: number) => `external-review-ask:${repo}#${pr}`;
 
+/** Who an ask seeded by Update is recorded as. */
+const SEEDED_BY = "Update";
+
 interface Ask {
   at: number;
   by: string;
@@ -96,11 +99,19 @@ function readAsk(store: Store, repo: string, pr: number): Ask | null {
 }
 
 /**
- * Whether the operator, FLIGHT or an Update asked this hub for a QA review of this head of the
- * PR. The ask is in this store only and binds one head: a push needs a new ask.
+ * Whether the operator or FLIGHT asked this hub for a QA review of this head of the PR. The ask is
+ * in this store only and binds one head: a push needs a new ask. An ask Update seeded for a review
+ * in flight counts only for that review (`forReview`), never for card moves or PR body edits.
  */
-export function externalReviewAsked(store: Store, repo: string, pr: number, sha: string): boolean {
-  return readAsk(store, repo, pr)?.sha === sha;
+export function externalReviewAsked(
+  store: Store,
+  repo: string,
+  pr: number,
+  sha: string,
+  forReview = false,
+): boolean {
+  const ask = readAsk(store, repo, pr);
+  return ask?.sha === sha && (forReview || ask.by !== SEEDED_BY);
 }
 
 /** Records the ask for `sha`; asking again for the same head changes nothing, a new head replaces it. */
@@ -108,11 +119,11 @@ export function askExternalReview(
   store: Store,
   repo: string,
   pr: number,
-  by: "FLIGHT" | "CAPCOM" | "Update",
+  by: "FLIGHT" | "CAPCOM" | typeof SEEDED_BY,
   at: number,
   sha: string,
 ): void {
-  if (externalReviewAsked(store, repo, pr, sha)) return;
+  if (externalReviewAsked(store, repo, pr, sha, true)) return;
   store.setSetting(askKey(repo, pr), JSON.stringify({ at, by, sha }));
 }
 
@@ -124,14 +135,16 @@ export function withdrawExternalReview(store: Store, repo: string, pr: number): 
 }
 
 /**
- * Update seeds the asks of reviews already in flight, so a hub that updates keeps finishing them
+ * Update seeds the asks of reviews still in flight (queued, starting or running), so a hub that updates keeps finishing them
  * (a pending mc/review status is never left behind). Runs once; later asks are the operator's.
  */
 export function seedExternalReviewAsks(store: Store, at: number): void {
   const seeded = "external-review-asks-seeded";
   if (store.getSetting(seeded) !== null) return;
   for (const row of store.externalReviewRows()) {
-    askExternalReview(store, row.repoId, row.prNumber, "Update", at, row.sha);
+    // only a review still in flight: a finished one gives this hub no claim on the PR
+    if (row.state !== "queued" && row.state !== "starting" && row.state !== "running") continue;
+    askExternalReview(store, row.repoId, row.prNumber, SEEDED_BY, at, row.sha);
   }
   store.setSetting(seeded, String(at));
 }
