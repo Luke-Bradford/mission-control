@@ -7009,6 +7009,7 @@ describe("superuser housekeeping", () => {
     ["pr-not-open", "the PR is not open"],
     ["held", "the run is held"],
     ["floor-enforced", "only the controller can merge it"],
+    ["design-failed", "only the operator can accept it"],
     ["second-review-done", "second review was already requested"],
     ["no-second-reviewer", "no reviewer on another account"],
   ] as const)("settle_park says why the engine refused: %s", async (reason, text) => {

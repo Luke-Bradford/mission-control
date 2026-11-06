@@ -291,7 +291,7 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "floor-enforced":
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
   "design-failed":
-    "the last review failed this head's design check, so FLIGHT cannot accept it: send it back for rework, or brief the operator with the rendered page and the failed points so they decide",
+    "the last review failed this head's design check, so only the operator can accept it, with Waive on the run's review park (Agents page). Send it back for rework; if the next review fails the design again, brief the operator with the review's images and the failed points. Your accept stays refused after they answer",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
@@ -471,6 +471,31 @@ const reviewFact = (r: ReviewRow): ReviewFact => ({
   minor: r.minor,
   failure: r.failure,
 });
+
+/**
+ * Whether the head's last design verdict is a fail. The head is judged by its own review, or by the
+ * one carried from before a main merge, as the loop judges it. A later review with no design verdict,
+ * or `n-a`, does not clear an earlier fail; a later pass does.
+ */
+export function designFailedIn(
+  rows: readonly ReviewRow[],
+  checks: (reviewId: number) => readonly { check: string; result: string }[],
+  loop: Pick<RunLoop, "epoch" | "carry" | "reviewWaivedSha">,
+  sha: string,
+): boolean {
+  const judged =
+    reviewFor(
+      rows.map(reviewFact),
+      loop.epoch,
+      sha,
+      carriedFrom(loop.carry, loop.reviewWaivedSha, sha),
+    )?.sha ?? sha;
+  const verdicts = rows
+    .filter((r) => r.sha === judged && r.state === "reported")
+    .map((r) => checks(r.id).find((c) => c.check === "design")?.result)
+    .filter((v) => v === "pass" || v === "fail");
+  return verdicts.at(-1) === "fail";
+}
 
 const endReason = (run: Run): string => {
   switch (run.endedBy) {
@@ -2959,12 +2984,15 @@ export function createEngine(deps: EngineDeps): Engine {
               );
               if (paths.length > 0) return refuse("floor-enforced");
             }
-            // A failed design is what the operator sees. The round cap never waives it for FLIGHT
-            // (PR 1465, #1529): rework it, or the operator looks at the page and accepts it.
+            // A failed design needs the operator's own accept (PR 1465, #1529).
             if (
               by === "FLIGHT" &&
-              review !== undefined &&
-              store.reviewChecks(review.id).some((c) => c.check === "design" && c.result === "fail")
+              designFailedIn(
+                store.reviewsOfRun(run.id),
+                (id) => store.reviewChecks(id),
+                loop,
+                pushed.sha,
+              )
             )
               return refuse("design-failed");
           }

@@ -80,6 +80,7 @@ import {
   REVIEW_TOKEN_BUDGET,
   type ReviewCheck,
   type ReviewFinding,
+  type ReviewRow,
   type Run,
   type RunLoop,
   readyHardRuleText,
@@ -114,6 +115,7 @@ import { writeCrewPause } from "../src/crew-pause.ts";
 import { asideWakeDue } from "../src/engine/aside.ts";
 import {
   createEngine,
+  designFailedIn,
   type Engine,
   type EngineDeps,
   reviewerOf,
@@ -7649,5 +7651,57 @@ describe("the engine runs reviews", () => {
       expect(h.asides).toEqual([RUN]);
       expect(h.wakes).toEqual([RUN]);
     });
+  });
+});
+
+describe("designFailedIn: the head's last design verdict", () => {
+  const row = (id: number, sha: string, state: ReviewRow["state"] = "reported"): ReviewRow => ({
+    id,
+    authorRunId: "run",
+    repoId: "mc",
+    seatId: "retro-1",
+    prNumber: 1,
+    sha,
+    epoch: 1,
+    attempt: 1,
+    round: id,
+    state,
+    runId: null,
+    verdict: null,
+    summary: null,
+    blocking: 1,
+    minor: 0,
+    failure: null,
+    createdAt: id,
+    startedAt: null,
+    endedAt: null,
+  });
+  const checks =
+    (verdicts: Record<number, "pass" | "fail" | "n-a" | undefined>) =>
+    (id: number): { check: string; result: string }[] => {
+      const v = verdicts[id];
+      return v === undefined ? [] : [{ check: "design", result: v }];
+    };
+  const loop = { epoch: 1, carry: null, reviewWaivedSha: null };
+
+  it("is a fail when the head's own review failed the design", () => {
+    expect(designFailedIn([row(1, "a")], checks({ 1: "fail" }), loop, "a")).toBe(true);
+    expect(designFailedIn([row(1, "a")], checks({ 1: "pass" }), loop, "a")).toBe(false);
+  });
+
+  it("judges a head by the review carried from before a main merge", () => {
+    const carried = { ...loop, carry: { from: "a", to: "b" } };
+    expect(designFailedIn([row(1, "a")], checks({ 1: "fail" }), carried, "b")).toBe(true);
+  });
+
+  it("keeps an earlier fail when a later review gives no design verdict or n-a", () => {
+    const rows = [row(1, "a"), row(2, "a")];
+    expect(designFailedIn(rows, checks({ 1: "fail" }), loop, "a")).toBe(true);
+    expect(designFailedIn(rows, checks({ 1: "fail", 2: "n-a" }), loop, "a")).toBe(true);
+  });
+
+  it("clears when a later review on the head passes the design", () => {
+    const rows = [row(1, "a"), row(2, "a")];
+    expect(designFailedIn(rows, checks({ 1: "fail", 2: "pass" }), loop, "a")).toBe(false);
   });
 });

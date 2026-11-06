@@ -11,11 +11,11 @@ Mockups count. [Visual QA](../../../docs/runbooks/visual-qa.md) covers planning,
 ## Plan
 
 - [ ] One question per page; one purpose per panel (§1).
-- [ ] Content: the reader, and which items belong (§1).
+- [ ] Content: reader, and which items belong (§1).
 - [ ] Dashboards: rank and size panels per [composition](references/dashboard-layout.md): real viewport, first-screen fields, normal rows, budgets.
 - [ ] Stats: label, value, definition, window, unit (§5–7).
 - [ ] Page-shaped APIs; tabs fetch on opening (§8–9).
-- [ ] Mockups precede new pages and big changes.
+- [ ] Mockups precede new pages, big changes.
 
 ## Build
 
@@ -24,7 +24,7 @@ Mockups count. [Visual QA](../../../docs/runbooks/visual-qa.md) covers planning,
 - [ ] **[I]** States have words/shapes alongside colour (§2–4).
 - [ ] **[I]** Empty/loading/error/stale/disconnected states; never "No data" (§5–7).
 - [ ] **[I]** Controls: keyboard reachable, named, focus-visible, minimum 24×24 px (§8–9).
-- [ ] Maximum four text lines per box (§5–7).
+- [ ] Four text lines per box at most (§5–7).
 - [ ] Tables: 40 px rows (32 compact), right-aligned tabular numbers, visible sort, unknown `—` (§5–7).
 - [ ] Content-aware columns, aligned headers, useful density.
 - [ ] **[I]** Readable labels/units/actions; only free text truncates, keyboard reaches full text.
@@ -33,15 +33,15 @@ Mockups count. [Visual QA](../../../docs/runbooks/visual-qa.md) covers planning,
 ## Check
 
 - [ ] Empty, one, 50 rows, long content.
-- [ ] Browser: 1280/1600/1920 widths, 1600×700, light/dark (§8–9), [dashboards](references/dashboard-layout.md#viewports-use-the-real-ones); also arrive from Overview by the nav.
+- [ ] Browser: 1280/1600/1920 widths, 1600×700, light/dark (§8–9), [dashboards](references/dashboard-layout.md#viewports-use-the-real-ones); also arrive as the operator does, from Overview.
 - [ ] [Table QA](../../../docs/runbooks/table-qa.md): settled context, then details.
 
 ## Review
 
 - [ ] Build items hold in diff and render.
-- [ ] **[I]** First screen answers the declared question (§1) at real viewports with busy data: clear hierarchy, content-sized panels. Fit or scroll reachability alone cannot pass.
+- [ ] **[I]** First screen answers the declared question (§1) at real viewports with busy data: clear hierarchy, content-sized panels. Fit or scroll reach alone cannot pass.
 - [ ] No empty panels/lone-number tiles (§5–7).
-- [ ] **[I]** Every item is for the page's reader; no raw ids or internal notes.
-- [ ] Record observations, images, findings, limits; geometry alone is insufficient.
+- [ ] **[I]** Every item is for the page's reader; no unformatted ids or epoch times.
+- [ ] Record observations, images, findings, limits; geometry alone never suffices.
 
-Record `design`: pass (every [I] passes on your render), n-a (no visible change), fail (quote failures; also a visible change nobody rendered). A fail holds the merge; the round cap never waives it. Only live-data checks are a "Controller check".
+Record `design`: pass (every [I] passes on your render or head images), n-a (no visible change), fail (quote failures; with neither, one Important finding asking for them). Only the operator accepts past a fail. Only live-data checks are "Controller checks".
