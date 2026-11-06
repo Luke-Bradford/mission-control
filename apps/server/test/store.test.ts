@@ -3797,6 +3797,12 @@ describe("hub retention", () => {
           table === "drafts" || table === "crew_errors" ? { n: 1 } : { n: 0 },
         );
       expect(db.prepare("SELECT state FROM board_moves").all()).toEqual([{ state: "pending" }]);
+      // an answered question to FLIGHT is kept a year, not ninety days
+      expect(db.prepare("SELECT answered_at FROM seat_questions ORDER BY id").all()).toEqual([
+        { answered_at: 1 },
+        { answered_at: null },
+      ]);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(366 * 86_400_000);
       expect(db.prepare("SELECT answered_at FROM seat_questions").all()).toEqual([
         { answered_at: null },
       ]);
@@ -3822,7 +3828,7 @@ describe("hub retention", () => {
         INSERT INTO run_pushes VALUES ('old-run','sha',0);
         INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
         INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
-      for (let i = 0; i < 13; i++) await store.pruneHistory(366 * 86_400_000);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(366 * 86_400_000);
       for (const table of [
         "runs",
         "reviews",
