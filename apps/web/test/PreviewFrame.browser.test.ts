@@ -11,6 +11,7 @@ const KEY = "decision:layout";
 const discussion = { id: "d1", itemKey: KEY, version: "v1", messages: [] };
 const PREVIEW = {
   ticket: 1453,
+  repoId: "shop-app",
   branch: "feature/1453-needs",
   sha: "a".repeat(40),
   publishedAt: NOW - HOUR,
