@@ -118,6 +118,27 @@ export function pendingCliUpdate(store: Store, tool: AutoCliTool): PendingCliUpd
 export const cliAutoHoldText = (tool: AutoCliTool, to: string): string =>
   `${tool} CLI ${to} has not passed its live check; no new runs start until it does or is rolled back`;
 
+/**
+ * Ends the hold of an update that a tool this job no longer manages left pending (the operator
+ * reinstalled it another way, so it is no longer an npm install). Only while the tool is on PATH:
+ * a tool that is missing keeps its hold. Returns whether it settled anything.
+ */
+export function settlePending(
+  store: Store,
+  hold: CliHold,
+  tool: AutoCliTool,
+  log: (line: string) => void,
+  path = process.env.PATH ?? "",
+): boolean {
+  const pending = pendingCliUpdate(store, tool);
+  if (pending === null || resolveOnPath(COMMANDS[tool], path) === null) return false;
+  store.deleteSetting(pendingKey(tool));
+  store.clearNote(noteKey(tool, pending.to), Date.now());
+  hold.release(cliAutoHoldOwner(tool));
+  log(`cli update ${tool}: no longer an npm install; leaving it to whatever installed it`);
+  return true;
+}
+
 /** Tools with a pass in flight in this process: a second tick for one waits for the next interval. */
 const running = new Set<AutoCliTool>();
 
@@ -215,7 +236,9 @@ async function pass(
     const current = await ops.installed();
     log(`resuming ${pending.from} -> ${pending.to}; ${current ?? "nothing"} is installed`);
     if (current === pending.to) return verify(pending.from, pending.to);
-    // the tool is not on the new version (rolled back or never installed): nothing is left to prove
+    // no version answers: the tool is broken, so put the previous one back (and keep the hold if that fails)
+    if (current === null) return rollBack(pending.from, pending.to, "no working version installed");
+    // some other version is installed (the previous one, or one put there by hand): nothing is left to prove
     return done("current");
   }
 

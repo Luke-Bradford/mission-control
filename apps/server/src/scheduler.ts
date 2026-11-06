@@ -42,6 +42,7 @@ import {
   npmPrefix,
   pendingCliUpdate,
   realCliOps,
+  settlePending,
 } from "./cli-auto.ts";
 import {
   CLI_COLLECTOR,
@@ -1084,6 +1085,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const tool of AUTO_CLI_TOOLS) {
         const ops = c.cliOps(tool);
         if (ops === null) {
+          settlePending(store, cliHold, tool, (line) => deps.log?.(line));
           recordStatus(
             `cli-auto:${tool}`,
             false,

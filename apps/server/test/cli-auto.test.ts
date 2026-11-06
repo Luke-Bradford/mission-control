@@ -20,6 +20,7 @@ import {
   npmPrefix,
   pendingCliUpdate,
   realCliOps,
+  settlePending,
 } from "../src/cli-auto.ts";
 import { CliHold, type ExecFn } from "../src/cli-update.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -576,3 +577,68 @@ describe("the hold during an update", () => {
 });
 
 const realpathOf = (p: string) => realpathSync(p);
+
+describe("a pending update the tool cannot settle", () => {
+  it("retries the rollback while no version answers, and keeps runs held", async () => {
+    const { state, ops } = fakeOps("2.1.0", "2.1.1");
+    const broken: CliToolOps = {
+      ...ops,
+      install: async (v) => {
+        state.installs.push(v);
+        state.installed = null as unknown as string;
+        return { ok: false, error: "EACCES" };
+      },
+      installed: async () => state.installed,
+    };
+    expect(await run("claude", broken)).toBe("rollback-failed");
+    expect(await run("claude", broken)).toBe("rollback-failed");
+    expect(hold.heldBy("cli-auto:claude")).toBe(true);
+    expect(pendingCliUpdate(store, "claude")).not.toBeNull();
+    expect(state.installs).toEqual(["2.1.1", "2.1.0", "2.1.0"]);
+    expect(store.notes().filter((n) => n.clearedAt === null)).toHaveLength(1);
+  });
+
+  it("settles a pending update for a tool now on PATH from another installer, and not one missing", () => {
+    const bin = join(dir, "bin2");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\n");
+    store.setSetting("cli-auto-pending:claude", JSON.stringify({ from: "2.1.0", to: "2.1.1" }));
+    hold.hold("claude CLI 2.1.1 has not passed its live check", "cli-auto:claude");
+    expect(settlePending(store, hold, "claude", (l) => lines.push(l), join(dir, "nowhere"))).toBe(
+      false,
+    );
+    expect(hold.reason).not.toBeNull();
+    expect(settlePending(store, hold, "claude", (l) => lines.push(l), bin)).toBe(true);
+    expect(hold.reason).toBeNull();
+    expect(pendingCliUpdate(store, "claude")).toBeNull();
+    expect(lines.some((l) => /no longer an npm install/.test(l))).toBe(true);
+  });
+
+  it("lets the job settle it when cliOps no longer manages the tool", async () => {
+    const bin = join(dir, "bin3");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "claude"), "#!/bin/sh\n");
+    vi.stubEnv("PATH", bin);
+    store.setSetting("cli-auto-pending:claude", JSON.stringify({ from: "2.1.0", to: "2.1.1" }));
+    const scheduler = createScheduler({
+      config: {
+        operator: { id: "operator", timezone: "Europe/London" },
+        accounts: [],
+        repos: [],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+        updates: { hub: "off", cli: "between_runs" },
+      },
+      store,
+      bus: new ChangeBus(),
+      cliHold: hold,
+      collectors: { cliOps: () => null },
+    });
+    expect(hold.reason).toMatch(/claude/);
+    await scheduler.tick("cliAuto");
+    expect(hold.reason).toBeNull();
+    expect(pendingCliUpdate(store, "claude")).toBeNull();
+    vi.unstubAllEnvs();
+    await scheduler.stop();
+  });
+});
