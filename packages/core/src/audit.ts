@@ -122,10 +122,45 @@ export interface AuditView {
     prs: { rounds: number; count: number }[];
     late: { seatId: string; model: string | null; findings: number; late: number }[];
   };
+  /** Items recorded in range, each with its risk tier. The server always sets it; optional so web fixtures built before it type-check. */
+  items?: AuditItem[];
   /** Empty, in its final shape, until SURGEON proposals are stored. */
   surgeonProposals: { id: string; at: number; summary: string }[];
   /** Lists the server cut to AUDIT_LIST_CAP, by name, with how many each held; absent when none was cut. */
   capped?: Record<string, number>;
+}
+
+/** Who may act on an Audit item: nobody (the hub does), FLIGHT, an operator acknowledgement, or an operator go-ahead. */
+export const AUDIT_TIERS = ["auto", "flight", "acknowledge", "go-ahead"] as const;
+export type AuditTier = (typeof AUDIT_TIERS)[number];
+
+/** The fixed tier of each item kind. Only a patch or minor CLI update is Auto. */
+export const AUDIT_KIND_TIERS: Readonly<Record<string, AuditTier>> = Object.freeze({
+  "cli-update": "auto",
+  "cli-update-failed": "flight",
+  "cli-update-major": "go-ahead",
+  "code-health-proposal": "acknowledge",
+  "audit-finding": "acknowledge",
+  flake: "flight",
+  "pr-size-outlier": "flight",
+});
+
+/** The tier of an item kind; a kind not listed is Go-ahead, never Auto. */
+export function auditTier(kind: string): AuditTier {
+  return Object.hasOwn(AUDIT_KIND_TIERS, kind) ? AUDIT_KIND_TIERS[kind] : "go-ahead";
+}
+
+/** A stored Audit item: something the hub did or needs decided, with the tier that says who acts on it. */
+export interface AuditItem {
+  id: number;
+  kind: string;
+  /** What the item is about, e.g. `claude@2.1.5`; one item per kind and subject. */
+  subject: string;
+  tier: AuditTier;
+  /** `done` when the hub finished it (an applied update), `open` while someone must act. */
+  state: "done" | "open";
+  detail: string;
+  at: number;
 }
 
 /** A list in the audit response holds at most this many rows (until the Audit page is redesigned). */
@@ -158,6 +193,7 @@ export function capAudit(audit: AuditView): AuditView {
     flakes: cut("flakes", audit.flakes),
     changes: cut("changes", audit.changes),
     surgeonProposals: cut("surgeonProposals", audit.surgeonProposals),
+    ...(audit.items === undefined ? {} : { items: cut("items", audit.items) }),
   };
   return Object.keys(capped).length === 0 ? audit : { ...out, capped };
 }
