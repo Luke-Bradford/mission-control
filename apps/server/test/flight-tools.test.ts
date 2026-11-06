@@ -7677,6 +7677,41 @@ describe("track", () => {
     basis: "ticket",
   };
 
+  it("refuses a pointer target that the hub could never mark, naming the form", async () => {
+    for (const [kind, target] of [
+      ["pr", "#7"],
+      ["pr", "o/mc#7"],
+      ["pr", "nope#7"],
+      ["pr", "7"],
+      ["ticket", "mc#0"],
+      ["seat", "nobody-9"],
+      ["repo", "nope"],
+      ["person", "bad_login"],
+      ["metric", "madeUp"],
+    ] as const) {
+      const r = await call("track", { ...entry, pointers: [{ kind, target }] });
+      expect(r.isError, `${kind} ${target}`).toBe(true);
+      expect(r.text).toContain(`a ${kind} pointer is`);
+    }
+    expect(store.flightLedger("s1")).toEqual([]);
+    const good = [
+      { kind: "pr", target: "mc#7" },
+      { kind: "ticket", target: "mc#8" },
+      { kind: "seat", target: "guido-1" },
+      { kind: "repo", target: "mc" },
+      { kind: "person", target: "octocat" },
+      { kind: "metric", target: "merged" },
+    ];
+    expect((await call("track", { ...entry, pointers: good })).isError).toBeUndefined();
+  });
+
+  it("stamps the moved pointers flight_state shows as read", async () => {
+    await call("track", { ...entry, pointers: [{ kind: "pr", target: "mc#7" }] });
+    store.markFlightPointers("pr", "mc#7", "CI failing", NOW - 1000);
+    expect(JSON.parse((await call("flight_state", {})).text).moved).toHaveLength(1);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+  });
+
   it("keeps #533 ledger tools available while away", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     expect(await call("track", entry)).toEqual({ text: trackedText(entry.key, true) });

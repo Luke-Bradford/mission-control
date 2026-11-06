@@ -298,6 +298,17 @@ export interface FlightPointerRef {
   /** A PR or ticket as `repo#n`, a seat id, a repo id, a person's login or a metric id. */
   target: string;
 }
+export const ledgerPointerText = (kind: FlightPointerKind, target: string): string => {
+  const form: Record<FlightPointerKind, string> = {
+    pr: "<repo id>#<number>, e.g. mc#7",
+    ticket: "<repo id>#<number>, e.g. mc#7",
+    seat: "a seat id in your session",
+    repo: "a configured repo id",
+    person: "a GitHub login",
+    metric: "a metric id from the registry",
+  };
+  return `Not tracked: a ${kind} pointer is ${form[kind]}; "${target}" is not.`;
+};
 /** A pointer as stored: when the hub last saw its target change, and when FLIGHT last read that. */
 export interface FlightPointer extends FlightPointerRef {
   changedAt: number | null;

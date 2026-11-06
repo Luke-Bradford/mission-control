@@ -143,6 +143,7 @@ import {
   type FlightDecisionKind,
   type FlightLedgerEntry,
   type FlightMoveColumn,
+  type FlightPointerKind,
   type FlightPrRead,
   FORGET_DESCRIPTION,
   flightFloorBlocked,
@@ -179,12 +180,14 @@ import {
   ledgerNextText,
   ledgerNoKeyText,
   ledgerOwnerText,
+  ledgerPointerText,
   ledgerTitleText,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   MC_TOOL_NAMES,
+  METRIC_IDS,
   mcToolHitText,
   messageAboutText,
   missingNeedsText,
@@ -381,6 +384,7 @@ import {
   flightSeat,
   flightState,
   markItemsShown,
+  markPointersShown,
   markPrsShown,
   operatorItems,
   ownReply,
@@ -2638,6 +2642,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     markPrsShown(store, state);
     markItemsShown(store, state);
     markRetrospectiveShown(store, state);
+    markPointersShown(store, config, state, now());
     deps.seen?.(ctx.runId, state);
     const { wake: _wake, ...shown } = state;
     return {
@@ -3075,6 +3080,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       !CREW_LANES.some((lane) => a.owner === `${LANE_LABEL_PREFIX}${lane}`)
     )
       return fail(ledgerOwnerText(a.owner));
+    const repoIds = config.repos.map((r) => r.id);
+    const pointable: Record<FlightPointerKind, (t: string) => boolean> = {
+      pr: (t) => /^[^#\s]+#[1-9]\d*$/.test(t) && repoIds.includes(t.slice(0, t.lastIndexOf("#"))),
+      ticket: (t) =>
+        /^[^#\s]+#[1-9]\d*$/.test(t) && repoIds.includes(t.slice(0, t.lastIndexOf("#"))),
+      seat: (t) => session.seats.some((s) => s.id === t),
+      repo: (t) => repoIds.includes(t),
+      person: (t) => LOGIN.test(t),
+      metric: (t) => (METRIC_IDS as readonly string[]).includes(t),
+    };
+    for (const p of a.pointers ?? [])
+      if (!pointable[p.kind](p.target)) return fail(ledgerPointerText(p.kind, p.target));
     const at = now();
     const entries = store.flightLedger(session.id);
     const old = entries.find((e) => e.key === a.key);

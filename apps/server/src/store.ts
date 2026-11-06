@@ -574,7 +574,7 @@ CREATE TABLE IF NOT EXISTS flight_ledger (
 -- What a ledger entry watches; the hub marks changed_at when the target moves, FLIGHT's wake stamps read_at.
 CREATE TABLE IF NOT EXISTS flight_pointers (
   session_id TEXT NOT NULL, entry_key TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
-  changed_at INTEGER, change TEXT, read_at INTEGER,
+  changed_at INTEGER, change TEXT, read_at INTEGER, changed_seq INTEGER, read_seq INTEGER,
   PRIMARY KEY (session_id, entry_key, kind, target)
 );
 CREATE INDEX IF NOT EXISTS flight_pointers_target ON flight_pointers(kind, target);
@@ -8038,10 +8038,10 @@ export class Store {
   markFlightPointers(kind: FlightPointerKind, target: string, change: string, at: number): void {
     this.db
       .prepare(
-        `UPDATE flight_pointers SET changed_at = ?, change = ?
-         WHERE kind = ? AND target = ? AND (changed_at IS NULL OR changed_at <= ?)`,
+        `UPDATE flight_pointers SET changed_at = ?, change = ?, changed_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
+         WHERE kind = ? AND target = ?`,
       )
-      .run(at, change.slice(0, FLIGHT_POINTER_CHANGE_MAX), kind, target, at);
+      .run(at, change.slice(0, FLIGHT_POINTER_CHANGE_MAX), kind, target);
   }
 
   /** The pointers of open entries whose target changed after FLIGHT last read them. */
@@ -8053,7 +8053,7 @@ export class Store {
           `SELECT p.entry_key, p.kind, p.target, p.changed_at, p.change FROM flight_pointers p
            JOIN flight_ledger l ON l.session_id = p.session_id AND l.key = p.entry_key
            WHERE p.session_id = ? AND l.status IN (${open}) AND p.changed_at IS NOT NULL
-             AND p.changed_at > COALESCE(p.read_at, 0)
+             AND p.changed_seq > COALESCE(p.read_seq, 0)
            ORDER BY p.changed_at, p.entry_key, p.kind, p.target`,
         )
         .all(session, ...FLIGHT_LEDGER_OPEN) as Row[]
@@ -8066,15 +8066,18 @@ export class Store {
     }));
   }
 
-  /** FLIGHT has read the pointers in `moved` at `at`; a change after what it was shown still counts. */
+  /**
+   * FLIGHT has read the pointers in `moved` at `at`. A pointer marked again since (another time or
+   * text) stays unread; changes are ordered by a counter, not by `at`, whose clock is the poll's.
+   */
   markFlightPointersRead(session: string, moved: readonly FlightMovedPointer[], at: number): void {
     const stamp = this.db.prepare(
-      `UPDATE flight_pointers SET read_at = ?
-       WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ? AND changed_at <= ?`,
+      `UPDATE flight_pointers SET read_at = ?, read_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
+       WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?
+         AND changed_at = ? AND change = ?`,
     );
     this.transaction(() => {
-      for (const m of moved)
-        stamp.run(Math.max(at, m.at), session, m.entry, m.kind, m.target, m.at);
+      for (const m of moved) stamp.run(at, session, m.entry, m.kind, m.target, m.at, m.change);
     });
   }
 

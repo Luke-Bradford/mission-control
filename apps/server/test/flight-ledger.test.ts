@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type BoardItem,
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_ITEMS_LISTED,
@@ -855,6 +856,53 @@ describe("ledger pointers", () => {
     expect(by("a")).toMatchObject({ changedAt: NOW + MIN, change: "CI failing" });
     expect(by("b")?.changedAt).not.toBeGreaterThan(NOW);
     expect(store.movedFlightPointers("s1").map((m) => m.entry)).toEqual(["a"]);
+  });
+
+  it("lists a change the poll stamped with a time before FLIGHT's last read", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "pr", target: "mc#7" }), 0);
+    const open = (over: Partial<PullRequestView> = {}) =>
+      pr(7, { state: "open", mergedAt: null, ci: "pending", ...over });
+    store.upsertPullRequests("mc", [open()], NOW);
+    // a wake reads the pointer while the next poll's fetch is still in flight
+    store.markFlightPointersRead("s1", store.movedFlightPointers("s1"), NOW + MIN + 5000);
+    store.upsertPullRequests("mc", [open({ ci: "failing" })], NOW + MIN);
+    expect(store.movedFlightPointers("s1").map((m) => m.change)).toEqual(["CI failing"]);
+  });
+
+  it("marks a ticket pointer when a card moves column or closes, and no other", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "ticket", target: "mc#5" }), 0);
+    store.putFlightLedgerEntry("s1", pointed("b", { kind: "ticket", target: "mc#6" }), 0);
+    const card = (n: number, status: string, closed = false): BoardItem => ({
+      repoId: "mc",
+      issueNumber: n,
+      title: `T${n}`,
+      status,
+      state: closed ? "done" : "in progress",
+      labels: [],
+      priority: null,
+      updatedAt: NOW,
+      url: "",
+      stage: null,
+      owner: null,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed,
+      prioritySource: null,
+      createdAt: NOW,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("mc", [card(5, "Ready"), card(6, "Ready")]);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+    store.replaceBoard("mc", [card(5, "In progress"), card(6, "Ready")]);
+    expect(store.movedFlightPointers("s1")).toMatchObject([
+      { entry: "a", kind: "ticket", target: "mc#5", change: "moved to In progress" },
+    ]);
+    store.replaceBoard("mc", [card(5, "In progress", true), card(6, "Ready")]);
+    expect(store.movedFlightPointers("s1").map((m) => m.change)).toEqual(["closed"]);
   });
 
   it("keeps a pointer's marks when the entry is saved again with the same pointer", () => {
