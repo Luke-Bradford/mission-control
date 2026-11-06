@@ -3544,7 +3544,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.mergePr,
-      "Clear a crew PR for engine merge on any path (your own tools, access, CLAUDE.md and .github/** included), or merge an eligible PR with no unfinished crew run without inventing an author run. When the PR's head came from outside the run, it adopts that head so CI and RETRO check it. Exact-head QA, CI, always_ask approvals, acceptance and holds remain required. The hub tells the operator of each merge it needed your call for.",
+      "Clear a crew PR for engine merge on any path (your own tools, access, CLAUDE.md and .github/** included), or merge an eligible PR with no unfinished crew run without inventing an author run. When the PR's head came from outside the run, it adopts that head so CI and RETRO check it. Exact-head QA, CI, always_ask approvals, acceptance and holds remain required. Each merge that needed your call is logged as a merge decision on the FLIGHT page, with its reasons; the hub sends no message.",
       PrBasisArgs,
       "merge",
       async (a, repo, ctx) => {

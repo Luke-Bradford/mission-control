@@ -6947,6 +6947,12 @@ describe("superuser housekeeping", () => {
     for (const path of paths) expect(merges[0]?.decision).toContain(path);
     expect(decisions().filter((d) => d.kind === "approval")).toEqual([]);
   });
+  it("the merge_pr description says where a merge is logged, not that the hub tells the operator", () => {
+    const description = need(tools.find((t) => t.name === "merge_pr")).description;
+    expect(description).not.toContain("tells the operator");
+    expect(description).toContain("logged as a merge decision on the FLIGHT page");
+    expect(description).toContain("the hub sends no message");
+  });
   it("merge_pr adopts nothing on a standard repo, and logs its refusal", async () => {
     engineOn = true;
     runPr();
