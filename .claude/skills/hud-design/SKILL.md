@@ -5,17 +5,17 @@ description: Plan, build and review visible interfaces, including dashboard layo
 
 # HUD design checklist
 
-Use `docs/design/system.md` (sections cited). A failed **[I]** item is Important; other failures are Minor.
+Use `docs/design/system.md`. A failed **[I]** item is Important; other failures are Minor.
 Mockups count. [Visual QA](../../../docs/runbooks/visual-qa.md) covers planning, evidence and sign-off.
 
 ## Plan
 
 - [ ] One question per page; one purpose per panel (§1).
-- [ ] Content: reader, and which items belong (§1).
+- [ ] Content: the reader and which items belong (§1).
 - [ ] Dashboards: rank and size panels per [composition](references/dashboard-layout.md): real viewport, first-screen fields, normal rows, budgets.
 - [ ] Stats: label, value, definition, window, unit (§5–7).
 - [ ] Page-shaped APIs; tabs fetch on opening (§8–9).
-- [ ] Mockups precede new pages, big changes.
+- [ ] Mockups precede new pages and big changes.
 
 ## Build
 

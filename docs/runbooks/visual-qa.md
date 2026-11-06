@@ -116,7 +116,7 @@ Give a reproduction, affected source and image, impact and concrete correction o
 Independent rendering is preferred for final application QA. If the reviewer only inspects supplied
 images, say so. That can assess visible composition, but cannot establish unperformed interactions.
 If the required render cannot run, record the missing coverage and reason; do not claim a rendered pass.
-A rendered page is your own render, or images of the current head (PR evidence or the author's). With neither, record `design` as fail with one Important finding that asks for images of this head; the author can produce them. A failed design holds the merge: only the operator accepts past it.
+A rendered page is your own render, or images of the current head (PR evidence or the author's). Images show composition, not interactions: say which [I] items they cannot establish. With neither render nor images, record the `design` verdict as fail with one Important finding that asks for images of this head; the author can produce them. A failed design holds FLIGHT's accept: only the operator accepts past it. Record `design` on every visible change, every round: a later review with no verdict keeps an earlier fail, and a later pass clears it.
 
 ## Retain context and detail
 

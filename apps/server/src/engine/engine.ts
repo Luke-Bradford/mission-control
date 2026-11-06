@@ -114,6 +114,7 @@ import {
   REVIEW_STATUS_WAIVED,
   type RepoId,
   type RepoRules,
+  type ReviewCheck,
   type ReviewFact,
   type ReviewRow,
   RULING_PARK,
@@ -291,7 +292,7 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "floor-enforced":
     "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
   "design-failed":
-    "the last review failed this head's design check, so only the operator can accept it, with Waive on the run's review park (Agents page). Send it back for rework; if the next review fails the design again, brief the operator with the review's images and the failed points. Your accept stays refused after they answer",
+    "the run's last design verdict is a fail and no later review passed it, so only the operator can accept it, with Waive on the run's review park (Agents page). Send it back for rework; if the next review fails the design again, brief the operator with the review's images (mc operator GET /api/qa-reports?repoId=<repo>&prNumber=<n>&headSha=<full sha>, whose /api/qa-report-assets links the operator can open) and the failed points. Your accept stays refused after they answer",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
@@ -473,25 +474,16 @@ const reviewFact = (r: ReviewRow): ReviewFact => ({
 });
 
 /**
- * Whether the head's last design verdict is a fail. The head is judged by its own review, or by the
- * one carried from before a main merge, as the loop judges it. A later review with no design verdict,
- * or `n-a`, does not clear an earlier fail; a later pass does.
+ * Whether the run's last design verdict, on this head or an earlier one, is a fail. A review with no
+ * design verdict, or `n-a`, does not clear an earlier fail, on the same head or after a rework; a
+ * later pass does. The carried review from before a main merge is one of the run's rows, so it counts.
  */
 export function designFailedIn(
   rows: readonly ReviewRow[],
-  checks: (reviewId: number) => readonly { check: string; result: string }[],
-  loop: Pick<RunLoop, "epoch" | "carry" | "reviewWaivedSha">,
-  sha: string,
+  checks: (reviewId: number) => readonly Pick<ReviewCheck, "check" | "result">[],
 ): boolean {
-  const judged =
-    reviewFor(
-      rows.map(reviewFact),
-      loop.epoch,
-      sha,
-      carriedFrom(loop.carry, loop.reviewWaivedSha, sha),
-    )?.sha ?? sha;
   const verdicts = rows
-    .filter((r) => r.sha === judged && r.state === "reported")
+    .filter((r) => r.state === "reported")
     .map((r) => checks(r.id).find((c) => c.check === "design")?.result)
     .filter((v) => v === "pass" || v === "fail");
   return verdicts.at(-1) === "fail";
@@ -2987,12 +2979,7 @@ export function createEngine(deps: EngineDeps): Engine {
             // A failed design needs the operator's own accept (PR 1465, #1529).
             if (
               by === "FLIGHT" &&
-              designFailedIn(
-                store.reviewsOfRun(run.id),
-                (id) => store.reviewChecks(id),
-                loop,
-                pushed.sha,
-              )
+              designFailedIn(store.reviewsOfRun(run.id), (id) => store.reviewChecks(id))
             )
               return refuse("design-failed");
           }
