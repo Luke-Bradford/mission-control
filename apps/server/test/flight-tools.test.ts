@@ -65,6 +65,7 @@ import {
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
+  flightWakeId,
   GH_READ_BAD_PATH,
   GH_READ_CUT,
   GH_READ_NOT_FOUND,
@@ -654,6 +655,13 @@ describe("log_decision", () => {
       },
     ]);
     expect(seen).toEqual(["flight"]);
+  });
+
+  it("stamps a decision with the id of the wake FLIGHT is in", async () => {
+    store.addFlightWake("r-flight", NOW - 5000, ["pr"], flightWakeId("r-flight", 0));
+    store.addFlightWake("r-flight", NOW - 1000, ["items"], flightWakeId("r-flight", 1));
+    await tool.call(ctx(), args());
+    expect(store.flightDecisions(0, 10)[0]?.wakeId).toBe(flightWakeId("r-flight", 1));
   });
 
   it("refuses a seat that is not in its session", async () => {

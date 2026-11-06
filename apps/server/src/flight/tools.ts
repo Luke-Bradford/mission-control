@@ -129,6 +129,9 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
+  FLIGHT_POINTER_KINDS,
+  FLIGHT_POINTER_TARGET_MAX,
+  FLIGHT_POINTERS_MAX,
   FLIGHT_PR_CHECKS_LISTED,
   FLIGHT_PR_FILES_LISTED,
   FLIGHT_STARTABLE,
@@ -672,6 +675,19 @@ const TrackArgs = z.strictObject({
     .nullable()
     .optional(),
   priority: z.enum(PRIORITIES).nullable().optional(),
+  pointers: z
+    .array(
+      z.strictObject({
+        kind: z.enum(FLIGHT_POINTER_KINDS),
+        target: z
+          .string()
+          .regex(/^[^\s]+$/)
+          .max(FLIGHT_POINTER_TARGET_MAX),
+      }),
+    )
+    .max(FLIGHT_POINTERS_MAX)
+    .nullable()
+    .optional(),
   basis: basisArg,
 });
 const UntrackArgs = z.strictObject({
@@ -1097,6 +1113,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return { text: e instanceof Error ? e.message : "Comms pin refused.", isError: true };
     }
   };
+  /** The wake FLIGHT's current run is in, for a decision made now; nothing when none is on record. */
+  const wakeOf = (): { wakeId?: string } => {
+    const found = flightSeat(config);
+    const runId = found === null ? null : store.seatSession(found.seat.id)?.runId;
+    const wakeId = runId == null ? null : store.latestFlightWakeId(runId);
+    return wakeId === null ? {} : { wakeId };
+  };
   const record = (
     at: number,
     d: Pick<FlightDecision, "kind" | "about" | "decision" | "basis"> &
@@ -1108,6 +1131,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       targetRunId: null,
       ref: null,
       questionId: null,
+      ...wakeOf(),
       ...d,
       about: cut(d.about, FLIGHT_ABOUT_MAX),
       decision: cut(d.decision, FLIGHT_DECISION_MAX),
@@ -3066,6 +3090,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       due: a.due === undefined ? (old?.due ?? null) : a.due,
       refs: a.refs === undefined ? (old?.refs ?? []) : (a.refs ?? []),
       priority: a.priority === undefined ? (old?.priority ?? null) : a.priority,
+      ...(a.pointers === undefined
+        ? old?.pointers === undefined
+          ? {}
+          : { pointers: old.pointers }
+        : {
+            pointers: (a.pointers ?? []).map((p) => {
+              const kept = old?.pointers?.find((o) => o.kind === p.kind && o.target === p.target);
+              return kept ?? { ...p, changedAt: null, change: null, readAt: null };
+            }),
+          }),
       createdAt: old?.createdAt ?? at,
       updatedAt: at,
       outcome: null,

@@ -10,9 +10,11 @@ import {
   FLIGHT_LEDGER_KEEP_MS,
   FLIGHT_LIST_MAX,
   FLIGHT_METRICS_DAY_MS,
+  FLIGHT_POINTER_KINDS,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_VIEW_LIMIT,
   type FlightLedgerEntry,
+  type FlightPointerKind,
   FOR_THE_CONTROLLER,
   NEW_LOOP,
   orderLedger,
@@ -32,7 +34,7 @@ import {
   prepareRetrospective,
 } from "../src/flight/retrospective.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
-import { flightState, flightView, flightWake } from "../src/flight/state.ts";
+import { flightState, flightView, flightWake, markPointersShown } from "../src/flight/state.ts";
 import * as gitRuntime from "../src/runtime/git.ts";
 import { Store } from "../src/store.ts";
 
@@ -822,4 +824,74 @@ it("reads real git batches with pinned git dirs and UTF-8 blobs", async () => {
   await expect(
     git(["cat-file", "--invalid-batch-mode"], "x".repeat(1_000_000)),
   ).rejects.toBeDefined();
+});
+
+describe("ledger pointers", () => {
+  const pointed = (key: string, ...pointers: { kind: FlightPointerKind; target: string }[]) =>
+    entry(key, {
+      pointers: pointers.map((p) => ({ ...p, changedAt: null, change: null, readAt: null })),
+    });
+
+  it("stores a pointer of each kind, and keeps them across a hub restart", () => {
+    const six = FLIGHT_POINTER_KINDS.map((kind) => ({ kind, target: `${kind}-1` }));
+    expect([...FLIGHT_POINTER_KINDS]).toEqual(["pr", "ticket", "seat", "repo", "person", "metric"]);
+    store.putFlightLedgerEntry("s1", pointed("work-1", ...six), 0);
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    expect(store.flightLedger("s1")[0]?.pointers).toEqual(
+      six.map((p) => ({ ...p, changedAt: null, change: null, readAt: null })),
+    );
+  });
+
+  it("marks the pointer on a PR whose state moved, and leaves a pointer on another PR", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "pr", target: "mc#7" }), 0);
+    store.putFlightLedgerEntry("s1", pointed("b", { kind: "pr", target: "mc#8" }), 0);
+    const open = (n: number, over: Partial<PullRequestView> = {}) =>
+      pr(n, { state: "open", mergedAt: null, ci: "pending", ...over });
+    store.upsertPullRequests("mc", [open(7), open(8)], NOW);
+    store.markFlightPointersRead("s1", store.movedFlightPointers("s1"), NOW + 1);
+    store.upsertPullRequests("mc", [open(7, { ci: "failing" }), open(8)], NOW + MIN);
+    const by = (key: string) => store.flightLedger("s1").find((e) => e.key === key)?.pointers?.[0];
+    expect(by("a")).toMatchObject({ changedAt: NOW + MIN, change: "CI failing" });
+    expect(by("b")?.changedAt).not.toBeGreaterThan(NOW);
+    expect(store.movedFlightPointers("s1").map((m) => m.entry)).toEqual(["a"]);
+  });
+
+  it("keeps a pointer's marks when the entry is saved again with the same pointer", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "seat", target: "guido-1" }), 0);
+    store.markFlightPointers("seat", "guido-1", "parked", NOW);
+    store.putFlightLedgerEntry(
+      "s1",
+      { ...(store.flightLedger("s1")[0] as FlightLedgerEntry), title: "new" },
+      0,
+    );
+    expect(store.movedFlightPointers("s1")).toHaveLength(1);
+  });
+});
+
+describe("the wake digest's moved pointers", () => {
+  it("lists a moved pointer once, and not again after FLIGHT has read it", () => {
+    store.putFlightLedgerEntry(
+      "s1",
+      entry("w", {
+        pointers: [
+          { kind: "pr", target: "mc#7", changedAt: null, change: null, readAt: null },
+          { kind: "pr", target: "mc#8", changedAt: null, change: null, readAt: null },
+        ],
+      }),
+      0,
+    );
+    const read = (at: number) => flightState({ config, store, busy: [], now: at });
+    expect(flightWake(read(NOW)).digest.moved).toBeUndefined();
+    store.markFlightPointers("pr", "mc#7", "CI failing", NOW + MIN);
+    const state = read(NOW + 2 * MIN);
+    expect(flightWake(state).digest.moved).toEqual([
+      { entry: "w", kind: "pr", target: "mc#7", change: "CI failing", at: NOW + MIN },
+    ]);
+    markPointersShown(store, config, state, NOW + 3 * MIN);
+    expect(flightWake(read(NOW + 4 * MIN)).digest.moved).toBeUndefined();
+    expect(store.flightLedger("s1")[0]?.pointers?.[0]?.readAt).toBe(NOW + 3 * MIN);
+    store.markFlightPointers("pr", "mc#7", "merged", NOW + 5 * MIN);
+    expect(flightWake(read(NOW + 6 * MIN)).digest.moved).toHaveLength(1);
+  });
 });

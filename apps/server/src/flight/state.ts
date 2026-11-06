@@ -299,8 +299,26 @@ const causeReason = (cause: string): string =>
   cause.startsWith(FLIGHT_LEFT_HEAD) ? "left" : cause.replace(/ \(\d+\)$/, "");
 
 /** Stores a wake on its run, with the fact categories (not the counts) that caused it. */
-export function recordWakeReasons(store: Store, runId: string, at: number, causes: string[]): void {
-  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))]);
+export function recordWakeReasons(
+  store: Store,
+  runId: string,
+  at: number,
+  causes: string[],
+  wakeId?: string,
+): void {
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId);
+}
+
+/** FLIGHT has received `s`: the pointers it lists as moved are read, and not listed again. */
+export function markPointersShown(
+  store: Store,
+  config: CcConfig,
+  s: FlightState,
+  at: number,
+): void {
+  const session = flightSeat(config)?.session.id;
+  if (session !== undefined && s.moved !== undefined)
+    store.markFlightPointersRead(session, s.moved, at);
 }
 
 /** The last day's wakes, by reason and by hour (24 buckets, the last one ending at `now`). */
@@ -719,6 +737,8 @@ export function flightState(i: {
   const ledger = openLedger
     .slice(0, FLIGHT_LEDGER_INDEX_MAX)
     .map(({ kind, key, title, status, next }) => ({ kind, key, title, status, next }));
+  const movedPointers = found === null ? [] : store.movedFlightPointers(found.session.id);
+  const moved = movedPointers.length === 0 ? {} : { moved: movedPointers };
   const notes: readonly string[] = FLIGHT_NOTE_SECTIONS;
   const brief = flightBriefSections(store, found?.session.id ?? null)
     .filter((b) => notes.includes(b.section))
@@ -755,6 +775,7 @@ export function flightState(i: {
       ...headline,
       ledger,
       ledgerMore: openLedger.length - ledger.length,
+      ...moved,
     };
   }
   const { session } = found;
@@ -1252,6 +1273,7 @@ export function flightState(i: {
     ...headline,
     ledger,
     ledgerMore: openLedger.length - ledger.length,
+    ...moved,
   };
 }
 

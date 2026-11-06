@@ -94,6 +94,8 @@ export const FLIGHT_RUN_TOOLS_SETTING = "flight.run-tools";
 
 export interface FlightDecision {
   orderId?: number;
+  /** The wake FLIGHT was in when it decided (see `flightWakeId`); absent when none was recorded. */
+  wakeId?: string;
   id: number;
   at: number;
   kind: FlightDecisionKind;
@@ -177,6 +179,8 @@ export interface FlightWakeRecord {
   runId: string;
   at: number;
   reasons: string[];
+  /** `flightWakeId(runId, n)`; absent on a wake stored before ids were kept. */
+  wakeId?: string;
 }
 
 /** The last day's wakes: counted by reason, and by hour (oldest hour first, the last one ends now). */
@@ -282,7 +286,37 @@ export const FLIGHT_HEADLINE_TITLE = "Headline";
 export const FLIGHT_NOTE_SECTIONS = ["project", "crew", "operator", "lessons"] as const;
 export const FOR_THE_CONTROLLER = "For the controller:";
 
+/** What a ledger entry can point at; the hub marks the pointer when that thing changes. */
+export const FLIGHT_POINTER_KINDS = ["pr", "ticket", "seat", "repo", "person", "metric"] as const;
+export type FlightPointerKind = (typeof FLIGHT_POINTER_KINDS)[number];
+export const FLIGHT_POINTERS_MAX = 10;
+export const FLIGHT_POINTER_TARGET_MAX = 100;
+export const FLIGHT_POINTER_CHANGE_MAX = 120;
+/** A pointer as FLIGHT names it on `track`: what it watches. */
+export interface FlightPointerRef {
+  kind: FlightPointerKind;
+  /** A PR or ticket as `repo#n`, a seat id, a repo id, a person's login or a metric id. */
+  target: string;
+}
+/** A pointer as stored: when the hub last saw its target change, and when FLIGHT last read that. */
+export interface FlightPointer extends FlightPointerRef {
+  changedAt: number | null;
+  /** One line on what changed, as the hub saw it. */
+  change: string | null;
+  readAt: number | null;
+}
+/** A pointer that moved since FLIGHT last read it, as the wake digest lists it. */
+export interface FlightMovedPointer extends FlightPointerRef {
+  /** The key of the ledger entry that holds the pointer. */
+  entry: string;
+  change: string;
+  at: number;
+}
+/** A wake's id: its run and its turn (0 is the start brief, k the k-th wake after it). */
+export const flightWakeId = (runId: string, n: number): string => `${runId}:${n}`;
+
 export interface FlightLedgerEntry {
+  pointers?: FlightPointer[];
   kind: FlightLedgerKind;
   key: string;
   title: string;
@@ -392,7 +426,7 @@ export const headlineText = (n: number): string =>
 export const headlineSavedText = (n: number): string =>
   `Saved your headline (${n} of ${FLIGHT_HEADLINE_MAX} characters).`;
 export const TRACK_DESCRIPTION =
-  "Create or update an open ledger entry by key, keeping its kind. Use untrack to mark it done or dropped. A field left out keeps its value; null clears it.";
+  "Create or update an open ledger entry by key, keeping its kind. Use untrack to mark it done or dropped. A field left out keeps its value; null clears it. pointers names what the entry watches (a pr or ticket as repo#n, a seat, repo, person or metric): the hub marks a pointer when that thing changes, and your next wake lists the pointers that moved. A new pointers list replaces the old one.";
 export const UNTRACK_DESCRIPTION =
   "Close a ledger entry by key with its outcome and status done (default) or dropped.";
 export const LEDGER_DESCRIPTION =
@@ -1142,6 +1176,8 @@ export interface FlightState {
   breaker: { tripped: boolean; reason: string | null };
   /** Pending scheduled work; only due entries prompt a wake. */
   planned?: FlightScheduleEntry[];
+  /** Pointers whose target changed since FLIGHT last read them; absent when none did. */
+  moved?: FlightMovedPointer[];
   /** Your brief, only FLIGHT_NOTE_SECTIONS in order; `text` is "" for a section never written. */
   brief: { section: FlightBriefSectionKey; title: string; text: string; ageMin: number | null }[];
   /** What the wake facts read that FLIGHT is not shown; the digest and `flight_state` drop it. */

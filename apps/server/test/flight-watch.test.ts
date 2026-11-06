@@ -5119,7 +5119,7 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     ask();
     await tick();
     expect(store.flightWakes(0)).toEqual([
-      { runId: "r-flight", at: nowMs, reasons: ["q", "items"] },
+      { runId: "r-flight", at: nowMs, reasons: ["q", "items"], wakeId: "r-flight:1" },
     ]);
     const view = flightView(config, store, nowMs + MIN);
     expect(view.wakeHistory?.byReason).toEqual([
