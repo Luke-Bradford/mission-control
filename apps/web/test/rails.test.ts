@@ -147,9 +147,9 @@ it("places wait marks clear of each other and of the hub pills, and drops what c
   boxes.forEach((a, i) => {
     for (const b of boxes.slice(i + 1)) expect(meet(a, b)).toBe(false);
     for (const h of hubPts)
-      expect(meet(a, { x0: h.x - HUB_W / 2, x1: h.x + HUB_W / 2, y0: h.y - 11, y1: h.y + 11 })).toBe(
-        false,
-      );
+      expect(
+        meet(a, { x0: h.x - HUB_W / 2, x1: h.x + HUB_W / 2, y0: h.y - 11, y1: h.y + 11 }),
+      ).toBe(false);
   });
 });
 

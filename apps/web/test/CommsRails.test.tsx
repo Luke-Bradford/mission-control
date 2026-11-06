@@ -270,7 +270,10 @@ it("keeps many waits from stacking: no two marks overlap, and the rest are count
     />,
   );
   const boxes = [...document.querySelectorAll(".comms-wait-mark")].map((g) => {
-    const [x, y] = /translate\(([-\d.]+) ([-\d.]+)\)/.exec(g.getAttribute("transform") ?? "")?.slice(1).map(Number) ?? [0, 0];
+    const [x, y] = /translate\(([-\d.]+) ([-\d.]+)\)/
+      .exec(g.getAttribute("transform") ?? "")
+      ?.slice(1)
+      .map(Number) ?? [0, 0];
     const w = Number(g.querySelector("rect")?.getAttribute("width"));
     return { x0: (x ?? 0) - w / 2, x1: (x ?? 0) + w / 2, y0: (y ?? 0) - 9, y1: (y ?? 0) + 9 };
   });
