@@ -1,23 +1,65 @@
 // @vitest-environment node
 
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import type { OverviewSummary } from "@mc/core";
 import { expect, it } from "vitest";
 import { SCROLL_SLACK_PX } from "../src/overview/useListFit.ts";
 import { browserSession, describeRendered, type RenderedPage } from "./browserRunner.ts";
 import { overviewDensityFixture } from "./overviewDensityFixtures.ts";
 
 const { renderAt } = browserSession();
+const evidence = process.env.MC_QA_EVIDENCE_DIR;
 
-async function open(width: number, height: number, dark = true) {
+/** Saves a screenshot when the run is collecting QA evidence; the files are named by size and state. */
+async function capture(page: RenderedPage, name: string) {
+  if (!evidence) return;
+  mkdirSync(evidence, { recursive: true });
+  await page.screenshot(join(evidence, `${name}.png`));
+}
+
+async function open(
+  width: number,
+  height: number,
+  options: { dark?: boolean; scenario?: "busy" | "empty"; wideBusy?: boolean } = {},
+) {
+  const fixture = overviewDensityFixture(options.scenario ?? "busy");
+  let api: Record<string, unknown> = fixture.api;
+  if (options.wideBusy) {
+    // In review holds 8 tickets and Merging 3: the case that used to leave review no card.
+    const base = fixture.api["/api/overview"] as OverviewSummary;
+    const card = (ticket: number) => ({
+      ...base.pipeline[3].cards[0],
+      ticket,
+      title: `Ticket ${ticket}`,
+    });
+    const summary: OverviewSummary = {
+      ...base,
+      pipeline: base.pipeline.map((stage) =>
+        stage.stage === "review"
+          ? { ...stage, count: 8, cards: Array.from({ length: 8 }, (_, i) => card(300 + i)) }
+          : stage.stage === "merging"
+            ? {
+                ...stage,
+                count: 3,
+                oldestAt: base.pipeline[3].oldestAt,
+                cards: [310, 311, 312].map(card),
+              }
+            : stage,
+      ),
+    };
+    api = { ...api, "/api/overview": summary, "/api/overview?session=demo": summary };
+  }
   const page = await renderAt({
     page: "test/overviewDensityBrowser.html",
     width,
     height,
-    colorScheme: dark ? "dark" : "light",
-    api: overviewDensityFixture("busy").api,
+    colorScheme: options.dark === false ? "light" : "dark",
+    api,
   });
   await page.evaluate(async () => {
     const deadline = performance.now() + 5000;
-    while (!document.querySelector(".board-card") && performance.now() < deadline)
+    while (!document.querySelector("#agentsList .trow:not(.head)") && performance.now() < deadline)
       await new Promise((resolve) => requestAnimationFrame(resolve));
     await document.fonts.ready;
     await new Promise((resolve) => setTimeout(resolve, 500));
@@ -137,4 +179,60 @@ describeRendered("Overview Board at the real sizes", () => {
         expect(apart).toBe(true);
       }
   }, 60_000);
+
+  it("measures again when a card grows after it was measured", async () => {
+    const page = await open(1920, 940);
+    // A taller meta line, as when more checks register or an owner joins.
+    await page.evaluate(async () => {
+      const card = document.querySelector(".board-stage.progress .board-card");
+      const extra = document.createElement("div");
+      extra.style.height = "60px";
+      card?.append(extra);
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    }, undefined);
+    expect(await cut(page, ".board-cards", ".board-card")).toEqual([]);
+  }, 60_000);
+
+  it.each([
+    [2560, 1145],
+    [2560, 1250],
+  ])(
+    "keeps In review and Merging both useful at %ix%i with 8 and 3 tickets",
+    async (width, height) => {
+      const page = await open(width, height, { wideBusy: true });
+      const shown = await page.evaluate(
+        () => ({
+          review: document.querySelectorAll(".board-stage.review .board-card").length,
+          merging: document.querySelectorAll(".board-stage.merging .board-card").length,
+        }),
+        undefined,
+      );
+      expect(shown.review).toBeGreaterThanOrEqual(3);
+      expect(shown.merging).toBeGreaterThanOrEqual(1);
+      expect(await cut(page, ".board-cards", ".board-card")).toEqual([]);
+    },
+    60_000,
+  );
+
+  it.each([
+    [1920, 940],
+    [2560, 1145],
+    [2560, 1250],
+  ])(
+    "saves screenshots at %ix%i, busy and quiet, FLIGHT folded and open",
+    async (width, height) => {
+      for (const scenario of ["busy", "empty"] as const) {
+        const page = await open(width, height, { scenario });
+        // From 2200 px the dock is open by default; below, it starts folded.
+        if (width < 2200) {
+          await capture(page, `overview-board-${width}x${height}-${scenario}-folded`);
+          await page.click(".dockrail button");
+          await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 500)), undefined);
+        }
+        await capture(page, `overview-board-${width}x${height}-${scenario}-open`);
+        expect(page.errors()).toEqual([]);
+      }
+    },
+    120_000,
+  );
 });

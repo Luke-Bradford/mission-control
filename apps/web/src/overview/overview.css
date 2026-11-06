@@ -2408,7 +2408,7 @@ button.quota-details {
 }
 .board-more {
   display: block;
-  padding: var(--sp-2) var(--sp-3);
+  padding: var(--sp-1) var(--sp-3);
 }
 .board-more.measuring {
   visibility: hidden;
@@ -2422,6 +2422,9 @@ button.quota-details {
   display: block;
   width: 6px;
   height: 6px;
+}
+.ci-count {
+  font-variant-numeric: tabular-nums;
 }
 .ci-pass {
   border-radius: 50%;
@@ -2437,7 +2440,7 @@ button.quota-details {
 @container overview-canvas (min-width: 2000px) {
   .board-stages {
     grid-template-columns: var(--board-cols-wide, repeat(4, minmax(0, 1fr)));
-    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-rows: var(--board-rows-wide, minmax(0, 1fr) auto);
   }
   .board-stage.ready,
   .board-stage.progress,
@@ -2757,13 +2760,6 @@ button.quota-details {
   display: inline-flex;
   align-items: center;
   min-height: var(--sp-5);
-}
-@container overview-canvas (min-width: 2000px) {
-  /* Rarely more than a ticket or two, so a long lane scrolls and In review keeps its room. */
-  .board-stage.merging .board-cards {
-    flex: none;
-    max-height: calc(3 * var(--sp-7));
-  }
 }
 .needs-more a {
   display: inline-flex;

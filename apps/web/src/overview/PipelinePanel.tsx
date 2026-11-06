@@ -36,6 +36,9 @@ export const PIPELINE_LANE_STAGES: Record<PipelineLane, readonly PipelineStage["
 
 const DASH = "—";
 
+/** More checks than this show as a count, not a mark each. */
+const CI_MARKS_MAX = 4;
+
 /** Where a pipeline card leads: the ticket's panel on the Board. One place to change it. */
 /**
  * A card's title without its own number: a merged card carries its pull request's title, which often
@@ -124,6 +127,7 @@ export function PipelinePanel() {
           {
             "--board-cols": boardTracks(lanes, BOARD_COLUMNS, Boolean(data)),
             "--board-cols-wide": boardTracks(lanes, BOARD_COLUMNS_WIDE, Boolean(data)),
+            "--board-rows-wide": boardRowsWide(lanes, Boolean(data)),
           } as CSSProperties
         }
       >
@@ -140,6 +144,18 @@ function CiMarks({ ci }: { ci: PipelineCard["ci"] }) {
   const passed = ci.filter((check) => check === "pass").length;
   const failed = ci.filter((check) => check === "fail").length;
   const label = `CI: ${passed} of ${ci.length} passed${failed ? `, ${failed} failed` : ""}`;
+  // Many checks would wrap the card's meta line, so past a few they read as a count.
+  if (ci.length > CI_MARKS_MAX)
+    return (
+      <span
+        className={`ci-count${failed ? " crit-t" : ""}`}
+        role="img"
+        aria-label={label}
+        title={label}
+      >
+        {failed ? "✗ " : ""}CI {passed}/{ci.length}
+      </span>
+    );
   return (
     <span className="ci-marks" role="img" aria-label={label} title={label}>
       {ci.map((check, i) => (
@@ -160,19 +176,26 @@ export interface BoardLane {
 }
 
 /**
- * The lanes from the server's stages. A ticket whose pull request merged is Done even while the
- * ticket stays open on purpose, so a card that is also in Done leaves In review and Merging.
+ * The lanes from the server's stages. A merged pull request takes its own card out of In review and
+ * Merging, whatever the ticket's state: a card leaves when its pull request is in Done, or, with no
+ * pull request on the card, when its ticket is. A new open pull request on a ticket whose earlier
+ * one merged stays in review.
  */
 export function boardLanes(pipeline: readonly PipelineStage[]): BoardLane[] {
   const ref = (card: { repoId: string; ticket: number }) => `${card.repoId}#${card.ticket}`;
-  const done = new Set(
-    pipeline.filter((stage) => stage.stage === "merged").flatMap((stage) => stage.cards.map(ref)),
+  const doneCards = pipeline
+    .filter((stage) => stage.stage === "merged")
+    .flatMap((stage) => stage.cards ?? []);
+  const mergedPrs = new Set(
+    doneCards.flatMap((card) => (card.pr === null ? [] : [`${card.repoId}#${card.pr}`])),
   );
+  const doneTickets = new Set(doneCards.map(ref));
+  const merged = (card: PipelineCard) =>
+    card.pr !== null ? mergedPrs.has(`${card.repoId}#${card.pr}`) : doneTickets.has(ref(card));
   return (Object.entries(PIPELINE_STAGES) as [PipelineLane, string][]).map(([key, label]) => {
     const stages = pipeline.filter((stage) => PIPELINE_LANE_STAGES[key].includes(stage.stage));
     const all = stages.flatMap((stage) => stage.cards ?? []);
-    const cards =
-      key === "review" || key === "merging" ? all.filter((c) => !done.has(ref(c))) : all;
+    const cards = key === "review" || key === "merging" ? all.filter((c) => !merged(c)) : all;
     const total = stages.reduce((sum, stage) => sum + stage.count, 0);
     const oldest = Math.min(
       ...stages.flatMap((stage) => (stage.oldestAt === null ? [] : [stage.oldestAt])),
@@ -212,6 +235,15 @@ export function boardTracks(
         : "minmax(0, 1fr)",
     )
     .join(" ");
+}
+
+/**
+ * The wide layout's two rows (In review over Merging): an empty Merging is only its head; a busy one
+ * takes a third, so both bodies have a height of their own for the fit to work in.
+ */
+export function boardRowsWide(lanes: readonly BoardLane[], loaded: boolean): string {
+  const merging = lanes.find((lane) => lane.key === "merging");
+  return loaded && merging?.count === 0 ? "minmax(0, 1fr) auto" : "minmax(0, 2fr) minmax(0, 1fr)";
 }
 
 function BoardStage({
@@ -312,7 +344,7 @@ function BoardCard({
       </span>
       {rework && <span className="board-rework">{rework}</span>}
       <span className="board-meta">
-        {owner && (
+        {owner && !rework?.includes(owner.name) && (
           <span className="pipeline-assignee" title={owner.name}>
             <i style={{ "--c": agentColor(owner.index) } as CSSProperties} aria-hidden="true" />
             <span>{owner.name}</span>

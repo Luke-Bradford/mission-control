@@ -284,6 +284,30 @@ describe("cardTitle", () => {
     ).toBeTruthy();
   });
 
+  it("keeps a new open pull request in review when an earlier pull request of the ticket merged", async () => {
+    const card = (pr: number) => ({
+      repoId: "sample-app",
+      ticket: 7,
+      title: "Staged ticket",
+      pr,
+      ci: [] as ("pass" | "fail" | "pending")[],
+      since: now - 120_000,
+      who: null,
+    });
+    stubFetch({
+      "/api/overview": summary([
+        { stage: "review", count: 1, oldestAt: now - 120_000, cards: [card(20)] },
+        { stage: "merged", count: 1, oldestAt: now - 60_000, cards: [card(19)] },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    render(<PipelinePanel />);
+    const review = await screen.findByRole("region", { name: "In review" });
+    expect(within(review).getByText(/Staged ticket/)).toBeTruthy();
+    expect(review.querySelector("h3 .num")?.textContent).toBe("1");
+  });
+
   it("gives a stage with tickets the width and an empty one only its head", async () => {
     stubFetch({
       "/api/overview": summary([
@@ -298,5 +322,32 @@ describe("cardTitle", () => {
     const board = container.querySelector(".board-stages") as HTMLElement;
     expect(board.style.getPropertyValue("--board-cols")).toBe("auto auto minmax(0, 1fr) auto auto");
     expect(board.style.getPropertyValue("--board-cols-wide")).toBe("auto auto minmax(0, 1fr) auto");
+  });
+});
+
+describe("Pipeline card checks", () => {
+  it("shows many checks as a count that names the failures", async () => {
+    const many = Array.from({ length: 8 }, (_, i) => (i === 6 ? "fail" : "pass")) as (
+      | "pass"
+      | "fail"
+    )[];
+    stubFetch({
+      "/api/overview": summary([
+        {
+          stage: "review",
+          count: 1,
+          oldestAt: now - 120_000,
+          cards: [{ ...pipeline[3].cards[0], ci: many }],
+        },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    const { container } = render(<PipelinePanel />);
+    await screen.findByText(/Ticket 4/);
+    const count = container.querySelector(".ci-count");
+    expect(count?.textContent).toBe("✗ CI 7/8");
+    expect(count?.getAttribute("aria-label")).toBe("CI: 7 of 8 passed, 1 failed");
+    expect(container.querySelector(".ci-marks")).toBeNull();
   });
 });

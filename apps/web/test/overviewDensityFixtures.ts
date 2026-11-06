@@ -328,10 +328,19 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
           : scenario === "busy" && i % 3 === 0
             ? `Recorded ticket ${offset + i} with a longer title that wraps onto a second line`
             : `Recorded ticket ${offset + i}`,
-      pr: null,
-      ci: [],
+      // Live cards carry a pull request, checks, a priority and a size, and a third are in rework.
+      pr: scenario === "busy" ? 1400 + offset + i : null,
+      ci:
+        scenario === "busy"
+          ? (["pass", "pass", "pass", "pass", "pass", "pass", "fail", "pending"] as const).slice()
+          : [],
+      priority: scenario === "busy" ? "P2" : undefined,
+      size: scenario === "busy" ? "S" : undefined,
       since: NOW - 20 * MIN,
       who: `dev-${i + 1}`,
+      ...(scenario === "busy" && i % 3 === 1
+        ? { rework: { round: 2, blockers: 1, seat: `dev-${i + 1}`, seatBusy: true } }
+        : {}),
     })),
   });
   const summary: OverviewSummary = {

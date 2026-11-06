@@ -19,6 +19,10 @@ export function useFittingCards(
   const [limit, setLimit] = useState<number | null>(null);
   // The body's size after the last commit: a resize observer callback matching it is our own trim.
   const settled = useRef({ width: 0, height: 0 });
+  // Each card's height when last committed: a card that grows later (checks register, an owner
+  // joins, a font loads) starts a fresh measure.
+  const heights = useRef(new Map<Element, number>());
+  const observer = useRef<ResizeObserver | null>(null);
   const [measuring, setMeasuring] = useState(true);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new signature restarts the measure
@@ -47,19 +51,36 @@ export function useFittingCards(
       setMeasuring(false);
     }
     settled.current = { width: el.clientWidth, height: el.clientHeight };
+    heights.current = new Map(
+      [...el.querySelectorAll(":scope > .board-card")].map((card) => [
+        card,
+        card.getBoundingClientRect().height,
+      ]),
+    );
+    // observe() on an element already watched does nothing, so every commit can say it again.
+    for (const card of heights.current.keys()) observer.current?.observe(card);
   });
 
   useLayoutEffect(() => {
     const el = body.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(() => {
+    const watcher = new ResizeObserver(() => {
       const { width, height } = settled.current;
-      if (el.clientWidth === width && el.clientHeight === height) return;
+      const grown = [...heights.current].some(
+        ([card, was]) =>
+          card.isConnected && Math.abs(card.getBoundingClientRect().height - was) > 0.5,
+      );
+      if (!grown && el.clientWidth === width && el.clientHeight === height) return;
       setLimit(null);
       setMeasuring(true);
     });
-    observer.observe(el);
-    return () => observer.disconnect();
+    observer.current = watcher;
+    watcher.observe(el);
+    for (const card of heights.current.keys()) watcher.observe(card);
+    return () => {
+      watcher.disconnect();
+      observer.current = null;
+    };
   }, [body]);
 
   return { limit, measuring: measuring && limit === null };
