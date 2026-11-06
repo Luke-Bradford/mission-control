@@ -139,7 +139,9 @@ const deps = (over: Partial<McToolsDeps> = {}): McToolsDeps => ({
 });
 
 const list =
-  (...prs: { number: number; createdAt: string; closingIssuesReferences?: { number: number }[] }[]) =>
+  (
+    ...prs: { number: number; createdAt: string; closingIssuesReferences?: { number: number }[] }[]
+  ) =>
   () => ({
     code: 0,
     stdout: JSON.stringify(prs),
