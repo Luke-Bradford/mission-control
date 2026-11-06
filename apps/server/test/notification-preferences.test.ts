@@ -742,8 +742,9 @@ it("does not notify again when an outage flips between down and late (#758)", as
   bus.emit("attention");
   expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("late");
   expect(await events()).toHaveLength(1);
+  // a late wake is FLIGHT's own watch (#1537): a new outage is a new alert again
   flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: no output for 31 min in a turn.");
-  expect(await events()).toHaveLength(1);
+  expect(await events()).toHaveLength(2);
 });
 
 it("holds the operator's own Stop through quiet hours, even once a question waits (#758)", async () => {
@@ -784,7 +785,8 @@ it("does not notify again when FLIGHT rotates while an item is late (#758)", asy
     at: Date.now() - 30 * 60_000,
   });
   bus.emit("attention");
-  expect(await events()).toMatchObject([{ category: "flightDown" }]);
+  // a late wake is FLIGHT's own watch (#1537): it notifies nobody
+  expect(await events()).toEqual([]);
   // the run ends for a fresh session and the watch starts the next a minute later
   store.upsertRun({
     ...flightRun("f1", Date.now() - 3_600_000),
@@ -801,7 +803,7 @@ it("does not notify again when FLIGHT rotates while an item is late (#758)", asy
     updatedAt: Date.now(),
   });
   bus.emit("attention");
-  expect(await events()).toHaveLength(1);
+  expect(await events()).toHaveLength(0);
   vi.setSystemTime(new Date("2026-10-23T12:01:00Z"));
   store.upsertRun(flightRun("f2", Date.now()));
   store.setSeatSession({
@@ -815,7 +817,7 @@ it("does not notify again when FLIGHT rotates while an item is late (#758)", asy
   });
   bus.emit("attention");
   expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("late");
-  expect(await events()).toHaveLength(1);
+  expect(await events()).toHaveLength(0);
 });
 
 it("adopts the new notification versions on Update without replaying open items", async () => {
