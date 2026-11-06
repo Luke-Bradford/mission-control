@@ -14,7 +14,7 @@ import {
   type TokenCall,
   type TokenCounts,
 } from "@mc/core";
-import type { CcConfig } from "./config.ts";
+import { type CcConfig, findHubRoot } from "./config.ts";
 import { crewDirPath, type Store } from "./store.ts";
 import { isObj, STREAM_EVENT_PREFIX } from "./streamjson.ts";
 import { GZ_MAX_INFLATED_BYTES } from "./transcript-file.ts";
@@ -354,13 +354,19 @@ const EMPTY_AUDIT: RunTokenAudit = {
 export const claudeProjectSlug = (checkout: string): string =>
   checkout.replace(/[^A-Za-z0-9]/g, "-");
 
-/** Usage numbers of one controller session file; no text is kept. */
-export async function controllerSessionUsage(text: string) {
-  const seen = new Map<
-    string,
-    { input: number; cacheRead: number; cacheWrite: number; output: number }
-  >();
-  let startedAt: number | null = null;
+/** One assistant message's usage numbers from a controller session file; no text is kept. */
+export interface ControllerMessage {
+  id: string;
+  at: number;
+  input: number;
+  cacheRead: number;
+  cacheWrite: number;
+  output: number;
+}
+
+/** The distinct assistant messages of one session file, each once (the larger output wins). */
+export async function controllerMessages(text: string, fallbackAt: number) {
+  const seen = new Map<string, ControllerMessage>();
   await foldText(
     text,
     (line) => {
@@ -377,25 +383,19 @@ export async function controllerSessionUsage(text: string) {
       if (id === null) return;
       const u = ev.message.usage;
       const prev = seen.get(id);
+      const at = typeof ev.timestamp === "string" ? Date.parse(ev.timestamp) : Number.NaN;
       seen.set(id, {
+        id,
+        at: prev?.at ?? (Number.isFinite(at) ? at : fallbackAt),
         input: num(u.input_tokens),
         cacheRead: num(u.cache_read_input_tokens),
         cacheWrite: num(u.cache_creation_input_tokens),
         output: Math.max(num(u.output_tokens), prev?.output ?? 0),
       });
-      const at = typeof ev.timestamp === "string" ? Date.parse(ev.timestamp) : Number.NaN;
-      if (Number.isFinite(at) && (startedAt === null || at < startedAt)) startedAt = at;
     },
     () => undefined,
   );
-  const total = { calls: seen.size, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
-  for (const u of seen.values()) {
-    total.input += u.input;
-    total.cacheRead += u.cacheRead;
-    total.cacheWrite += u.cacheWrite;
-    total.output += u.output;
-  }
-  return { ...total, startedAt };
+  return [...seen.values()];
 }
 
 export interface TokenAuditPassSummary {
@@ -474,32 +474,36 @@ async function readControllerSessions(i: {
   start: number;
   budget: number;
 }): Promise<number> {
-  const root = join(i.home ?? homedir(), ".claude", "projects");
-  const checkouts = new Set((i.config.crew?.sessions ?? []).map((s) => s.checkout));
-  let stored = 0;
-  for (const checkout of checkouts) {
-    const dir = join(root, claudeProjectSlug(checkout));
-    for (const name of await i.files.list(dir)) {
-      if (!name.endsWith(".jsonl") || i.clock() - i.start >= i.budget) continue;
-      const sessionId = name.slice(0, -".jsonl".length);
-      if (i.store.hasControllerUsage(sessionId)) continue;
-      const path = join(dir, name);
-      const mtime = await i.files.mtimeMs(path);
-      if (mtime === null || i.now - mtime < CONTROLLER_IDLE_MS) continue;
-      const buf = await i.files.read(path);
-      if (buf === null || buf.length > GZ_MAX_INFLATED_BYTES) continue;
-      const u = await controllerSessionUsage(buf.toString("utf8"));
-      i.store.saveControllerUsage({
-        sessionId,
-        startedAt: u.startedAt ?? mtime,
-        calls: u.calls,
-        input: u.input,
-        cacheRead: u.cacheRead,
-        cacheWrite: u.cacheWrite,
-        output: u.output,
-      });
-      stored += 1;
+  // The controller works in the operator's own checkout of this repo (the hub's), not in the
+  // crew's clones or worktrees, so that is the folder Claude Code keeps its sessions under.
+  const checkout = i.config.audit?.controllerCheckout ?? findHubRoot();
+  if (checkout == null) return 0;
+  const dir = join(i.home ?? homedir(), ".claude", "projects", claudeProjectSlug(checkout));
+  // Session files, and each session's subagent files; (path, session id)
+  const found: { path: string; session: string }[] = [];
+  for (const name of await i.files.list(dir)) {
+    if (name.endsWith(".jsonl")) {
+      found.push({ path: join(dir, name), session: name.slice(0, -".jsonl".length) });
+    } else {
+      const sub = join(dir, name, "subagents");
+      for (const f of await i.files.list(sub)) {
+        if (f.endsWith(".jsonl")) found.push({ path: join(sub, f), session: name });
+      }
     }
+  }
+  let stored = 0;
+  for (const { path, session } of found) {
+    if (i.clock() - i.start >= i.budget) break;
+    const mtime = await i.files.mtimeMs(path);
+    // A file still being written is read once it has been idle; one read before is read again if it grew.
+    if (mtime === null || i.now - mtime < CONTROLLER_IDLE_MS) continue;
+    if (i.store.controllerFileMtime(path) === mtime) continue;
+    const buf = await i.files.read(path);
+    if (buf === null || buf.length > GZ_MAX_INFLATED_BYTES) continue;
+    const messages = await controllerMessages(buf.toString("utf8"), mtime);
+    i.store.saveControllerMessages(session, messages);
+    i.store.markControllerFile(path, mtime);
+    stored += 1;
   }
   return stored;
 }

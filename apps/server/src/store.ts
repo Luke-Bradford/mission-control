@@ -309,11 +309,12 @@ CREATE TABLE IF NOT EXISTS run_token_calls (
   cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL,
   PRIMARY KEY (run_id, idx)
 );
-CREATE TABLE IF NOT EXISTS controller_usage (
-  session_id TEXT PRIMARY KEY, started_at INTEGER NOT NULL, calls INTEGER NOT NULL,
-  input INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
-  output INTEGER NOT NULL
+CREATE TABLE IF NOT EXISTS controller_messages (
+  message_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, at INTEGER NOT NULL, input INTEGER NOT NULL,
+  cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, output INTEGER NOT NULL
 );
+CREATE INDEX IF NOT EXISTS controller_messages_at ON controller_messages(at);
+CREATE TABLE IF NOT EXISTS controller_files (path TEXT PRIMARY KEY, mtime INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER, PRIMARY KEY (repo_id, number)
@@ -2314,25 +2315,34 @@ export class Store {
       .all(since) as { section: PromptSection; tokens: number }[];
   }
 
-  /** Stores one controller session's usage numbers (never text); a session read again is replaced. */
-  saveControllerUsage(u: {
-    sessionId: string;
-    startedAt: number;
-    calls: number;
-    input: number;
-    cacheRead: number;
-    cacheWrite: number;
-    output: number;
-  }): void {
-    this.db
-      .prepare(
-        `INSERT OR REPLACE INTO controller_usage
-           (session_id, started_at, calls, input, cache_read, cache_write, output)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(u.sessionId, u.startedAt, u.calls, u.input, u.cacheRead, u.cacheWrite, u.output);
+  /**
+   * Stores controller messages' usage numbers (never text). A message id seen again, in a resumed
+   * session's copy of its history or a subagent file, counts once; the larger output is kept.
+   */
+  saveControllerMessages(
+    sessionId: string,
+    messages: readonly {
+      id: string;
+      at: number;
+      input: number;
+      cacheRead: number;
+      cacheWrite: number;
+      output: number;
+    }[],
+  ): void {
+    const insert = this.db.prepare(
+      `INSERT INTO controller_messages (message_id, session_id, at, input, cache_read, cache_write, output)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(message_id) DO UPDATE SET output = MAX(output, excluded.output)`,
+    );
+    this.transaction(() => {
+      for (const m of messages) {
+        insert.run(m.id, sessionId, m.at, m.input, m.cacheRead, m.cacheWrite, m.output);
+      }
+    });
   }
 
+  /** Controller usage by message time since `since`: distinct sessions, distinct messages and token sums. */
   controllerUsageSince(since: number): {
     sessions: number;
     calls: number;
@@ -2341,22 +2351,28 @@ export class Store {
     cacheWrite: number;
     output: number;
   } {
-    const r = this.db
+    return this.db
       .prepare(
-        `SELECT COUNT(*) AS sessions, COALESCE(SUM(calls), 0) AS calls, COALESCE(SUM(input), 0) AS input,
-           COALESCE(SUM(cache_read), 0) AS cacheRead, COALESCE(SUM(cache_write), 0) AS cacheWrite,
-           COALESCE(SUM(output), 0) AS output FROM controller_usage WHERE started_at >= ?`,
+        `SELECT COUNT(DISTINCT session_id) AS sessions, COUNT(*) AS calls,
+           COALESCE(SUM(input), 0) AS input, COALESCE(SUM(cache_read), 0) AS cacheRead,
+           COALESCE(SUM(cache_write), 0) AS cacheWrite, COALESCE(SUM(output), 0) AS output
+         FROM controller_messages WHERE at >= ?`,
       )
-      .get(since) as Row;
-    return r as never;
+      .get(since) as never;
   }
 
-  /** Whether a controller session's usage is stored. */
-  hasControllerUsage(sessionId: string): boolean {
-    return (
-      this.db.prepare("SELECT 1 FROM controller_usage WHERE session_id = ?").get(sessionId) !==
-      undefined
-    );
+  /** The mtime a controller file was last read at, or null when it has not been read. */
+  controllerFileMtime(path: string): number | null {
+    const r = this.db.prepare("SELECT mtime FROM controller_files WHERE path = ?").get(path) as
+      | { mtime: number }
+      | undefined;
+    return r?.mtime ?? null;
+  }
+
+  markControllerFile(path: string, mtime: number): void {
+    this.db
+      .prepare("INSERT OR REPLACE INTO controller_files (path, mtime) VALUES (?, ?)")
+      .run(path, mtime);
   }
 
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */

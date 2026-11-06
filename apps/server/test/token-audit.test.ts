@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { CcConfig } from "../src/config.ts";
+import { type CcConfig, findHubRoot } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 import {
   type AuditFiles,
@@ -177,14 +177,17 @@ describe("auditEndedRuns", () => {
     summary: null,
     ...over,
   });
-  const config = (on: boolean) =>
+  const config = (on: boolean, checkout: string | null = "/Users/op/repo") =>
     ({
       operator: { id: "operator", timezone: "UTC" },
       accounts: [],
       repos: [],
       loops: [],
       poll: { usageMinutes: 30, githubSeconds: 60 },
-      audit: { controllerSessions: on },
+      audit: {
+        controllerSessions: on,
+        ...(checkout === null ? {} : { controllerCheckout: checkout }),
+      },
       crew: {
         worktrees: dir,
         maxSeats: 1,
@@ -214,13 +217,35 @@ describe("auditEndedRuns", () => {
     };
   };
 
-  const seedControllerSession = () => {
-    const folder = join(home, ".claude", "projects", claudeProjectSlug("/Users/op/repo"));
-    mkdirSync(folder, { recursive: true });
+  /** A main session file and a subagent file under `checkout`'s folder that share one message id. */
+  const seedControllerSession = (checkout = "/Users/op/repo") => {
+    const folder = join(home, ".claude", "projects", claudeProjectSlug(checkout));
+    mkdirSync(join(folder, "sess-1", "subagents"), { recursive: true });
+    const msg = (id: string, out: number, text: string) =>
+      JSON.stringify({
+        type: "assistant",
+        timestamp: "2026-11-06T10:00:00Z",
+        message: {
+          id,
+          content: [{ type: "text", text }],
+          usage: {
+            input_tokens: 3,
+            cache_read_input_tokens: 10,
+            cache_creation_input_tokens: 20,
+            output_tokens: out,
+          },
+        },
+      });
     writeFileSync(
       join(folder, "sess-1.jsonl"),
-      `${assistant("c1", { input: 3, cr: 10, cw: 20, out: 7 }, [{ type: "text", text: "SECRET WORDS" }])}\n`,
+      `${msg("c1", 7, "SECRET WORDS")}\n${msg("shared", 5, "x")}\n`,
     );
+    writeFileSync(
+      join(folder, "sess-1", "subagents", "agent-a.jsonl"),
+      `${msg("shared", 9, "y")}\n`,
+    );
+    // A resumed session's file that copies the history: the shared message again.
+    writeFileSync(join(folder, "sess-2.jsonl"), `${msg("shared", 9, "z")}\n`);
   };
 
   it("stores each run's audit once, reading only the hub's own transcript folder", async () => {
@@ -244,22 +269,48 @@ describe("auditEndedRuns", () => {
     expect(again.paths).toEqual([]);
   });
 
-  it("with the controller switch on, stores usage numbers and no text", async () => {
+  it("with the controller switch on, reads the hub checkout's sessions and subagents, each message once, numbers only", async () => {
     seedControllerSession();
     const { files, paths } = recording();
-    // The session file was just written: run the pass two hours on, when the session is finished.
+    // The session files were just written: run the pass two hours on, when the sessions are finished.
     const later = Date.now() + 2 * 3_600_000;
     const r = await auditEndedRuns({ store, config: config(true), now: later, files, home });
-    expect(r.controllerSessions).toBe(1);
-    expect(paths.some((p) => p.startsWith(home))).toBe(true);
-    expect(store.controllerUsageSince(0)).toEqual({
-      sessions: 1,
-      calls: 1,
-      input: 3,
-      cacheRead: 10,
-      cacheWrite: 20,
-      output: 7,
+    expect(r.controllerSessions).toBe(3);
+    expect(paths.some((p) => p.includes("subagents"))).toBe(true);
+    // Messages: c1 and shared; shared is counted once though three files hold it (larger output wins).
+    expect(store.controllerUsageSince(0)).toMatchObject({
+      calls: 2,
+      input: 6,
+      cacheRead: 20,
+      cacheWrite: 40,
+      output: 7 + 9,
     });
     expect(JSON.stringify(store.controllerUsageSince(0))).not.toContain("SECRET");
+    // Read once: a second pass reads none of the files again.
+    const again = recording();
+    const r2 = await auditEndedRuns({
+      store,
+      config: config(true),
+      now: later,
+      files: again.files,
+      home,
+    });
+    expect(r2.controllerSessions).toBe(0);
+    expect(store.controllerUsageSince(0).calls).toBe(2);
+  });
+
+  it("defaults to the hub's own checkout, not the crew's", async () => {
+    const hub = findHubRoot();
+    expect(hub).not.toBeNull();
+    seedControllerSession(hub as string);
+    const { files } = recording();
+    const r = await auditEndedRuns({
+      store,
+      config: config(true, null),
+      now: Date.now() + 2 * 3_600_000,
+      files,
+      home,
+    });
+    expect(r.controllerSessions).toBe(3);
   });
 });
