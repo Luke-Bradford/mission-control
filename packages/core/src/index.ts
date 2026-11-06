@@ -23,6 +23,7 @@ export * from "./map-wire.ts";
 export * from "./mcp.ts";
 export * from "./metrics.ts";
 export * from "./needs-you.ts";
+export * from "./pace.ts";
 export * from "./path-grants.ts";
 export * from "./plain-talk.ts";
 export * from "./pr-evidence.ts";

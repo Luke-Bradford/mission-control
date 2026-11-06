@@ -162,6 +162,7 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
@@ -3413,6 +3414,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(profiles instanceof Error ? 502 : 422, chosen.refusal);
       }
       const away = activeAway(store, now(), config.operator.timezone);
+      const pace = paceStartCheck(store, now());
       if (
         away &&
         !opts?.operator &&
@@ -3427,6 +3429,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(away && !opts?.operator
           ? { away: { pickUp: away.may.pickUp, flight: opts?.flight === true } }
           : {}),
+        ...(!opts?.operator && pace ? { pace } : {}),
         repoId: info.repo.id,
         issue,
         card: {

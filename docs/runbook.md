@@ -1823,6 +1823,24 @@ hud-shot:<id>`, which FLIGHT cites in a ticket. The operator reads one at `GET
 Not built: rendering a PR preview. The hub does not serve PR branches, so there is nothing for the
 tool to point at; FLIGHT reviews merged work on the running hub.
 
+## Slow pace
+
+The operator can set how hard the crew runs, for a weekend or a holiday. With no setting the crew
+runs at normal pace and nothing slows it by itself. `POST /api/settings/pace` takes `on`, `until`
+(an end time, epoch ms, in the future), `labels` (a ticket starts only if it carries all of them;
+none means any), `maxStarts` (how many tickets may start while it is on) and `note` (the operator's
+word for it, such as "weekend"). The server stamps `since` when it is switched on; only tickets that
+started a build or plan run from then count against `maxStarts` (a review does not, and a ticket
+started twice counts once). The setting is a separate idea from Away: Away limits what kind of
+work may start and what may be written; slow pace limits how much. Both hold at once.
+
+While it is on, the queue, FLIGHT's `start_seat` and a seat start all refuse a ticket that does not
+match or that arrives after the starts are used, naming the pace and the ticket. A start the
+operator makes by hand from the HUD is not held. At the end time it stops applying without anyone
+turning it off. An unreadable row counts as normal pace. `GET /api/overview` carries
+`pace` (`note`, `until`, `labels`, `maxStarts`, `startsLeft`) while it is on and `null` otherwise,
+for the Overview to show.
+
 ## Away mode
 
 The server reads the settings saved by `POST /api/settings/away` before starting work or marking

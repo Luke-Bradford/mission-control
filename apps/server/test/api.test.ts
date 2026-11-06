@@ -1577,8 +1577,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/settings/crew-pause", { seats: null }],
   ["GET", "/api/settings/away"],
   ["GET", "/api/away/digest"],
+  ["GET", "/api/settings/pace"],
   ["GET", "/api/repos/shop-app/prs/titles?numbers=4"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
+  ["POST", "/api/settings/pace", { on: false, until: 0, labels: [], maxStarts: 0, note: "" }],
   [
     "POST",
     "/api/guard/check",
@@ -3842,6 +3844,34 @@ describe("crew and attention", () => {
       keys: [...Array.from({ length: 49 }, (_, i) => `k${i}`), "x".repeat(200)],
     });
     expect(ok.json()).toEqual({ acked: 50 });
+  });
+});
+
+describe("pace settings", () => {
+  const input = { on: true, until: NOW + 3_600_000, labels: ["bug"], maxStarts: 2, note: "weekend" };
+
+  it("is normal until saved, then shows on the Overview until the end time", async () => {
+    expect((await get("/api/overview")).json().pace).toBeNull();
+    const r = await postBody("/api/settings/pace", input);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ...input, since: clock });
+    expect((await get("/api/settings/pace")).json()).toEqual({ ...input, since: clock });
+    expect((await get("/api/overview")).json().pace).toEqual({
+      note: "weekend",
+      until: input.until,
+      labels: ["bug"],
+      maxStarts: 2,
+      startsLeft: 2,
+    });
+    clock = input.until;
+    expect((await get("/api/overview")).json().pace).toBeNull();
+  });
+
+  it("refuses an end time in the past and unknown fields (400)", async () => {
+    expect((await postBody("/api/settings/pace", { ...input, until: NOW - 1 })).statusCode).toBe(
+      400,
+    );
+    expect((await postBody("/api/settings/pace", { ...input, extra: 1 })).statusCode).toBe(400);
   });
 });
 

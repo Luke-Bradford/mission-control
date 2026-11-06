@@ -29,6 +29,7 @@ import {
   hudColumnOf,
   NEW_LOOP,
   type Profile,
+  paceRefusal,
   priorityRank,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
@@ -56,6 +57,7 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "../machine-capacity.ts";
+import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
@@ -285,10 +287,12 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       // the one start check every start applies
       const startable = (body: string | null): boolean => {
         const away = activeAway(store, now(), config.operator.timezone);
+        const pace = paceStartCheck(store, now());
         return group.some(
           ({ seat }) =>
             eligibleToStart({
               ...(away ? { away: { pickUp: away.may.pickUp, flight: false } } : {}),
+              ...(pace ? { pace } : {}),
               repoId,
               issue: card.issueNumber,
               card,
@@ -527,6 +531,12 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
       store.untake(seatId, repoId, issue);
       return;
     }
+  }
+  // The slow pace may have been set, or its starts used, since the card was dealt.
+  const pace = paceStartCheck(store, deps.now());
+  if (pace && paceRefusal(pace, ref, card.labels) !== null) {
+    store.untake(seatId, repoId, issue);
+    return;
   }
   // The poll is up to a minute old and another hub may have claimed the card since: read it fresh.
   // The row goes back; the next refill, from a newer poll, decides whether it is dealt again.

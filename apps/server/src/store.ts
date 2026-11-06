@@ -2398,6 +2398,17 @@ export class Store {
     return latest?.loop?.mergeHold ?? null;
   }
 
+  /** Distinct tickets a build or plan run started on since `since`; review runs do not count. */
+  ticketsStartedSince(since: number): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(DISTINCT ticket) AS n FROM runs
+         WHERE started_at >= ? AND ticket IS NOT NULL AND review_id IS NULL`,
+      )
+      .get(since) as { n: number };
+    return row.n;
+  }
+
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
     const rows = this.db

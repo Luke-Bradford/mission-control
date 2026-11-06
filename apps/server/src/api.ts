@@ -101,6 +101,8 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  PACE_SETTING,
+  type PaceSettings,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
   type PrUatView,
@@ -324,6 +326,7 @@ import {
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
@@ -5523,12 +5526,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const scope = viewScope(req.query.session);
         if (scope === null) return reply.code(404).send({ error: "unknown session" });
         const at = now();
-        return overviewSummary(store, at, {
-          repoIds: scope.repoIds,
-          pipelineRepoIds: scope.pipelineRepoIds,
-          timezone: config.operator.timezone,
-          attention: sharedAttention(),
-        });
+        return {
+          ...overviewSummary(store, at, {
+            repoIds: scope.repoIds,
+            pipelineRepoIds: scope.pipelineRepoIds,
+            timezone: config.operator.timezone,
+            attention: sharedAttention(),
+          }),
+          pace: paceView(store, at),
+        };
       });
 
       // The Update button. Its texts are fixed. The commands' output goes to update.log, which GET
@@ -5900,6 +5906,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
+
+      // Reader: docs/runbook.md#slow-pace (the Overview reads the same view from GET /api/overview)
+      api.get("/settings/pace", async (): Promise<PaceSettings> => readPaceSettings(store));
+
+      // Reader: docs/runbook.md#slow-pace (set by the operator or FLIGHT; the Overview shows it)
+      api.post("/settings/pace", async (req, reply) => {
+        const body = PaceInput.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const at = now();
+        if (body.data.on && body.data.until <= at)
+          return reply.code(400).send({ error: "until must be a time in the future" });
+        // Counting starts from the moment it was switched on; saving it again keeps that moment.
+        const since = activePace(store, at)?.since ?? at;
+        const saved: PaceSettings = { ...body.data, since };
+        store.setSetting(PACE_SETTING, JSON.stringify(saved));
+        bus.emit("settings");
+        return saved;
+      });
 
       // Reader: apps/web/src/shell/AwayDigest.tsx
       api.get<{ Querystring: { meta?: unknown } }>("/away/digest", async (req, reply) => {
