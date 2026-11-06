@@ -31,6 +31,8 @@ async function open(
     const card = (ticket: number) => ({
       ...base.pipeline[3].cards[0],
       ticket,
+      // Its own pull request: one that is in Done would take the card out of review.
+      pr: 2000 + ticket,
       title: `Ticket ${ticket}`,
     });
     const summary: OverviewSummary = {
