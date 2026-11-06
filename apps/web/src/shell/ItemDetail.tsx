@@ -32,6 +32,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { LinksSection } from "../needs/LinksSection.tsx";
 import { Pictures } from "../needs/Pictures.tsx";
+import { PreviewOpener } from "../needs/PreviewFrame.tsx";
 import {
   CATCH_UP_LABEL,
   catchUpTone,
@@ -322,6 +323,7 @@ export function ItemDetail({
   if (key === null) return null;
   const page = layout === "page";
   const p = page ? "needs" : "ds";
+  const previewBlock = item && !holding ? <PreviewOpener item={item} /> : null;
   const briefBlock = (
     <div className="pb" id={`${p}Brief`}>
       {!item || holding ? (
@@ -549,6 +551,7 @@ export function ItemDetail({
             {answerBlock}
             {replyBlock}
           </div>
+          {previewBlock}
           <Pictures item={item} />
           <LinksSection item={item} />
           {briefBlock}
@@ -562,6 +565,7 @@ export function ItemDetail({
   }
   return (
     <>
+      {previewBlock}
       {briefBlock}
       {answerBlock}
       {replyBlock}

@@ -12,6 +12,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { boardItem, CONFIG, CREW_CONFIG, METRICS_VIEW, REPOS } from "./fixtures.ts";
+import { TEMPLATES } from "./templateFixtures.ts";
 
 const { renderAt } = browserSession();
 
@@ -177,6 +178,18 @@ const FORMS = [
       ["css", `${CARD} .repo-seats tbody tr button`],
     ],
   },
+  {
+    id: "F14",
+    form: 'form[aria-label="New template"]',
+    cap: 800,
+    steps: [["click", "New"]],
+  },
+  {
+    id: "F15",
+    form: ".teams-sources",
+    cap: 640,
+    steps: [["field", "Feed name"]],
+  },
 ] as const satisfies readonly {
   id: string;
   form: string;
@@ -184,7 +197,43 @@ const FORMS = [
   steps: readonly Step[];
 }[];
 type Form = (typeof FORMS)[number];
-const pageOf = (form: Form) => (form.id === "F06" ? "F06" : "repos");
+const pageOf = (form: Form) =>
+  form.id === "F06" ? "F06" : form.id === "F14" ? "loops" : form.id === "F15" ? "sources" : "repos";
+
+/** The Setup tab a form lives on, as a path under /setup. */
+const tabOf = (form: Form) =>
+  form.id === "F14" ? "loops" : form.id === "F15" ? "sources" : "repos";
+
+const LONG_FEED = `Work chat ${"with a long name ".repeat(8)}`.trim();
+
+/** What F14 and F15 read besides the config: the templates, and the Teams status and health. */
+function extra(form: Form, kind: World) {
+  if (form.id === "F14")
+    return {
+      [RESOURCES.config.path]: {
+        ...((world(kind) as Record<string, unknown>)[RESOURCES.config.path] as ConfigView),
+        profiles: { source: "built-in", version: "a".repeat(64), error: null, list: TEMPLATES },
+      },
+    };
+  if (form.id !== "F15") return {};
+  const count = kind === "empty" ? 0 : kind === "fifty" ? 50 : 1;
+  const repo = REPOS[0]?.id ?? "shop-app";
+  return {
+    [RESOURCES.teams.path]: {
+      enabled: true,
+      note: "Polls on a timer.",
+      retryAt: null,
+      selected: Array.from({ length: count }, (_, i) => ({
+        kind: "chat",
+        id: `fictional-chat-${i + 1}`,
+        name: kind === "long" ? LONG_FEED : `Work chat ${i + 1}`,
+        repoId: repo,
+        lane: "work",
+      })),
+    },
+    [RESOURCES.health.path]: [],
+  };
+}
 
 /** Runs the steps a person would take, inside the page, waiting for each control to appear. */
 const drive = (page: RenderedPage, steps: readonly Step[]) =>
@@ -250,7 +299,11 @@ async function open(form: Form, o: RenderOpts) {
     height: o.height,
     search: `?${query}`,
     colorScheme: o.colorScheme ?? "light",
-    api: { ...world(o.kind ?? "one"), ...writes(o.checkoutPasses ?? true) },
+    api: {
+      ...world(o.kind ?? "one"),
+      ...writes(o.checkoutPasses ?? true),
+      ...extra(form, o.kind ?? "one"),
+    },
   });
   await page.box("#page-setup, main");
   if (o.state === "loading" || o.state === "error") {
@@ -458,6 +511,8 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
     F10: { steps: [["click", "Add repo"]] },
     F11: { steps: [["click", "Save seat"]] },
     F12: { steps: [["click", "Save seat"]] },
+    F14: { steps: [["click", "Save template"]] },
+    F15: { steps: [["click", "Add feed"]] },
   };
   for (const form of FORMS) {
     it(
@@ -898,5 +953,123 @@ describeRendered("F13 Board view editor, rendered in the Board page", () => {
         ].join("\n"),
       );
       expect(captures.length).toBe(4);
+    });
+});
+
+// F14 (template editor, 800px) and F15 (Teams sources, 640px) inside the real shell: the rail with
+// FLIGHT folded, and the dock open. Light at the six viewports; dark and the images at the two
+// sizes the plan names. With MC_FORMS_B2_SHOTS set, each image is saved and listed in a manifest.
+const B2 = [FORMS[7], FORMS[8]] as const;
+async function openInShell(
+  form: Form,
+  o: { width: number; height: number; colorScheme?: "light" | "dark"; dock?: "folded" | "open" },
+) {
+  const page = await renderAt({
+    page: "test/agentV2Browser.html",
+    width: o.width,
+    height: o.height,
+    search: `?dock=${o.dock ?? "folded"}&at=/setup/${tabOf(form)}`,
+    colorScheme: o.colorScheme ?? "light",
+    api: { ...world("one"), ...writes(true), ...extra(form, "one") },
+  });
+  await page.box("#page-setup, main");
+  await drive(page, form.steps);
+  await page.box(form.form);
+  return page;
+}
+
+describeRendered("F14 template editor and F15 Teams sources, rendered in the Setup shell", () => {
+  for (const form of B2) {
+    for (const [width, height] of VIEWPORTS) {
+      it(
+        `${form.id} is capped at ${form.cap}px with 32px controls and no clipping at ${width}x${height} light, rail dock`,
+        async () => {
+          const page = await openInShell(form, { width, height });
+          await expectDense(page, form, false);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+    for (const [width, height] of [
+      [1280, 900],
+      [1600, 700],
+    ] as const) {
+      it(
+        `${form.id} holds beside FLIGHT's open dock at ${width}x${height}`,
+        async () => {
+          const page = await openInShell(form, { width, height, dock: "open" });
+          await expectDense(page, form, false);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  const shots = process.env.MC_FORMS_B2_SHOTS;
+  const captures: { file: string; form: string; viewport: string; theme: string }[] = [];
+  for (const form of B2) {
+    for (const [width, height] of [
+      [1920, 1080],
+      [1600, 700],
+    ] as const) {
+      for (const colorScheme of ["light", "dark"] as const) {
+        if (colorScheme === "light" && !shots) continue;
+        it(
+          `${form.id} holds the same at ${width}x${height} ${colorScheme}${shots ? " and is captured" : ""}`,
+          async () => {
+            const page = await openInShell(form, { width, height, colorScheme });
+            await expectDense(page, form, false);
+            if (shots) {
+              await page.evaluate(async () => {
+                await document.fonts.ready;
+              }, null);
+              mkdirSync(shots, { recursive: true });
+              const file = `${form.id.toLowerCase()}-${width}x${height}-${colorScheme}.png`;
+              await page.screenshot(join(shots, file));
+              captures.push({
+                file,
+                form: form.id,
+                viewport: `${width}x${height}`,
+                theme: colorScheme,
+              });
+            }
+            await page.close();
+          },
+          BROWSER_TEST_TIMEOUT_MS,
+        );
+      }
+    }
+  }
+  if (shots)
+    it("F14 and F15 write the capture manifest and QA report", () => {
+      mkdirSync(shots, { recursive: true });
+      const baseline = process.env.MC_FORMS_B2_BASELINE ?? "origin/main";
+      const head = process.env.MC_FORMS_B2_HEAD ?? "HEAD";
+      writeFileSync(
+        join(shots, "manifest.json"),
+        `${JSON.stringify(
+          captures.map((c) => ({ ...c, baseline, head })),
+          null,
+          2,
+        )}\n`,
+      );
+      writeFileSync(
+        join(shots, "qa-report.md"),
+        [
+          "# Template editor (F14) and Teams sources (F15) QA report",
+          "",
+          `Baseline ${baseline}; head ${head}. Fixtures: the seven catalogue templates; one Teams work feed.`,
+          "",
+          "Limits: the images show one fixture per form at two sizes. The six-viewport, dock-open, data-state and Tab checks are measured, not imaged.",
+          "",
+          "| Image | Form | Viewport | Theme |",
+          "| --- | --- | --- | --- |",
+          ...captures.map((c) => `| ${c.file} | ${c.form} | ${c.viewport} | ${c.theme} |`),
+          "",
+        ].join("\n"),
+      );
+      expect(captures.length).toBe(8);
     });
 });

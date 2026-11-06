@@ -186,8 +186,8 @@ describe("one Needs-you count", () => {
       const panel = container.querySelector("#overviewNextP");
       const waiting = panel?.querySelector(".ph")?.textContent;
       const listed =
-        (panel?.querySelectorAll(".needs-row").length ?? 0) +
-        Number(panel?.querySelector(".needs-more")?.textContent?.replace(/\D/g, "") || 0);
+        (panel?.querySelectorAll(".next-row").length ?? 0) +
+        Number(panel?.querySelector(".next-more")?.textContent?.replace(/\D/g, "") || 0);
       const pulse = screen
         .getByRole("button", { name: /^Needs you: \d+$/ })
         .querySelector("b")?.textContent;
