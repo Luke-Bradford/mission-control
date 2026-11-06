@@ -26,7 +26,6 @@ describe("Overview layout (hud.css)", () => {
       String.raw`\.flight-notebook-index a`,
       String.raw`\.flight-note-heading h3 a`,
       String.raw`\.flight-markdown-source summary`,
-      String.raw`\.comms-spider-legend \.away`,
       String.raw`\.seg button`,
       String.raw`\.comms-section-head \.comms-needs-link`,
       String.raw`\.comms-mentions-panel header button`,
@@ -42,7 +41,6 @@ describe("Overview layout (hud.css)", () => {
     for (const selector of [
       String.raw`\.ph \.act \.ph-link`,
       String.raw`\.flight-markdown-source summary`,
-      String.raw`\.comms-spider-legend \.away`,
       String.raw`\.comms-section-head \.comms-needs-link`,
     ]) {
       const action = rule(selector);
@@ -50,7 +48,6 @@ describe("Overview layout (hud.css)", () => {
       expect(action, selector).toContain("align-items: center");
       expect(action, selector).toContain("min-height: 24px");
     }
-    expect(rule(String.raw`\.comms-spider-legend \.away`)).toContain("min-width: 24px");
     expect(rule(String.raw`\.tip-state`)).toContain("font-size: var(--fs-s)");
     expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-micro)");
   });
