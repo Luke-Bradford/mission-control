@@ -2600,6 +2600,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   function reattach(): Promise<void> {
     if (reattaching !== null) return reattaching;
     reattaching = (async () => {
+      // only when a restart cut a check off: any other start claims its recoveries without waiting
+      if (staleChecks()) await endStaleChecks();
       for (const row of heldSessions()) {
         if (stopping) return;
         await recoverSession(row);
@@ -4091,6 +4093,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * note, the seat idle, its CLI and throwaway worktree gone. Before the reattach, which would
    * otherwise take it back as the seat's own run.
    */
+  const staleChecks = (): boolean =>
+    (crew?.sessions ?? []).some((session) =>
+      session.seats.some((seat) => store.getSetting(cliCheckRunKey(seat.id)) !== null),
+    );
+
   async function endStaleChecks(): Promise<void> {
     for (const session of crew?.sessions ?? []) {
       for (const seat of session.seats) {
@@ -5050,9 +5057,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             log(`could not resume paused crew runs: ${errText(e)}`),
           );
       });
-      endStaleChecks()
-        .then(() => reattach())
-        .catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
+      reattach().catch((e: unknown) => log(`could not resume crew runs: ${errText(e)}`));
     },
 
     async stopAll() {
