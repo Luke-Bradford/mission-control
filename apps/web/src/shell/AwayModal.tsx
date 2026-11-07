@@ -15,7 +15,14 @@ import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { isoDay, untilLabel } from "../fmt.ts";
 import { Seg } from "../hud/Seg.tsx";
 import { BuildChips } from "./buildStatus.tsx";
-import { closeAway, trapTab, useAwayOpen, useOverlay, useReturnFocus } from "./overlays.ts";
+import {
+  closeAway,
+  pushOverlay,
+  trapTab,
+  useAwayOpen,
+  useOverlay,
+  useReturnFocus,
+} from "./overlays.ts";
 import { toast } from "./Toast.tsx";
 import "./AwayModal.css";
 
@@ -95,7 +102,14 @@ export const AWAY_BAD_DATE =
  */
 export function AwayModal() {
   const open = useAwayOpen();
-  useOverlay("away", open, closeAway);
+  const guard = useSubmitGuard();
+  // While a save is out the modal stays: closing would drop the draft a failure must keep. Esc
+  // pops the overlay before calling this, so it goes back on the stack.
+  const dismiss = (): void => {
+    if (guard.pending()) pushOverlay("away", dismiss);
+    else closeAway();
+  };
+  useOverlay("away", open, dismiss);
   const head = useId();
   const untilId = useId();
   const close = useRef<HTMLButtonElement>(null);
@@ -115,9 +129,8 @@ export function AwayModal() {
   const [badDate, setBadDate] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [focusKey, setFocusKey] = useState(0);
-  const guard = useSubmitGuard();
+  // Cleared on open as well as close, so a draft left by a save that ended while closed is not shown.
   useEffect(() => {
-    if (open) return;
     setDraft(null);
     setFailure(null);
     setUncertain(false);
@@ -129,7 +142,8 @@ export function AwayModal() {
   if (!open) return null;
 
   const defaultUntil = tz ? isoDay(Date.now(), tz, DEFAULT_AWAY_DAYS) : "";
-  const shownUntil = away ? away.until || (away.on ? "" : defaultUntil) : "";
+  // Half-typed input reports an empty value: leave it alone rather than put the default back.
+  const shownUntil = !away || badDate ? "" : away.until || (away.on ? "" : defaultUntil);
   const dateError =
     away && (badDate || !(shownUntil === "" || validDay(shownUntil))) ? AWAY_BAD_DATE : undefined;
   const issues: FieldIssue[] = attempted && dateError ? [{ id: untilId, message: dateError }] : [];
@@ -156,6 +170,7 @@ export function AwayModal() {
       toast(AWAY_WAITING);
       return;
     }
+    setBadDate(false);
     edit({ ...away, on: true, until });
   }
 
@@ -218,7 +233,7 @@ export function AwayModal() {
           </span>
           <BuildChips panel="awayBody" />
           <span className="act">
-            <button type="button" className="sm" ref={close} onClick={closeAway}>
+            <button type="button" className="sm" ref={close} disabled={busy} onClick={dismiss}>
               Close
             </button>
           </span>
@@ -328,7 +343,7 @@ export function AwayModal() {
             <button type="submit" className="sm" disabled={busy}>
               Save away mode
             </button>
-            <button type="button" className="sm" onClick={closeAway}>
+            <button type="button" className="sm" disabled={busy} onClick={dismiss}>
               Cancel
             </button>
           </div>

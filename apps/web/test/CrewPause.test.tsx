@@ -394,3 +394,44 @@ it("Esc closes the modal, keeps Tab inside it and returns focus to the opener", 
   expect(document.activeElement).toBe(opener);
   off();
 });
+
+it("Esc and Cancel do not close the modal while a save is out, so a failure keeps the draft", async () => {
+  let fail: () => void = () => {};
+  const held = new Promise<void>((_, reject) => {
+    fail = () => reject(new TypeError("Failed to fetch"));
+  });
+  held.catch(() => {});
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") await held;
+      return new Response(JSON.stringify(input === "/api/config" ? CREW_CONFIG : null), {
+        status: 200,
+      });
+    }),
+  );
+  const noop = () => {};
+  const off = installKeys({
+    navigate: noop,
+    toggleDock: noop,
+    help: noop,
+    selectNext: noop,
+    selectPrev: noop,
+    toast: noop,
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Save tokens" } });
+  fireEvent.click(screen.getByRole("button", { name: "Pause all seats" }));
+  for (let i = 0; i < 2; i++)
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+  await act(async () => fail());
+  const failed = await waitFor(summaryOf);
+  expect(failed.textContent).toContain("Failed to fetch");
+  expect((screen.getByLabelText("Reason") as HTMLInputElement).value).toBe("Save tokens");
+  off();
+});

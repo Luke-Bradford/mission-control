@@ -295,6 +295,70 @@ describe("AwayModal", () => {
     expect(posts).toHaveLength(1);
   });
 
+  it("Esc, Close and Cancel keep the modal open while a save is out; a later open shows the server's copy", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let stored: AwaySettings = DEFAULT_AWAY;
+    stubFetch({
+      "/api/config": CONFIG,
+      "/api/settings/away": () => ({ status: 200, body: stored }),
+    });
+    const base = globalThis.fetch as unknown as (...a: unknown[]) => Promise<Response>;
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        await held;
+        stored = JSON.parse(String(init.body));
+        return new Response(JSON.stringify(stored), { status: 200 });
+      }
+      return base(input, init);
+    });
+    render(
+      <>
+        <AwayModal />
+        <Toast />
+      </>,
+    );
+    act(() => openAway());
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    fireEvent.click(checkbox(/Pick up safe tickets/));
+    save();
+    for (let i = 0; i < 2; i++)
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "Escape" });
+      });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Close" }).hasAttribute("disabled")).toBe(true);
+    release();
+    await waitFor(() => expect(toast()).toContain(SAVED));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    stored = DEFAULT_AWAY; // the hub's record changes while the modal is closed
+    act(() => hub.refetch(RESOURCES.away.path));
+    await new Promise((r) => setTimeout(r, 20));
+    act(() => openAway());
+    await waitFor(() => expect(checkbox(/Pick up safe tickets/).checked).toBe(true));
+    expect(screen.queryByText(/Unsaved changes\./)).toBeNull();
+  });
+
+  it("while Off, a half-typed date is left alone and flagged, then a full date clears the error", async () => {
+    setup();
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    const until = screen.getByLabelText("Until") as HTMLInputElement;
+    expect(until.value).toBe("2026-10-27");
+    Object.defineProperty(until, "validity", { value: { badInput: true }, configurable: true });
+    fireEvent.change(until, { target: { value: "" } });
+    save();
+    expect(until.value).toBe("");
+    expect(until.getAttribute("aria-invalid")).toBe("true");
+    Object.defineProperty(until, "validity", { value: { badInput: false }, configurable: true });
+    fireEvent.change(until, { target: { value: "2026-11-01" } });
+    expect(until.value).toBe("2026-11-01");
+    expect(until.getAttribute("aria-invalid")).toBeNull();
+  });
+
   it("Cancel discards the draft and sends nothing", async () => {
     const posts = setup();
     await waitFor(() => expect(pressed("Off")).toBe(true));

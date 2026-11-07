@@ -4,7 +4,7 @@ import { createPortal } from "react-dom";
 import { ApiError, apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { Pill } from "../hud/Pill.tsx";
-import { trapTab, useOverlay, useReturnFocus } from "../shell/overlays.ts";
+import { pushOverlay, trapTab, useOverlay, useReturnFocus } from "../shell/overlays.ts";
 import {
   ErrorSummary,
   FieldError,
@@ -42,7 +42,12 @@ export function CrewPauseControl() {
   const reasonId = useId();
   const allBox = useRef<HTMLInputElement>(null);
   const seats = (config?.crew?.sessions ?? []).flatMap((s) => s.seats);
-  const close = () => setOpen(false);
+  // While a save is out the modal stays: closing would drop the draft a failure must keep. Esc
+  // pops the overlay before calling this, so it goes back on the stack.
+  const close = () => {
+    if (guard.pending()) pushOverlay("crew-pause", close);
+    else setOpen(false);
+  };
   useOverlay("crew-pause", open, close);
   useReturnFocus(open);
   useEffect(() => {
@@ -300,7 +305,7 @@ export function CrewPauseControl() {
                 <button type="submit" className="sm" disabled={busy || !!error}>
                   {all ? "Pause all seats" : "Pause selected seats"}
                 </button>
-                <button type="button" className="sm" onClick={close}>
+                <button type="button" className="sm" disabled={busy} onClick={close}>
                   Cancel
                 </button>
               </div>
