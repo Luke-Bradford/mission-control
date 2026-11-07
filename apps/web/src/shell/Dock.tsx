@@ -25,6 +25,7 @@ import { isSendKey, SEND_HINT } from "../components/sendKey.ts";
 import { contextPct, doingLine } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import {
+  COMMS_INBOX_HEADING,
   chatRows,
   type DockRow,
   dockRows,
@@ -348,17 +349,20 @@ export function FlightChat({
 
   // The newest operator message: stored (sent), taken up (delivered) or kept for a stopped FLIGHT.
   const lastStored = [...(stored?.messages ?? [])].reverse().find((m) => m.from === COMMS_CAPCOM);
-  // Taken up: a later inbox delivery to FLIGHT carries the stored message's id.
+  // Taken up: FLIGHT has seen the message or answered it. The hub hands an unlabelled message over
+  // inside a wake or the start brief (a 'hub' line), a labelled one as a bare inbox line ('you'); both
+  // carry the stored message's id in the inbox JSON. A reply from FLIGHT after it counts as well.
   const taken =
     lastStored !== undefined &&
-    streamRows.some(
+    (streamRows.some(
       (r) =>
-        r.kind === "you" &&
+        (r.kind === "you" || r.kind === "hub") &&
         r.at !== null &&
         r.at >= lastStored.at &&
-        isInboxDelivery(r.text) &&
+        r.text.includes(COMMS_INBOX_HEADING) &&
         r.text.includes(`"id":"${lastStored.id}"`),
-    );
+    ) ||
+      all.some((r) => r.kind === "flight" && r.at !== null && r.at > lastStored.at));
   const [justSent, setJustSent] = useState(false);
   // Only a message sent here gets a state line; older history says nothing about itself.
   const last: SendState | null = !justSent

@@ -210,7 +210,7 @@ function Breadcrumb({ view }: { view: CommsView }) {
               ? ["Comms", "Agents", view.agentId, "Inbox"]
               : ["Comms", "Agents", view.agentId];
   return (
-    <nav className="comms-breadcrumb" aria-label="Breadcrumb">
+    <nav className="comms-breadcrumb" aria-label="Breadcrumb" title={parts.join(" › ")}>
       {parts.map((part, index) => (
         <span key={part}>
           {index > 0 && <i aria-hidden="true">›</i>}

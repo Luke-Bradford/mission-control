@@ -149,6 +149,27 @@ describeRendered("The FLIGHT fly-out in the production App", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
+  it(
+    "at 1280 with the fly-out open, Comms gives the conversation room and the trail fits or ends in an ellipsis",
+    async () => {
+      const page = await openStopped(PAGE_PATHS.comms, 1280);
+      await page.box("#chatP");
+      const facts = await page.evaluate(() => {
+        const chat = document.querySelector("#chatP")?.getBoundingClientRect();
+        const crumb = document.querySelector<HTMLElement>(".comms-chat-title .comms-breadcrumb");
+        const last = crumb?.lastElementChild as HTMLElement | null;
+        return {
+          chatW: chat?.width ?? 0,
+          fits: crumb ? crumb.scrollWidth <= crumb.clientWidth + 1 : false,
+          ellipsis: last ? getComputedStyle(last).textOverflow === "ellipsis" : false,
+        };
+      }, null);
+      expect(facts.chatW).toBeGreaterThanOrEqual(420);
+      expect(facts.fits || facts.ellipsis).toBe(true);
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
   if (SHOTS) {
     it.each([
       [1280, 1000],
