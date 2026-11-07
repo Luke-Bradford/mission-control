@@ -66,14 +66,14 @@ describeRendered("Crew pause run exceptions", () => {
               api: { "/api/config": CREW_CONFIG, "/api/settings/crew-pause": pause(count) },
             });
             await page.click(".crew-pause > button");
-            await page.box(".crew-pause-form");
+            await page.box(".crew-pause-panel");
             const facts = await page.evaluate(
               () => ({
                 width: document.documentElement.scrollWidth,
                 text: document.querySelector(".crew-pause-audit")?.textContent,
                 rows: document.querySelectorAll(".crew-pause-audit li").length,
                 scroll: (() => {
-                  const e = document.querySelector(".crew-pause-form");
+                  const e = document.querySelector(".crew-pause-panel .pb");
                   return !!e && e.scrollHeight > e.clientHeight;
                 })(),
               }),
@@ -84,9 +84,9 @@ describeRendered("Crew pause run exceptions", () => {
             expect(facts.text).toContain(
               count ? "Run guido-1:20261102-120000" : "No run exceptions.",
             );
-            expect(await page.unclipped(".crew-pause-form")).not.toContain(false);
+            expect(await page.unclipped(".crew-pause-panel")).not.toContain(false);
             expect(
-              await page.reachable(".crew-pause-form button, .crew-pause-audit summary"),
+              await page.reachable(".crew-pause-panel button, .crew-pause-audit summary"),
             ).not.toContain(false);
             if (count === 50) expect(facts.scroll).toBe(true);
             if (count === 1)

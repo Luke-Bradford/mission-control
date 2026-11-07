@@ -82,9 +82,10 @@ describe("Demo renders every page busy", () => {
       return found;
     });
     fireEvent.click(box);
-    await waitFor(() =>
-      expect(document.getElementById("toast")?.textContent).toContain(DEMO_REFUSED),
-    );
+    // a change is only a draft; Save is what sends it, and the demo refuses that
+    fireEvent.click(screen.getByRole("button", { name: "Save away mode" }));
+    const summary = await screen.findByRole("region", { name: "Away mode was not saved" });
+    expect(summary.textContent).toContain(DEMO_REFUSED);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

@@ -23,6 +23,11 @@ import { transcriptFilePath } from "./transcript-file.ts";
 
 export const COMMS_INBOX_PROMPT_MAX = 8_000;
 export const COMMS_INBOX_PROMPT_ROWS = 40;
+/** The per-message feed returns this many messages unless asked for fewer, and never more than the max. */
+export const COMMS_FEED_DEFAULT = 100;
+export const COMMS_FEED_MAX = 200;
+/** An open item carries at most this much of its message text. */
+export const COMMS_OPEN_TEXT_MAX = 280;
 
 export interface CommsServiceDeps {
   /** A PR-scoped thread resolved and validated by the operator API. */

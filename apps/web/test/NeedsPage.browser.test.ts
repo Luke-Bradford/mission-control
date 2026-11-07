@@ -39,7 +39,7 @@ function messages(n: number) {
   }));
 }
 
-function api(n = 6, optionCount = 2) {
+function api(n = 6, optionCount = 2, extraAsks = 0) {
   const asks = [
     item({
       key: KEY,
@@ -70,6 +70,9 @@ function api(n = 6, optionCount = 2) {
     }),
     item({ key: "question:two", kind: "question", escalationId: null, text: "Second ask" }),
     item({ key: "question:three", kind: "question", escalationId: null, text: "Third ask" }),
+    ...Array.from({ length: extraAsks }, (_, i) =>
+      item({ key: `question:extra${i}`, kind: "question", escalationId: null, text: `Ask ${i}` }),
+    ),
   ];
   const base = desktopFixture().api;
   const discussion = { id: "d1", itemKey: KEY, version: "v1", messages: messages(n) };
@@ -250,6 +253,114 @@ describeRendered("Needs you page", () => {
   );
 
   it(
+    "the conversation composer fills its column and Hold keeps the question in view",
+    async () => {
+      for (const [width, height] of [
+        [2560, 1440],
+        [1920, 1080],
+      ] as const) {
+        const label = `${width}x${height}`;
+        const page = await renderAt({
+          page: "test/needsBrowser.html",
+          width,
+          height,
+          api: api(),
+          assets: ASSETS,
+        });
+        try {
+          await ready(page);
+          const composer = await page.box("#needsDiscussionForm");
+          const area = await page.box("#needsDiscussionForm textarea");
+          expect(
+            area.width / composer.width,
+            `${label}: the conversation textarea fills its row`,
+          ).toBeGreaterThanOrEqual(0.9);
+          const answer = await page.boxes(".needs-answer .composer textarea");
+          expect(answer.length, `${label}: the answer composer is there`).toBeGreaterThan(0);
+          if (SHOTS) {
+            mkdirSync(SHOTS, { recursive: true });
+            await page.screenshot(join(SHOTS, `needs-${width}x${height}-hold-closed.png`));
+          }
+          await page.click(".needs-hold button");
+          await page.boxes(".needs-hold .hold-form");
+          const open = await page.evaluate(() => {
+            const band = document.querySelector(".needs-band") as HTMLElement;
+            const q = document.querySelector(".needs-band-title") as HTMLElement;
+            const r = q.getBoundingClientRect();
+            const b = band.getBoundingClientRect();
+            return {
+              bandClips: band.scrollHeight > band.clientHeight + 1,
+              questionInside: r.top >= b.top && r.bottom <= b.bottom,
+              questionLines: Math.round(
+                r.height / Number.parseFloat(getComputedStyle(q).lineHeight),
+              ),
+              fullLines: Math.round(
+                q.scrollHeight / Number.parseFloat(getComputedStyle(q).lineHeight),
+              ),
+              formInside:
+                (
+                  document.querySelector(".needs-hold .hold-form") as HTMLElement
+                ).getBoundingClientRect().bottom <=
+                b.bottom + 1,
+              bottom: b.bottom,
+            };
+          }, undefined);
+          expect(open.bandClips, `${label}: nothing in the band is cut off`).toBe(false);
+          expect(open.questionInside, `${label}: the question sits inside the band`).toBe(true);
+          expect(open.questionLines, `${label}: the whole question shows`).toBe(open.fullLines);
+          expect(open.formInside, `${label}: the Hold form sits inside the band`).toBe(true);
+          expect(open.bottom, `${label}: the open band leaves room below`).toBeLessThan(height / 2);
+          if (SHOTS) await page.screenshot(join(SHOTS, `needs-${width}x${height}-hold-open.png`));
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "every nav tab is fully visible at 1280 with a two-digit Needs you count",
+    async () => {
+      const page = await renderAt({
+        page: "test/needsBrowser.html",
+        width: 1280,
+        height: 900,
+        api: api(6, 2, 34),
+        assets: ASSETS,
+      });
+      try {
+        await ready(page);
+        const count = await page.evaluate(
+          () => document.querySelector(".tabs a.needs-tab b")?.textContent ?? "",
+          undefined,
+        );
+        expect(count).toBe("37");
+        const clipped = await page.evaluate(() => {
+          const tabs = document.querySelector(".tabs") as HTMLElement;
+          const box = tabs.getBoundingClientRect();
+          const status = document.querySelector(".top-status")?.getBoundingClientRect();
+          return {
+            scrolls: tabs.scrollWidth > tabs.clientWidth + 1,
+            outside: [...tabs.querySelectorAll("a")]
+              .filter((a) => {
+                const r = a.getBoundingClientRect();
+                return r.right > box.right + 1 || (status && r.right > status.left + 1);
+              })
+              .map((a) => a.textContent),
+          };
+        }, undefined);
+        expect(clipped.scrolls, "the tabs need no sideways scroll").toBe(false);
+        expect(clipped.outside, "no tab sits under the status readout").toEqual([]);
+        if (SHOTS) await page.screenshot(join(SHOTS, "needs-1280x900-nav.png"));
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "captures the design views",
     async () => {
       for (const scheme of ["light", "dark"] as const) {
@@ -269,7 +380,7 @@ describeRendered("Needs you page", () => {
             await ready(page);
             await pictureLoaded(page);
             // populated: the question, the picture, the options and the conversation are all there
-            await page.boxes(".needs-band-question");
+            await page.boxes(".needs-band-title");
             await page.boxes("#needsMsgs .dmsg");
             await page.boxes(".needs-row");
             if (SHOTS) {

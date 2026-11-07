@@ -496,3 +496,19 @@ it.each([false, true])(
     expect(stream.readStream).toHaveBeenCalledTimes(130);
   },
 );
+
+it("closes an open question on the addressee's seen reaction, not anyone else's", () => {
+  const m = store.addComms({
+    at: 4,
+    from: "seat",
+    to: "other",
+    ticket: null,
+    text: "Which option?",
+    label: "question",
+  });
+  if (!m) throw new Error("missing message");
+  store.addCommsReaction(m.id, "third", "seen", undefined, 5);
+  expect(store.openCommsItems().map((i) => i.id)).toEqual([m.id]);
+  reactComms(store, "other", m.id, "seen", undefined, 6);
+  expect(store.openCommsItems()).toEqual([]);
+});

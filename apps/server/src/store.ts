@@ -17,6 +17,7 @@ import type {
 import {
   type AccountId,
   type AgentId,
+  ASKING_RUN_ENDED_REASON,
   type AttentionBrief,
   type AttentionKind,
   AUDIT_BASELINE_DAYS,
@@ -25,12 +26,14 @@ import {
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
   type AuditChange,
+  type AuditItem,
   type AuditMetrics,
   type AuditOveruseFacts,
   type AuditPrSize,
   type AuditRunKind,
   type AuditTokenOveruse,
   type AuditView,
+  auditTier,
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
@@ -49,7 +52,6 @@ import {
   type CommsReactionKind,
   classifyOveruse,
   commsCutMarker,
-  DECISION_DEFAULT_WAIT_MS,
   type DefectRefs,
   type DefectVia,
   type DoneWhenEntry,
@@ -111,6 +113,8 @@ import {
   type QaFindingView,
   type QaFlowView,
   type QaReviewRoundView,
+  type QuestionClosure,
+  type QuestionClosureKind,
   type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
@@ -435,6 +439,13 @@ CREATE TABLE IF NOT EXISTS queues (
   taken_at INTEGER, PRIMARY KEY (seat_id, pos)
 );
 -- Needs-you notes the engine raises; cleared_at is set once the cause is gone, dismissed_at when the operator dismissed it (reset when it is raised again).
+-- Things the hub did or needs decided, with the risk tier fixed by the item's kind when recorded.
+CREATE TABLE IF NOT EXISTS audit_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, subject TEXT NOT NULL,
+  tier TEXT NOT NULL, state TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL,
+  UNIQUE (kind, subject)
+);
+CREATE INDEX IF NOT EXISTS audit_items_at ON audit_items(at);
 CREATE TABLE IF NOT EXISTS attention_notes (
   key TEXT PRIMARY KEY, kind TEXT NOT NULL, run_id TEXT, seat_id TEXT, repo_id TEXT,
   text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER, dismissed_at INTEGER
@@ -505,6 +516,13 @@ CREATE TABLE IF NOT EXISTS seat_questions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
   text TEXT NOT NULL, at INTEGER NOT NULL, answered_at INTEGER
 );
+-- A question that left Needs you without an answer, with why (returned, withdrawn, or a fact).
+CREATE TABLE IF NOT EXISTS question_closures (
+  key TEXT NOT NULL, ask_at INTEGER NOT NULL, kind TEXT NOT NULL, reason TEXT NOT NULL,
+  by TEXT NOT NULL, question TEXT NOT NULL, ticket TEXT, operator INTEGER NOT NULL,
+  at INTEGER NOT NULL, PRIMARY KEY (key, ask_at)
+);
+CREATE INDEX IF NOT EXISTS question_closures_at ON question_closures(at);
 -- Failures of the mc tools that the operator is told of (Needs you, until acked).
 CREATE TABLE IF NOT EXISTS crew_errors (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT, text TEXT NOT NULL,
@@ -2938,6 +2956,21 @@ export class Store {
     return rows.map((r) => this.boardMoveOf(r));
   }
 
+  /**
+   * Whether a real run in this store moved the issue's card to a column (done). Rows under
+   * `pr:` and `dep:` ids have no run, so another hub's moves never count.
+   */
+  runMovedCard(repoId: RepoId, issue: number): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM board_moves m JOIN runs r ON r.id = m.run_id
+           WHERE m.repo_id = ? AND m.issue = ? AND m.state = 'done' LIMIT 1`,
+        )
+        .get(repoId, issue) !== undefined
+    );
+  }
+
   /** Every move of the run's card, oldest first, pending ones too. */
   boardMovesOfRun(runId: string): BoardMove[] {
     const rows = this.db
@@ -3018,6 +3051,7 @@ export class Store {
       ["comms_repeats", "at < ?", OPERATIONAL_RETENTION_DAYS],
       // a question message and the replies to it outlive the 90-day message log
       ["comms", `at < ? AND (${COMMS_QUESTION_THREAD_SQL})`, AUDIT_RETENTION_DAYS],
+      ["question_closures", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
       ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
       [
@@ -3888,8 +3922,39 @@ export class Store {
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
+      items: this.auditItems(since, until),
       surgeonProposals: [],
     };
+  }
+
+  /**
+   * Records an Audit item once per kind and subject; its tier comes from the kind (unknown kinds
+   * are Go-ahead). A repeat leaves the item as it was, except that an open item may become done.
+   */
+  recordAuditItem(i: {
+    kind: string;
+    subject: string;
+    state: AuditItem["state"];
+    detail: string;
+    at: number;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO audit_items (kind, subject, tier, state, detail, at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(kind, subject) DO UPDATE SET state = excluded.state, detail = excluded.detail
+         WHERE audit_items.state = 'open' AND excluded.state = 'done'`,
+      )
+      .run(i.kind, i.subject, auditTier(i.kind), i.state, i.detail, i.at);
+  }
+
+  /** Items recorded in range, newest first. */
+  private auditItems(since: number, until: number): AuditItem[] {
+    return this.db
+      .prepare(
+        `SELECT id, kind, subject, tier, state, detail, at FROM audit_items
+         WHERE at >= ? AND at <= ? ORDER BY at DESC, id DESC`,
+      )
+      .all(since, until) as unknown as AuditItem[];
   }
 
   /** Merged PRs in range that have a recorded size, largest first. */
@@ -5200,6 +5265,16 @@ export class Store {
     );
   }
 
+  /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
+  externalReviewRows(): ReviewRow[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM reviews WHERE author_run_id LIKE 'external-pr:%' AND state != 'superseded' ORDER BY id",
+      )
+      .all() as Row[];
+    return rows.map(toReview);
+  }
+
   reviewsOfRun(authorRunId: string): ReviewRow[] {
     const rows = this.db
       .prepare("SELECT * FROM reviews WHERE author_run_id = ? ORDER BY id")
@@ -6470,6 +6545,28 @@ export class Store {
       .all(COMMS_CREW) as Row[];
     return rows.map((row) => this.commsRow(row) as CommsRow & { label: "question" | "blocker" });
   }
+  /** The newest `limit` messages with an id above `sinceId`, newest first; text cut to `textMax`. */
+  commsFeed(
+    sinceId: number,
+    limit: number,
+    textMax: number,
+  ): Pick<CommsRow, "id" | "at" | "from" | "to" | "label" | "ref" | "text">[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, at, from_id, to_id, label, ref, substr(text, 1, ?) AS text FROM comms
+         WHERE id > ? ORDER BY id DESC LIMIT ?`,
+      )
+      .all(textMax, sinceId, limit) as Row[];
+    return rows.map((r) => ({
+      id: `comms:${Number(r.id)}`,
+      at: Number(r.at),
+      from: r.from_id as string,
+      to: r.to_id as string,
+      label: (r.label as CommsLabel | null) ?? null,
+      ref: (r.ref as string | null) ?? null,
+      text: r.text as string,
+    }));
+  }
   markCommsScopeRead(scope: string, messageId: string): void {
     const id = commsMessageNumber(messageId);
     if (id === null) return;
@@ -7653,6 +7750,124 @@ export class Store {
       .run(at, runId);
   }
 
+  /**
+   * Records that a question left Needs you without an answer. False, storing nothing, when this ask
+   * was closed already. Closing an `ask:` key also answers its question, so the seat's run no
+   * longer waits on it.
+   */
+  closeQuestion(c: QuestionClosure): boolean {
+    let stored = false;
+    this.transaction(() => {
+      stored = this.insertClosure(c);
+    });
+    return stored;
+  }
+
+  /** `closeQuestion` without its own transaction, for a caller already in one. */
+  private insertClosure(c: QuestionClosure): boolean {
+    const r = this.db
+      .prepare(
+        `INSERT INTO question_closures (key, ask_at, kind, reason, by, question, ticket, operator, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key, ask_at) DO NOTHING`,
+      )
+      .run(c.key, c.askAt, c.kind, c.reason, c.by, c.question, c.ticket, c.operator ? 1 : 0, c.at);
+    const stored = Number(r.changes) > 0;
+    const ask = /^ask:(\d+)$/.exec(c.key);
+    if (stored && ask !== null) this.answerQuestion(Number(ask[1]), c.at);
+    return stored;
+  }
+
+  private closureOf(r: Row): QuestionClosure {
+    return {
+      key: r.key as string,
+      askAt: r.ask_at as number,
+      kind: r.kind as QuestionClosureKind,
+      reason: r.reason as string,
+      by: r.by as string,
+      question: r.question as string,
+      ticket: (r.ticket as string | null) ?? null,
+      operator: r.operator === 1,
+      at: r.at as number,
+    };
+  }
+
+  /** The closure of one ask of a key; null when it was not closed without an answer. */
+  questionClosure(key: string, askAt: number): QuestionClosure | null {
+    const r = this.db
+      .prepare("SELECT * FROM question_closures WHERE key = ? AND ask_at = ?")
+      .get(key, askAt) as Row | undefined;
+    return r ? this.closureOf(r) : null;
+  }
+
+  /**
+   * The closures of items that stay in the attention list until routed away (not a seat's `ask:`
+   * question, which leaves when answered), by key, newest first; read once per build.
+   */
+  closedItemKeys(): Map<string, QuestionClosure[]> {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM question_closures WHERE key NOT LIKE 'ask:%' ORDER BY at DESC, rowid DESC",
+      )
+      .all() as Row[];
+    const byKey = new Map<string, QuestionClosure[]>();
+    for (const r of rows) {
+      const c = this.closureOf(r);
+      byKey.set(c.key, [...(byKey.get(c.key) ?? []), c]);
+    }
+    return byKey;
+  }
+
+  /** The closures the operator had in Needs you since `since`, newest first. */
+  questionClosures(since: number, limit: number): QuestionClosure[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM question_closures WHERE operator = 1 AND at >= ? ORDER BY at DESC, rowid DESC LIMIT ?",
+      )
+      .all(since, limit) as Row[];
+    return rows.map((r) => this.closureOf(r));
+  }
+
+  /** Whether FLIGHT's newest brief on the key is for the operator. */
+  private briefedForOperator(key: string): boolean {
+    const r = this.db
+      .prepare("SELECT structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
+      .get(key) as { structured: string | null } | undefined;
+    return r?.structured != null && (JSON.parse(r.structured) as AttentionBrief).for === "operator";
+  }
+
+  private endQuestions(where: "run_id" | "agent_id", id: string, at: number): void {
+    this.transaction(() => {
+      const rows = this.db
+        .prepare(`SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL`)
+        .all(id) as Row[];
+      for (const r of rows) {
+        const q = toQuestion(r);
+        const key = `ask:${q.id}`;
+        this.insertClosure({
+          key,
+          askAt: q.at,
+          kind: "run-ended",
+          reason: ASKING_RUN_ENDED_REASON,
+          by: "hub",
+          question: q.text,
+          ticket: this.run(q.runId)?.ticket ?? null,
+          operator: q.passedAt !== null && this.briefedForOperator(key),
+          at,
+        });
+      }
+    });
+  }
+
+  /** The asking run has ended: each of its open questions closes, with that reason. */
+  endRunQuestions(runId: string, at: number): void {
+    this.endQuestions("run_id", runId, at);
+  }
+
+  /** The seat has no run now: each of its open questions closes, with that reason. */
+  endSeatQuestions(agentId: AgentId, at: number): void {
+    this.endQuestions("agent_id", agentId, at);
+  }
+
   /** Records an mc tool failure for the operator; returns its id. */
   addCrewError(e: Omit<CrewError, "id">): number {
     const r = this.db
@@ -8262,19 +8477,10 @@ export class Store {
   }
 
   /** Stores FLIGHT's brief on an attention key; returns its id. */
-  addBrief(b: AttentionBrief & { key: string; defaultEligible?: boolean }): number {
+  addBrief(b: AttentionBrief & { key: string }): number {
     let id = 0;
     this.transaction(() => {
-      const {
-        key,
-        context,
-        recommendation,
-        options,
-        basis,
-        at,
-        defaultEligible = true,
-        ...structured
-      } = b;
+      const { key, context, recommendation, options, basis, at, ...structured } = b;
       if (structured.person) {
         const thread = /^person:(\d+):(\d+)$/.exec(key);
         const n = thread ? this.notification(thread[1] as string) : null;
@@ -8323,13 +8529,8 @@ export class Store {
       const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
       if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
         structured.askAt = prior?.askAt ?? last.at;
+      // No timed default on a question to the operator (#1532): a brief never stores one.
       delete structured.defaultAt;
-      if (defaultEligible && structured.for !== "flight" && structured.recommendedOptionId) {
-        const kept = structured.askAt !== undefined ? prior?.defaultAt : undefined;
-        // The wait starts when a default is first stamped, never at an older ask's time: an ask
-        // briefed before defaults existed must not come due the moment it is briefed again.
-        structured.defaultAt = kept ?? at + DECISION_DEFAULT_WAIT_MS;
-      }
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)

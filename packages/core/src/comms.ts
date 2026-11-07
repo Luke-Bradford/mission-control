@@ -139,7 +139,10 @@ export interface CommsOpenItem {
   from: string;
   to: string;
   ticket: string | null;
+  /** The message text, cut to a few hundred characters. */
+  text?: string;
   waitedMs: number;
-  nextStep: "flight" | "flight-not-triaging";
+  /** "operator": no FLIGHT seat, so the question is the operator's now. */
+  nextStep: "flight" | "flight-not-triaging" | "operator";
   nextAt: number;
 }

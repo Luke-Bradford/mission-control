@@ -108,7 +108,7 @@
 
 .needs-band {
   flex: none;
-  max-height: 136px;
+  max-height: 33vh;
   overflow: auto;
   padding: var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--line);
@@ -131,12 +131,68 @@
   color: var(--fg);
 }
 
-.needs-band-question {
+.needs-band-title {
   margin: var(--sp-1) 0 0;
   font-size: var(--fs-title);
   line-height: var(--lh-title);
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.needs-band-question {
+  margin: var(--sp-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.needs-band-label {
+  color: var(--fg-2);
+}
+
+.needs-band-pick {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+
+.needs-pins {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-s);
+}
+
+.needs-pins li {
+  display: flex;
+  gap: var(--sp-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.needs-pin-title {
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.needs-row-ask {
+  min-width: 0;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.needs-row-who {
+  color: var(--fg-2);
+}
+
+.needs-more > summary {
+  cursor: pointer;
+  color: var(--fg-2);
 }
 
 .needs-body {
@@ -180,6 +236,13 @@
 
 .needs-answer .composer textarea {
   flex: 1;
+  min-width: 0;
+  resize: vertical;
+}
+
+/* The conversation box takes the whole row; its Ask FLIGHT button sits on the row below. */
+.needs-side .composer textarea {
+  flex: 1 0 100%;
   min-width: 0;
   resize: vertical;
 }
@@ -283,4 +346,68 @@
 .needs-hold {
   flex: none;
   margin-left: auto;
+}
+
+/* A branch's built app over the whole window: the app lays out by viewport width, so it gets all of it. */
+.preview-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 38;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.preview-bar {
+  flex: none;
+  box-sizing: border-box;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-3);
+  border-bottom: 1px solid var(--line-2);
+  background: var(--surface);
+}
+
+.preview-question {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.preview-iframe {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  border: 0;
+  background: var(--surface);
+}
+
+.preview-bar a {
+  flex: none;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-s);
+  color: var(--fg);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-s);
+  background: var(--surface-2);
+  text-decoration: none;
+}
+
+/* Hold open: the form takes its own row in the band and the band grows to hold it, so the
+   whole question stays readable above it. */
+.needs-band:has(.hold-form) {
+  max-height: none;
+}
+
+.needs-hold:has(.hold-form) {
+  flex: 1 0 100%;
+  margin-left: 0;
+}
+
+.needs-hold .hold-form {
+  max-width: 480px;
 }

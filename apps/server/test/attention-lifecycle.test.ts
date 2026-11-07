@@ -119,9 +119,13 @@ it("keeps an ended budget run's operator-briefed Comms question visible", () => 
   store.addBrief({
     key,
     for: "operator",
+    ask: "May GUIDO proceed past the budget hold on repo#7?",
     context: "Held run",
     recommendation: "Keep held",
-    options: [{ label: "Hold", answer: "Keep the hold" }],
+    options: [
+      { label: "Hold", answer: "Keep the hold" },
+      { label: "Proceed", answer: "Release the hold" },
+    ],
     basis: "Budget",
     at: NOW,
   });
@@ -168,9 +172,13 @@ it("routes a controller-owned cleanup to the operator only after an explicit rec
   store.addBrief({
     key,
     for: "operator",
+    ask: "Keep the run's worktree for inspection, or remove it?",
     context: "No controller is available",
     recommendation: "Keep the worktree and ask the operator to inspect the lock",
-    options: [],
+    options: [
+      { label: "Keep", answer: "Keep the worktree" },
+      { label: "Remove", answer: "Remove the worktree" },
+    ],
     basis: "Cleanup failure",
     at: NOW,
   });

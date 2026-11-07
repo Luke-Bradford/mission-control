@@ -33,6 +33,18 @@ import { evaluateHolds } from "./attention-holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
+  AUTO_CLI_TOOLS,
+  type AutoCliTool,
+  autoUpdateCli,
+  type CliToolOps,
+  cliAutoHoldOwner,
+  cliAutoHoldText,
+  npmPrefix,
+  pendingCliUpdate,
+  realCliOps,
+  settlePending,
+} from "./cli-auto.ts";
+import {
   CLI_COLLECTOR,
   CLI_NOTE_KEY,
   CLI_RETRY_MS,
@@ -110,6 +122,7 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "./machine-capacity.ts";
+import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
@@ -135,7 +148,8 @@ export type Job =
   | "backfill"
   | "engine"
   | "update"
-  | "cli";
+  | "cli"
+  | "cliAuto";
 const SIGNAL_LOOPS: readonly Job[] = ["engine", "ta", "studio", "sessions"];
 
 /** start() order: sessions first, so the first studio tick reuses that read of the registry. */
@@ -155,6 +169,7 @@ export const JOBS: readonly Job[] = [
   "engine",
   "update",
   "cli",
+  "cliAuto",
 ];
 /** start() delays the first engine tick: the first GitHub poll has read the boards and PRs by then. */
 export const ENGINE_FIRST_DELAY_MS = 30_000;
@@ -246,6 +261,8 @@ export interface Collectors {
   rewriteSummaries: typeof rewriteCrewSummaries;
   /** One CLI update check (`updates.cli: between_runs`): brew outdated, upgrade, smoke test. */
   cli: (beforeUpgrade: () => void) => Promise<CliCheck>;
+  /** The version source, installer and live check for one CLI, or null when something else keeps it current. */
+  cliOps: (tool: AutoCliTool) => CliToolOps | null;
   /** The one-off fill of past crew runs' missing ticket titles, read from GitHub. */
   fillTitles: typeof fillTicketTitles;
   claude: (acct: AccountId, onError: OnError, now: number) => Promise<UsageSample[]>;
@@ -264,6 +281,8 @@ export interface Collectors {
 export interface SchedulerDeps {
   config: CcConfig;
   teamsEnabled?: boolean;
+  /** False on a preview: it polls GitHub but never moves a card. Default true. */
+  boardWrites?: boolean;
   store: Store;
   bus: ChangeBus;
   now?: () => number;
@@ -340,6 +359,10 @@ export function realCollectors(config: CcConfig): Collectors {
     backfill: backfillRuns,
     rewriteSummaries: rewriteCrewSummaries,
     cli: (beforeUpgrade) => checkCli({ exec: realExec, beforeUpgrade }),
+    cliOps: (tool) => {
+      const prefix = npmPrefix(tool);
+      return prefix === null ? null : realCliOps(tool, realExec, prefix);
+    },
     fillTitles: fillTicketTitles,
     claude: (acct, onError, now) =>
       sampleClaude(
@@ -443,6 +466,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     else store.clearNote(CLI_NOTE_KEY, now());
   }
 
+  // An update begun before a restart (or a rollback that failed) keeps runs held until it is settled.
+  if (config.updates?.cli === "between_runs") {
+    for (const tool of AUTO_CLI_TOOLS) {
+      const pending = pendingCliUpdate(store, tool);
+      if (pending !== null) cliHold.hold(cliAutoHoldText(tool, pending.to), cliAutoHoldOwner(tool));
+    }
+  }
+
   /** Each agent's HUD state at its last recorded change or last look; seeded so a restart is no change. */
   const lastStates = new Map<AgentId, HudState>(store.latestAgentStates());
 
@@ -528,6 +559,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               `${repo.id} PR #${pr.number} is still a draft.`,
               pr.updatedAt + PR_WAIT_MS,
             );
+      const closed = await closeSettledQuestions({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+        deliver: deps.deliverDefault,
+      });
+      if (closed > 0) bus.emit("attention");
       const raised = raiseStalledCommsDecisions({ config, store, now: now() });
       if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
@@ -915,7 +954,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               flightSeat(config)?.session.repoId === repo.id,
             );
             changed.boards ||= r.boards;
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
               changed.boards = true;
           });
         }
@@ -936,7 +978,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
             // Whoever opened a ticket's PR, its card follows (the engine moves only its runs').
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
               changed.boards = true;
           });
           const error = store.status().find((s) => s.collector === collector)?.error;
@@ -1052,6 +1097,32 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       }
       emit("health", "attention");
     },
+    cliAuto: async () => {
+      if (config.updates?.cli !== "between_runs") return;
+      for (const tool of AUTO_CLI_TOOLS) {
+        const ops = c.cliOps(tool);
+        if (ops === null) {
+          settlePending(store, cliHold, tool, (line) => deps.log?.(line));
+          recordStatus(
+            `cli-auto:${tool}`,
+            false,
+            `${tool} is not an npm global install; update it by hand`,
+          );
+          continue;
+        }
+        try {
+          await autoUpdateCli(tool, ops, {
+            store,
+            hold: cliHold,
+            log: (line) => deps.log?.(line),
+            now,
+          });
+        } catch (e) {
+          deps.log?.(`cli update ${tool}: ${e instanceof Error ? e.message : String(e)}`);
+        }
+      }
+      emit("health", "attention");
+    },
     usage: async () => {
       for (const acct of config.accounts) {
         await guarded(usageCollector(acct.id), () => usageFor(acct));
@@ -1085,7 +1156,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               ).boards
             )
               boards = true;
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id)) boards = true;
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
+              boards = true;
           });
         }
       }
@@ -1280,6 +1355,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     engine: ENGINE_TICK_MS,
     update: VERSION_CHECK_MS,
     cli: CLI_UPDATE_INTERVAL_MS,
+    cliAuto: CLI_UPDATE_INTERVAL_MS,
   };
 
   const FIRST_DELAY_MS: Partial<Record<Job, number>> = {
@@ -1358,7 +1434,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         if (job === "update" && (deps.autoUpdate === undefined || config.updates?.hub !== "auto"))
           continue;
         // `updates.cli: off` (the default) starts no update timer
-        if (job === "cli" && config.updates?.cli !== "between_runs") continue;
+        if ((job === "cli" || job === "cliAuto") && config.updates?.cli !== "between_runs")
+          continue;
         const every = () => {
           const t = setInterval(() => {
             if (job === "github" && !githubDue()) return;

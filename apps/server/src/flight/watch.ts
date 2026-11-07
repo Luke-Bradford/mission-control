@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import {
   BACKGROUND_STALL_MS,
   FLIGHT_BATCH_MS,
+  FLIGHT_CONTEXT_GROWTH_TOKENS,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
@@ -24,6 +25,7 @@ import {
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_REWAKE_MS,
+  FLIGHT_ROTATIONS_MAX,
   FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_STARTS_MAX,
   FLIGHT_TICK_MS,
@@ -31,6 +33,7 @@ import {
   FLIGHT_WAKE_REMINDER,
   type FlightState,
   flightDownText,
+  flightRotationLoopText,
   flightStartFailedText,
   freshStartLine,
   HUD_STATE_LABEL,
@@ -76,6 +79,7 @@ import {
   type WakeReason,
   wakeFacts,
   wakeReasons,
+  wakeReasonWords,
 } from "./state.ts";
 
 export interface FlightWatchDeps {
@@ -171,6 +175,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** When FLIGHT itself was started; a rotation is left out. */
   let starts: number[] = [];
   let rotating = false;
+  /** When FLIGHT was handed a fresh session this hour: rotations count against their own cap. */
+  let rotations: number[] = [];
+  /** Each run's context at its first turn, so the handover line is growth, not the start's size. */
+  const firstContext = new Map<string, number>();
   let rotationRequested = false;
   let lastFailure: string | null = null;
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
@@ -265,7 +273,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       runId: null,
       seatId,
       repoId,
-      text: `FLIGHT left ${left.length} wake reason${left.length === 1 ? "" : "s"} without a decision after two wakes: ${left.map((r) => r.label).join("; ")}`.slice(
+      text: `FLIGHT left ${left.length} wake reason${left.length === 1 ? "" : "s"} without a decision after two wakes: ${left.map((r) => wakeReasonWords(r, config.operator.timezone)).join("; ")}`.slice(
         0,
         600,
       ),
@@ -459,6 +467,27 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (await settleGhost(id, row, alive, t)) return;
       if (noteOpen()) return;
       starts = starts.filter((s) => s > t - FLIGHT_HOUR_MS);
+      rotations = rotations.filter((s) => s > t - FLIGHT_HOUR_MS);
+      // a handover loop: each rotation is a full session start, so they have a cap of their own
+      if (rotating && rotations.length >= FLIGHT_ROTATIONS_MAX) {
+        clearDown(t);
+        const last = row?.runId ?? null;
+        store.raiseNote({
+          key: FLIGHT_NOTE_KEY,
+          kind: "blocked",
+          runId: null,
+          seatId: id,
+          repoId: found.session.repoId,
+          text: flightRotationLoopText(
+            rotations.length,
+            last === null ? null : (firstContext.get(last) ?? null),
+          ),
+          at: t,
+        });
+        rotating = false;
+        bus.emit("attention");
+        return;
+      }
       if (starts.length >= FLIGHT_STARTS_MAX && !rotating) {
         clearDown(t);
         store.raiseNote({
@@ -486,6 +515,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         areas: await deps.areas?.(found.session.repoId),
       });
       if (!rotating) starts.push(t);
+      else rotations.push(t);
       rotating = false;
       rotationRequested = false; // the fresh session already sees the current config
       try {
@@ -573,7 +603,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     }
     // past the context limit: one handover wake, then the fresh session once that turn has ended
     const context = store.digest(runId)?.contextTokens ?? null;
-    if (context !== null && context > FLIGHT_CONTEXT_ROTATE_TOKENS) {
+    if (context !== null && !firstContext.has(runId)) firstContext.set(runId, context);
+    const grown = context === null ? 0 : context - (firstContext.get(runId) ?? context);
+    if (
+      context !== null &&
+      context > FLIGHT_CONTEXT_ROTATE_TOKENS &&
+      grown >= FLIGHT_CONTEXT_GROWTH_TOKENS
+    ) {
       let asked = handover?.runId === runId ? handover : null;
       if (asked === null) {
         const sent = await supervisor.send(runId, handoverKey(runId), FLIGHT_HANDOVER_ASK);

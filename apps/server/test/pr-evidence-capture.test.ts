@@ -144,6 +144,14 @@ describe("PrEvidence capture", () => {
     expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB.slice(0, 0) })).toBeNull();
   });
 
+  it("keeps a PR in draft when it adds a page no screenshot can show", () => {
+    const t = setup();
+    const paths = ["apps/web/src/pages/Inbox.tsx", "apps/web/src/inbox/List.tsx"];
+    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths })).toContain(
+      "pages/Inbox.tsx has no screenshot address",
+    );
+  });
+
   it("does not capture a head twice, and a new head is captured afresh", async () => {
     const t = setup();
     await Promise.all([

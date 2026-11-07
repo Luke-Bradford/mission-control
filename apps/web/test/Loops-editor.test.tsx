@@ -65,10 +65,30 @@ it("validates before writes and cancel makes no write", () => {
   render(<Loops config={config} />);
   const form = open();
   fireEvent.click(within(form).getByRole("button", { name: "Save template" }));
-  expect(within(form).getByRole("alert").textContent).toContain("Name");
+  expect(within(form).getByRole("link", { name: /^Name must be lowercase/ })).toBeTruthy();
   fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
   expect(screen.queryByRole("form")).toBeNull();
   expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+it("a step error links to and focuses its field", () => {
+  render(<Loops config={config} />);
+  const form = open();
+  fill(form);
+  fireEvent.change(within(form).getByLabelText("Step name"), { target: { value: "" } });
+  fireEvent.change(within(form).getByLabelText("Check 1 text"), { target: { value: " " } });
+  fireEvent.submit(form);
+  const summary = within(form).getByRole("region", { name: "Fix before saving" });
+  expect(document.activeElement).toBe(summary);
+  fireEvent.click(within(summary).getByRole("link", { name: /^Step 1: a name of up to 100/ }));
+  const step = within(form).getByLabelText("Step name");
+  expect(document.activeElement).toBe(step);
+  expect(step.getAttribute("aria-invalid")).toBe("true");
+  expect(step.getAttribute("aria-describedby")).toBe(`${step.id}-error`);
+  fireEvent.click(within(summary).getByRole("link", { name: /^Step 1, check 1: text/ }));
+  expect(document.activeElement).toBe(within(form).getByLabelText("Check 1 text"));
+  // typing the fix clears the error without another submit
+  fireEvent.change(within(form).getByLabelText("Step name"), { target: { value: "implement" } });
+  expect(within(summary).queryByRole("link", { name: /^Step 1: a name/ })).toBeNull();
 });
 it("saves a checked label template and selects the saved result", async () => {
   let body:
@@ -122,13 +142,13 @@ it("rejects duplicate names and invalid phase order without a write", () => {
   fill(form);
   fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "feature" } });
   fireEvent.submit(form);
-  expect(within(form).getByRole("alert").textContent).toContain("already exists");
+  expect(within(form).getByRole("link", { name: /already exists/ })).toBeTruthy();
   fireEvent.change(within(form).getByLabelText("Name"), { target: { value: "sample-work" } });
   fireEvent.click(within(form).getByRole("button", { name: "Add step" }));
-  const cards = within(form).getAllByRole("group").slice(1);
-  fireEvent.click(within(cards[1] as HTMLElement).getByRole("button", { name: "Move up" }));
+  const second = within(form).getByRole("group", { name: "Step 2" });
+  fireEvent.click(within(second).getByRole("button", { name: "Move up" }));
   fireEvent.submit(form);
-  expect(within(form).getByRole("alert").textContent).toContain("in that order");
+  expect(within(form).getByRole("link", { name: /in that order/ })).toBeTruthy();
   expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
 });
 
@@ -156,8 +176,11 @@ it("refreshes a stale base explicitly, retains checks and retries with the refre
   await screen.findByRole("alert");
   fireEvent.click(within(form).getByRole("button", { name: "Refresh templates" }));
   await waitFor(() =>
-    expect(within(form).getByRole("alert").textContent).toContain("Templates refreshed"),
+    expect(within(form).getByRole("status").textContent).toContain("Templates refreshed"),
   );
+  // a successful refresh is news, not a failure: no error summary, no alert
+  expect(form.querySelector(".fsum")).toBeNull();
+  expect(within(form).queryByRole("alert")).toBeNull();
   fireEvent.submit(form);
   await screen.findByRole("region", { name: "sample-work" });
   expect(attempts).toBe(2);

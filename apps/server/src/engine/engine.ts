@@ -65,13 +65,13 @@ import {
   evidenceSectionText,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_CONTROLLER_CHECK_PATHS,
+  FLIGHT_FLOOR_PATHS,
   fillLoopText,
   fixCommsText,
   fixKey,
   fixSentText,
   fixText,
   gateView,
-  globMatches,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
@@ -114,6 +114,7 @@ import {
   REVIEW_STATUS_WAIVED,
   type RepoId,
   type RepoRules,
+  type ReviewCheck,
   type ReviewFact,
   type ReviewRow,
   RULING_PARK,
@@ -263,6 +264,7 @@ export type OperatorRefusal =
   | "second-review-done"
   | "no-second-reviewer"
   | "floor-enforced"
+  | "design-failed"
   | "before-lift"
   | "rework-undelivered"
   | "use-controller-check"
@@ -288,7 +290,9 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "second-review-done": "a second review was already requested on this head",
   "no-second-reviewer": "no reviewer on another account than the first review's is available",
   "floor-enforced":
-    "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
+    "a blocking review on floor-enforcing paths cannot be accepted past; use second_review or send it for rework",
+  "design-failed":
+    "the run's last design verdict is a fail and no later review passed it, so only the operator can accept it, with Waive on the run's review park (Agents page). Send it back for rework; if the next review fails the design again, brief the operator with the review's images (mc operator GET /api/qa-reports?repoId=<repo>&prNumber=<n>&headSha=<full sha>, whose /api/qa-report-assets links the operator can open) and the failed points. Your accept stays refused after they answer",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
@@ -367,6 +371,12 @@ export interface Engine {
    * author the failure.
    */
   clearFlight(runId: string, expectedSha?: string): Promise<boolean>;
+  /**
+   * FLIGHT takes in a PR head that came from outside the run: it is recorded as the run's push
+   * and the run goes back to CI on it. False when the run is not in review or ci on an open PR
+   * whose head is this one, or when it already is the push.
+   */
+  adoptPrHead(runId: string, head: string): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
   acceptRuling(runId: string): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
@@ -468,6 +478,22 @@ const reviewFact = (r: ReviewRow): ReviewFact => ({
   minor: r.minor,
   failure: r.failure,
 });
+
+/**
+ * Whether the run's last design verdict, on this head or an earlier one, is a fail. A review with no
+ * design verdict, or `n-a`, does not clear an earlier fail, on the same head or after a rework; a
+ * later pass does. The carried review from before a main merge is one of the run's rows, so it counts.
+ */
+export function designFailedIn(
+  rows: readonly ReviewRow[],
+  checks: (reviewId: number) => readonly Pick<ReviewCheck, "check" | "result">[],
+): boolean {
+  const verdicts = rows
+    .filter((r) => r.state === "reported")
+    .map((r) => checks(r.id).find((c) => c.check === "design")?.result)
+    .filter((v) => v === "pass" || v === "fail");
+  return verdicts.at(-1) === "fail";
+}
 
 const endReason = (run: Run): string => {
   switch (run.endedBy) {
@@ -612,15 +638,6 @@ export function createEngine(deps: EngineDeps): Engine {
         ) ||
       seat === undefined ||
       accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
-    );
-  }
-
-  function requiresIndependentController(loop: RunLoop, sha: string): boolean {
-    return (
-      loop.touches?.sha === sha &&
-      loop.touches.paths.some((path) =>
-        FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
-      )
     );
   }
 
@@ -1708,7 +1725,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "merge": {
-        // a hold from FLIGHT or the controller keeps the merge until it is released
+        // a hold from FLIGHT or the operator keeps the merge until it is released
         if (cur.mergeHold) {
           const hold = cur.mergeHold;
           const reason = mergeHoldParkText(hold.by, hold.reason);
@@ -1725,7 +1742,7 @@ export function createEngine(deps: EngineDeps): Engine {
           out.again = true;
           return;
         }
-        // a ticket's `## Controller check` holds the merge until the operator's pass on this head
+        // a ticket's `## Controller check` holds the merge until a recorded pass on this head
         const check = await controllerCheckHold(run, cur, a.sha);
         if (check !== null) {
           out.parked = true;
@@ -2109,16 +2126,6 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const step = reconcile(snap);
     const cur = step.loop;
-    // FLIGHT cannot clear its own authority changes. Request the independent verdict while
-    // clearance is pending, before the merge action that used to create this check too late.
-    if (
-      cur.phase === "review" &&
-      cur.awaitingFlight &&
-      requiresIndependentController(cur, cur.awaitingFlight) &&
-      !(cur.controllerCheck?.sha === cur.awaitingFlight && cur.controllerCheck.pass)
-    ) {
-      cur.controllerCheck = { sha: cur.awaitingFlight, from: "review", pass: false };
-    }
     if (
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       activeAway(store, now(), config.operator.timezone)?.may.safePr &&
@@ -2878,7 +2885,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (kind === "pr-closed") return refuse("pr-closed");
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
         if (kind === "budget" && isDollarCapReason(loop.parked.reason)) return refuse("dollar-cap");
-        // only the controller's verdict settles a controller check, for every caller
+        // only a recorded verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
         if (kind === UAT_PARK) return refuse("use-uat");
         if (kind === MERGE_HOLD_PARK) return refuse("use-merge-hold");
@@ -2904,7 +2911,7 @@ export function createEngine(deps: EngineDeps): Engine {
           if (opts.action !== "lift" && pr?.state !== "open") return refuse("pr-not-open");
           if (opts.action !== "lift" && pr?.headSha !== pushed.sha) return refuse("head-moved");
           if (opts.action === "lift") {
-            if (kind !== "stuck") return refuse("wrong-action");
+            if (kind !== "stuck" && kind !== "gate") return refuse("wrong-action");
             const head = store.newestRunCommit(run.id)?.sha;
             if (
               !head ||
@@ -2926,11 +2933,10 @@ export function createEngine(deps: EngineDeps): Engine {
               .at(-1);
             // only a blocking review on the floor paths needs a reviewer FLIGHT does not control
             if (!first || first.blocking === 0) return refuse("wrong-action");
-            const paths = await publisher.hardRuleTouches(
-              run,
-              pushed.sha,
-              FLIGHT_CONTROLLER_CHECK_PATHS,
-            );
+            const paths = await publisher.hardRuleTouches(run, pushed.sha, [
+              ...FLIGHT_CONTROLLER_CHECK_PATHS,
+              ...FLIGHT_FLOOR_PATHS,
+            ]);
             if (paths.length === 0) return refuse("wrong-action");
             const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
             if (
@@ -2949,13 +2955,18 @@ export function createEngine(deps: EngineDeps): Engine {
               .filter((r) => r.sha === pushed.sha && r.state === "reported")
               .at(-1);
             if (!review || review.blocking > 0) {
-              const paths = await publisher.hardRuleTouches(
-                run,
-                pushed.sha,
-                FLIGHT_CONTROLLER_CHECK_PATHS,
-              );
+              const paths = await publisher.hardRuleTouches(run, pushed.sha, [
+                ...FLIGHT_CONTROLLER_CHECK_PATHS,
+                ...FLIGHT_FLOOR_PATHS,
+              ]);
               if (paths.length > 0) return refuse("floor-enforced");
             }
+            // A failed design needs the operator's own accept (PR 1465, #1529).
+            if (
+              by === "FLIGHT" &&
+              designFailedIn(store.reviewsOfRun(run.id), (id) => store.reviewChecks(id))
+            )
+              return refuse("design-failed");
           }
           if (flightHeld(store.run(run.id) ?? run)) return refuse("held");
         }
@@ -3090,8 +3101,7 @@ export function createEngine(deps: EngineDeps): Engine {
           held !== undefined &&
           held !== null &&
           !held.pass &&
-          loop.awaitingFlight === held.sha &&
-          requiresIndependentController(loop, held.sha);
+          loop.awaitingFlight === held.sha;
         if (
           run.endedAt !== null ||
           (!awaiting &&
@@ -3325,12 +3335,67 @@ export function createEngine(deps: EngineDeps): Engine {
         if (
           !sha ||
           (expectedSha !== undefined && sha !== expectedSha) ||
-          sha !== store.runPush(runId)?.sha ||
-          (requiresIndependentController(run.loop, sha) &&
-            !(run.loop.controllerCheck?.sha === sha && run.loop.controllerCheck.pass))
+          sha !== store.runPush(runId)?.sha
         )
           return false;
-        store.setRunLoop(runId, { ...run.loop, flightClearedSha: sha, awaitingFlight: null });
+        // a stored pending check row for this head is FLIGHT's to pass with this verdict
+        const check = run.loop.controllerCheck;
+        store.setRunLoop(runId, {
+          ...run.loop,
+          flightClearedSha: sha,
+          awaitingFlight: null,
+          ...(check?.sha === sha && !check.pass
+            ? { controllerCheck: { ...check, pass: true } }
+            : {}),
+        });
+        await pass(runId);
+        return true;
+      });
+    },
+
+    adoptPrHead(runId, head) {
+      return onChainResult(runId, false, async () => {
+        if (!live()) return false;
+        const run = store.run(runId);
+        const loop = run?.loop;
+        if (
+          !run ||
+          !loop ||
+          run.endedAt !== null ||
+          flightHeld(run) ||
+          (loop.phase !== "review" && loop.phase !== "ci") ||
+          run.branch === null ||
+          flightPowersOf(config, run.repoId) !== "superuser"
+        )
+          return false;
+        const pr = findPr(run, loop);
+        if (pr?.state !== "open" || pr.headSha !== head || store.runPush(runId)?.sha === head)
+          return false;
+        const at = now();
+        store.addRunCommit({ runId, repoId: run.repoId, branch: run.branch, sha: head, at });
+        store.setRunPush({ runId, sha: head, at });
+        store.setRunLoop(runId, {
+          ...loop,
+          phase: "ci",
+          pushFor: head,
+          pushStartedAt: at,
+          gate: null,
+          touches: null,
+          flightClearedSha: null,
+          reviewWaivedSha: null,
+          carry: null,
+          awaitingFlight: null,
+          adopted: true,
+          transient: 0,
+        });
+        store.addLoopEvent(
+          `${runId}:${loop.epoch}:adopted:${head}`,
+          runId,
+          `FLIGHT adopted head ${head.slice(0, 7)} from outside the run`,
+          at,
+        );
+        lastTransient.delete(runId);
+        bus.emit("agents");
         await pass(runId);
         return true;
       });

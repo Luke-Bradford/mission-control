@@ -611,7 +611,7 @@ function holdOf(loop: ReviewCheckLoop | null): ReviewCheckState | null {
     by,
     ...(loop.parked?.reason ? { reason: loop.parked.reason } : {}),
   });
-  if (loop.controllerCheck && !loop.controllerCheck.pass) return held("operator");
+  if (loop.controllerCheck && !loop.controllerCheck.pass) return held("FLIGHT");
   if (loop.uat && !loop.uat.accepted) return held("operator");
   if (loop.mergeHold) return held(loop.mergeHold.by);
   if (loop.awaitingFlight) return held("FLIGHT");
