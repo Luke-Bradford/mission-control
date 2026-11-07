@@ -70,7 +70,7 @@ export function NeedsBanner({ awayOnly = false }: { awayOnly?: boolean }) {
             {notAcked > 0 && <span>· {notAcked} not acknowledged</span>}
           </span>
           <span className="spacer" />
-          <span className="s accent">Open in FLIGHT →</span>
+          <span className="s accent">Open Needs you →</span>
         </button>
       )}
     </div>

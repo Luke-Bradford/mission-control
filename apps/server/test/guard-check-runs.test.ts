@@ -86,7 +86,15 @@ describe("lockedCheck", () => {
 describe("the check recorder", () => {
   const HEAD = "a".repeat(40);
   const KEY = { runId: "r1", toolUseId: "t1" };
-  let rows: { runId: string; command: string; headSha: string; ok: boolean; at: number }[];
+  const WORKTREE = "/work/trees/guido-1-9";
+  let rows: {
+    runId: string;
+    command: string;
+    invokedCommand?: string | undefined;
+    headSha: string;
+    ok: boolean;
+    at: number;
+  }[];
   let state: CloneState | null;
   let checks: readonly string[];
   const recorder = () =>
@@ -94,6 +102,7 @@ describe("the check recorder", () => {
       store: { addCheckRun: (c) => void rows.push(c) },
       checks: async () => checks,
       state: async () => state,
+      worktree: async () => WORKTREE,
       now: () => 99,
     });
 
@@ -153,6 +162,53 @@ describe("the check recorder", () => {
         at: 99,
       },
     ]);
+  });
+
+  it.each([
+    ["&&", `cd ${WORKTREE} && ${LINT}`],
+    [";", `cd ${WORKTREE}; ${LINT}`],
+    ["; with a trailing slash", `cd ${WORKTREE}/; ${LINT}`],
+    ["a quoted path", `cd "${WORKTREE}" && ${LINT}`],
+  ])("counts a check run after a cd into the seat's own worktree with %s", async (_n, command) => {
+    const r = recorder();
+    await r.begin(KEY, command);
+    await r.end(KEY, true);
+    expect(rows.map((x) => [x.command, x.invokedCommand, x.headSha])).toEqual([
+      [LINT, command, HEAD],
+    ]);
+  });
+
+  it.each([
+    ["a cd into another path", `cd /work/trees/other; ${LINT}`],
+    ["a cd into another path with &&", `cd /work/trees/other && ${LINT}`],
+    ["a cd into a sibling that shares the prefix", `cd ${WORKTREE}-2; ${LINT}`],
+    ["a cd into a subdirectory", `cd ${WORKTREE}/apps && ${LINT}`],
+    ["a sleep", `sleep 1; ${LINT}`],
+    ["a pipe", `${LINT} | tee x`],
+    ["a cd and then a second command", `cd ${WORKTREE}; true; ${LINT}`],
+    ["a cd and a check followed by another command", `cd ${WORKTREE}; ${LINT}; true`],
+    ["a cd and a pipe", `cd ${WORKTREE}; ${LINT} | tee x`],
+    ["a cd after the check", `${LINT}; cd ${WORKTREE}`],
+    ["a cd and an or", `cd ${WORKTREE} || ${LINT}`],
+    ["a cd to a variable", `cd $HOME; ${LINT}`],
+  ])("does not count a check run after %s", async (_n, command) => {
+    const r = recorder();
+    await r.begin(KEY, command);
+    await r.end(KEY, true);
+    expect(rows).toEqual([]);
+  });
+
+  it("counts nothing after a cd when the worktree is unknown", async () => {
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void rows.push(c) },
+      checks: async () => CHECKS,
+      state: async () => state,
+      worktree: async () => null,
+      now: () => 99,
+    });
+    await r.begin(KEY, `cd ${WORKTREE}; ${LINT}`);
+    await r.end(KEY, true);
+    expect(rows).toEqual([]);
   });
 
   it("records a failed call as ok = false", async () => {

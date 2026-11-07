@@ -12,6 +12,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { CrewGitError, crewGit, crewGitBytes, SAFE_CONFIG } from "../src/runtime/git.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
+
+const hooksBlocked = await blockedHere("git-hooks");
 
 let dir: string;
 let clone: string;
@@ -123,7 +126,7 @@ exec "${realGit}" "$@"
     expect(e.code).toBe("redirected");
   });
 
-  it("does not run the clone's hooks (a plain git does)", async () => {
+  it.skipIf(hooksBlocked)("does not run the clone's hooks (a plain git does)", async () => {
     writeFileSync(join(wt, "b.txt"), "b\n");
     await crewGit(wt, ["add", "b.txt"], common());
     await crewGit(

@@ -2115,6 +2115,30 @@ describe("Setup › Repos & seats: the seat form", () => {
     },
   );
 
+  // The summary is rendered by a save that finished after the click, so React commits it outside
+  // any event. Focus must already be on it when it first appears in the DOM; a test that looks a
+  // moment later (as the one above does) would pass or fail on how busy the machine is.
+  it.each(FORMS)(
+    "$name: focus is on the refused-save summary the moment it appears",
+    async ({ edit }) => {
+      const form = await openForm(
+        { [`POST ${SEATS_PATH}`]: () => ({ status: 409, body: { error: "Refused." } }) },
+        edit,
+      );
+      touch(form, edit);
+      let focusedOnAppear: Element | null = null;
+      const watch = new MutationObserver(() => {
+        const found = form.querySelector(".fsum");
+        if (found && focusedOnAppear === null) focusedOnAppear = document.activeElement;
+      });
+      watch.observe(form, { childList: true, subtree: true });
+      fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+      const summary = await within(form).findByRole("region", { name: "Not saved" });
+      watch.disconnect();
+      expect(focusedOnAppear).toBe(summary);
+    },
+  );
+
   it.each(FORMS)(
     "$name: a lost connection says the result is unknown, rereads, and keeps the entries",
     async ({ edit }) => {

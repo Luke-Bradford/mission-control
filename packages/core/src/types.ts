@@ -186,8 +186,13 @@ export interface RunLoop {
   reviewReplyTo?: number | null;
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
-  /** Off its seat while in review; `wake`: rework or a park is due, so it goes back first. */
-  aside?: { worktree: string; wake: boolean } | null;
+  /**
+   * Off its seat while in review; `wake`: rework or a park is due, so it goes back first.
+   * `displaced`: it left to make way for rework on the seat (a pushed run holds a refused newer
+   * commit), so that rework comes back before it.
+   * `ask`: the operator question this run waits on; the run wakes once it is answered.
+   */
+  aside?: { worktree: string; wake: boolean; displaced?: true; ask?: number } | null;
   /**
    * The engine's reads for the pushed sha: origin's default-branch tip, whether it is an ancestor
    * of `sha`, whether every commit in `sha --not mainSha` is in run_commits, and the changed
@@ -442,6 +447,17 @@ export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt"
  * previews for that repo, a checkout is set and the PR is open. `preview` is the running one, or
  * null; the web offers "Start preview" when `previewable && preview === null`.
  */
+/** A branch's built web app, kept to show as the real app in Demo (the operator opens it from Needs you). */
+export interface DesignPreviewView {
+  ticket: number;
+  branch: string;
+  sha: string;
+  publishedAt: number;
+  pr: number | null;
+  running: boolean;
+  url: string;
+}
+
 export interface PullRequestPreviewFacts {
   previewable: boolean;
   preview: { pr: number; branch: string; port: number; url: string; startedAt: number } | null;
@@ -1486,6 +1502,12 @@ export interface PipelineCard {
   /** The board item's Priority and Size, when the ticket has them. */
   priority?: string | null;
   size?: string | null;
+  /**
+   * Set while the PR's newest review found blocking problems on its current head: the ticket
+   * is in rework (In progress with its seat), or Ready after its run ended, and has been reviewed.
+   * `seat` is the seat running the ticket now, else the reviewed run's author; `seatBusy` is true while that seat is running.
+   */
+  rework?: { round: number; blockers: number; seat: string | null; seatBusy: boolean };
 }
 
 export type AttentionHoldCondition =

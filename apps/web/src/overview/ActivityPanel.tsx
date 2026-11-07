@@ -25,6 +25,7 @@ import { agentPath, commsAgentPath, commsFlightPath, followLink, itemPath } from
 import { useSessionScope } from "../shell/session.ts";
 import { ACTIVITY_FILTER_KEY, readKey, writeKey } from "../storage.ts";
 import { logLine } from "./logLine.ts";
+import { useListFit } from "./useListFit.ts";
 
 type LogRow = ActivityRow & { attentionKey?: string; escalationRef?: string | null };
 
@@ -314,6 +315,8 @@ export function ActivityPanel() {
     if (!held && list.current) list.current.scrollTop = 0;
   }, [held]);
 
+  // Whole rows at the foot, and no scrollbar for a sliver of overflow.
+  useListFit(list, ".arow", keyed.map((row) => row.key).join("|"));
   return (
     <Panel
       id="actP"

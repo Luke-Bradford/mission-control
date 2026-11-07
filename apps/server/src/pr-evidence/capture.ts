@@ -15,7 +15,9 @@ import {
   evidenceImageName,
   evidenceMissing,
   evidenceRefusalText,
+  evidenceUncataloguedText,
   prEvidenceAffectedPages,
+  prEvidenceUncatalogued,
 } from "@mc/core";
 import { decodePng, diffImages } from "./png.ts";
 import type { EvidenceImage, PrEvidenceStore } from "./store.ts";
@@ -153,6 +155,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
             ),
           );
         } catch (e) {
+          // A stopped capture says why it stopped; the page in progress did not fail.
+          if (signal.aborted) throw e;
           // Say which render failed: the render's own message names neither page nor side.
           const why = e instanceof Error ? e.message : String(e);
           throw new Error(`${page} page, ${scheme} scheme, ${name} side: ${why}`, { cause: e });
@@ -284,6 +288,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     },
     gate(t) {
       if (t.repoId !== deps.repoId) return null;
+      const uncatalogued = prEvidenceUncatalogued(t.paths);
+      if (uncatalogued.length > 0) return evidenceUncataloguedText(uncatalogued);
       const pages = prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
       const missing = evidenceMissing(manifest(t), t.sha, pages);

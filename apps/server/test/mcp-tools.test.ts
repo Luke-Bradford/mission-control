@@ -114,6 +114,7 @@ import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
+import { PreviewRefused } from "../src/design-previews.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
@@ -133,6 +134,7 @@ import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { runSeatGrants } from "../src/runtime/grants.ts";
 import { Store } from "../src/store.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 const NOW = Date.parse("2026-10-20T12:00:00Z");
 const BRANCH = "feature/42-fix-the-stop-race";
@@ -342,6 +344,8 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+const seatbeltBlocked = await blockedHere("seatbelt");
+
 describe("the mc tools", () => {
   it("confines code_health reads to the live session repo and fails closed on secret lookup", async () => {
     const ctx = { seatId: "guido-1", runId: RUN };
@@ -374,6 +378,7 @@ describe("the mc tools", () => {
       [MC_TOOL_NAMES.commsReact, ["writer", "read-only", "scratch"]],
       ["commit", ["writer"]],
       ["sync_main", ["writer"]],
+      [MC_TOOL_NAMES.publishPreview, ["writer"]],
       [MC_TOOL_NAMES.prBody, ["writer"]],
       ["ask_flight", ["writer", "read-only"]],
       ["call_flight", ["writer", "read-only", "scratch"]],
@@ -391,6 +396,7 @@ describe("the mc tools", () => {
       MC_TOOLS.commsReact,
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
+      MC_TOOLS.publishPreview,
       MC_TOOLS.prBody,
       MC_TOOLS.askFlight,
       MC_TOOLS.callFlight,
@@ -459,6 +465,75 @@ describe("sync_main", () => {
       isError: true,
     });
     expect(calls).toEqual([RUN]);
+  });
+});
+
+describe("publish_preview", () => {
+  const published: Array<{ ticket: number; branch: string; sha: string; worktree: string }> = [];
+  const previews = (running: boolean, refuse?: string): McToolsDeps["designPreviews"] => ({
+    repoId: "mc",
+    url: "http://127.0.0.1:7440/",
+    publish: async (input) => {
+      if (refuse !== undefined) throw new PreviewRefused(refuse);
+      published.push(input);
+      return {
+        ticket: input.ticket,
+        branch: input.branch,
+        sha: input.sha,
+        publishedAt: NOW,
+        pr: null,
+        running,
+        url: "http://127.0.0.1:7440/",
+      };
+    },
+  });
+  const call = (over: Partial<McToolsDeps>, args: unknown = {}) =>
+    tool(MC_TOOL_NAMES.publishPreview, make(over)).call(CTX, args);
+
+  it("publishes the committed branch, and says whether it is running", async () => {
+    published.length = 0;
+    const sha = head();
+    const r = await call({ designPreviews: previews(true) });
+    expect(r.text).toBe(
+      `Preview published for #42 at ${sha.slice(0, 7)} and running at http://127.0.0.1:7440/. It stops after an hour unused. It is deleted when the PR closes or after 7 days.`,
+    );
+    expect(published).toEqual([{ ticket: 42, branch: BRANCH, sha, worktree: wt }]);
+    expect((await call({ designPreviews: previews(false) })).text).toBe(
+      `Preview published for #42 at ${sha.slice(0, 7)}. Another preview is running, so this one waits until the operator opens it.`,
+    );
+  });
+
+  it("refuses a dirty tree, an unserved build and a hub without previews", async () => {
+    published.length = 0;
+    write("apps/a.ts", "dirty\n");
+    expect(await call({ designPreviews: previews(true) })).toEqual({
+      text: "Not published: commit your changes first, so the preview matches a commit.",
+      isError: true,
+    });
+    expect(published).toEqual([]);
+    git(wt, "checkout", "--", "apps/a.ts");
+    expect(
+      await call({ designPreviews: previews(true, "Not published: x.sh in the build.") }),
+    ).toEqual({
+      text: "Not published: x.sh in the build.",
+      isError: true,
+    });
+    expect(await call({})).toEqual({
+      text: "Not published: this hub cannot serve previews of this repo. Ask FLIGHT.",
+      isError: true,
+    });
+    expect((await call({ designPreviews: previews(true) }, { x: 1 })).text).toMatch(
+      /^Invalid arguments:/,
+    );
+    liveSeat("retro", "retro:1");
+    expect(
+      (
+        await tool(MC_TOOL_NAMES.publishPreview, make({ designPreviews: previews(true) })).call(
+          { seatId: "retro", runId: "retro:1" },
+          {},
+        )
+      ).isError,
+    ).toBe(true);
   });
 });
 
@@ -1441,6 +1516,7 @@ describe("through /mcp", () => {
         "comms_react",
         "commit",
         "sync_main",
+        "publish_preview",
         "pr_body",
         "ask_flight",
         "call_flight",
@@ -5999,7 +6075,7 @@ describe("restore_file", () => {
     expect(restoreSandbox).not.toHaveBeenCalled();
   });
 
-  it.skipIf(process.platform !== "darwin")(
+  it.skipIf(process.platform !== "darwin" || seatbeltBlocked)(
     "Seatbelt tool restore and delete use the default sandbox runner",
     async () => {
       const ts = make({ config: cfg });

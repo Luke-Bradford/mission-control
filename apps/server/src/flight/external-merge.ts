@@ -1,4 +1,4 @@
-/** The controller merge path for a PR without a crew author. No synthetic run or gate waiver. */
+/** The controller merge path for a PR with no unfinished crew run. No synthetic run or gate waiver. */
 import { Buffer } from "node:buffer";
 import type { RepoRules } from "@mc/core";
 import {
@@ -7,6 +7,7 @@ import {
   FLIGHT_FLOOR_PATHS,
   globMatches,
   REVIEW_STATUS_CONTEXT,
+  type ReviewRow,
   type TicketView,
   ticketControllerCheck,
 } from "@mc/core";
@@ -20,7 +21,7 @@ import {
   externalPrControl,
   setExternalPrControl,
 } from "../external-pr-control.ts";
-import { isExternalReview, readExternalSubject } from "../external-reviews.ts";
+import { branchOwned, isExternalReview, readExternalSubject } from "../external-reviews.ts";
 import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import type { Store } from "../store.ts";
@@ -43,8 +44,10 @@ export async function mergeExternalPr(i: {
   const sha = cached?.headSha;
   if (!cached || cached.state !== "open" || !sha || repo.autonomy !== "merge")
     return fail("No open external PR in this merge workspace.");
-  if (store.runsOnBranch(repo.id, cached.branch).some((run) => run.reviewId == null))
+  if (branchOwned(i.config, store, repo.id, cached.branch, cached.ticket))
     return fail("This branch belongs to a crew run; use its normal merge path.");
+  const runHold = store.branchMergeHold(repo.id, cached.branch);
+  if (runHold) return fail(`This PR has a merge hold from ${runHold.by}: ${runHold.reason}`);
   let rules: RepoRules;
   try {
     const loaded = await i.rules();
@@ -100,20 +103,29 @@ export async function mergeExternalPr(i: {
       !checks.some((check) => check.name === REVIEW_STATUS_CONTEXT && check.state === "passing")
     )
       return fail("CI and mc/review must pass on this exact head.");
+    const crewBranch = store
+      .runsOnBranch(repo.id, cached.branch)
+      .some((run) => run.reviewId == null);
+    const clean = (row: ReviewRow) =>
+      row.state === "reported" &&
+      row.blocking === 0 &&
+      row.verdict?.spec === "pass" &&
+      row.verdict.quality === "pass";
     const reviewProof = () => {
       const rows = store.reviewsOfPr(repo.id, number).filter((row) => row.sha === sha);
       // #91 respects a real external mc/review status when the hub has no attempt for this head.
       // Never manufacture a scratch report or revive a superseded/failed attempt to represent it.
-      if (rows.length === 0) return null;
-      const row = rows.findLast((value) => value.state !== "superseded");
-      return row &&
-        isExternalReview(row) &&
-        row.state === "reported" &&
-        row.blocking === 0 &&
-        row.verdict?.spec === "pass" &&
-        row.verdict.quality === "pass"
-        ? row
-        : undefined;
+      // A branch with a crew build run is different: its mc/review status may be the crew's own
+      // (waived or carried), so that head still needs an external review row.
+      if (rows.length === 0) return crewBranch ? undefined : null;
+      const live = rows.filter((value) => value.state !== "superseded");
+      const external = live.findLast((row) => isExternalReview(row) && clean(row));
+      if (!external) return undefined;
+      // a later row that reported a problem (or failed) still blocks; a later clean crew row does not
+      const blocked = live
+        .slice(live.indexOf(external) + 1)
+        .some((row) => row.state === "failed" || (row.state === "reported" && !clean(row)));
+      return blocked ? undefined : external;
     };
     const review = reviewProof();
     if (review === undefined)
@@ -285,7 +297,8 @@ export async function mergeExternalPr(i: {
       (final.reviewDecision !== null && !["", "APPROVED"].includes(String(final.reviewDecision))) ||
       externalControlReason(store, repo.id, number, sha) !== null ||
       store.pullRequests(repo.id).find((pr) => pr.number === number)?.headSha !== sha ||
-      store.runsOnBranch(repo.id, finalSubject.branch).some((run) => run.reviewId == null)
+      branchOwned(i.config, store, repo.id, finalSubject.branch, cached.ticket) ||
+      store.branchMergeHold(repo.id, finalSubject.branch)
     )
       return fail("The PR head, checks, ownership or hold changed before merge.");
     const merged = await i.gh(

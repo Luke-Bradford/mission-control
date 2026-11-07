@@ -26,6 +26,7 @@ import {
   codexSeatConfig,
   codexVersionAllowed,
 } from "../src/runtime/codex-floor.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 const sandboxInput: CrewSandboxInput = {
   cwd: "/mc/wt/guido-1",
@@ -47,64 +48,69 @@ const installedCodex = (() => {
   }
 })();
 
-describe.skipIf(installedCodex === null)("Codex seat profile under the real codex sandbox", () => {
-  let root: string;
-  afterEach(() => rmSync(root, { recursive: true, force: true }));
+const seatbeltBlocked = await blockedHere("seatbelt");
 
-  it.each(["writer", "scratch"] as const)(
-    "lets a %s seat write its worktree but not create or write .codex",
-    (mode) => {
-      root = realpathSync(mkdtempSync(join(tmpdir(), "mc-codex-project-")));
-      const cwd = join(root, "worktree");
-      const home = join(root, "codex-home");
-      const seatTmp = join(root, "seat-tmp");
-      for (const path of [cwd, home, seatTmp, join(root, "operator")]) mkdirSync(path);
-      execFileSync("git", ["init", "-q", cwd]);
-      writeFileSync(
-        join(home, "config.toml"),
-        codexSeatConfig(
-          {
-            cwd,
-            gitCommonDir: join(cwd, ".git"),
-            worktreeGitDir: join(cwd, ".git"),
-            home: join(root, "operator"),
-            dataDir: join(root, "data"),
-            denyRead: [],
-            pnpmStoreDir: join(root, "pnpm-store"),
-          },
-          mode,
-          "http://127.0.0.1:1/mcp",
-          seatTmp,
-        ),
-      );
-      const run = (script: string) => {
-        try {
-          execFileSync(
-            installedCodex as string,
-            ["sandbox", "-C", cwd, "-P", "mc_seat", "--", "/bin/sh", "-c", script],
+describe.skipIf(installedCodex === null || seatbeltBlocked)(
+  "Codex seat profile under the real codex sandbox",
+  () => {
+    let root: string;
+    afterEach(() => rmSync(root, { recursive: true, force: true }));
+
+    it.each(["writer", "scratch"] as const)(
+      "lets a %s seat write its worktree but not create or write .codex",
+      (mode) => {
+        root = realpathSync(mkdtempSync(join(tmpdir(), "mc-codex-project-")));
+        const cwd = join(root, "worktree");
+        const home = join(root, "codex-home");
+        const seatTmp = join(root, "seat-tmp");
+        for (const path of [cwd, home, seatTmp, join(root, "operator")]) mkdirSync(path);
+        execFileSync("git", ["init", "-q", cwd]);
+        writeFileSync(
+          join(home, "config.toml"),
+          codexSeatConfig(
             {
               cwd,
-              env: { PATH: process.env.PATH, HOME: join(root, "operator"), CODEX_HOME: home },
-              stdio: "ignore",
-              timeout: 30_000,
+              gitCommonDir: join(cwd, ".git"),
+              worktreeGitDir: join(cwd, ".git"),
+              home: join(root, "operator"),
+              dataDir: join(root, "data"),
+              denyRead: [],
+              pnpmStoreDir: join(root, "pnpm-store"),
             },
-          );
-          return true;
-        } catch {
-          return false;
-        }
-      };
-      expect(run("echo x > ok.txt")).toBe(true);
-      expect(existsSync(join(cwd, "ok.txt"))).toBe(true);
-      expect(run(`mkdir ${CODEX_PROJECT_DIR}`)).toBe(false);
-      expect(run(`ln -s . ${CODEX_PROJECT_DIR}`)).toBe(false);
-      mkdirSync(join(cwd, CODEX_PROJECT_DIR));
-      expect(run(`echo x > ${CODEX_PROJECT_DIR}/config.toml`)).toBe(false);
-      expect(existsSync(join(cwd, CODEX_PROJECT_DIR, "config.toml"))).toBe(false);
-    },
-    60_000,
-  );
-});
+            mode,
+            "http://127.0.0.1:1/mcp",
+            seatTmp,
+          ),
+        );
+        const run = (script: string) => {
+          try {
+            execFileSync(
+              installedCodex as string,
+              ["sandbox", "-C", cwd, "-P", "mc_seat", "--", "/bin/sh", "-c", script],
+              {
+                cwd,
+                env: { PATH: process.env.PATH, HOME: join(root, "operator"), CODEX_HOME: home },
+                stdio: "ignore",
+                timeout: 30_000,
+              },
+            );
+            return true;
+          } catch {
+            return false;
+          }
+        };
+        expect(run("echo x > ok.txt")).toBe(true);
+        expect(existsSync(join(cwd, "ok.txt"))).toBe(true);
+        expect(run(`mkdir ${CODEX_PROJECT_DIR}`)).toBe(false);
+        expect(run(`ln -s . ${CODEX_PROJECT_DIR}`)).toBe(false);
+        mkdirSync(join(cwd, CODEX_PROJECT_DIR));
+        expect(run(`echo x > ${CODEX_PROJECT_DIR}/config.toml`)).toBe(false);
+        expect(existsSync(join(cwd, CODEX_PROJECT_DIR, "config.toml"))).toBe(false);
+      },
+      60_000,
+    );
+  },
+);
 
 describe("codexSeatConfig", () => {
   it("gives FLIGHT full filesystem and network authority without changing the standard profile", () => {

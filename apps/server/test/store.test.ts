@@ -116,6 +116,43 @@ describe("Store", () => {
     expect(rows.get("empty")).toEqual([]);
   });
 
+  it("reads a branch's newest PR as a number and a state only", () => {
+    const pr = (number: number, branch: string, state: "open" | "closed" | "merged") => ({
+      repoId: "r",
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch,
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: 1,
+      updatedAt: 1,
+      mergedAt: null,
+      headSha: "sha",
+      mergeCommitSha: null,
+      mergeable: null,
+      author: "a",
+      assignees: [],
+      checks: [],
+      closingIssues: [],
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+    });
+    store.upsertPullRequests(
+      "r",
+      [pr(3, "feature/x", "closed"), pr(7, "feature/x", "open"), pr(5, "feature/y", "merged")],
+      1,
+    );
+    expect(store.pullRequestOfBranch("r", "feature/x")).toEqual({ number: 7, state: "open" });
+    expect(store.pullRequestOfBranch("r", "feature/y")).toEqual({ number: 5, state: "merged" });
+    expect(store.pullRequestOfBranch("r", "feature/none")).toBeNull();
+    expect(store.pullRequestOfBranch("other", "feature/x")).toBeNull();
+  });
+
   it("partitions batched pull requests and reuses a prepared statement", () => {
     const pr = (repoId: string, number: number) => ({
       repoId,
@@ -3333,6 +3370,37 @@ describe("test lock history", () => {
     store.addLockHold({ ...h, since: 5000, queuedAt: 4500 });
     store.deleteLockHolds("r1", 6000);
     expect(store.lockRuns(0)[0]).toMatchObject({ queuedAt: 4500, endedAt: 6000, outcome: "freed" });
+  });
+
+  it("keeps a review run's wrapped (done) locked call as a hub receipt with no pass claimed (#1411)", () => {
+    const sha = "a".repeat(40);
+    const id = store.requestReview({
+      authorRunId: "author",
+      repoId: "repo",
+      seatId: "retro",
+      prNumber: 7,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 100,
+    });
+    if (id === null) throw new Error("no id");
+    store.setReviewState(id, ["queued"], "starting", { at: 110 });
+    store.setReviewState(id, ["starting"], "running", { at: 120, runId: "rev-run" });
+    const h = {
+      runId: "rev-run",
+      seatId: "retro",
+      command: "pnpm -s vitest run 2>&1 | tail -20",
+      toolUseId: "one",
+      since: 1000,
+    };
+    store.addLockHold(h);
+    store.deleteLockHold("rev-run", "one", 2000, undefined);
+    const receipts = store.qaCheckReceipts("rev-run", sha);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({ command: h.command, ok: null, exitCode: null });
+    expect(receipts[0]?.evidence).toContain("tool done");
   });
 
   it("records the Post hook event as pass or fail, and a failed call fails the whole hold", () => {

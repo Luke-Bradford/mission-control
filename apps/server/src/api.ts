@@ -248,6 +248,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
+import type { DesignPreviews } from "./design-previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -257,7 +258,7 @@ import {
   setExternalMergeHold,
   setExternalPrControl,
 } from "./external-pr-control.ts";
-import { readExternalSubject } from "./external-reviews.ts";
+import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -286,7 +287,7 @@ import {
   useApproval,
 } from "./flight-approvals.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
-import type { CheckRecorder } from "./guard/check-runs.ts";
+import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { rereadDenial } from "./guard/rereads.ts";
@@ -462,6 +463,8 @@ export interface AppDeps {
   previews?: PreviewManager;
   /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
   previewRepoId?: RepoId;
+  /** The hub's design previews (a branch's built app, shown with Demo data); absent on preview hubs. */
+  designPreviews?: DesignPreviews;
   /** A child preview reports browser activity to its parent without exposing an operator token. */
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
@@ -533,7 +536,9 @@ export interface AppDeps {
   supervisor?: Supervisor;
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
   engine?: Pick<Engine, "onOperatorMessage" | "status"> &
-    Partial<Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold">>;
+    Partial<
+      Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold" | "reconcileRun">
+    >;
   /** The Update button (`update.ts`); absent: version says why, and update answers 409. */
   updater?: Updater;
   /** The per-run tokens that authorise `/mcp`; absent: the endpoint is not served. */
@@ -606,6 +611,11 @@ const MessageBody = z.strictObject({
     .max(COMMS_MESSAGE_MAX)
     .refine((t) => t.trim() !== "", "must not be blank"),
   interrupt: z.boolean().optional(),
+  /**
+   * The seat question this text answers (a Needs-you reply to an ask item names it). Only then does
+   * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
+   */
+  question: z.number().int().positive().optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -1196,6 +1206,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
+  // A cross-site no-cors GET (an <img>, fetch with
+  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
+  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
+  // callers that send no header (the guard hook, curl) are unaffected. A design preview runs on
+  // another port of this host, which browsers call same-site, so that is refused too; the HUD's
+  // own requests are same-origin. The matched route is
+  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
+  app.addHook("onRequest", async (req, reply) => {
+    const path = req.routeOptions.url ?? req.url;
+    if (
+      path.startsWith("/api/") &&
+      (req.headers["sec-fetch-site"] === "cross-site" ||
+        req.headers["sec-fetch-site"] === "same-site")
+    ) {
+      return reply.code(403).send({ error: "cross-site request refused" });
+    }
+  });
+
   // CSRF defence (there is no login, so these are the only cross-site guard): a cross-site form
   // cannot send application/json, and a cross-site fetch carries a foreign Origin.
   app.addHook("onRequest", async (req, reply) => {
@@ -1224,18 +1252,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       !isLocalOrigin(origin)
     ) {
       return reply.code(403).send({ error: "cross-origin request refused" });
-    }
-  });
-
-  // A cross-site no-cors GET (an <img>, fetch with
-  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
-  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
-  // callers that send no header (the guard hook, curl) are unaffected. The matched route is
-  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
-  app.addHook("onRequest", async (req, reply) => {
-    const path = req.routeOptions.url ?? req.url;
-    if (path.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site") {
-      return reply.code(403).send({ error: "cross-site request refused" });
     }
   });
 
@@ -2319,9 +2335,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
             if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
-            lock?.release(key, failed);
-            await checks?.end(key, !failed);
             const command = body.data.tool_input?.command;
+            // A call that pipes or chains past the check (`pnpm -s test; echo $?`, `| tail`) ends
+            // with the last command's status, not the check's: it is `done`, never `pass` (#1411).
+            const wrapped = typeof command === "string" && !plainCall(command);
+            // the hook sends a null exit code for an interrupted or background call: unknown, so
+            // it neither passes the lock row nor counts toward the push gate
+            const unknown = body.data.exit_code === null;
+            lock?.release(key, failed ? true : wrapped || unknown ? undefined : false);
+            await checks?.end(key, !failed && !unknown, body.data.exit_code ?? null);
             const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
             if (
               fullAccess &&
@@ -3397,6 +3419,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return deps.previews?.list() ?? [];
       });
 
+      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you lists previews)
+      api.get("/design-previews", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        return deps.designPreviews?.list() ?? [];
+      });
+
+      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you opens one)
+      api.post<{ Params: { ticket: string } }>(
+        "/design-previews/:ticket/open",
+        async (req, reply) => {
+          if (
+            operatorToken !== undefined &&
+            !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+          )
+            return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+          const ticket = /^[1-9]\d*$/.test(req.params.ticket) ? Number(req.params.ticket) : 0;
+          const view = ticket === 0 ? null : ((await deps.designPreviews?.open(ticket)) ?? null);
+          if (view === null)
+            return reply.code(404).send({ error: "No stored preview for this ticket." });
+          return view;
+        },
+      );
+
       // Reader: apps/server/src/main.ts#PreviewManager (child-preview idle activity)
       api.post<{ Params: { pr: string } }>("/previews/:pr/activity", async (req, reply) => {
         const pr = /^[1-9]\d*$/.test(req.params.pr) ? Number(req.params.pr) : 0;
@@ -4228,9 +4277,58 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         MessageBody,
         async (sup, id, b) => {
           const runId = sup.seat(id)?.runId ?? null;
+          // A reply that names a passed question whose run was set aside is that run's answer, not
+          // the run now on the seat's: the text waits in the run's inbox, only that question
+          // closes, and the engine wakes the run. Nothing is written to the run on the seat.
+          const named = b.question === undefined ? null : store.question(b.question);
+          if (b.question !== undefined && (named === null || named.answeredAt !== null)) {
+            throw new SupervisorError(409, "That question is already closed.");
+          }
+          if (named !== null && named.agentId !== id) {
+            throw new SupervisorError(409, "That question belongs to another seat.");
+          }
+          const parked =
+            named !== null &&
+            named.agentId === id &&
+            named.passedAt !== null &&
+            named.runId !== runId &&
+            store.run(named.runId)?.endedAt === null &&
+            store.run(named.runId)?.loop?.aside != null
+              ? named
+              : undefined;
+          if (parked !== undefined) {
+            const asideRun = store.run(parked.runId);
+            try {
+              await sendComms(
+                {
+                  store,
+                  crew: commsCrew,
+                  knownSecrets: deps.knownSecrets ?? (async () => []),
+                  now,
+                },
+                COMMS_CAPCOM,
+                {
+                  to: id,
+                  text: b.text,
+                  ref: asideRun?.ticket ?? undefined,
+                  targetRunId: parked.runId,
+                },
+              );
+            } catch (e) {
+              throw new SupervisorError(
+                400,
+                e instanceof Error ? e.message : "Comms message refused.",
+              );
+            }
+            store.answerQuestion(parked.id, now());
+            bus.emit("attention");
+            await deps.engine?.reconcileRun?.(parked.runId);
+            return { ok: true };
+          }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
-            await sendComms(
+            let delivered = false;
+            const sent = await sendComms(
               {
                 store,
                 crew: commsCrew,
@@ -4239,6 +4337,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 seatSender: false,
                 notify: async (seatId, text) => {
                   await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                  delivered = true;
                 },
               },
               COMMS_CAPCOM,
@@ -4249,6 +4348,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ref: ticket ?? undefined,
               },
             );
+            // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
+            if (delivered) store.markCommsInboxRead(id, [sent.id]);
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
@@ -4988,7 +5089,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pr.state !== "open" ||
           !sha ||
           repo.autonomy !== "merge" ||
-          store.runsOnBranch(repoId, pr.branch).some((run) => run.reviewId == null)
+          branchOwned(config, store, repoId, pr.branch, pr.ticket)
         ) {
           reply.code(404).send({ error: "no external PR is waiting here" });
           return null;
@@ -5503,7 +5604,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ?? reply.code(404).send({ error: "Item is no longer open." });
       });
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
+      // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>
         attentionItems(
           config,
@@ -5530,7 +5631,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("attention");
         return { ok: true };
       });
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
+      // Reader: apps/web/src/flight/HeldNeeds.tsx (the release button)
       api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
         if (!NoBody.safeParse(req.body).success)
           return reply.code(400).send({ error: "Expected an empty object." });
@@ -5727,7 +5828,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards)
+      // Reader: apps/web/src/pages/Needs.tsx (the person cards)
       api.get(
         "/notifications",
         async (): Promise<NotificationsView> => notificationsView(config, store, now()),

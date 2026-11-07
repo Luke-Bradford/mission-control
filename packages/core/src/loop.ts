@@ -147,6 +147,8 @@ export const CI_EXCERPT_MAX = 8192;
 
 /** The `cardFor` mark of a phase and epoch: the card move for it is done. */
 export const cardMark = (phase: string, epoch: number): string => `${phase}:${epoch}`;
+/** The mark's phase for a review with blocking findings: the card is back In progress. */
+export const REWORK_PHASE = "rework";
 /** The key of a run's blocked note for one epoch. */
 export const blockedNoteKey = (runId: string, epoch: number): string => `blocked:${runId}:${epoch}`;
 
@@ -510,6 +512,13 @@ export const asideEventText = (call: string): string =>
 export const asideInCiEventText = (call: string): string =>
   `in CI; ${call} is free for its next ticket`;
 /** A run still being built leaves its seat for rework due on another of the seat's PRs. */
+export const asideForAnswerEventText = (call: string): string =>
+  `waiting on the operator's answer; ${call} is free for its next ticket and this one comes back once answered`;
+/** The line a run gets when its parked question is answered: the answer itself waits in its Comms inbox. */
+export const answeredLineText =
+  "The operator answered your question. The answer is in your Comms inbox: read it and carry on with the ticket.";
+export const answerLineKey = (runId: string, questionId: number): string =>
+  `answer:${runId}:${questionId}`;
 export const asideForReworkEventText = (call: string): string =>
   `set aside for rework on another PR; ${call} comes back after it`;
 export const wokenEventText = (call: string): string => `back to ${call} for rework`;
@@ -629,6 +638,11 @@ export interface LoopSnapshot {
   };
   /** The run's session has a review seat, so the run may leave its seat in CI or review. */
   asideOk: boolean;
+  /**
+   * The run has an open question that waits on the operator. Its seat is not held for the answer:
+   * the run is parked off the seat, which takes the next ticket, and the run comes back once answered.
+   */
+  operatorAsk?: boolean;
   /** Another run of this seat, set aside, has rework due (findings, a failed check): it goes first. */
   reworkDue?: boolean;
   /** The latest evidence. */
@@ -693,7 +707,8 @@ export type LoopAction =
   | { kind: "send"; key: string; text: string }
   | { kind: "ci-excerpt"; key: string; sha: string; again?: boolean }
   | { kind: "rerun-ci"; sha: string }
-  | { kind: "move-card"; column: MoveColumn }
+  /** `mark`: the `cardFor` the move sets when it is not the phase's (rework is a state of review). */
+  | { kind: "move-card"; column: MoveColumn; mark?: string }
   | { kind: "note"; key: string; noteKind: LoopNoteKind; text: string }
   | { kind: "clear-note"; key: string }
   | { kind: "end-run" }
@@ -702,7 +717,7 @@ export type LoopAction =
   | { kind: "request-review"; sha: string; attempt: number }
   | { kind: "supersede-review"; reviewId: number }
   | { kind: "pr-body"; reviewId: number }
-  | { kind: "set-aside" }
+  | { kind: "set-aside"; displaced?: true }
   | { kind: "wake" }
   | { kind: "update-branch"; mainSha: string }
   | { kind: "mark-ready" }
@@ -741,6 +756,7 @@ function missingWhy(
   return `PR #${pr.number} has ${pr.headSha === null ? "no head" : `head ${sha7(pr.headSha)}`}, not ${sha7(pushed.sha)}`;
 }
 
+const READY = "Ready" satisfies MoveColumn;
 const IN_PROGRESS = "In progress" satisfies MoveColumn;
 const IN_REVIEW = "In review" satisfies MoveColumn;
 const BLOCKED = "Blocked" satisfies MoveColumn;
@@ -948,8 +964,14 @@ function stateStep(s: LoopSnapshot): Step {
         : capReason !== null
           ? { kind: "budget", reason: capReason, ended: true }
           : { kind: "ended", reason: `run ended (${s.ended.reason})`, ended: true };
+    // A park that ended with blocking findings owes its card the Ready move even if the park
+    // already moved it to Blocked: clear the mark so desiredStep plans it. A budget stop stays, and so
+    // does a closed PR (nobody wants that work restarted).
+    const reviewed = reviewView(s, loop);
+    const owesReady =
+      parked.kind !== "budget" && s.pr?.state === "open" && reviewed.blocked && !reviewed.waived;
     return {
-      loop: { ...loop, phase: "parked", parked },
+      loop: { ...loop, phase: "parked", parked, ...(owesReady ? { cardFor: null } : {}) },
       actions:
         capReason !== null && loop.parked?.kind !== "budget"
           ? [{ kind: "event", text: parkedEventText(capReason) }]
@@ -1441,17 +1463,54 @@ function asideDue(s: LoopSnapshot, loop: RunLoop): boolean {
   );
 }
 
+/** A line the engine owes the run (the answer to its parked question) goes before it leaves its seat again. */
+function pendingLineDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  return !loop.aside && !!loop.pendingLine && !(loop.pendingLine.key in s.claimed);
+}
+
+/** Whether the run being built leaves its seat to wait for the operator's answer, not hold the seat idle. */
+function parkOnPersonDue(s: LoopSnapshot, loop: RunLoop): boolean {
+  const { seat } = s;
+  return (
+    s.operatorAsk === true &&
+    seat.openQuestion &&
+    (loop.phase === "working" || loop.phase === "ci" || loop.phase === "review") &&
+    !loop.aside &&
+    s.ended === null &&
+    seat.holdsRun &&
+    seat.state === "idle" &&
+    !seat.inTurn
+  );
+}
+
 /**
- * Whether the run being built leaves its seat at this turn end because rework is due on another of
- * the seat's runs. Its worktree is kept as it is; it comes back once the rework is out of the way.
+ * Whether a run that has pushed holds a newer commit the push gate refused (in ci with a refusal
+ * recorded, or parked as refused or stuck). A fresh commit in ci whose push is not yet tried is not. The commit stays in its worktree, unpushed; the seat's other run may hold
+ * the rework that fixes the refusal.
+ */
+function refusedPush(s: LoopSnapshot, loop: RunLoop): boolean {
+  return (
+    s.pushed !== null &&
+    s.headCommit !== null &&
+    s.headCommit !== s.pushed.sha &&
+    ((loop.phase === "ci" && loop.lastRefusal !== null) ||
+      (loop.phase === "parked" &&
+        (loop.parked?.kind === "refused" || loop.parked?.kind === STUCK_PARK)))
+  );
+}
+
+/**
+ * Whether the run leaves its seat at this turn end because rework is due on another of the seat's
+ * runs: one being built, or one that pushed and holds a refused newer commit. Its worktree is kept
+ * as it is; it comes back once the rework is out of the way.
  */
 function displaceDue(s: LoopSnapshot, loop: RunLoop): boolean {
   const { seat } = s;
   return (
     s.reworkDue === true &&
-    // a run that has been pushed is rework itself (or in flight); two reworks must not displace each other
-    s.pushed === null &&
-    loop.phase === "working" &&
+    // a run in review or working on a pushed sha is rework itself (or in flight); two reworks must
+    // not displace each other
+    ((s.pushed === null && loop.phase === "working") || refusedPush(s, loop)) &&
     !loop.aside &&
     s.ended === null &&
     seat.holdsRun &&
@@ -1498,7 +1557,13 @@ function dueLine(s: LoopSnapshot, loop: RunLoop): LoopAction | null {
   const working = loop.phase === "working";
   const reporting = working || loop.phase === "review";
 
-  if (working && !loop.aside && loop.pendingLine && free(loop.pendingLine.key)) {
+  // (in ci or review only the line that carries an answer to a parked question is ever pending)
+  if (
+    (working || loop.phase === "ci" || loop.phase === "review") &&
+    !loop.aside &&
+    loop.pendingLine &&
+    free(loop.pendingLine.key)
+  ) {
     return { kind: "send", key: loop.pendingLine.key, text: loop.pendingLine.text };
   }
 
@@ -1638,10 +1703,26 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
   const notes = loop.phase === "done" ? new Map<string, DesiredNote>() : desiredNotes(s, loop);
 
   if (loop.phase !== "done") {
+    // A review with blocking findings is rework: the card goes back In progress with its seat (In
+    // review means a review is queued or running). An ended run's reviewed card goes to Ready.
+    const reviewed = rv.blocked && !rv.waived;
+    const rework = loop.phase === "review" && s.ended === null && reviewed;
     const column =
-      loop.phase === "review" ? IN_REVIEW : loop.phase === "parked" ? BLOCKED : IN_PROGRESS;
-    if (loop.cardFor !== cardMark(loop.phase, loop.epoch))
-      actions.push({ kind: "move-card", column });
+      loop.phase === "review"
+        ? rework
+          ? IN_PROGRESS
+          : IN_REVIEW
+        : loop.phase === "parked"
+          ? loop.parked?.ended &&
+            loop.parked.kind !== "budget" &&
+            s.pr?.state === "open" &&
+            reviewed
+            ? READY
+            : BLOCKED
+          : IN_PROGRESS;
+    const mark = rework ? cardMark(REWORK_PHASE, loop.epoch) : cardMark(loop.phase, loop.epoch);
+    if (loop.cardFor !== mark)
+      actions.push(rework ? { kind: "move-card", column, mark } : { kind: "move-card", column });
   }
   for (const [key, { noteKind, text }] of notes) {
     if (!s.openNotes.includes(key)) actions.push({ kind: "note", key, noteKind, text });
@@ -1698,9 +1779,11 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
         ? { kind: "wake" }
         : updateSha !== null
           ? { kind: "update-branch", mainSha: updateSha }
-          : asideDue(s, loop) || displaceDue(s, loop)
-            ? { kind: "set-aside" }
-            : dueLine(s, loop);
+          : !pendingLineDue(s, loop) && displaceDue(s, loop)
+            ? { kind: "set-aside", displaced: true }
+            : !pendingLineDue(s, loop) && (asideDue(s, loop) || parkOnPersonDue(s, loop))
+              ? { kind: "set-aside" }
+              : dueLine(s, loop);
     if (line !== null) actions.push(line);
   }
   return actions;
@@ -1737,11 +1820,18 @@ export function reconcile(s: LoopSnapshot): { loop: RunLoop; actions: LoopAction
     } else if (s.ended === null) {
       // (a session with no review seat has no review to wait for: the run comes back)
       // (working: a conflicted merge of main, or CI failed after one, waits on the seat)
-      loop.aside.wake ||=
-        (loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
-        loop.phase === "working" ||
-        !s.asideOk ||
-        fixDue(s, loop);
+      // (a run parked on the operator's question waits for the answer, whatever else holds; once
+      // it is answered the run comes back in any phase)
+      const asked = loop.aside.ask !== undefined;
+      const held = s.operatorAsk === true && (asked || loop.phase === "working");
+      if (!held) {
+        loop.aside.wake ||=
+          asked ||
+          (loop.phase === "parked" && !isDecisionPark(loop.parked?.kind)) ||
+          loop.phase === "working" ||
+          !s.asideOk ||
+          fixDue(s, loop);
+      }
     }
   }
   return { loop, actions: [...step.actions, ...desiredStep(s, loop)] };

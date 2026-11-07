@@ -2,6 +2,9 @@ import { createServer, request as httpRequest, type Server } from "node:http";
 import { connect } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
 import { hubTarget, startHudProxy } from "../src/flight/hud-proxy.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 const open: Array<{ close(): unknown }> = [];
 afterEach(async () => {

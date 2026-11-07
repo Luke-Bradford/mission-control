@@ -144,6 +144,14 @@ describe("PrEvidence capture", () => {
     expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB.slice(0, 0) })).toBeNull();
   });
 
+  it("keeps a PR in draft when it adds a page no screenshot can show", () => {
+    const t = setup();
+    const paths = ["apps/web/src/pages/Inbox.tsx", "apps/web/src/inbox/List.tsx"];
+    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths })).toContain(
+      "pages/Inbox.tsx has no screenshot address",
+    );
+  });
+
   it("does not capture a head twice, and a new head is captured afresh", async () => {
     const t = setup();
     await Promise.all([
@@ -346,6 +354,26 @@ describe("PrEvidence gate", () => {
     expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
   });
 
+  it("blames no page when the capture was stopped mid-render", async () => {
+    let rendering!: () => void;
+    const entered = new Promise<void>((r) => {
+      rendering = r;
+    });
+    const logged: string[] = [];
+    const t = setup({
+      render: async () => {
+        rendering();
+        return new Promise(() => {});
+      },
+      log: (line) => logged.push(line),
+    });
+    const going = t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    await entered;
+    await t.evidence.stop();
+    await going;
+    expect(logged).toEqual(["#7: screenshot capture failed: the hub is shutting down"]);
+  });
+
   it("leaves another repo's PR alone", async () => {
     const t = setup();
     const other = { repoId: "other", pr: 7, sha: HEAD, paths: WEB };
@@ -371,7 +399,7 @@ describe("PrEvidence gate", () => {
     await t.evidence.ensure({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
     const text = t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB });
     expect(text).toContain("board");
-    expect(text).toContain("main side: page did not render");
+    expect(text).toContain("board page, light scheme, main side: page did not render");
     // another head has no failure to report
     expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: NEXT, paths: WEB })).not.toContain(
       "capture failed",
