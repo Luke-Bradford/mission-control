@@ -402,6 +402,24 @@ files in `~/Library/Logs/mission-control/` are preserved; routine hub logging no
 `server.log` there. If you installed the older newsyslog entry that sends this hub SIGTERM, remove
 that entry: the built-in rotation replaces it and does not need a service restart.
 
+### Budget brake
+
+When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
+stops dealing and starting new developer and review runs on that account. It is the same projection
+the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/budget-brake.ts`
+is the one function for both.
+
+- Stopped: the engine's deal, the review start, `start_seat`, and the supervisor's `startRun`
+  (refusal "Not started: the budget brake is on ..." with the projection and the reset time). An
+  operator's explicit start and a read-only reader pass.
+- Not stopped: FLIGHT's own seat, runs already in progress (they finish their step), resumes and
+  rework wakes.
+- Needs you shows one hub alert, `budget-brake`, naming each braked account, its projection, its
+  reset and when the brake lifts. The scheduler keeps it current after each usage reading and on the
+  minute tick.
+- It lifts by itself: when the projection falls back to 100% or under, or the week resets. There is
+  nothing to configure and no GitHub write.
+
 ### FLIGHT runaway breaker
 
 FLIGHT has no hourly, per-run or per-ticket caps on what it does; it makes judgement calls. One

@@ -34,6 +34,7 @@ import {
   briefSavedDecision,
   briefSavedText,
   briefTooLongText,
+  budgetBrakeText,
   CATCH_UP_KINDS,
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
@@ -331,6 +332,7 @@ import {
   releaseHold,
 } from "../attention-holds.ts";
 import { activeAway } from "../away.ts";
+import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
@@ -1572,6 +1574,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (accountAtStop(config, store, cfg.accountId, at)) {
       return fail(accountStoppedText(call, cfg.accountId));
     }
+    const brake = budgetBrake(config, store, cfg.accountId, at);
+    if (brake !== null) return fail(budgetBrakeText(call, brake, config.operator.timezone));
     // The card as it is now: the cached board is only refreshed by the poll, so a ticket closed or
     // moved since would otherwise be started on its old column. A card that cannot be read fails closed.
     let card: BoardItem | undefined;

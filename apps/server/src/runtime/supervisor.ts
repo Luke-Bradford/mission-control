@@ -41,6 +41,7 @@ import { basename, dirname, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
   BLOCKING_SEVERITIES,
+  budgetBrakeText,
   CANNOT_START,
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
@@ -132,6 +133,7 @@ import {
 } from "@mc/core";
 import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
+import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli-update.ts";
@@ -3460,6 +3462,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           awayQuotaReserve(config, store, info.seat.accountId, now()))
       ) {
         throw new SupervisorError(422, AWAY_QUOTA_REFUSED);
+      }
+      // The budget brake stops a new run; an operator's explicit start and a reader pass.
+      const brake = budgetBrake(config, store, info.seat.accountId, now());
+      if (brake !== null && !readOnly && !opts?.operator) {
+        throw new SupervisorError(
+          422,
+          budgetBrakeText(call(info), brake, config.operator.timezone),
+        );
       }
       // A detached reader does not compete for the ticket or its assignee.
       const refusal = eligibleToStart({

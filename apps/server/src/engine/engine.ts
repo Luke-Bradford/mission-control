@@ -183,7 +183,13 @@ import {
   UPDATE_UP_TO_DATE,
   type UpdateBranchResult,
 } from "./publish.ts";
-import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
+import {
+  accountAtStop,
+  accountHoldsNewWork,
+  isTransientStart,
+  maxOpenRunsOf,
+  seatMayTake,
+} from "./queue.ts";
 import { hardRulesBy, type RepoRulesError } from "./rules.ts";
 import { overrunText, tickLogOf } from "./ticks.ts";
 
@@ -437,7 +443,7 @@ export function reviewerOf(
   const pool = ofRole.length > 0 ? ofRole : seats;
   if (avail === undefined) return pool[0] ?? null;
   const notStopped = pool.filter(
-    (x) => !accountAtStop(config, avail.store, x.accountId, avail.now),
+    (x) => !accountHoldsNewWork(config, avail.store, x.accountId, avail.now),
   );
   const busy = new Set(
     avail.store.reviewsIn(["starting", "running"]).map((review) => review.seatId),
@@ -2624,7 +2630,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const heldRun = held === null ? null : store.run(held);
       const free = heldRun === null || heldRun.endedAt !== null;
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
-      if (accountAtStop(config, store, seat.accountId, now())) continue;
+      if (accountHoldsNewWork(config, store, seat.accountId, now())) continue;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
         if (!reviewWanted(row)) {
           dropReview(row);
