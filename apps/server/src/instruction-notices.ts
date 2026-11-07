@@ -1,4 +1,4 @@
-import { COMMS_CAPCOM, type InstructionMutation, seatDef } from "@mc/core";
+import { COMMS_MC, type InstructionMutation, seatDef } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
 import { sendComms } from "./comms.ts";
 import type { CcConfig } from "./config.ts";
@@ -44,7 +44,8 @@ export function flushInstructionNotices(deps: NoticeDeps): Promise<Map<string, D
           .flatMap((s) => s.seats)
           .find((s) => seatDef(s).loop === "watch");
         if (notice.by === "flight" && !flight) continue;
-        const from = notice.by === "flight" ? flight!.id : COMMS_CAPCOM;
+        // the notice is the hub's record of a change; FLIGHT's own change is FLIGHT's
+        const from = notice.by === "flight" ? flight!.id : COMMS_MC;
         try {
           const message = await sendComms(
             {
@@ -53,6 +54,7 @@ export function flushInstructionNotices(deps: NoticeDeps): Promise<Map<string, D
               knownSecrets: async () => [],
               now: deps.now,
               seatSender: false,
+              senderKind: notice.by === "flight" ? "flight" : "hub",
             },
             from,
             {

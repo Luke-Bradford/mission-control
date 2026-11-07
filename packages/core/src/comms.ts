@@ -57,6 +57,9 @@ export interface CommsReaction {
   reason: string | null;
   at: number;
 }
+/** Who a stored message came from, set by the hub from how the request was made, never from the text. */
+export const COMMS_SENDER_KINDS = ["operator", "controller", "flight", "seat", "hub"] as const;
+export type CommsSenderKind = (typeof COMMS_SENDER_KINDS)[number];
 export interface CommsMessage {
   id: string;
   at: number;
@@ -71,6 +74,8 @@ export interface CommsMessage {
   reactions: CommsReaction[];
   pinned?: boolean;
   operator: boolean;
+  /** Null on a message stored before senders were recorded. */
+  senderKind?: CommsSenderKind | null;
 }
 /** One agent's Comms figures for the nav: messages in the last 24 hours, with its contacts, and the unread counts. */
 export interface CommsCount {

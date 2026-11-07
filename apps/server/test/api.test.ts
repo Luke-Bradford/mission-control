@@ -1055,6 +1055,7 @@ describe("Comms API", () => {
           label: null,
           ref: null,
           text: "three",
+          senderKind: null,
         },
         {
           id: second.id,
@@ -1064,6 +1065,7 @@ describe("Comms API", () => {
           label: null,
           ref: null,
           text: "two",
+          senderKind: null,
         },
         {
           id: first.id,
@@ -1073,6 +1075,7 @@ describe("Comms API", () => {
           label: "question",
           ref: "PR 1",
           text: "one",
+          senderKind: null,
         },
       ]);
       const after = await comms.inject({

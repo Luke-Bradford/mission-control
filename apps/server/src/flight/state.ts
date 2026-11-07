@@ -11,6 +11,7 @@ import {
   areaLabelsOf,
   type BoardItem,
   COMMS_CAPCOM,
+  COMMS_CONTROLLER,
   carriedFrom,
   claimedByOther,
   clockHm,
@@ -747,15 +748,25 @@ function wakeInputs(i: {
   const fresh = wakeItems({ items: i.items })
     .filter((x) => seen[itemFactId(x)] !== itemHash(x))
     .map(itemFactId);
+  const flightId = i.flightId;
   const operator =
-    i.flightId === null
+    flightId === null
       ? []
-      : i.store.unreadCommsFrom(COMMS_CAPCOM, i.flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS);
+      : // the controller's lines wake FLIGHT as the operator's do
+        [COMMS_CAPCOM, COMMS_CONTROLLER]
+          .flatMap((from) =>
+            i.store.unreadCommsFrom(from, flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS),
+          )
+          .sort((a, b) => Number(a) - Number(b));
   // read by FLIGHT and still unanswered after its turn: owed until it replies
   const owed =
-    i.flightId === null
+    flightId === null
       ? []
-      : i.store.owedCommsFrom(COMMS_CAPCOM, i.flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS);
+      : [COMMS_CAPCOM, COMMS_CONTROLLER]
+          .flatMap((from) =>
+            i.store.owedCommsFrom(from, flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS),
+          )
+          .sort((a, b) => Number(a) - Number(b));
   // a seat left idle by the slow pace is the operator's wish, not a fault to wake FLIGHT about
   const idle = i.pace ? undefined : idleSeats(i, waits, rules, fit);
   return idle === undefined

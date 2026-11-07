@@ -25,6 +25,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_CHATTER_WINDOW_MS,
+  COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_LABELS,
@@ -38,8 +39,10 @@ import {
   COMMS_TICKET,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
+  CONTROLLER_HEADER,
   type CommsCount,
   type CommsMetricsView,
+  type CommsSenderKind,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -501,6 +504,8 @@ export interface AppDeps {
   codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
+  /** The per-boot controller token: the controller's own key, which labels its messages. */
+  controllerToken?: string;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
@@ -1331,6 +1336,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return reply.code(403).send({ error: SEAT_REFUSED });
   });
 
+  // The controller's own key. A request that carries it passes where the operator token does (it
+  // grants nothing new) and is marked, so what it sends is recorded as the controller's.
+  const controllerRequests = new WeakSet<FastifyRequest>();
+  if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
+    const { controllerToken, operatorToken: held } = deps;
+    app.addHook("onRequest", async (req) => {
+      const given = req.headers[CONTROLLER_HEADER];
+      delete req.headers[CONTROLLER_HEADER];
+      if (!operatorTokenMatches(controllerToken, given)) return;
+      controllerRequests.add(req);
+      req.headers[OPERATOR_HEADER] = held;
+    });
+  }
+  /**
+   * Who a request's message is from, judged by how it was made and never by its text: FLIGHT's
+   * operator tool, the controller's credential, or a person using the app.
+   */
+  /** Who reacts or pins: FLIGHT through its operator tool, the controller, or the operator. */
+  const commsActor = (req: FastifyRequest): string => commsSender(req).from;
+  const commsSender = (req: FastifyRequest): { from: string; kind: CommsSenderKind } => {
+    const actor = flightActor(req);
+    if (actor !== null) return { from: actor.seatId, kind: "flight" };
+    if (controllerRequests.has(req)) return { from: COMMS_CONTROLLER, kind: "controller" };
+    return { from: COMMS_CAPCOM, kind: "operator" };
+  };
+
   const operatorToken = deps.operatorToken;
   if (operatorToken !== undefined) {
     app.addHook("onRequest", async (req, reply) => {
@@ -1838,6 +1869,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply.code(400).send({ error: "unknown PR thread" });
           prThread = store.pullRequest(repo.id, Number(number))?.ticket ?? `${repo.id}#${number}`;
         }
+        const sender = commsSender(req);
         try {
           const message = await sendComms(
             {
@@ -1846,10 +1878,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
+              senderKind: sender.kind,
               ...(prThread === undefined ? {} : { ticket: prThread }),
               notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
             },
-            COMMS_CAPCOM,
+            sender.from,
             body.data,
           );
           bus.emit("agents");
@@ -1875,11 +1908,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           const reaction = reactComms(
             store,
-            COMMS_CAPCOM,
+            commsActor(req),
             req.params.id,
             body.data.reaction,
             body.data.reason,
             now(),
+            true,
           );
           bus.emit("agents");
           bus.emit("attention");
@@ -1896,7 +1930,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (commsMessageNumber(req.params.id) === null)
             return reply.code(400).send({ error: "invalid Comms message id" });
           try {
-            pinComms(store, COMMS_CAPCOM, req.params.id, pinned, now());
+            pinComms(store, commsActor(req), req.params.id, pinned, now());
             bus.emit("agents");
             return { pinned };
           } catch (e) {
@@ -4381,7 +4415,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       seatAction(
         "/seats/:id/message",
         MessageBody,
-        async (sup, id, b) => {
+        async (sup, id, b, req) => {
+          const sender = commsSender(req);
           const runId = sup.seat(id)?.runId ?? null;
           // A reply that names a passed question whose run was set aside is that run's answer, not
           // the run now on the seat's: the text waits in the run's inbox, only that question
@@ -4411,8 +4446,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   crew: commsCrew,
                   knownSecrets: deps.knownSecrets ?? (async () => []),
                   now,
+                  senderKind: sender.kind,
                 },
-                COMMS_CAPCOM,
+                sender.from,
                 {
                   to: id,
                   text: b.text,
@@ -4441,12 +4477,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 knownSecrets: deps.knownSecrets ?? (async () => []),
                 now,
                 seatSender: false,
+                senderKind: sender.kind,
                 notify: async (seatId, text) => {
                   await sup.message(seatId, text, { interrupt: b.interrupt === true });
                   delivered = true;
                 },
               },
-              COMMS_CAPCOM,
+              sender.from,
               {
                 to: id,
                 text: b.text,
@@ -5498,16 +5535,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
           }
           let commsError: unknown = null;
+          const sender = commsSender(req);
           const result = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
             kinds: [kind],
             beforeLift: async () => {
               try {
-                await sendComms({ store, crew: commsCrew, knownSecrets, now }, COMMS_CAPCOM, {
-                  to: run.agentId,
-                  text: body.data.text,
-                  ref: run.ticket ?? undefined,
-                  targetRunId: run.id,
-                });
+                await sendComms(
+                  { store, crew: commsCrew, knownSecrets, now, senderKind: sender.kind },
+                  sender.from,
+                  {
+                    to: run.agentId,
+                    text: body.data.text,
+                    ref: run.ticket ?? undefined,
+                    targetRunId: run.id,
+                  },
+                );
                 return true;
               } catch (e) {
                 commsError = e;
