@@ -5598,6 +5598,23 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
       expect(Object.keys(flightWaits(store))).toEqual(["PR 1443"]);
     });
 
+    it.each([`pr:mc#7:${T0}`, `loop:engine:${T0}`, `mc#9:1559:${T0}`])(
+      "wait_on through the signal id of an ended wait on %s settles it",
+      (target) => {
+        recordFlightWait(store, target, { on: "x", until: T0 + MIN, at: T0 });
+        const sig = overs(T0 + 2 * MIN)[0];
+        expect(sig?.key).toBe(`${target}:${T0 + MIN}`);
+        markFlightSignalsShown(store, read(T0 + 2 * MIN), T0 + 2 * MIN);
+        recordFlightWait(store, `wait_over:${sig?.key}`, {
+          on: "x",
+          until: T0 + 30 * MIN,
+          at: T0 + 3 * MIN,
+        });
+        expect(overs(T0 + 4 * MIN)).toEqual([]);
+        expect(Object.keys(flightWaits(store))).toEqual([target]);
+      },
+    );
+
     it("is cleared in one pass for waits left behind, however many", () => {
       const waits: Record<string, { on: string; until: number; at: number }> = {};
       let target = "PR 1443";

@@ -921,11 +921,10 @@ export function flightWaits(store: Store): Record<string, FlightWait> {
  * waits on the original target again, so ending the wait never wraps the key in another `wait_over:`.
  */
 export const waitTargetOf = (target: string): string => {
-  const t = target.trim();
-  // only a wait_over id carries the times to strip: a reason's own key ends in a time that is part of it
-  return t.startsWith("wait_over:")
-    ? t.replace(/^(wait_over:)+/, "").replace(/(:\d{10,})+$/, "")
-    : t;
+  let t = target.trim();
+  // each wait_over: wrapped the key in the time its wait ended; the target's own trailing time stays
+  while (t.startsWith("wait_over:")) t = t.slice("wait_over:".length).replace(/:\d{10,}$/, "");
+  return t;
 };
 
 /** Keeps a wait; a later one on the same target replaces it. Entries a week past their time go. */
