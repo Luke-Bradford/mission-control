@@ -1526,8 +1526,12 @@ function buildAttentionItems(
     // restated: FLIGHT owes a new brief on a question the operator was already shown, so a
     // missed rebrief counts under the not-triaging alert rather than going quiet
     if (restated) {
+      // acked at or after the newest line (FLIGHT's dismiss acks): dealt with
+      if (item.acked) return { ...back, flightTriage: "handling" };
       if (!triaging) return { ...back, flightTriage: "down" };
-      const triageDueAt = item.at + FLIGHT_TRIAGE_WAIT_MS;
+      // a fresh window after FLIGHT restarts or the hub updates, as for any returned item
+      const triageDueAt =
+        Math.max(item.at, triage.liveSince, hubStartedAt ?? 0) + FLIGHT_TRIAGE_WAIT_MS;
       return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
     }
     // FLIGHT's own line to the operator: FLIGHT wrote it, so it is never work waiting on FLIGHT

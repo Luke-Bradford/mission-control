@@ -2840,9 +2840,34 @@ describe("messages are not Needs you", () => {
       }),
     ]);
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain(key);
+    const late = attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS);
+    expect(late.find((i) => i.key === key)).toMatchObject({
+      owner: "flight",
+      flightTriage: "missed",
+    });
+    // the reason for the clock: a missed rebrief is counted under the alert
+    expect(late.find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging?.keys).toContain(key);
+    // FLIGHT not triaging: counted as down
+    store.raiseNote({
+      key: FLIGHT_DOWN_NOTE_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId: "flight-1",
+      repoId: "shop-app",
+      text: "FLIGHT is down: it is parked.",
+      at: NOW - 10 * MIN,
+    });
+    expect(chatter().find((i) => i.key === key)?.flightTriage).toBe("down");
+    store.clearNote(FLIGHT_DOWN_NOTE_KEY, NOW);
+    // FLIGHT dismissing it (an ack past the newest line) clears it
+    store.ack([key], NOW);
+    expect(chatter().find((i) => i.key === key)?.flightTriage).toBe("handling");
+    expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).not.toContain(key);
     expect(
-      attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS).find((i) => i.key === key),
-    ).toMatchObject({ owner: "flight", flightTriage: "missed" });
+      attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS).find(
+        (i) => i.key === FLIGHT_NOT_TRIAGING_KEY,
+      ),
+    ).toBeUndefined();
     // briefed again, past the newest line: the operator's once more
     store.addBrief({
       key,
