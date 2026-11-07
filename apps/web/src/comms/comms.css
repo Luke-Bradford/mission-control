@@ -963,7 +963,7 @@ a.comms-ref {
   gap: var(--sp-2);
 }
 
-@container (min-width: 1576px) {
+@container (min-width: 1540px) {
   .comms-grid {
     grid-template-columns: 280px minmax(0, 1fr) 420px;
   }
