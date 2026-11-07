@@ -1099,6 +1099,11 @@ export interface FlightState {
     triageRemainingMs: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
+    /**
+     * Set when the Needs you entry check sent the item back (#1543): what it lacks before it may
+     * reach the operator. Fix the brief with brief_item, or keep the item (brief it for FLIGHT).
+     */
+    returned?: string[];
   }[];
   /**
    * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of

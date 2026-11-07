@@ -98,6 +98,52 @@ describe("Needs you page", () => {
     expect(within(list).getAllByRole("link")[0]?.getAttribute("aria-current")).toBe("true");
   });
 
+  it("shows the title, when it was raised, what to decide, and the pinned ticket and PR (#1543)", async () => {
+    routes([
+      ask("q1", {
+        brief: brief({
+          ask: "Merge PR 1412 now that review and CI passed?",
+          recommendedOptionId: "a",
+          options: [
+            { id: "a", label: "Merge", answer: "Merge it." },
+            { id: "b", label: "Hold", answer: "Leave it open." },
+          ],
+        }),
+        pinned: {
+          ticket: {
+            ref: "mission-control#1400",
+            title: "Loop schema in core",
+            url: "https://github.com/o/mission-control/issues/1400",
+          },
+          pr: {
+            ref: "mission-control#1412",
+            number: 1412,
+            title: "Loop schema in core (stage A)",
+            url: "https://github.com/o/mission-control/pull/1412",
+          },
+        },
+      }),
+    ]);
+    render(<Needs item={null} />);
+    const band = await screen.findByRole("region", { name: "The question" });
+    expect(within(band).getByRole("heading", { level: 2 }).textContent).toBe("Loop schema in core");
+    expect(band.textContent).toContain(
+      "What you need to decide: Merge PR 1412 now that review and CI passed?",
+    );
+    expect(band.querySelector("time")?.textContent).toMatch(
+      /^\w{3} \d{1,2} \w{3} \d\d:\d\d · 60 min ago$/,
+    );
+    const pins = within(band).getByRole("list", { name: "Ticket and PR" });
+    expect(within(pins).getByRole("link", { name: "Ticket #1400" }).getAttribute("href")).toBe(
+      "https://github.com/o/mission-control/issues/1400",
+    );
+    expect(within(pins).getByRole("link", { name: "PR 1412" })).toBeTruthy();
+    expect(pins.textContent).toContain("Loop schema in core (stage A)");
+    // the list row shows the same title and the raised time
+    const list = screen.getByRole("navigation", { name: "Waiting on you" });
+    expect(within(list).getAllByRole("link")[0]?.textContent).toContain("Loop schema in core");
+  });
+
   it("says nobody is waiting with no items", async () => {
     routes([]);
     render(<Needs item={null} />);

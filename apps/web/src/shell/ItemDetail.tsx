@@ -553,8 +553,11 @@ export function ItemDetail({
           </div>
           {previewBlock}
           <Pictures item={item} />
-          <LinksSection item={item} />
-          {briefBlock}
+          <details className="needs-more">
+            <summary>What FLIGHT checked, and other links</summary>
+            <LinksSection item={item} />
+            {briefBlock}
+          </details>
         </div>
         <div className="needs-side" id="needsSide">
           {discussionBlock}

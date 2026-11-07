@@ -1270,6 +1270,19 @@ export interface AttentionItem {
   brief?: AttentionBrief;
   flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
+  /**
+   * Why the Needs you entry check sent this item back to FLIGHT, in words (#1543). Present only on
+   * an item that would otherwise have been the operator's.
+   */
+  returned?: string[];
+  /**
+   * The ticket and PR the item is about, with their titles, for the operator's page (#1543). Each
+   * part is absent when the hub does not know it.
+   */
+  pinned?: {
+    ticket?: { ref: string; title: string | null; url: string | null };
+    pr?: { ref: string; number: number; title: string; url: string };
+  };
   /** When a recommended option applies; absent means no automatic default. */
   defaultDueAt?: number;
   /**

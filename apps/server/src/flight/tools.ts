@@ -20,6 +20,7 @@ import {
   awayBugDecisionAbout,
   type BoardItem,
   BRIEF_CLEARED_DECISION,
+  BRIEF_ENTRY_REFUSED,
   BRIEF_INPUT_MAX,
   BRIEF_ITEM_DESCRIPTION,
   BRIEF_KEY_MAX,
@@ -197,6 +198,7 @@ import {
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
+  needsYouEntryFaults,
   noOpenQuestionText,
   notAcceptedText,
   notDevRunText,
@@ -327,6 +329,7 @@ import {
   attentionItems,
   CREW_ERROR_KEY,
   crew,
+  hubAlert,
   isOperatorCall,
   NO_CLI_VERSION,
   NO_LOCK,
@@ -2694,6 +2697,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     );
     if (item === undefined || ownReply(item, flightSeat(config)?.seat.id ?? null)) {
       return fail(briefNoItemText(key));
+    }
+    // the Needs you entry check (#1543), at the source: a brief that would not reach the operator
+    // is refused here, with what it lacks, so FLIGHT fixes it in one try
+    if (structured.for === "operator" && !hubAlert(item, store)) {
+      const faults = needsYouEntryFaults({
+        ...item,
+        brief: {
+          for: "operator",
+          ask: structured.ask ?? "",
+          context: assessment,
+          recommendation,
+          options: options ?? [],
+          basis,
+          at,
+          ...(structured.person === undefined ? {} : { person: structured.person }),
+        },
+      });
+      if (faults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${faults.join("; ")}.`);
     }
     if (structured.for === "flight") {
       if (isOperatorCall(item, store))

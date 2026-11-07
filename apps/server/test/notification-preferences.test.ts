@@ -300,7 +300,7 @@ it("notifies only above 90 percent and only once per quota crossing", async () =
   }
 });
 
-it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM opted in", async () => {
+it("does not notify FLIGHT's raw @CAPCOM question or direct-line narration, even with @CAPCOM opted in", async () => {
   await app.close();
   const crewConfig: CcConfig = {
     ...config,
@@ -353,9 +353,11 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM 
     text: "@CAPCOM review this?",
   });
   bus.emit("agents");
-  expect(await events()).toMatchObject([{ category: "capcom", text: "@CAPCOM review this?" }]);
+  // #1543: FLIGHT's raw @CAPCOM question no longer reaches Needs you (it has no brief), so it
+  // raises nothing to notify
+  expect(await events()).toEqual([]);
   bus.emit("agents");
-  expect(await events()).toHaveLength(1);
+  expect(await events()).toEqual([]);
   p.categories.capcom = false;
   await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
   store.addComms({
@@ -366,7 +368,7 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM 
     text: "@CAPCOM suppressed?",
   });
   bus.emit("agents");
-  expect(await events()).toHaveLength(1);
+  expect(await events()).toEqual([]);
 });
 
 it("emits one away digest on return through settings invalidations", async () => {

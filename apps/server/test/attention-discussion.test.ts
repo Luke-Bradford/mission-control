@@ -144,3 +144,13 @@ it("opens with the catalogue recommendation and replaces a changed brief", async
   expect((await app.inject(`${url}?id=${first.id}`)).json()).toEqual(first);
   await app.close();
 });
+
+it("opens a discussion on an operator's item they have already read (#1543)", async () => {
+  // no FLIGHT seat: the note is the operator's as it stands
+  const app = buildApp({ config: { ...config, crew: undefined }, store, bus: new ChangeBus() });
+  const key = "note:blocked:demo";
+  store.ack([key], 5);
+  const res = await app.inject(`/api/attention/${key}/discussion`);
+  expect(res.statusCode).toBe(200);
+  expect(res.json().id).toEqual(expect.any(String));
+});

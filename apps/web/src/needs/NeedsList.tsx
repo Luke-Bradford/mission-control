@@ -1,16 +1,21 @@
 import { ATTENTION_LABEL, type AttentionItem } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
-import { rel } from "../fmt.ts";
+import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { followLink, needsYouPath, PAGE_PATHS } from "../router.ts";
-import { questionOf } from "./QuestionBand.tsx";
+import { questionOf, titleOf } from "./QuestionBand.tsx";
 
 /** Times tick here, in the row's child, so the list is not rebuilt each second. */
 function RowAge({ at }: { at: number }) {
   const now = useSecond();
   const tz = useTz();
-  return <span className="s">{at > 0 && tz !== null ? rel(at, now, tz) : "—"}</span>;
+  if (at <= 0 || tz === null) return <span className="s">—</span>;
+  return (
+    <time className="s" dateTime={new Date(at).toISOString()} title={raisedAt(at, tz)}>
+      {`${raisedAt(at, tz)} · ${rel(at, now, tz)}`}
+    </time>
+  );
 }
 
 function Row({ item, current }: { item: AttentionItem; current: boolean }) {
@@ -28,7 +33,7 @@ function Row({ item, current }: { item: AttentionItem; current: boolean }) {
         <RowAge at={item.at} />
       </span>
       <span className="needs-row-text">
-        <MarkdownInline text={questionOf(item)} max={160} />
+        <MarkdownInline text={titleOf(item)} max={160} />
       </span>
     </a>
   );

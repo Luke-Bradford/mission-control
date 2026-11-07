@@ -169,6 +169,75 @@ its link. That issue is how the operator resumes the loop.
 - The operator sees no Comms notice for a message addressed to someone else.
 - The controller checks by hand once a week: every item in Needs you passes the cold-read test.
 
+## Amendment, 7 November: entry rules
+
+On 7 November Needs you showed 11 items. None of them was a complete question for the operator.
+They included "PR #1412 · You: review", a FLIGHT alarm with raw ids, three studio loop issues
+over 100 days old, and an item FLIGHT had marked "None for the operator." The operator said
+**(operator)**:
+
+- Anything that reaches Needs you follows standing rules, with a hard check on what gets in.
+- Text that does not say what the operator must decide goes back to whoever raised it.
+- The page is simple and easy to read. Each item shows its title, when it was raised, what the
+  operator must decide and the options the asker gave.
+- The ticket and the PR are pinned to the item and linked by default.
+- Pictures show when the question is about how something looks.
+
+### The entry rules
+
+Hub code checks every item before it counts in Needs you (`packages/core/src/needs-you-entry.ts`,
+#1543). An item counts only when it is one of these:
+
+1. **A hub alert the operator alone can act on.** Hub code writes its words. The alerts:
+   - FLIGHT is not triaging;
+   - FLIGHT left a wake undecided twice;
+   - an Update only a person can run;
+   - the runaway breaker tripped;
+   - a run stopped on a budget or account limit;
+   - an account at its rate limit;
+   - a safety stop.
+2. **FLIGHT's complete question.** FLIGHT's brief for the operator, with all of these:
+   - a question: one sentence that asks, ending in `?`, at most 300 characters;
+   - no web address, raw signal id, raw timestamp or `[tag]` prefix in the question;
+   - 2 to 4 options, each with a label and what happens if chosen; a person's message may offer
+     suggested replies instead;
+   - a recommendation;
+   - the ticket or PR it is about;
+   - the time it was raised.
+
+Rule 4's further parts (title, priority, picture for a looks question) join this check when #1510
+lands. The check is one function, so each later rule is one more line in it.
+
+### What happens to an item that fails
+
+- **FLIGHT's brief is refused when written.** `brief_item` for the operator names each failed rule,
+  so FLIGHT fixes it in one try.
+- **Anything else that fails goes to FLIGHT.** Protected items are included. The item carries the
+  failed rules, and FLIGHT's state lists them. It does not count in the operator's tab.
+- **FLIGHT keeps, answers or briefs it.** A wait goes on FLIGHT's watch list. A question FLIGHT
+  cannot state goes back to the seat (#1532).
+- **When FLIGHT is not triaging,** failed items are counted under the one "FLIGHT is not triaging"
+  alert. The operator learns that work waits, and starting FLIGHT is the fix.
+- **With no FLIGHT seat** the check does not apply. Rule 3's exception stands.
+
+### The page, simplest form
+
+The list shows each item's title, the date and time it was raised, and who raised it. The open
+item shows, top to bottom:
+
+1. **Title.** The ticket's or PR's title, in plain words.
+2. **Raised:** date and time, then the age ("Fri 6 Nov 17:23 · 7 h ago"), and who asked.
+3. **What you need to decide:** the question in one sentence.
+4. **Options** as the asker gave them, each a button with what happens if chosen. The recommended
+   one is marked with its reason.
+5. **Pinned links:** the ticket and the PR, each with its number and title, opened by default.
+6. **Pictures,** large, when the question is about how something looks.
+7. **Ask FLIGHT,** beside the question.
+
+What FLIGHT checked and who it asked sit below, one line each. Raw item text, "FLIGHT's view" and
+"What FLIGHT did" lists leave the first screen. This replaces item 8 of "The open question, in
+reading order" below.
+
 ## Words
 
 One name for one thing, in this document and in the app.

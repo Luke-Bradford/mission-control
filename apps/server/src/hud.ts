@@ -55,6 +55,7 @@ import {
   lockBlockedText,
   loopText,
   modeOfSeat,
+  needsYouEntryFaults,
   OPERATOR_CALL_KINDS,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
@@ -885,6 +886,60 @@ const STUCK_KINDS: readonly AttentionItem["kind"][] = [
   "error",
 ];
 
+/**
+ * The ticket and PR an item is about, with titles, from stored board and PR reads only
+ * (#1543): the page pins them so a number never stands alone. The PR is the item's own (a PR item
+ * or a PR address), else the open PR for its ticket.
+ */
+export function pinned(item: AttentionItem, store: Store): AttentionItem {
+  const ref = item.ticket === null ? null : parseTicket(item.ticket);
+  const card =
+    ref === null ? undefined : store.board(ref.repoId).find((b) => b.issueNumber === ref.number);
+  const own =
+    /^pr:([^#]+)#(\d+):/.exec(item.key) ??
+    /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(item.url ?? "");
+  const repoId = own?.[1] ?? ref?.repoId ?? item.repoId;
+  const prs = repoId === null || repoId === undefined ? [] : store.pullRequests(repoId);
+  const pr =
+    own !== null
+      ? prs.find((p) => p.number === Number(own[2]))
+      : item.ticket === null
+        ? undefined
+        : prs.find((p) => p.ticket === item.ticket && p.state === "open");
+  if (item.ticket === null && pr === undefined) return item;
+  return {
+    ...item,
+    pinned: {
+      ...(item.ticket === null
+        ? {}
+        : { ticket: { ref: item.ticket, title: card?.title ?? null, url: card?.url ?? null } }),
+      ...(pr === undefined
+        ? {}
+        : {
+            pr: {
+              ref: `${pr.repoId}#${pr.number}`,
+              number: pr.number,
+              title: pr.title,
+              url: pr.url,
+            },
+          }),
+    },
+  };
+}
+
+/**
+ * Hub alerts the entry check passes that need the store to tell (#1543): the runaway breaker, and
+ * a run stopped on a budget or account limit, which only the operator can lift. The rest of the
+ * alert list is in core (`needsYouAlert`).
+ */
+export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
+  if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
+  if (item.kind !== "blocked") return false;
+  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
+  const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+  return park === "budget" || park === "account";
+}
+
 /** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
 const keptRaw = (item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean =>
   isOperatorCall(item, store) || STUCK_KINDS.includes(item.kind);
@@ -1410,11 +1465,30 @@ function buildAttentionItems(
       ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
       : missed(item, triageDueAt);
   };
+  /**
+   * The Needs you entry check (#1543): with a FLIGHT seat, an operator item that is neither a hub
+   * alert nor FLIGHT's complete question goes back to FLIGHT with the reasons. Protected items
+   * included: they reach the operator through FLIGHT's brief, or, while FLIGHT is not triaging,
+   * counted under the one not-triaging alert.
+   */
+  const entryCheck = (item: AttentionItem): AttentionItem => {
+    if (triage === null || item.owner !== OWNER_OPERATOR || hubAlert(item, store)) return item;
+    const returned = needsYouEntryFaults(item);
+    if (returned.length === 0) return item;
+    const back: AttentionItem = { ...item, owner: OWNER_FLIGHT, returned };
+    if (!triaging) return { ...back, flightTriage: "down" };
+    // FLIGHT's own line to the operator, or an item FLIGHT kept: FLIGHT already has it
+    if (item.brief?.for === "flight" || ownReply(item, flightId) || flightAsks.has(item.key))
+      return { ...back, flightTriage: "handling" };
+    const triageDueAt =
+      Math.max(item.at, item.brief?.at ?? 0, triage.liveSince) + FLIGHT_TRIAGE_WAIT_MS;
+    return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
+  };
   const result: AttentionItem[] = items
     // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
     .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
-    .map((i) => {
+    .map((i): AttentionItem => {
       const item = route(i);
       // Another agent's tag or direct-line question stays FLIGHT's, even untriaged, until FLIGHT
       // briefs it for the operator (ownReply keeps FLIGHT's own question tag the operator's).
@@ -1434,10 +1508,12 @@ function buildAttentionItems(
     }),
     acks,
   );
+  // last, after a released hold has handed an item back to the operator
+  const checked = partition.items.map(entryCheck);
   const shown =
     triage === null
-      ? partition.items
-      : withNotTriaging(partition.items, triage, acks, now, config.operator.timezone);
+      ? checked
+      : withNotTriaging(checked, triage, acks, now, config.operator.timezone);
   return includeHeld ? [...shown, ...partition.held] : shown;
 }
 
@@ -1636,8 +1712,8 @@ function crewItems(
   }
 
   for (const q of store.openQuestions()) {
-    out.push(
-      item({
+    out.push({
+      ...item({
         key: `ask:${q.id}`,
         kind: "question",
         agentId: q.agentId,
@@ -1645,7 +1721,9 @@ function crewItems(
         text: questionText(seatCallSign(q.agentId), q.text),
         at: q.at,
       }),
-    );
+      // the asking run's ticket: what the question is about (#1543)
+      ticket: store.run(q.runId)?.ticket ?? null,
+    });
   }
 
   // The engine's notes: blocked, ready for review, check before merging, rate-limited. Each

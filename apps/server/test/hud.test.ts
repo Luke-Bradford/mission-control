@@ -20,6 +20,7 @@ import {
   FLIGHT_RUNAWAY_SETTING,
   FLIGHT_TRIAGE_WAIT_MS,
   NEW_LOOP,
+  needsYouAlert,
   needsYouItems,
   type Profile,
   type PullRequestView,
@@ -41,13 +42,20 @@ import {
   isOperatorCall,
   markHubStarted,
   NO_LOCK,
+  pinned,
 } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
+import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 const MIN = 60_000;
+/** A complete brief's options: the Needs you entry check wants 2 to 4 (#1543). */
+const TWO_OPTIONS = [
+  { label: "Yes", answer: "Go ahead." },
+  { label: "No", answer: "Do not." },
+];
 const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 
@@ -927,7 +935,28 @@ describe("attentionItems: PRs waiting on you", () => {
       worktree: null,
       updatedAt: NOW,
     });
-    expect(prItems()[0]?.owner).toBe("operator");
+    // stopped: nobody triages, and a PR with no brief fails the Needs you entry check, so it is
+    // counted under the one not-triaging alert (#1543)
+    expect(prItems()[0]).toMatchObject({ owner: "flight", flightTriage: "down" });
+  });
+
+  it("pins the ticket and the PR, with their titles, on the operator's item (#1543)", () => {
+    seed([pr()]);
+    const item = prItems()[0];
+    if (item === undefined) throw new Error("no PR item");
+    expect(pinned(item, store).pinned).toEqual({
+      ticket: {
+        ref: "shop-app#42",
+        title: "Fix the fence",
+        url: boardItem({}).url,
+      },
+      pr: {
+        ref: "shop-app#7",
+        number: 7,
+        title: "spec",
+        url: "https://github.com/o/shop-app/pull/7",
+      },
+    });
   });
 
   it("a 9-day-old draft on a board ticket is a pr item", () => {
@@ -2090,6 +2119,9 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         .filter((i) => i.kind === "question" && i.owner === "operator")
         .map((i) => i.key);
     store.upsertRun(run({ id: "f1", agentId: "FLIGHT-1", repoId: "shop-app" }));
+    store.upsertRun(
+      run({ id: "c1", agentId: "GUIDO-1", repoId: "shop-app", ticket: "shop-app#5" }),
+    );
     const flightRow = (over: Partial<SeatSessionRow>) =>
       store.setSeatSession({
         seatId: "FLIGHT-1",
@@ -2118,19 +2150,20 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         owner: "flight",
         flightTriage: "waiting",
       });
-      // a decision and a flag are the operator's calls: missed, they reach the operator as
-      // themselves, never folded into the not-triaging item (#758)
+      // a decision and a flag are the operator's calls, but only through FLIGHT's brief: missed
+      // unbriefed, they fail the Needs you entry check and the not-triaging alert counts them (#1543)
       const late = attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS);
       expect(late.find((i) => i.key === key)).toMatchObject({
-        owner: "operator",
+        owner: "flight",
         flightTriage: "missed",
       });
-      expect(late.find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)).toBeUndefined();
+      expect(late.find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging?.keys).toContain(key);
     }
     flightRow({ state: "parked" });
-    expect(attentionItems(c, store, NOW).find((i) => i.key === "note:triage")?.owner).toBe(
-      "operator",
-    );
+    expect(attentionItems(c, store, NOW).find((i) => i.key === "note:triage")).toMatchObject({
+      owner: "flight",
+      flightTriage: "down",
+    });
     flightRow({});
     const id = asked("GUIDO-1", "c1");
     const own = asked("FLIGHT-1", "f1");
@@ -2138,35 +2171,48 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       attentionItems(c, store, at)
         .filter((i) => i.kind === "question" && i.owner === "flight")
         .map((i) => [i.key, i.flightTriage]);
-    // a seat's question is FLIGHT's from the start; FLIGHT's own (from before #758) the operator's
-    expect(keys(NOW)).toEqual([`ask:${own}`]);
-    expect(flight(NOW)).toEqual([[`ask:${id}`, "waiting"]]);
+    // a seat's question is FLIGHT's from the start; FLIGHT's own (from before #758) has no brief,
+    // so the Needs you entry check keeps it with FLIGHT (#1543)
+    expect(keys(NOW)).toEqual([]);
+    expect(flight(NOW)).toEqual([
+      [`ask:${id}`, "waiting"],
+      [`ask:${own}`, "handling"],
+    ]);
     // 20 minutes old: missed, and still FLIGHT's
-    expect(keys(NOW + 15 * MIN)).toEqual([`ask:${own}`]);
-    expect(flight(NOW + 15 * MIN)).toEqual([[`ask:${id}`, "missed"]]);
+    expect(keys(NOW + 15 * MIN)).toEqual([]);
+    expect(flight(NOW + 15 * MIN)).toEqual([
+      [`ask:${id}`, "missed"],
+      [`ask:${own}`, "handling"],
+    ]);
     // passed without a brief (before #758): still FLIGHT's to brief
     store.passQuestion(id, NOW);
-    expect(keys(NOW)).toEqual([`ask:${own}`]);
+    expect(keys(NOW)).toEqual([]);
     // FLIGHT's brief for the operator is the only way it becomes theirs
     store.addBrief({
       key: `ask:${id}`,
       context: "GUIDO-1 needs a product call.",
       ask: "One lane per customer?",
       recommendation: "Yes.",
-      options: [],
+      options: TWO_OPTIONS,
       basis: "product direction",
       at: NOW,
       for: "operator",
     });
-    expect(keys(NOW)).toEqual([`ask:${id}`, `ask:${own}`]);
+    expect(keys(NOW)).toEqual([`ask:${id}`]);
     // FLIGHT stopped: a new question stays FLIGHT's, marked down, and the stopped item counts it
     const held = asked("GUIDO-1", "c1");
     flightRow({ runId: null, state: "stopped" });
     expect(keys(NOW)).not.toContain(`ask:${held}`);
-    expect(flight(NOW)).toEqual([[`ask:${held}`, "down"]]);
-    expect(
-      attentionItems(c, store, NOW).find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging,
-    ).toMatchObject({ cause: "stopped", keys: [`ask:${held}`] });
+    // FLIGHT's own unbriefed question is counted too: nothing raw reaches Needs you (#1543)
+    expect(flight(NOW)).toEqual([
+      [`ask:${own}`, "down"],
+      [`ask:${held}`, "down"],
+    ]);
+    const stopped = attentionItems(c, store, NOW).find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY);
+    expect(stopped?.notTriaging?.cause).toBe("stopped");
+    expect(stopped?.notTriaging?.keys).toEqual(
+      expect.arrayContaining([`ask:${own}`, `ask:${held}`]),
+    );
   });
 
   it("FLIGHT triages questions from every session", () => {
@@ -2703,8 +2749,9 @@ describe("messages are not Needs you", () => {
       },
     };
   });
+  // a ticket on every line: a question the operator sees must name what it is about (#1543)
   const say = (at: number, from: string, to: string, text: string) =>
-    store.addComms({ at, from, to, ticket: null, text });
+    store.addComms({ at, from, to, ticket: "shop-app#5", text });
   const up = (seatId: string) => {
     store.upsertRun(run({ id: `r-${seatId}`, agentId: seatId }));
     store.setSeatSession({
@@ -2739,7 +2786,7 @@ describe("messages are not Needs you", () => {
     expect(chatter()).toEqual([]);
   });
 
-  it("counts a question to @CAPCOM from FLIGHT as the operator's tag", () => {
+  it("keeps a question FLIGHT tags @CAPCOM with out of Needs you: a question needs a brief (#1543)", () => {
     up("flight-1");
     say(NOW - 9 * MIN, "flight-1", COMMS_CAPCOM, "@CAPCOM nothing else needs you.");
     say(NOW - 8 * MIN, "flight-1", COMMS_CAPCOM, "@CAPCOM merge #551 now, or wait for #498?");
@@ -2747,11 +2794,12 @@ describe("messages are not Needs you", () => {
       expect.objectContaining({
         kind: "tag",
         agentId: "flight-1",
-        owner: "operator",
+        owner: "flight",
+        flightTriage: "handling",
         text: "@CAPCOM merge #551 now, or wait for #498?",
+        returned: [expect.stringMatching(/^no brief for the operator/)],
       }),
     ]);
-    expect(chatter()[0]?.flightTriage).toBeUndefined();
   });
 
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {
@@ -2810,7 +2858,7 @@ describe("messages are not Needs you", () => {
         context: "GUIDO-1 needs the operator.",
         ask: "Decide for GUIDO-1?",
         recommendation: "Yes.",
-        options: [],
+        options: TWO_OPTIONS,
         basis: "product direction",
         at: NOW - 7 * MIN,
         for: "operator",
@@ -2839,7 +2887,7 @@ describe("messages are not Needs you", () => {
       context: "GUIDO-1 needs a production key.",
       ask: "Add the key to the vault?",
       recommendation: "Add it.",
-      options: [],
+      options: TWO_OPTIONS,
       basis: "spending",
       at: NOW - MIN,
       for: "operator",
@@ -2963,13 +3011,14 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
   const trip = (at = NOW - 30_000) =>
     store.setSetting(FLIGHT_RUNAWAY_SETTING, JSON.stringify({ at, reason: "a loop" }));
 
-  it("does not triage while the runaway breaker is tripped: a stuck run reaches the operator at once", () => {
+  it("does not triage while the runaway breaker is tripped: a stuck run is counted by the alert at once", () => {
     flight();
     stuck();
     expect(stuckItem()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
     trip();
-    expect(stuckItem()).toMatchObject({ owner: "operator" });
-    expect(stuckItem()?.flightTriage).toBeUndefined();
+    // unbriefed, it fails the Needs you entry check: the not-triaging alert counts it (#1543)
+    expect(stuckItem()).toMatchObject({ owner: "flight", flightTriage: "down" });
+    expect(aggregate()?.notTriaging?.keys).toContain("note:blocked:r-guido:0");
     store.deleteSetting(FLIGHT_RUNAWAY_SETTING);
     expect(stuckItem()).toMatchObject({ owner: "flight", flightTriage: "waiting" });
   });
@@ -3434,6 +3483,79 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     );
   });
 
+  it("counts only the hub's alerts among items like the 7 November ones, with FLIGHT live (#1543)", () => {
+    flight();
+    // a watched loop's 115-day-old issue, never briefed
+    store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - 115 * DAY })]);
+    // an item FLIGHT kept: "None for the operator."
+    store.raiseNote({
+      key: "blocked:parked",
+      kind: "blocked",
+      runId: null,
+      seatId: "guido-1",
+      repoId: "shop-app",
+      text: "shop-app#1503 parked: RETRO-1's review failed 2 times",
+      at: NOW - 10 * HOUR,
+    });
+    store.addBrief({
+      key: "note:blocked:parked",
+      for: "flight",
+      context: "Rework sent to the seat.",
+      recommendation: "None for the operator.",
+      options: [],
+      basis: "review",
+      at: NOW - 9 * HOUR,
+    });
+    // an old operator brief with machine text and one option (brief_item now refuses this)
+    store.raiseNote({
+      key: "flag-x",
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: "shop-app",
+      text: "check before merging",
+      at: NOW - HOUR,
+    });
+    store.addBrief({
+      key: "note:flag-x",
+      for: "operator",
+      ask: "[operator-decision] prFlow 1407:stage:clearance:1793825335003",
+      context: "x",
+      recommendation: "Merge.",
+      options: [{ label: "Merge", answer: "Merge it." }],
+      basis: "b",
+      at: NOW - HOUR,
+    });
+    // the hub's own alert, in hub words
+    store.raiseNote({
+      key: HUB_UPDATE_HELD_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "Update waits for you.",
+      at: NOW - 4 * HOUR,
+    });
+    // core's alert list names the server's key
+    expect(needsYouAlert({ key: `note:${HUB_UPDATE_HELD_KEY}`, kind: "blocked" })).toBe(true);
+    const shown = needsYouItems(all()).map((i) => i.key);
+    expect(shown).toContain(`note:${HUB_UPDATE_HELD_KEY}`);
+    for (const key of ["esc:shop-app#9", "note:blocked:parked", "note:flag-x"])
+      expect(shown).not.toContain(key);
+    expect(all().find((i) => i.key === "note:flag-x")).toMatchObject({
+      owner: "flight",
+      returned: expect.arrayContaining([
+        expect.stringMatching(/\[tag\] prefix/),
+        expect.stringMatching(/raw signal id/),
+        expect.stringMatching(/^1 options/),
+      ]),
+    });
+    expect(all().find((i) => i.key === "note:blocked:parked")).toMatchObject({
+      owner: "flight",
+      flightTriage: "handling",
+    });
+  });
+
   it("is never FLIGHT's to triage", () => {
     flight({ runId: null, state: "stopped" });
     ask();
@@ -3443,27 +3565,29 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     );
   });
 
-  it("never folds an operator's call: a missed decision or flag reaches the operator as itself", () => {
+  it("folds an unbriefed operator's call too: a missed decision is counted, never shown raw (#1543)", () => {
     flight();
     store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - HOUR })]);
     const id = ask(NOW - 30 * MIN);
     const items = all();
     expect(items.find((i) => i.key === "esc:shop-app#9")).toMatchObject({
-      owner: "operator",
+      owner: "flight",
       flightTriage: "missed",
+      returned: [expect.stringMatching(/^no brief for the operator/)],
     });
-    expect(aggregate()?.notTriaging?.keys).toEqual([`ask:${id}`]);
-    // reported down while live: nobody triages, so the decision goes to the operator at once
+    expect(aggregate()?.notTriaging?.keys).toEqual(["esc:shop-app#9", `ask:${id}`]);
+    // reported down while live: nobody triages, and the alert counts the decision
     store.replaceEscalations("shop-app", [escalation({ openedAt: NOW - MIN })]);
     expect(all().find((i) => i.key === "esc:shop-app#9")?.owner).toBe("flight");
     watchNote(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
-    const down = all().find((i) => i.key === "esc:shop-app#9");
-    expect(down?.owner).toBe("operator");
-    expect(down?.flightTriage).toBeUndefined();
-    expect(aggregate()?.notTriaging?.keys).not.toContain("esc:shop-app#9");
+    expect(all().find((i) => i.key === "esc:shop-app#9")).toMatchObject({
+      owner: "flight",
+      flightTriage: "down",
+    });
+    expect(aggregate()?.notTriaging?.keys).toContain("esc:shop-app#9");
   });
 
-  it("leaves a missed stuck run, error, budget park and held Update raw, so they notify as before", () => {
+  it("leaves a budget park and held Update raw as alerts; folds a missed error or stuck run (#1543)", () => {
     flight();
     store.upsertRun(
       run({
@@ -3532,15 +3656,15 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       at: NOW - 30 * MIN,
     });
     const error = all().find((i) => i.kind === "error");
-    expect(error).toMatchObject({ owner: "operator", flightTriage: "missed" });
-    // an ordinary missed item is still folded in
-    expect(aggregate()?.notTriaging?.keys).toEqual(["note:plain"]);
-    // reported down while live: a stuck run goes to the operator at once, not into the count
+    // unbriefed, an error fails the Needs you entry check: FLIGHT's, counted by the alert (#1543)
+    expect(error).toMatchObject({ owner: "flight", flightTriage: "missed" });
+    expect(aggregate()?.notTriaging?.keys).toContain("note:plain");
+    expect(aggregate()?.notTriaging?.keys).toContain(error?.key);
+    // reported down while live: a stuck run is counted by the alert too
     raise("blocked:other", "blocked");
     watchNote(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
-    const fresh = all().find((i) => i.key === "note:blocked:other");
-    expect(fresh?.owner).toBe("operator");
-    expect(aggregate()?.notTriaging?.keys).not.toContain("note:blocked:other");
+    expect(all().find((i) => i.key === "note:blocked:other")?.owner).toBe("flight");
+    expect(aggregate()?.notTriaging?.keys).toContain("note:blocked:other");
   });
 
   it("reads as unread again when a new item joins after the operator acked it", () => {
