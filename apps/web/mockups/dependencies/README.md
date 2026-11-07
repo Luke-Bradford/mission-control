@@ -43,7 +43,7 @@ Drill-throughs: a ticket ref goes to `ticketPath`, a PR to the QA page's repo an
 ### What the views keep, and what gives way
 
 - **Board:** the eight real columns in their real order (Backlog, Refinement, Blocked, Ready, In progress, In review, Ready for QA, Done), 257 px wide, with the Board's sideways scroll. Cards keep their 210 px minimum.
-- **FLIGHT, Crew & board:** the FLIGHT status strip, the tabs, the live Seats columns (Seat, Workstream, Stage, Stuck / waiting on, FLIGHT's next action, Last instruction) with 48 px panel heads, and a footer line. Seats is capped at 361 px and scrolls inside itself, as the live panel does. That is what gives way: Blocked chains takes the rest, 332 px at 1920×940, which is about 7 rows at 32 px, not the 9 first estimated. At 2560×1145 it has about 550 px, about 11 rows at 40 px. FLIGHT's queue and Revisit triggers are not redrawn; they stay below.
+- **FLIGHT, Crew & board:** the FLIGHT status strip, the tabs, and the live Seats columns (Seat, Workstream, Stage, Stuck / waiting on, FLIGHT's next action, Last instruction) with 48 px panel heads. There is no footer line. Seats takes the height of its 11 rows (428 px at 32 px rows, 516 px at 40 px rows) when the window allows, and Blocked chains keeps at least 360 px and takes the rest: about 443 px at 1920×1080, 360 px at 1920×940 (about 7 rows, not the 9 first estimated), about 420 px at 2560×1145 and about 790 px at 2560×1440. When the window is too short Seats gives way first and scrolls inside itself, as the live panel does (361 px at 1920×940). Below 734 px of page height the page scrolls. FLIGHT's queue and Revisit triggers are not redrawn; they stay below.
 - **QA:** the queue and the decision controls as they are, with one new line in the decision panel.
 
 ## Panel stats
@@ -68,7 +68,7 @@ All four are now, not over a window. Hover a stat in the mockup for its definiti
 
 ## Board build outline
 
-A Ready ticket with `Depends on` moves to the Blocked column, as a GitHub blocked-by link already does, because the engine will not deal it. The operator approved this on 4 November 2026. The Ready count then falls: in the mockup it drops from 11 to 4, and the note above the Board says so. A card in Blocked shows its reason as a link to the ticket it depends on ("Blocked: depends on #1015"), the operator's request of 4 November 2026: quick and clear, one click to the blocker. The `Waits on` chip beside it names the PR and the wait. While chains have not loaded, every ticket stays where its Status puts it and the note says that too.
+A Ready ticket with `Depends on` moves to the Blocked column, as a GitHub blocked-by link already does, because the engine will not deal it. Only `Depends on` moves: a stacked or held ticket stays in Ready, with its `Waits on` chip, until the operator approves widening the rule. The operator approved this on 4 November 2026. The Ready count then falls: in the mockup it drops from 11 to 6, and the note above the Board says so. A card in Blocked shows its reason as a link to the ticket it depends on ("Blocked: depends on #1015"), the operator's request of 4 November 2026: quick and clear, one click to the blocker. The `Waits on` chip beside it names the PR and the wait. While chains have not loaded, every ticket stays where its Status puts it and the note says that too.
 
 ## Build tickets
 

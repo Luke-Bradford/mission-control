@@ -147,8 +147,8 @@ describe("Dependencies mockup in jsdom", () => {
   it("moves Ready tickets with Depends on to Blocked and says so", () => {
     const document = render("?view=board&state=normal");
     const count = (name: string) => document.querySelectorAll(`#col-${name} .card`).length;
-    expect(count("Ready")).toBe(4);
-    expect(count("Blocked")).toBe(7);
+    expect(count("Ready")).toBe(6);
+    expect(count("Blocked")).toBe(5);
     expect(text(document.querySelector(".boardnote"))).toContain("down from 11");
     const chips = [...document.querySelectorAll("#col-Blocked [data-chip=waits]")].map(text);
     expect(chips).toContain("Waits on PR 1033 · Ready for QA · 3d 4h");
@@ -164,10 +164,13 @@ describe("Dependencies mockup in jsdom", () => {
     const link = (ref: string) =>
       document.querySelector(`#col-Blocked [data-reason='${ref}'] a`)?.getAttribute("href");
     expect(link("#1139")).toBe("/tickets/mission-control/1015");
-    expect(link("demo#34")).toBe("/tickets/demo/22");
-    expect(text(document.querySelector("#col-Blocked [data-reason='#1138']"))).toBe(
-      "Blocked: stacked on #1015",
+    expect(link("demo#31")).toBe("/tickets/demo/21");
+    expect(text(document.querySelector("#col-Blocked [data-reason='#1139']"))).toBe(
+      "Blocked: depends on #1015",
     );
+    // only Depends on moves; stacked and held tickets stay in Ready
+    expect(document.querySelector("#col-Ready [data-ticket='#1138']")).not.toBeNull();
+    expect(document.querySelector("#col-Ready [data-ticket='demo#34']")).not.toBeNull();
     expect(document.querySelectorAll("#col-Blocked .card").length).toBe(
       document.querySelectorAll("#col-Blocked [data-reason]").length,
     );
@@ -230,6 +233,41 @@ describe("Dependencies mockup in jsdom", () => {
     const document = render("?view=flight&state=normal");
     expect(document.querySelector("[data-ref='PR 1189'] a[href^='/agent/']")).toBeNull();
     expect(document.querySelector("[data-ref='demo PR 21'] a[href^='/agent/']")).not.toBeNull();
+  });
+
+  it("draws no waiting card when nothing waits", () => {
+    const document = render("?view=board&state=empty");
+    expect(text(document.querySelector("#col-Ready"))).not.toMatch(/Depends on|Stacked on|Held for/);
+    expect(text(document.querySelector(".boardnote"))).toContain("Nothing with Depends on");
+  });
+
+  it("starts each dependent row with its own ref and names what it waits on after the edge word", () => {
+    const document = render("?view=flight&state=normal");
+    const rows = [...document.querySelectorAll("#chainsP .tr[data-parent]")];
+    expect(rows.length).toBe(10);
+    for (const row of rows) {
+      const ref = row.getAttribute("data-ref") ?? "";
+      const parent = row.getAttribute("data-parent") ?? "";
+      const words = text(row.querySelector(".work"));
+      expect(words.startsWith(ref), words).toBe(true);
+      if (words.includes("behind in seat queue")) expect(words).toContain("behind in seat queue GUIDO-CX");
+      else expect(words).toMatch(new RegExp(`(depends on|stacked on|held for) ${parent}`));
+    }
+    expect(text(document.querySelector("[data-ref='#1139'] .work"))).toBe(
+      "#1139 Sort Seats by wait · depends on PR 1033",
+    );
+    expect(text(document.querySelector("[data-ref='#1180'] .work"))).toBe(
+      "#1180 Rework PR A · behind in seat queue GUIDO-CX",
+    );
+  });
+
+  it("shows the +n route and long titles on QA", () => {
+    expect(text(render("?view=qa&state=many&pr=demo-44").querySelector("[data-frees]"))).toContain(
+      "+4",
+    );
+    const long = render("?view=qa&state=long");
+    expect(text(long.querySelector("#queueP a.row.on .t"))).toContain("Rework how the hub reads");
+    expect(text(long.querySelector("#decisionP dl"))).toContain("Rework how the hub reads");
   });
 
   it("puts every ticket back in Ready while the chains have not loaded", () => {

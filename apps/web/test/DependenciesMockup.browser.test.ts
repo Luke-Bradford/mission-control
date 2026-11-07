@@ -125,9 +125,41 @@ describeRendered("Dependencies mockup in a browser", () => {
       const box = await page.box('[data-ref="PR 1033"]');
       expect(box.y).toBeGreaterThanOrEqual(0);
       expect(box.y + box.height).toBeLessThanOrEqual(940);
+      expect((await page.box("#chainsP")).height).toBeGreaterThanOrEqual(360);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "shows all 11 Seats rows without scrolling when the window allows",
+    async () => {
+      for (const [width, height] of [
+        [1920, 1080],
+        [2560, 1145],
+        [2560, 1440],
+      ] as const) {
+        const page = await renderAt({
+          page: PAGE,
+          width,
+          height,
+          search: "?view=flight&state=normal&theme=dark",
+          colorScheme: "dark",
+        });
+        await page.boxes("#wifP");
+        const result = await page.evaluate(() => {
+          const scroll = document.querySelector<HTMLElement>("#wifP .scroll");
+          const rows = document.querySelectorAll("#wifP .tr:not(.th)").length;
+          return {
+            rows,
+            hidden: scroll ? scroll.scrollHeight - scroll.clientHeight : -1,
+          };
+        }, null);
+        expect(result, `${width}x${height}`).toEqual({ rows: 11, hidden: 0 });
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS * 3,
   );
 
   it(
@@ -181,7 +213,7 @@ describeRendered("Dependencies mockup in a browser", () => {
           () =>
             [
               ...document.querySelectorAll<HTMLElement>(
-                "#chainsP a, #wifP a, [data-chip] a, .reason a, [data-frees] a, .card .ctop a",
+                "#chainsP a, #wifP a, [data-chip] a, .reason a, [data-frees] a, .card .ctop a, .card a.ctitle",
               ),
             ]
               .map((a) => ({ text: a.textContent, box: a.getBoundingClientRect() }))

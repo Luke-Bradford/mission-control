@@ -110,7 +110,7 @@
       .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
       .card { border: 1px solid var(--line-2); border-radius: 3px; background: var(--surface-2); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
       .card .ctop { display: flex; justify-content: space-between; gap: 8px; font: 12px/16px var(--mono); color: var(--muted); }
-      .card .ctitle { font-weight: 600; color: var(--fg); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .card .ctitle { min-height: 24px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
       .card .cmeta { font: 12px/16px var(--mono); color: var(--fg-2); }
       .chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 4px; padding: 4px 8px; min-height: 24px; border-radius: 3px; font: 12px/16px var(--mono); border: 1px solid var(--line-2); max-width: 100%; overflow-wrap: anywhere; }
       .chip.waits { border-color: var(--warn); background: var(--warn-soft); }
@@ -120,13 +120,12 @@
       .chip.read { color: var(--muted); }
 
       /* FLIGHT */
-      /* Rows never squeeze Seats (max-content); a short window grows the page instead of clipping a panel. */
-/* Fixed rows only: Seats is capped at 361 px with its own scroll, as the live panel is, and Blocked chains takes what is left. */
-      .flight { grid-template-rows: 48px 36px 361px minmax(300px, 1fr) 30px; gap: 8px; padding-top: 8px; padding-bottom: 8px; height: max(calc(100 * var(--vh) - 85px), 823px); }
+      /* Seats is as tall as its 11 rows when the window allows; Blocked chains keeps at least 360 px and takes the rest.
+         When the window is too short Seats gives way first and scrolls inside itself. Below 734 px the page scrolls. */
+      .flight { grid-template-rows: 48px 36px minmax(0, max-content) minmax(360px, 1fr); gap: 8px; padding-top: 8px; padding-bottom: 8px; height: max(calc(100 * var(--vh) - 85px), 734px); }
       .fstatus { display: flex; align-items: center; gap: 16px; padding: 0 16px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); font-size: 13px; }
       .fstatus .sub { margin-left: auto; }
-      .ffoot { display: flex; align-items: center; padding: 0 16px; color: var(--muted); font: 12px/16px var(--mono); }
-            .card .reason { font: 12px/16px var(--mono); color: var(--warn); overflow-wrap: anywhere; }
+      .card .reason { font: 12px/16px var(--mono); color: var(--warn); overflow-wrap: anywhere; }
       .card .reason a { font-weight: 600; }
       .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
       .tabs a { padding: 4px 12px; min-height: 36px; display: inline-flex; align-items: center; color: var(--fg-2); }
@@ -170,7 +169,7 @@
         );
         const theme = pick(q.get("theme"), ["light", "dark"], "dark");
         const rail = q.get("rail") === "open";
-        const qaPr = pick(q.get("pr"), ["1033", "1034", "demo-21"], "1033");
+        const qaPr = pick(q.get("pr"), ["1033", "1034", "demo-21", "demo-44"], "1033");
         document.documentElement.dataset.theme = theme;
 
         const BANNER =
@@ -420,7 +419,7 @@
           { ref: "#1188", repo: "mission-control", title: "Queue order for the seat", col: "In progress", prio: "P2", meta: "PR 1189 · draft", rootOf: "PR 1189" },
           { ref: "#1139", repo: "mission-control", title: "Sort Seats by wait", col: "Ready", prio: "P2", meta: "Depends on #1015", dep: true },
           { ref: "#1142", repo: "mission-control", title: "Chain row for the Seats table", col: "Ready", prio: "P2", meta: "Depends on #1015", dep: true },
-          { ref: "#1138", repo: "mission-control", title: "Keyboard order for chain rows", col: "Ready", prio: "P3", meta: "Stacked on #1015", dep: true },
+          { ref: "#1138", repo: "mission-control", title: "Keyboard order for chain rows", col: "Ready", prio: "P3", meta: "Stacked on #1015" },
           { ref: "#1180", repo: "mission-control", title: "Rework PR A", col: "Ready", prio: "P2", meta: "Queued for GUIDO-CX" },
           { ref: "#1181", repo: "mission-control", title: "Rework PR B", col: "Ready", prio: "P2", meta: "Queued for GUIDO-CX" },
           { ref: "#1201", repo: "mission-control", title: "Show when a seat is idle", col: "Ready", prio: "P3", meta: "Queued for INCO-2" },
@@ -431,11 +430,15 @@
           { ref: "demo#31", repo: "demo", title: t("Export tests"), col: "Ready", prio: "P3", meta: "Depends on demo PR 21", dep: true },
           { ref: "demo#32", repo: "demo", title: t("Export docs"), col: "Ready", prio: "P3", meta: "Depends on demo PR 21", dep: true },
           { ref: "demo#33", repo: "demo", title: t("Export telemetry"), col: "Ready", prio: "P3", meta: "Depends on demo PR 21", dep: true },
-          { ref: "demo#34", repo: "demo", title: t("Settings migration"), col: "Ready", prio: "P3", meta: "Held for demo PR 22", dep: true },
+          { ref: "demo#34", repo: "demo", title: t("Settings migration"), col: "Ready", prio: "P3", meta: "Held for demo PR 22" },
           { ref: "demo#21", repo: "demo", title: t("Add export button"), col: "In review", prio: "P2", meta: "RETRO-1 checking", rootOf: "demo PR 21" },
           { ref: "#1210", repo: "mission-control", title: "Seat history export", col: "Backlog", prio: "P3", meta: "Not refined" },
           { ref: "#1211", repo: "mission-control", title: "Idle seat reminder", col: "Refinement", prio: "P3", meta: "Needs a size" },
         ];
+        if (state === "empty") {
+          // Nothing waits in an empty read: no fixture card may say it does.
+          BOARD.splice(0, BOARD.length, ...BOARD.filter((c) => !c.dep && !/^(Stacked on|Held for)/.test(c.meta)));
+        }
         if (state === "many") {
           for (let i = 0; i < 6; i += 1) BOARD.push({ ref: `demo#${70 + i}`, repo: "demo", title: `Follow-up ${70 + i}`, col: "Ready", prio: "P3", meta: "Depends on demo PR 44", dep: true });
           BOARD.push({ ref: "demo#60", repo: "demo", title: "Importer cleanup", col: "Ready", prio: "P3", meta: "Depends on legacy#7", dep: true });
@@ -443,9 +446,9 @@
         }
         /** The ticket each Blocked card depends on: the block reason, linked. */
         const REASON = {
-          "#1139": ["depends on", "#1015"], "#1142": ["depends on", "#1015"], "#1138": ["stacked on", "#1015"],
+          "#1139": ["depends on", "#1015"], "#1142": ["depends on", "#1015"],
           "demo#31": ["depends on", "demo#21"], "demo#32": ["depends on", "demo#21"], "demo#33": ["depends on", "demo#21"],
-          "demo#34": ["held for", "demo#22"], "demo#60": ["depends on", "legacy#7"], "demo#61": ["depends on", "demo#40"],
+          "demo#60": ["depends on", "legacy#7"], "demo#61": ["depends on", "demo#40"],
           ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`demo#${70 + i}`, ["depends on", "demo#44"]])),
         };
         const COLUMNS = ["Backlog", "Refinement", "Blocked", "Ready", "In progress", "In review", "Ready for QA", "Done"];
@@ -537,18 +540,19 @@
             h("span", { role: "cell", class: "num" }, c.longestWaitMs === null ? h("span", { title: NO_START }, "—") : formatWait(c.longestWaitMs)),
             h("span", { role: "cell", class: "num" }, String(c.frees.length))));
           const flat = [];
-          const walk = (n, depth) => n.children.forEach((k) => { flat.push([k, depth]); walk(k, depth + 1); });
+          const walk = (n, depth) => n.children.forEach((k) => { flat.push([k, depth, n]); walk(k, depth + 1); });
           walk(c.root, 1);
           const capped = flat.length > MAX_SHOWN;
           const shown = capped && !open ? flat.slice(0, SHOWN_WHEN_CAPPED) : flat;
-          for (const [k, depth] of shown) {
-            const seatLink = k.edge === "queue" && c.seatId ? [" ", seatEl(c.seatId, c.seatId.toUpperCase())] : null;
-            rows.push(h("div", { class: "tr", role: "row" },
+          for (const [k, depth, parent] of shown) {
+            // The dependent leads; the edge word then names what it waits on.
+            const holds = k.edge === "queue" && c.seatId ? seatEl(c.seatId, c.seatId.toUpperCase()) : refEl(parent.ref, c.repoId);
+            rows.push(h("div", { class: "tr", role: "row", "data-ref": k.ref, "data-parent": parent.ref },
               h("div", { role: "cell", class: "work", style: `padding-left:${depth * 16}px` },
-                h("span", { class: "edge" }, EDGE_WORD[k.edge], seatLink),
-                refEl(k.ref, c.repoId),
-                h("span", { class: "ttl", title: k.title ?? "" }, k.title ?? ""),
-                k.alsoWaitsOn.map((o) => h("span", { class: "also" }, "also waits on ", refEl(o, c.repoId)))),
+                refEl(k.ref, c.repoId), " ",
+                h("span", { class: "ttl", title: k.title ?? "" }, k.title ?? ""), " ",
+                h("span", { class: "edge" }, "· ", EDGE_WORD[k.edge], " ", holds),
+                k.alsoWaitsOn.map((o) => h("span", { class: "also" }, " also waits on ", refEl(o, c.repoId)))),
               h("span", { role: "cell" }), h("span", { role: "cell" }), h("span", { role: "cell" }),
               h("span", { role: "cell", class: "num" }, k.waitedMs === null ? h("span", { title: NO_START }, "—") : formatWait(k.waitedMs)),
               h("span", { role: "cell" })));
@@ -613,15 +617,15 @@
             h("div", { class: "tabs", role: "tablist" },
               h("a", { href: "/flight#needs" }, "Needs you"), h("a", { href: "/flight#did" }, "What FLIGHT did"),
               h("a", { class: "on", href: "/flight#crew", "aria-current": "page" }, "Crew & board"), h("a", { href: "/flight#knows" }, "What FLIGHT knows")),
-            renderSeats(), renderChains(),
-            h("p", { class: "ffoot" }, "Seats and chains refresh with the hub · fixture data"));
+            renderSeats(), renderChains());
         }
 
         // ---- QA
         const QA_QUEUE = [
-          { key: "1033", repo: "mission-control", pr: "PR 1033", title: "Dependency edges in the board read", age: "3d 4h" },
-          { key: "1034", repo: "mission-control", pr: "PR 1034", title: "Comms thread keyboard order", age: "1d 6h" },
-          { key: "demo-21", repo: "demo", pr: "demo PR 21", title: "Add export button", age: "9h" },
+          { key: "1033", repo: "mission-control", pr: "PR 1033", title: t("Dependency edges in the board read"), age: "3d 4h" },
+          { key: "1034", repo: "mission-control", pr: "PR 1034", title: t("Comms thread keyboard order"), age: "1d 6h" },
+          { key: "demo-21", repo: "demo", pr: "demo PR 21", title: t("Add export button"), age: "9h" },
+          ...(state === "many" ? [{ key: "demo-44", repo: "demo", pr: "demo PR 44", title: "Bulk import", age: "5h" }] : []),
         ];
 
         function freesBlock(pr) {
