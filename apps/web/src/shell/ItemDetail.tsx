@@ -664,12 +664,12 @@ function OriginalLinks({
 }: {
   item: AttentionItem;
   thread?: PersonThreadView;
-  /** The page lists the item URL in its Links section. */
+  /** The page lists the item URL and the seat's page in its Links section. */
   hideUrl?: boolean;
 }) {
   return (
     <div className="row">
-      {item.agentId !== null && (
+      {item.agentId !== null && !hideUrl && (
         <a
           href={agentPath(item.agentId)}
           onClick={(e) => followLink(e, agentPath(item.agentId as string))}

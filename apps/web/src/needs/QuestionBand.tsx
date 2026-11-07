@@ -4,6 +4,10 @@ import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 
+/** A title without its leading number ("#1389 Server enforces …"), or null when none is left. */
+export const plainTitle = (title: string | null | undefined): string | null =>
+  title?.replace(/^#\d+\s*/, "").trim() || null;
+
 /** What an item asks, in words: FLIGHT's ask where it briefed one, else the item's text. */
 export const questionOf = (item: AttentionItem): string => item.brief?.ask?.trim() || item.text;
 
@@ -12,7 +16,7 @@ export const questionOf = (item: AttentionItem): string => item.brief?.ask?.trim
  * Needs you's entry rules (#1543) make sure an item has one or the other.
  */
 export const titleOf = (item: AttentionItem): string =>
-  item.pinned?.ticket?.title ?? item.pinned?.pr?.title ?? questionOf(item);
+  plainTitle(item.pinned?.ticket?.title) ?? plainTitle(item.pinned?.pr?.title) ?? questionOf(item);
 
 /**
  * Who asks: the seat or loop behind the item, else FLIGHT when it briefed the question, else the

@@ -185,6 +185,34 @@ describe("Needs you page", () => {
     expect(links.textContent).not.toMatch(/1400|1412/);
   });
 
+  it("keeps the seat id and PR number out of everything above the Links section (#1583)", async () => {
+    routes([
+      ask("q1", {
+        kind: "blocked",
+        agentId: "flight-1",
+        brief: undefined,
+        pinned: {
+          pr: {
+            ref: "mission-control#1412",
+            number: 1412,
+            title: "#1412 Loop schema in core",
+            url: "https://github.com/o/mission-control/pull/1412",
+          },
+        },
+      }),
+    ]);
+    render(<Needs item={null} />);
+    const band = await screen.findByRole("region", { name: "The question" });
+    expect(within(band).getByRole("heading", { level: 2 }).textContent).toBe("Loop schema in core");
+    expect(band.textContent).not.toMatch(/#1412/);
+    const main = document.getElementById("needsMain") as HTMLElement;
+    expect((main.textContent ?? "").split("Links")[0]).not.toContain("flight-1");
+    const links = within(main).getByRole("region", { name: "Links" });
+    expect(within(links).getByRole("link", { name: /page$/ }).getAttribute("href")).toBe(
+      "/agent/flight-1",
+    );
+  });
+
   it("says nobody is waiting with no items", async () => {
     routes([]);
     render(<Needs item={null} />);
