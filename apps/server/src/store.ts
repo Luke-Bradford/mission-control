@@ -360,7 +360,7 @@ CREATE TABLE IF NOT EXISTS decision_defaults (
 CREATE TABLE IF NOT EXISTS question_choices (
   key TEXT NOT NULL, brief_at INTEGER NOT NULL, option_id TEXT NOT NULL, label TEXT NOT NULL,
   answer TEXT NOT NULL, question TEXT NOT NULL, ticket TEXT, target TEXT NOT NULL,
-  target_kind TEXT NOT NULL, message_id INTEGER, chosen_at INTEGER NOT NULL,
+  target_kind TEXT NOT NULL, message_id INTEGER, chosen_at INTEGER NOT NULL, chosen_by TEXT,
   PRIMARY KEY (key, brief_at)
 );
 CREATE INDEX IF NOT EXISTS question_choices_ticket ON question_choices(ticket);
@@ -978,6 +978,8 @@ export interface QuestionChoiceRow {
   targetKind: ChoiceTargetKind;
   /** The Comms message carrying the answer; null when none was stored. */
   messageId: string | null;
+  /** Who chose, in words: "the operator", "FLIGHT" or "the controller". */
+  chosenBy: string;
   chosenAt: number;
 }
 /** A slice of stored Comms: the crew channel, one pair, everything a seat sent or got, or its inbox. */
@@ -2054,6 +2056,7 @@ export class Store {
     // Set when waking the recipient failed, so an identical retry wakes them instead of being skipped.
     this.addColumn("comms", "wake_failed_at", "INTEGER");
     this.addColumn("comms", "delivered_at", "INTEGER");
+    this.addColumn("question_choices", "chosen_by", "TEXT");
     // Who sent it, set by the hub; NULL on rows stored before this column.
     this.addColumn("comms", "sender_kind", "TEXT");
     this.db.exec(`
@@ -6286,8 +6289,8 @@ export class Store {
     const r = this.db
       .prepare(
         `INSERT OR IGNORE INTO question_choices
-           (key, brief_at, option_id, label, answer, question, ticket, target, target_kind, message_id, chosen_at)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+           (key, brief_at, option_id, label, answer, question, ticket, target, target_kind, message_id, chosen_at, chosen_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
       )
       .run(
         c.key,
@@ -6301,6 +6304,7 @@ export class Store {
         c.targetKind,
         c.messageId === null ? null : commsMessageNumber(c.messageId),
         c.chosenAt,
+        c.chosenBy,
       );
     const row = this.choice(c.key, c.briefAt);
     if (row === null) throw new Error("Choice was not stored.");
@@ -6335,6 +6339,7 @@ export class Store {
       target: r.target as string,
       targetKind: r.target_kind as ChoiceTargetKind,
       messageId: r.message_id == null ? null : `comms:${r.message_id}`,
+      chosenBy: (r.chosen_by as string | null) ?? "the operator",
       chosenAt: r.chosen_at as number,
     };
   }

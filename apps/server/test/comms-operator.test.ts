@@ -4,6 +4,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { commsInboxContext } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
+import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../src/flight/operator-call.ts";
 import { Store } from "../src/store.ts";
 
 const seat = (id: string, role: string) => ({
@@ -190,5 +191,40 @@ it("the choose route validates its body and answers 404 for a question that is n
   });
   expect(gone.statusCode).toBe(404);
   expect((await app.inject({ url: "/api/attention/ask:99/choice", headers })).statusCode).toBe(404);
+  await app.close();
+});
+
+it("a choice made through FLIGHT's operator tool is stored and worded as FLIGHT's, not the operator's", async () => {
+  const { store, app, woken } = setup();
+  store.upsertRun(run({ id: "r1" }));
+  store.upsertRun(run({ id: "fr", agentId: "flight-1", seq: 1, ticket: null }));
+  const q = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "Ship the plan?", at: 2 });
+  store.passQuestion(q, 3);
+  store.addBrief({
+    key: `ask:${q}`,
+    for: "operator",
+    ask: "Ship the plan?",
+    context: "c",
+    recommendation: "r",
+    basis: "b",
+    at: 5_000,
+    options: [{ id: "yes", label: "Ship it", answer: "Go ahead." }],
+  });
+  const res = await app.inject({
+    method: "POST",
+    url: `/api/attention/ask:${q}/choose`,
+    payload: { optionId: "yes", briefAt: 5_000 },
+    headers: {
+      ...headers,
+      [FLIGHT_OPERATOR_ACTOR_HEADER]: JSON.stringify({ seatId: "flight-1", runId: "fr" }),
+    },
+  });
+  expect(res.statusCode).toBe(200);
+  expect(woken).toEqual(["guido-1"]);
+  const sent = store.commsMessage("comms:1");
+  expect(sent).toMatchObject({ from: "flight-1", to: "guido-1", senderKind: "flight" });
+  expect(sent?.text).toContain("FLIGHT chose");
+  expect(sent?.text).not.toContain("the operator chose");
+  expect(store.latestChoice(`ask:${q}`)?.chosenBy).toBe("FLIGHT");
   await app.close();
 });

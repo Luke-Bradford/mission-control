@@ -90,6 +90,7 @@ const deps = () => ({
   config,
   store,
   now: () => nowMs,
+  sender: { from: "CAPCOM", kind: "operator" as const },
   crew,
   knownSecrets: async () => [],
   wake,

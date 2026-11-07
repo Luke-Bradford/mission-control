@@ -4,6 +4,7 @@ import {
   type ChoiceTargetKind,
   COMMS_CAPCOM,
   COMMS_MC,
+  type CommsSenderKind,
 } from "@mc/core";
 import { sendComms } from "./comms.ts";
 import type { CcConfig } from "./config.ts";
@@ -25,6 +26,8 @@ export interface ChooseDeps {
   now: () => number;
   crew: () => readonly string[];
   knownSecrets: () => Promise<readonly string[]>;
+  /** Who is choosing, set by the hub from how the request was made: the operator, FLIGHT or the controller. */
+  sender: { from: string; kind: CommsSenderKind };
   /** Wakes the seat so it takes its inbox; delivery state is set when it does. */
   wake: (seatId: string) => void;
   /** Wakes a run set aside by the engine, which is not the run on its seat. */
@@ -32,6 +35,15 @@ export interface ChooseDeps {
 }
 
 const ASK = /^ask:(\d+)$/;
+
+/** How the chooser is named in the answer, the note to FLIGHT and the ticket's history. */
+export const CHOOSER_NAMES: Record<CommsSenderKind, string> = {
+  operator: "the operator",
+  controller: "the controller",
+  flight: "FLIGHT",
+  seat: "a seat",
+  hub: "the hub",
+};
 
 const receipt = (store: Store, row: QuestionChoiceRow, alreadyChosen: boolean): ChoiceReceipt => ({
   key: row.key,
@@ -105,7 +117,8 @@ export async function chooseOption(
   }
   const ticket = item.ticket ?? brief.ticket ?? null;
   const asked = brief.ask || item.text;
-  const lead = `Re: ${key} · the operator chose "${option.label}"`;
+  const chooser = CHOOSER_NAMES[d.sender.kind];
+  const lead = `Re: ${key} · ${chooser} chose "${option.label}"`;
   const text =
     targetKind === "flight-for-next-run"
       ? `${lead}\n\n${option.answer}\n\nThe run that asked has ended. Pass this on to the next run on ${ticket ?? "that ticket"}.`
@@ -124,6 +137,7 @@ export async function chooseOption(
     target: to,
     targetKind,
     messageId: null,
+    chosenBy: chooser,
     chosenAt: now,
   });
   if (!claimed.fresh) return receipt(store, claimed.row, true);
@@ -136,11 +150,11 @@ export async function chooseOption(
         knownSecrets: d.knownSecrets,
         now: d.now,
         seatSender: false,
-        senderKind: "operator",
+        senderKind: d.sender.kind,
         wakeUnlabelled: true,
         notify: (seatId) => d.wake(seatId),
       },
-      COMMS_CAPCOM,
+      d.sender.from,
       {
         to,
         text,
@@ -163,14 +177,14 @@ export async function chooseOption(
   else store.ack([key], now);
 
   // FLIGHT hears of a seat's answer in one line at its next wake; this wakes no one
-  if (targetKind === "seat" && flightId !== null && flightId !== to)
+  if (targetKind === "seat" && flightId !== null && flightId !== to && flightId !== d.sender.from)
     store.addComms({
       at: now,
       from: COMMS_MC,
       senderKind: "hub",
       to: flightId,
       ticket,
-      text: `The operator chose "${option.label}" for ${to}'s question${ticket === null ? "" : ` on ${ticket}`}; it is delivered to the run.`,
+      text: `${chooser[0]?.toUpperCase()}${chooser.slice(1)} chose "${option.label}" for ${to}'s question${ticket === null ? "" : ` on ${ticket}`}; it is delivered to the run.`,
     });
   return receipt(store, claimed.row, false);
 }

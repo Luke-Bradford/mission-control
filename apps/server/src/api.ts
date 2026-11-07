@@ -6006,7 +6006,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               now,
               crew: commsCrew,
               knownSecrets: deps.knownSecrets ?? (async () => []),
-              wake: (seatId) => deps.deliverComms?.(seatId, "", COMMS_CAPCOM),
+              sender: commsSender(req),
+              wake: (seatId) => deps.deliverComms?.(seatId, "", commsSender(req).from),
               ...(deps.engine?.reconcileRun === undefined
                 ? {}
                 : {

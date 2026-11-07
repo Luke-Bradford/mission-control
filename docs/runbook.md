@@ -2746,7 +2746,7 @@ keep their permission checks.
 - **Choosing an option.** `POST /api/attention/:key/choose` with `{ optionId, briefAt }` is the one
   way a choice acts; chat text never picks an option. `briefAt` must equal the open brief's time and
   `optionId` must be one of its options. A brief the hub wrote (`by: "hub"`, such as a queue change) is refused with 409: it acts through its own buttons. The brief is claimed before anything is sent, so two picks at once deliver once. The answer goes to the run that asked and wakes it; if
-  that run has ended it goes to FLIGHT, to pass to the ticket's next run, never to another run
+  the answer is worded and stored as the chooser's (the operator, FLIGHT through its operator tool, or the controller; `question_choices.chosen_by`), never as the operator's when FLIGHT or the controller chose. If that run has ended it goes to FLIGHT, to pass to the ticket's next run, never to another run
   directly. FLIGHT's own question goes to FLIGHT, woken. When a seat asked, FLIGHT gets one
   unlabelled line at its next wake (no wake). The question closes, the choice is stored in
   `question_choices` (kept 365 days) and shows in the ticket's timeline as a `choice` decision;

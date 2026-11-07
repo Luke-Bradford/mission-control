@@ -234,7 +234,7 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
       id: 0,
       decisionKind: "choice",
       about: c.question,
-      decision: `The operator chose "${c.label}".`,
+      decision: `${c.chosenBy[0]?.toUpperCase()}${c.chosenBy.slice(1)} chose "${c.label}".`,
       basis: `Delivered to ${c.target}.`,
     });
   events.sort(newestFirst);
