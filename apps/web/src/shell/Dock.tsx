@@ -7,7 +7,7 @@ import {
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { needsYouItems, openNeedsYou, sortNeeds, useNeedsYou } from "../attention.ts";
+import { needsYouItems, openNeed, sortNeeds, useNeedsYou } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
@@ -35,7 +35,6 @@ import { BuildChips } from "./buildStatus.tsx";
 import { DockSummary } from "./DockSummary.tsx";
 import { useOlderEvents } from "./olderEvents.ts";
 import {
-  openItem,
   setDockCollapsed,
   setFlightUnread,
   toggleDock,
@@ -192,10 +191,13 @@ const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
 export function FlightChat({
   where,
   active = true,
+  needsBeside = false,
   prefill,
   onPrefillConsumed,
 }: {
   where: ChatPlace;
+  /** The page beside the chat already lists what waits on you. */
+  needsBeside?: boolean;
   active?: boolean;
   prefill?: ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
@@ -277,6 +279,7 @@ export function FlightChat({
           attention={attentionResource}
           crew={crew}
           canMessage={seat?.live === true}
+          hideWaiting={needsBeside}
         />
       )}
       {where !== "dock" && asks.length > 0 && (
@@ -303,7 +306,7 @@ export function FlightChat({
                   type="button"
                   className="sm"
                   // "FLIGHT is not triaging" lists its items on Needs you's home
-                  onClick={() => (i.notTriaging ? openNeedsYou() : openItem(i.key))}
+                  onClick={() => openNeed(i)}
                 >
                   {i.notTriaging ? "Show them" : "Open"}
                 </button>
@@ -399,7 +402,33 @@ export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeo
   return overview && dock.wide && dock.visible && !dock.collapsed && covers;
 }
 
-export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
+/** From this width the Overview's side column, with Needs you in it, sits beside the open dock. */
+const OVERVIEW_BESIDE_QUERY = "(min-width: 2200px)";
+
+/** Whether the Overview shows its Needs you panel beside the dock, so the dock need not repeat it. */
+export function useNeedsBeside(overview: boolean) {
+  const [wide, setWide] = useState(
+    () => typeof matchMedia !== "undefined" && matchMedia(OVERVIEW_BESIDE_QUERY).matches,
+  );
+  useEffect(() => {
+    if (typeof matchMedia === "undefined") return;
+    const media = matchMedia(OVERVIEW_BESIDE_QUERY),
+      update = () => setWide(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return overview && wide;
+}
+
+export function Dock({
+  coversPage = false,
+  needsBeside = false,
+}: {
+  coversPage?: boolean;
+  /** The Overview shows beside the dock, so its Needs you panel is already in view. */
+  needsBeside?: boolean;
+} = {}) {
   const { visible, wide, collapsed, toggle } = useDock();
   // Esc folds the cover from anywhere on the page, and the page behind stays usable.
   useOverlay("overview-flight", coversPage, () => setDockCollapsed(true));
@@ -546,7 +575,7 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
             </p>
           )}
           <div className="dockbody" id="dockBody">
-            <FlightChat where="dock" active={looking} />
+            <FlightChat where="dock" active={looking} needsBeside={needsBeside} />
           </div>
         </div>
       </aside>

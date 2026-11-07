@@ -20,6 +20,7 @@ import {
   awayBugDecisionAbout,
   type BoardItem,
   BRIEF_CLEARED_DECISION,
+  BRIEF_ENTRY_REFUSED,
   BRIEF_INPUT_MAX,
   BRIEF_ITEM_DESCRIPTION,
   BRIEF_KEY_MAX,
@@ -39,6 +40,8 @@ import {
   CLOSE_DESCRIPTION,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMENTED_DECISION,
   COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_HEADING,
@@ -195,6 +198,7 @@ import {
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
+  needsYouEntryFaults,
   noOpenQuestionText,
   notAcceptedText,
   notDevRunText,
@@ -325,6 +329,7 @@ import {
   attentionItems,
   CREW_ERROR_KEY,
   crew,
+  hubAlert,
   isOperatorCall,
   NO_CLI_VERSION,
   NO_LOCK,
@@ -353,6 +358,7 @@ import {
 } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
+import { handoffTarget } from "../run-handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
@@ -557,6 +563,11 @@ const BriefItemArgs = z
     ...StructuredBriefArgs.shape,
     key: z.string().min(1).max(BRIEF_KEY_MAX),
     for: z.enum(["operator", "flight"]).default("operator"),
+    /** The ticket the question is about, for an item with none of its own (#1543). */
+    ticket: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,100}#[1-9]\d{0,9}$/)
+      .optional(),
     assessment: text(BRIEF_INPUT_MAX).optional(),
     context: text(BRIEF_INPUT_MAX).optional(),
     did: z
@@ -947,6 +958,9 @@ function issuesQuery(label: boolean, assignee: boolean, after: boolean): string 
   return `query(${vars.join(", ")}) { repository(owner: $owner, name: $name) { issues(${filters.join(", ")}) { pageInfo { hasNextPage endCursor } nodes { number title labels(first: 20) { nodes { name } } assignees(first: 10) { nodes { login } } projectItems(first: 10) { nodes { project { number } status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }`;
 }
 
+/** What recommendationId means; the tier list is read from core so the text cannot drift. */
+export const CODE_HEALTH_RECOMMENDATION_ID_DESCRIPTION = `A code-health recommendation. An accepted one links its work. A proposed one whose rule is in FLIGHT's tier (${CODE_HEALTH_FLIGHT_TIER_RULES.join(", ")}) is accepted for you: owner FLIGHT, review in ${CODE_HEALTH_FLIGHT_REVIEW_DAYS} days, your basis recorded. Any other proposed one is refused until the operator accepts it. Durable link and recovery prevent duplicate work on retry.`;
+
 /** Each repo's last create_ticket or comment_ticket call: one at a time, so the duplicate check holds. */
 const ticketQueue = new Map<string, Promise<unknown>>();
 /** Chrome is host-wide and expensive: every FLIGHT session shares one render slot. */
@@ -1256,14 +1270,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     try {
       await deps.supervisor.message(q.agentId, answerMessageText(answer), {
         interrupt: false,
-        questions: "unpassed",
+        questions: "none",
       });
     } catch (e) {
       return fail(notSentText(e instanceof Error ? e.message : String(e)));
     }
-    // Passed without a brief (before #758): the message closed unpassed questions only, so hand
-    // this one back and close it too, once the answer is delivered.
-    if (q.passedAt !== null && store.unpassQuestion(id)) store.answerQuestion(id, at);
+    // The message closes no question: only this one, once the answer is delivered, so the seat's
+    // other open questions wait for their own answers. One passed without a brief (before #758)
+    // is handed back first.
+    if (q.passedAt !== null) store.unpassQuestion(id);
+    store.answerQuestion(id, at);
+    bus.emit("attention");
     store.addComms({
       at,
       from: ctx.seatId,
@@ -1549,7 +1566,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return startSeat(
       ctx,
       { seat: c.args.seat, issue: c.args.issue, basis: c.args.reason },
-      { fromSeat: source.agentId, branch: source.branch },
+      {
+        fromSeat: source.agentId,
+        // the open PR's head is the branch to push to; it can differ from the ended run's
+        branch: handoffTarget(store, {
+          runId: source.id,
+          repoId: repo.id,
+          ticket: ref,
+          branch: source.branch,
+          worktree: null,
+        }).branch,
+      },
     );
   }
 
@@ -2046,7 +2073,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         workReady = false,
         workAttempt = false;
       if (recommendationId) {
-        const recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
+        let recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
+        // FLIGHT accepts a proposal of its own tier by filing its work; every other rule waits for the operator.
+        if (
+          recommendation?.state.kind === "proposed" &&
+          CODE_HEALTH_FLIGHT_TIER_RULES.includes(recommendation.rule)
+        ) {
+          try {
+            recommendation = store.flightAcceptCodeHealth(
+              repo.id,
+              recommendationId,
+              ctx.seatId,
+              basis,
+              now(),
+            );
+          } catch {
+            return fail("That recommendation changed while FLIGHT accepted it. Read it again.");
+          }
+        }
         if (
           !recommendation ||
           !(
@@ -2641,6 +2685,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (hold && key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
     const assessment = structured.assessment ?? context;
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
+    const named = structured.ticket?.split("#")[0];
+    if (named !== undefined && !config.repos.some((r) => r.id === named))
+      return fail(
+        `Not briefed: ticket ${structured.ticket} names no repo of this hub. Use repo#n with one of: ${config.repos.map((r) => r.id).join(", ")}.`,
+      );
     if (structured.for === "operator" && structured.ask === undefined)
       return fail("Give a non-empty ask when passing an item to the operator.");
     const ids = (options ?? []).flatMap((o) => (o.id ? [o.id] : []));
@@ -2656,8 +2705,31 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const item = operatorItems(config, store, at, deps.login, undefined, deps.lockState?.()).find(
       (i) => i.key === key,
     );
-    if (item === undefined || ownReply(item, flightSeat(config)?.seat.id ?? null)) {
+    // FLIGHT's own @CAPCOM question reaches the operator only through its brief (#1543)
+    if (
+      item === undefined ||
+      (structured.for !== "operator" && ownReply(item, flightSeat(config)?.seat.id ?? null))
+    ) {
       return fail(briefNoItemText(key));
+    }
+    // the Needs you entry check (#1543), at the source: a brief that would not reach the operator
+    // is refused here, with what it lacks, so FLIGHT fixes it in one try
+    if (structured.for === "operator" && !hubAlert(item, store)) {
+      const faults = needsYouEntryFaults({
+        ...item,
+        brief: {
+          for: "operator",
+          ask: structured.ask ?? "",
+          context: assessment,
+          recommendation,
+          options: options ?? [],
+          basis,
+          at,
+          ...(structured.ticket === undefined ? {} : { ticket: structured.ticket }),
+          ...(structured.person === undefined ? {} : { person: structured.person }),
+        },
+      });
+      if (faults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${faults.join("; ")}.`);
     }
     if (structured.for === "flight") {
       if (isOperatorCall(item, store))
@@ -3442,7 +3514,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.mergePr,
-      "Clear a crew PR for engine merge, or merge an eligible controller PR without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
+      "Clear a crew PR for engine merge, or merge an eligible PR with no unfinished crew run without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
       PrBasisArgs,
       "merge",
       async (a, repo, ctx) => {
@@ -3565,7 +3637,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.settlePark,
-      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds.`,
+      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds. Accept is refused when the last review failed the design check: only the operator accepts that.`,
       SettleArgs,
       "settle",
       async (a) => {
@@ -4174,8 +4246,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           recommendationId: {
             type: "string",
             pattern: "^chr_[a-f0-9]{32}$",
-            description:
-              "Optional accepted code-health recommendation. Durable link and recovery prevent duplicate work on retry.",
+            description: CODE_HEALTH_RECOMMENDATION_ID_DESCRIPTION,
           },
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
           body: { type: "string", minLength: 1, maxLength: TICKET_BODY_MAX },

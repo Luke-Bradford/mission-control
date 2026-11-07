@@ -10,7 +10,6 @@ import {
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
-import { NOBODY_WAITING } from "../src/flight/AskedOfYou.tsx";
 import { BRIEF_EMPTY, WATCH_EMPTY } from "../src/flight/Brief.tsx";
 import { overturnText } from "../src/flight/conversation.ts";
 import { controllerCapped } from "../src/flight/DidTab.tsx";
@@ -22,11 +21,10 @@ import { SUMMARY_EMPTY } from "../src/flight/Summary.tsx";
 import { NO_SEATS } from "../src/flight/WorkInFlight.tsx";
 import { NOTHING_LOGGED } from "../src/flight/WorkingLog.tsx";
 import { rel } from "../src/fmt.ts";
-import { type PersonThreadView, whereOf } from "../src/notifications.ts";
+import type { PersonThreadView } from "../src/notifications.ts";
 import { Flight, tabForHash } from "../src/pages/Flight.tsx";
 import { agentPath, PAGE_PATHS } from "../src/router.ts";
 import { Header } from "../src/shell/Header.tsx";
-import { useItem } from "../src/shell/overlays.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
 import { stubFetch as fetchStub } from "./fetchStub.ts";
@@ -101,15 +99,6 @@ const thread = (over: Partial<PersonThreadView> = {}): PersonThreadView => ({
   firstSeenAt: NOW - HOUR,
   catchUp: "new",
   ...over,
-});
-const personItem = item({
-  key: KEY,
-  kind: "person",
-  agentId: null,
-  escalationId: null,
-  ticket: null,
-  url: URL,
-  text: "alice mentioned you: Fix the stop race",
 });
 
 beforeEach(() => {
@@ -444,7 +433,7 @@ describe("FLIGHT page", () => {
         expect(container.querySelector(selector)?.textContent, selector).toContain(FLIGHT_NO_SEAT),
       );
     }
-    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Handling" }));
     await waitFor(() =>
       expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send."),
     );
@@ -1040,11 +1029,9 @@ describe("FLIGHT page", () => {
     expect(container.querySelector("#wifP")?.textContent).toContain("Checkpoint in 1h 00m");
     fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
     fireEvent.click(await screen.findByRole("button", { name: "Needs you: 1" }));
-    expect(screen.getByRole("tab", { name: "Needs you" }).getAttribute("aria-selected")).toBe(
-      "true",
-    );
-    expect((container.querySelector("#flight-needs") as HTMLElement).hidden).toBe(false);
-    expect(container.querySelector("#askP")?.textContent).toContain("Choose a release window");
+    // the asks have their own page now
+    expect(window.location.pathname).toBe("/needs-you");
+    window.history.replaceState(null, "", "/");
   });
 
   describe("a delivery-board row's next action", () => {
@@ -1310,9 +1297,8 @@ describe("FLIGHT page", () => {
         screen.getByRole("tab", { name: "What FLIGHT did" }).getAttribute("aria-selected"),
       ).toBe("true");
       fireEvent.click(needs);
-      expect(screen.getByRole("tab", { name: "Needs you" }).getAttribute("aria-selected")).toBe(
-        "true",
-      );
+      expect(window.location.pathname).toBe("/needs-you");
+      window.history.replaceState(null, "", "/");
     });
   });
 
@@ -1336,7 +1322,7 @@ describe("FLIGHT page", () => {
         <Flight />
       </>,
     );
-    expect(await screen.findByRole("button", { name: /^Needs you 2:/ })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Needs you: 2 waiting" })).toBeTruthy();
     expect(await screen.findByRole("button", { name: "Needs you: 2" })).toBeTruthy();
     // What FLIGHT owns is its own group, never counted as Needs you.
     expect(screen.getByRole("button", { name: "FLIGHT handling: 1" })).toBeTruthy();
@@ -1542,7 +1528,7 @@ describe("FLIGHT's brief", () => {
     });
     const { container } = render(<Flight />);
     expect((container.querySelector("#flight-needs") as HTMLElement).hidden).toBe(false);
-    expect(screen.getByRole("tab", { name: "Needs you" }).getAttribute("aria-selected")).toBe(
+    expect(screen.getByRole("tab", { name: "Handling" }).getAttribute("aria-selected")).toBe(
       "true",
     );
     await waitFor(() => expect(document.getElementById(id)?.textContent).toContain("Linked reply"));
@@ -1550,7 +1536,6 @@ describe("FLIGHT's brief", () => {
   });
 
   it.each([
-    ["#askP", "flight-needs"],
     ["#heldP", "flight-needs"],
     ["#decidedP", "flight-did"],
     ["#logP", "flight-did"],
@@ -1574,11 +1559,19 @@ describe("FLIGHT's brief", () => {
     expect((live.querySelector(`#${panel}`) as HTMLElement).hidden).toBe(false);
   });
 
+  it.each(["#askP", "#defaultsP"])("a %s link follows the asks to the Needs you page", (hash) => {
+    window.history.replaceState(null, "", `/flight${hash}`);
+    stubFetch({ "/api/config": CONFIG });
+    render(<Flight />);
+    expect(window.location.pathname + window.location.hash).toBe("/needs-you");
+    window.history.replaceState(null, "", "/");
+  });
+
   it("names the four tabs for the operator's questions, in order", async () => {
     stubFetch({ "/api/config": CONFIG });
     render(<Flight />);
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual([
-      "01Needs you",
+      "01Handling",
       "02What FLIGHT did",
       "03Crew & board",
       "04What FLIGHT knows",
@@ -1654,7 +1647,8 @@ describe("FLIGHT's brief", () => {
     stubFetch({ "/api/flight": flightView(), "/api/config": CONFIG });
     const { container } = render(<Flight />);
     await screen.findByRole("button", { name: "decided 24 h: 2" });
-    expect(container.querySelector("#flight-needs #askP")).not.toBeNull();
+    expect(container.querySelector("#flight-needs #handlingP")).not.toBeNull();
+    expect(container.querySelector("#askP")).toBeNull();
     for (const id of ["did", "crew", "knows"]) {
       expect((container.querySelector(`#flight-${id}`) as HTMLElement).children, id).toHaveLength(
         0,
@@ -1772,216 +1766,6 @@ describe("FLIGHT's brief", () => {
     );
   });
 
-  it("Asked of you lists the operator's items, with FLIGHT's take where it briefed one", async () => {
-    function Probe() {
-      return <span data-testid="item">{useItem() ?? "none"}</span>;
-    }
-    const items = [
-      item({ key: "b", kind: "approval", text: "Merge b?" }),
-      item({
-        key: "a",
-        kind: "decision",
-        text: "Pick a cache",
-        brief: brief({ recommendation: "Use LRU." }),
-      }),
-      item({ key: "c", kind: "stalled", owner: "flight" }),
-    ];
-    stubFetch({ "/api/attention": items, "/api/config": CONFIG });
-    render(
-      <>
-        <Probe />
-        <Flight />
-      </>,
-    );
-    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
-    const rows = await screen.findAllByTestId("ask-row");
-    expect(rows).toHaveLength(2);
-    expect(rows[0]?.textContent).toContain("Pick a cache");
-    expect(rows[0]?.textContent).toContain("FLIGHT's take:");
-    expect(rows[0]?.textContent).toContain("Use LRU.");
-    expect(rows[1]?.textContent).toContain("Merge b?");
-    expect(rows[1]?.textContent).not.toContain("FLIGHT's take:");
-    fireEvent.click(within(rows[0] as HTMLElement).getByRole("button", { name: "Open" }));
-    expect(screen.getByTestId("item").textContent).toBe("a");
-  });
-
-  it("Asked of you shows FLIGHT not triaging as one item with what waits on it listed under it (#758)", async () => {
-    stubFetch({
-      "/api/attention": [
-        item({
-          key: "flight:not-triaging",
-          kind: "blocked",
-          agentId: "flight-1",
-          escalationId: null,
-          text: "FLIGHT is not triaging: 1 waiting since 12:55. FLIGHT has not triaged them within its window.",
-          notTriaging: { cause: "late", keys: ["ask:1"], since: NOW - 5 * 60_000 },
-        }),
-        item({
-          key: "ask:1",
-          kind: "question",
-          escalationId: null,
-          text: "GUIDO-1 asks: Which lane?",
-          owner: "flight",
-          flightTriage: "missed",
-        }),
-      ],
-      "/api/config": CONFIG,
-    });
-    render(<Flight />);
-    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
-    const row = await screen.findByTestId("not-triaging");
-    expect(row.textContent).toContain("FLIGHT is not triaging: 1 waiting since 12:55.");
-    // Needs you's home shows them at once; the item stays FLIGHT's, so it is no row of its own
-    expect(within(row).getByText("GUIDO-1 asks: Which lane?")).toBeTruthy();
-    expect(within(row).getByRole("button", { name: "Hide them" })).toBeTruthy();
-    expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
-    expect(screen.queryByText(NOBODY_WAITING)).toBeNull();
-  });
-
-  it("says the GitHub threads could not load, with Retry, and keeps the asks standing", async () => {
-    stubFetch({
-      "/api/attention": [personItem, item({ key: "q1", kind: "question", text: "Which port?" })],
-      "/api/notifications": () => ({ status: 500, body: { error: "GitHub is down" } }),
-      "/api/config": CONFIG,
-    });
-    render(<Flight />);
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toBe("Could not load your GitHub threads: GitHub is down");
-    expect(
-      within(alert.parentElement as HTMLElement).getByRole("button", { name: "Retry" }),
-    ).toBeTruthy();
-    expect(screen.getAllByTestId("ask-row")).toHaveLength(2);
-    expect(screen.queryByTestId("person-card")).toBeNull();
-  });
-
-  it("keeps person notifications out of Asked of you until FLIGHT passes them up", async () => {
-    stubFetch({
-      "/api/attention": [{ ...personItem, owner: "flight", flightTriage: "waiting" }],
-      "/api/notifications": { open: [thread()], handledToday: [] },
-      "/api/config": CONFIG,
-    });
-    render(<Flight />);
-    expect(await screen.findByText(NOBODY_WAITING)).toBeTruthy();
-    expect(screen.queryByTestId("person-card")).toBeNull();
-  });
-
-  it("Asked of you shows a person card for each GitHub thread in Needs you, with FLIGHT's take when briefed", async () => {
-    function Probe() {
-      return <span data-testid="item">{useItem() ?? "none"}</span>;
-    }
-    const t2 = thread({
-      key: "person:202:1",
-      id: "202",
-      author: null,
-      number: 7,
-      catchUp: "follow-up",
-    });
-    // An open thread Needs you does not hold (a digested one) is not asked of you.
-    const digested = thread({ key: "person:303:1", id: "303", title: "Digested" });
-    stubFetch({
-      "/api/attention": [
-        { ...personItem, brief: brief({ recommendation: "Reply that the fix is in review." }) },
-        { ...personItem, key: t2.key, text: "Someone: thread 7" },
-      ],
-      "/api/notifications": { open: [thread(), t2, digested], handledToday: [] },
-      "/api/config": CONFIG,
-    });
-    render(
-      <>
-        <Probe />
-        <Flight />
-      </>,
-    );
-    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
-    const cards = await screen.findAllByTestId("person-card");
-    expect(cards).toHaveLength(2);
-    expect(screen.queryByText(/Digested/)).toBeNull();
-    const first = cards[0]?.textContent ?? "";
-    for (const part of [
-      "alice",
-      whereOf(thread()),
-      rel(NOW - HOUR, NOW, "Europe/London"),
-      "New",
-      "mentioned you: Fix the stop race",
-      "can you look?",
-      "FLIGHT'S TAKE",
-      "Reply that the fix is in review.",
-    ])
-      expect(first).toContain(part);
-    expect(
-      within(cards[0] as HTMLElement)
-        .getByRole("link", { name: "Open in GitHub ↗" })
-        .getAttribute("href"),
-    ).toBe(URL);
-    const second = cards[1]?.textContent ?? "";
-    expect(second).toContain("Someone");
-    expect(second).toContain(whereOf(t2));
-    expect(second).toContain("Follow-up");
-    expect(second).not.toContain("FLIGHT'S TAKE");
-    expect(screen.queryAllByTestId("ask-row")).toHaveLength(0);
-    fireEvent.click(
-      within(cards[0] as HTMLElement).getByRole("button", { name: "Read the brief and reply" }),
-    );
-    expect(screen.getByTestId("item").textContent).toBe(KEY);
-  });
-
-  it("omits the quote when a source snippet is empty", async () => {
-    stubFetch({
-      "/api/attention": [personItem],
-      "/api/notifications": { open: [thread({ snippet: null })], handledToday: [] },
-      "/api/config": CONFIG,
-    });
-    render(<Flight />);
-    const card = await screen.findByTestId("person-card");
-    expect(card.querySelector("blockquote")).toBeNull();
-  });
-
-  it("Asked of you highlights mentions and keeps the message inert", async () => {
-    const snippet =
-      '@CAPCOM @OctoCat <img src=x onerror="alert(1)"> @octocat-other @operator @someone @capcom';
-    stubFetch({
-      "/api/attention": [personItem],
-      "/api/notifications": { open: [thread({ snippet })], handledToday: [] },
-      "/api/config": { ...CONFIG, githubLogin: "octocat" },
-    });
-    render(<Flight />);
-    const card = await screen.findByTestId("person-card");
-    const quote = card.querySelector("blockquote") as HTMLElement;
-    expect(quote.textContent).toBe(snippet);
-    expect([...quote.querySelectorAll(".mention")].map((el) => el.textContent)).toEqual([
-      "@CAPCOM",
-      "@OctoCat",
-      "@capcom",
-    ]);
-    expect(quote.querySelector("img")).toBeNull();
-  });
-
-  it("the Handled today footer lists each handled thread with its how", async () => {
-    const h = {
-      id: "9",
-      repoId: "shop-app",
-      number: 3,
-      title: "t",
-      author: "bob",
-      how: "marked handled",
-      at: NOW - MIN,
-      firstSeenAt: NOW - HOUR,
-    };
-    stubFetch({
-      "/api/attention": [],
-      "/api/config": CONFIG,
-      "/api/notifications": {
-        open: [],
-        handledToday: [h, { ...h, id: "8", author: null, how: "read on GitHub" }],
-      },
-    });
-    const { container } = render(<Flight />);
-    expect((await screen.findByTestId("handled-today")).textContent).toBe(
-      "Handled today: bob (marked handled) · Someone (read on GitHub)",
-    );
-    expect(container.querySelector("#askP")?.textContent).toContain(NOBODY_WAITING);
-  });
-
   it("Incoming renders Teams matches as Asked of you", async () => {
     stubFetch({
       "/api/repos": REPOS,
@@ -2086,14 +1870,6 @@ describe("FLIGHT's brief", () => {
     expect(rows[1]?.textContent).toContain("Queued");
   });
 
-  it("Asked of you says nobody is waiting with no items", async () => {
-    stubFetch({ "/api/attention": [], "/api/config": CONFIG });
-    const { container } = render(<Flight />);
-    await waitFor(() =>
-      expect(container.querySelector("#askP")?.textContent).toContain(NOBODY_WAITING),
-    );
-  });
-
   it("Incoming keeps recorded outcomes; revisit triggers and Notebook context stay distinct", async () => {
     const cards = [
       boardItem({ issueNumber: 12, status: "Backlog", createdAt: NOW - 30 * HOUR }),
@@ -2163,7 +1939,7 @@ describe("FLIGHT's brief", () => {
     await waitFor(() =>
       expect(container.querySelector("#briefP")?.textContent).toContain("The cache may thrash."),
     );
-    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Handling" }));
     await waitFor(() =>
       expect(container.querySelector("#draftsP")?.textContent).toContain("No drafts to send."),
     );
@@ -2298,7 +2074,7 @@ describe("Draft replies", () => {
       expect(row.querySelector("button, textarea")).toBeNull();
     }
     expect(container.querySelectorAll(".draft-row.acked")).toHaveLength(2);
-    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Handling" }));
     expect(
       within(container.querySelector("#draftsP") as HTMLElement).getByRole("button", {
         name: "Post on GitHub",
@@ -2360,7 +2136,7 @@ describe("Draft replies", () => {
           <Toast />
         </>,
       );
-      fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Handling" }));
       const button = await screen.findByRole("button", { name: "Copy for Teams" });
       button.focus();
       expect(document.activeElement).toBe(button);
@@ -2421,7 +2197,7 @@ describe("Draft replies", () => {
         },
       });
       const { container } = render(<Flight />);
-      fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+      fireEvent.click(screen.getByRole("tab", { name: "Handling" }));
       fireEvent.click(await screen.findByRole("button", { name: "Copy for Teams" }));
       if (failed) {
         expect(await screen.findByRole("alert")).toHaveProperty(
@@ -2465,7 +2241,7 @@ describe("Draft replies", () => {
         <Toast />
       </>,
     );
-    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Handling" }));
     expect(await screen.findByText("Prepared reply")).toBeTruthy();
     expect(screen.getByText("To shop-app#12")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -2502,7 +2278,7 @@ describe("Draft replies", () => {
       },
     });
     render(<Flight />);
-    fireEvent.click(screen.getByRole("tab", { name: "Needs you" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Handling" }));
     fireEvent.click(await screen.findByRole("button", { name: "Post on GitHub" }));
     expect((await screen.findByRole("alert")).textContent).toBe("mentions are refused");
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));

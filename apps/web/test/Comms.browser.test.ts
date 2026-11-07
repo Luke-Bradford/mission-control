@@ -75,6 +75,52 @@ describeRendered("Comms with older messages to load, rendered", () => {
   );
 });
 
+const refMessage = {
+  ...message(1),
+  id: "comms:ref",
+  text: "Handoff on #1452, see PR 1460",
+  ticket: "shop-app#1452",
+  ref: "#1452",
+};
+
+describeRendered("Comms ticket numbers, rendered", () => {
+  it.each([
+    [2560, 1200],
+    [1920, 940],
+  ])(
+    "shows the number and its separate filter button at %ix%i",
+    async (width, height) => {
+      mkdirSync(SHOTS, { recursive: true });
+      const page = await renderAt({
+        page: "test/commsBrowser.html",
+        width,
+        height,
+        api: {
+          ...api,
+          "/api/comms/crew": { messages: [refMessage], hasMore: false, unread: 0 },
+          "/api/comms/crew?history=1": { messages: [refMessage], hasMore: false, unread: 0 },
+        },
+      });
+      const number = await page.box(".comms-message-meta a.comms-ref");
+      const filter = await page.box(".comms-message-meta .comms-ref-filter");
+      const prLink = await page.box(".comms-bubble-body a.comms-ref");
+      const prFilter = await page.box(".comms-bubble-body .comms-ref-filter");
+      expect(number.width).toBeGreaterThan(0);
+      expect(filter.width).toBeGreaterThan(0);
+      // the number and the filter are each a 24px target, the number's link included
+      for (const box of [number, filter, prLink, prFilter]) {
+        expect(box.height).toBeGreaterThanOrEqual(24);
+        expect(box.width).toBeGreaterThanOrEqual(24);
+      }
+      // two controls side by side, not one on top of the other
+      expect(filter.x).toBeGreaterThanOrEqual(number.x + number.width - 1);
+      await page.screenshot(join(SHOTS, `comms-refs-${width}x${height}.png`));
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+});
+
 // Enough seats that the list outgrows the viewport and scrolls.
 const SEATS = Array.from({ length: 16 }, (_, i) => (i === 0 ? "guido-1" : `retro-${i}`));
 const seats = SEATS.map((id, index) =>

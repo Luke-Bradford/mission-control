@@ -1,5 +1,4 @@
 import { ORDER_ANCHOR_PREFIX } from "../instructions/links.ts";
-import { NEEDS_YOU_PANEL } from "../router.ts";
 import { DECISION_ANCHOR_PREFIX } from "./conversation.ts";
 
 /** The FLIGHT page's tabs, each named for the question the operator brings to it. */
@@ -7,7 +6,7 @@ export const FLIGHT_TABS = ["needs", "did", "crew", "knows"] as const;
 export type FlightTab = (typeof FLIGHT_TABS)[number];
 
 export const TAB_LABEL: Record<FlightTab, string> = {
-  needs: "Needs you",
+  needs: "Handling",
   did: "What FLIGHT did",
   crew: "Crew & board",
   knows: "What FLIGHT knows",
@@ -15,8 +14,6 @@ export const TAB_LABEL: Record<FlightTab, string> = {
 
 /** Panels a link may name, by the tab that holds them; a working-context or draft row by prefix. */
 const HASH_TAB: Readonly<Record<string, FlightTab>> = {
-  [NEEDS_YOU_PANEL]: "needs",
-  defaultsP: "needs",
   handlingP: "needs",
   heldP: "needs",
   waitingP: "needs",

@@ -17,6 +17,7 @@ import * as sessionDriver from "../src/runtime/session.ts";
 import type { Supervisor, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewCodexDir, crewKeeperDir, type Store } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   BRANCH,
   bus,
@@ -37,6 +38,8 @@ import {
   untilGone,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 describe("startRun claims the ticket", () => {
   /** A fake gh that records every call and answers with `code`. */

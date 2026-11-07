@@ -132,6 +132,7 @@ Use the [visual QA workflow](../../../../docs/runbooks/visual-qa.md) to carry th
 - Passing on geometry, then the operator rejecting the composition, more than once.
 - Fixing the seats' share of the page first and fitting the rest around it, when the operator's complaint was forms on the right wider than their content.
 - A branch with 4,147 added lines of product code and 86,450 added lines of evidence. Keep evidence small enough that someone will read it, and spend the effort on the page.
+- The Needs you page (PR 1465, #1529) merged with its design failed three rounds running, accepted at the review cap. The builder never saw it; the screenshot evidence photographed every page but this one. On the operator's screen the list rows overlapped, because Overview's `.needs-row` stayed loaded after visiting Overview and every test opened `/needs-you` directly. Half the list was items for the controller and raw hub alarms. Arrive the way the operator does, and judge whether each item belongs to the reader.
 
 ## References
 

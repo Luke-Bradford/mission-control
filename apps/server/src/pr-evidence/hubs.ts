@@ -2,7 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { EvidenceSide } from "./capture.ts";
 
@@ -105,4 +105,31 @@ export function evidenceSideStarter(
       throw e;
     }
   };
+}
+
+/**
+ * Removes what a capture the hub died in the middle of left behind: its `capture-*` folders (the
+ * database copies) and every side folder (a checkout, its build and the git worktree registration
+ * for it). Run at hub start, before any capture can begin, so nothing in `workDir` is in use.
+ */
+export async function removeStaleEvidenceWork(o: {
+  workDir: string;
+  /** The checkout the side worktrees were registered with. */
+  checkout: string;
+  run: EvidenceHubOptions["run"];
+}): Promise<string[]> {
+  const removed: string[] = [];
+  const sides = join(o.workDir, "sides");
+  const stale = [
+    ...(await readdir(o.workDir).catch(() => [])).filter((n) => n.startsWith("capture-")),
+    ...(await readdir(sides).catch(() => [])).map((n) => join("sides", n)),
+  ];
+  for (const name of stale) {
+    await rm(join(o.workDir, name), { recursive: true, force: true });
+    removed.push(name);
+  }
+  // The folders are gone, so git can drop the worktrees it still lists for them.
+  if (removed.some((n) => n.startsWith("sides")))
+    await o.run("git", ["-C", o.checkout, "worktree", "prune"]).catch(() => {});
+  return removed;
 }

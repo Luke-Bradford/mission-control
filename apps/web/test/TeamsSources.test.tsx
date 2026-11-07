@@ -1,5 +1,6 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { hub, RESOURCES } from "../src/data.ts";
 import { whereOf } from "../src/notifications.ts";
 import { Sources } from "../src/setup/Sources.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -96,6 +97,58 @@ it("uses Teams feed metadata for person locations", () => {
   ).toBe("Teams · Work chat");
 });
 
+it("failed refresh keeps the feeds", async () => {
+  let fail = false;
+  stubFetch({
+    "/api/sources/teams": () =>
+      fail ? { status: 502, body: { error: "Source unavailable" } } : { status: 200, body: status },
+    "/api/health": [],
+  });
+  render(<Sources config={CONFIG} error={null} />);
+  fireEvent.click(await screen.findByRole("button", { name: "Remove Work chat" }));
+  expect(screen.getByText("No selected work feeds.")).toBeTruthy();
+  fireEvent.change(screen.getByRole("textbox", { name: "Feed name" }), {
+    target: { value: "Typed chat" },
+  });
+  fail = true;
+  await act(async () => {
+    hub.refetch(RESOURCES.teams.path);
+  });
+  await screen.findByText(/Could not load Teams: Source unavailable/);
+  // the selection, the form and what was typed stay; Save is still offered
+  expect(screen.getByText("No selected work feeds.")).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: "Feed name" }) as HTMLInputElement).value).toBe(
+    "Typed chat",
+  );
+  expect(screen.getByRole("button", { name: "Save Teams selection" })).toBeTruthy();
+  expect(screen.getByText("Polls on a timer.")).toBeTruthy();
+});
+
+it("names a duplicate or empty feed beside its field and keeps what was typed", async () => {
+  stubFetch({ "/api/sources/teams": status, "/api/health": [] });
+  render(<Sources config={CONFIG} error={null} />);
+  await screen.findByText("Work chat");
+  fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+  const empty = screen.getByRole("region", { name: "Fix before adding" });
+  fireEvent.click(within(empty).getByRole("link", { name: "Feed name is required." }));
+  expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Feed name" }));
+  expect(screen.getByRole("textbox", { name: "Feed name" }).getAttribute("aria-invalid")).toBe(
+    "true",
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Feed name" }), {
+    target: { value: "Again" },
+  });
+  fireEvent.change(screen.getByRole("textbox", { name: "Feed ID" }), {
+    target: { value: "fictional-chat" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add feed" }));
+  expect(screen.getByRole("link", { name: /already selected/ })).toBeTruthy();
+  expect((screen.getByRole("textbox", { name: "Feed ID" }) as HTMLInputElement).value).toBe(
+    "fictional-chat",
+  );
+  expect(screen.getAllByText("Work chat")).toHaveLength(1);
+});
+
 it("does not render personal feeds as configured Teams sources", async () => {
   stubFetch({
     "/api/sources/teams": {
@@ -141,9 +194,11 @@ it("retains selection after a refused save", async () => {
 
 it("keeps feed fields usable at narrow widths", () => {
   const css = readStyles();
-  expect(css).toMatch(/\.teams-selection\s*\{[^}]*flex-wrap: wrap;/);
   expect(css).toMatch(/\.teams-sources\s*\{[^}]*overflow-wrap: anywhere;/);
-  expect(css).toMatch(/\.teams-selection label\s*\{[^}]*min-width: 0;/);
+  // the grouped form's pairs shrink and its fields may not push the row wider than the form
+  expect(css).toMatch(/\.fpair\s*\{[^}]*minmax\(0, 1fr\)/);
+  expect(css).toMatch(/\.ffield\s*\{[^}]*min-width: 0;/);
+  expect(css).toMatch(/\.fform-640\s*\{[^}]*max-width: 640px;/);
 });
 
 it("shows last successful poll while a later poll is backing off", async () => {

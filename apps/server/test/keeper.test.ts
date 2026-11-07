@@ -31,6 +31,9 @@ import {
   runKeeper,
 } from "../src/runtime/keeper.ts";
 import { expectNoLeftovers } from "./leftovers.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 let dir: string;
 let transcript: string;

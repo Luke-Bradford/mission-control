@@ -1774,6 +1774,525 @@ describe("Setup › Repos & seats cards", () => {
   });
 });
 
+describe("Setup › Repos & seats: the add-repo steps", () => {
+  const form = () => screen.getByRole("form", { name: "Add repo" });
+  const type = (label: string, value: string) =>
+    fireEvent.change(within(form()).getByLabelText(label), { target: { value } });
+  const press = (name: string) => fireEvent.click(within(form()).getByRole("button", { name }));
+  const posts = (path: string) =>
+    fetchFn.mock.calls.filter(([p, i]) => p === path && i?.method === "POST").length;
+  async function toChecks(over: Record<string, unknown> = {}) {
+    load({
+      "POST /api/repos/preview": PREVIEW,
+      "POST /api/repos/checkout-preview": { ok: true },
+      "POST /api/repos/onboard": { backup: "c.bak" },
+      ...over,
+    });
+    at("repos");
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
+    type("GitHub repo", "octo-org/mission");
+    type("Project number", "4");
+    type("Repo id", "mission");
+    press("Next: checkout");
+    type("Checkout folder", "/work/mission");
+    press("Next: live checks");
+  }
+  const toMode = async (over: Record<string, unknown> = {}) => {
+    await toChecks(over);
+    press("Run live checks");
+    await screen.findByText(/Project board verified/);
+  };
+
+  it("keyboard focus follows each step, and Cancel returns to the opener", async () => {
+    load({ "POST /api/repos/preview": PREVIEW, "POST /api/repos/checkout-preview": { ok: true } });
+    at("repos");
+    const opener = await screen.findByRole("button", { name: "+ Add repo" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(within(form()).getByLabelText("GitHub repo"));
+    type("GitHub repo", "octo-org/mission");
+    type("Project number", "4");
+    type("Repo id", "mission");
+    fireEvent.submit(form());
+    expect(document.activeElement).toBe(within(form()).getByLabelText("Checkout folder"));
+    type("Checkout folder", "/work/mission");
+    fireEvent.submit(form());
+    await within(form()).findByRole("list", { name: "Live check results" });
+    expect(document.activeElement).toBe(
+      within(form()).getByRole("button", { name: "Run live checks" }),
+    );
+    press("Cancel");
+    await waitFor(() => expect(document.activeElement).toBe(opener));
+  });
+
+  it("an invalid Next explains what to fix instead of staying silent", async () => {
+    load();
+    at("repos");
+    fireEvent.click(await screen.findByRole("button", { name: "+ Add repo" }));
+    type("GitHub repo", "not a repo");
+    press("Next: checkout");
+    const summary = within(form()).getByRole("region", { name: "Fix before continuing" });
+    expect(summary.textContent).toContain("owner/name");
+    expect(summary.textContent).toContain("Project number");
+    expect(summary.textContent).toContain("Repo id");
+    expect(document.activeElement).toBe(summary);
+    expect(within(form()).getByLabelText("GitHub repo").getAttribute("aria-invalid")).toBe("true");
+    // still on step 1, and the entry is kept
+    expect((within(form()).getByLabelText("GitHub repo") as HTMLInputElement).value).toBe(
+      "not a repo",
+    );
+    press("Next: checkout");
+    expect(within(form()).queryByLabelText("Branch")).toBeNull();
+  });
+
+  it("step summaries show the earlier answers and the checks list one row per request", async () => {
+    await toChecks();
+    expect(form().textContent).toContain("octo-org/mission · project 4 · id mission");
+    expect(form().textContent).toContain("/work/mission · branch main");
+    const checks = within(within(form()).getByRole("list", { name: "Live check results" }));
+    expect(checks.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "GitHub repo and Project boardNot run",
+      "Checkout folder and branchNot run",
+    ]);
+  });
+
+  it("a failed check stays on step 3, marks the failing request, and keeps every entry", async () => {
+    await toChecks({
+      "POST /api/repos/checkout-preview": () => ({
+        status: 400,
+        body: { error: "origin does not match" },
+      }),
+    });
+    press("Run live checks");
+    const summary = await within(form()).findByRole("region", { name: "A check failed" });
+    expect(summary.textContent).toContain("origin does not match");
+    const rows = within(form()).getByRole("list", { name: "Live check results" });
+    expect(
+      within(rows)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["GitHub repo and Project boardPass", "Checkout folder and branchFail"]);
+    expect(within(form()).getByRole("button", { name: "Run live checks" })).toBeTruthy();
+    press("Back");
+    expect((within(form()).getByLabelText("Checkout folder") as HTMLInputElement).value).toBe(
+      "/work/mission",
+    );
+    expect(posts("/api/repos/onboard")).toBe(0);
+  });
+
+  it("a refused repo check marks the first request and leaves the second not run", async () => {
+    await toChecks({
+      "POST /api/repos/preview": () => ({ status: 404, body: { error: "Project 4 not found" } }),
+    });
+    press("Run live checks");
+    await within(form()).findByText(/Project 4 not found/);
+    const rows = within(form()).getByRole("list", { name: "Live check results" });
+    expect(
+      within(rows)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["GitHub repo and Project boardFail", "Checkout folder and branchNot run"]);
+  });
+
+  it("a lost connection during the live checks says nothing was saved, and keeps the entries", async () => {
+    await toChecks();
+    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetchFn.mockImplementation(async (input, init) => {
+      if (input === "/api/repos/preview") throw new TypeError("Failed to fetch");
+      return answer(input, init);
+    });
+    press("Run live checks");
+    const summary = await within(form()).findByRole("region", { name: "Check did not finish" });
+    expect(summary.textContent).toContain("Nothing was saved");
+    expect(summary.textContent).not.toContain("saving again");
+    expect(document.activeElement).toBe(summary);
+    const rows = within(form()).getByRole("list", { name: "Live check results" });
+    expect(
+      within(rows)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["GitHub repo and Project boardFail", "Checkout folder and branchNot run"]);
+    press("Back");
+    expect((within(form()).getByLabelText("Checkout folder") as HTMLInputElement).value).toBe(
+      "/work/mission",
+    );
+  });
+
+  it("a server error at the live checks is a failed check, not a dropped connection", async () => {
+    await toChecks({
+      "POST /api/repos/preview": () => ({
+        status: 502,
+        body: { error: "github: no CI workflow directory on octo-org/mission" },
+      }),
+    });
+    press("Run live checks");
+    const summary = await within(form()).findByRole("region", { name: "A check failed" });
+    expect(summary.textContent).toContain("no CI workflow directory");
+    expect(summary.textContent).toContain("Nothing was saved");
+    expect(summary.textContent).not.toContain("connection dropped");
+  });
+
+  it("converting a second repo starts a fresh form for that repo", async () => {
+    load();
+    at("repos");
+    const first = expandCard(await screen.findByLabelText("shop-app"));
+    fireEvent.click(within(first).getByRole("button", { name: "Convert to crew repo" }));
+    expect(
+      (
+        within(screen.getByLabelText("Convert shop-app to crew repo")).getByLabelText(
+          "GitHub repo",
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("octo-org/shop-app");
+    const second = expandCard(await screen.findByLabelText("site-builder"));
+    fireEvent.click(within(second).getByRole("button", { name: "Convert to crew repo" }));
+    expect(
+      (
+        within(screen.getByLabelText("Convert site-builder to crew repo")).getByLabelText(
+          "GitHub repo",
+        ) as HTMLInputElement
+      ).value,
+    ).toBe("octo-org/site-builder");
+  });
+
+  it("a double press of Run live checks sends one pair of requests", async () => {
+    await toChecks();
+    fireEvent.submit(form());
+    fireEvent.submit(form());
+    await screen.findByText(/Project board verified/);
+    expect(posts("/api/repos/preview")).toBe(1);
+    expect(posts("/api/repos/checkout-preview")).toBe(1);
+  });
+
+  it("the last step lists what will be written, and a double press adds once", async () => {
+    await toMode();
+    fireEvent.change(within(form()).getByLabelText("Mode"), { target: { value: "crew" } });
+    expect(form().textContent).toContain("Repo mission (octo-org/mission, project 4) added");
+    expect(form().textContent).toContain("Crew session mission on a shared checkout");
+    fireEvent.submit(form());
+    fireEvent.submit(form());
+    await waitFor(() => expect(posts("/api/repos/onboard")).toBe(1));
+  });
+
+  it("a refused add keeps the entries and says so in the form", async () => {
+    await toMode({
+      "POST /api/repos/onboard": () => ({ status: 409, body: { error: "mission already exists" } }),
+    });
+    press("Add repo");
+    const summary = await within(form()).findByRole("region", { name: "Not saved" });
+    expect(summary.textContent).toContain("mission already exists");
+    expect(form().textContent).toContain("Repo mission");
+    expect(within(form()).getByRole("button", { name: "Add repo" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
+  it("a lost connection on the last write says the result is unknown and rereads the config", async () => {
+    await toMode();
+    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetchFn.mockImplementation(async (input, init) => {
+      if (input === "/api/repos/onboard") throw new TypeError("Failed to fetch");
+      return answer(input, init);
+    });
+    const before = fetchFn.mock.calls.filter(([p]) => p === "/api/config").length;
+    press("Add repo");
+    const summary = await within(form()).findByRole("region", { name: "Result unknown" });
+    expect(summary.textContent).toContain("The result is unknown");
+    await waitFor(() =>
+      expect(fetchFn.mock.calls.filter(([p]) => p === "/api/config").length).toBeGreaterThan(
+        before,
+      ),
+    );
+  });
+});
+
+describe("Setup › Repos & seats: the seat form", () => {
+  const SEAT = {
+    id: "guido-1",
+    role: "GUIDO",
+    accountId: "claude-main",
+    model: "sonnet",
+    area: ["apps/**"],
+  };
+  const CHANGES = {
+    sessions: [{ id: "s1", seats: [SEAT] }],
+    pending: [],
+    restartNeeded: [],
+    error: null,
+    checkedAt: NOW,
+  };
+  const SAVED = { backup: "config.yaml.bak-x", changes: { ...CHANGES, applied: [] } };
+  const SEATS_PATH = "/api/crew/sessions/s1/seats";
+  const posts = () =>
+    fetchFn.mock.calls.filter(([p, i]) => p === SEATS_PATH && i?.method === "POST").length;
+  async function openForm(over: Record<string, unknown> = {}, edit = false) {
+    load({
+      "/api/config": { ...CREW_CONFIG, loops: CFG.loops },
+      "/api/crew/changes": CHANGES,
+      [`POST ${SEATS_PATH}`]: SAVED,
+      ...over,
+    });
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    if (edit) {
+      // the seat list is the pending one from /api/crew/changes once that has loaded
+      await within(card).findByText(String(over.waitFor ?? "sonnet"));
+      const row = within(card).getByRole("row", { name: /guido-1/ });
+      fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+      return screen.findByRole("form", { name: "Edit guido-1" });
+    }
+    fireEvent.click(within(card).getByRole("button", { name: "+ Add seat to this repo" }));
+    return screen.findByRole("form", { name: "Add seat" });
+  }
+  const fill = (form: HTMLElement, id: string) =>
+    fireEvent.change(within(form).getByLabelText("Call sign"), { target: { value: id } });
+
+  it("the seat form opens at its first control and Cancel returns to the add button", async () => {
+    const form = await openForm();
+    expect(document.activeElement).toBe(within(form).getByLabelText("Call sign"));
+    fireEvent.click(within(form).getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "+ Add seat to this repo" }),
+      ),
+    );
+  });
+
+  it("the long selects carry their full chosen text as a title", async () => {
+    const form = await openForm();
+    for (const label of ["Role", "Account", "Model"]) {
+      const select = within(form).getByLabelText(label) as HTMLSelectElement;
+      expect(select.title).toBe(select.selectedOptions[0]?.textContent);
+      expect(select.title).not.toBe("");
+    }
+  });
+
+  it("invalid seat submit explains itself", async () => {
+    const form = await openForm();
+    fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+    const summary = await within(form).findByRole("region", { name: "Fix before saving" });
+    expect(summary.textContent).toContain("Call sign");
+    expect(document.activeElement).toBe(summary);
+    expect(within(form).getByLabelText("Call sign").getAttribute("aria-invalid")).toBe("true");
+    expect(posts()).toBe(0);
+  });
+
+  // Both forms: F11 adds a seat, F12 edits guido-1. `touch` makes a change the form must keep.
+  const FORMS = [
+    { name: "F11 add", edit: false, label: "Add seat" },
+    { name: "F12 edit", edit: true, label: "Edit guido-1" },
+  ] as const;
+  const touch = (form: HTMLElement, edit: boolean) => {
+    if (edit) fireEvent.change(within(form).getByLabelText("Role"), { target: { value: "INCO" } });
+    else fill(form, "inco-2");
+  };
+  const kept = (form: HTMLElement, edit: boolean) =>
+    edit
+      ? (within(form).getByLabelText("Role") as HTMLSelectElement).value
+      : (within(form).getByLabelText("Call sign") as HTMLInputElement).value;
+  const keptValue = (edit: boolean) => (edit ? "INCO" : "inco-2");
+
+  it.each(FORMS)(
+    "$name: a refused save is shown in the form and keeps what was typed",
+    async ({ edit, label }) => {
+      const form = await openForm(
+        {
+          [`POST ${SEATS_PATH}`]: () => ({
+            status: 409,
+            body: { error: "The seats changed in config.yaml; reread them." },
+          }),
+        },
+        edit,
+      );
+      touch(form, edit);
+      fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+      const summary = await within(form).findByRole("region", { name: "Not saved" });
+      expect(summary.textContent).toContain("The seats changed in config.yaml; reread them.");
+      expect(document.activeElement).toBe(summary);
+      expect(kept(form, edit)).toBe(keptValue(edit));
+      expect(screen.getByRole("form", { name: label })).toBeTruthy();
+    },
+  );
+
+  // The summary is rendered by a save that finished after the click, so React commits it outside
+  // any event. Focus must already be on it when it first appears in the DOM; a test that looks a
+  // moment later (as the one above does) would pass or fail on how busy the machine is.
+  it.each(FORMS)(
+    "$name: focus is on the refused-save summary the moment it appears",
+    async ({ edit }) => {
+      const form = await openForm(
+        { [`POST ${SEATS_PATH}`]: () => ({ status: 409, body: { error: "Refused." } }) },
+        edit,
+      );
+      touch(form, edit);
+      let focusedOnAppear: Element | null = null;
+      const watch = new MutationObserver(() => {
+        const found = form.querySelector(".fsum");
+        if (found && focusedOnAppear === null) focusedOnAppear = document.activeElement;
+      });
+      watch.observe(form, { childList: true, subtree: true });
+      fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+      const summary = await within(form).findByRole("region", { name: "Not saved" });
+      watch.disconnect();
+      expect(focusedOnAppear).toBe(summary);
+    },
+  );
+
+  it.each(FORMS)(
+    "$name: a lost connection says the result is unknown, rereads, and keeps the entries",
+    async ({ edit }) => {
+      const form = await openForm({}, edit);
+      fetchFn.mockImplementation(async (input, init) => {
+        if (init?.method === "POST") throw new TypeError("Failed to fetch");
+        return new Response(JSON.stringify(input === "/api/config" ? CREW_CONFIG : CHANGES));
+      });
+      touch(form, edit);
+      fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+      const summary = await within(form).findByRole("region", { name: "Result unknown" });
+      expect(summary.textContent).toContain("The result is unknown");
+      expect(kept(form, edit)).toBe(keptValue(edit));
+    },
+  );
+
+  it.each(FORMS)("$name: a double submit sends one request", async ({ edit, label }) => {
+    const form = await openForm({}, edit);
+    let finish!: (r: Response) => void;
+    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetchFn.mockImplementation((input, init) =>
+      init?.method === "POST"
+        ? new Promise<Response>((done) => {
+            finish = done;
+          })
+        : answer(input, init),
+    );
+    touch(form, edit);
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    expect(posts()).toBe(1);
+    await act(async () => finish(new Response(JSON.stringify(SAVED))));
+    await waitFor(() => expect(screen.queryByRole("form", { name: label })).toBeNull());
+    expect(posts()).toBe(1);
+  });
+
+  it("a seat that leaves config.yaml mid-edit stays an edit and is only ever added back", async () => {
+    const form = await openForm(
+      {
+        [`POST ${SEATS_PATH}`]: () => ({ status: 409, body: { error: "guido-1 was removed." } }),
+      },
+      true,
+    );
+    fireEvent.change(within(form).getByLabelText("Model"), { target: { value: "sonnet" } });
+    // the reread after the conflict finds the seat gone
+    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetchFn.mockImplementation(async (input, init) =>
+      input === "/api/crew/changes"
+        ? new Response(JSON.stringify({ ...CHANGES, sessions: [{ id: "s1", seats: [] }] }))
+        : answer(input, init),
+    );
+    fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+    await within(form).findByRole("region", { name: "Not saved" });
+    const gone = await screen.findByText(/guido-1 is no longer in config.yaml/);
+    expect(gone).toBeTruthy();
+    expect(screen.getByRole("form", { name: "Edit guido-1" })).toBeTruthy();
+    expect(within(form).getByLabelText("Call sign")).toHaveProperty("disabled", true);
+    fetchFn.mockImplementation(answer);
+    fireEvent.click(within(form).getByRole("button", { name: "Add it back" }));
+    await waitFor(() => expect(posts()).toBe(2));
+    const sent = fetchFn.mock.calls
+      .filter(([p, i]) => p === SEATS_PATH && i?.method === "POST")
+      .map(([, i]) => JSON.parse(String(i?.body)));
+    expect(sent[1].base).toEqual([]);
+    expect(sent[1].seats).toEqual([SEAT]);
+  });
+
+  it("an unreadable model list says why, with a retry, instead of 'No discovered models'", async () => {
+    const form = await openForm({
+      "/api/accounts/models": () => ({ status: 503, body: { error: "catalogue down" } }),
+    });
+    await waitFor(() => expect(form.textContent).toContain("catalogue down"));
+    expect(form.textContent).not.toContain("No discovered models");
+    expect(within(form).getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("Retry rereads the model list and fills the Model select", async () => {
+    const form = await openForm({
+      "/api/accounts/models": () => ({ status: 503, body: { error: "catalogue down" } }),
+    });
+    await waitFor(() => expect(form.textContent).toContain("catalogue down"));
+    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetchFn.mockImplementation(async (input, init) =>
+      input === "/api/accounts/models"
+        ? new Response(
+            JSON.stringify([
+              { accountId: "claude-main", models: [{ model: "sonnet", efforts: [] }] },
+            ]),
+          )
+        : answer(input, init),
+    );
+    fireEvent.click(within(form).getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect((within(form).getByLabelText("Model") as HTMLSelectElement).value).toBe("sonnet"),
+    );
+    expect(form.textContent).not.toContain("catalogue down");
+  });
+
+  it("while the model list loads, Model says so and Save explains the wait", async () => {
+    load({
+      "/api/config": { ...CREW_CONFIG, loops: CFG.loops },
+      "/api/crew/changes": CHANGES,
+    });
+    const answer = fetchFn.getMockImplementation() as (...a: unknown[]) => Promise<Response>;
+    fetchFn.mockImplementation((input, init) =>
+      input === "/api/accounts/models" ? new Promise<Response>(() => {}) : answer(input, init),
+    );
+    at("repos");
+    const card = expandCard(await screen.findByLabelText("shop-app"));
+    fireEvent.click(within(card).getByRole("button", { name: "+ Add seat to this repo" }));
+    const form = await screen.findByRole("form", { name: "Add seat" });
+    const model = within(form).getByLabelText("Model") as HTMLSelectElement;
+    expect(model.selectedOptions[0]?.textContent).toBe("Loading models…");
+    fill(form, "inco-2");
+    fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+    const summary = await within(form).findByRole("region", { name: "Fix before saving" });
+    expect(summary.textContent).toContain("still loading");
+    expect(posts()).toBe(0);
+  });
+
+  it("with no models, the 'Model is required' link lands on Account, which can take focus", async () => {
+    const form = await openForm({ "/api/accounts/models": [] });
+    fill(form, "inco-2");
+    fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+    const summary = await within(form).findByRole("region", { name: "Fix before saving" });
+    fireEvent.click(within(summary).getByRole("link", { name: /Model is required/ }));
+    expect(document.activeElement).toBe(within(form).getByLabelText("Account"));
+  });
+
+  it("edit keeps the seat's id fixed and a retired model visible", async () => {
+    const form = await openForm(
+      {
+        waitFor: "retired-x",
+        "/api/crew/changes": {
+          ...CHANGES,
+          sessions: [{ id: "s1", seats: [{ ...SEAT, model: "retired-x" }] }],
+        },
+      },
+      true,
+    );
+    expect(within(form).getByLabelText("Call sign")).toHaveProperty("disabled", true);
+    expect((within(form).getByLabelText("Model") as HTMLSelectElement).value).toBe("retired-x");
+    fireEvent.click(within(form).getByRole("button", { name: "Save seat" }));
+    await waitFor(() => expect(posts()).toBe(1));
+    const sent = JSON.parse(
+      String(
+        fetchFn.mock.calls.find(([p, i]) => p === SEATS_PATH && i?.method === "POST")?.[1]?.body,
+      ),
+    );
+    expect(sent.base).toEqual([{ ...SEAT, model: "retired-x" }]);
+    expect(sent.seats[0].id).toBe("guido-1");
+  });
+});
+
 describe("Setup toolbar: Update", () => {
   const SHA = "0123456789abcdef0123456789abcdef01234567";
   const version = (over: Partial<VersionInfo> = {}): VersionInfo => ({

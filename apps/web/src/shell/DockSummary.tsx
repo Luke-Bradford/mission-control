@@ -1,10 +1,9 @@
 import { ATTENTION_LABEL, type AttentionItem, type Crew, type FlightSummaryView } from "@mc/core";
-import { openNeedsYou, youAction } from "../attention.ts";
+import { openNeed, openNeedsYou, youAction } from "../attention.ts";
 import type { Resource } from "../data.ts";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { openItem } from "./overlays.ts";
 import { useStore } from "./store.ts";
 
 /** The existing attention order and read-only headline; no second queue or decision store. */
@@ -13,18 +12,21 @@ export function DockSummary({
   attention,
   crew,
   canMessage,
+  hideWaiting = false,
 }: {
   asks: readonly AttentionItem[];
   attention: Resource<AttentionItem[]>;
   crew: Crew | undefined;
   canMessage: boolean;
+  /** The page beside the dock already lists what waits on you (the Overview's Needs you). */
+  hideWaiting?: boolean;
 }) {
   const summary = useResource<FlightSummaryView>(RESOURCES.flightSummary);
   const connection = useStore(streamStatus);
   const stale = (summary.data?.headlineAgeMin ?? 0) >= 60;
   const headline = summary.data?.headline;
   const first = asks[0];
-  const open = (item: AttentionItem) => (item.notTriaging ? openNeedsYou() : openItem(item.key));
+  const open = openNeed;
   return (
     <section className="dock-summary scroll" aria-label="FLIGHT summary">
       <div className="dock-summary-state s" aria-live="polite">
@@ -81,51 +83,53 @@ export function DockSummary({
           </button>
         </p>
       )}
-      <div className="dock-waiting" id="dockWaiting">
-        <h3 className="dwh">
-          {attention.data === undefined
-            ? attention.error
-              ? "Waiting items are unavailable."
-              : "Loading waiting items…"
-            : `Waiting on you · ${asks.length}`}
-        </h3>
-        {attention.data !== undefined && asks.length === 0 && (
-          <p className="note">Nothing is waiting for your decision.</p>
-        )}
-        {asks.slice(0, 3).map((item) => {
-          const agent = crew?.rows.find((row) => row.id === item.agentId);
-          return (
-            <div className="dock-summary-item" key={item.key} data-testid="waiting-ask">
-              <div className="row">
-                <Pill tone={item.kind === "decision" ? "warn" : "plain"}>
-                  {item.notTriaging ? "FLIGHT" : ATTENTION_LABEL[item.kind]}
-                </Pill>
-                {agent ? (
-                  <AgentTag bare sm id={agent.id} index={agent.index} />
-                ) : (
-                  <span className="s">{item.agentId}</span>
-                )}
+      {!hideWaiting && (
+        <div className="dock-waiting" id="dockWaiting">
+          <h3 className="dwh">
+            {attention.data === undefined
+              ? attention.error
+                ? "Waiting items are unavailable."
+                : "Loading waiting items…"
+              : `Waiting on you · ${asks.length}`}
+          </h3>
+          {attention.data !== undefined && asks.length === 0 && (
+            <p className="note">Nothing is waiting for your decision.</p>
+          )}
+          {asks.slice(0, 3).map((item) => {
+            const agent = crew?.rows.find((row) => row.id === item.agentId);
+            return (
+              <div className="dock-summary-item" key={item.key} data-testid="waiting-ask">
+                <div className="row">
+                  <Pill tone={item.kind === "decision" ? "warn" : "plain"}>
+                    {item.notTriaging ? "FLIGHT" : ATTENTION_LABEL[item.kind]}
+                  </Pill>
+                  {agent ? (
+                    <AgentTag bare sm id={agent.id} index={agent.index} />
+                  ) : (
+                    <span className="s">{item.agentId}</span>
+                  )}
+                </div>
+                <p className="dock-item-reason" title={item.text}>
+                  {item.text}
+                </p>
+                <button
+                  type="button"
+                  className="sm"
+                  aria-label={`Open: ${item.text}`}
+                  onClick={() => open(item)}
+                >
+                  {item.notTriaging ? "Show them" : "Open"}
+                </button>
               </div>
-              <p className="dock-item-reason" title={item.text}>
-                {item.text}
-              </p>
-              <button
-                type="button"
-                className="sm"
-                aria-label={`Open: ${item.text}`}
-                onClick={() => open(item)}
-              >
-                {item.notTriaging ? "Show them" : "Open"}
-              </button>
-            </div>
-          );
-        })}
-        {asks.length > 3 && (
-          <button type="button" className="sm" onClick={openNeedsYou}>
-            View all {asks.length} waiting items
-          </button>
-        )}
-      </div>
+            );
+          })}
+          {asks.length > 3 && (
+            <button type="button" className="sm" onClick={openNeedsYou}>
+              View all {asks.length} waiting items
+            </button>
+          )}
+        </div>
+      )}
       <div className="dock-next">
         <h3>Next action</h3>
         {first ? (

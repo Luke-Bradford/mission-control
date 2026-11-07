@@ -1,32 +1,11 @@
-import type { AttentionHoldCondition, AttentionItem, CrewRow } from "@mc/core";
-import { useState } from "react";
-import { apiPost } from "../api.ts";
+import type { AttentionItem, CrewRow } from "@mc/core";
 import { needsYouItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
-import { ACTIONS } from "../data.ts";
-import type { FlightSeat } from "../flight/flightTypes.ts";
 import { mss } from "../fmt.ts";
-import { followLink, NEEDS_YOU_PATH } from "../router.ts";
-import { answerTarget, sendAnswer } from "./answer.ts";
-import { HoldForm } from "./HoldForm.tsx";
+import { followLink, NEEDS_YOU_PATH, needsYouPath } from "../router.ts";
 
-export function DecisionCard({
-  item,
-  row,
-  rows,
-  flightSeat,
-  onDiscuss,
-}: {
-  item: AttentionItem;
-  row: CrewRow | undefined;
-  rows: CrewRow[];
-  flightSeat: FlightSeat | null;
-  onDiscuss: (item: AttentionItem) => void;
-}) {
+export function DecisionCard({ item, row }: { item: AttentionItem; row: CrewRow | undefined }) {
   const now = useSecond();
-  const [held, setHeld] = useState(false);
-  const [holding, setHolding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const option = item.brief?.options.find(
     (choice) => choice.id === item.brief?.recommendedOptionId,
   );
@@ -34,28 +13,6 @@ export function DecisionCard({
   const countdown = dueAt === undefined ? null : Math.max(0, Math.ceil((dueAt - now) / 1000));
   const clock = countdown === null ? null : mss(countdown * 1000);
   const ticket = item.ticket?.match(/#\d+$/)?.[0] ?? item.ticket;
-  const accept = async () => {
-    if (!option) return;
-    setError(
-      await sendAnswer(
-        answerTarget(item, rows, flightSeat),
-        flightSeat,
-        item,
-        item.brief?.ask ?? item.text,
-        option.answer,
-      ),
-    );
-  };
-  const hold = async (reason: string, condition: AttentionHoldCondition) => {
-    setError(null);
-    try {
-      await apiPost(ACTIONS.hold(item.key), { reason, condition });
-      setHeld(true);
-      setHolding(false);
-    } catch {
-      setError("Could not hold this decision.");
-    }
-  };
   return (
     <article className="decision-card">
       <div className="decision-meta">
@@ -66,26 +23,10 @@ export function DecisionCard({
       <h3>{item.brief?.ask ?? item.text}</h3>
       {option && <p className="decision-recommendation">{`Recommends: ${option.label}`}</p>}
       <div className="acts">
-        {option && (
-          <button className="primary" type="button" onClick={() => void accept()}>
-            {`Accept · ${option.label}`}
-          </button>
-        )}
-        <button type="button" onClick={() => onDiscuss(item)}>
-          Discuss
-        </button>
-        <button type="button" disabled={held} onClick={() => setHolding(true)}>
-          Held
-        </button>
+        <a href={needsYouPath(item.key)} onClick={(e) => followLink(e, needsYouPath(item.key))}>
+          Open in Needs you
+        </a>
       </div>
-      {error && <p className="crit-t s">{error}</p>}
-      {holding && (
-        <HoldForm
-          busy={false}
-          onCancel={() => setHolding(false)}
-          onHold={(reason, condition) => void hold(reason, condition)}
-        />
-      )}
     </article>
   );
 }
@@ -93,13 +34,9 @@ export function DecisionCard({
 export function Decisions({
   items,
   rows,
-  flightSeat,
-  onDiscuss,
 }: {
   items: AttentionItem[] | undefined;
   rows: CrewRow[];
-  flightSeat: FlightSeat | null;
-  onDiscuss: (item: AttentionItem) => void;
 }) {
   // Decisions and every operator item with an automatic default; the head counts the whole set.
   const needsYou = needsYouItems(items);
@@ -126,9 +63,6 @@ export function Decisions({
               key={item.key}
               item={item}
               row={rows.find((row) => row.id === item.agentId)}
-              rows={rows}
-              flightSeat={flightSeat}
-              onDiscuss={onDiscuss}
             />
           ))
         )}

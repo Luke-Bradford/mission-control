@@ -564,6 +564,33 @@ select {
   white-space: nowrap;
 }
 
+/* Demo: the chip replaces the brand words, and a frame marks every page; word and colour both. */
+.demo-marker {
+  padding: 0 var(--sp-2);
+  background: var(--think);
+  color: var(--surface);
+  border-radius: var(--r);
+  font-family: var(--mono);
+  font-size: var(--fs-s);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+}
+
+.demo-marker-popout {
+  position: fixed;
+  top: var(--sp-2);
+  right: var(--sp-2);
+  z-index: 25;
+}
+
+.demo-frame {
+  position: fixed;
+  inset: 0;
+  z-index: 25;
+  border: 3px solid var(--think);
+  pointer-events: none;
+}
+
 .tabs {
   display: flex;
   gap: 0;
@@ -660,18 +687,18 @@ select {
   font-weight: 600;
 }
 
-.needs-btn {
+.tabs a.needs-tab {
   display: inline-flex;
   align-items: center;
   gap: var(--sp-2);
 }
 
-.needs-btn b {
+.tabs a.needs-tab b {
   font-variant-numeric: tabular-nums;
 }
 
-.needs-btn.has {
-  border-color: var(--warn-mark);
+.tabs a.needs-tab.has {
+  color: var(--warn);
 }
 
 .mach-btn {
@@ -717,7 +744,6 @@ select {
 
 @media (min-width: 1280px) {
   .top {
-    flex-wrap: nowrap;
     gap: var(--sp-2);
     padding-inline: var(--sp-3);
   }
@@ -726,8 +752,11 @@ select {
   .brand {
     letter-spacing: 0.1em;
   }
+  /* The tabs keep their full width: when a two-digit Needs you count leaves the status meters
+     no room beside them, the meters drop to a second row rather than clip the last tab. */
   .tabs {
-    min-width: 0;
+    flex: none;
+    overflow-x: visible;
   }
   .tabs a {
     gap: var(--sp-1);
