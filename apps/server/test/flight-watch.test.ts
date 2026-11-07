@@ -60,6 +60,7 @@ import {
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { budgetBrake } from "../src/budget-brake.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
@@ -1918,6 +1919,25 @@ describe("the FLIGHT watcher", () => {
     }
     await watch.check();
     expect(startCalls).toEqual([]);
+  });
+
+  it("keeps starting FLIGHT while the budget brake is on its account", async () => {
+    for (const [at, pct] of [
+      [T0 - 6 * 60 * MIN, 40],
+      [T0 - 1000, 60],
+    ] as const)
+      store.addUsage({
+        accountId: "claude-main",
+        window: "7d",
+        at,
+        pct,
+        resetAt: T0 + 24 * 60 * MIN,
+        source: "test",
+      });
+    expect(budgetBrake(config, store, "claude-main", T0)).not.toBeNull();
+    await watch.check();
+    expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
+    expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual([]);
   });
 
   describe("FLIGHT down without a failed start", () => {
