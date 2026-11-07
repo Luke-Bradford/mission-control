@@ -68,6 +68,7 @@ import {
   FLIGHT_MEMORY_FULL,
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_PLAN_LIMIT,
+  FLIGHT_POINTER_CHANGE_MAX,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_WAKE_HEAD,
@@ -80,8 +81,11 @@ import {
   type FlightLedgerEntry,
   type FlightMemoryNote,
   type FlightMemoryTitle,
+  type FlightMovedPointer,
   type FlightPlanInput,
   type FlightPlanOperation,
+  type FlightPointer,
+  type FlightPointerKind,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
@@ -606,6 +610,13 @@ CREATE TABLE IF NOT EXISTS flight_ledger (
   session_id TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
   updated_at INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY(session_id, key)
 );
+-- What a ledger entry watches; the hub marks changed_at when the target moves, FLIGHT's wake stamps read_at.
+CREATE TABLE IF NOT EXISTS flight_pointers (
+  session_id TEXT NOT NULL, entry_key TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
+  changed_at INTEGER, change TEXT, read_at INTEGER, changed_seq INTEGER, read_seq INTEGER,
+  PRIMARY KEY (session_id, entry_key, kind, target)
+);
+CREATE INDEX IF NOT EXISTS flight_pointers_target ON flight_pointers(kind, target);
 CREATE TABLE IF NOT EXISTS flight_watch (
   session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
   PRIMARY KEY (session_id, id)
@@ -1172,6 +1183,7 @@ const toBoardItem = (r: Row): BoardItem => ({
 
 const toFlightDecision = (r: Row): FlightDecision => ({
   ...(r.order_id == null ? {} : { orderId: Number(r.order_id) }),
+  ...(r.wake_id == null ? {} : { wakeId: r.wake_id as string }),
   id: r.id as number,
   at: r.at as number,
   kind: r.kind as FlightDecisionKind,
@@ -1725,6 +1737,8 @@ export class Store {
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
     this.addColumn("flight_decisions", "order_id", "INTEGER");
+    this.addColumn("flight_decisions", "wake_id", "TEXT");
+    this.addColumn("flight_wakes", "wake_id", "TEXT");
     this.db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
     );
@@ -3469,6 +3483,13 @@ export class Store {
   /** True when any stored row changed. */
   replaceBoard(repoId: RepoId, items: BoardItem[]): boolean {
     return this.changed("board_items", repoId, () => {
+      const before = new Map(
+        (
+          this.db
+            .prepare("SELECT issue_number, status, closed FROM board_items WHERE repo_id = ?")
+            .all(repoId) as Row[]
+        ).map((r) => [r.issue_number as number, r]),
+      );
       this.db.prepare("DELETE FROM board_items WHERE repo_id = ?").run(repoId);
       const ins = this.db.prepare(
         `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
@@ -3489,6 +3510,14 @@ export class Store {
            after_deps = excluded.after_deps, defect_refs = excluded.defect_refs`,
       );
       for (const i of items) {
+        const old = before.get(i.issueNumber);
+        if (old !== undefined && (old.status !== i.status || Boolean(old.closed) !== i.closed))
+          this.markFlightPointers(
+            "ticket",
+            `${repoId}#${i.issueNumber}`,
+            i.closed ? "closed" : `moved to ${i.status}`,
+            Date.now(),
+          );
         ins.run(
           repoId,
           i.issueNumber,
@@ -3600,6 +3629,32 @@ export class Store {
     return named;
   }
 
+  /** Marks the ledger pointers on a PR whose state, head, CI, review or draft flag differ from the stored row. */
+  private markMovedPullRequest(repoId: RepoId, p: PullRequestView, at: number): void {
+    const old = this.db
+      .prepare(
+        "SELECT state, head_sha, ci, review, is_draft FROM pull_requests WHERE repo_id = ? AND number = ?",
+      )
+      .get(repoId, p.number) as Row | undefined;
+    const change =
+      old === undefined
+        ? "opened"
+        : old.state !== p.state
+          ? p.state
+          : (old.head_sha ?? null) !== (p.headSha ?? null)
+            ? "new commit"
+            : old.ci !== p.ci
+              ? `CI ${p.ci}`
+              : (old.review ?? null) !== (p.review ?? null)
+                ? `review ${p.review ?? "cleared"}`
+                : Boolean(old.is_draft) !== p.isDraft
+                  ? p.isDraft
+                    ? "back to draft"
+                    : "ready for review"
+                  : null;
+    if (change !== null) this.markFlightPointers("pr", `${repoId}#${p.number}`, change, at);
+  }
+
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
@@ -3707,6 +3762,7 @@ export class Store {
           }
         }
       }
+      this.markMovedPullRequest(repoId, p, readAt);
       ins.run(
         repoId,
         p.number,
@@ -8075,21 +8131,34 @@ export class Store {
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
-  addFlightWake(runId: string, at: number, reasons: string[]): void {
+  addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
     this.db
-      .prepare("INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons) VALUES (?, ?, ?)")
-      .run(runId, at, JSON.stringify(reasons));
+      .prepare(
+        "INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons, wake_id) VALUES (?, ?, ?, ?)",
+      )
+      .run(runId, at, JSON.stringify(reasons), wakeId ?? null);
+  }
+
+  /** The id of the run's latest wake; null when it has none or none was given an id. */
+  latestFlightWakeId(runId: string): string | null {
+    const row = this.db
+      .prepare("SELECT wake_id FROM flight_wakes WHERE run_id = ? ORDER BY at DESC LIMIT 1")
+      .get(runId) as { wake_id: string | null } | undefined;
+    return row?.wake_id ?? null;
   }
 
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
     const rows = this.db
-      .prepare("SELECT run_id, at, reasons FROM flight_wakes WHERE at >= ? ORDER BY at, run_id")
-      .all(since) as { run_id: string; at: number; reasons: string }[];
+      .prepare(
+        "SELECT run_id, at, reasons, wake_id FROM flight_wakes WHERE at >= ? ORDER BY at, run_id",
+      )
+      .all(since) as { run_id: string; at: number; reasons: string; wake_id: string | null }[];
     return rows.map((r) => ({
       runId: r.run_id,
       at: r.at,
       reasons: JSON.parse(r.reasons) as string[],
+      ...(r.wake_id === null ? {} : { wakeId: r.wake_id }),
     }));
   }
 
@@ -8240,8 +8309,9 @@ export class Store {
     const r = this.db
       .prepare(
         `INSERT INTO flight_decisions
-           (at, kind, seat_id, target_run_id, ref, question_id, about, decision, basis, order_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (at, kind, seat_id, target_run_id, ref, question_id, about, decision, basis, order_id,
+            wake_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         d.at,
@@ -8254,6 +8324,7 @@ export class Store {
         d.decision,
         d.basis,
         d.orderId ?? null,
+        d.wakeId ?? null,
       );
     return Number(r.lastInsertRowid);
   }
@@ -8360,11 +8431,79 @@ export class Store {
 
   /** The full ledger for one crew session, including retained closed entries. */
   flightLedger(session: string): FlightLedgerEntry[] {
+    const pointers = new Map<string, FlightPointer[]>();
+    for (const r of this.db
+      .prepare(
+        `SELECT entry_key, kind, target, changed_at, change, read_at FROM flight_pointers
+         WHERE session_id = ? ORDER BY rowid`,
+      )
+      .all(session) as Row[]) {
+      const list = pointers.get(r.entry_key as string) ?? [];
+      list.push({
+        kind: r.kind as FlightPointerKind,
+        target: r.target as string,
+        changedAt: r.changed_at as number | null,
+        change: r.change as string | null,
+        readAt: r.read_at as number | null,
+      });
+      pointers.set(r.entry_key as string, list);
+    }
     return (
       this.db
         .prepare("SELECT entry FROM flight_ledger WHERE session_id = ? ORDER BY key")
         .all(session) as { entry: string }[]
-    ).map((r) => JSON.parse(r.entry) as FlightLedgerEntry);
+    ).map((r) => {
+      const entry = JSON.parse(r.entry) as FlightLedgerEntry;
+      const held = pointers.get(entry.key);
+      return held === undefined ? entry : { ...entry, pointers: held };
+    });
+  }
+
+  /** Marks every pointer at `kind` and `target`, in any entry, as changed at `at`. */
+  markFlightPointers(kind: FlightPointerKind, target: string, change: string, at: number): void {
+    this.db
+      .prepare(
+        `UPDATE flight_pointers SET changed_at = ?, change = ?, changed_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
+         WHERE kind = ? AND target = ?`,
+      )
+      .run(at, change.slice(0, FLIGHT_POINTER_CHANGE_MAX), kind, target);
+  }
+
+  /** The pointers of open entries whose target changed after FLIGHT last read them. */
+  movedFlightPointers(session: string): FlightMovedPointer[] {
+    const open = FLIGHT_LEDGER_OPEN.map(() => "?").join(", ");
+    return (
+      this.db
+        .prepare(
+          `SELECT p.entry_key, p.kind, p.target, p.changed_at, p.change FROM flight_pointers p
+           JOIN flight_ledger l ON l.session_id = p.session_id AND l.key = p.entry_key
+           WHERE p.session_id = ? AND l.status IN (${open}) AND p.changed_at IS NOT NULL
+             AND p.changed_seq > COALESCE(p.read_seq, 0)
+           ORDER BY p.changed_at, p.entry_key, p.kind, p.target`,
+        )
+        .all(session, ...FLIGHT_LEDGER_OPEN) as Row[]
+    ).map((r) => ({
+      entry: r.entry_key as string,
+      kind: r.kind as FlightPointerKind,
+      target: r.target as string,
+      change: (r.change as string | null) ?? "",
+      at: r.changed_at as number,
+    }));
+  }
+
+  /**
+   * FLIGHT has read the pointers in `moved` at `at`. A pointer marked again since (another time or
+   * text) stays unread; changes are ordered by a counter, not by `at`, whose clock is the poll's.
+   */
+  markFlightPointersRead(session: string, moved: readonly FlightMovedPointer[], at: number): void {
+    const stamp = this.db.prepare(
+      `UPDATE flight_pointers SET read_at = ?, read_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
+       WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?
+         AND changed_at = ? AND change = ?`,
+    );
+    this.transaction(() => {
+      for (const m of moved) stamp.run(at, session, m.entry, m.kind, m.target, m.at, m.change);
+    });
   }
 
   /** Save an entry and prune old closed entries across all sessions, in one transaction. */
@@ -8374,12 +8513,48 @@ export class Store {
         .prepare(`INSERT INTO flight_ledger (session_id, key, kind, status, updated_at, entry)
         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_id, key) DO UPDATE SET
         kind = excluded.kind, status = excluded.status, updated_at = excluded.updated_at, entry = excluded.entry`)
-        .run(session, entry.key, entry.kind, entry.status, entry.updatedAt, JSON.stringify(entry));
+        .run(
+          session,
+          entry.key,
+          entry.kind,
+          entry.status,
+          entry.updatedAt,
+          JSON.stringify({ ...entry, pointers: undefined }),
+        );
+      if (entry.pointers !== undefined) this.syncFlightPointers(session, entry);
       this.db
         .prepare(`DELETE FROM flight_ledger WHERE updated_at < ?
         AND status NOT IN (${FLIGHT_LEDGER_OPEN.map(() => "?").join(", ")})`)
         .run(pruneBefore, ...FLIGHT_LEDGER_OPEN);
+      this.db
+        .prepare(
+          `DELETE FROM flight_pointers WHERE NOT EXISTS (
+             SELECT 1 FROM flight_ledger l
+             WHERE l.session_id = flight_pointers.session_id AND l.key = flight_pointers.entry_key)`,
+        )
+        .run();
     });
+  }
+
+  /** Makes the entry's pointers exactly `entry.pointers`; one that stays keeps its marks. */
+  private syncFlightPointers(session: string, entry: FlightLedgerEntry): void {
+    const pointers = entry.pointers ?? [];
+    const kept = new Set(pointers.map((p) => `${p.kind}\0${p.target}`));
+    const drop = this.db.prepare(
+      "DELETE FROM flight_pointers WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?",
+    );
+    for (const old of this.db
+      .prepare("SELECT kind, target FROM flight_pointers WHERE session_id = ? AND entry_key = ?")
+      .all(session, entry.key) as { kind: string; target: string }[]) {
+      if (!kept.has(`${old.kind}\0${old.target}`))
+        drop.run(session, entry.key, old.kind, old.target);
+    }
+    const add = this.db.prepare(
+      `INSERT OR IGNORE INTO flight_pointers (session_id, entry_key, kind, target, changed_at, change, read_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const p of pointers)
+      add.run(session, entry.key, p.kind, p.target, p.changedAt, p.change, p.readAt);
   }
 
   /** The stored sections of a session's brief. */
