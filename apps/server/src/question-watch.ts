@@ -35,14 +35,15 @@ export interface QuestionSubject {
 
 export interface QuestionFacts {
   ticket: "open" | "closed" | "none";
-  /** When the card last changed; a closed ticket settles a question only if this is after the ask. */
-  ticketAt: number;
+  /**
+   * What the hub first saw of the ticket and PR when the question became one it watches. A ticket
+   * or PR that was already closed or merged then is news the asker had, not a change since the ask.
+   */
+  sight: { ticketClosed: boolean; pr: { number: number; state: string } | null };
   pr: {
     number: number;
     state: "open" | "merged" | "closed";
     headSha: string | null;
-    /** When the PR merged, else last changed. */
-    at: number;
   } | null;
   run: "live" | "ended" | "none" | `parked:${string}`;
 }
@@ -120,9 +121,9 @@ export function questionFacts(store: Store, s: QuestionSubject): QuestionFacts {
             .filter((p) => p.ticket === s.ticket || p.closingIssues?.includes(Number(ticket[2])))
             .sort((a, b) => b.number - a.number)[0];
   const run = s.runId === null ? null : store.run(s.runId);
-  return {
+  const facts: QuestionFacts = {
     ticket: card === null ? "none" : card.closed ? "closed" : "open",
-    ticketAt: card?.updatedAt ?? 0,
+    sight: { ticketClosed: false, pr: null },
     pr:
       found === undefined
         ? null
@@ -130,7 +131,6 @@ export function questionFacts(store: Store, s: QuestionSubject): QuestionFacts {
             number: found.number,
             state: found.state,
             headSha: found.headSha,
-            at: found.mergedAt ?? found.updatedAt,
           },
     run:
       run === null
@@ -141,6 +141,43 @@ export function questionFacts(store: Store, s: QuestionSubject): QuestionFacts {
             ? `parked:${run.loop.parked.kind}`
             : "live",
   };
+  facts.sight = sightOf(store, s, facts);
+  return facts;
+}
+
+const SIGHT_SETTING = "question-watch.sight";
+type Sight = QuestionFacts["sight"];
+
+/** The first look at a question's ticket and PR, kept until the question leaves the watch. */
+function sightOf(store: Store, s: QuestionSubject, f: QuestionFacts): Sight {
+  const id = subjectId(s);
+  const all = JSON.parse(store.getSetting(SIGHT_SETTING) ?? "{}") as Record<string, Sight>;
+  const now: Sight = {
+    ticketClosed: f.ticket === "closed",
+    pr: f.pr === null ? null : { number: f.pr.number, state: f.pr.state },
+  };
+  const kept = all[id];
+  if (kept === undefined) {
+    all[id] = now;
+    store.setSetting(SIGHT_SETTING, JSON.stringify(all));
+    return now;
+  }
+  // another PR now closes the ticket: it is looked at afresh
+  if (f.pr !== null && kept.pr?.number !== f.pr.number) {
+    all[id] = { ...kept, pr: now.pr };
+    store.setSetting(SIGHT_SETTING, JSON.stringify(all));
+    return all[id];
+  }
+  return kept;
+}
+
+/** Forgets the sights of questions no longer watched. */
+export function forgetSights(store: Store, watched: readonly QuestionSubject[]): void {
+  const all = JSON.parse(store.getSetting(SIGHT_SETTING) ?? "{}") as Record<string, Sight>;
+  const keep = new Set(watched.map(subjectId));
+  const next = Object.fromEntries(Object.entries(all).filter(([id]) => keep.has(id)));
+  if (Object.keys(next).length !== Object.keys(all).length)
+    store.setSetting(SIGHT_SETTING, JSON.stringify(next));
 }
 
 /** The first fact that settles the question: the run ended, the ticket closed, the PR merged or closed. */
@@ -149,12 +186,13 @@ export function closingFact(
   f: QuestionFacts,
 ): { kind: QuestionClosureKind; reason: string } | null {
   if (f.run === "ended") return { kind: "run-ended", reason: ASKING_RUN_ENDED_REASON };
-  // only a change after the ask settles it: a ticket already closed when it was asked is the asker's news
-  if (f.ticket === "closed" && s.ticket !== null && f.ticketAt > s.askAt)
+  // only a change since the hub first saw the question settles it: a ticket or PR already closed
+  // then is not news, and an edit to a closed card is not a close
+  if (f.ticket === "closed" && !f.sight.ticketClosed && s.ticket !== null)
     return { kind: "ticket-closed", reason: ticketClosedReason(s.ticket) };
-  if (f.pr?.state === "merged" && f.pr.at > s.askAt)
+  if (f.pr?.state === "merged" && f.sight.pr?.state !== "merged")
     return { kind: "pr-merged", reason: prMergedReason(f.pr.number) };
-  if (f.pr?.state === "closed" && f.pr.at > s.askAt)
+  if (f.pr?.state === "closed" && f.sight.pr?.state !== "closed")
     return { kind: "pr-closed", reason: prClosedReason(f.pr.number) };
   return null;
 }
@@ -173,7 +211,9 @@ export async function closeSettledQuestions(d: {
 }): Promise<number> {
   const { store, now } = d;
   let closed = 0;
-  for (const s of openQuestionSubjects(d)) {
+  const subjects = openQuestionSubjects(d);
+  forgetSights(store, subjects);
+  for (const s of subjects) {
     const closing = closingFact(s, questionFacts(store, s));
     if (closing === null) continue;
     const stored = store.closeQuestion({

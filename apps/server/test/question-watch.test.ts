@@ -227,6 +227,7 @@ describe("the hub closes a question on a recorded fact", () => {
 
   it("lists both closures under Answered for the last week", async () => {
     const { key } = passedQuestion();
+    await closeSettledQuestions({ config: config(), store, now: NOW - 1 });
     store.replaceBoard("mc", [card(7, { closed: true })]);
     await closeSettledQuestions({ config: config(), store, now: NOW });
     const second = store.addQuestion({
@@ -317,8 +318,7 @@ describe("the hub closes a question on a recorded fact", () => {
     const merged = {
       ...facts,
       ticket: "closed" as const,
-      ticketAt: NOW,
-      pr: { number: 9, state: "merged" as const, headSha: "abc", at: NOW },
+      pr: { number: 9, state: "merged" as const, headSha: "abc" },
     };
     expect(closingFact(subject, merged)?.kind).toBe("ticket-closed");
     expect(closingFact(subject, { ...merged, run: "ended" })?.kind).toBe("run-ended");
