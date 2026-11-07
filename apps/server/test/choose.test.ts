@@ -68,7 +68,7 @@ const brief: AttentionBrief = {
 };
 const item = (key: string, over: Partial<AttentionItem> = {}): AttentionItem => ({
   key,
-  kind: "ask",
+  kind: "question",
   agentId: "guido-1",
   repoId: "mc",
   text: "Ship the plan?",
@@ -100,11 +100,11 @@ const seatSession = (seatId: string, runId: string | null) =>
     seatId,
     runId,
     cliSessionId: null,
-    state: runId === null ? "idle" : "working",
+    state: runId === null ? "idle" : "running",
     reason: null,
     worktree: null,
     updatedAt: 1,
-  } as Parameters<Store["setSeatSession"]>[0]);
+  });
 
 beforeEach(() => {
   store = new Store(":memory:");
@@ -186,7 +186,7 @@ it("sends FLIGHT's own question to FLIGHT and wakes it", async () => {
 });
 
 it("sends the answer to FLIGHT when the asking run has ended, never to the run now on the seat", async () => {
-  store.upsertRun(run({ id: "r1", endedAt: 3_000, status: "done" }));
+  store.upsertRun(run({ id: "r1", endedAt: 3_000, status: "ok" }));
   store.upsertRun(run({ id: "r2", seq: 2 }));
   seatSession("guido-1", "r2");
   const q = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "Ship?", at: 2 });

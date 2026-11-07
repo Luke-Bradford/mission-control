@@ -112,7 +112,7 @@ it("an identical send within a minute is stored once and answers already sent wi
 
 it("a reply to a seat whose run ended goes to the seat now on that ticket, else to FLIGHT", async () => {
   const { store, app, send } = setup();
-  store.upsertRun(run({ id: "r1", endedAt: 2_000, status: "done" }));
+  store.upsertRun(run({ id: "r1", endedAt: 2_000, status: "ok" }));
   const original = store.addComms({
     at: 1_500,
     from: "guido-1",
@@ -135,11 +135,11 @@ it("a reply to a seat whose run ended goes to the seat now on that ticket, else 
     seatId: "inco-1",
     runId: "r9",
     cliSessionId: null,
-    state: "working",
+    state: "running",
     reason: null,
     worktree: null,
     updatedAt: 1,
-  } as Parameters<Store["setSeatSession"]>[0]);
+  });
   const next = await send({ to: "guido-1", text: "and one more", replyTo: original.id });
   expect(next.json().message.to).toBe("inco-1");
   // a reply to a message whose run is still live goes where it was addressed
