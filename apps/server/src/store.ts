@@ -107,6 +107,7 @@ import {
   type MachineSample,
   type MergedPrFacts,
   memoryTopicKey,
+  OLDER_FINDINGS_MAX,
   overusePrevention,
   PROMPT_BYTES_PER_TOKEN,
   PROMPT_SECTIONS,
@@ -216,6 +217,8 @@ import {
   testAttemptSource,
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
+import { externalReviewKey } from "./external-review-key.ts";
+import { openOlderFindings } from "./older-findings.ts";
 import { qaNativeIdentity } from "./qa-history-key.ts";
 import { StandingInstructions } from "./standing-instructions.ts";
 
@@ -5627,9 +5630,13 @@ export class Store {
         );
       if (res.changes !== 1) return;
       const row = this.db
-        .prepare("SELECT author_run_id, round, changed_since FROM reviews WHERE id = ?")
+        .prepare(
+          "SELECT author_run_id, repo_id, pr_number, sha, epoch, round, changed_since FROM reviews WHERE id = ?",
+        )
         .get(reviewId) as Row;
       const author = row.author_run_id as string;
+      const repoId = row.repo_id as string;
+      const prNumber = row.pr_number as number;
       // late: a later round's finding on a file the author did not touch since the last review
       const changed =
         (row.round as number) >= 2 && row.changed_since !== null
@@ -5720,6 +5727,25 @@ export class Store {
                  AND p.round < c.round)`,
           )
           .run(reviewId, reviewId);
+        // An external review's subject is the PR, so it also accepts the crew run's findings on
+        // earlier heads, but only those its brief listed: a review does not accept what it never saw.
+        if (author === externalReviewKey(repoId, prNumber)) {
+          const previous = this.reviewsOfRun(author)
+            .filter(
+              (x) => x.id < reviewId && x.epoch === Number(row.epoch) && x.state === "reported",
+            )
+            .at(-1);
+          const resolveListed = this.db.prepare(
+            `UPDATE review_findings SET resolution = 'fixed', resolved_review_id = ?
+             WHERE review_id = ? AND pos = ? AND resolution IS NULL`,
+          );
+          for (const o of openOlderFindings(
+            this,
+            { id: reviewId, repoId, prNumber, sha: row.sha as string, authorRunId: author },
+            previous?.id ?? null,
+          ).slice(0, OLDER_FINDINGS_MAX))
+            resolveListed.run(reviewId, o.reviewId, o.finding.pos);
+        }
       }
       this.appendAttempt(author, "review", r.at, {
         ...this.review(reviewId),

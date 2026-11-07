@@ -115,6 +115,7 @@ import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { PreviewRefused } from "../src/design-previews.ts";
+import { externalReviewKey } from "../src/external-review-key.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
@@ -4976,6 +4977,100 @@ describe("report_findings", () => {
     expect(store.findingsOf(reviewId)[0]).toMatchObject({
       resolution: "fixed",
       resolvedReviewId: second,
+    });
+  });
+
+  it("lets an external review resolve a finding listed from an earlier head, and only those", async () => {
+    // the crew run's round-1 review holds a blocking finding at pos 0
+    expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+    const external = store.requestReview({
+      authorRunId: externalReviewKey("mc", 9),
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 9,
+      sha: "b".repeat(40),
+      epoch: 0,
+      attempt: 1,
+      round: 2,
+      at: NOW + 1,
+    }) as number;
+    store.setReviewState(external, ["queued"], "running", { at: NOW + 1, runId: "retro:ext" });
+    const ext = reviewRun("retro:ext", external);
+    const unlisted = await report(
+      args({
+        verdict: passing,
+        findings: [],
+        resolutions: [{ findingRef: { reviewId, pos: 7 }, outcome: "fixed" }],
+      }),
+      ext,
+    );
+    expect(unlisted.isError).toBe(true);
+    expect(unlisted.text).toContain("listed in the brief as open from an earlier head");
+    expect(
+      await report(
+        args({
+          verdict: passing,
+          findings: [],
+          resolutions: [{ findingRef: { reviewId, pos: 0 }, outcome: "fixed" }],
+        }),
+        ext,
+      ),
+    ).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+    expect(store.reviewResolutions(external)).toEqual([{ reviewId, pos: 0, outcome: "fixed" }]);
+    expect(store.findingsOf(reviewId)[0]).toMatchObject({
+      resolution: "fixed",
+      resolvedReviewId: external,
+    });
+  });
+
+  describe("a clean external review", () => {
+    const externalOf = (pr: number, sha = "b".repeat(40)) => {
+      const id = store.requestReview({
+        authorRunId: externalReviewKey("mc", pr),
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: pr,
+        sha,
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: NOW + 1,
+      }) as number;
+      store.setReviewState(id, ["queued"], "running", { at: NOW + 1, runId: "retro:ext" });
+      return { id, ext: reviewRun("retro:ext", id) };
+    };
+
+    it("marks the PR's earlier crew-review findings fixed", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const { id, ext } = externalOf(9);
+      expect(await report(args({ verdict: passing, findings: [] }), ext)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.findingsOf(reviewId)[0]).toMatchObject({
+        resolution: "fixed",
+        resolvedReviewId: id,
+      });
+    });
+
+    it("marks a crew finding on the external review's own head fixed: the brief listed it", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const { id, ext } = externalOf(9, AUTHOR_SHA);
+      expect(await report(args({ verdict: passing, findings: [] }), ext)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.findingsOf(reviewId)[0]).toMatchObject({
+        resolution: "fixed",
+        resolvedReviewId: id,
+      });
+    });
+
+    it("leaves another PR's findings alone", async () => {
+      expect(await report()).toEqual({ text: expect.stringContaining(FINDINGS_RECORDED) });
+      const { ext } = externalOf(77);
+      expect(await report(args({ verdict: passing, findings: [] }), ext)).toEqual({
+        text: expect.stringContaining(FINDINGS_RECORDED),
+      });
+      expect(store.findingsOf(reviewId)[0]?.resolution).toBeUndefined();
     });
   });
 

@@ -13,7 +13,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
-import { DEFAULT_PROFILES, type Profile, type ProfileRoute, type RunProfile } from "@mc/core";
+import {
+  DEFAULT_PROFILES,
+  OLDER_FINDINGS_MAX,
+  type Profile,
+  type ProfileRoute,
+  type RunProfile,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import {
@@ -532,6 +538,35 @@ describe("reviewBrief", () => {
     expect(out).toContain("FLIGHT's reason: the guard is fine");
     expect(out).toContain("(The first review's blocking findings are not recorded.)");
     expect(reviewBrief(review)).not.toContain("second, independent");
+  });
+
+  it("lists older-head findings, and cuts the list at OLDER_FINDINGS_MAX with a count", () => {
+    const finding = (pos: number) => ({
+      reviewId: 4,
+      sha: "a".repeat(40),
+      finding: {
+        pos,
+        severity: "Critical" as const,
+        file: "a.ts",
+        line: 3,
+        summary: `older-${pos}`,
+        scenario: "w",
+        fix: "f",
+        state: "open" as const,
+      },
+    });
+    const few = reviewBrief({ ...review, olderFindings: [finding(0)] });
+    expect(few).toContain("## Open blocking findings from earlier reviews");
+    expect(few).toContain("[Critical] a.ts:3 — older-0 (review id 4, pos 0, head aaaaaaa)");
+    expect(few).not.toContain("not listed");
+    const many = reviewBrief({
+      ...review,
+      olderFindings: Array.from({ length: OLDER_FINDINGS_MAX + 3 }, (_, i) => finding(i)),
+    });
+    expect(many).toContain(`older-${OLDER_FINDINGS_MAX - 1} (`);
+    expect(many).not.toContain(`older-${OLDER_FINDINGS_MAX} (`);
+    expect(many).toContain("(3 more open findings from earlier reviews are not listed");
+    expect(reviewBrief(review)).not.toContain("earlier reviews");
   });
 
   it("lists the screenshot pairs", () => {

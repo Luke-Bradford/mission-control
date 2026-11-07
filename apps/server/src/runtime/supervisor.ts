@@ -163,6 +163,7 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import { openOlderFindings } from "../older-findings.ts";
 import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
@@ -4412,6 +4413,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         prev === null
           ? null
           : (evidence.filter((e) => e.at >= (prev.endedAt ?? 0)).at(-1)?.note ?? null);
+      // An ended run's PR: its earlier heads' reviews belong to the crew run, so the findings still
+      // open there are not in `prev`.
+      const olderFindings = external ? openOlderFindings(store, review, prev?.id ?? null) : [];
       let brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,
@@ -4433,6 +4437,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           ? store.findingsOf(prev.id).filter((f) => BLOCKING_SEVERITIES.includes(f.severity))
           : [],
         prevReply,
+        ...(olderFindings.length > 0 ? { olderFindings } : {}),
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
