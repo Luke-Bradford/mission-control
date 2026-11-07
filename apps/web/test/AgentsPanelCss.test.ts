@@ -87,12 +87,13 @@ it("lets phone users scroll every Crew column while keeping the agent pinned", (
   );
 });
 
-it("constrains the crew pause portal to the viewport with scrolling", () => {
-  expect(css).toMatch(/\.crew-pause-form \{[^}]*position: fixed/);
-  expect(css).toMatch(
-    /\.crew-pause-form \{[^}]*max-height: calc\(calc\(100 \* var\(--dvh\)\) - 32px\)/,
-  );
-  expect(css).toMatch(/\.crew-pause-form \{[^}]*overflow-y: auto/);
+it("constrains the crew pause modal to the viewport, scrolling its body", () => {
+  // the modal sits on the shared overlay: a fixed backdrop, and a panel capped at 86% of the viewport
+  expect(css).toMatch(/\.modal \{[^}]*position: fixed/);
+  expect(css).toMatch(/\.modal \.panel \{[^}]*max-height: calc\(86 \* var\(--vh\)\)/);
+  expect(css).toMatch(/\.crew-pause-panel\.crew-pause-panel \{[^}]*width: min\(640px, 100%\)/);
+  // the body is the scroller (`.scroll`), so the footer's actions stay in view
+  expect(css).toMatch(/\.scroll \{[^}]*overflow: auto/);
 });
 
 it("sizes the review-waiver menu from spacing tokens", () => {

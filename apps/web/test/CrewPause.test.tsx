@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
 import { CrewPauseControl } from "../src/components/CrewPause.tsx";
 import { seatStatus } from "../src/crew.ts";
 import { hub } from "../src/data.ts";
+import { installKeys } from "../src/shell/keys.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { CREW_CONFIG, seatRow } from "./fixtures.ts";
 
@@ -210,4 +211,227 @@ it("keeps a stale pause visible but refuses writes after a refresh fails", async
   );
   fireEvent.submit(screen.getByLabelText("Reason").closest("form") as HTMLFormElement);
   expect(fetch.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+});
+
+/** The pause control over a server that answers writes by `write`, and records every POST body. */
+function setupPause(write: (init: RequestInit | undefined) => { status: number; body: unknown }) {
+  const posts: unknown[] = [];
+  const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") {
+      posts.push(JSON.parse(String(init.body)));
+      const out = write(init);
+      return new Response(JSON.stringify(out.body), { status: out.status });
+    }
+    const body = input === "/api/config" ? CREW_CONFIG : null;
+    return new Response(JSON.stringify(body), { status: 200 });
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<CrewPauseControl />);
+  return posts;
+}
+
+const summaryOf = () => screen.getByRole("region", { name: "The crew pause was not saved" });
+
+it("empty selection links to the seat list", async () => {
+  const posts = setupPause(() => ({ status: 200, body: null }));
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Save tokens" } });
+  fireEvent.click(screen.getByLabelText("All seats"));
+  fireEvent.click(screen.getByRole("button", { name: "Pause selected seats" }));
+  const summary = summaryOf();
+  expect(document.activeElement).toBe(summary);
+  fireEvent.click(within(summary).getByRole("link", { name: /Choose at least one seat/ }));
+  expect(document.activeElement).toBe(screen.getByRole("group", { name: "Seats to pause" }));
+  expect(posts).toHaveLength(0);
+});
+
+it("an empty reason focuses a named summary whose link reaches the Reason field", async () => {
+  const posts = setupPause(() => ({ status: 200, body: null }));
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  fireEvent.click(screen.getByRole("button", { name: "Pause all seats" }));
+  const summary = summaryOf();
+  expect(document.activeElement).toBe(summary);
+  const reason = screen.getByLabelText("Reason");
+  expect(reason.getAttribute("aria-invalid")).toBe("true");
+  expect(reason.getAttribute("aria-describedby")).toContain("-error");
+  fireEvent.click(within(summary).getByRole("link", { name: "Enter a reason for the pause." }));
+  expect(document.activeElement).toBe(reason);
+  expect(posts).toHaveLength(0);
+});
+
+it("lays out scope, the seat summary, Reason, a read-only Duration, then the audit", async () => {
+  stubFetch({
+    "/api/config": CREW_CONFIG,
+    "/api/settings/crew-pause": { seats: "all", reason: "Save tokens", by: "operator", at: 1 },
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit crew pause" }));
+  const dialog = screen.getByRole("dialog", { name: "Edit crew pause" });
+  const order = [
+    "Scope",
+    "will pause.",
+    "Reason",
+    "Duration",
+    "Until resumed",
+    "No automatic expiry",
+    "Run exceptions",
+  ].map((text) => (dialog.textContent ?? "").indexOf(text));
+  expect(order.every((at) => at >= 0)).toBe(true);
+  expect([...order].sort((a, b) => a - b)).toEqual(order);
+  const duration = within(dialog).getByRole("group", { name: "Duration" });
+  expect(duration.querySelector("input, select, button")).toBeNull();
+  expect(dialog.querySelector('input[type="date"], input[type="datetime-local"]')).toBeNull();
+  const audit = within(dialog).getByRole("region", { name: "Crew pause audit" });
+  expect(audit.contains(screen.getByLabelText("Reason"))).toBe(false);
+});
+
+it("summarises the selected seats", async () => {
+  setupPause(() => ({ status: 200, body: null }));
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  expect(screen.getByRole("status", { name: "" }).textContent).toMatch(
+    /^All \d+ seats? will pause\.$/,
+  );
+  fireEvent.click(screen.getByLabelText("All seats"));
+  expect(screen.getByText("No seats selected.")).toBeTruthy();
+  const seat = CREW_CONFIG.crew?.sessions[0]?.seats[0];
+  if (!seat) throw new Error("missing fixture seat");
+  fireEvent.click(screen.getByLabelText(seat.id));
+  expect(screen.getByText(new RegExp(`will pause: ${seat.id}\\.$`))).toBeTruthy();
+});
+
+it("a refused save keeps the draft and says why in the summary", async () => {
+  const posts = setupPause(() => ({
+    status: 409,
+    body: { error: "Another pause is being saved" },
+  }));
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Save tokens" } });
+  fireEvent.click(screen.getByRole("button", { name: "Pause all seats" }));
+  const summary = await waitFor(summaryOf);
+  await waitFor(() => expect(document.activeElement).toBe(summary));
+  expect(summary.textContent).toContain("Another pause is being saved");
+  expect(summary.textContent).not.toContain("result is unknown");
+  expect((screen.getByLabelText("Reason") as HTMLInputElement).value).toBe("Save tokens");
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(posts).toHaveLength(1);
+});
+
+it("a lost connection keeps the draft and says the result is unknown", async () => {
+  const fetch = vi.fn(async (input: string, init?: RequestInit) => {
+    if (init?.method === "POST") throw new TypeError("Failed to fetch");
+    return new Response(JSON.stringify(input === "/api/config" ? CREW_CONFIG : null), {
+      status: 200,
+    });
+  });
+  vi.stubGlobal("fetch", fetch);
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Save tokens" } });
+  fireEvent.click(screen.getByRole("button", { name: "Pause all seats" }));
+  const summary = await waitFor(summaryOf);
+  expect(summary.textContent).toContain("Failed to fetch");
+  expect(summary.textContent).toContain("The result is unknown");
+  expect((screen.getByLabelText("Reason") as HTMLInputElement).value).toBe("Save tokens");
+  expect((screen.getByLabelText("All seats") as HTMLInputElement).checked).toBe(true);
+});
+
+it("a double submit posts once", async () => {
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const posts: unknown[] = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        posts.push(init.body);
+        await held;
+        return new Response("null", { status: 200 });
+      }
+      return new Response(JSON.stringify(input === "/api/config" ? CREW_CONFIG : null), {
+        status: 200,
+      });
+    }),
+  );
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Save tokens" } });
+  const form = screen.getByLabelText("Reason").closest("form") as HTMLFormElement;
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  fireEvent.click(screen.getByRole("button", { name: "Pause all seats" }));
+  release();
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(posts).toHaveLength(1);
+});
+
+it("Esc closes the modal, keeps Tab inside it and returns focus to the opener", async () => {
+  stubFetch({ "/api/config": CREW_CONFIG, "/api/settings/crew-pause": null });
+  render(<CrewPauseControl />);
+  const noop = () => {};
+  const off = installKeys({
+    navigate: noop,
+    toggleDock: noop,
+    help: noop,
+    selectNext: noop,
+    selectPrev: noop,
+    toast: noop,
+  });
+  const opener = await screen.findByRole("button", { name: "Pause crew" });
+  opener.focus();
+  fireEvent.click(opener);
+  const dialog = screen.getByRole("dialog", { name: "Pause crew" });
+  const cancel = screen.getByRole("button", { name: "Cancel" });
+  cancel.focus();
+  expect(fireEvent.keyDown(cancel, { key: "Tab" })).toBe(false);
+  expect(document.activeElement).toBe(screen.getByLabelText("All seats"));
+  expect(dialog.closest(".modal")).toBeTruthy();
+  act(() => {
+    fireEvent.keyDown(document.body, { key: "Escape" });
+  });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(opener);
+  off();
+});
+
+it("Esc and Cancel do not close the modal while a save is out, so a failure keeps the draft", async () => {
+  let fail: () => void = () => {};
+  const held = new Promise<void>((_, reject) => {
+    fail = () => reject(new TypeError("Failed to fetch"));
+  });
+  held.catch(() => {});
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") await held;
+      return new Response(JSON.stringify(input === "/api/config" ? CREW_CONFIG : null), {
+        status: 200,
+      });
+    }),
+  );
+  const noop = () => {};
+  const off = installKeys({
+    navigate: noop,
+    toggleDock: noop,
+    help: noop,
+    selectNext: noop,
+    selectPrev: noop,
+    toast: noop,
+  });
+  render(<CrewPauseControl />);
+  fireEvent.click(await screen.findByRole("button", { name: "Pause crew" }));
+  fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Save tokens" } });
+  fireEvent.click(screen.getByRole("button", { name: "Pause all seats" }));
+  for (let i = 0; i < 2; i++)
+    act(() => {
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    });
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+  await act(async () => fail());
+  const failed = await waitFor(summaryOf);
+  expect(failed.textContent).toContain("Failed to fetch");
+  expect((screen.getByLabelText("Reason") as HTMLInputElement).value).toBe("Save tokens");
+  off();
 });
