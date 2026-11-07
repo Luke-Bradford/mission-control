@@ -331,6 +331,241 @@ function tailBytes(text: string, max: number): string {
     .replace(/^�+/, "");
 }
 
+/** The job that only reports whether the others passed: its lines never stand ahead of theirs. */
+export const CI_SUMMARY_JOB = "check";
+/** A failure as vitest prints it, at the start of the line: never a passing test or code line that says FAIL. */
+const FAIL_LINE = /^(?:FAIL|FAILED)\b/;
+/** The error line under a failure: an assertion or a typed error. */
+const ERROR_LINE = /AssertionError|\b\w*Error:/;
+/** A type or lint error, a failure by itself. */
+const CHECK_ERROR = /\berror TS\d+|^\d+:\d+\s+error\s/;
+/** A failed assertion's line vitest prints before its Failed Tests section. */
+const CROSS_LINE = /^[×✗✕]\s/;
+/** A line that opens (or ends) a block of a test's console output. */
+const STREAM_LINE = /^(?:stderr|stdout) \|/;
+const BLOCK_END = /^(?:[✓×✗✕❯↓]|FAIL\b|RUN\b|Test Files|Tests\s|Duration)/;
+const NOT_A_CAUSE = /Process completed with exit code/;
+/** How far under a FAIL line its error line is looked for. */
+const ERROR_WINDOW = 6;
+/** One failing line is cut here. */
+const FAILING_LINE_MAX = 300;
+/** A job's failing lines are kept up to this many, then its last lines follow. */
+const FAILING_LINES_MAX = 100;
+/** How many of a job's last lines follow its failing lines. */
+const CONTEXT_LINES = 10;
+/** `gh run view --log-failed` lines: job, step, then the text behind a timestamp. */
+const LOG_LINE = /^([^\t]*)\t[^\t]*\t(?:\d{4}-\d\d-\d\dT[\d:.]+Z ?)?(.*)$/;
+
+/** A Biome diagnostic's header: the file, position and rule, ending in a rule of box characters. */
+const BIOME_HEADER = /^\S+(?::\d+:\d+)? \S+.*━{3}/;
+
+type JobLines = {
+  /** A FAIL line with the error lines under it, or a type or lint error alone. */
+  entries: string[][];
+  /** `×` lines and Biome headers, in log order. */
+  marks: string[];
+  /** Bare errors and console output. */
+  noise: string[];
+  rest: string[];
+  fails: number;
+};
+type Group = {
+  job: string;
+  entries: string[][];
+  marks: string[];
+  noise: string[];
+  rest: string[];
+  /** Failing lines past FAILING_LINES_MAX, not kept at all. */
+  dropped: number;
+};
+type Tier = { name: string; units: (g: Group) => string[][]; shown: string[][][] };
+
+/** What a job's omitted failing lines are told as. */
+const omittedText = (n: number, job: string): string =>
+  `[${n} more failing lines${job === "" ? "" : ` in ${job}`} not shown; inspect the CI log.]`;
+
+/**
+ * The part of a failed run's log a seat is shown, at most `max` bytes. Ranked across every job:
+ * first each job's first failure (a FAIL name with the error lines under it, or a type error), then
+ * the rest of the failures, jobs taking turns; then (only for a job without a FAIL line) its `×`
+ * lines and Biome diagnostics; then bare errors and console output; then each job's last lines. A
+ * job's lines keep their log order under its `[job]` label. Failing lines left out are counted in
+ * a closing line. A log without any failing line is its last lines alone. The summary job stands
+ * aside when another job has lines.
+ */
+export function ciLogBody(log: string, max: number): string {
+  const jobs = new Map<string, JobLines>();
+  const cut = (t: string) => Array.from(t).slice(0, FAILING_LINE_MAX).join("");
+  const seen = new Set<string>();
+  const once = (key: string) => {
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  };
+  // a set per list: a log may hold hundreds of thousands of distinct console lines
+  const sets = new Map<string[], Set<string>>();
+  const addOnce = (list: string[], line: string) => {
+    const held = sets.get(list) ?? new Set<string>();
+    sets.set(list, held);
+    if (held.has(line)) return;
+    held.add(line);
+    list.push(line);
+  };
+  let open: string[] | null = null;
+  let sinceFail = 0;
+  let stream = false;
+  let lastJob: string | null = null;
+  for (const raw of log.split("\n")) {
+    const m = LOG_LINE.exec(raw);
+    const job = m === null ? "" : (m[1] ?? "");
+    const text = (m === null ? raw : (m[2] ?? "")).trim();
+    if (text === "") continue;
+    const g = jobs.get(job) ?? { entries: [], marks: [], noise: [], rest: [], fails: 0 };
+    jobs.set(job, g);
+    // a FAIL line's error window and a console block end where the job's lines do
+    if (job !== lastJob) {
+      open = null;
+      stream = false;
+      lastJob = job;
+    }
+    if (STREAM_LINE.test(text)) stream = true;
+    else if (BLOCK_END.test(text)) stream = false;
+    if (NOT_A_CAUSE.test(text)) continue;
+    const line = cut(text);
+    if (FAIL_LINE.test(text)) {
+      stream = false;
+      // a name printed twice (at the failure and in the summary) keeps its first error lines
+      if (once(`${job}\t${line}`)) {
+        open = [line];
+        g.entries.push(open);
+        g.fails++;
+        sinceFail = 0;
+      } else open = null;
+    } else if (open !== null && !stream && sinceFail < ERROR_WINDOW && ERROR_LINE.test(text)) {
+      // under its FAIL line even when another test failed with the same words
+      open.push(line);
+      sinceFail++;
+    } else {
+      sinceFail++;
+      if (CHECK_ERROR.test(text)) {
+        if (once(`${job}\t${line}`)) g.entries.push([line]);
+      } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text)) addOnce(g.marks, line);
+      else if (stream || ERROR_LINE.test(text)) addOnce(g.noise, line);
+      else g.rest.push(text);
+    }
+  }
+  if (jobs.size > 1) jobs.delete(CI_SUMMARY_JOB);
+  const groups: Group[] = [...jobs.entries()]
+    .map(([job, g]) => {
+      const allMarks = g.fails > 0 ? [] : g.marks;
+      const marks = allMarks.slice(0, FAILING_LINES_MAX);
+      const entries: string[][] = [];
+      let kept = 0;
+      for (const e of g.entries) {
+        kept += e.length;
+        if (kept > FAILING_LINES_MAX) break;
+        entries.push(e);
+      }
+      const dropped =
+        g.entries.reduce((n, e) => n + e.length, 0) -
+        entries.reduce((n, e) => n + e.length, 0) +
+        (allMarks.length - marks.length);
+      const failing = g.entries.length + marks.length > 0;
+      return {
+        job,
+        dropped,
+        entries,
+        marks,
+        noise: g.noise,
+        rest: g.rest.slice(-(failing ? CONTEXT_LINES : CI_EXCERPT_LINES)),
+      };
+    })
+    .sort((a, b) => b.entries.length - a.entries.length);
+  const failingOf = (x: Group) => x.entries.length + x.marks.length;
+  if (!groups.some((x) => failingOf(x) > 0)) {
+    // the last lines of the jobs still standing: the summary job's stay out of it
+    const kept = log
+      .trimEnd()
+      .split("\n")
+      .filter((raw) => jobs.has(LOG_LINE.exec(raw)?.[1] ?? ""));
+    return tailBytes(kept.slice(-CI_EXCERPT_LINES).join("\n"), max);
+  }
+  const named = groups.length > 1 || groups[0]?.job !== "";
+  const label = (job: string, tier: string) =>
+    named && job !== "" ? `[${job}${tier === "" ? "" : `: ${tier}`}]` : null;
+
+  // room kept for each job's notice of what was left out
+  let budget = max;
+  for (const x of groups) {
+    if (failingOf(x) > 0) budget -= byteLength(omittedText(99999, x.job)) + 1;
+  }
+  // too little room for any notice: the lines get it all, and no notice is added
+  if (budget < 0) budget = max;
+  const tiers: Tier[] = [
+    { name: "", units: (x) => x.entries, shown: groups.map(() => []) },
+    { name: "", units: (x) => x.marks.map((l) => [l]), shown: groups.map(() => []) },
+    { name: "console", units: (x) => x.noise.map((l) => [l]), shown: groups.map(() => []) },
+    { name: "last lines", units: (x) => x.rest.map((l) => [l]), shown: groups.map(() => []) },
+  ];
+  const take = (t: Tier, gi: number, unit: string[]): boolean => {
+    const x = groups[gi] as Group;
+    const shown = t.shown[gi] as string[][];
+    let cost = unit.reduce((n, l) => n + byteLength(l) + 1, 0);
+    // a section's label is paid for with its first unit
+    const lab = label(x.job, t.name);
+    if (lab !== null && shown.length === 0) cost += byteLength(lab) + 1;
+    if (cost > budget) return false;
+    budget -= cost;
+    shown.push(unit);
+    return true;
+  };
+  // jobs take turns, one unit each: the first failure of every job, then the rest, then each
+  // lower tier; a job that stops fitting is closed for its tier
+  const fill = (t: Tier, from: number) => {
+    const closed = new Set<number>();
+    const lists = groups.map((x) => t.units(x));
+    for (let i = from; ; i++) {
+      let any = false;
+      for (let gi = 0; gi < groups.length; gi++) {
+        const unit = lists[gi]?.[i];
+        if (closed.has(gi) || unit === undefined) continue;
+        any = true;
+        if (!take(t, gi, unit)) closed.add(gi);
+      }
+      if (!any) break;
+    }
+  };
+  const tier0 = tiers[0] as Tier;
+  // the first failure of every job, before any job's second
+  groups.forEach((x, gi) => {
+    const first = x.entries[0];
+    if (first !== undefined) take(tier0, gi, first);
+  });
+  fill(tier0, 1);
+  for (const t of tiers.slice(1)) fill(t, 0);
+
+  const out: string[] = [];
+  for (const t of tiers) {
+    groups.forEach((x, gi) => {
+      const lines = (t.shown[gi] as string[][]).flat();
+      if (lines.length === 0) return;
+      const lab = label(x.job, t.name);
+      if (lab !== null) out.push(lab);
+      out.push(...lines);
+    });
+  }
+  groups.forEach((x, gi) => {
+    const total = x.entries.flat().length + x.marks.length + x.dropped;
+    const shown =
+      (tier0.shown[gi] as string[][]).flat().length +
+      ((tiers[1] as Tier).shown[gi] as string[][]).length;
+    const note = omittedText(total - shown, x.job);
+    // a notice only when it fits: the body never goes past `max`
+    if (total > shown && byteLength(`${out.join("\n")}\n${note}`) <= max) out.push(note);
+  });
+  return out.join("\n");
+}
+
 /** The run's PR body as the hub writes it; `section` goes between "What changed" and "Closes". */
 export function runPrBody(
   ticket: { issue: number; title: string },
@@ -544,15 +779,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
       if (open === null) return { ok: false, text: MC_PR_FAILED, transient: true };
       const mine = open.find((p) => p.createdAt >= run.startedAt);
       if (mine !== undefined) return { ok: true, prNumber: mine.number };
-      // A restarted seat keeps its branch. It may therefore continue its own ended run's PR,
-      // but never adopts a PR merely because it happens to be open on that branch.
+      // A restarted seat keeps its branch. It may therefore continue its own ended run's PR, and
+      // so may the seat that took that run over by handoff, but never adopts a PR merely because
+      // it happens to be open on that branch.
+      const receivedFrom = deps.store.receivedHandoff(run.id)?.runId;
       const adopted = open.find((p) =>
         deps.store
           .runsOnTicket(run.repoId, run.ticket ?? "")
           .some(
             (earlier) =>
               earlier.id !== run.id &&
-              earlier.agentId === run.agentId &&
+              (earlier.agentId === run.agentId || earlier.id === receivedFrom) &&
               earlier.startedAt < run.startedAt &&
               earlier.endedAt !== null &&
               earlier.endedAt <= run.startedAt &&
@@ -714,15 +951,17 @@ export function createPublisher(deps: McToolsDeps): Publisher {
         const sections: string[] = [];
         for (const f of failed) {
           const head = `${cleanLog(f.name).slice(0, RUN_NAME_MAX)}:\n`;
-          const room = budget - (sections.length > 0 ? SEPARATOR_BYTES : 0) - byteLength(head);
-          if (room <= 0) break; // no room for a header with anything under it
+          // each run left gets an equal part of what is left; what one does not use passes on
+          const left = failed.length - failed.indexOf(f);
+          const share = Math.floor((budget - (sections.length > 0 ? SEPARATOR_BYTES : 0)) / left);
+          const room = share - byteLength(head);
+          if (room <= 0) continue; // no room for a header with anything under it
           const viewed = await deps.gh(
             ["run", "view", `--repo=${repo}`, String(f.id), "--log-failed"],
             { cwd: cwd(), maxBuffer: CI_LOG_MAX_BUFFER },
           );
           if (viewed.code !== 0) return CI_LOG_UNREADABLE;
-          const lines = cleanLog(viewed.stdout).trimEnd().split("\n").slice(-CI_EXCERPT_LINES);
-          const body = tailBytes(lines.join("\n"), room);
+          const body = ciLogBody(cleanLog(viewed.stdout).trimEnd(), room);
           if (body === "") continue;
           const section = head + body;
           budget -= byteLength(section) + (sections.length > 0 ? SEPARATOR_BYTES : 0);

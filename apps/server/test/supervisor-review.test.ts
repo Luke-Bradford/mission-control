@@ -48,6 +48,7 @@ import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   BRANCH,
   boardCard,
@@ -69,6 +70,8 @@ import {
   until,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 describe("questions and strays", () => {
   const stray = (path: string, agentId = "guido-1") => ({
@@ -124,6 +127,59 @@ describe("questions and strays", () => {
     await sup.endRun("guido-1");
     expect(store.openQuestions()).toEqual([]);
     expect(store.strays().map((s) => s.path)).toEqual(["docs/b.md"]);
+  });
+
+  it("another run's end or a message spares a question of a set-aside run of the seat (#1451)", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const parked = store.addQuestion({
+      agentId: "guido-1",
+      runId: "guido-1:parked",
+      text: "parked?",
+      at: 1,
+    });
+    store.passQuestion(parked, 2);
+    store.addQuestion({ agentId: "guido-1", runId, text: "one?", at: 1 });
+    await sup.message("guido-1", "per customer", { interrupt: false });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["parked?"]);
+    store.addQuestion({ agentId: "guido-1", runId, text: "two?", at: 1 });
+    await sup.endRun("guido-1");
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["parked?"]);
+  });
+
+  it("ending a set-aside run closes its question (#1451)", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "guido-1:parked",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      loop: { ...NEW_LOOP, aside: { worktree: "/w/none", wake: false, ask: 1 } },
+    });
+    const q = store.addQuestion({
+      agentId: "guido-1",
+      runId: "guido-1:parked",
+      text: "which?",
+      at: 1,
+    });
+    store.passQuestion(q, 2);
+    await sup.endAsideRun("guido-1:parked");
+    expect(store.openQuestions()).toEqual([]);
   });
 
   it("a run that crashes closes them too", async () => {

@@ -15,7 +15,9 @@ import {
   evidenceImageName,
   evidenceMissing,
   evidenceRefusalText,
+  evidenceUncataloguedText,
   prEvidenceAffectedPages,
+  prEvidenceUncatalogued,
 } from "@mc/core";
 import { decodePng, diffImages } from "./png.ts";
 import type { EvidenceImage, PrEvidenceStore } from "./store.ts";
@@ -134,18 +136,31 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     };
   }
 
-  async function render(side: EvidenceSide, pages: EvidencePage[], signal: AbortSignal) {
+  async function render(
+    side: EvidenceSide,
+    name: string,
+    pages: EvidencePage[],
+    signal: AbortSignal,
+  ) {
     const shots = new Map<string, Buffer>();
     for (const page of pages)
       for (const scheme of EVIDENCE_SCHEMES) {
         signal.throwIfAborted();
-        shots.set(
-          `${page}:${scheme}`,
-          await abortable(
-            deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal),
-            signal,
-          ),
-        );
+        try {
+          shots.set(
+            `${page}:${scheme}`,
+            await abortable(
+              deps.render(side.origin, EVIDENCE_PAGE_PATHS[page], scheme, signal),
+              signal,
+            ),
+          );
+        } catch (e) {
+          // A stopped capture says why it stopped; the page in progress did not fail.
+          if (signal.aborted) throw e;
+          // Say which render failed: the render's own message names neither page nor side.
+          const why = e instanceof Error ? e.message : String(e);
+          throw new Error(`${page} page, ${scheme} scheme, ${name} side: ${why}`, { cause: e });
+        }
       }
     return shots;
   }
@@ -165,7 +180,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     const side = await deps.startSide({ sha, db, signal });
     try {
       signal.throwIfAborted();
-      return await render(side, pages, signal);
+      return await render(side, name, pages, signal);
     } finally {
       await side.stop().catch(() => {});
     }
@@ -273,6 +288,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     },
     gate(t) {
       if (t.repoId !== deps.repoId) return null;
+      const uncatalogued = prEvidenceUncatalogued(t.paths);
+      if (uncatalogued.length > 0) return evidenceUncataloguedText(uncatalogued);
       const pages = prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
       const missing = evidenceMissing(manifest(t), t.sha, pages);

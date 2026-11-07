@@ -12,10 +12,14 @@ export const DOCK_COLLAPSED_KEY = "mc-dock-collapsed";
 /** The Crew Activity Map's last manually picked repo. */
 export const MAP_REPO_KEY = "mc-map-repo";
 
+/** The Overview live log's filter. */
+export const ACTIVITY_FILTER_KEY = "overview.live-log.filter";
 /** The Board's selected lane. */
 export const LANE_KEY = "mc-lane";
 /** The Board's All-repos layout: `together` or `apart`. */
 export const BOARD_LAYOUT_KEY = "mc-board-layout";
+/** The Board view: a display filter (labels, priority, assignee, milestone), JSON, one per browser. */
+export const BOARD_VIEW_KEY = "mc-board-view";
 /** The away period whose digest this viewer acknowledged. */
 export const AWAY_DIGEST_KEY = "mc-away-digest";
 
@@ -27,20 +31,37 @@ export const BUILD_STATUS_KEY = "mc-build-status";
 /** PR heads the operator checked locally in this browser. */
 export const QA_CHECKED_HEADS_KEY = "mc-qa-checked-heads";
 
+/** The tab's Demo choice, in sessionStorage: per tab, kept over a reload, copied to a popout. */
+export const DEMO_KEY = "mc-demo";
+
+let keyScope = "";
+/** In Demo every key but the theme moves under this prefix, so Demo cannot change Live's choices. */
+export function setKeyScope(prefix: string): void {
+  keyScope = prefix;
+}
+const scoped = (key: string): string => (key === THEME_KEY ? key : keyScope + key);
+
 export function readKey(key: string): string | null {
   try {
-    return localStorage.getItem(key);
+    return localStorage.getItem(scoped(key));
   } catch {
     return null;
   }
 }
 
-export function writeKey(key: string, value: string): void {
+/** Like `writeKey`, but says whether storage took the value (false when it threw). */
+export function tryWriteKey(key: string, value: string): boolean {
   try {
-    localStorage.setItem(key, value);
+    localStorage.setItem(scoped(key), value);
+    return true;
   } catch {
-    // blocked storage: the value still applies for this page
+    return false;
   }
+}
+
+export function writeKey(key: string, value: string): void {
+  // blocked storage: the value still applies for this page
+  tryWriteKey(key, value);
 }
 
 /** A stored `true`/`false`; `fallback` when absent, unreadable or anything else. */

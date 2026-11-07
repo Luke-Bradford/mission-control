@@ -4,6 +4,7 @@ import {
   COMMS_CAPCOM,
   FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
+  FLIGHT_COST_DAYS,
   FLIGHT_GITHUB_LOW_FRACTION,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
@@ -110,7 +111,10 @@ function read(store: Store, repo: string, now: number): RecordState {
         ? stored<MainCi | null>(store, `${FLIGHT_MAIN_SETTING}:${repo}`, null)
         : null;
     if (main?.ci === "failing" && (main.episode ?? main.sha) === entry.key) continue;
-    if ((entry.lastSeen ?? entry.toldAt ?? entry.since) < cutoff) delete state.signals[key];
+    // a seat's call is kept as long as the wait telemetry looks back
+    const keepFrom =
+      entry.kind === "seat_call" ? now - FLIGHT_COST_DAYS * 24 * FLIGHT_HOUR_MS : cutoff;
+    if ((entry.lastSeen ?? entry.toldAt ?? entry.since) < keepFrom) delete state.signals[key];
   }
   for (const entries of [state.triage, state.checks, state.flakes]) {
     for (const [key, entry] of Object.entries(entries)) if (entry.at < cutoff) delete entries[key];
@@ -683,9 +687,13 @@ export function flightSignals(i: {
       `PR #${pr.pr} (${pr.ref || "no ticket"}) reported green and reviewed at ${new Date(pr.at).toISOString()}, still not merged`,
     );
   }
+  const heldBy = flightWaits(store);
   for (const item of i.triageItems ?? []) {
     // a PR ready to merge has its own check, merge_stalled
     if (now - item.at < FLIGHT_ITEM_STALE_MS || item.kind === "ready") continue;
+    // an item FLIGHT waits on (by its full key or the signal's key) is not stale until the wait ends
+    if ([item.key, item.key.replace(/:\d+$/, "")].some((k) => (heldBy[k]?.until ?? 0) > now))
+      continue;
     raise(
       "item_stale",
       // an item's key ends in the time it was last raised, which a PR's update moves

@@ -1,4 +1,5 @@
 import type { MapDelta, MapSnapshot } from "@mc/core";
+import { openStream, type StreamSource } from "../api.ts";
 import { applyDelta } from "./deltas.ts";
 import { shareMap } from "./structural.ts";
 
@@ -13,7 +14,7 @@ export class LiveMap {
   private held: ReturnType<typeof setTimeout> | undefined;
   /** A delta during a fetch could not be applied: refetch, throttled, once it lands. */
   private stale = false;
-  private source: EventSource | null = null;
+  private source: StreamSource | null = null;
   private snapshot: MapSnapshot | null = null;
   private pending: MapDelta[] = [];
   private fetching = false;
@@ -66,7 +67,7 @@ export class LiveMap {
   }
   private connect() {
     if (!this.active() || this.source) return;
-    this.source = new EventSource(`/api/stream?map=${encodeURIComponent(this.repo)}`);
+    this.source = openStream(`/api/stream?map=${encodeURIComponent(this.repo)}`);
     this.source.addEventListener("open", () => {
       const first = !this.opened;
       this.opened = true;

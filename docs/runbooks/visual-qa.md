@@ -25,7 +25,7 @@ The review handoff must carry both; otherwise the reviewer cannot judge the actu
 For example, a seat table needs room for identity, state, work, rate, cost, context and actions.
 Its width comes from readable columns. A history plot needs room to compare values and read axes.
 Neither gets an arbitrary share of leftover space. Reuse existing tokens and accepted compact density.
-For substantial redesigns, provide a rendered native proposal before product implementation.
+For substantial redesigns, show the design first as the real app on a branch (see [Show it on a branch](#show-it-on-a-branch)), before the rest of the build.
 
 | Surface | Decision / fields | Normal rows | Size budget and reason | Full detail / retained behavior |
 | --- | --- | --- | --- | --- |
@@ -33,6 +33,33 @@ For substantial redesigns, provide a rendered native proposal before product imp
 
 Treat an approved reference as a baseline, not permanent authority. Later operator steering and
 demonstrated defects can supersede it. Record the reason; preserve the old reference as history.
+
+## Show it on a branch
+
+New pages and big visual changes are shown as the real app on the ticket's branch, with Demo data, so
+the operator sees the fonts, styles and padding the page would ship with. A static mockup file is not
+served and a design does not merge to main by itself: after approval the build continues on the same
+branch.
+
+1. Build the design in `apps/web` on the ticket's branch. Add any new page's data to the Demo seed, so
+   the page is full when it opens.
+2. Merge main (`mc sync_main`), commit, and run `pnpm -s build` in your worktree. The build stays in your
+   sandbox; the hub never runs a branch's code.
+3. Call `mc publish_preview`. The hub copies the built files from `apps/web/dist` and answers with the
+   URL, `http://127.0.0.1:7440/`. It refuses a dirty tree, a build with a link or a file type it does
+   not serve (it serves `.html .js .mjs .css .svg .png .ico .woff .woff2 .webmanifest`), and a build
+   over 64 MB or 2,000 files.
+4. Send FLIGHT the URL in a handoff. Never send a `file://` link: the operator cannot open it.
+
+What the hub does with it: one preview runs at a time (`POST /api/design-previews/:ticket/open`
+replaces the running one; a publish takes the slot only when it is empty). A preview stops after an hour
+unused; its files go when its PR closes or merges, or after 7 days. Five builds are kept; a sixth
+deletes the oldest that is not running. A restart keeps the builds with nothing running.
+
+The preview is on its own origin (port 7440, loopback only) with no operator token and no proxy to the
+hub. Its security headers let the page talk to itself only, and the hub refuses any `/api/` request
+marked `same-site`, so the branch's script cannot read or change anything in the hub. Every ticket's preview shares that origin, so the listener allows no service worker and tells the browser to keep nothing (`cache-control: no-cache`): one build's files cannot stand in for the next, or outlive a closed PR. If port 7440 is
+taken, the hub logs that and starts without previews.
 
 ## Build stable evidence
 
@@ -71,6 +98,8 @@ are different evidence from seeing and using the result.
 | Charts and meaning | Is this chart appropriate? Are units, time, scale, denominator, missing data and freshness clear? Is its aspect ratio useful? Is information repeated? |
 | Responsive behavior | Does the layout recompose across the declared viewports without squeezing important content, enlarging empty plots or losing accepted strengths? |
 | Interaction and states | Do keyboard focus, error/retry, forms, filters, readers and overlays work in the real shell? |
+| Arrival | Does the page look the same when reached the way the operator reaches it (from the Overview, by nav or link) as when opened by URL? Page stylesheets load lazily and stay loaded, so another page's rules can reach this one. |
+| Content | Is every item for this page's reader? Name any item meant for someone else, and any unformatted internal id or epoch time where the reader expects a name or a time. On a page for decisions, such as Needs you, also name any item with nothing to decide. |
 
 Write a concrete observation and an image or interaction receipt for each applicable dimension.
 “No overflow”, “all tests pass” and an image count are insufficient design observations.
@@ -87,6 +116,7 @@ Give a reproduction, affected source and image, impact and concrete correction o
 Independent rendering is preferred for final application QA. If the reviewer only inspects supplied
 images, say so. That can assess visible composition, but cannot establish unperformed interactions.
 If the required render cannot run, record the missing coverage and reason; do not claim a rendered pass.
+A rendered page is your own render, or images of the current head (PR evidence or the author's). Images show composition, not interactions: say which [I] items they cannot establish. With neither render nor images, record the `design` verdict as fail with one Important finding that asks for images of this head; the author can produce them. A failed design holds FLIGHT's accept: only the operator accepts past it. Record `design` on every visible change, every round: a later review with no verdict keeps an earlier fail, and a later pass clears it.
 
 ## Retain context and detail
 

@@ -19,11 +19,13 @@ const alive = (pid: number): boolean => {
 
 async function run(
   mode: string,
-  over: { deadlineMs?: number; graceMs?: number; signal?: AbortSignal } = {},
+  over: { deadlineMs?: number; graceMs?: number; closeMs?: number; signal?: AbortSignal } = {},
 ) {
-  const pidfile = join(mkdtempSync(join(tmpdir(), "hud-helper-")), "pid");
+  const folder = mkdtempSync(join(tmpdir(), "hud-helper-"));
+  const pidfile = join(folder, "pid");
+  const marker = join(folder, "marker");
   const result = renderHudInHelper(
-    `http://127.0.0.1:7420/map?mode=${mode}&pidfile=${pidfile}`,
+    `http://127.0.0.1:7420/map?mode=${mode}&pidfile=${pidfile}&marker=${marker}`,
     guard,
     {
       helperPath: HELPER,
@@ -36,7 +38,7 @@ async function run(
     await expect.poll(() => readFileSync(pidfile, "utf8"), { timeout: 3000 }).toMatch(/^\d+$/);
     return Number(readFileSync(pidfile, "utf8"));
   };
-  return { result, grandchild };
+  return { result, grandchild, marker, pidfile };
 }
 
 describe("renderHudInHelper", () => {
@@ -48,6 +50,37 @@ describe("renderHudInHelper", () => {
     await expect(result).rejects.toThrow("capture cancelled");
     await expect.poll(() => alive(pid)).toBe(false);
   });
+  it("asks the helper to stop with SIGTERM first, and kills its group only after closeMs", async () => {
+    const controller = new AbortController();
+    const { result, grandchild, marker } = await run("term-hang", {
+      signal: controller.signal,
+      closeMs: 400,
+    });
+    const pid = await grandchild();
+    const stopped = Date.now();
+    controller.abort(new Error("capture cancelled"));
+    await expect(result).rejects.toThrow("capture cancelled");
+    // the helper saw SIGTERM and ignored it; the call waited out closeMs before SIGKILL
+    expect(readFileSync(marker, "utf8")).toBe("SIGTERM");
+    expect(Date.now() - stopped).toBeGreaterThanOrEqual(350);
+    await expect.poll(() => alive(pid)).toBe(false);
+  });
+
+  it("settles as soon as a helper that got SIGTERM has exited, not after closeMs", async () => {
+    const controller = new AbortController();
+    const { result, grandchild, marker } = await run("term-exit", {
+      signal: controller.signal,
+      closeMs: 10_000,
+    });
+    const pid = await grandchild();
+    const stopped = Date.now();
+    controller.abort(new Error("capture cancelled"));
+    await expect(result).rejects.toThrow("capture cancelled");
+    expect(readFileSync(marker, "utf8")).toBe("SIGTERM");
+    expect(Date.now() - stopped).toBeLessThan(5_000);
+    await expect.poll(() => alive(pid)).toBe(false);
+  });
+
   it("returns the helper's PNG and kills everything the helper started", async () => {
     const { result, grandchild } = await run("ok");
     expect(await result).toEqual(Buffer.from("png"));

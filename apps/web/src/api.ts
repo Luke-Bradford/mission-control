@@ -1,11 +1,27 @@
 /** fetch wrapper for the Mission Control server: same-origin, JSON both ways. */
 import { OPERATOR_BOOTSTRAP_PATH, OPERATOR_HEADER, OPERATOR_TOKEN_REQUIRED } from "@mc/core";
+import { demoSend, demoStream, isDemo } from "./demo/mode.ts";
+
+/**
+ * The only doors to the network: `send` for requests and `openStream` for the stream. In Demo
+ * both answer from the simulator and nothing leaves the browser.
+ */
+function send(path: string, init: RequestInit): Promise<Response> {
+  return isDemo() ? demoSend(path, init) : fetch(path, init);
+}
+
+export type StreamSource = Pick<EventSource, "readyState" | "close" | "addEventListener">;
+
+export function openStream(path: string): StreamSource {
+  return isDemo() ? demoStream(path) : new EventSource(path);
+}
 
 let operatorToken: string | undefined;
 let operatorTokenLoad: Promise<void> | undefined;
 
 /** Share the page-load bootstrap with early writes; an unavailable bootstrap is harmless. */
 export function loadOperatorToken(): Promise<void> {
+  if (isDemo()) return Promise.resolve();
   if (operatorTokenLoad) return operatorTokenLoad;
   if (operatorToken !== undefined) return Promise.resolve();
   operatorTokenLoad = request<{ token?: unknown } | null>(OPERATOR_BOOTSTRAP_PATH, {})
@@ -60,7 +76,7 @@ async function errorOf(res: Response): Promise<ApiError> {
 }
 
 async function request<T>(path: string, init: RequestInit): Promise<T> {
-  const res = await fetch(path, { credentials: "same-origin", ...init });
+  const res = await send(path, { credentials: "same-origin", ...init });
   if (!res.ok) throw await errorOf(res);
   return (await res.json()) as T;
 }
@@ -107,10 +123,13 @@ export async function apiQaReportImage(id: string): Promise<Blob> {
   return operatorPng(`/api/qa-report-assets/${id}`);
 }
 
+/** A picture on an operator route, as a PNG blob; only paths `pictureRoute` accepted come here. */
+export const apiOperatorPicture = (path: string): Promise<Blob> => operatorPng(path);
+
 async function operatorPng(path: string): Promise<Blob> {
   await loadOperatorToken();
   const read = () =>
-    fetch(path, {
+    send(path, {
       credentials: "same-origin",
       headers: operatorToken ? { [OPERATOR_HEADER]: operatorToken } : {},
     });

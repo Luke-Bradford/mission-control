@@ -509,6 +509,27 @@ async function removePending(
 }
 
 /**
+ * Where a branch began on origin's default branch: the merge base of `baseSha` and `rev`. What the
+ * branch changed is judged from here, so a file main changed after the branch began is not counted
+ * as the branch's.
+ */
+async function branchBase(
+  inClone: (args: string[]) => Promise<string>,
+  baseSha: string,
+  rev: string,
+  subject: string,
+): Promise<string> {
+  const mergeBase = (await inClone(["merge-base", baseSha, rev]).catch(() => "")).trim();
+  if (!COMMIT_SHA.test(mergeBase)) {
+    throw new CheckoutError(
+      "protected",
+      `could not compare ${subject} with origin; Mission Control won't install from it`,
+    );
+  }
+  return mergeBase;
+}
+
+/**
  * Refuses a reused branch whose ref changes an install input, compared with origin's default
  * branch. The early message only: the ref can move, so `refuseChangedInputs` decides.
  */
@@ -1010,7 +1031,8 @@ async function verifyInstall(
   allowNestedInstallDir?: (rel: string, read: ReadObject) => Promise<boolean>,
 ): Promise<string[]> {
   await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
-  if (s.compare) await refuseInstallInputs(s.inClone, s.base, s.rev, s.subject, tool.inputs);
+  const base = s.compare ? await branchBase(s.inClone, s.base, s.rev, s.subject) : s.base;
+  if (s.compare) await refuseInstallInputs(s.inClone, base, s.rev, s.subject, tool.inputs);
   const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
   if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
   const read = verifiedObjects((args, maxBuffer) =>
@@ -1029,7 +1051,7 @@ async function verifyInstall(
     read,
   );
   if (unsafe !== null) throw refuse(s.subject, unsafe);
-  await refuseChangedInputs(s.path, tool, found, read, s.base, s.subject);
+  await refuseChangedInputs(s.path, tool, found, read, base, s.subject);
   for (const file of tool.required) {
     if (!found.includes(file)) throw refuse(s.subject, `has no ${file}`);
   }
@@ -1104,7 +1126,10 @@ async function installReusedPnpm(
   }
   let importers: Promise<Set<string>> | undefined;
   const nestedModules = await verifyInstall(s, PNPM_TOOL, true, async (rel, read) => {
-    if (importers === undefined) importers = pnpmWorkspaceImporters(read, s.base);
+    if (importers === undefined)
+      importers = branchBase(s.inClone, s.base, s.rev, s.subject).then((from) =>
+        pnpmWorkspaceImporters(read, from),
+      );
     if (!(await importers).has(dirname(rel))) return false;
     const packageJson = join(s.path, dirname(rel), "package.json");
     const manifest = await lstat(packageJson).catch(() => null);
@@ -1481,7 +1506,8 @@ export async function installAfterSync(
     const g = (args: string[]) => crewGit(checkout, args, common, { gitDir: common });
     const subject = `branch ${worktree.branch}`;
     await refuseUnsafeTree(w, "HEAD", subject, PNPM_TOOL.installDir);
-    await refuseInstallInputs(w, worktree.baseSha, "HEAD", subject, PNPM_TOOL.inputs);
+    const base = await branchBase(w, worktree.baseSha, "HEAD", subject);
+    await refuseInstallInputs(w, base, "HEAD", subject, PNPM_TOOL.inputs);
     const inputs: string[] = [];
     const unsafe = await inspectDisk(worktree.path, PNPM_TOOL, inputs);
     if (unsafe !== null) throw refuse(subject, unsafe);
@@ -1490,13 +1516,88 @@ export async function installAfterSync(
     const read = verifiedObjects((args, maxBuffer) =>
       crewGitBytes(checkout, args, common, { gitDir: common, maxBuffer }),
     );
-    await refuseChangedInputs(worktree.path, PNPM_TOOL, inputs, read, worktree.baseSha, subject);
+    await refuseChangedInputs(worktree.path, PNPM_TOOL, inputs, read, base, subject);
     const pnpmStore = await prepareSharedPnpmStore(worktreesRoot, worktree.branch);
     await addMcTmpExclude(common);
     await install(PNPM_TOOL, worktree.path, worktree.branch, undefined, pnpmStore);
     return uvNote;
   } catch (e) {
     return `dependencies changed; install refused: ${e instanceof Error ? e.message : String(e)}`;
+  }
+}
+
+/** Moves a clean worktree whose commits origin has onto the handed-over branch; else refuses. */
+async function switchToHandoff(
+  w: (args: string[]) => Promise<string>,
+  branch: string,
+  current: string,
+): Promise<void> {
+  const on = current.replace(/^refs\/heads\//, "") || "a detached head";
+  const unpushed = new CheckoutError(
+    "path",
+    `the worktree has unpushed work on ${on}; it was not changed`,
+  );
+  const dirty = await w([
+    "--no-optional-locks",
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+  ]);
+  if (dirty.trim() !== "") throw unpushed;
+  const remote = `refs/remotes/origin/${branch}`;
+  if (
+    !(await succeeds(
+      w(["rev-parse", "--verify", "--quiet", "--end-of-options", `${remote}^{commit}`]),
+    ))
+  )
+    throw unpushed;
+  if (!(await succeeds(w(["merge-base", "--is-ancestor", "HEAD", remote])))) throw unpushed;
+  const local = await succeeds(
+    w(["rev-parse", "--verify", "--quiet", "--end-of-options", `refs/heads/${branch}^{commit}`]),
+  );
+  try {
+    await w(
+      local
+        ? ["switch", "--quiet", branch]
+        : ["switch", "--quiet", "--track", "-c", branch, `origin/${branch}`],
+    );
+  } catch (e) {
+    throw new CheckoutError("path", `the worktree could not be moved to ${branch}`, {
+      cause: e,
+      detail: gitReason(e),
+    });
+  }
+}
+
+/**
+ * A handed-over branch is taken at origin's tip. The PR's head can be ahead of the local branch
+ * (the controller pushes to it), and a seat started on the old tip could not push. Local work that
+ * origin lacks stays; a branch that has diverged is refused, since neither side may be dropped.
+ */
+async function followOrigin(w: (args: string[]) => Promise<string>, branch: string): Promise<void> {
+  const remote = await w([
+    "rev-parse",
+    "--verify",
+    "--quiet",
+    "--end-of-options",
+    `refs/remotes/origin/${branch}^{commit}`,
+  ]).then(
+    (s) => s.trim(),
+    () => null,
+  );
+  if (!remote) return;
+  const head = (await w(["rev-parse", "--verify", "HEAD"])).trim();
+  if (head === remote || (await succeeds(w(["merge-base", "--is-ancestor", remote, head])))) return;
+  if (!(await succeeds(w(["merge-base", "--is-ancestor", head, remote])))) {
+    throw new CheckoutError("path", `${branch} has diverged from origin's; it was not changed`);
+  }
+  try {
+    await w(["merge", "--ff-only", "--quiet", remote]);
+  } catch (e) {
+    throw new CheckoutError("path", `${branch} could not be moved to origin's tip`, {
+      cause: e,
+      detail: gitReason(e),
+    });
   }
 }
 
@@ -1540,9 +1641,15 @@ export async function prepareCheckout(
   }
   if (await succeeds(lstat(path))) {
     const gitDir = await adminDirOf(common, path);
-    const head = gitDir
+    let head = gitDir
       ? await crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir }).catch(() => "")
       : "";
+    if (gitDir !== null && i.handoff && head.trim() !== `refs/heads/${branch}`) {
+      // The seat that wrote the PR gets it back: its worktree sits on the local branch, the PR's
+      // head is another ref. Taken over only when nothing in it is unpushed.
+      await switchToHandoff((args) => crewGit(path, args, common, { gitDir }), branch, head.trim());
+      head = `refs/heads/${branch}`;
+    }
     if (gitDir === null || head.trim() !== `refs/heads/${branch}`) {
       throw new CheckoutError(
         "path",
@@ -1551,6 +1658,9 @@ export async function prepareCheckout(
       );
     }
     await checkSeatGitConfig(path);
+    if (i.handoff) {
+      await followOrigin((args) => crewGit(path, args, common, { gitDir }), branch);
+    }
     const status = await crewGit(
       path,
       [
@@ -1630,6 +1740,9 @@ export async function prepareCheckout(
       );
     }
     await checkSeatGitConfig(path);
+    if (i.handoff && local !== null) {
+      await followOrigin((args) => crewGit(path, args, common, { gitDir }), branch);
+    }
     await installAll(
       {
         checkout: i.checkout,

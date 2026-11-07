@@ -88,6 +88,16 @@ describe("Dock content", () => {
     expect(container.querySelector("#dockHead .rt")?.textContent).toBe(" · Head agent");
   });
 
+  it("drops its Waiting on you list when the page beside it lists what waits, and keeps the summary", async () => {
+    const { container } = render(<Dock needsBeside />);
+    await waitFor(() =>
+      expect(dockEl(container)?.querySelector(".meta")?.textContent).toBe(FLIGHT_NO_SEAT),
+    );
+    expect(container.querySelector('[aria-label="FLIGHT summary"]')).toBeTruthy();
+    expect(container.querySelector("#dockWaiting")).toBeNull();
+    expect(container.textContent).not.toContain("Waiting on you");
+  });
+
   it("says no FLIGHT seat is configured, with no conversation and the input switched off", async () => {
     const { container } = render(<Dock />);
     const dock = dockEl(container) as HTMLElement;
@@ -640,7 +650,9 @@ describe("Waiting on you", () => {
     expect(rows).toHaveLength(3);
     expect(rows[0]?.textContent).toContain("No output");
     fireEvent.click(rows[2]?.querySelector("button") as HTMLElement);
-    expect(screen.getByTestId("item").textContent).toBe("ask:7");
+    // an ask is answered on the Needs you page, not in a flyout
+    expect(window.location.pathname).toBe("/needs-you/ask%3A7");
+    expect(screen.getByTestId("item").textContent).toBe("none");
     expect(rows[1]?.textContent).toContain("Which?");
   });
 
@@ -663,7 +675,7 @@ describe("Waiting on you", () => {
     expect(row?.textContent).toContain("FLIGHT");
     expect(row?.textContent).not.toContain("Blocked");
     fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /^Open:/ }));
-    expect(window.location.pathname + window.location.hash).toBe(NEEDS_YOU_PATH);
+    expect(window.location.pathname).toBe(`${NEEDS_YOU_PATH}/flight%3Anot-triaging`);
   });
 
   it("shows what waits on you even with no FLIGHT seat", async () => {

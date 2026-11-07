@@ -15,6 +15,16 @@ import {
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
+import {
+  ErrorSummary,
+  FieldError,
+  type FieldIssue,
+  fieldProps,
+  issueOf,
+  isUncertain,
+  UNCERTAIN_TEXT,
+  useSubmitGuard,
+} from "../components/formSupport.tsx";
 import { modelLine, seatAreaText, seatStatus, useSeatName } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
@@ -31,16 +41,6 @@ import {
   useSessionScope,
 } from "../shell/session.ts";
 import { toast } from "../shell/Toast.tsx";
-import {
-  ErrorSummary,
-  FieldError,
-  type FieldIssue,
-  fieldProps,
-  issueOf,
-  isUncertain,
-  UNCERTAIN_TEXT,
-  useSubmitGuard,
-} from "./formSupport.tsx";
 
 const DASH = "—";
 export const FOLDERS_UNREADABLE = "Could not read the checkout's folders.";
@@ -68,7 +68,7 @@ export const removedText = (call: string, s: string, backup: string) =>
   `${call} removed from s/${s}. Backup: ${backup}.`;
 export const RELOADED = "Reloaded config.yaml.";
 
-const CALL_SIGN = /^[a-z][a-z0-9-]{0,30}$/;
+export const CALL_SIGN = /^[a-z][a-z0-9-]{0,30}$/;
 const SESSION_FORM_KEY = "add-session";
 
 /** A refused or lost write: what to say, whether the server may still have acted, and where it shows. */
@@ -281,7 +281,7 @@ function SeatForm({
     issues.length > 0 ? "Fix before saving" : shown?.uncertain ? "Result unknown" : "Not saved";
   return (
     <form
-      className="seatform fform fform-agent"
+      className="seatform fform fform-480"
       aria-label={adding ? `Add agent to s/${session.id}` : `Edit ${id}`}
       noValidate
       onKeyDown={(e) => {
@@ -1032,7 +1032,7 @@ export function Sessions({ config }: { config: ConfigView }) {
           </button>
         ) : (
           <form
-            className="seatform sessionform fform fform-session"
+            className="seatform sessionform fform fform-640"
             aria-label="Add session"
             noValidate
             onKeyDown={(e) => {
