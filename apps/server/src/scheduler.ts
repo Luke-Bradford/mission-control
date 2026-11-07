@@ -561,6 +561,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         config,
         store,
         now: now(),
+        lock: deps.lockState?.(),
         deliver: deps.deliverDefault,
       });
       if (closed > 0) bus.emit("attention");

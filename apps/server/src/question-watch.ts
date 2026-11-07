@@ -7,6 +7,7 @@ import {
   prMergedReason,
   type QuestionClosureKind,
   questionClosedText,
+  type TestLockState,
   ticketClosedReason,
 } from "@mc/core";
 import { protectedDecisionItem, questionAskAt } from "./attention-holds.ts";
@@ -53,13 +54,14 @@ export function openQuestionSubjects(d: {
   config: CcConfig;
   store: Store;
   now: number;
+  lock?: TestLockState;
 }): QuestionSubject[] {
   const { config, store, now } = d;
   const flightId = flightSeat(config)?.seat.id ?? null;
   const questions = new Map(store.openQuestions().map((q) => [`ask:${q.id}`, q]));
   const notes = new Map(store.notes().map((n) => [`${NOTE_KEY}${n.key}`, n]));
   const out: QuestionSubject[] = [];
-  for (const item of attentionItems(config, store, now, NO_LOCK)) {
+  for (const item of attentionItems(config, store, now, d.lock ?? NO_LOCK)) {
     const asked = questions.get(item.key);
     const seatQuestion = asked !== undefined && asked.agentId !== flightId ? asked : undefined;
     const operatorBrief = item.brief !== undefined && item.brief.for !== "flight";
@@ -151,6 +153,7 @@ export async function closeSettledQuestions(d: {
   config: CcConfig;
   store: Store;
   now: number;
+  lock?: TestLockState;
   deliver?: (seatId: string, text: string) => Promise<void>;
 }): Promise<number> {
   const { store, now } = d;

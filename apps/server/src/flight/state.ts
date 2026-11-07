@@ -1323,7 +1323,7 @@ export function flightState(i: {
           ? [{ ref: p.ref, pr: p.pr, at }]
           : [];
       }),
-      questions: openQuestionSubjects({ config, store, now }).map((q) => {
+      questions: openQuestionSubjects({ config, store, now, lock: i.lock }).map((q) => {
         const facts = questionFacts(store, q);
         return {
           id: subjectId(q),
