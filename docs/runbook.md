@@ -274,6 +274,11 @@ were captured. Web changes require the configured screenshot gate before queuein
 isolated previews and copied data; it never reconstructs a historical approval. A reviewer run is
 recorded, but no developer run is invented for the PR.
 
+A crew review that reports after its author's run has ended (or is gone from this hub) is posted the
+same way, and the head is not reviewed a second time. When the hub holds a reported result it does
+not post (a draft PR, a branch still owned, a PR it was never asked to review), it logs one line
+saying why, once per review.
+
 These PRs do not enter the crew's merge or board-completion path. Their controller still applies CI,
 review, acceptance and repository merge rules. A failed review remains failed rather than repeatedly
 starting paid retries. A new push creates a new review opportunity.
@@ -401,6 +406,24 @@ The launchd `StandardOutPath` and `StandardErrorPath` remain bootstrap/fallback 
 files in `~/Library/Logs/mission-control/` are preserved; routine hub logging no longer grows
 `server.log` there. If you installed the older newsyslog entry that sends this hub SIGTERM, remove
 that entry: the built-in rotation replaces it and does not need a service restart.
+
+### Budget brake
+
+When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
+stops dealing and starting new developer and review runs on that account. It is the same projection
+the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/budget-brake.ts`
+is the one function for both.
+
+- Stopped: the engine's deal, the review start, `start_seat`, and the supervisor's `startRun`
+  (refusal "Not started: the budget brake is on ..." with the projection and the reset time). An
+  operator's explicit start and a read-only reader pass.
+- Not stopped: FLIGHT's own seat, runs already in progress (they finish their step), resumes and
+  rework wakes.
+- Needs you shows one hub alert, `budget-brake`, naming each braked account, its projection, its
+  reset and when the brake lifts. The scheduler keeps it current after each usage reading and on the
+  minute tick.
+- It lifts by itself: when the projection falls back to 100% or under, or the week resets. There is
+  nothing to configure and no GitHub write.
 
 ### FLIGHT runaway breaker
 
@@ -2716,7 +2739,14 @@ keep their permission checks.
   `comms_repeats` counts it (`store.commsRepeatCount(since)`), kept 90 days.
 - **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
   that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
-  The kind of a message is not stamped yet.
+- **Sender kind.** Each message stores who sent it: `operator`, `controller`, `flight`, `seat` or
+  `hub` (column `sender_kind`; a Comms read returns it as `senderKind`). The hub sets it from how
+  the request was made, never from the text. `operator` is a person using the app (sender
+  `CAPCOM`). The controller sends with its own token (`<data dir>/controller-token`, header
+  `x-mc-controller`, new each boot), as `CONTROLLER`; it passes where the operator token does and
+  grants nothing more, and a `CONTROLLER` line wakes FLIGHT as `CAPCOM` does. FLIGHT's `mc operator`
+  sends are FLIGHT's. The hub's own messages are `hub`, sent as `MC`, never `CAPCOM`. Rows stored
+  before this have no kind (`senderKind` is null) and keep their old sender.
 - **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,
   FLIGHT's `answer` and `pass` decisions, question messages (label `question`) and the replies to
   them keep 365.

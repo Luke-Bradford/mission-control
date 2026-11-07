@@ -1737,6 +1737,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           now,
           notify: deps.onComms,
           seatSender: true,
+          senderKind: flightCall ? "flight" : "seat",
           ...(senderTicket ? { senderTicket } : {}),
           senderRunId: ctx.runId,
           ...(senderPr === undefined ? {} : { senderPr }),
@@ -2523,6 +2524,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     store.addComms({
       at,
       from: ctx.seatId,
+      senderKind: "seat",
       to: flightSeat(config)?.seat.id ?? COMMS_CAPCOM,
       ticket: live.run.ticket ?? null,
       text: ASK_FLIGHT_COMMS_POINTER,
@@ -2981,6 +2983,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     store.addComms({
       at,
       from: ctx.seatId,
+      senderKind: "seat",
       to: watcher?.id ?? COMMS_CAPCOM,
       ticket: run.ticket ?? null,
       text: planned,

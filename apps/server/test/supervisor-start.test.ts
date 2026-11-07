@@ -213,6 +213,43 @@ describe("startRun eligibility", () => {
     await refused(422, AWAY_QUOTA_REFUSED);
   });
 
+  describe("the budget brake", () => {
+    const brake = () => {
+      const at = Date.now();
+      for (const [t, pct] of [
+        [at - 6 * 3_600_000, 40],
+        [at, 60],
+      ] as const)
+        store.addUsage({
+          accountId: "claude-main",
+          window: "7d",
+          at: t,
+          resetAt: at + 86_400_000,
+          pct,
+          source: "test",
+        });
+    };
+    it("refuses a new start while the weekly projection passes 100%", async () => {
+      brake();
+      const claim = vi.fn(async () => {});
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}), claim });
+      sup.start();
+      const e = await refusal(sup.startRun("guido-1", 42));
+      expect(e.status).toBe(422);
+      expect(e.message).toMatch(
+        /^Not started: the budget brake is on\. GUIDO-1's account claude-main/,
+      );
+      expect(claim).not.toHaveBeenCalled();
+      expect(store.seatSession("guido-1")).toBeNull();
+    });
+    it("lets the operator's explicit start through", async () => {
+      brake();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+      sup.start();
+      expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
+    });
+  });
+
   it("allows the operator's manual start while away with pickUp off and unknown quota", async () => {
     store.setSetting(
       AWAY_SETTING,

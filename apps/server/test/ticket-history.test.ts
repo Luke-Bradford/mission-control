@@ -395,6 +395,7 @@ describe("GET /api/tickets/:repoId/:number", () => {
           store,
           crew: () => ["guido-1", "flight-1"],
           knownSecrets: async () => [],
+          senderKind: "seat" as const,
           now: () => NOW,
           seatSender: true,
         },
