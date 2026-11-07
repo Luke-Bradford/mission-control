@@ -38,7 +38,7 @@ export function doingLines(run: FlightRun, summary: FlightSummaryView | undefine
 
 export function DoingNowList({ lines }: { lines: DoingLine[] }) {
   return (
-    <ul className="fp-lines" id="doing">
+    <ul className="fp-lines fp-doing" id="doing">
       {lines.map((l) => (
         <li key={l.key}>
           <span className="fp-w">

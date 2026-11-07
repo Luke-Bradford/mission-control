@@ -193,6 +193,11 @@
 .fp-lines li:last-child {
   border-bottom: 0;
 }
+/* At most five lines: they size the panel and never scroll, so nothing can hide behind a scrollbar. */
+.fp-doing {
+  flex: none;
+  overflow: visible;
+}
 .fp-decisions {
   overflow: hidden;
 }
