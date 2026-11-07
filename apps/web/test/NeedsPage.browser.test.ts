@@ -285,7 +285,7 @@ describeRendered("Needs you page", () => {
           await page.boxes(".needs-hold .hold-form");
           const open = await page.evaluate(() => {
             const band = document.querySelector(".needs-band") as HTMLElement;
-            const q = document.querySelector(".needs-band-question") as HTMLElement;
+            const q = document.querySelector(".needs-band-title") as HTMLElement;
             const r = q.getBoundingClientRect();
             const b = band.getBoundingClientRect();
             return {
@@ -380,7 +380,7 @@ describeRendered("Needs you page", () => {
             await ready(page);
             await pictureLoaded(page);
             // populated: the question, the picture, the options and the conversation are all there
-            await page.boxes(".needs-band-question");
+            await page.boxes(".needs-band-title");
             await page.boxes("#needsMsgs .dmsg");
             await page.boxes(".needs-row");
             if (SHOTS) {

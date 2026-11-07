@@ -83,6 +83,7 @@ import {
   guardStopOutput,
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
+  isOperatorItem,
   type LimitRow,
   LOCK_WAIT_MS,
   LOOPBACK_HOST,
@@ -98,6 +99,7 @@ import {
   METER_FULL_PCT,
   type MilestonesView,
   NEW_LOOP,
+  needsYouAlert,
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
@@ -297,8 +299,10 @@ import {
   CREW_ERROR_KEY,
   crew,
   forgetViews,
+  hubAlert,
   NO_LOCK,
   NOTE_KEY,
+  pinned,
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
@@ -5590,19 +5594,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
+      const pinnedFor = (item: AttentionItem): AttentionItem =>
+        isOperatorItem(item)
+          ? {
+              ...pinned(item, store, config),
+              ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
+            }
+          : item;
       api.get(
         "/attention",
         async (): Promise<AttentionItem[]> =>
           sharedAttention().map((item) =>
-            item.kind === "tag" && item.text.length > 170
-              ? { ...item, text: `${item.text.slice(0, 169)}…` }
-              : item,
+            // the operator's items carry their ticket and PR with titles (#1543)
+            pinnedFor(
+              item.kind === "tag" && item.text.length > 170
+                ? { ...item, text: `${item.text.slice(0, 169)}…` }
+                : item,
+            ),
           ),
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (whole tag message on open)
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
-        return item ?? reply.code(404).send({ error: "Item is no longer open." });
+        return item ? pinnedFor(item) : reply.code(404).send({ error: "Item is no longer open." });
       });
       // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>
@@ -5650,7 +5664,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           deps.lock?.state() ?? NO_LOCK,
           sharedCrew().rows,
           deps.hubLogin?.() ?? null,
-        ).find((item) => item.key === key && !item.acked);
+          // read is not resolved: the operator discusses an item they have opened (#1543)
+        ).find((item) => item.key === key && (!item.acked || isOperatorItem(item)));
         return item ? { ...item, version: attentionVersion(item) } : undefined;
       };
       const openDiscussion = (item: AttentionItem & { version: string }) => {
@@ -5659,7 +5674,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ? brief.options.find((o) => o.id === brief.recommendedOptionId)
           : undefined;
         const text = recommended?.description
-          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description}. What would help you decide? I can pull the Teams thread or the code.`
+          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description.replace(/[.\s]+$/, "")}. What would help you decide? I can pull the Teams thread or the code.`
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };

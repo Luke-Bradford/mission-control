@@ -6,6 +6,9 @@ import { messageUnpausedSeat } from "./crew-pause.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 
+/** The note key prefix of a seat's failed focus import; hud.ts lists it as a hub stop. */
+export const INSTRUCTION_FOCUS_NOTE_PREFIX = "instruction-focus";
+
 interface NoticeDeps {
   config: CcConfig;
   store: Store;
@@ -106,7 +109,7 @@ export function importInstructionFocus(
   let attentionChanged = false;
   for (const session of deps.config.crew?.sessions ?? [])
     for (const seat of session.seats) {
-      const key = `instruction-focus:${seat.id}`;
+      const key = `${INSTRUCTION_FOCUS_NOTE_PREFIX}:${seat.id}`;
       try {
         deps.store.instructions.syncFocus(seat, now());
         if (open.has(key)) {

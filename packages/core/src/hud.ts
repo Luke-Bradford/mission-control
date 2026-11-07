@@ -445,8 +445,8 @@ export const FLIGHT_TRIAGE_LABEL = {
 export const OWNER_FLIGHT = "flight" satisfies AttentionOwner;
 /**
  * Kinds that are always the operator's call: FLIGHT may brief them for the operator but never keep
- * them, and once past FLIGHT's triage window (or while FLIGHT is not triaging) they reach the
- * operator as themselves, never folded into the "FLIGHT is not triaging" item (#758).
+ * them. Past FLIGHT's triage window they stay off Needs you until FLIGHT's brief passes the entry
+ * check (#1543); unbriefed, the "FLIGHT is not triaging" item counts them (#758).
  */
 export const OPERATOR_CALL_KINDS: readonly AttentionKind[] = [
   "approval",
