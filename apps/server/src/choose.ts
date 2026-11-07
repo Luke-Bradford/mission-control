@@ -2,7 +2,6 @@ import {
   type AttentionItem,
   type ChoiceReceipt,
   type ChoiceTargetKind,
-  COMMS_CAPCOM,
   COMMS_MC,
   type CommsSenderKind,
 } from "@mc/core";
