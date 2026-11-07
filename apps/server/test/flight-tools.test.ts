@@ -147,7 +147,13 @@ import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts"
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
-import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
+import {
+  flightBriefView,
+  flightTriageItems,
+  operatorItems,
+  unhandledReasons,
+  wakeReasons,
+} from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
@@ -584,6 +590,22 @@ describe("wait_on", () => {
       about: "mc#7: waiting on its PR merging",
     });
   });
+
+  it.each([
+    ["items", `pr:mc#7:${NOW}`, `pr:mc#7:${NOW}`],
+    ["signals", `hub_error:loop:engine:${NOW}`, `loop:engine:${NOW}`],
+    ["signals", `merge_stalled:mc#9:1559:${NOW}`, `mc#9:1559:${NOW}`],
+  ])(
+    "keeps a reason's own key whole, so a wait on it handles the %s fact %s",
+    async (category, fact, target) => {
+      expect((await call("wait_on", waitArgs({ target }))).isError).toBeUndefined();
+      expect(Object.keys(flightWaits(store))).toEqual([target]);
+      const reasons = wakeReasons("", JSON.stringify({ [category]: [fact] }));
+      expect(unhandledReasons(store, reasons, NOW - 1, new Set(reasons.map((x) => x.id)))).toEqual(
+        [],
+      );
+    },
+  );
 
   it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
     expect(
