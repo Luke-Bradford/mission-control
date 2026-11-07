@@ -65,7 +65,7 @@ it("opens stable threads, refuses stale versions and keeps ended threads readabl
   await app.close();
 });
 
-it("retries failed sends once and does not resend a successful message", async () => {
+it("keeps a reply FLIGHT could not take, retries it, and does not resend a delivered one", async () => {
   const message = vi.fn().mockRejectedValueOnce(new Error("busy")).mockResolvedValue(undefined);
   const supervisor = {
     status: () => ({ enabled: true, note: null }),
@@ -76,7 +76,10 @@ it("retries failed sends once and does not resend a successful message", async (
   const first = (await app.inject(url)).json();
   const payload = { version: first.version, messageId: "ask", text: "Why?" };
   const send = () => app.inject({ method: "POST", url, payload });
-  expect((await send()).statusCode).toBe(503);
+  // FLIGHT is down for the first send: the reply is stored and waits for FLIGHT's wake
+  expect((await send()).statusCode).toBe(200);
+  expect(store.pendingDiscussions()).toHaveLength(1);
+  expect(store.discussionSent(first.id, "ask")).toBe(false);
   expect((await send()).statusCode).toBe(200);
   expect((await send()).statusCode).toBe(200);
   expect(message).toHaveBeenCalledTimes(2);
@@ -95,6 +98,24 @@ it("retries failed sends once and does not resend a successful message", async (
       })
     ).statusCode,
   ).toBe(403);
+  await app.close();
+});
+
+it("stores a reply when the crew is off or FLIGHT is not running, for its next wake", async () => {
+  const supervisor = {
+    status: () => ({ enabled: false, note: "off" }),
+  } as unknown as Supervisor;
+  const app = buildApp({ config, store, bus: new ChangeBus(), supervisor });
+  const url = "/api/attention/note:blocked:demo/discussion";
+  const first = (await app.inject(url)).json();
+  const sent = await app.inject({
+    method: "POST",
+    url,
+    payload: { version: first.version, messageId: "ask", text: "Why?" },
+  });
+  expect(sent.statusCode).toBe(200);
+  expect(sent.json().messages.map((m: { text: string }) => m.text)).toContain("Why?");
+  expect(store.pendingDiscussions().map((t) => t.id)).toEqual([first.id]);
   await app.close();
 });
 

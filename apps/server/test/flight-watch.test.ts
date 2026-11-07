@@ -14,6 +14,7 @@ import {
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
+  FLIGHT_GUARD_COOLDOWN_MS,
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HEADLINE,
@@ -2485,6 +2486,60 @@ describe("the FLIGHT watcher", () => {
       expect(notesOpen().map((n) => n.text)).toEqual([
         expect.stringContaining(`FLIGHT handed over ${FLIGHT_ROTATIONS_MAX} times in an hour`),
       ]);
+    });
+
+    describe("the handover guard's cooldown", () => {
+      const tripGuard = async (): Promise<void> => {
+        let runId = startCalls.length === 0 ? "r-flight" : `r-flight-${startCalls.length}`;
+        for (let i = 1; i <= FLIGHT_ROTATIONS_MAX + 1; i++) {
+          facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+          context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS, runId);
+          await watch.check();
+          context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000, runId);
+          store.claimLine(handoverKey(runId), {
+            runId,
+            seatId: "flight-1",
+            origin: "engine",
+            text: FLIGHT_HANDOVER_ASK,
+            at: T0,
+          });
+          await watch.check(); // rotates
+          await watch.check(); // starts the fresh session, unless the cap holds it
+          nowMs += MIN;
+          runId = `r-flight-${startCalls.length}`;
+          if (notesOpen().length > 0) break;
+        }
+      };
+
+      it("restarts FLIGHT on its own 30 minutes after the guard trips, and clears the note", async () => {
+        liveCrew();
+        await tripGuard();
+        expect(notesOpen()).toHaveLength(1);
+        const started = startCalls.length;
+        nowMs += FLIGHT_GUARD_COOLDOWN_MS - 2 * MIN;
+        await watch.check();
+        expect(startCalls).toHaveLength(started);
+        expect(notesOpen()).toHaveLength(1);
+        nowMs += 3 * MIN;
+        await watch.check();
+        expect(startCalls).toHaveLength(started + 1);
+        expect(notesOpen()).toEqual([]);
+      });
+
+      it("stays stopped, and alerts, when it trips a second time in a row", async () => {
+        liveCrew();
+        const n = await tripGuard();
+        nowMs += FLIGHT_GUARD_COOLDOWN_MS + MIN;
+        await watch.check(); // the cooldown restart
+        await tripGuard();
+        const started = startCalls.length;
+        expect(notesOpen()).toHaveLength(1);
+        expect(notesOpen()[0]?.text).toContain("twice in a row");
+        nowMs += 3 * FLIGHT_GUARD_COOLDOWN_MS;
+        await watch.check();
+        expect(startCalls).toHaveLength(started);
+        expect(notesOpen()).toHaveLength(1);
+      });
     });
 
     it("rotates at once when the handover for this run was already sent", async () => {
@@ -5136,9 +5191,40 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     await watch.check();
     expect(sendCalls).toHaveLength(2);
     store.markCommsInboxRead("flight-1", [String(sent?.id)]);
+    // FLIGHT answered it, so nothing is owed
+    store.addComms({
+      at: nowMs,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: null,
+      text: "hi",
+      replyTo: sent?.id,
+    });
     nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
+  });
+
+  it("wakes FLIGHT again for an operator message it read and did not answer, and lists it as owed", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    store.replaceBoard("mc", [triageCard({ status: "Ready" })]);
+    await watch.check();
+    const sent = store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "hello",
+    });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    store.markCommsInboxRead("flight-1", [String(sent?.id)]);
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(3);
+    expect(sendCalls[2]?.text).toContain("owed (1)");
+    expect(sendCalls[2]?.text).toContain('"owed":["1"]');
   });
 
   it("answering a question does not wake FLIGHT again for a seat that stays free", async () => {

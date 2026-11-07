@@ -751,11 +751,16 @@ function wakeInputs(i: {
     i.flightId === null
       ? []
       : i.store.unreadCommsFrom(COMMS_CAPCOM, i.flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS);
+  // read by FLIGHT and still unanswered after its turn: owed until it replies
+  const owed =
+    i.flightId === null
+      ? []
+      : i.store.owedCommsFrom(COMMS_CAPCOM, i.flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS);
   // a seat left idle by the slow pace is the operator's wish, not a fault to wake FLIGHT about
   const idle = i.pace ? undefined : idleSeats(i, waits, rules, fit);
   return idle === undefined
-    ? { fit, fresh, operator, reviewsWaited }
-    : { fit, fresh, operator, reviewsWaited, idle };
+    ? { fit, fresh, operator, owed, reviewsWaited }
+    : { fit, fresh, operator, owed, reviewsWaited, idle };
 }
 
 /** The setting that keeps when each seat's idle spell began (the hub's own record). */
@@ -1702,6 +1707,8 @@ export function wakeFacts(
       .sort(),
     // an unread plain message from the operator: never routine
     operator: s.wake?.operator ?? [],
+    // read and not answered: owed until FLIGHT replies to it
+    owed: s.wake?.owed ?? [],
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     release: releasable(s),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
@@ -1773,6 +1780,7 @@ export function pending(
     stoppedSeats(s).length > 0 ||
     startableFor(s).free.length > 0 ||
     idleFacts(s.wake?.idle).length > 0 ||
+    (s.wake?.owed?.length ?? 0) > 0 ||
     s.seats.some((x) => x.parked !== null && flightParkKind(x.parked.kind)) ||
     s.aside.some((x) => x.parked !== null && flightParkKind(x.parked.kind))
   );
@@ -1847,6 +1855,8 @@ const wordsOf = (text: string): Set<string> =>
 const accountable = (category: string, item: unknown): boolean => {
   // Guidance changes wake FLIGHT but do not demand a fabricated decision when nothing changes.
   if (category === "t" || category === "instructions" || category === "operator") return false;
+  // an owed reply is answered with a Comms reply, not a logged decision
+  if (category === "owed") return false;
   if (category === "prs") {
     const [, , ready, state, awaiting, away] = String(item).split(":");
     return (ready === "true" && state === "open") || !!awaiting || !!away;
@@ -1954,6 +1964,8 @@ export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
       return "review seats are idle with a review queued";
     case "holdsInForce":
       return `${spaced(text)} hold is in force`;
+    case "owed":
+      return `you owe the operator an answer to Comms message ${text}`;
     case "breaker":
       return `the runaway breaker is tripped (${spaced(text)})`;
     case "prs":

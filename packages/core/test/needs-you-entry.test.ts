@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { FLIGHT_LEFT_NOTE_KEY, FLIGHT_NOT_TRIAGING_KEY } from "../src/flight.ts";
+import {
+  FLIGHT_DOWN_NOTE_KEY,
+  FLIGHT_LEFT_NOTE_KEY,
+  FLIGHT_NOT_TRIAGING_KEY,
+  FLIGHT_NOTE_KEY,
+} from "../src/flight.ts";
 import { guardAckKey } from "../src/guard.ts";
 import {
   NEEDS_YOU_ASK_MAX,
@@ -49,6 +54,8 @@ describe("needsYouEntryFaults", () => {
     for (const key of [
       FLIGHT_NOT_TRIAGING_KEY,
       `note:${FLIGHT_LEFT_NOTE_KEY}`,
+      `note:${FLIGHT_DOWN_NOTE_KEY}`,
+      `note:${FLIGHT_NOTE_KEY}`,
       "note:hub-update-held",
       `note:${guardAckKey(7)}`,
     ]) {

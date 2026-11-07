@@ -1,4 +1,9 @@
-import { FLIGHT_LEFT_NOTE_KEY, FLIGHT_NOT_TRIAGING_KEY } from "./flight.ts";
+import {
+  FLIGHT_DOWN_NOTE_KEY,
+  FLIGHT_LEFT_NOTE_KEY,
+  FLIGHT_NOT_TRIAGING_KEY,
+  FLIGHT_NOTE_KEY,
+} from "./flight.ts";
 import { GUARD_ACK_PREFIX } from "./guard.ts";
 import type { AttentionItem } from "./types.ts";
 
@@ -13,6 +18,9 @@ import type { AttentionItem } from "./types.ts";
 const ALERT_KEYS = new Set([
   FLIGHT_NOT_TRIAGING_KEY,
   `note:${FLIGHT_LEFT_NOTE_KEY}`,
+  // FLIGHT is down, or the hub stopped starting it: the operator can always start it
+  `note:${FLIGHT_DOWN_NOTE_KEY}`,
+  `note:${FLIGHT_NOTE_KEY}`,
   // apps/server/src/update.ts HUB_UPDATE_HELD_KEY; the server test pins the two together
   "note:hub-update-held",
 ]);

@@ -15,6 +15,7 @@ import {
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
+  FLIGHT_GUARD_COOLDOWN_MS,
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HOUR_MS,
@@ -182,6 +183,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** Each run's context at its first turn, so the handover line is growth, not the start's size. */
   const firstContext = new Map<string, number>();
   let rotationRequested = false;
+  /** When the hub starts FLIGHT again after the handover guard stopped it; null when it stays stopped. */
+  let guardRetryAt: number | null = null;
+  /** When the hub started FLIGHT again after the guard; a trip within an hour of it is the second in a row. */
+  let guardRestartedAt: number | null = null;
   let lastFailure: string | null = null;
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
@@ -467,6 +472,14 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       // parked or at the stop line, FLIGHT waits for that first; a run left with no session goes
       // before any start, which it would refuse
       if (await settleGhost(id, row, alive, t)) return;
+      // the handover guard's cooldown is over: FLIGHT starts again, and a trip soon after is the second in a row
+      if (guardRetryAt !== null && t >= guardRetryAt && noteOpen()) {
+        store.clearNote(FLIGHT_NOTE_KEY, t);
+        guardRetryAt = null;
+        guardRestartedAt = t;
+        rotations = [];
+        bus.emit("attention");
+      }
       if (noteOpen()) return;
       starts = starts.filter((s) => s > t - FLIGHT_HOUR_MS);
       rotations = rotations.filter((s) => s > t - FLIGHT_HOUR_MS);
@@ -474,6 +487,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (rotating && rotations.length >= FLIGHT_ROTATIONS_MAX) {
         clearDown(t);
         const last = row?.runId ?? null;
+        const again = guardRestartedAt !== null && t - guardRestartedAt < FLIGHT_HOUR_MS;
+        guardRetryAt = again ? null : t + FLIGHT_GUARD_COOLDOWN_MS;
+        guardRestartedAt = null;
         store.raiseNote({
           key: FLIGHT_NOTE_KEY,
           kind: "blocked",
@@ -483,6 +499,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           text: flightRotationLoopText(
             rotations.length,
             last === null ? null : (firstContext.get(last) ?? null),
+            again,
           ),
           at: t,
         });
@@ -501,6 +518,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           text: flightStartFailedText(lastFailure ?? "it stopped 3 times in an hour"),
           at: t,
         });
+        guardRetryAt = null;
         processGone = false; // said once, in this note
         bus.emit("attention");
         return;

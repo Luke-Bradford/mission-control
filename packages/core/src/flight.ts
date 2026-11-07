@@ -1283,6 +1283,8 @@ export interface FlightWakeInputs {
   idle?: FlightIdleSeats;
   /** Ids of the operator's messages to FLIGHT that its inbox has not read; they wake it at once. */
   operator?: string[];
+  /** Ids of the operator's messages FLIGHT has read and not yet answered (a reply naming them); they stay in the wake until it does. */
+  owed?: string[];
   /** Moved PR pointers the digest leaves out because `prs` lists that PR: stamped read with `moved`. */
   movedCovered?: FlightMovedPointer[];
 }
@@ -1395,8 +1397,22 @@ export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
 export const FLIGHT_CONTEXT_GROWTH_TOKENS = 50_000;
 /** Handovers (rotations) in an hour before the watch stops restarting FLIGHT and says why. */
 export const FLIGHT_ROTATIONS_MAX = 4;
-export const flightRotationLoopText = (n: number, startTokens: number | null): string =>
-  `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start.`;
+/** After the handover guard stops FLIGHT, the hub starts it again on its own this long after. */
+export const FLIGHT_GUARD_COOLDOWN_MS = 30 * 60_000;
+/**
+ * The guard's note. The first trip says when FLIGHT comes back on its own; a trip right after that
+ * restart stays stopped until the operator starts it.
+ */
+export const flightRotationLoopText = (
+  n: number,
+  startTokens: number | null,
+  again = false,
+): string =>
+  `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start. ${
+    again
+      ? "It has done this twice in a row, so it stays stopped until you start it. Your messages are kept and reach it when it starts."
+      : `The hub starts it again in ${FLIGHT_GUARD_COOLDOWN_MS / 60_000} minutes. Your messages are kept until then.`
+  }`;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
