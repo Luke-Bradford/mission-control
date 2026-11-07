@@ -41,6 +41,7 @@ import {
   type TicketView,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
+import { budgetBrake } from "../budget-brake.ts";
 import type { CardNow } from "../collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../collectors/usage-claude.ts";
 import {
@@ -736,5 +737,21 @@ export function awayQuotaReserve(
   );
 }
 
+/**
+ * Whether the account may not take on new work: at its usage stop, or its weekly projection has
+ * the budget brake on. Only new deals and starts ask this; runs in progress and resumes do not.
+ */
+export function accountHoldsNewWork(
+  config: CcConfig,
+  store: Store,
+  accountId: string,
+  at: number,
+): boolean {
+  return (
+    accountAtStop(config, store, accountId, at) ||
+    budgetBrake(config, store, accountId, at) !== null
+  );
+}
+
 const atQuotaStop = (deps: TakeDeps, accountId: string): boolean =>
-  accountAtStop(deps.config, deps.store, accountId, deps.now());
+  accountHoldsNewWork(deps.config, deps.store, accountId, deps.now());

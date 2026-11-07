@@ -136,6 +136,7 @@ export async function chooseOption(
         knownSecrets: d.knownSecrets,
         now: d.now,
         seatSender: false,
+        senderKind: "operator",
         wakeUnlabelled: true,
         notify: (seatId) => d.wake(seatId),
       },
@@ -166,6 +167,7 @@ export async function chooseOption(
     store.addComms({
       at: now,
       from: COMMS_MC,
+      senderKind: "hub",
       to: flightId,
       ticket,
       text: `The operator chose "${option.label}" for ${to}'s question${ticket === null ? "" : ` on ${ticket}`}; it is delivered to the run.`,

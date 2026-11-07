@@ -5,6 +5,7 @@ import {
   BACKGROUND_STALL_MS,
   type BoardItem,
   COMMS_CAPCOM,
+  COMMS_CONTROLLER,
   CREW_PAUSE_SETTING,
   carriedFrom,
   FLIGHT_BATCH_MS,
@@ -61,6 +62,7 @@ import {
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { budgetBrake } from "../src/budget-brake.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
@@ -1920,6 +1922,25 @@ describe("the FLIGHT watcher", () => {
     }
     await watch.check();
     expect(startCalls).toEqual([]);
+  });
+
+  it("keeps starting FLIGHT while the budget brake is on its account", async () => {
+    for (const [at, pct] of [
+      [T0 - 6 * 60 * MIN, 40],
+      [T0 - 1000, 60],
+    ] as const)
+      store.addUsage({
+        accountId: "claude-main",
+        window: "7d",
+        at,
+        pct,
+        resetAt: T0 + 24 * 60 * MIN,
+        source: "test",
+      });
+    expect(budgetBrake(config, store, "claude-main", T0)).not.toBeNull();
+    await watch.check();
+    expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
+    expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual([]);
   });
 
   describe("FLIGHT down without a failed start", () => {
@@ -4853,6 +4874,31 @@ describe("the sweep's new checks hold back until their time", () => {
     expect(kinds()).not.toContain("controller_unanswered");
   });
 
+  it("an answer from the controller ends a controller request too", () => {
+    store.addFlightDecision({
+      at: T0 - 14 * MIN,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: `${FOR_THE_CONTROLLER} approve it`,
+      decision: "asked",
+      basis: "b",
+    });
+    nowMs += 2 * MIN;
+    expect(kinds()).toContain("controller_unanswered");
+    store.addComms({
+      at: nowMs,
+      from: COMMS_CONTROLLER,
+      senderKind: "controller",
+      to: "flight-1",
+      ticket: null,
+      text: "approved",
+    });
+    expect(kinds()).not.toContain("controller_unanswered");
+  });
+
   it("an ended run with no PR counts; one with a PR, or a missing report already told, does not", () => {
     store.upsertRun(
       run("r-nopr", "guido-1", {
@@ -5113,6 +5159,26 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     await watch.check();
     expect(sendCalls).toHaveLength(1);
     store.addComms({ at: nowMs, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "hello" });
+    nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("operator");
+  });
+
+  it("a message from the controller wakes FLIGHT as the operator's does", async () => {
+    flightOnly();
+    store.setSeatSession(row("guido-1", null));
+    ask("inco-1", "r-inco");
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    store.addComms({
+      at: nowMs,
+      from: COMMS_CONTROLLER,
+      senderKind: "controller",
+      to: "flight-1",
+      ticket: null,
+      text: "checked",
+    });
     nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
     await watch.check();
     expect(sendCalls).toHaveLength(2);

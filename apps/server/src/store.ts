@@ -49,12 +49,14 @@ import {
   COMMS_CAPCOM,
   COMMS_CHATTER_ROUNDS,
   COMMS_CHATTER_WINDOW_MS,
+  COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
   COMMS_TEXT_MAX,
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
+  type CommsSenderKind,
   classifyOveruse,
   commsCutMarker,
   type DefectRefs,
@@ -959,6 +961,7 @@ export interface CommsRow {
   ref: string | null;
   replyTo: string | null;
   mentions: string[];
+  senderKind: CommsSenderKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt: number | null;
 }
@@ -998,6 +1001,11 @@ export interface NewCommsRow {
   /** The number of the sender's newest open PR, stamped by the hub. */
   pr?: number | null;
   mentions?: readonly string[];
+  /**
+   * Who sent it. The hub sets it from how the request was made, never from the text. Every send in
+   * apps/server/src names it (comms-sender-kind.test.ts scans for that); only fixtures omit it.
+   */
+  senderKind?: CommsSenderKind;
 }
 
 /** A FLIGHT settlement of a stale Comms question or blocker. */
@@ -1492,7 +1500,8 @@ export class Store {
           this.insertComms(
             {
               at,
-              from: COMMS_CAPCOM,
+              from: COMMS_MC,
+              senderKind: "hub",
               to: flightId,
               ticket: null,
               text: `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
@@ -2045,6 +2054,8 @@ export class Store {
     // Set when waking the recipient failed, so an identical retry wakes them instead of being skipped.
     this.addColumn("comms", "wake_failed_at", "INTEGER");
     this.addColumn("comms", "delivered_at", "INTEGER");
+    // Who sent it, set by the hub; NULL on rows stored before this column.
+    this.addColumn("comms", "sender_kind", "TEXT");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
@@ -6184,6 +6195,7 @@ export class Store {
       row.from === COMMS_CAPCOM ||
       row.from === COMMS_CREW ||
       row.from === COMMS_MC ||
+      row.from === COMMS_CONTROLLER ||
       row.from === row.to
     )
       return;
@@ -6204,9 +6216,14 @@ export class Store {
   }
 
   private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
+    // The sender's name must match its kind: CAPCOM is only ever the operator, and the hub is MC.
+    if (row.from === COMMS_CAPCOM && row.senderKind !== undefined && row.senderKind !== "operator")
+      throw new Error("Only the operator sends as CAPCOM.");
+    if (row.senderKind === "hub" && row.from !== COMMS_MC)
+      throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -6220,6 +6237,7 @@ export class Store {
         row.targetRunId ?? null,
         row.fromRunId ?? null,
         row.pr ?? null,
+        row.senderKind ?? null,
       );
     const id = Number(inserted.lastInsertRowid);
     const mention = this.db.prepare(
@@ -6247,6 +6265,7 @@ export class Store {
       replyTo: r.reply_to == null ? null : `comms:${r.reply_to}`,
       mentions,
       deliveredAt: (r.delivered_at as number | null | undefined) ?? null,
+      senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
     };
   }
 
@@ -6972,10 +6991,10 @@ export class Store {
     sinceId: number,
     limit: number,
     textMax: number,
-  ): Pick<CommsRow, "id" | "at" | "from" | "to" | "label" | "ref" | "text">[] {
+  ): Pick<CommsRow, "id" | "at" | "from" | "to" | "label" | "ref" | "text" | "senderKind">[] {
     const rows = this.db
       .prepare(
-        `SELECT id, at, from_id, to_id, label, ref, substr(text, 1, ?) AS text FROM comms
+        `SELECT id, at, from_id, to_id, label, ref, sender_kind, substr(text, 1, ?) AS text FROM comms
          WHERE id > ? ORDER BY id DESC LIMIT ?`,
       )
       .all(textMax, sinceId, limit) as Row[];
@@ -6987,6 +7006,7 @@ export class Store {
       label: (r.label as CommsLabel | null) ?? null,
       ref: (r.ref as string | null) ?? null,
       text: r.text as string,
+      senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
     }));
   }
   markCommsScopeRead(scope: string, messageId: string): void {
