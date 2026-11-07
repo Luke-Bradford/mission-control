@@ -260,6 +260,60 @@ describe("loops in the file", () => {
     expect(chooseRunProfile(ps, [], "S", null)).toHaveProperty("refusal");
   });
 
+  it.each(["plan_required", "tries", "rounds"])("%s is required without a loop", (key) => {
+    const without = Object.fromEntries(
+      Object.entries({ plan_required: false, tries: 2, rounds: 2 }).filter(([k]) => k !== key),
+    );
+    const text = stringify({
+      profiles: [
+        {
+          name: "small-change",
+          steps: [{ name: "do", phase: "working" }],
+          reviewer: { role: "RETRO", depth: "light" },
+          ...without,
+        },
+      ],
+    });
+    expect((loadProfiles(file(text)) as ProfilesError).message).toBe(
+      `profiles.0.${key}: Invalid input: required`,
+    );
+  });
+
+  it("refuses a loop on an orchestration-only template", () => {
+    const text = stringify({
+      profiles: [
+        {
+          name: "watch",
+          orchestration_only: true,
+          steps: [{ name: "do" }],
+          reviewer: { role: "RETRO", depth: "light" },
+          loop: std("watch", [], false),
+        },
+      ],
+    });
+    expect((loadProfiles(file(text)) as ProfilesError).message).toContain(
+      "orchestration-only templates carry no loop",
+    );
+  });
+
+  it("refuses a file where no loop is the fallback", () => {
+    const text = withLoop(std("extra", [], false)).replace("fallback: true", "fallback: false");
+    expect(text).toContain("fallback: false");
+    expect((loadProfiles(file(text)) as ProfilesError).message).toBe(
+      "profiles: no loop is the fallback for tickets of any other Size",
+    );
+  });
+
+  it.each([
+    [{ labels: ["x"] }, "labels do not match the loop's trigger labels"],
+    [{ plan_required: false }, "plan_required does not match the loop's plan step"],
+    [{ rounds: 3 }, "rounds does not match the cap of review-changes"],
+  ])("refuses %j when it disagrees with the loop", (extra, why) => {
+    expect(
+      (loadProfiles(file(withLoop(std("extra", [], false), extra))) as ProfilesError).message,
+    ).toBe(`profiles.1.loop: ${why}`);
+  });
+
   it("refuses a cap above the most", () => {
     const loop = std("extra", [], false);
     const bad = {
