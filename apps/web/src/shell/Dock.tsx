@@ -42,13 +42,13 @@ import {
   type FlightView,
   flightOffText,
 } from "../flight/flightTypes.ts";
+import { useFlightThread } from "../flight/thread.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { usePath, useSearch } from "../router.ts";
 import { BuildChips } from "./buildStatus.tsx";
 import { DockSummary } from "./DockSummary.tsx";
 import { flyoutContext, stripContext, withContext } from "./flyoutContext.ts";
-import { useOlderEvents } from "./olderEvents.ts";
 import {
   setDockCollapsed,
   setFlightUnread,
@@ -157,7 +157,9 @@ function StateLine({
     words =
       last === "waiting"
         ? "Waiting: FLIGHT is stopped. Your message is saved and goes to FLIGHT when it starts."
-        : "FLIGHT is stopped. A message is saved and goes to FLIGHT when it starts.";
+        : last === "delivered"
+          ? "FLIGHT is stopped. Your last message was delivered."
+          : "FLIGHT is stopped. A message is saved and goes to FLIGHT when it starts.";
   else if (last === "delivered") words = "Delivered to FLIGHT.";
   else if (last === "sent") words = "Sent. Waiting for FLIGHT to pick it up.";
   else words = SEND_HINT;
@@ -206,7 +208,8 @@ function Composer({
   const used = useRef<number | null>(null);
   const path = usePath();
   const search = useSearch();
-  const where = flyoutContext(path, search);
+  const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
+  const where = flyoutContext(path, search, attention ?? []);
   // The chip follows the page until the operator removes it; a removed chip stays removed.
   const [chip, setChip] = useState(true);
   const canSend = loaded && seat !== null;
@@ -287,9 +290,6 @@ const STICK_PX = 40;
 /** Scrolled this close to the top, the dock asks for the next older events. */
 const LOAD_OLDER_PX = 40;
 
-/** The newest-first order of two rows by time; a row with no time keeps its place. */
-const byTime = (a: DockRow, b: DockRow) => (a.at ?? 0) - (b.at ?? 0);
-
 /**
  * FLIGHT's conversation, the same thread Comms shows: the stored messages between the operator and
  * FLIGHT, with FLIGHT's own turn text from its stream. The box takes text whatever FLIGHT's state;
@@ -312,32 +312,18 @@ export function FlightChat({
   const flightRes = useResource<FlightView>(RESOURCES.flight);
   const flight = flightRes.data;
   const seat = flight?.seat ?? null;
-  const streamRef = seat ? RESOURCES.stream(seat.id) : null;
-  const newest = useResource<AgentStream>(streamRef).data;
-  const olderEvents = useOlderEvents(streamRef?.path ?? null, newest);
-  const stream = olderEvents.stream;
+  // FLIGHT's stream is read only to see that the hub has handed it a message; the conversation is the
+  // stored thread, the same one Comms shows.
+  const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const tz = useTz();
-  const stored = useResource<CommsMessagesResponse>(RESOURCES.commsFlight).data;
+  const thread = useFlightThread();
+  const stored = { messages: thread.messages };
+  const olderEvents = thread.older;
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const stick = useRef(true);
   const streamRows = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
-  const all = useMemo(() => {
-    const thread: DockRow[] = (stored?.messages ?? []).map((m) =>
-      m.from === COMMS_CAPCOM
-        ? { kind: "you", id: `c:${m.id}`, at: m.at, text: stripContext(m.text) }
-        : { kind: "flight", id: `c:${m.id}`, at: m.at, text: m.text },
-    );
-    // The stored thread is the record; a stream copy of something stored shows once.
-    // The hub's inbox delivery to FLIGHT is a stream line of JSON, not something the operator said.
-    const own = streamRows.filter(
-      (r) =>
-        (r.kind === "you" || r.kind === "flight") &&
-        !(r.kind === "you" && isInboxDelivery(r.text)) &&
-        !(r.kind === "you" && thread.some((t) => t.kind === "you" && sameMessage(r.text, t.text))),
-    );
-    return [...thread, ...own].sort(byTime);
-  }, [stored, streamRows]);
+  const all = thread.rows;
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const sent = useRef(0);
   const { rows, open } = useMemo(() => withPending(all, pending), [all, pending]);
@@ -366,12 +352,13 @@ export function FlightChat({
       (stored?.messages ?? []).some((m) => m.from !== COMMS_CAPCOM && m.replyTo === lastStored.id));
   const [justSent, setJustSent] = useState(false);
   // Only a message sent here gets a state line; older history says nothing about itself.
+  // Delivery is checked first: a message FLIGHT already has stays delivered if FLIGHT then stops.
   const last: SendState | null = !justSent
     ? null
-    : seat?.live !== true
-      ? "waiting"
-      : taken
-        ? "delivered"
+    : taken
+      ? "delivered"
+      : seat?.live !== true
+        ? "waiting"
         : "sent";
 
   const count = shown.length;
@@ -437,13 +424,19 @@ export function FlightChat({
           </button>
         )}
         {olderEvents.error && <p className="crit-t s">{olderEvents.error}</p>}
-        {shown.length === 0 && (
-          <p className="note">
-            {stored === undefined && flight === undefined
-              ? "Loading the conversation…"
-              : "No messages with FLIGHT yet."}
-          </p>
-        )}
+        {shown.length === 0 &&
+          (thread.status === "error" ? (
+            <p className="note err" role="alert">
+              Could not load the conversation.{" "}
+              <button type="button" className="sm" onClick={thread.retry}>
+                Retry
+              </button>
+            </p>
+          ) : thread.status === "loading" ? (
+            <p className="note">Loading the conversation…</p>
+          ) : (
+            <p className="note">No messages with FLIGHT yet.</p>
+          ))}
         {shown.map((r) => (
           <Msg key={r.id} row={r} tz={tz} />
         ))}
@@ -538,15 +531,14 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
   }, [drawer]);
   const flight = useResource<FlightView>(RESOURCES.flight).data;
   const seat = flight?.seat ?? null;
-  const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
-  const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
+  const thread = useFlightThread();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  // The reply last seen with the dock shown; undefined until the stream first loads, so history is not "new".
+  // The reply last seen with the dock shown; undefined until the thread first loads, so history is not "new".
   const replyIds = useMemo(
-    () => chatRows(all).flatMap((r) => (r.kind === "flight" ? [r.id] : [])),
-    [all],
+    () => thread.rows.flatMap((r) => (r.kind === "flight" ? [r.id] : [])),
+    [thread.rows],
   );
   const lastReply = replyIds.at(-1) ?? null;
   const [seenReply, setSeenReply] = useState<string | null | undefined>(undefined);
@@ -559,9 +551,9 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
     wasLooking.current = looking;
   }, [wide, visible, collapsed, looking]);
   useEffect(() => {
-    if (stream === undefined) return;
+    if (thread.status !== "ready") return;
     if (seenReply === undefined || looking) setSeenReply(lastReply);
-  }, [stream, seenReply, looking, lastReply]);
+  }, [thread.status, seenReply, looking, lastReply]);
   const unread =
     seenReply === undefined
       ? 0

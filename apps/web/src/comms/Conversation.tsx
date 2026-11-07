@@ -37,6 +37,7 @@ import {
   navigate,
   ticketPath,
 } from "../router.ts";
+import { stripContext } from "../shell/flyoutContext.ts";
 import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
 import { type CommsView, ticketForRef } from "./model.ts";
@@ -396,12 +397,12 @@ function MessagePane({
                   type="button"
                   onClick={() => onOpenMessage(viewForMessage(quote, flightId), quote.id)}
                 >
-                  <b>{quote.from}</b> · {time(quote.at)} · {quote.text}
+                  <b>{quote.from}</b> · {time(quote.at)} · {stripContext(quote.text)}
                 </button>
               )}
               <div className="comms-bubble-body">
                 <MessageRefs
-                  text={message.text}
+                  text={stripContext(message.text)}
                   ticket={message.ticket}
                   from={message.from}
                   to={message.to}
@@ -673,7 +674,7 @@ function PinnedMessage({ message }: { message: CommsMessage }) {
   };
   return (
     <span>
-      {message.from}: {message.text}
+      {message.from}: {stripContext(message.text)}
       <button type="button" onClick={unpin}>
         Unpin
       </button>

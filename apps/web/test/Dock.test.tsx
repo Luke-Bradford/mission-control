@@ -389,6 +389,35 @@ const STREAM = {
     { id: "3:0", at: NOW - 300_000, kind: "tool", text: "ls" },
   ],
 };
+/** The stored FLIGHT thread (what Comms shows and the fly-out reads): the same three lines STREAM once held. */
+const stored = (
+  id: number,
+  from: string,
+  text: string,
+  at: number,
+  replyTo: string | null = null,
+) => ({
+  id: `comms:${id}`,
+  at,
+  from,
+  to: from === "CAPCOM" ? "flight-1" : "CAPCOM",
+  text,
+  ticket: null,
+  label: null,
+  ref: null,
+  replyTo,
+  mentions: [],
+  reactions: [],
+  operator: from === "CAPCOM",
+});
+const THREAD = {
+  messages: [
+    stored(1, "CAPCOM", "<b>hi</b> FLIGHT", NOW - 500_000),
+    stored(2, "flight-1", "Over to you @CAPCOM, please.", NOW - 400_000),
+    stored(3, "flight-1", "Done: **both** merged\n\n- one\n- two", NOW - 350_000),
+  ],
+  hasMore: false,
+};
 const DECISION = {
   id: 1,
   targetRunId: null,
@@ -411,6 +440,7 @@ function stubFlight(view: FlightView, extra: Record<string, unknown> = {}) {
     "/api/flight": view,
     "/api/flight/summary": flightSummary(),
     "/api/agents/flight-1/stream?limit=20": STREAM,
+    "/api/comms/flight": THREAD,
     ...extra,
   });
 }
@@ -650,6 +680,45 @@ describe("when FLIGHT's state cannot load", () => {
   });
 });
 
+describe("when the stored thread cannot load", () => {
+  it("says so with a Retry, and says loading while it loads, never that the conversation is empty", async () => {
+    let fail = true;
+    const fn = stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/comms/flight": () =>
+          fail ? { status: 500, body: { error: "down" } } : { status: 200, body: { messages: [] } },
+      },
+    );
+    const { container } = render(<Dock />);
+    expect(container.querySelector("#dockMsgs")?.textContent).toContain("Loading the conversation");
+    expect(container.querySelector("#dockMsgs")?.textContent).not.toContain("No messages");
+    await waitFor(() =>
+      expect(container.querySelector("#dockMsgs")?.textContent).toContain(
+        "Could not load the conversation",
+      ),
+    );
+    expect(container.querySelector("#dockMsgs")?.textContent).not.toContain("No messages");
+    fail = false;
+    const before = fn.mock.calls.filter(([p]) => p === "/api/comms/flight").length;
+    fireEvent.click(
+      within(container.querySelector("#dockMsgs") as HTMLElement).getByRole("button", {
+        name: "Retry",
+      }),
+    );
+    await waitFor(() =>
+      expect(fn.mock.calls.filter(([p]) => p === "/api/comms/flight").length).toBeGreaterThan(
+        before,
+      ),
+    );
+    await waitFor(() =>
+      expect(container.querySelector("#dockMsgs")?.textContent).toContain(
+        "No messages with FLIGHT yet.",
+      ),
+    );
+  });
+});
+
 describe("the box", () => {
   const typeIn = async (container: HTMLElement) => {
     const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
@@ -740,16 +809,13 @@ describe("the conversation", () => {
     expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(1);
   });
 
-  it("settles a pending message once FLIGHT's stream has it", async () => {
-    let events = STREAM.events;
+  it("settles a pending message once the stored thread has it", async () => {
+    let thread = THREAD;
     stubFlight(
       { seat: flightSeat(), decisions: [] },
       {
         "POST /api/comms": {},
-        "/api/agents/flight-1/stream?limit=20": () => ({
-          status: 200,
-          body: { ...STREAM, events },
-        }),
+        "/api/comms/flight": () => ({ status: 200, body: thread }),
       },
     );
     const { container } = render(<Dock />);
@@ -757,9 +823,12 @@ describe("the conversation", () => {
     const input = sendText(container, "assign it");
     await waitFor(() => expect(input.value).toBe(""));
     expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(1);
-    events = [...STREAM.events, { id: "5:0", at: NOW, kind: "op", text: "assign it" }];
+    thread = {
+      ...THREAD,
+      messages: [...THREAD.messages, stored(4, "CAPCOM", "assign it", NOW)],
+    };
     await act(async () => {
-      hub.refetch("/api/agents/flight-1/stream?limit=20");
+      hub.refetch("/api/comms/flight");
     });
     await waitFor(() => expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(0));
     const mine = [...container.querySelectorAll(".dmsg.you")].filter(
@@ -768,36 +837,32 @@ describe("the conversation", () => {
     expect(mine).toHaveLength(1);
   });
 
-  it("asks for FLIGHT's last 20 events and pages older ones in ahead of them", async () => {
-    const older = [
-      { id: "old:0", at: NOW - 2 * HOUR, kind: "msg" as const, text: "An older reply" },
-    ];
+  it("pages older messages of the stored thread in ahead of the rest", async () => {
+    const olderMsg = stored(0, "flight-1", "An older reply", NOW - 2 * HOUR);
     const fetch = stubFlight(
       { seat: flightSeat(), decisions: [] },
       {
-        "/api/agents/flight-1/stream?limit=20": { ...STREAM, hasMore: true },
-        "/api/agents/flight-1/stream?limit=20&before=0%3A0": { ...STREAM, events: older },
+        "/api/comms/flight": { ...THREAD, hasMore: true },
+        "/api/comms/flight?before=comms%3A1": { messages: [olderMsg], hasMore: false },
       },
     );
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
     fireEvent.click(await screen.findByRole("button", { name: "Load older" }));
     await screen.findByText("An older reply");
-    expect(fetch.mock.calls.map(([p]) => p)).toContain(
-      "/api/agents/flight-1/stream?limit=20&before=0%3A0",
-    );
+    expect(fetch.mock.calls.map(([p]) => p)).toContain("/api/comms/flight?before=comms%3A1");
     expect(container.querySelectorAll(".dmsg")).toHaveLength(4);
     expect(container.querySelector(".dmsg .txt")?.textContent).toBe("An older reply");
     // Nothing older remains, so the control goes.
     expect(screen.queryByRole("button", { name: "Load older" })).toBeNull();
   });
 
-  it("loads older events when the reader scrolls to the top of the dock", async () => {
+  it("loads older messages when the reader scrolls to the top of the dock", async () => {
     const fetch = stubFlight(
       { seat: flightSeat(), decisions: [] },
       {
-        "/api/agents/flight-1/stream?limit=20": { ...STREAM, hasMore: true },
-        "/api/agents/flight-1/stream?limit=20&before=0%3A0": { ...STREAM, events: [] },
+        "/api/comms/flight": { ...THREAD, hasMore: true },
+        "/api/comms/flight?before=comms%3A1": { messages: [], hasMore: false },
       },
     );
     const { container } = render(<Dock />);
@@ -806,13 +871,11 @@ describe("the conversation", () => {
     box.scrollTop = 0;
     fireEvent.scroll(box);
     await waitFor(() =>
-      expect(fetch.mock.calls.map(([p]) => p)).toContain(
-        "/api/agents/flight-1/stream?limit=20&before=0%3A0",
-      ),
+      expect(fetch.mock.calls.map(([p]) => p)).toContain("/api/comms/flight?before=comms%3A1"),
     );
   });
 
-  it("offers no older events when the stream has none", async () => {
+  it("offers no older messages when the thread has none", async () => {
     stubFlight({ seat: flightSeat(), decisions: [] });
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
@@ -853,16 +916,11 @@ describe("the conversation", () => {
 
   it("counts a new reply as unread while the dock is hidden, and clears it once shown", async () => {
     stubWidth(true);
-    const reply = { id: "4:0", at: NOW - 100_000, kind: "msg", text: "A new answer" };
-    let events = STREAM.events;
+    const reply = stored(4, "flight-1", "A new answer", NOW - 100_000);
+    let thread = THREAD;
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      {
-        "/api/agents/flight-1/stream?limit=20": () => ({
-          status: 200,
-          body: { ...STREAM, events },
-        }),
-      },
+      { "/api/comms/flight": () => ({ status: 200, body: thread }) },
     );
     function Unread() {
       return <span data-testid="unread">{useFlightUnread()}</span>;
@@ -877,9 +935,9 @@ describe("the conversation", () => {
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
     expect(screen.getByTestId("unread").textContent).toBe("0");
     act(() => toggleDock(false));
-    events = [...STREAM.events, reply];
+    thread = { ...THREAD, messages: [...THREAD.messages, reply] };
     await act(async () => {
-      hub.refetch("/api/agents/flight-1/stream?limit=20");
+      hub.refetch("/api/comms/flight");
     });
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("1"));
     act(() => toggleDock(true));
@@ -889,16 +947,11 @@ describe("the conversation", () => {
 
   it("counts a reply as unread while the visible dock is collapsed, and clears it on Expand", async () => {
     stubWidth(true);
-    const reply = { id: "4:0", at: NOW - 100_000, kind: "msg", text: "A new answer" };
-    let events = STREAM.events;
+    const reply = stored(4, "flight-1", "A new answer", NOW - 100_000);
+    let thread = THREAD;
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      {
-        "/api/agents/flight-1/stream?limit=20": () => ({
-          status: 200,
-          body: { ...STREAM, events },
-        }),
-      },
+      { "/api/comms/flight": () => ({ status: 200, body: thread }) },
     );
     function Unread() {
       return <span data-testid="unread">{useFlightUnread()}</span>;
@@ -911,9 +964,9 @@ describe("the conversation", () => {
     );
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
     expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
-    events = [...STREAM.events, reply];
+    thread = { ...THREAD, messages: [...THREAD.messages, reply] };
     await act(async () => {
-      hub.refetch("/api/agents/flight-1/stream?limit=20");
+      hub.refetch("/api/comms/flight");
     });
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("1"));
     fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
@@ -922,15 +975,10 @@ describe("the conversation", () => {
 
   it("follows new messages on expansion without moving a reader who had scrolled up", async () => {
     stubWidth(true);
-    let events = STREAM.events;
+    let thread = THREAD;
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      {
-        "/api/agents/flight-1/stream?limit=20": () => ({
-          status: 200,
-          body: { ...STREAM, events },
-        }),
-      },
+      { "/api/comms/flight": () => ({ status: 200, body: thread }) },
     );
     render(<Dock />);
     await waitFor(() => expect(screen.getByRole("log").children).toHaveLength(3));
@@ -947,8 +995,11 @@ describe("the conversation", () => {
     log.scrollTop = 800;
     fireEvent.scroll(log);
     fireEvent.click(screen.getByRole("button", { name: "Collapse" }));
-    events = [...events, { id: "new:hidden", at: NOW, kind: "msg", text: "The newest answer" }];
-    await act(async () => hub.refetch("/api/agents/flight-1/stream?limit=20"));
+    thread = {
+      ...thread,
+      messages: [...thread.messages, stored(5, "flight-1", "The newest answer", NOW)],
+    };
+    await act(async () => hub.refetch("/api/comms/flight"));
     await waitFor(() => expect(log.children).toHaveLength(4));
     expect(log.scrollTop).toBe(800);
     fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
@@ -957,15 +1008,10 @@ describe("the conversation", () => {
 
   it("keeps the scroll position while reading up, and follows again near the bottom", async () => {
     sessionStorage.setItem(DOCK_COLLAPSED_KEY, "false");
-    let events = STREAM.events;
+    let thread = THREAD;
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      {
-        "/api/agents/flight-1/stream?limit=20": () => ({
-          status: 200,
-          body: { ...STREAM, events },
-        }),
-      },
+      { "/api/comms/flight": () => ({ status: 200, body: thread }) },
     );
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
@@ -973,9 +1019,15 @@ describe("the conversation", () => {
     Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
     Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
     const reply = async (id: string, n: number) => {
-      events = [...events, { id, at: NOW - 100_000 + n, kind: "msg", text: `reply ${id}` }];
+      thread = {
+        ...thread,
+        messages: [
+          ...thread.messages,
+          stored(10 + n, "flight-1", `reply ${id}`, NOW - 100_000 + n),
+        ],
+      };
       await act(async () => {
-        hub.refetch("/api/agents/flight-1/stream?limit=20");
+        hub.refetch("/api/comms/flight");
       });
       await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3 + n));
     };

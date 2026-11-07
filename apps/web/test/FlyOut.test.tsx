@@ -43,6 +43,19 @@ describe("where the operator is", () => {
     expect(flyoutContext("/agent/inco-1")).toBe("Agents · inco-1");
   });
 
+  it("names the open question, the Comms conversation and the item panel", () => {
+    const items = [
+      { key: "esc:shop-app#1", ticket: "shop-app#1" },
+      { key: "ask:3", ticket: null },
+    ];
+    expect(flyoutContext("/needs-you/esc%3Ashop-app%231", "", items)).toBe(
+      "Needs you · shop-app#1",
+    );
+    expect(flyoutContext("/needs-you/ask%3A3", "", items)).toBe("Needs you · ask:3");
+    expect(flyoutContext("/comms/agents/inco-1")).toBe("Comms · inco-1");
+    expect(flyoutContext("/", "?item=esc%3Ashop-app%231", items)).toBe("Overview · shop-app#1");
+  });
+
   it("puts a line before the message that stripping takes off again", () => {
     expect(withContext("Board · shop-app#12", "why?")).toBe(
       "[Operator is on: Board · shop-app#12]\nwhy?",
@@ -175,16 +188,17 @@ describe("what the line under the box says", () => {
     expect(container.querySelectorAll(".dmsg.you")).toHaveLength(1);
   });
 
-  it("keeps saying sent while FLIGHT streams text from a turn already running, until the hand-over carries the message", async () => {
+  it("keeps saying sent while FLIGHT works on, until the hand-over carries the message", async () => {
     stub();
     const { container } = render(<Dock />);
     await send("status?");
     const state = () => container.querySelector("#dockState")?.textContent ?? "";
     await waitFor(() => expect(state()).toContain("Sent."));
-    // FLIGHT is mid-turn on other work: its text is not an answer to a message it has not read.
+    // FLIGHT is mid-turn on other work: it streams text and stores a note that does not reply to the message.
     events = [{ id: "2:0", at: NOW + 200_000, kind: "msg", text: "Still checking PR 1549." }];
+    stored.push(message("flight-1", COMMS_CAPCOM, "Handover note is written."));
     await waitFor(() => hub.refetchAll());
-    await waitFor(() => expect(container.textContent).toContain("Still checking PR 1549."));
+    await waitFor(() => expect(container.textContent).toContain("Handover note is written."));
     expect(state()).toContain("Sent.");
     expect(state()).not.toContain("Delivered");
     // Its next wake carries the stored message: now it has it.
@@ -200,6 +214,31 @@ describe("what the line under the box says", () => {
     ];
     await waitFor(() => hub.refetchAll());
     await waitFor(() => expect(state()).toContain("Delivered to FLIGHT."));
+  });
+
+  it("stays delivered when FLIGHT then stops", async () => {
+    stub();
+    const { container } = render(<Dock />);
+    await send("status?");
+    const state = () => container.querySelector("#dockState")?.textContent ?? "";
+    await waitFor(() => expect(state()).toContain("Sent."));
+    const stored1 = stored[0] as { id: string };
+    events = [
+      {
+        id: "1:0",
+        at: NOW + 100_000,
+        kind: "op",
+        text: `${MC_LINE_PREFIX} Wake: 1 operator message\n\n${COMMS_INBOX_HEADING} the operator's own messages and replies):\n${JSON.stringify([stored1])}`,
+      },
+    ];
+    await waitFor(() => hub.refetchAll());
+    await waitFor(() => expect(state()).toContain("Delivered to FLIGHT."));
+    seat = { ...SEAT, state: "stopped", live: false };
+    await waitFor(() => hub.refetchAll());
+    await waitFor(() => expect(state()).toContain("FLIGHT is stopped"));
+    expect(state()).toContain("Your last message was delivered");
+    expect(state()).not.toContain("goes to FLIGHT when it starts");
+    expect(screen.getByRole("button", { name: "Start FLIGHT" })).toBeTruthy();
   });
 
   it("says delivered once FLIGHT has stored a reply to the message", async () => {
@@ -229,6 +268,28 @@ describe("what the line under the box says", () => {
 });
 
 describe("one FLIGHT conversation", () => {
+  it("shows FLIGHT's stored messages in both and leaves its turn-by-turn text to the seat page", async () => {
+    events = [{ id: "9:0", at: NOW + 50_000, kind: "msg", text: "Handover note is written." }];
+    stored.push(message("flight-1", COMMS_CAPCOM, "I filed the ticket."));
+    stub();
+    render(
+      <>
+        <Dock />
+        <CommsConversation view={{ kind: "flight" }} row={null} />
+      </>,
+    );
+    await waitFor(() =>
+      expect(document.querySelector("#dockMsgs")?.textContent).toContain("I filed the ticket."),
+    );
+    await waitFor(() =>
+      expect(document.querySelector(".comms-messages")?.textContent).toContain(
+        "I filed the ticket.",
+      ),
+    );
+    expect(document.querySelector("#dockMsgs")?.textContent).not.toContain("Handover note");
+    expect(document.querySelector(".comms-messages")?.textContent).not.toContain("Handover note");
+  });
+
   it("a message sent from the fly-out shows in Comms' FLIGHT thread, and one sent from Comms shows in the fly-out", async () => {
     stub();
     render(
@@ -248,7 +309,18 @@ describe("one FLIGHT conversation", () => {
       expect(document.querySelector("#dockMsgs")?.textContent).toContain("from Comms"),
     );
     expect(document.querySelector("#dockMsgs")?.textContent).toContain("from the fly-out");
-    // The fly-out shows what was typed; the stored text, with the context line, is what Comms keeps.
+    // Both views read the one stored thread: the same messages in the same order, with the context
+    // line the fly-out adds to what FLIGHT gets left off in both.
+    const flyout = [...document.querySelectorAll("#dockMsgs .dmsg .txt")].map((e) => e.textContent);
+    const commsTexts = [...document.querySelectorAll(".comms-messages .comms-bubble-body")].map(
+      (e) => e.textContent ?? "",
+    );
+    expect(flyout).toEqual(["from the fly-out", "from Comms"]);
+    expect(commsTexts.some((t) => t.includes("from the fly-out"))).toBe(true);
+    expect(commsTexts.some((t) => t.includes("from Comms"))).toBe(true);
+    expect(document.querySelector(".comms-messages")?.textContent).not.toContain(
+      "[Operator is on:",
+    );
     expect(document.querySelector("#dockMsgs")?.textContent).not.toContain("Operator is on");
   });
 });
