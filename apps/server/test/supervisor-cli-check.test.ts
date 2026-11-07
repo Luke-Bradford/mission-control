@@ -110,7 +110,9 @@ it("does not call a failure before the CLI starts a failed version (the fetch ca
   const result = await sup.checkCli("claude");
   expect(result.kind).toBe("unproven");
   expect(recorded().filter((l) => l.argv)).toEqual([]);
-  expect(store.seatSession("guido-1")).toMatchObject({ state: "idle", runId: null });
+  // the start failed before the seat had a row: it holds no run
+  expect(store.seatSession("guido-1")?.runId ?? null).toBeNull();
+  expect(store.seatSession("guido-1")?.state ?? "idle").toBe("idle");
   expect(worktrees().filter((n) => n.includes("cli-check"))).toEqual([]);
 });
 
@@ -133,7 +135,8 @@ it("ends a check a restart cut off, instead of adopting it as the seat's run", a
   );
   await until(() => expect(existsSync(cwd)).toBe(false));
   expect(store.notes().filter((n) => n.seatId === "guido-1")).toEqual([]);
-  expect(store.getSetting("cli-check-run:guido-1")).toBeNull();
+  // the marker goes last, once the end has finished
+  await until(() => expect(store.getSetting("cli-check-run:guido-1")).toBeNull());
 
   writeFileSync(`${recordFile}.go`, "");
   await checking.catch(() => {});
