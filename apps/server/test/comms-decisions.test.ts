@@ -6,7 +6,6 @@ import {
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
-  DECISION_DEFAULT_WAIT_MS,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
@@ -69,7 +68,7 @@ afterEach(() => {
 });
 
 describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => {
-  it("is raised once, at 45 minutes, with a recommended option and a default", () => {
+  it("is raised once, at 45 minutes, with a recommended option and no timed default", () => {
     const { id } = send();
     expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED - 1 })).toBe(0);
     expect(store.briefs().has(keyOf(id))).toBe(false);
@@ -78,9 +77,11 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     const brief = store.briefs().get(keyOf(id));
     expect(brief).toMatchObject({
       for: "operator",
+      by: "hub",
       recommendedOptionId: "proceed",
-      defaultAt: STALLED + DECISION_DEFAULT_WAIT_MS,
     });
+    expect(brief).not.toHaveProperty("defaultAt");
+    expect(brief?.options.map((o) => o.description ?? "").join(" ")).not.toMatch(/on its own/);
     expect(brief?.options.map((o) => o.id)).toEqual(["proceed", "hold"]);
     expect(find(id, STALLED)).toMatchObject({ owner: "operator", kind: "question" });
 
@@ -186,7 +187,7 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     expect(store.briefs().has(keyOf(budget.id))).toBe(false);
   });
 
-  it("applies its default through the sweep only after the operator's wait", async () => {
+  it("an operator question never carries a timed default", async () => {
     const { id } = send("blocker");
     store.setSeatSession({
       seatId: "GUIDO-1",
@@ -199,11 +200,10 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     });
     raiseStalledCommsDecisions({ config: config(), store, now: STALLED });
     const deliver = vi.fn(async () => {});
-    const due = STALLED + DECISION_DEFAULT_WAIT_MS;
-    expect(await applyDecisionDefaults({ config: config(), store, now: due - 1, deliver })).toBe(0);
-    expect(await applyDecisionDefaults({ config: config(), store, now: due, deliver })).toBe(1);
-    expect(deliver).toHaveBeenCalledWith("GUIDO-1", expect.stringContaining(keyOf(id)));
-    expect(find(id, due)?.acked).toBe(true);
-    expect(await applyDecisionDefaults({ config: config(), store, now: due + 1, deliver })).toBe(0);
+    const later = STALLED + 2 * 60 * 60_000;
+    expect(find(id, later)?.defaultDueAt).toBeUndefined();
+    expect(await applyDecisionDefaults({ config: config(), store, now: later, deliver })).toBe(0);
+    expect(deliver).not.toHaveBeenCalled();
+    expect(find(id, later)?.acked).toBe(false);
   });
 });

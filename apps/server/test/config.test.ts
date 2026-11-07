@@ -253,6 +253,29 @@ describe("loadConfig", () => {
       expect(errorOf(() => loadConfig(label(bad))).path).toBe("loops[0].launchdLabel");
   });
 
+  it("reads a loop's paused_by: an issue, or a stop file with ~ expanded", () => {
+    const withPause = (line: string) =>
+      tmpConfig((y) =>
+        y.replace(
+          "    launchd_label: com.shop-app.ta-loop\n",
+          `    launchd_label: com.shop-app.ta-loop\n    paused_by: ${line}\n`,
+        ),
+      );
+    expect(loadConfig(withPause("{ issue: autonomy-engine#1818 }")).loops[0]?.pausedBy).toEqual({
+      issue: { repoId: "autonomy-engine", number: 1818 },
+    });
+    expect(loadConfig(withPause("{ stop_file: ~/STOP }")).loops[0]?.pausedBy).toEqual({
+      stopFile: join(homedir(), "STOP"),
+    });
+    expect(loadConfig(EXAMPLE).loops[0]?.pausedBy).toBeUndefined();
+    for (const bad of [
+      "{ issue: x#1, stop_file: ~/STOP }",
+      "{ issue: nohash }",
+      "{ issue: x#1, extra: 1 }",
+    ])
+      expect(() => loadConfig(withPause(bad))).toThrow(ConfigError);
+  });
+
   it("expands ~ to the home directory", () => {
     const c = loadConfig(EXAMPLE);
     expect(c.loops[0]?.stateDir).toBe(join(homedir(), "code/.shop-app-autonomy/var/autonomy"));

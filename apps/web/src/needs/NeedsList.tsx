@@ -4,7 +4,7 @@ import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
-import { followLink, needsYouPath, PAGE_PATHS } from "../router.ts";
+import { followLink, needsYouPath } from "../router.ts";
 import { askerOf, questionOf, titleOf } from "./QuestionBand.tsx";
 
 /** Times tick here, in the row's child, so the list is not rebuilt each second. */
@@ -50,21 +50,6 @@ function Row({ item, current }: { item: AttentionItem; current: boolean }) {
   );
 }
 
-/** A held item: it waits on a condition, so it links to the Held panel on FLIGHT. */
-function HeldRow({ item }: { item: AttentionItem }) {
-  const to = `${PAGE_PATHS.flight}#heldP`;
-  return (
-    <a className="needs-row held" href={to} onClick={(e) => followLink(e, to)}>
-      <span className="needs-row-top">
-        <Pill tone="plain">{ATTENTION_LABEL[item.kind]}</Pill>
-      </span>
-      <span className="needs-row-text">
-        <MarkdownInline text={questionOf(item)} max={160} />
-      </span>
-    </a>
-  );
-}
-
 function Group({ title, n, children }: { title: string; n: number; children: React.ReactNode }) {
   if (n === 0) return null;
   return (
@@ -76,19 +61,18 @@ function Group({ title, n, children }: { title: string; n: number; children: Rea
 }
 
 /**
- * The left column: what waits on you, what FLIGHT will do unless you object, and what is held.
+ * The left column: what waits on you, and what FLIGHT will do unless you object. Held items are not
+ * here (#1543): a held item waits on a condition, not on the operator; FLIGHT's page lists them.
  * It lists the whole Needs you set, so its count is the tab's.
  */
 export function NeedsList({
   asks,
   defaulted,
-  held,
   selected,
   footer,
 }: {
   asks: readonly AttentionItem[];
   defaulted: readonly AttentionItem[];
-  held: readonly AttentionItem[];
   selected: string | null;
   /** Under the groups: what was handled today. */
   footer?: React.ReactNode;
@@ -103,11 +87,6 @@ export function NeedsList({
       <Group title="FLIGHT will do unless you object" n={defaulted.length}>
         {defaulted.map((i) => (
           <Row key={i.key} item={i} current={i.key === selected} />
-        ))}
-      </Group>
-      <Group title="Held" n={held.length}>
-        {held.map((i) => (
-          <HeldRow key={i.key} item={i} />
         ))}
       </Group>
       {footer}

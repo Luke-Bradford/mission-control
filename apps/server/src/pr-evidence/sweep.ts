@@ -9,6 +9,7 @@ import {
   withSection,
 } from "@mc/core";
 import type { GhRunner } from "../mcp/gh.ts";
+import { ownsPr } from "../ownership.ts";
 import type { Store } from "../store.ts";
 import type { PrEvidence } from "./capture.ts";
 
@@ -77,6 +78,8 @@ export function createEvidenceSweep(deps: {
         for (const pr of deps.store.pullRequests(deps.repoId)) {
           if (stopped) break;
           if (pr.state !== "open" || !pr.headSha) continue;
+          // another hub's PR (or a hand-opened one nobody asked this hub to review) is not ours to edit
+          if (!ownsPr(deps.store, deps.repoId, pr)) continue;
           const paths = deps.store.prFilePaths(deps.repoId, pr.number);
           const targetPaths =
             pr.changedFiles != null && paths.length === pr.changedFiles

@@ -122,6 +122,7 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "./machine-capacity.ts";
+import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
@@ -280,6 +281,8 @@ export interface Collectors {
 export interface SchedulerDeps {
   config: CcConfig;
   teamsEnabled?: boolean;
+  /** False on a preview: it polls GitHub but never moves a card. Default true. */
+  boardWrites?: boolean;
   store: Store;
   bus: ChangeBus;
   now?: () => number;
@@ -556,6 +559,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               `${repo.id} PR #${pr.number} is still a draft.`,
               pr.updatedAt + PR_WAIT_MS,
             );
+      const closed = await closeSettledQuestions({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+        deliver: deps.deliverDefault,
+      });
+      if (closed > 0) bus.emit("attention");
       const raised = raiseStalledCommsDecisions({ config, store, now: now() });
       if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
@@ -943,7 +954,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               flightSeat(config)?.session.repoId === repo.id,
             );
             changed.boards ||= r.boards;
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
               changed.boards = true;
           });
         }
@@ -964,7 +978,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
             // Whoever opened a ticket's PR, its card follows (the engine moves only its runs').
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
               changed.boards = true;
           });
           const error = store.status().find((s) => s.collector === collector)?.error;
@@ -1139,7 +1156,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               ).boards
             )
               boards = true;
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id)) boards = true;
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
+              boards = true;
           });
         }
       }

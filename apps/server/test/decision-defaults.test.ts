@@ -181,22 +181,37 @@ describe("decision defaults", () => {
     expect(decisionDefault(store, legacy)).toBeNull();
   });
 
-  it("starts the wait when a default is first stamped, not at an older ask's time", () => {
-    const key = "ask:old";
-    const asked = NOW - 5 * 86_400_000;
-    // briefed before defaults existed: the same ask, stored with no defaultAt
-    store.addBrief({ key, ...brief(), at: asked, defaultEligible: false });
-    store.addBrief({ key, ...brief(), at: NOW });
+  it("an operator question never carries a timed default", async () => {
+    const id = store.addQuestion({ agentId: "GUIDO-1", runId: "run", text: "Proceed?", at: ASKED });
+    store.setSeatSession({
+      seatId: "GUIDO-1",
+      runId: "run",
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: ASKED,
+    });
+    const key = `ask:${id}`;
+    // a brief with a recommended option: stored with no deadline, and the item has no due time
+    store.addBrief({ key, ...brief(), at: ASKED });
     const stored = store.briefs().get(key);
-    expect(stored?.askAt).toBe(asked);
-    expect(stored?.defaultAt).toBe(NOW + DECISION_DEFAULT_WAIT_MS);
+    expect(stored).toMatchObject({ recommendedOptionId: "go" });
+    expect(stored).not.toHaveProperty("defaultAt");
+    const later = NOW + 2 * 60 * 60_000;
+    const shown = attentionItems(config(), store, later).find((x) => x.key === key);
+    expect(shown?.defaultDueAt).toBeUndefined();
+    const deliver = vi.fn(async () => {});
+    expect(await applyDecisionDefaults({ config: config(), store, now: later, deliver })).toBe(0);
+    expect(deliver).not.toHaveBeenCalled();
+    // a defaultAt stored by an older brief does not apply either
+    expect(decisionDefault(store, item(key), config(), later)).toBeNull();
   });
 
   it("stores a recommendation on a protected brief without a deadline", () => {
     store.addBrief({
       key: `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`,
       ...brief(),
-      defaultEligible: false,
     });
     expect(store.briefs().get(`${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)).toMatchObject({
       recommendedOptionId: "go",
@@ -204,7 +219,7 @@ describe("decision defaults", () => {
     expect(store.briefs().get(`${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)).not.toHaveProperty("defaultAt");
   });
 
-  it("applies an ordinary reversible decision once at its deadline", async () => {
+  it("does not apply an ordinary reversible decision at a legacy deadline", async () => {
     // the question's run carries the ticket it is about (#1543)
     store.upsertRun({
       id: "run",
@@ -236,11 +251,10 @@ describe("decision defaults", () => {
     });
     store.addBrief({ key: `ask:${id}`, ...brief() });
     const deliver = vi.fn(async () => {});
-    expect(await applyDecisionDefaults({ config: config(), store, now: NOW, deliver })).toBe(1);
+    expect(await applyDecisionDefaults({ config: config(), store, now: NOW, deliver })).toBe(0);
     expect(attentionItems(config(), store, NOW).find((x) => x.key === `ask:${id}`)?.acked).toBe(
-      true,
+      false,
     );
-    expect(deliver).toHaveBeenCalledOnce();
-    expect(await applyDecisionDefaults({ config: config(), store, now: NOW + 1, deliver })).toBe(0);
+    expect(deliver).not.toHaveBeenCalled();
   });
 });
