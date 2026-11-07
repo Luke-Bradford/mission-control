@@ -3345,6 +3345,95 @@ describe("comms", () => {
   });
 });
 
+describe("answeredQuestionsOn", () => {
+  const mkRun = (id: string, ticket: string) =>
+    store.upsertRun(run({ id, ticket, agentId: "a", endedAt: 2 }));
+  const ask = (runId: string, text: string, answered: boolean, at: number) => {
+    const q = store.addQuestion({ agentId: "a", runId, text, at });
+    if (answered) {
+      store.answerQuestion(q, at + 1);
+      store.addFlightDecision({
+        at: at + 1,
+        kind: "answer",
+        seatId: "a",
+        targetRunId: null,
+        ref: null,
+        questionId: q,
+        about: text,
+        decision: `answer to ${text}`,
+        basis: "b",
+      });
+    }
+  };
+
+  it("returns the ticket's answered questions only, newest first, up to the limit", () => {
+    mkRun("r42", "mc#42");
+    mkRun("r7", "mc#7");
+    ask("r42", "old", true, 10);
+    ask("r42", "unanswered", false, 20);
+    ask("r7", "elsewhere", true, 30);
+    ask("r42", "new", true, 40);
+    expect(store.answeredQuestionsOn("mc#42", 10).map((d) => d.question)).toEqual(["new", "old"]);
+    expect(store.answeredQuestionsOn("mc#42", 1).map((d) => d.question)).toEqual(["new"]);
+    expect(store.answeredQuestionsOn("mc#42", 10)[0]?.answer).toBe("answer to new");
+  });
+});
+
+describe("question and answer retention", () => {
+  it("keeps an answered seat question and FLIGHT's answer for 365 days, other decisions and messages for 90", async () => {
+    const day = 86_400_000;
+    const q = store.addQuestion({ agentId: "a", runId: "r", text: "Which?", at: 0 });
+    store.answerQuestion(q, 1);
+    const decision = (kind: "answer" | "note", questionId: number | null) =>
+      store.addFlightDecision({
+        at: 0,
+        kind,
+        seatId: "a",
+        targetRunId: null,
+        ref: null,
+        questionId,
+        about: "x",
+        decision: kind,
+        basis: "b",
+      });
+    decision("answer", q);
+    decision("note", null);
+    store.addComms({ at: 0, from: "a", to: "b", ticket: null, text: "old" });
+    const count = (table: string) =>
+      (
+        (store as unknown as { db: DatabaseSync }).db
+          .prepare(`SELECT COUNT(*) AS n FROM ${table}`)
+          .get() as { n: number }
+      ).n;
+    for (let i = 0; i < 20; i++) await store.pruneHistory(100 * day);
+    expect([count("seat_questions"), count("flight_decisions"), count("comms")]).toEqual([1, 1, 0]);
+    expect(store.flightDecisionsAbout("answer", "x")).toEqual([]);
+    for (let i = 0; i < 20; i++) await store.pruneHistory(367 * day);
+    expect([count("seat_questions"), count("flight_decisions")]).toEqual([0, 0]);
+  });
+});
+
+describe("Comms question retention", () => {
+  it("keeps a question message and its reply for 365 days, a plain message for 90", async () => {
+    const day = 86_400_000;
+    const q = store.addComms({
+      at: 0,
+      from: "a",
+      to: "b",
+      ticket: null,
+      text: "q",
+      label: "question",
+    });
+    if (q === null) throw new Error("not stored");
+    store.addComms({ at: 1, from: "b", to: "a", ticket: null, text: "reply", replyTo: q.id });
+    store.addComms({ at: 2, from: "a", to: "b", ticket: null, text: "plain" });
+    for (let i = 0; i < 25; i++) await store.pruneHistory(100 * day);
+    expect(store.comms(0).map((m) => m.text)).toEqual(["q", "reply"]);
+    for (let i = 0; i < 25; i++) await store.pruneHistory(367 * day);
+    expect(store.comms(0)).toEqual([]);
+  });
+});
+
 describe("test lock history", () => {
   it("keeps one row per hold, closes the last call with the supplied clock, and frees runs", () => {
     store.upsertRun(run({ ticket: "MC-1" }));
@@ -3725,7 +3814,7 @@ describe("hub retention", () => {
         INSERT INTO briefs (key,context,recommendation,options,basis,at) VALUES
         ('brief:open','context','recommendation','[]','basis',0),
         ('brief:cleared','context','recommendation','[]','basis',0);`);
-      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(91 * 86_400_000);
       expect(db.prepare("SELECT key FROM briefs ORDER BY key").all()).toEqual([
         { key: "brief:open" },
       ]);
@@ -3756,7 +3845,7 @@ describe("hub retention", () => {
           ('seat','old',0,1), ('seat','unacked',0,0);
         INSERT INTO question_closures (key,ask_at,kind,reason,by,question,ticket,operator,at) VALUES
           ('ask:1',0,'returned','r','flight-1','q',NULL,1,0);`);
-      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
+      for (let i = 0; i < 24; i++) await store.pruneHistory(91 * 86_400_000);
       expect(db.prepare("SELECT key FROM attention_notes ORDER BY key").all()).toEqual([
         { key: "open" },
       ]);
@@ -3771,6 +3860,12 @@ describe("hub retention", () => {
           table === "drafts" || table === "crew_errors" ? { n: 1 } : { n: 0 },
         );
       expect(db.prepare("SELECT state FROM board_moves").all()).toEqual([{ state: "pending" }]);
+      // an answered question to FLIGHT is kept a year, not ninety days
+      expect(db.prepare("SELECT answered_at FROM seat_questions ORDER BY id").all()).toEqual([
+        { answered_at: 1 },
+        { answered_at: null },
+      ]);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(366 * 86_400_000);
       expect(db.prepare("SELECT answered_at FROM seat_questions").all()).toEqual([
         { answered_at: null },
       ]);
@@ -3796,7 +3891,7 @@ describe("hub retention", () => {
         INSERT INTO run_pushes VALUES ('old-run','sha',0);
         INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
         INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
-      for (let i = 0; i < 14; i++) await store.pruneHistory(366 * 86_400_000);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(366 * 86_400_000);
       for (const table of [
         "runs",
         "reviews",
