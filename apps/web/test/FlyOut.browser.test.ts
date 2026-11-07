@@ -14,6 +14,21 @@ import { CONFIG } from "./fixtures.ts";
 const { renderAt } = browserSession();
 const HARNESS = "test/demoBrowser.html";
 const SHOTS = process.env.MC_SHOT_DIR;
+/** One stored message, so a Comms conversation has a message list to measure. */
+const FIXTURE_MESSAGE = {
+  id: "comms:1",
+  at: 1_700_000_000_000,
+  from: "inco-1",
+  to: "CAPCOM",
+  text: "A short note for the conversation.",
+  ticket: null,
+  label: null,
+  ref: null,
+  replyTo: null,
+  mentions: [],
+  reactions: [],
+  operator: false,
+};
 
 const open = (at: string, width = 1600, height = 900, colorScheme: "light" | "dark" = "light") =>
   renderAt({
@@ -76,12 +91,22 @@ describeRendered("The FLIGHT fly-out in the production App", () => {
       seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "stopped", live: false },
       decisions: [],
     },
-    "/api/comms/flight": { messages: [] },
+    "/api/comms/flight": { messages: [FIXTURE_MESSAGE] },
     "/api/comms/crew": { messages: [] },
     "/api/comms/mentions": { mentions: [] },
     "/api/comms/pins": { messages: [] },
-    "/api/comms/agents/inco-1": { messages: [], inbox: [], contacts: [], unread: 0 },
-    "/api/comms/agents/inco-1?summary=1": { messages: [], inbox: [], contacts: [], unread: 0 },
+    "/api/comms/agents/inco-1": {
+      messages: [FIXTURE_MESSAGE],
+      inbox: [],
+      contacts: [],
+      unread: 0,
+    },
+    "/api/comms/agents/inco-1?summary=1": {
+      messages: [FIXTURE_MESSAGE],
+      inbox: [],
+      contacts: [],
+      unread: 0,
+    },
   };
   const openStopped = async (path: string, width: number, height = 900) => {
     const page = await renderAt({

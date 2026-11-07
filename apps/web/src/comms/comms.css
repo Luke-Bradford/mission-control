@@ -864,7 +864,7 @@ a.comms-ref {
 
 /*
  * The layout answers to the width the page gets, which the FLIGHT fly-out takes 380px of. Narrow means
- * the conversation keeps its width and a row's height and the graph and traffic scroll below it:
+ * the conversation keeps its width and a row of its own, the larger of 560px and 72% of the window (400px or more for the messages) and the graph and traffic scroll below it:
  *  - 1016px of page is a 1100px window with the fly-out folded to its 48px rail (its default);
  *  - an agent, inbox or contact view carries its own 220px column of contacts, so it needs
  *    280 + 220 + 420 for the conversation + a 300px graph column, about 1340px of page, before it
@@ -873,7 +873,7 @@ a.comms-ref {
 @container (max-width: 1016px) {
   .comms-grid {
     grid-template-columns: 240px minmax(0, 1fr);
-    grid-template-rows: max(420px, calc(62 * var(--vh))) auto;
+    grid-template-rows: max(560px, calc(72 * var(--vh))) auto;
     overflow-y: auto;
   }
   .comms-right {
@@ -889,7 +889,7 @@ a.comms-ref {
 @container (max-width: 1340px) {
   .comms-grid:has(.comms-agent) {
     grid-template-columns: 240px minmax(0, 1fr);
-    grid-template-rows: max(420px, calc(62 * var(--vh))) auto;
+    grid-template-rows: max(560px, calc(72 * var(--vh))) auto;
     overflow-y: auto;
   }
   .comms-grid:has(.comms-agent) .comms-right {
