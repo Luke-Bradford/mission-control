@@ -130,6 +130,7 @@ export function AwayModal() {
   const [attempted, setAttempted] = useState(false);
   const [focusKey, setFocusKey] = useState(0);
   // Cleared on open as well as close, so a draft left by a save that ended while closed is not shown.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `open` is the trigger, not a value read
   useEffect(() => {
     setDraft(null);
     setFailure(null);
