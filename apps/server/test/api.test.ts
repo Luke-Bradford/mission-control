@@ -1,4 +1,4 @@
-import { joinMapGraph, unpackMap } from "@mc/core";
+import { FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -1038,6 +1038,170 @@ describe("Comms API", () => {
     });
   });
 
+  it("lists recent Comms messages newest first, after the since cursor, within the cap", async () => {
+    const first = commsRow("alpha", "beta", "one", clock, null, "PR 1", "question");
+    const second = commsRow("beta", "alpha", "two");
+    const third = commsRow("alpha", "crew", "three");
+    await withCommsApp(async (comms) => {
+      const all = await comms.inject({ method: "GET", url: "/api/comms/feed" });
+      expect(all.statusCode).toBe(200);
+      expect(all.json().messages).toEqual([
+        {
+          id: third.id,
+          at: third.at,
+          from: "alpha",
+          to: "crew",
+          label: null,
+          ref: null,
+          text: "three",
+        },
+        {
+          id: second.id,
+          at: second.at,
+          from: "beta",
+          to: "alpha",
+          label: null,
+          ref: null,
+          text: "two",
+        },
+        {
+          id: first.id,
+          at: first.at,
+          from: "alpha",
+          to: "beta",
+          label: "question",
+          ref: "PR 1",
+          text: "one",
+        },
+      ]);
+      const after = await comms.inject({
+        method: "GET",
+        url: `/api/comms/feed?since=${encodeURIComponent(first.id)}`,
+      });
+      expect(after.json().messages.map((m: { id: string }) => m.id)).toEqual([third.id, second.id]);
+      const capped = await comms.inject({ method: "GET", url: "/api/comms/feed?limit=1" });
+      expect(capped.json().messages.map((m: { id: string }) => m.id)).toEqual([third.id]);
+      commsRow("alpha", "beta", "y".repeat(500));
+      const long = await comms.inject({ method: "GET", url: "/api/comms/feed?limit=1" });
+      expect(long.json().messages[0].text).toHaveLength(280);
+      const tooMany = await comms.inject({ method: "GET", url: "/api/comms/feed?limit=100000" });
+      expect(tooMany.statusCode).toBe(400);
+      const bad = await comms.inject({ method: "GET", url: "/api/comms/feed?since=nope" });
+      expect(bad.statusCode).toBe(400);
+    });
+  });
+
+  it("gives each open item its message text, capped, and lists open seat questions", async () => {
+    const long = "x".repeat(500);
+    const short = commsRow("alpha", "beta", "Which approach?", clock, null, undefined, "question");
+    const big = commsRow("alpha", "beta", long, clock, null, undefined, "blocker");
+    const askedAt = clock++;
+    const id = store.addQuestion({
+      agentId: "alpha",
+      runId: "r-alpha",
+      text: "May I change the schema?",
+      at: askedAt,
+    });
+    await withCommsApp(async (comms) => {
+      const items = (await comms.inject({ method: "GET", url: "/api/comms/open" })).json().items;
+      expect(items.find((i: { id: string }) => i.id === short.id).text).toBe("Which approach?");
+      const bigText = items.find((i: { id: string }) => i.id === big.id).text as string;
+      expect(bigText.length).toBeLessThan(long.length);
+      expect(bigText.startsWith("xxx")).toBe(true);
+      expect(items).toContainEqual(
+        expect.objectContaining({
+          id: `ask:${id}`,
+          label: "question",
+          from: "alpha",
+          to: "flight",
+          text: "May I change the schema?",
+          waitedMs: clock - askedAt,
+        }),
+      );
+      store.answerQuestion(id, clock);
+      const after = (await comms.inject({ method: "GET", url: "/api/comms/open" })).json().items;
+      expect(after.some((i: { id: string }) => i.id === `ask:${id}`)).toBe(false);
+    });
+  });
+
+  it("gives an open seat question FLIGHT's triage window, and the operator's when no FLIGHT seat exists", async () => {
+    const askedAt = clock - 16 * 60_000;
+    const id = store.addQuestion({
+      agentId: "alpha",
+      runId: "r-alpha",
+      text: "Schema?",
+      at: askedAt,
+    });
+    await withCommsApp(async (comms) => {
+      const item = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.find((i: { id: string }) => i.id === `ask:${id}`);
+      expect(item).toMatchObject({
+        waitedMs: 16 * 60_000,
+        nextStep: "flight",
+        nextAt: askedAt + FLIGHT_TRIAGE_WAIT_MS,
+      });
+    });
+    clock = askedAt + FLIGHT_TRIAGE_WAIT_MS + 1;
+    await withCommsApp(async (comms) => {
+      const item = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.find((i: { id: string }) => i.id === `ask:${id}`);
+      expect(item).toMatchObject({
+        nextStep: "flight-not-triaging",
+        nextAt: askedAt + FLIGHT_TRIAGE_WAIT_MS,
+      });
+    });
+    const full = commsConfig();
+    if (!full.crew) throw new Error("missing crew");
+    const noFlight = buildApp({
+      config: {
+        ...full,
+        crew: {
+          ...full.crew,
+          sessions: full.crew.sessions.map((s) => ({
+            ...s,
+            seats: s.seats.filter((seat) => seat.role !== "FLIGHT"),
+          })),
+        },
+      },
+      store,
+      bus,
+      now: () => clock,
+      knownSecrets: async () => [],
+      deliverComms: vi.fn(),
+    });
+    await noFlight.ready();
+    try {
+      const item = (await noFlight.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.find((i: { id: string }) => i.id === `ask:${id}`);
+      expect(item).toMatchObject({ to: "CAPCOM", nextStep: "operator", nextAt: clock });
+    } finally {
+      await noFlight.close();
+    }
+  });
+
+  it("shows a seat question FLIGHT passed on as the operator's", async () => {
+    const id = store.addQuestion({
+      agentId: "alpha",
+      runId: "r-alpha",
+      text: "Schema?",
+      at: clock - 25 * 60_000,
+    });
+    store.passQuestion(id, clock - 24 * 60_000);
+    await withCommsApp(async (comms) => {
+      const item = (await comms.inject({ method: "GET", url: "/api/comms/open" }))
+        .json()
+        .items.find((i: { id: string }) => i.id === `ask:${id}`);
+      expect(item).toMatchObject({
+        to: "CAPCOM",
+        nextStep: "operator",
+        nextAt: clock - 24 * 60_000,
+      });
+    });
+  });
+
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
     const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");
@@ -1413,6 +1577,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/traffic"],
   ["GET", "/api/comms/chatter"],
   ["GET", "/api/comms/open"],
+  ["GET", "/api/comms/feed"],
   ["POST", "/api/comms/read", { scope: "crew", messageId: "comms:1" }],
   ["POST", "/api/comms", { to: "guido-1", text: "hello" }],
   ["POST", "/api/comms/comms:1/reactions", { reaction: "seen" }],

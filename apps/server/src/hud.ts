@@ -1039,6 +1039,25 @@ function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage
   return { ...triage, liveSince: Math.max(triage.liveSince, runawayLiftedAt(store)) };
 }
 
+/**
+ * How an open seat question (`ask:<id>`) is triaged now: null with no FLIGHT seat (the operator's
+ * at once), else whether FLIGHT is triaging and when its triage window for a question asked at
+ * `askedAt` ends. The same window the attention builder gives that item.
+ */
+export function seatQuestionTriage(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  askedAt: number,
+): { triaging: boolean; dueAt: number } | null {
+  const triage = flightTriage(config, store, now);
+  if (triage === null) return null;
+  return {
+    triaging: triage.triaging,
+    dueAt: Math.max(askedAt, triage.liveSince) + FLIGHT_TRIAGE_WAIT_MS,
+  };
+}
+
 function flightTriageNow(config: CcConfig, store: Store, now: number): FlightTriage | null {
   const found = flightSeat(config);
   if (found === null) return null;

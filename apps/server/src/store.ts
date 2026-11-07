@@ -6432,6 +6432,28 @@ export class Store {
       .all(COMMS_CREW) as Row[];
     return rows.map((row) => this.commsRow(row) as CommsRow & { label: "question" | "blocker" });
   }
+  /** The newest `limit` messages with an id above `sinceId`, newest first; text cut to `textMax`. */
+  commsFeed(
+    sinceId: number,
+    limit: number,
+    textMax: number,
+  ): Pick<CommsRow, "id" | "at" | "from" | "to" | "label" | "ref" | "text">[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, at, from_id, to_id, label, ref, substr(text, 1, ?) AS text FROM comms
+         WHERE id > ? ORDER BY id DESC LIMIT ?`,
+      )
+      .all(textMax, sinceId, limit) as Row[];
+    return rows.map((r) => ({
+      id: `comms:${Number(r.id)}`,
+      at: Number(r.at),
+      from: r.from_id as string,
+      to: r.to_id as string,
+      label: (r.label as CommsLabel | null) ?? null,
+      ref: (r.ref as string | null) ?? null,
+      text: r.text as string,
+    }));
+  }
   markCommsScopeRead(scope: string, messageId: string): void {
     const id = commsMessageNumber(messageId);
     if (id === null) return;
