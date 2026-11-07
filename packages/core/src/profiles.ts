@@ -26,13 +26,12 @@ export {
  * whether a plan is required, the reviewer, the CI checks and the try and round limits. The file
  * reader is the server's; this is the shape, the built-ins, the routing and the texts.
  */
+import { loopOf } from "./loop-config.ts";
 import type { LoopPhase } from "./types.ts";
 
 /** What `/api/config` gives as the source when no profiles file exists and the built-ins apply. */
 export const BUILTIN_PROFILES_SOURCE = "built-in";
 export const PROFILE_NAME = /^[a-z][a-z0-9-]{0,31}$/;
-/** The sizes that go to small-change when no template label matches. */
-export const SMALL_SIZES: readonly string[] = ["XS", "S"];
 /** The model a full-depth review runs on. */
 export const REVIEW_FULL_MODEL = "opus";
 export const PROFILE_REASON_MAX = 300;
@@ -93,7 +92,26 @@ const BUILD_PROFILES: readonly Profile[] = [
   },
   {
     name: "small-change",
-    labels: ["chore", "test", "docs"],
+    labels: ["chore", "test"],
+    steps: [
+      { name: "implement", phase: "working" },
+      { name: "verify", phase: "ci" },
+      { name: "review", phase: "review" },
+      { name: "draft PR", phase: null },
+    ],
+    checklist: checklist(
+      "Only the paths this ticket type allows changed (tests for test, docs for docs)",
+      "No existing test weakened, skipped or deleted",
+    ),
+    planRequired: false,
+    reviewer: { role: REVIEWER, depth: "light" },
+    checks: [],
+    tries: 2,
+    rounds: 2,
+  },
+  {
+    name: "docs",
+    labels: ["docs"],
     steps: [
       { name: "implement", phase: "working" },
       { name: "verify", phase: "ci" },
@@ -373,7 +391,79 @@ const DESCRIPTIONS: {
   },
   {
     name: "small-change",
-    trigger: "chore, test or docs ticket",
+    trigger: "chore or test ticket",
+    budget: 120000,
+    rounds: 2,
+    steps: ["implement", "verify", "review", "draft PR"],
+    nodes: [
+      {
+        name: "implement",
+        phase: null,
+        role: "GUIDO or INCO",
+        checks: [
+          {
+            kind: "rule",
+            text: "Only the paths this ticket type allows changed (tests for test, docs for docs)",
+          },
+        ],
+      },
+      {
+        name: "verify",
+        phase: null,
+        role: "Mission Control runs it",
+        checks: [
+          {
+            kind: "cmd",
+            text: "Full test suite passes (takes the test lock)",
+          },
+          {
+            kind: "rule",
+            text: "No existing test weakened, skipped or deleted",
+          },
+        ],
+        max: 2,
+        retry: "fail → back to implement · max 2",
+      },
+      {
+        name: "review",
+        phase: null,
+        role: "RETRO, fresh eyes",
+        checks: [
+          {
+            kind: "review",
+            text: "Spec verdict: does what the ticket asks; every acceptance criterion has evidence",
+          },
+          {
+            kind: "review",
+            text: "Quality verdict: no Critical or Important findings (Minor ones are logged, not looped)",
+          },
+          {
+            kind: "rule",
+            text: "Blast radius: callers and shared code listed by Mission Control were checked",
+          },
+          {
+            kind: "review",
+            text: "Pages it touches opened in a real browser, with screenshots",
+          },
+        ],
+        retry: "Critical or Important findings → implement → verify",
+      },
+      {
+        name: "draft PR",
+        phase: null,
+        role: "GUIDO or INCO",
+        checks: [
+          {
+            kind: "rule",
+            text: "PR is open as a draft",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    name: "docs",
+    trigger: "docs ticket",
     budget: 120000,
     rounds: 2,
     steps: ["implement", "verify", "review", "draft PR"],
@@ -660,7 +750,7 @@ export const DEFAULT_PROFILES: readonly Profile[] = DESCRIPTIONS.map((d) => {
     (n) => d.name !== "feature" || !["plan", "go/no-go"].includes(n.name),
   );
   let path = d.steps.filter((n) => d.name !== "feature" || !["plan", "go/no-go"].includes(n));
-  if (["feature", "bugfix", "small-change"].includes(d.name)) {
+  if (["feature", "bugfix", "small-change", "docs"].includes(d.name)) {
     path = [
       ...path.filter((n) => !["draft PR", "verify", "review"].includes(n)),
       "draft PR",
@@ -694,10 +784,6 @@ export const DEFAULT_PROFILES: readonly Profile[] = DESCRIPTIONS.map((d) => {
   };
 });
 
-/** The profile a card with no template label falls back to, by Size. */
-const fallbackName = (size: string | null): string =>
-  size !== null && SMALL_SIZES.includes(size) ? "small-change" : "feature";
-
 /**
  * Picks the profile for a card: the first in `ps` order with one of the card's labels, else
  * small-change at Size XS or S and feature otherwise. Throws if the fallback is missing (the
@@ -713,10 +799,14 @@ export function routeProfile(
     const label = profile.labels.find((l) => labels.includes(l));
     if (label !== undefined) return { profile, route: { by: "label", label } };
   }
-  const name = fallbackName(size);
-  const profile = ps.find((p) => p.name === name && !p.orchestrationOnly);
-  if (profile === undefined) throw new Error(`no profile named "${name}"`);
-  return { profile, route: { by: "size", size } };
+  const loops = ps.flatMap((profile) => {
+    const loop = loopOf(profile);
+    return loop === null ? [] : [{ profile, loop }];
+  });
+  const sized = size === null ? undefined : loops.find((l) => l.loop.trigger.sizes.includes(size));
+  const chosen = sized ?? loops.find((l) => l.loop.trigger.fallback === true);
+  if (chosen === undefined) throw new Error("no profile is the fallback");
+  return { profile: chosen.profile, route: { by: "size", size } };
 }
 
 /**
