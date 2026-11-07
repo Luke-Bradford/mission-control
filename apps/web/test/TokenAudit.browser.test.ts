@@ -3,6 +3,7 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
+import { tracePath } from "../src/router.ts";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { tokenAuditFixture } from "./tokenAuditFixture.ts";
 
@@ -50,6 +51,12 @@ describeRendered("Audit Tokens tab in a browser", () => {
                   return r.width > 0 && r.height > 0 && (r.width < 24 || r.height < 24);
                 })
                 .map((e) => e.textContent),
+              pokingOut: [...document.querySelectorAll(".ta-table")]
+                .filter((t) => {
+                  const box = t.closest(".panel")?.getBoundingClientRect();
+                  return !!box && t.getBoundingClientRect().right > box.right + 0.5;
+                })
+                .map((t) => t.className),
               clipped: [...document.querySelectorAll(".ta .panel, .ta-fig")]
                 .filter((e) => e.scrollWidth > e.clientWidth)
                 .map((e) => e.className),
@@ -58,6 +65,7 @@ describeRendered("Audit Tokens tab in a browser", () => {
           );
           expect(m.sideways, `${colorScheme}: sideways scroll`).toBeLessThanOrEqual(0);
           expect(m.small, `${colorScheme}: small controls`).toEqual([]);
+          expect(m.pokingOut, `${colorScheme}: tables wider than their panel`).toEqual([]);
           expect(m.clipped, `${colorScheme}: clipped boxes`).toEqual([]);
           for (const fig of m.figs) expect(fig).toMatch(/last 7 days|Turn on audit/);
           if (SHOTS)
@@ -88,10 +96,12 @@ describeRendered("Audit Tokens tab in a browser", () => {
           () => [...document.querySelectorAll(".ta a[href]")].map((a) => a.getAttribute("href")),
           undefined,
         );
-        expect(hrefs).toEqual(["/agent/inco-1?trace=run-4821", "/agent/flight-1?trace=run-4790"]);
-        await page.click('.ta a[href$="run-4821"]');
+        const runs = tokenAuditFixture().topRuns;
+        const paths = runs.map((r) => tracePath(r.agentId, r.runId));
+        expect(hrefs).toEqual(paths);
+        await page.click(".ta-run");
         const at = await page.evaluate(() => location.pathname + location.search, undefined);
-        expect(at).toBe("/agent/inco-1?trace=run-4821");
+        expect(at).toBe(paths[0]);
       } finally {
         await page.close();
       }

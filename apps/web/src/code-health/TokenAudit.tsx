@@ -13,6 +13,16 @@ const ROWS = 10;
 /** Tokens with their unit: `820 tokens`, `61.0M tokens`, `2.71B tokens`. */
 const tokens = (n: number): string =>
   n >= 1e9 ? `${(n / 1e9).toFixed(2)}B tokens` : `${kTokens(n)} tokens`;
+/** The same without the unit, for a column whose header names it: `820`, `61.0M`, `2.71B`. */
+const bare = (n: number): string => (n >= 1e9 ? `${(n / 1e9).toFixed(2)}B` : kTokens(n));
+/** `guido-2:20261105T181028Z` is a run started at that UTC time; anything else has no time to show. */
+const RUN_STAMP = /:(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})\d{2}Z$/;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export function runLabel(agentId: string, runId: string): string {
+  const m = RUN_STAMP.exec(runId);
+  if (!m) return agentId;
+  return `${agentId} · ${Number(m[3])} ${MONTHS[Number(m[2]) - 1] ?? ""} ${m[4]}:${m[5]}`;
+}
 const count = (n: number, noun: string): string => `${n.toLocaleString("en-GB")} ${noun}`;
 const days = (n: number): string => (n === 1 ? "the last day" : `the last ${n} days`);
 
@@ -96,7 +106,7 @@ function Named({ rows, label }: { rows: TokenAuditNamed[]; label: string }) {
 
 function Runs({ rows }: { rows: TokenAuditRun[] }) {
   return (
-    <table className="ta-table">
+    <table className="ta-table ta-fixed ta-runs">
       <thead>
         <tr>
           <th scope="col">Run</th>
@@ -104,10 +114,10 @@ function Runs({ rows }: { rows: TokenAuditRun[] }) {
             Calls
           </th>
           <th scope="col" className="ta-n">
-            Peak context
+            Peak context (tokens)
           </th>
           <th scope="col" className="ta-n">
-            Re-read
+            Re-read (tokens)
           </th>
           <th scope="col" className="ta-n">
             After report
@@ -123,13 +133,18 @@ function Runs({ rows }: { rows: TokenAuditRun[] }) {
           return (
             <tr key={r.runId}>
               <th scope="row">
-                <a href={to} onClick={(e) => followLink(e, to)}>
-                  {r.agentId} · {r.runId}
+                <a
+                  className="ta-run"
+                  href={to}
+                  title={`${r.runId} (times are UTC)`}
+                  onClick={(e) => followLink(e, to)}
+                >
+                  {runLabel(r.agentId, r.runId)}
                 </a>
               </th>
               <td className="ta-n">{r.calls.toLocaleString("en-GB")}</td>
-              <td className="ta-n">{tokens(r.peakContext)}</td>
-              <td className="ta-n">{tokens(r.reread)}</td>
+              <td className="ta-n">{bare(r.peakContext)}</td>
+              <td className="ta-n">{bare(r.reread)}</td>
               <td className="ta-n">
                 {percent(r.readAfterReportShare && r.readAfterReportShare * 100)}
               </td>
@@ -189,7 +204,7 @@ function Body({ view }: { view: TokenAuditView }) {
           note={
             view.controller
               ? `${tokens(view.controller.cacheRead)} re-read, ${win}`
-              : "Turn on audit.controllerSessions in config to count them"
+              : "Set audit.controller_sessions: true in config.yaml to count them"
           }
         />
       </ul>
@@ -209,7 +224,7 @@ function Body({ view }: { view: TokenAuditView }) {
             <Runs rows={view.topRuns} />
           </Panel>
           <Panel title="By role" sub={`Runs started in ${win}`}>
-            <table className="ta-table">
+            <table className="ta-table ta-fixed">
               <thead>
                 <tr>
                   <th scope="col">Role</th>
@@ -220,10 +235,10 @@ function Body({ view }: { view: TokenAuditView }) {
                     Calls a run
                   </th>
                   <th scope="col" className="ta-n">
-                    Median peak context
+                    Median peak context (tokens)
                   </th>
                   <th scope="col" className="ta-n">
-                    Re-read
+                    Re-read (tokens)
                   </th>
                   <th scope="col" className="ta-n">
                     Rewrites
@@ -236,8 +251,8 @@ function Body({ view }: { view: TokenAuditView }) {
                     <th scope="row">{r.role}</th>
                     <td className="ta-n">{r.runs.toLocaleString("en-GB")}</td>
                     <td className="ta-n">{r.runs > 0 ? Math.round(r.calls / r.runs) : "—"}</td>
-                    <td className="ta-n">{tokens(r.medianPeakContext)}</td>
-                    <td className="ta-n">{tokens(r.reread)}</td>
+                    <td className="ta-n">{bare(r.medianPeakContext)}</td>
+                    <td className="ta-n">{bare(r.reread)}</td>
                     <td className="ta-n">{r.rewrites.toLocaleString("en-GB")}</td>
                   </tr>
                 ))}

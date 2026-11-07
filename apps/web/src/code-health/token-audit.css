@@ -135,3 +135,24 @@
 .ta-missing span {
   color: var(--fg-2);
 }
+.ta-fixed {
+  table-layout: fixed;
+}
+.ta-fixed thead th.ta-n {
+  white-space: normal;
+  vertical-align: bottom;
+}
+.ta-runs th:not(:first-child),
+.ta-runs td {
+  width: 13%;
+}
+.ta-runs th:first-child {
+  width: auto;
+  max-width: none;
+}
+.ta-run {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

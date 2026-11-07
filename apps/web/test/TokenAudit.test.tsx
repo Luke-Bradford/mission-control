@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { TokenAudit } from "../src/code-health/TokenAudit.tsx";
 import { hub, RESOURCES } from "../src/data.ts";
+import { tracePath } from "../src/router.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { tokenAuditFixture } from "./tokenAuditFixture.ts";
 
@@ -33,10 +34,15 @@ it("links every heaviest run to its trace and never a bare id", async () => {
   render(<TokenAudit />);
   const panel = (await screen.findByRole("region", { name: "Heaviest runs" })) as HTMLElement;
   const links = within(panel).getAllByRole("link");
-  expect(links.map((a) => a.getAttribute("href"))).toEqual([
-    "/agent/inco-1?trace=run-4821",
-    "/agent/flight-1?trace=run-4790",
-  ]);
+  expect(links.map((a) => a.getAttribute("href"))).toEqual(
+    tokenAuditFixture().topRuns.map((r) => tracePath(r.agentId, r.runId)),
+  );
+  // A person reads the agent and when it started; the whole id stays one hover away.
+  expect(links.map((a) => a.textContent)).toContain("flight-1 · 1 Nov 18:10");
+  for (const a of links) {
+    expect(a.textContent).not.toMatch(/\d{8}T\d{6}Z/);
+    expect(a.getAttribute("title")).toMatch(/\d{8}T\d{6}Z/);
+  }
 });
 
 it("names the gap on the unlinked tables and lists the figures not recorded yet", async () => {
@@ -118,6 +124,9 @@ it("says when the hub is not recording controller sessions, and shows them when 
   const first = render(<TokenAudit />);
   expect((await screen.findByRole("list", { name: "Token figures" })).textContent).toContain(
     "Not recorded: switched off",
+  );
+  expect(screen.getByRole("list", { name: "Token figures" }).textContent).toContain(
+    "audit.controller_sessions",
   );
   first.unmount();
   hub.clear();
