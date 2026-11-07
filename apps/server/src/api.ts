@@ -4465,7 +4465,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 knownSecrets: deps.knownSecrets ?? (async () => []),
                 now,
                 seatSender: false,
-                wakeUnlabelled: true,
                 notify: async (seatId, text) => {
                   await sup.message(seatId, text, { interrupt: b.interrupt === true });
                   delivered = true;
@@ -4481,7 +4480,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
             if (delivered) store.markCommsInboxRead(id, [sent.id], now());
-            return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
+            // an exact repeat is a success that says so, with the first copy's state
+            return sent.repeat === true
+              ? { ok: true, ...commsSendState(store, sent.id, true) }
+              : { ok: true };
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(

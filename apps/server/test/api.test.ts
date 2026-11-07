@@ -1583,6 +1583,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/comms/read", { scope: "crew", messageId: "comms:1" }],
   ["POST", "/api/comms", { to: "guido-1", text: "hello" }],
   ["POST", "/api/comms/comms:1/reactions", { reaction: "seen" }],
+  ["GET", "/api/comms/comms:1/reply-route"],
+  ["GET", "/api/comms/comms:1/state"],
+  ["POST", "/api/attention/unknown/choose", { optionId: "yes", briefAt: 1 }],
+  ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
   ["DELETE", "/api/comms/comms:1/pin", {}],
   ["GET", "/api/agents/shop-app-ta/files"],
@@ -2516,6 +2520,7 @@ describe("local access", () => {
       if (url.startsWith("/api/design-previews")) continue; // the design preview tests below cover them
       if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
+      if (/^\/api\/attention\/unknown\/choo?[si]/.test(url)) continue; // needs an open question; choose.test.ts covers it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
       if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
@@ -2675,7 +2680,7 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
-      if (url === "/api/attention/unknown") {
+      if (url === "/api/attention/unknown" || /^\/api\/attention\/unknown\/choo?[si]/.test(url)) {
         expect(r.statusCode).toBe(404);
         continue;
       }
@@ -2962,6 +2967,7 @@ describe("local access", () => {
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
+            .replace(/\/attention\/[^/]+\/(choose|choice)$/, "/attention/:key/$1")
             .replace(
               /\/attention\/[^/]+\/replies\/[^/]+\/post$/,
               "/attention/:key/replies/:replyId/post",
