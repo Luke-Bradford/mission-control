@@ -165,6 +165,8 @@ import {
   flightState,
   flightTriageItems,
   operatorItems,
+  unhandledReasons,
+  wakeReasons,
 } from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
@@ -600,6 +602,32 @@ describe("wait_on", () => {
       at: NOW,
     });
   });
+
+  it("waits on the original target when given a wait_over signal's id", async () => {
+    const r = await call("wait_on", waitArgs({ target: `wait_over:wait_over:mc#7:${NOW}:${NOW}` }));
+    expect(r.isError).toBeUndefined();
+    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
+    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
+      ref: "mc#7",
+      about: "mc#7: waiting on its PR merging",
+    });
+  });
+
+  it.each([
+    ["items", `pr:mc#7:${NOW}`, `pr:mc#7:${NOW}`],
+    ["signals", `hub_error:loop:engine:${NOW}`, `loop:engine:${NOW}`],
+    ["signals", `merge_stalled:mc#9:1559:${NOW}`, `mc#9:1559:${NOW}`],
+  ])(
+    "keeps a reason's own key whole, so a wait on it handles the %s fact %s",
+    async (category, fact, target) => {
+      expect((await call("wait_on", waitArgs({ target }))).isError).toBeUndefined();
+      expect(Object.keys(flightWaits(store))).toEqual([target]);
+      const reasons = wakeReasons("", JSON.stringify({ [category]: [fact] }));
+      expect(unhandledReasons(store, reasons, NOW - 1, new Set(reasons.map((x) => x.id)))).toEqual(
+        [],
+      );
+    },
+  );
 
   it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
     expect(

@@ -729,13 +729,40 @@ export function flightSignals(i: {
     );
   }
   const waits = flightWaits(store);
+  const ended = Object.values(waits).filter((w) => w.until <= now);
+  const decisions =
+    ended.length === 0
+      ? []
+      : store
+          .flightDecisions(Math.min(...ended.map((w) => w.until)), 500)
+          .filter((d) => d.kind !== "wait");
   for (const [target, wait] of Object.entries(waits)) {
+    // a wait on a wait_over key is a nest from before waits kept their original target
+    if (waitTargetOf(target) !== target) {
+      delete waits[target];
+      continue;
+    }
     // what it waited on has settled on its own: nothing to look at again
     if (waitResolved(store, repo, target)) {
       delete waits[target];
       continue;
     }
     if (wait.until > now) continue;
+    // FLIGHT dealt with it since it ended: a decision on the target, or naming the signal's key
+    const signalKey = `${target}:${wait.until}`;
+    if (
+      decisions.some(
+        (d) =>
+          d.at >= wait.until &&
+          (d.ref === target ||
+            d.seatId === target ||
+            d.about.includes(`wait_over:${signalKey}`) ||
+            d.decision.includes(`wait_over:${signalKey}`)),
+      )
+    ) {
+      delete waits[target];
+      continue;
+    }
     raise(
       "wait_over",
       `${target}:${wait.until}`,
@@ -747,7 +774,11 @@ export function flightSignals(i: {
     store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));
   }
   for (const [id, signal] of Object.entries(state.signals)) {
-    if (signal.kind === "wait_over" && signal.toldAt === null && !active.has(id)) {
+    if (
+      signal.kind === "wait_over" &&
+      !active.has(id) &&
+      (signal.toldAt === null || signal.key.includes("wait_over:"))
+    ) {
       delete state.signals[id];
     }
   }
@@ -885,10 +916,21 @@ export function flightWaits(store: Store): Record<string, FlightWait> {
   return stored<Record<string, FlightWait>>(store, FLIGHT_WAITS_SETTING, {});
 }
 
+/**
+ * The target a wait is really on. FLIGHT may pass a `wait_over` signal's id back as the target; that
+ * waits on the original target again, so ending the wait never wraps the key in another `wait_over:`.
+ */
+export const waitTargetOf = (target: string): string => {
+  let t = target.trim();
+  // each wait_over: wrapped the key in the time its wait ended; the target's own trailing time stays
+  while (t.startsWith("wait_over:")) t = t.slice("wait_over:".length).replace(/:\d{10,}$/, "");
+  return t;
+};
+
 /** Keeps a wait; a later one on the same target replaces it. Entries a week past their time go. */
 export function recordFlightWait(store: Store, target: string, wait: FlightWait): void {
   const waits = flightWaits(store);
-  waits[target] = wait;
+  waits[waitTargetOf(target)] = wait;
   for (const [key, w] of Object.entries(waits))
     if (w.until < wait.at - FLIGHT_SIGNAL_KEEP_MS) delete waits[key];
   store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));
