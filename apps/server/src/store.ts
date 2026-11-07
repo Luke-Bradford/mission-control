@@ -13,10 +13,15 @@ import type {
   QaHistoryEntry,
   QaReport,
   RunHandoff,
+  RunTokenAudit,
+  TokenCall,
+  TokenCounts,
+  TokenSourceAdd,
 } from "@mc/core";
 import {
   type AccountId,
   type AgentId,
+  ASKING_RUN_ENDED_REASON,
   type AttentionBrief,
   type AttentionKind,
   AUDIT_BASELINE_DAYS,
@@ -51,7 +56,6 @@ import {
   type CommsReactionKind,
   classifyOveruse,
   commsCutMarker,
-  DECISION_DEFAULT_WAIT_MS,
   type DefectRefs,
   type DefectVia,
   type DoneWhenEntry,
@@ -64,6 +68,7 @@ import {
   FLIGHT_MEMORY_FULL,
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_PLAN_LIMIT,
+  FLIGHT_POINTER_CHANGE_MAX,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_WAKE_HEAD,
@@ -76,8 +81,11 @@ import {
   type FlightLedgerEntry,
   type FlightMemoryNote,
   type FlightMemoryTitle,
+  type FlightMovedPointer,
   type FlightPlanInput,
   type FlightPlanOperation,
+  type FlightPointer,
+  type FlightPointerKind,
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
@@ -113,6 +121,8 @@ import {
   type QaFindingView,
   type QaFlowView,
   type QaReviewRoundView,
+  type QuestionClosure,
+  type QuestionClosureKind,
   type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
@@ -296,6 +306,23 @@ CREATE TABLE IF NOT EXISTS prompt_sections (
   PRIMARY KEY (run_id, wake, section)
 );
 CREATE INDEX IF NOT EXISTS prompt_sections_at ON prompt_sections(at);
+CREATE TABLE IF NOT EXISTS run_token_audit (
+  run_id TEXT PRIMARY KEY, at INTEGER NOT NULL, calls INTEGER NOT NULL, peak_context INTEGER NOT NULL,
+  median_context INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
+  output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
+  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS run_token_calls (
+  run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
+  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL,
+  PRIMARY KEY (run_id, idx)
+);
+CREATE TABLE IF NOT EXISTS controller_messages (
+  message_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, at INTEGER NOT NULL, input INTEGER NOT NULL,
+  cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, output INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS controller_messages_at ON controller_messages(at);
+CREATE TABLE IF NOT EXISTS controller_files (path TEXT PRIMARY KEY, mtime INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS flow_issues (
   repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
   done_at INTEGER, PRIMARY KEY (repo_id, number)
@@ -505,6 +532,13 @@ CREATE TABLE IF NOT EXISTS seat_questions (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
   text TEXT NOT NULL, at INTEGER NOT NULL, answered_at INTEGER
 );
+-- A question that left Needs you without an answer, with why (returned, withdrawn, or a fact).
+CREATE TABLE IF NOT EXISTS question_closures (
+  key TEXT NOT NULL, ask_at INTEGER NOT NULL, kind TEXT NOT NULL, reason TEXT NOT NULL,
+  by TEXT NOT NULL, question TEXT NOT NULL, ticket TEXT, operator INTEGER NOT NULL,
+  at INTEGER NOT NULL, PRIMARY KEY (key, ask_at)
+);
+CREATE INDEX IF NOT EXISTS question_closures_at ON question_closures(at);
 -- Failures of the mc tools that the operator is told of (Needs you, until acked).
 CREATE TABLE IF NOT EXISTS crew_errors (
   id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT, text TEXT NOT NULL,
@@ -576,6 +610,13 @@ CREATE TABLE IF NOT EXISTS flight_ledger (
   session_id TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
   updated_at INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY(session_id, key)
 );
+-- What a ledger entry watches; the hub marks changed_at when the target moves, FLIGHT's wake stamps read_at.
+CREATE TABLE IF NOT EXISTS flight_pointers (
+  session_id TEXT NOT NULL, entry_key TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
+  changed_at INTEGER, change TEXT, read_at INTEGER, changed_seq INTEGER, read_seq INTEGER,
+  PRIMARY KEY (session_id, entry_key, kind, target)
+);
+CREATE INDEX IF NOT EXISTS flight_pointers_target ON flight_pointers(kind, target);
 CREATE TABLE IF NOT EXISTS flight_watch (
   session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
   PRIMARY KEY (session_id, id)
@@ -1142,6 +1183,7 @@ const toBoardItem = (r: Row): BoardItem => ({
 
 const toFlightDecision = (r: Row): FlightDecision => ({
   ...(r.order_id == null ? {} : { orderId: Number(r.order_id) }),
+  ...(r.wake_id == null ? {} : { wakeId: r.wake_id as string }),
   id: r.id as number,
   at: r.at as number,
   kind: r.kind as FlightDecisionKind,
@@ -1695,6 +1737,8 @@ export class Store {
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
     this.addColumn("flight_decisions", "order_id", "INTEGER");
+    this.addColumn("flight_decisions", "wake_id", "TEXT");
+    this.addColumn("flight_wakes", "wake_id", "TEXT");
     this.db.exec(
       "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
     );
@@ -2186,6 +2230,181 @@ export class Store {
       "INSERT OR IGNORE INTO prompt_sections (run_id, wake, section, bytes, tokens, at) VALUES (?, ?, ?, ?, ?, ?)",
     );
     for (const s of sections) insert.run(runId, wake, s.section, s.bytes, s.tokens, at);
+  }
+
+  /** Stores a run's token audit and its calls; a run audited twice keeps the later read. */
+  saveRunTokenAudit(
+    runId: string,
+    at: number,
+    audit: RunTokenAudit,
+    calls: readonly TokenCall[],
+  ): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM run_token_calls WHERE run_id = ?").run(runId);
+      this.db
+        .prepare(
+          `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
+             cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
+             by_source, by_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          runId,
+          at,
+          audit.calls,
+          audit.peakContext,
+          audit.medianContext,
+          audit.cacheRead,
+          audit.cacheWrite,
+          audit.output,
+          audit.rewrites,
+          audit.rewriteTokens,
+          audit.readAfterReport,
+          JSON.stringify(audit.bySource),
+          JSON.stringify(audit.byCommand),
+        );
+      const insert = this.db.prepare(
+        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      );
+      for (const [i, c] of calls.entries()) {
+        insert.run(
+          runId,
+          i,
+          c.context,
+          c.cacheRead,
+          c.cacheWrite,
+          c.output,
+          JSON.stringify(c.added),
+        );
+      }
+    });
+  }
+
+  /** A run's stored calls, in order. */
+  runTokenCalls(runId: string): TokenCall[] {
+    return (
+      this.db
+        .prepare("SELECT * FROM run_token_calls WHERE run_id = ? ORDER BY idx")
+        .all(runId) as Row[]
+    ).map((r) => ({
+      context: r.context as number,
+      cacheRead: r.cache_read as number,
+      cacheWrite: r.cache_write as number,
+      output: r.output as number,
+      added: JSON.parse(r.added as string) as TokenSourceAdd[],
+    }));
+  }
+
+  /** Ended runs started since `since` with no token audit yet, newest first. */
+  runsToAuditTokens(since: number, limit: number): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM runs WHERE ended_at IS NOT NULL AND started_at >= ?
+             AND id NOT IN (SELECT run_id FROM run_token_audit)
+           ORDER BY started_at DESC, seq DESC LIMIT ?`,
+        )
+        .all(since, limit) as Row[]
+    ).map(toRun);
+  }
+
+  /** The stored token audits of runs that started since `since`, with the run each belongs to. */
+  runTokenAudits(since: number): { run: Run; audit: RunTokenAudit }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
+           a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
+           a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
+           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command
+         FROM run_token_audit a JOIN runs r ON r.id = a.run_id
+         WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
+      )
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      run: toRun(r),
+      audit: {
+        calls: r.a_calls as number,
+        peakContext: r.a_peak as number,
+        medianContext: r.a_median as number,
+        cacheRead: r.a_cache_read as number,
+        cacheWrite: r.a_cache_write as number,
+        output: r.a_output as number,
+        rewrites: r.a_rewrites as number,
+        rewriteTokens: r.a_rewrite_tokens as number,
+        readAfterReport: r.a_after as number | null,
+        bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
+        byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
+      },
+    }));
+  }
+
+  /** Prompt-section tokens by section for prompts recorded since `since`. */
+  promptSectionTotals(since: number): { section: PromptSection; tokens: number }[] {
+    return this.db
+      .prepare(
+        "SELECT section, SUM(tokens) AS tokens FROM prompt_sections WHERE at >= ? GROUP BY section",
+      )
+      .all(since) as { section: PromptSection; tokens: number }[];
+  }
+
+  /**
+   * Stores controller messages' usage numbers (never text). A message id seen again, in a resumed
+   * session's copy of its history or a subagent file, counts once; the larger output is kept.
+   */
+  saveControllerMessages(
+    sessionId: string,
+    messages: readonly {
+      id: string;
+      at: number;
+      input: number;
+      cacheRead: number;
+      cacheWrite: number;
+      output: number;
+    }[],
+  ): void {
+    const insert = this.db.prepare(
+      `INSERT INTO controller_messages (message_id, session_id, at, input, cache_read, cache_write, output)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(message_id) DO UPDATE SET output = MAX(output, excluded.output)`,
+    );
+    this.transaction(() => {
+      for (const m of messages) {
+        insert.run(m.id, sessionId, m.at, m.input, m.cacheRead, m.cacheWrite, m.output);
+      }
+    });
+  }
+
+  /** Controller usage by message time since `since`: distinct sessions, distinct messages and token sums. */
+  controllerUsageSince(since: number): {
+    sessions: number;
+    calls: number;
+    input: number;
+    cacheRead: number;
+    cacheWrite: number;
+    output: number;
+  } {
+    return this.db
+      .prepare(
+        `SELECT COUNT(DISTINCT session_id) AS sessions, COUNT(*) AS calls,
+           COALESCE(SUM(input), 0) AS input, COALESCE(SUM(cache_read), 0) AS cacheRead,
+           COALESCE(SUM(cache_write), 0) AS cacheWrite, COALESCE(SUM(output), 0) AS output
+         FROM controller_messages WHERE at >= ?`,
+      )
+      .get(since) as never;
+  }
+
+  /** The mtime a controller file was last read at, or null when it has not been read. */
+  controllerFileMtime(path: string): number | null {
+    const r = this.db.prepare("SELECT mtime FROM controller_files WHERE path = ?").get(path) as
+      | { mtime: number }
+      | undefined;
+    return r?.mtime ?? null;
+  }
+
+  markControllerFile(path: string, mtime: number): void {
+    this.db
+      .prepare("INSERT OR REPLACE INTO controller_files (path, mtime) VALUES (?, ?)")
+      .run(path, mtime);
   }
 
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */
@@ -2929,6 +3148,21 @@ export class Store {
     return rows.map((r) => this.boardMoveOf(r));
   }
 
+  /**
+   * Whether a real run in this store moved the issue's card to a column (done). Rows under
+   * `pr:` and `dep:` ids have no run, so another hub's moves never count.
+   */
+  runMovedCard(repoId: RepoId, issue: number): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM board_moves m JOIN runs r ON r.id = m.run_id
+           WHERE m.repo_id = ? AND m.issue = ? AND m.state = 'done' LIMIT 1`,
+        )
+        .get(repoId, issue) !== undefined
+    );
+  }
+
   /** Every move of the run's card, oldest first, pending ones too. */
   boardMovesOfRun(runId: string): BoardMove[] {
     const rows = this.db
@@ -3004,6 +3238,7 @@ export class Store {
       ["hub_events", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["flight_wakes", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["question_closures", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["drafts", "created_at < ? AND state != 'pending'", OPERATIONAL_RETENTION_DAYS],
       ["crew_errors", "acked = 1 AND at < ?", OPERATIONAL_RETENTION_DAYS],
       [
@@ -3248,6 +3483,13 @@ export class Store {
   /** True when any stored row changed. */
   replaceBoard(repoId: RepoId, items: BoardItem[]): boolean {
     return this.changed("board_items", repoId, () => {
+      const before = new Map(
+        (
+          this.db
+            .prepare("SELECT issue_number, status, closed FROM board_items WHERE repo_id = ?")
+            .all(repoId) as Row[]
+        ).map((r) => [r.issue_number as number, r]),
+      );
       this.db.prepare("DELETE FROM board_items WHERE repo_id = ?").run(repoId);
       const ins = this.db.prepare(
         `INSERT INTO board_items (repo_id, issue_number, title, status, state, labels, priority,
@@ -3268,6 +3510,14 @@ export class Store {
            after_deps = excluded.after_deps, defect_refs = excluded.defect_refs`,
       );
       for (const i of items) {
+        const old = before.get(i.issueNumber);
+        if (old !== undefined && (old.status !== i.status || Boolean(old.closed) !== i.closed))
+          this.markFlightPointers(
+            "ticket",
+            `${repoId}#${i.issueNumber}`,
+            i.closed ? "closed" : `moved to ${i.status}`,
+            Date.now(),
+          );
         ins.run(
           repoId,
           i.issueNumber,
@@ -3379,6 +3629,32 @@ export class Store {
     return named;
   }
 
+  /** Marks the ledger pointers on a PR whose state, head, CI, review or draft flag differ from the stored row. */
+  private markMovedPullRequest(repoId: RepoId, p: PullRequestView, at: number): void {
+    const old = this.db
+      .prepare(
+        "SELECT state, head_sha, ci, review, is_draft FROM pull_requests WHERE repo_id = ? AND number = ?",
+      )
+      .get(repoId, p.number) as Row | undefined;
+    const change =
+      old === undefined
+        ? "opened"
+        : old.state !== p.state
+          ? p.state
+          : (old.head_sha ?? null) !== (p.headSha ?? null)
+            ? "new commit"
+            : old.ci !== p.ci
+              ? `CI ${p.ci}`
+              : (old.review ?? null) !== (p.review ?? null)
+                ? `review ${p.review ?? "cleared"}`
+                : Boolean(old.is_draft) !== p.isDraft
+                  ? p.isDraft
+                    ? "back to draft"
+                    : "ready for review"
+                  : null;
+    if (change !== null) this.markFlightPointers("pr", `${repoId}#${p.number}`, change, at);
+  }
+
   private writePullRequests(repoId: RepoId, prs: PullRequestView[], readAt: number): void {
     const ins = this.db.prepare(
       `INSERT INTO pull_requests (repo_id, number, title, url, branch, ticket, state, is_draft,
@@ -3486,6 +3762,7 @@ export class Store {
           }
         }
       }
+      this.markMovedPullRequest(repoId, p, readAt);
       ins.run(
         repoId,
         p.number,
@@ -5203,6 +5480,16 @@ export class Store {
     );
   }
 
+  /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
+  externalReviewRows(): ReviewRow[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM reviews WHERE author_run_id LIKE 'external-pr:%' AND state != 'superseded' ORDER BY id",
+      )
+      .all() as Row[];
+    return rows.map(toReview);
+  }
+
   reviewsOfRun(authorRunId: string): ReviewRow[] {
     const rows = this.db
       .prepare("SELECT * FROM reviews WHERE author_run_id = ? ORDER BY id")
@@ -6397,6 +6684,28 @@ export class Store {
       .all(COMMS_CREW) as Row[];
     return rows.map((row) => this.commsRow(row) as CommsRow & { label: "question" | "blocker" });
   }
+  /** The newest `limit` messages with an id above `sinceId`, newest first; text cut to `textMax`. */
+  commsFeed(
+    sinceId: number,
+    limit: number,
+    textMax: number,
+  ): Pick<CommsRow, "id" | "at" | "from" | "to" | "label" | "ref" | "text">[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, at, from_id, to_id, label, ref, substr(text, 1, ?) AS text FROM comms
+         WHERE id > ? ORDER BY id DESC LIMIT ?`,
+      )
+      .all(textMax, sinceId, limit) as Row[];
+    return rows.map((r) => ({
+      id: `comms:${Number(r.id)}`,
+      at: Number(r.at),
+      from: r.from_id as string,
+      to: r.to_id as string,
+      label: (r.label as CommsLabel | null) ?? null,
+      ref: (r.ref as string | null) ?? null,
+      text: r.text as string,
+    }));
+  }
   markCommsScopeRead(scope: string, messageId: string): void {
     const id = commsMessageNumber(messageId);
     if (id === null) return;
@@ -7554,6 +7863,124 @@ export class Store {
       .run(at, runId);
   }
 
+  /**
+   * Records that a question left Needs you without an answer. False, storing nothing, when this ask
+   * was closed already. Closing an `ask:` key also answers its question, so the seat's run no
+   * longer waits on it.
+   */
+  closeQuestion(c: QuestionClosure): boolean {
+    let stored = false;
+    this.transaction(() => {
+      stored = this.insertClosure(c);
+    });
+    return stored;
+  }
+
+  /** `closeQuestion` without its own transaction, for a caller already in one. */
+  private insertClosure(c: QuestionClosure): boolean {
+    const r = this.db
+      .prepare(
+        `INSERT INTO question_closures (key, ask_at, kind, reason, by, question, ticket, operator, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key, ask_at) DO NOTHING`,
+      )
+      .run(c.key, c.askAt, c.kind, c.reason, c.by, c.question, c.ticket, c.operator ? 1 : 0, c.at);
+    const stored = Number(r.changes) > 0;
+    const ask = /^ask:(\d+)$/.exec(c.key);
+    if (stored && ask !== null) this.answerQuestion(Number(ask[1]), c.at);
+    return stored;
+  }
+
+  private closureOf(r: Row): QuestionClosure {
+    return {
+      key: r.key as string,
+      askAt: r.ask_at as number,
+      kind: r.kind as QuestionClosureKind,
+      reason: r.reason as string,
+      by: r.by as string,
+      question: r.question as string,
+      ticket: (r.ticket as string | null) ?? null,
+      operator: r.operator === 1,
+      at: r.at as number,
+    };
+  }
+
+  /** The closure of one ask of a key; null when it was not closed without an answer. */
+  questionClosure(key: string, askAt: number): QuestionClosure | null {
+    const r = this.db
+      .prepare("SELECT * FROM question_closures WHERE key = ? AND ask_at = ?")
+      .get(key, askAt) as Row | undefined;
+    return r ? this.closureOf(r) : null;
+  }
+
+  /**
+   * The closures of items that stay in the attention list until routed away (not a seat's `ask:`
+   * question, which leaves when answered), by key, newest first; read once per build.
+   */
+  closedItemKeys(): Map<string, QuestionClosure[]> {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM question_closures WHERE key NOT LIKE 'ask:%' ORDER BY at DESC, rowid DESC",
+      )
+      .all() as Row[];
+    const byKey = new Map<string, QuestionClosure[]>();
+    for (const r of rows) {
+      const c = this.closureOf(r);
+      byKey.set(c.key, [...(byKey.get(c.key) ?? []), c]);
+    }
+    return byKey;
+  }
+
+  /** The closures the operator had in Needs you since `since`, newest first. */
+  questionClosures(since: number, limit: number): QuestionClosure[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM question_closures WHERE operator = 1 AND at >= ? ORDER BY at DESC, rowid DESC LIMIT ?",
+      )
+      .all(since, limit) as Row[];
+    return rows.map((r) => this.closureOf(r));
+  }
+
+  /** Whether FLIGHT's newest brief on the key is for the operator. */
+  private briefedForOperator(key: string): boolean {
+    const r = this.db
+      .prepare("SELECT structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
+      .get(key) as { structured: string | null } | undefined;
+    return r?.structured != null && (JSON.parse(r.structured) as AttentionBrief).for === "operator";
+  }
+
+  private endQuestions(where: "run_id" | "agent_id", id: string, at: number): void {
+    this.transaction(() => {
+      const rows = this.db
+        .prepare(`SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL`)
+        .all(id) as Row[];
+      for (const r of rows) {
+        const q = toQuestion(r);
+        const key = `ask:${q.id}`;
+        this.insertClosure({
+          key,
+          askAt: q.at,
+          kind: "run-ended",
+          reason: ASKING_RUN_ENDED_REASON,
+          by: "hub",
+          question: q.text,
+          ticket: this.run(q.runId)?.ticket ?? null,
+          operator: q.passedAt !== null && this.briefedForOperator(key),
+          at,
+        });
+      }
+    });
+  }
+
+  /** The asking run has ended: each of its open questions closes, with that reason. */
+  endRunQuestions(runId: string, at: number): void {
+    this.endQuestions("run_id", runId, at);
+  }
+
+  /** The seat has no run now: each of its open questions closes, with that reason. */
+  endSeatQuestions(agentId: AgentId, at: number): void {
+    this.endQuestions("agent_id", agentId, at);
+  }
+
   /** Records an mc tool failure for the operator; returns its id. */
   addCrewError(e: Omit<CrewError, "id">): number {
     const r = this.db
@@ -7704,21 +8131,34 @@ export class Store {
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
-  addFlightWake(runId: string, at: number, reasons: string[]): void {
+  addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
     this.db
-      .prepare("INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons) VALUES (?, ?, ?)")
-      .run(runId, at, JSON.stringify(reasons));
+      .prepare(
+        "INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons, wake_id) VALUES (?, ?, ?, ?)",
+      )
+      .run(runId, at, JSON.stringify(reasons), wakeId ?? null);
+  }
+
+  /** The id of the run's latest wake; null when it has none or none was given an id. */
+  latestFlightWakeId(runId: string): string | null {
+    const row = this.db
+      .prepare("SELECT wake_id FROM flight_wakes WHERE run_id = ? ORDER BY at DESC LIMIT 1")
+      .get(runId) as { wake_id: string | null } | undefined;
+    return row?.wake_id ?? null;
   }
 
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
     const rows = this.db
-      .prepare("SELECT run_id, at, reasons FROM flight_wakes WHERE at >= ? ORDER BY at, run_id")
-      .all(since) as { run_id: string; at: number; reasons: string }[];
+      .prepare(
+        "SELECT run_id, at, reasons, wake_id FROM flight_wakes WHERE at >= ? ORDER BY at, run_id",
+      )
+      .all(since) as { run_id: string; at: number; reasons: string; wake_id: string | null }[];
     return rows.map((r) => ({
       runId: r.run_id,
       at: r.at,
       reasons: JSON.parse(r.reasons) as string[],
+      ...(r.wake_id === null ? {} : { wakeId: r.wake_id }),
     }));
   }
 
@@ -7869,8 +8309,9 @@ export class Store {
     const r = this.db
       .prepare(
         `INSERT INTO flight_decisions
-           (at, kind, seat_id, target_run_id, ref, question_id, about, decision, basis, order_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (at, kind, seat_id, target_run_id, ref, question_id, about, decision, basis, order_id,
+            wake_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         d.at,
@@ -7883,6 +8324,7 @@ export class Store {
         d.decision,
         d.basis,
         d.orderId ?? null,
+        d.wakeId ?? null,
       );
     return Number(r.lastInsertRowid);
   }
@@ -7989,11 +8431,79 @@ export class Store {
 
   /** The full ledger for one crew session, including retained closed entries. */
   flightLedger(session: string): FlightLedgerEntry[] {
+    const pointers = new Map<string, FlightPointer[]>();
+    for (const r of this.db
+      .prepare(
+        `SELECT entry_key, kind, target, changed_at, change, read_at FROM flight_pointers
+         WHERE session_id = ? ORDER BY rowid`,
+      )
+      .all(session) as Row[]) {
+      const list = pointers.get(r.entry_key as string) ?? [];
+      list.push({
+        kind: r.kind as FlightPointerKind,
+        target: r.target as string,
+        changedAt: r.changed_at as number | null,
+        change: r.change as string | null,
+        readAt: r.read_at as number | null,
+      });
+      pointers.set(r.entry_key as string, list);
+    }
     return (
       this.db
         .prepare("SELECT entry FROM flight_ledger WHERE session_id = ? ORDER BY key")
         .all(session) as { entry: string }[]
-    ).map((r) => JSON.parse(r.entry) as FlightLedgerEntry);
+    ).map((r) => {
+      const entry = JSON.parse(r.entry) as FlightLedgerEntry;
+      const held = pointers.get(entry.key);
+      return held === undefined ? entry : { ...entry, pointers: held };
+    });
+  }
+
+  /** Marks every pointer at `kind` and `target`, in any entry, as changed at `at`. */
+  markFlightPointers(kind: FlightPointerKind, target: string, change: string, at: number): void {
+    this.db
+      .prepare(
+        `UPDATE flight_pointers SET changed_at = ?, change = ?, changed_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
+         WHERE kind = ? AND target = ?`,
+      )
+      .run(at, change.slice(0, FLIGHT_POINTER_CHANGE_MAX), kind, target);
+  }
+
+  /** The pointers of open entries whose target changed after FLIGHT last read them. */
+  movedFlightPointers(session: string): FlightMovedPointer[] {
+    const open = FLIGHT_LEDGER_OPEN.map(() => "?").join(", ");
+    return (
+      this.db
+        .prepare(
+          `SELECT p.entry_key, p.kind, p.target, p.changed_at, p.change FROM flight_pointers p
+           JOIN flight_ledger l ON l.session_id = p.session_id AND l.key = p.entry_key
+           WHERE p.session_id = ? AND l.status IN (${open}) AND p.changed_at IS NOT NULL
+             AND p.changed_seq > COALESCE(p.read_seq, 0)
+           ORDER BY p.changed_at, p.entry_key, p.kind, p.target`,
+        )
+        .all(session, ...FLIGHT_LEDGER_OPEN) as Row[]
+    ).map((r) => ({
+      entry: r.entry_key as string,
+      kind: r.kind as FlightPointerKind,
+      target: r.target as string,
+      change: (r.change as string | null) ?? "",
+      at: r.changed_at as number,
+    }));
+  }
+
+  /**
+   * FLIGHT has read the pointers in `moved` at `at`. A pointer marked again since (another time or
+   * text) stays unread; changes are ordered by a counter, not by `at`, whose clock is the poll's.
+   */
+  markFlightPointersRead(session: string, moved: readonly FlightMovedPointer[], at: number): void {
+    const stamp = this.db.prepare(
+      `UPDATE flight_pointers SET read_at = ?, read_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
+       WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?
+         AND changed_at = ? AND change = ?`,
+    );
+    this.transaction(() => {
+      for (const m of moved) stamp.run(at, session, m.entry, m.kind, m.target, m.at, m.change);
+    });
   }
 
   /** Save an entry and prune old closed entries across all sessions, in one transaction. */
@@ -8003,12 +8513,48 @@ export class Store {
         .prepare(`INSERT INTO flight_ledger (session_id, key, kind, status, updated_at, entry)
         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_id, key) DO UPDATE SET
         kind = excluded.kind, status = excluded.status, updated_at = excluded.updated_at, entry = excluded.entry`)
-        .run(session, entry.key, entry.kind, entry.status, entry.updatedAt, JSON.stringify(entry));
+        .run(
+          session,
+          entry.key,
+          entry.kind,
+          entry.status,
+          entry.updatedAt,
+          JSON.stringify({ ...entry, pointers: undefined }),
+        );
+      if (entry.pointers !== undefined) this.syncFlightPointers(session, entry);
       this.db
         .prepare(`DELETE FROM flight_ledger WHERE updated_at < ?
         AND status NOT IN (${FLIGHT_LEDGER_OPEN.map(() => "?").join(", ")})`)
         .run(pruneBefore, ...FLIGHT_LEDGER_OPEN);
+      this.db
+        .prepare(
+          `DELETE FROM flight_pointers WHERE NOT EXISTS (
+             SELECT 1 FROM flight_ledger l
+             WHERE l.session_id = flight_pointers.session_id AND l.key = flight_pointers.entry_key)`,
+        )
+        .run();
     });
+  }
+
+  /** Makes the entry's pointers exactly `entry.pointers`; one that stays keeps its marks. */
+  private syncFlightPointers(session: string, entry: FlightLedgerEntry): void {
+    const pointers = entry.pointers ?? [];
+    const kept = new Set(pointers.map((p) => `${p.kind}\0${p.target}`));
+    const drop = this.db.prepare(
+      "DELETE FROM flight_pointers WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?",
+    );
+    for (const old of this.db
+      .prepare("SELECT kind, target FROM flight_pointers WHERE session_id = ? AND entry_key = ?")
+      .all(session, entry.key) as { kind: string; target: string }[]) {
+      if (!kept.has(`${old.kind}\0${old.target}`))
+        drop.run(session, entry.key, old.kind, old.target);
+    }
+    const add = this.db.prepare(
+      `INSERT OR IGNORE INTO flight_pointers (session_id, entry_key, kind, target, changed_at, change, read_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const p of pointers)
+      add.run(session, entry.key, p.kind, p.target, p.changedAt, p.change, p.readAt);
   }
 
   /** The stored sections of a session's brief. */
@@ -8163,19 +8709,10 @@ export class Store {
   }
 
   /** Stores FLIGHT's brief on an attention key; returns its id. */
-  addBrief(b: AttentionBrief & { key: string; defaultEligible?: boolean }): number {
+  addBrief(b: AttentionBrief & { key: string }): number {
     let id = 0;
     this.transaction(() => {
-      const {
-        key,
-        context,
-        recommendation,
-        options,
-        basis,
-        at,
-        defaultEligible = true,
-        ...structured
-      } = b;
+      const { key, context, recommendation, options, basis, at, ...structured } = b;
       if (structured.person) {
         const thread = /^person:(\d+):(\d+)$/.exec(key);
         const n = thread ? this.notification(thread[1] as string) : null;
@@ -8224,13 +8761,8 @@ export class Store {
       const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
       if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
         structured.askAt = prior?.askAt ?? last.at;
+      // No timed default on a question to the operator (#1532): a brief never stores one.
       delete structured.defaultAt;
-      if (defaultEligible && structured.for !== "flight" && structured.recommendedOptionId) {
-        const kept = structured.askAt !== undefined ? prior?.defaultAt : undefined;
-        // The wait starts when a default is first stamped, never at an older ask's time: an ask
-        // briefed before defaults existed must not come due the moment it is briefed again.
-        structured.defaultAt = kept ?? at + DECISION_DEFAULT_WAIT_MS;
-      }
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)

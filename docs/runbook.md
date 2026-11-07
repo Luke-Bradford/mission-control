@@ -215,6 +215,13 @@ error in health, not as a crash. A missing `worktree` is not an error: the in-fl
 branch (and so its ticket) is just null. For the studio loop it also means no live session can
 match, so an open fire shows as `unknown` (see "Loop liveness" below).
 
+A loop can say how it is paused with `paused_by:` under `loops:`, either `{ stop_file: <path> }`
+(paused while the file exists) or `{ issue: <repo id>#<number> }` (paused while that issue is open on
+the board). The hub only reads it. A paused loop's issues and PRs stay on its card, which shows
+"Paused by <repo>#<number>", and never count in Needs you. A TA loop is also paused by its `PAUSE`
+file. The live config needs `paused_by: { issue: autonomy-engine#1818 }` on the paused loop (and the
+studio loop's own setting, if it has one); without it the hub cannot tell the loop is paused.
+
 The config is rejected at start-up if an id repeats within `accounts`, `repos` or `loops`, or if
 two accounts share a vendor: the usage readers use this Mac's single Claude login (Keychain
 OAuth) and single Codex login, so a second account would report the first one's usage.
@@ -550,6 +557,13 @@ What each seat's process starts with:
   closes, or a ticket that reaches Done, removes its Comms item on the next attention build.
   Messages from before the feature's rollout boundary do not enter the escalation, preventing a
   rollout backlog.
+  `GET /api/comms/open` lists these items with their text (first 280 characters) and also lists
+  each seat's open `ask_flight` question as a question to FLIGHT (id `ask:<n>`). A seat question
+  follows FLIGHT's triage window (20 minutes from the later of the ask and FLIGHT going live),
+  not the 15 and 45 minute Comms steps; with no FLIGHT seat, or once FLIGHT has passed it to the operator, its `nextStep` is `operator`. A `seen` reaction
+  from the addressee closes an item, as a reply does; a `seen` from anyone else does not.
+  `GET /api/comms/feed` lists recent messages (id, time, from, to, label, ref, and the first 280 characters of text) newest
+  first. `since=comms:<n>` returns only newer ones; `limit` defaults to 100 and is at most 200.
   If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
   on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
   and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
@@ -1176,7 +1190,7 @@ This accepts the parked run:
 - **A ruling or review-failed park:** the run goes to review.
 - **A review or review-ruling park:** the run goes to review, and its findings on that head are waived.
 
-The route answers 409 when the engine is off, or when nothing was lifted. The 409 names the check that refused: the park is gone or ended, the PR is closed or not open, the head moved, the run is held, or a blocking review touches floor-enforcing paths that only the controller can merge past. FLIGHT's `settle_park` refusals name the same reasons. Past that blocking review FLIGHT uses `second_review` (below), not the controller.
+The route answers 409 when the engine is off, or when nothing was lifted. The 409 names the check that refused: the park is gone or ended, the PR is closed or not open, the head moved, the run is held, or a blocking review touches floor-enforcing paths that cannot be accepted past. FLIGHT's `settle_park` refusals name the same reasons. Past that blocking review FLIGHT uses `second_review` (below) or sends it for rework.
 
 ### Rework a parked run
 
@@ -1212,9 +1226,9 @@ It applies to repos where the engine merges (`merge` workspaces).
 A ticket with a controller-check heading (`## Controller check`, or a near spelling: another level,
 "Checks", a suffix) is never merged by the engine until you pass it. When the run's review is clean
 and CI is green, the run parks as `controller-check` with that section's text (cut to a short brief;
-the ticket has the rest), and it shows in Needs you. Once a ticket has listed a check, a pass is
+the ticket has the rest). FLIGHT does the check, and the park is FLIGHT's to clear. Once a ticket has listed a check, a pass is
 needed even if the heading is later removed. If the ticket cannot be read, the run parks the same way
-after three tries, saying so. Do the check, then record the verdict for the head you looked at:
+after three tries, saying so. Do the check, then record the verdict for the head you looked at (FLIGHT uses `mc operator`; the operator may use the route):
 
 ```sh
 curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-type: application/json' -H "x-mc-operator: $(cat <data dir>/operator-token)" -d '{"verdict":"pass","sha":"<7 or more characters of the head>"}'
@@ -1223,7 +1237,7 @@ curl -s -X POST localhost:7420/api/runs/<run id>/controller-check -H 'content-ty
 `pass` applies at once and lets the engine merge on its next pass. It is tied to that head: it is
 refused if the PR head has moved, and a later head, including the engine's own merge of main after a
 pass, needs a fresh check. `fail` needs a `"note"`, sends it to the seat as rework and ends the park.
-A plain resume or message does not lift this park, and neither does FLIGHT: only the controller's verdict does. A paused seat's verdict is
+A plain resume or message does not lift this park: only a recorded verdict does, and on a superuser repo FLIGHT's `mc operator` call records it on any path. On a standard repo FLIGHT may not record it for changes to its own runtime or approval rules. A paused seat's verdict is
 still recorded. While the park waits, the seat is free; a `fail` on a run that was set aside stores
 the note and the engine wakes the run when its seat is free.
 
@@ -1310,6 +1324,8 @@ the target. The hub then drops the wait. The same pass clears waits nested befor
 
 **What a free seat or an item wakes.** A free build seat, and the Ready tickets listed with it, wake FLIGHT only when a Ready ticket is in that seat's area (one `area:` label the seat covers, not held by another login). A seat or ticket FLIGHT recorded a `wait_on` for stays out until the wait is due. An item wakes FLIGHT only while it is new to it: once a wake or `flight_state` has shown the item, it wakes FLIGHT again only if its text changes. `GET /api/flight` `wakeHistory.idle` counts the day's wakes with no decision within 4 minutes (`flight_wakes` joined to `flight_decisions`); the target is under 15% of `total`.
 
+**Ledger pointers and wake ids.** A ledger entry can carry `pointers` (`mc track`): each names a `pr` or `ticket` (`repo#n`), a `seat`, `repo`, `person` or `metric`. They live in `flight_pointers`, so a restart keeps them. The hub marks a pointer when its target changes: a stored PR's state, head, CI, review or draft flag, and a card's column or close. No agent runs for that. The wake digest's `moved` lists the pointers marked since FLIGHT last read them, once each; delivering a wake, or a `flight_state` read, stamps their `read_at`. Changes are ordered by a counter (`changed_seq`, `read_seq`), not by clock, so a change the poll stamped before FLIGHT's read still counts as unread. `track` refuses a target the hub could not mark: `<repo id>#<n>` for a pr or ticket, a seat in the session, a configured repo id, a GitHub login, a metric id. The store holds seat, repo, person and metric pointers too, but no hub event feeds them, so `track` accepts only `pr` and `ticket` pointers. The digest lists at most `FLIGHT_MOVED_LISTED` moved pointers (the rest wait, unread, for the next wake) and leaves out a PR pointer whose PR the digest's `prs` already lists and whose change `prs` shows (opened, a state, a new commit); that one is read with the wake. CI, review and draft changes are not in the `prs` entry, so they stay in `moved`. Each wake has an id, `<runId>:<n>` (0 is the start brief), kept on `flight_wakes.wake_id` and on every decision made in it (`flight_decisions.wake_id`).
+
 **Pace.** FLIGHT re-wakes hourly from its last wake, and only while something waits on it; a live run does not speed that up. The sweep's signals above and a seat's call wake it sooner. The next wake time in `/api/flight` follows the same rule.
 
 ### FLIGHT adds a controller check to a ticket
@@ -1318,7 +1334,7 @@ Seats have no tool to edit an issue body, so FLIGHT puts a check under a ticket'
 itself: `mc add_controller_check { issue, item, basis }`. It appends `- <item>` under
 that heading, creating the section before `## Size`, `## Security` or the end when the ticket has none, and
 removes an identical line from `## Done when`. Nothing else in the body changes. The engine then parks the
-run's PR for the controller's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
+run's PR until FLIGHT records the check's verdict (`POST /api/runs/:id/controller-check`). It refuses a closed ticket,
 a cut body, an `always_ask` or other-lane card, and Away; an item already listed writes nothing. It only
 ever adds a hold, and is logged as a `card` decision.
 
@@ -1347,9 +1363,14 @@ it has waited. A chain that has stood still for 30 minutes raises a `chain_stall
 
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
 product direction, a security exception, an irreversible external action, and a floor approval the
-repo reserves (`always_ask`, CI workflows, the CLAUDE.md crew block). These are FLIGHT shortcuts; each change is a logged decision. The floor is the repo's own rules (guard rules,
-hard-rule paths, `always_ask`, CI workflows and the CLAUDE.md block); a controller's approval (see
-[FLIGHT approvals](#flight-approvals)) is what lifts one.
+repo reserves (`always_ask`). These are FLIGHT shortcuts; each change is a logged decision. On a superuser
+repo `mc merge_pr` clears any PR once review is clean and CI is green, guard rules, hard-rule paths, CI
+workflows and the CLAUDE.md block included, with no controller check and no approval row. The hub logs
+the clearance as a `merge` decision, with its basis, the run and ticket, and what needed FLIGHT's call (paths
+under the guard, `CLAUDE.md` and `.github/**` named first). That decision on the FLIGHT page is the operator's
+line for each such merge; the hub sends no Comms message for it.
+A standard repo keeps the floor: a controller's approval (see [FLIGHT approvals](#flight-approvals))
+is what lifts it.
 
 The crew-pause panel lists active run exceptions, who granted each, its reason and time. A
 finished or missing run no longer has an exception, even after a hub restart. The hub event
@@ -1438,7 +1459,8 @@ while a build run is live or parked on it, while a run is live on the same ticke
 branch, while a seat has claimed the ticket's handoff and has no run row yet, and for every run of a
 configured (observed) loop. Once that run has ended (a controller pushed the head and FLIGHT ended the
 run to free the seat), the PR is reviewed and merged like one with no crew author; a
-hard-rule PR then needs the same head-bound `merge-floor` approval below. A merge hold on the branch's
+hard-rule PR then needs the same head-bound `merge-floor` approval below on a standard repo; on a
+superuser repo FLIGHT's own logged decision is enough. A merge hold on the branch's
 latest build run still refuses the merge after that run ends, until the hold is released. An operator's
 Stop ends a run and sets no hold, so it does not keep the PR from merging: set a merge hold for that.
 This is decided, not an oversight: a hold that outlived the run could be cleared only by starting a
@@ -1452,14 +1474,27 @@ is refused, and nothing is changed). A stuck run whose newest commit is the PR's
 after the push gate refused it, is recorded as pushed when FLIGHT lifts the park, so it reaches review.
 No build run is invented and no board card is marked Done by this path.
 
-Protected repository rules require the existing head-bound `merge-floor` controller approval.
-Ordinary CLAUDE.md prose does not require that approval when its Mission Control section is
-unchanged. Changes to FLIGHT's runtime or approval guidance also require a real independent
-controller check. FLIGHT cannot give itself that verdict through `mc operator`; the in-process
-request retains its authenticated FLIGHT actor instead of impersonating an anonymous operator.
-For a crew PR awaiting FLIGHT clearance, the engine requests this check before clearance. The
-operator can pass the current head through `/api/runs/:id/controller-check`, after which FLIGHT
-clears the PR through its ordinary merge path. A new head requires a new verdict.
+When such a PR is behind main or conflicts, FLIGHT can bring main in itself: `mc sync_main` needs an
+unended run, but FLIGHT's shell may merge, resolve and commit on a detached HEAD (`git fetch`, `git
+checkout --detach origin/<branch>`, `git merge origin/main`), resolve and commit, then `git switch -c
+<name>` and `git push origin <name>:<branch>` to the PR's own branch (the guard refuses a push of
+`HEAD:<branch>`, as it needs a named branch on both sides). The guard refuses those git writes on `main` and in a checkout it cannot read, and a push to
+`main` stays refused. Or FLIGHT starts a seat on the ticket and sends the conflict to it.
+
+On a standard repo, protected repository rules require the existing head-bound `merge-floor`
+controller approval. Ordinary CLAUDE.md prose does not require that approval when its Mission Control
+section is unchanged. Changes to FLIGHT's runtime or approval guidance also require a real independent
+controller check there, which FLIGHT cannot give itself through `mc operator`.
+
+On a superuser repo only `always_ask` labels and a linked ticket's `## Controller check` hold an
+external PR. FLIGHT's own logged decision covers protected paths and names them; a PR that changes them still needs a
+hub review row on its head, not only a passing `mc/review` status. For a crew PR awaiting FLIGHT clearance, `mc merge_pr`
+clears the head. When the PR's head came from outside the run (a commit from a person or another
+worktree) the run cannot await clearance; on a superuser repo `mc merge_pr` then adopts that head as the
+run's push (logged as a `sync` decision; any waiver of the old head's review is dropped), so CI and
+RETRO check it, and the run waits for FLIGHT's clearance on every later head too. FLIGHT calls it again
+when it awaits. A `gate` park (strays or foreign commits
+on a superuser repo) is lifted with `settle_park` `lift`.
 
 External PR acceptance and controller checks have head-bound records. A required acceptance
 appears in the existing QA queue and uses the existing operator route:
@@ -1471,9 +1506,33 @@ appears in the existing QA queue and uses the existing operator route:
 A failure or send-back needs its note. Each route rechecks the current head and PR provenance;
 an old verdict does not apply after a push. A merge hold remains on the PR across pushes and can
 only be changed from the head the caller has checked. Operator acceptance stays with the operator.
-FLIGHT may manage its own holds and ordinary evidence checks, while operator holds and checks on
-FLIGHT's own access remain the independent controller's. These records do not replace CI or QA,
+FLIGHT may manage its own holds and evidence checks (on a standard repo not those on its own access),
+while operator holds remain the operator's. These records do not replace CI or QA,
 and they never stand in for #1214's day-long post-Update observation.
+
+#### Which PRs a hub acts on
+
+Several hubs can run on one repo, even under one GitHub login. A hub's automatic GitHub writes (a
+card move, a branch delete, the screenshot section of a PR body, a review comment or `mc/review`
+status) are limited to work it owns, so a hub with no runs writes nothing:
+
+- A branch is owned when a work run in this hub's store has it, ended or not (a review run does not
+  count). A PR is owned when its branch is, or when someone asked this hub to review it.
+- A card is owned when a work run here has its ticket, or a run here moved it. A Blocked card with
+  no run here is not released by this hub when its wait resolves.
+- A PR opened by hand has no run. Ask this hub to review it with
+  `POST /api/prs/:repo/:number/review-request { sha }` (FLIGHT: `mc operator`). The ask is kept in
+  this hub's store only and binds the head `sha` it was made for: a push needs a new ask, so an
+  ask on another hub's PR does not follow that PR's later heads. It starts the QA review, the
+  `mc/review` status, the card follow and the screenshot evidence for that head. Asking again for
+  the same head changes nothing and writes no Activity line. Take it back with
+  `{ sha, action: "withdraw" }` (it needs no GitHub read, so it works on a closed PR).
+  Without an ask the PR is read and shown, never written to. A PR whose branch a run in this
+  hub's store made, ended or not, needs no ask for its QA review.
+- On Update, the hub records an ask once for each external review already in flight, so a review
+  that was running is finished and its pending `mc/review` status is not left behind.
+- A preview never moves a card: it polls GitHub and shows it (`boardWrites` is off for a preview).
+- Hubs still read and show every PR, including another hub's.
 
 ### FLIGHT approvals
 
@@ -1485,7 +1544,7 @@ POST /api/flight/approvals { "rule": "merge-floor" | "repo-rules" | "merge-push"
                              "scope": "...", "until": "<ISO time, within 7 days>", "reason": "..." }
 ```
 
-- `merge-floor`: a PR that touches `CLAUDE.md` or `.github/**`. Scope `pr:<number>@<head sha, at least 7 characters>`. The engine then treats the head as awaiting FLIGHT, `merge_pr` clears it, and the engine merges it. A new head needs a new approval. The approval stays until it expires.
+- `merge-floor`: a PR that touches `CLAUDE.md` or `.github/**`, on a standard repo or an external PR with `always_ask`; a superuser repo's FLIGHT clears these itself. Scope `pr:<number>@<head sha, at least 7 characters>`. The engine then treats the head as awaiting FLIGHT, `merge_pr` clears it, and the engine merges it. A new head needs a new approval. The approval stays until it expires.
 - `repo-rules`, `merge-push`: a call the guard refused. The scope is the exact command, or the exact file path for Edit and Write. It lets that one call through once, then it is used up.
 
 Each grant and each use is a decision of kind `approval` on the Audit ledger. The refusal text names the rule.
@@ -2321,7 +2380,8 @@ touched.
   branch with no run in this hub's store is left alone; a hub with no runs of its own deletes nothing.
   FLIGHT's `delete_branch` is a separate, explicit action with its own checks.
 - **A closed PR deletes nothing.** The hub does not remove the branch of a PR that closed without
-  merging; the agents decide what to do with it.
+  merging; the agents decide what to do with it. A closed PR is no signal for any hub write: it
+  moves no card either.
 - **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes a remote
   branch with no open PR, no live run, no commit for 24 hours, and a tip that a merged PR carried as
   its head, so unmerged commits are never swept. A branch that is the base of an open PR stays. Any
@@ -2411,11 +2471,21 @@ branch previews do.
 
 The route only reads data the hub already stores.
 
+**Token audit.** `GET /api/audit/tokens?days=N` (a whole number from 1 to 365, default 7; anything else answers 400) says where the crew's tokens went, for runs started in the last N days. It returns `TokenAuditView` from mc/core: totals (`runs`, `calls`, `output`, `cacheRead`, `cacheWrite`, `reread`, `rewrites`), `byRole`, `bySource` and `byCommand` (each with tokens added to a context and `reread`, which is tokens added times the calls left in the run), `topRuns` (the ten with the most re-reading), `hubSections` (what the hub itself sent, from the `prompt_sections` rows), `flightStart` (FLIGHT's cost of starting sessions, the `start` reason of `wakeCost`) and `controller`.
+- **How it is filled.** The `transcripts` job (every 6 hours, first run a minute after start) first reads each ended run's transcript once and stores a `run_token_audit` row plus one `run_token_calls` row per model call, then gzips or deletes old transcripts as before, so a transcript is read before it can be removed. Only a transcript in the hub's own `crew/` folder is read; an observed loop's run, a Codex run or a missing file is stored with no calls and is not retried. A pass stops starting new runs after 20 seconds and carries on at the next one. Nothing is parsed on a request.
+- **What a call is.** One assistant message id from the run's own frames (a subagent's frames are left out). Context is input plus cache read plus cache write. What was added since the previous call is split between the agent's own earlier output, each tool result (by tool name; for Bash by the command's first word, or `pnpm <script>`), hub or operator lines (`hub line`) and, for the first call, `start of run`. A context that shrank adds nothing (compaction or a fresh session). The split uses each item's size in characters, so it is an estimate; the context sizes are the CLI's own.
+- **Cache rewrite.** A call that writes more than 20,000 tokens to the cache while reading less than half the previous call's context.
+- **After the report.** `readAfterReportShare` is the share of a run's cache reads on calls after its first `report_evidence` (null if it never ran one).
+- **Output.** A run's output tokens are the sum of its `result` events' `usage.output_tokens`, the CLI's own figure; the streamed figure of an assistant message is only a part of it. Per-call output in the audit is still the streamed figure. Runs folded before this change keep the old output count until their transcript is folded again.
+- **Controller sessions (off by default).** `audit: { controller_sessions: true }` in `config.yaml` makes the same job read the Claude Code session files of the controller from `~/.claude/projects/<checkout path with every non-alphanumeric character as a dash>/`. The checkout is the hub's own (where the controller works), or `audit.controller_checkout` when set; the crew's clones and worktrees are not read. Session files and each session's `subagents/*.jsonl` are read once each, after the file has been idle for an hour (again if it grew). Only usage numbers are stored, per assistant message id in `controller_messages`; a message id that appears in several files (a resumed session copies its history) counts once, and the figures are summed by message time. No message text is kept. With the switch off, nothing outside the hub's data folder is listed or read, and `controller` is null. The operator turns it on; no seat can.
+
 **Automatic CLI updates (Auto tier).** With `updates.cli: between_runs`, the `cliAuto` job runs every `CLI_UPDATE_INTERVAL_MS` (`apps/server/src/cli-auto.ts`) for `claude` and `codex`. A tool is managed only when its binary resolves into an npm global prefix (`<prefix>/lib/node_modules/<package>/`, `npmPrefix`); a Homebrew cask or formula, or the native installer, is left to whatever installed it and shows on a `cli-auto:<tool>` health row. The hub installs into that same prefix (`npm --prefix <prefix> install -g pkg@x.y.z`), so the copy seats start is the one that changes. Per tool: read the newest version (`npm view`); if it is newer than the installed one and is a plain `x.y.z`, then
 - a new **major** version installs nothing and records one `cli-update-major` (go-ahead) item;
 - a version at or below the **held** one (`cli-auto-held:<tool>` setting) is skipped;
 - otherwise new runs are held under the owner `cli-auto:<tool>` (no other update path can release it), the begun update is stored (`cli-auto-pending:<tool>`), the exact version is installed (no shell), and the live check runs.
-The live check runs in an empty temp dir with no permission bypass and one read-only tool: `--version` must print that version (and for codex be at or above `CODEX_MIN_VERSION`, the same floor a seat start applies), then the tool must read a file holding a random nonce and answer with it (`claude -p --allowedTools=Read`, `codex exec --sandbox read-only`). It does not go through the supervisor's seat start path (account binding, seat config, app-server), which is hard-rule code; it covers a version that cannot start, reads or answer, not one that breaks only a seat's own settings.
+The live check starts the new version the way a real seat does (`checkCli` in `apps/server/src/runtime/supervisor.ts`, which uses the same start path as a run: the seat's account binding, seat config, sandbox, guard hook and MCP config, and for codex the app-server). First `--version` must print that version (and for codex be at or above `CODEX_MIN_VERSION`, the seat floor). Then one build seat of that vendor that holds no run is started in a throwaway detached worktree (`<seat>-cli-check`, removed afterwards; a real worktree is never written) and sent one harmless line: read a file holding a random nonce and reply with it. It passes when the turn ends without error, a tool result carries the nonce and the answer carries it (`judgeCliCheck`). The CLI hold this update keeps does not stop the check's own start. The check run leaves no ticket, inbox line, prompt version or missing-report note, and the seat is idle again after it. A version that breaks only under a seat's settings fails here and is rolled back.
+- A seat that has a run, a start under way or a pause is never used. If every seat of the vendor is in that state the check cannot run: nothing is proven, so the update is not rolled back. It stays pending with new runs held, outcome `waiting`, and the scheduler re-checks after `CLI_RETRY_MS`.
+- If no build seat of that vendor is configured, no run can break on that tool, and the old bare check applies instead (`claude -p --allowedTools=Read` or `codex exec --sandbox read-only` in an empty temp dir, same nonce read).
 A pass keeps the version, clears the pending record and records a `cli-update` item; the next seat run uses it. A failure (install, wrong version or check) puts the previous version back (skipped when the failed install changed nothing), holds the failed version until a newer one appears, records a `cli-update-failed` item and raises one Needs-you note (`cli-auto:<tool>:<version>`). If the previous version is not back, new runs stay held and the update stays pending: the next pass (or the hub after a restart, which re-holds runs at start) re-checks and retries the rollback. Each step writes a server log line starting `cli update <tool>:`. The job never touches the guard, the safety floor, CI workflows or the Mission Control block.
 
 **Batching.** A wake whose only new facts are routine (a free seat, a startable ticket, a hold to release, an idle reviewer, a PR moving through its steps) waits until `FLIGHT_BATCH_MS` (15 minutes) after the last wake and goes out together with whatever else has built up. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. Everything else wakes at once, under the 2-minute gap: an unread plain message from the operator (the `operator` wake fact, cleared once FLIGHT's inbox reads it), operator holds in force, discussions, questions, triage, blockers and parks, signals, planned entries, stopped seats, instruction changes and the breaker. The safety floor is never held back.

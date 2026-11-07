@@ -34,9 +34,11 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_METRICS_DAY_MS,
+  FLIGHT_MOVED_LISTED,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OPERATOR_UNREAD_MS,
+  FLIGHT_PR_ENTRY_CHANGES,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -59,6 +61,7 @@ import {
   type FlightMemoryKind,
   type FlightMemoryNote,
   type FlightMemoryTitle,
+  type FlightMovedPointer,
   type FlightPark,
   type FlightScheduleView,
   type FlightSeatState,
@@ -83,10 +86,12 @@ import {
   READY_LABEL,
   RULING_PARK,
   type Run,
+  reviewFaultStands,
   STUCK_PARK,
   seatCallSign,
   seatDef,
   type TestLockState,
+  WAITING_OPERATOR_LABEL,
   wakeKeyPrefix,
 } from "@mc/core";
 import { runAccountId } from "../account-bindings.ts";
@@ -110,6 +115,13 @@ import {
   machineCapacitySince,
 } from "../machine-capacity.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr-flow.ts";
+import {
+  closingFact,
+  factsText,
+  openQuestionSubjects,
+  questionFacts,
+  subjectId,
+} from "../question-watch.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -317,8 +329,26 @@ const causeReason = (cause: string): string =>
   cause.startsWith(FLIGHT_LEFT_HEAD) ? "left" : cause.replace(/ \(\d+\)$/, "");
 
 /** Stores a wake on its run, with the fact categories (not the counts) that caused it. */
-export function recordWakeReasons(store: Store, runId: string, at: number, causes: string[]): void {
-  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))]);
+export function recordWakeReasons(
+  store: Store,
+  runId: string,
+  at: number,
+  causes: string[],
+  wakeId?: string,
+): void {
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId);
+}
+
+/** FLIGHT has received `s`: the pointers it lists as moved are read, and not listed again. */
+export function markPointersShown(
+  store: Store,
+  config: CcConfig,
+  s: FlightState,
+  at: number,
+): void {
+  const session = flightSeat(config)?.session.id;
+  const shown = [...(s.moved ?? []), ...(s.wake?.movedCovered ?? [])];
+  if (session !== undefined && shown.length > 0) store.markFlightPointersRead(session, shown, at);
 }
 
 /** The last day's wakes, by reason and by hour (24 buckets, the last one ending at `now`). */
@@ -656,6 +686,11 @@ export function markItemsShown(store: Store, s: FlightState): void {
   }
 }
 
+/** The wake fact for a queued review an idle review seat has not started; also FLIGHT's `wait_on` target for it. */
+export const REVIEW_FAULT_FACT = "idle-reviewers";
+/** The wait targets that hold it: the fact, and the wake reason's label (`reviews idle-reviewers`). */
+export const REVIEW_FAULT_TARGETS = [REVIEW_FAULT_FACT, `reviews ${REVIEW_FAULT_FACT}`];
+
 /** Whether a recorded wait still holds `target` (a seat id or a ticket ref) back. */
 const waitingOn = (waits: Record<string, { until: number }>, target: string, now: number) =>
   Object.entries(waits).some(
@@ -663,6 +698,10 @@ const waitingOn = (waits: Record<string, { until: number }>, target: string, now
   );
 
 /** What `wakeFacts` reads beyond the digest: where a Ready ticket could start, and which items are new. */
+function withCovered(inputs: FlightWakeInputs, covered: FlightMovedPointer[]): FlightWakeInputs {
+  return covered.length === 0 ? inputs : { ...inputs, movedCovered: covered };
+}
+
 function wakeInputs(i: {
   store: Store;
   seats: FlightSeatState[];
@@ -693,6 +732,7 @@ function wakeInputs(i: {
     fit[seat.id] = ready.filter((t) => fits(seat, t)).map((t) => t.ref);
   }
   const seen = seenItems(i.store);
+  const reviewsWaited = REVIEW_FAULT_TARGETS.some((target) => waitingOn(waits, target, i.now));
   const fresh = wakeItems({ items: i.items })
     .filter((x) => seen[itemFactId(x)] !== itemHash(x))
     .map(itemFactId);
@@ -701,7 +741,9 @@ function wakeInputs(i: {
       ? []
       : i.store.unreadCommsFrom(COMMS_CAPCOM, i.flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS);
   const idle = idleSeats(i, waits, rules, fit);
-  return idle === undefined ? { fit, fresh, operator } : { fit, fresh, operator, idle };
+  return idle === undefined
+    ? { fit, fresh, operator, reviewsWaited }
+    : { fit, fresh, operator, reviewsWaited, idle };
 }
 
 /** The setting that keeps when each seat's idle spell began (the hub's own record). */
@@ -841,6 +883,7 @@ export function flightState(i: {
   const ledger = openLedger
     .slice(0, FLIGHT_LEDGER_INDEX_MAX)
     .map(({ kind, key, title, status, next }) => ({ kind, key, title, status, next }));
+  const movedAll = found === null ? [] : store.movedFlightPointers(found.session.id);
   const notes: readonly string[] = FLIGHT_NOTE_SECTIONS;
   const brief = flightBriefSections(store, found?.session.id ?? null)
     .filter((b) => notes.includes(b.section))
@@ -971,8 +1014,21 @@ export function flightState(i: {
         queued: reviews.filter((row) => row.state === "queued").length,
         running: reviews.filter((row) => row.state === "starting" || row.state === "running")
           .length,
+        // the oldest review queued on this seat; the engine may re-route it to another seat on its next pass
+        waitMin: Math.max(
+          0,
+          ...reviews
+            .filter((row) => row.state === "queued")
+            .map((row) => Math.floor((now - row.createdAt) / 60_000)),
+        ),
         idle:
           !seatUnavailable(seat) &&
+          !accountAtStop(
+            config,
+            store,
+            runAccountId(store, held?.id ?? null, seat.accountId),
+            now,
+          ) &&
           pausedSeat(store, seat.id) === null &&
           store.seatSession(seat.id)?.state !== "stopped" &&
           held === null &&
@@ -987,6 +1043,7 @@ export function flightState(i: {
     .filter(
       (b) =>
         !b.closed &&
+        !b.labels.includes(WAITING_OPERATOR_LABEL) &&
         inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
         FLIGHT_STARTABLE.includes(hudColumnOf(b)) &&
         !active.has(`${b.repoId}#${b.issueNumber}`) &&
@@ -1314,6 +1371,12 @@ export function flightState(i: {
     }));
 
   const planned = flightScheduleView(config, store, now).entries;
+  // a PR the digest lists already shows a change to its state or head; the pointer is read with the wake, not repeated
+  const listedPrs = new Set(prs.map((p) => `${session.repoId}#${p.pr}`));
+  const covered = movedAll.filter(
+    (m) => m.kind === "pr" && listedPrs.has(m.target) && FLIGHT_PR_ENTRY_CHANGES.includes(m.change),
+  );
+  const moved = movedAll.filter((m) => !covered.includes(m)).slice(0, FLIGHT_MOVED_LISTED);
   return {
     prFlow: flow,
     ...flightSignals({
@@ -1331,6 +1394,14 @@ export function flightState(i: {
           ? [{ ref: p.ref, pr: p.pr, at }]
           : [];
       }),
+      questions: openQuestionSubjects({ config, store, now, lock: i.lock }).map((q) => {
+        const facts = questionFacts(store, q);
+        return {
+          id: subjectId(q),
+          facts: factsText(facts),
+          closing: closingFact(q, facts) !== null,
+        };
+      }),
       now,
     }),
     instructionRevision: store.instructions.revision(),
@@ -1338,17 +1409,20 @@ export function flightState(i: {
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
     discussions,
-    wake: wakeInputs({
-      store,
-      seats,
-      tickets,
-      allTickets: openTickets,
-      items,
-      areas: i.areas,
-      hubLogin: i.hubLogin ?? null,
-      flightId: found?.seat.id ?? null,
-      now,
-    }),
+    wake: withCovered(
+      wakeInputs({
+        store,
+        seats,
+        tickets,
+        allTickets: openTickets,
+        items,
+        areas: i.areas,
+        hubLogin: i.hubLogin ?? null,
+        flightId: found?.seat.id ?? null,
+        now,
+      }),
+      covered,
+    ),
     time: clockHm(now, tz),
     ...(digestMatches.length > 0
       ? {
@@ -1378,6 +1452,7 @@ export function flightState(i: {
     ...headline,
     ledger,
     ledgerMore: openLedger.length - ledger.length,
+    ...(moved.length === 0 ? {} : { moved }),
   };
 }
 
@@ -1562,10 +1637,10 @@ export function wakeFacts(
 ): string {
   const { free, startable } = startableFor(s);
   // a review just queued waits for its seat to start it; only one that has stood still is a fault
-  const reviewFault =
-    (s.reviewQueue?.queued ?? 0) > 0 &&
-    (s.reviewQueue?.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS &&
-    s.reviewQueue?.seats.some((seat) => seat.idle);
+  // The engine re-routes a queued review to the seat `reviewerOf` picks, so an idle seat with no queue
+  // of its own gets one without FLIGHT. The fault is an idle seat whose own queued review has stood
+  // still; a seat at its quota stop is not idle. A wait on it holds the fact.
+  const reviewFault = s.wake?.reviewsWaited !== true && reviewFaultStands(s.reviewQueue);
   return JSON.stringify({
     instructions:
       s.instructionRevision && s.instructionRevision !== "0" ? [s.instructionRevision] : [],
@@ -1595,7 +1670,7 @@ export function wakeFacts(
         .map((x) => `${x.seat}:${x.ticket}:${x.parked?.kind}`),
     ].sort(),
     stopped: stoppedSeats(s),
-    reviews: reviewFault ? ["idle-reviewers"] : [],
+    reviews: reviewFault ? [REVIEW_FAULT_FACT] : [],
     prFlow: prFlowFacts(s.prFlow),
     holdsInForce:
       s.flowHolds
@@ -1807,6 +1882,85 @@ export function wakeReasons(
         targets: [...factTargets(category, item), ...itemTickets(category, item, itemRefs)],
       }));
   });
+}
+
+/**
+ * A wake reason in words for the operator, from its fact: a PR, ticket, seat or item named, and the
+ * time where the fact has one. Never the raw `kind:key:epoch` id.
+ */
+export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
+  const at = (ms: number): string => {
+    const day = new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      timeZone,
+    }).format(ms);
+    return `${day} ${clockHm(ms, timeZone)}`;
+  };
+  const times = (text: string): string => text.replace(/\d{13}/g, (ms) => at(Number(ms)));
+  const spaced = (text: string): string => text.replace(/[_-]+/g, " ");
+  const split = /^([^:]+):([\s\S]*)$/.exec(reason.id);
+  const category = split?.[1] ?? "";
+  let item: unknown = split?.[2];
+  try {
+    item = JSON.parse(split?.[2] ?? "null");
+  } catch {
+    // a fact id that is not JSON keeps its text
+  }
+  const text = typeof item === "string" ? item : JSON.stringify(item);
+  const [a = "", b = "", c = "", d = "", e = ""] = typeof item === "string" ? item.split(":") : [];
+  const since = (part: string): string =>
+    /^\d{13}$/.test(part) ? ` since ${at(Number(part))}` : "";
+  switch (category) {
+    case "q":
+      return `question ${text}`;
+    case "prFlow": {
+      const [pr = "", what = "", ...rest] = (typeof item === "string" ? item : "").split(":");
+      const when = since(rest.at(-1) ?? "");
+      if (what === "unowned") return `PR #${pr} has had no owner${when}`;
+      if (what === "waiting") return `PR #${pr} has waited on the ${rest[0] ?? "operator"}${when}`;
+      return `PR #${pr} has stood at the ${rest[0] ?? "same"} step${when}`;
+    }
+    case "triage":
+      return b === "missed"
+        ? `FLIGHT missed ${a}`
+        : `${a} waits for FLIGHT's triage (${spaced(b)})`;
+    case "parked":
+      return `${a} is parked on ${b} (${spaced(c)})`;
+    case "stopped":
+      return `${text} is stopped`;
+    case "idle":
+      return `${a} idle ${b}`;
+    case "free":
+      return `seat ${text} is free`;
+    case "t":
+      return `ticket ${text} is ready to start`;
+    case "reviews":
+      return "review seats are idle with a review queued";
+    case "holdsInForce":
+      return `${spaced(text)} hold is in force`;
+    case "breaker":
+      return `the runaway breaker is tripped (${spaced(text)})`;
+    case "prs":
+      return `PR #${b} (${a}) waits on FLIGHT${e ? ` to ${spaced(e)}` : ""}`;
+    case "planned": {
+      const [, dueAt, , target, label] = Array.isArray(item) ? item : [];
+      return `${label ?? "a planned check"} on ${target ?? "its target"}, due ${typeof dueAt === "number" ? at(dueAt) : "now"}`;
+    }
+    case "items": {
+      if (a === "pr") return times(text.replace(/^pr:/, "").replace(/^([^:]+):/, ""));
+      if (a === "comms-open") return `Comms message ${b} waits for an answer`;
+      if (a === "esc") return `issue ${b} waits for an answer`;
+      if (a === "stall") return `${b} stalled${since(e)}`;
+      return `${spaced(a)} ${times([b, c, d, e].filter((x) => x !== "").join(" "))}`.trim();
+    }
+    case "signals": {
+      const target = times(text.slice(a.length + 1));
+      return target === "" ? spaced(a) : `${spaced(a)} on ${target}`;
+    }
+    default:
+      return times(`${category} ${text}`);
+  }
 }
 
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */

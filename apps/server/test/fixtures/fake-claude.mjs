@@ -26,11 +26,14 @@
 //   NONJSON    a stdout line that is not JSON
 //   HANG       keep running after stdin closes (until a signal)
 //   IGNORETERM as HANG, and ignore SIGTERM too (only SIGKILL ends it)
+//   CHECKREAD  (the CLI-update check's line, "Read the file <f> in the current directory") a Read tool_use on
+//              <f> in the cwd, its tool_result and the file's contents as the answer
 //   QUIET      print nothing until `<--record file>.go` exists, then run the turn (its reply
 //              says QUIETED)
 //   ORPHAN     exit 0 at once, leaving a child that holds stdout and stderr open for 3 s
 import { spawn } from "node:child_process";
-import { appendFileSync, existsSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const argv = process.argv.slice(2);
@@ -192,6 +195,27 @@ function userTurn(text) {
     process.stdout.write('{"type":"result","is_error":true,"stop_reason":"half"}', () =>
       process.exit(3),
     );
+    return;
+  }
+  const checkRead = /Read the file (\S+) in the current directory/.exec(text);
+  if (checkRead && existsSync(`${recordTo}.hold`) && !existsSync(`${recordTo}.go`)) {
+    // a check that has not answered yet (until `<record file>.go` exists)
+    const wait = setInterval(() => {
+      if (!existsSync(`${recordTo}.go`)) return;
+      clearInterval(wait);
+      userTurn(text);
+    }, 20);
+    return;
+  }
+  if (checkRead) {
+    const content = readFileSync(join(process.cwd(), checkRead[1]), "utf8");
+    assistant(
+      [{ type: "tool_use", id: "toolu_r", name: "Read", input: { file_path: checkRead[1] } }],
+      "tool_use",
+    );
+    user([{ tool_use_id: "toolu_r", type: "tool_result", content, is_error: false }]);
+    assistant([{ type: "text", text: content }], "end_turn");
+    result(content, "end_turn");
     return;
   }
   if (text.includes("SLOW")) {

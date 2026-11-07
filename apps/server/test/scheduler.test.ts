@@ -212,6 +212,40 @@ describe("scheduler", () => {
     expect(log).toHaveBeenCalledWith("transcripts: 1 gzipped, 0 deleted, 0 failed");
   });
 
+  it("runs the token audit before transcript maintenance, and maintenance runs if the audit throws", async () => {
+    const order: string[] = [];
+    const tokenAudit = vi.fn(async () => {
+      order.push("tokenAudit");
+      return { audited: 2, empty: 0, controllerSessions: 0 };
+    });
+    const transcripts = vi.fn(async () => {
+      order.push("transcripts");
+      return { gzipped: 0, deleted: 0, skippedLive: 0, failed: [] };
+    });
+    const log = vi.fn();
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts, tokenAudit }),
+      log,
+    });
+    await s.tick("transcripts");
+    expect(order).toEqual(["tokenAudit", "transcripts"]);
+    expect(tokenAudit).toHaveBeenCalledWith({ store, config, now: NOW });
+    expect(log).toHaveBeenCalledWith("token audit: 2 runs, 0 controller sessions");
+
+    order.length = 0;
+    tokenAudit.mockImplementationOnce(async () => {
+      order.push("tokenAudit");
+      throw new Error("disk gone");
+    });
+    await s.tick("transcripts");
+    expect(order).toEqual(["tokenAudit", "transcripts"]);
+    expect(log).toHaveBeenCalledWith("token audit failed: disk gone");
+  });
+
   it("starts transcript maintenance after one minute, then every six hours", async () => {
     vi.useFakeTimers();
     config.crew = {
@@ -2354,6 +2388,52 @@ describe("board and PR cadence", () => {
       await s.stop();
     },
   );
+
+  it.each(["github", "prs"] as const)(
+    "a preview polls on %s but never follows PRs",
+    async (job) => {
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        boardWrites: false,
+      });
+      await s.tick(job);
+      const poll = job === "github" ? c.github : c.prSweep;
+      expect(poll).toHaveBeenCalled();
+      expect(c.followPrs).not.toHaveBeenCalled();
+      await s.stop();
+    },
+  );
+
+  it("a preview does not follow PRs after a waited PR poll either", async () => {
+    vi.useFakeTimers({ now: NOW });
+    config.poll = { usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 };
+    const c = stubs({ followPrs: vi.fn(async () => true) });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: Date.now,
+      collectors: c,
+      waitedPrs: () => [7],
+      boardWrites: false,
+    });
+    await s.tick("github");
+    await s.tick("github");
+    expect(c.githubPrs).toHaveBeenCalled();
+    expect(c.followPrs).not.toHaveBeenCalled();
+    await s.stop();
+  });
+
+  it("main.ts hands the scheduler boardWrites: !preview", async () => {
+    const { readFileSync } = await import("node:fs");
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(main).toContain("boardWrites: !preview,");
+  });
 
   it("follows PRs after a waited PR poll and emits a board move", async () => {
     vi.useFakeTimers({ now: NOW });

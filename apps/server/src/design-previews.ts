@@ -9,7 +9,7 @@
 import { constants, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { extname, join, sep } from "node:path";
-import type { DesignPreviewView } from "@mc/core";
+import type { DesignPreviewView, RepoId } from "@mc/core";
 import Fastify, { type FastifyInstance } from "fastify";
 import { DESIGN_PREVIEW_PORT } from "./design-preview-port.ts";
 import { webHandler } from "./web.ts";
@@ -89,6 +89,8 @@ export interface DesignPreviewsDeps {
   root: string;
   port: number;
   hubPort: number;
+  /** The repo every preview here belongs to (the hub supports previews for one repo). */
+  repoId: RepoId;
   prOf(branch: string): { number: number; state: "open" | "closed" | "merged" } | null;
   now?: () => number;
   log?: (line: string) => void;
@@ -139,6 +141,7 @@ export class DesignPreviews {
 
   private view(m: Manifest): DesignPreviewView {
     return {
+      repoId: this.deps.repoId,
       ticket: m.ticket,
       branch: m.branch,
       sha: m.sha,

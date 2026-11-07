@@ -42,6 +42,7 @@ import {
   npmPrefix,
   pendingCliUpdate,
   realCliOps,
+  type SeatCheck,
   settlePending,
 } from "./cli-auto.ts";
 import {
@@ -122,8 +123,10 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "./machine-capacity.ts";
+import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
+import { auditEndedRuns } from "./token-audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
@@ -261,7 +264,7 @@ export interface Collectors {
   /** One CLI update check (`updates.cli: between_runs`): brew outdated, upgrade, smoke test. */
   cli: (beforeUpgrade: () => void) => Promise<CliCheck>;
   /** The version source, installer and live check for one CLI, or null when something else keeps it current. */
-  cliOps: (tool: AutoCliTool) => CliToolOps | null;
+  cliOps: (tool: AutoCliTool, seatCheck?: SeatCheck) => CliToolOps | null;
   /** The one-off fill of past crew runs' missing ticket titles, read from GitHub. */
   fillTitles: typeof fillTicketTitles;
   claude: (acct: AccountId, onError: OnError, now: number) => Promise<UsageSample[]>;
@@ -275,11 +278,15 @@ export interface Collectors {
     spawn: boolean,
   ) => Promise<MachineResult>;
   transcripts?: typeof maintainTranscripts;
+  /** Reads ended runs' transcripts for the token audit; runs before the transcripts are gzipped or deleted. */
+  tokenAudit?: typeof auditEndedRuns;
 }
 
 export interface SchedulerDeps {
   config: CcConfig;
   teamsEnabled?: boolean;
+  /** False on a preview: it polls GitHub but never moves a card. Default true. */
+  boardWrites?: boolean;
   store: Store;
   bus: ChangeBus;
   now?: () => number;
@@ -301,6 +308,8 @@ export interface SchedulerDeps {
   autoUpdate?: () => Promise<unknown>;
   /** Where the CLI update check holds new runs while the CLI fails its smoke test. */
   cliHold?: CliHold;
+  /** The live check of an automatic CLI update, run on a seat (the supervisor's, built after the scheduler). */
+  seatCheck?: SeatCheck;
   /** Hands an applied default to the seat that asked it. */
   deliverDefault?: (seatId: string, text: string) => Promise<void>;
   /** The PRs the engine waits on in a repo (CI running, a merge queued). Default: from the loop runs. */
@@ -356,9 +365,9 @@ export function realCollectors(config: CcConfig): Collectors {
     backfill: backfillRuns,
     rewriteSummaries: rewriteCrewSummaries,
     cli: (beforeUpgrade) => checkCli({ exec: realExec, beforeUpgrade }),
-    cliOps: (tool) => {
+    cliOps: (tool, seatCheck) => {
       const prefix = npmPrefix(tool);
-      return prefix === null ? null : realCliOps(tool, realExec, prefix);
+      return prefix === null ? null : realCliOps(tool, realExec, prefix, undefined, seatCheck);
     },
     fillTitles: fillTicketTitles,
     claude: (acct, onError, now) =>
@@ -388,6 +397,7 @@ export function realCollectors(config: CcConfig): Collectors {
     machine: (prevCpus, prev, now, testCommand, spawn) =>
       sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand, spawn }),
     transcripts: maintainTranscripts,
+    tokenAudit: auditEndedRuns,
   };
 }
 
@@ -456,6 +466,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const cliHold = deps.cliHold ?? new CliHold();
   /** The re-check armed while new runs are held. */
   let cliRetry: NodeJS.Timeout | null = null;
+  /** The re-check armed while an automatic CLI update waits for a free seat. */
+  let cliAutoRetry: NodeJS.Timeout | null = null;
   // A hold from before a restart stands until a check passes: the supervisor's resume runs next.
   const heldNote = store.notes().find((n) => n.key === CLI_NOTE_KEY);
   if (heldNote !== undefined) {
@@ -556,6 +568,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               `${repo.id} PR #${pr.number} is still a draft.`,
               pr.updatedAt + PR_WAIT_MS,
             );
+      const closed = await closeSettledQuestions({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+        deliver: deps.deliverDefault,
+      });
+      if (closed > 0) bus.emit("attention");
       const raised = raiseStalledCommsDecisions({ config, store, now: now() });
       if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
@@ -943,7 +963,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               flightSeat(config)?.session.repoId === repo.id,
             );
             changed.boards ||= r.boards;
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
               changed.boards = true;
           });
         }
@@ -964,7 +987,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             changed.boards ||= r.boards;
             changed.escalations ||= r.escalations;
             // Whoever opened a ticket's PR, its card follows (the engine moves only its runs').
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
               changed.boards = true;
           });
           const error = store.status().find((s) => s.collector === collector)?.error;
@@ -1083,7 +1109,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     cliAuto: async () => {
       if (config.updates?.cli !== "between_runs") return;
       for (const tool of AUTO_CLI_TOOLS) {
-        const ops = c.cliOps(tool);
+        const ops = c.cliOps(tool, deps.seatCheck);
         if (ops === null) {
           settlePending(store, cliHold, tool, (line) => deps.log?.(line));
           recordStatus(
@@ -1094,12 +1120,20 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           continue;
         }
         try {
-          await autoUpdateCli(tool, ops, {
+          const outcome = await autoUpdateCli(tool, ops, {
             store,
             hold: cliHold,
             log: (line) => deps.log?.(line),
             now,
           });
+          // an update waiting for a free seat does not wait out the next interval
+          if (outcome === "waiting" && cliAutoRetry === null) {
+            cliAutoRetry = setTimeout(() => {
+              cliAutoRetry = null;
+              void tick("cliAuto");
+            }, CLI_RETRY_MS);
+            cliAutoRetry.unref();
+          }
         } catch (e) {
           deps.log?.(`cli update ${tool}: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -1139,7 +1173,11 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               ).boards
             )
               boards = true;
-            if (await c.followPrs({ gql: client, store, config, now }, repo.id)) boards = true;
+            if (
+              deps.boardWrites !== false &&
+              (await c.followPrs({ gql: client, store, config, now }, repo.id))
+            )
+              boards = true;
           });
         }
       }
@@ -1204,6 +1242,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         );
       }),
     transcripts: async () => {
+      try {
+        const a = await (c.tokenAudit ?? auditEndedRuns)({ store, config, now: now() });
+        if (a.audited || a.controllerSessions)
+          deps.log?.(`token audit: ${a.audited} runs, ${a.controllerSessions} controller sessions`);
+      } catch (e) {
+        deps.log?.(`token audit failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
       const r = await (c.transcripts ?? maintainTranscripts)({
         store,
         now: now(),
@@ -1453,6 +1498,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       triageTimer = null;
       if (cliRetry !== null) clearTimeout(cliRetry);
       cliRetry = null;
+      if (cliAutoRetry !== null) clearTimeout(cliAutoRetry);
+      cliAutoRetry = null;
       if (triggerTimer !== null) clearTimeout(triggerTimer);
       triggerTimer = null;
       if (crewTimer !== null) clearTimeout(crewTimer);

@@ -143,6 +143,8 @@ import {
   type TestLockHistory,
   type TestLockView,
   type TicketView,
+  TOKEN_AUDIT_DAYS_DEFAULT,
+  TOKEN_AUDIT_DAYS_MAX,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -168,6 +170,7 @@ import {
   AttentionHoldInput,
   attentionHoldError,
   holdItem,
+  nothingForOperator,
   releaseHold,
 } from "./attention-holds.ts";
 import {
@@ -201,6 +204,9 @@ import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import {
+  COMMS_FEED_DEFAULT,
+  COMMS_FEED_MAX,
+  COMMS_OPEN_TEXT_MAX,
   COMMS_SNAPSHOT_LIMIT,
   pinComms,
   reactComms,
@@ -255,10 +261,13 @@ import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
+  askExternalReview,
   externalMergeHold,
   externalPrControl,
+  externalReviewAsked,
   setExternalMergeHold,
   setExternalPrControl,
+  withdrawExternalReview,
 } from "./external-pr-control.ts";
 import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
@@ -303,6 +312,7 @@ import {
   NO_LOCK,
   NOTE_KEY,
   pinned,
+  seatQuestionTriage,
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
@@ -387,6 +397,7 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
+import { tokenAuditView } from "./token-audit-view.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 import { transcriptFootprint } from "./transcript-lifecycle.ts";
 import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
@@ -724,6 +735,9 @@ const QA_DAYS_ERROR = `days must be an integer 1..${QA_RETENTION_DAYS}`;
 /** `GET /api/agents/:id/files/diff?path=`: one path, as the file list gives it. */
 const DiffPath = z.string().min(1).max(4096);
 
+/** `GET /api/attention/answered`: the questions closed without an answer, over the last week. */
+const ANSWERED_WINDOW_MS = 7 * 24 * 60 * 60_000;
+const ANSWERED_LIMIT = 50;
 /** `POST /api/attention/ack`. */
 const AckBody = z.strictObject({
   keys: z.array(z.string().min(1).max(200)).min(1).max(ACK_BATCH_MAX),
@@ -1661,21 +1675,83 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/pages/Comms.tsx#Comms (unanswered questions and blockers)
       api.get("/comms/open", () => {
         const at = now();
-        return {
-          items: store.openCommsItems().map((item) => {
-            const flightAt = item.at + COMMS_FLIGHT_ESCALATION_MS;
-            const atFlight = at >= flightAt;
+        const step = (askedAt: number) => {
+          const flightAt = askedAt + COMMS_FLIGHT_ESCALATION_MS;
+          const atFlight = at >= flightAt;
+          return {
+            waitedMs: Math.max(0, at - askedAt),
+            nextStep: atFlight ? ("flight-not-triaging" as const) : ("flight" as const),
+            nextAt: atFlight ? flightAt + COMMS_CAPCOM_ESCALATION_MS : flightAt,
+          };
+        };
+        const asked = store.openCommsItems().map((item) => ({
+          id: item.id,
+          label: item.label,
+          from: item.from,
+          to: item.to,
+          ticket: item.ticket,
+          text: item.text.slice(0, COMMS_OPEN_TEXT_MAX),
+          at: item.at,
+          ...step(item.at),
+        }));
+        const flightId = flightSeat(config)?.seat.id ?? COMMS_CAPCOM;
+        // A seat question is FLIGHT's from the start: its deadline is FLIGHT's triage window,
+        // and with no FLIGHT seat it is the operator's now.
+        // A question FLIGHT passed to the operator is the operator's, whatever the window says.
+        const seatQuestionStep = (askedAt: number, passedAt: number | null) => {
+          if (passedAt !== null)
             return {
-              id: item.id,
-              label: item.label,
-              from: item.from,
-              to: item.to,
-              ticket: item.ticket,
-              waitedMs: Math.max(0, at - item.at),
-              nextStep: atFlight ? ("flight-not-triaging" as const) : ("flight" as const),
-              nextAt: atFlight ? flightAt + COMMS_CAPCOM_ESCALATION_MS : flightAt,
+              waitedMs: Math.max(0, at - askedAt),
+              nextStep: "operator" as const,
+              nextAt: passedAt,
             };
-          }),
+          const triage = seatQuestionTriage(config, store, at, askedAt);
+          if (triage === null)
+            return {
+              waitedMs: Math.max(0, at - askedAt),
+              nextStep: "operator" as const,
+              nextAt: at,
+            };
+          const late = !triage.triaging || at >= triage.dueAt;
+          return {
+            waitedMs: Math.max(0, at - askedAt),
+            nextStep: late ? ("flight-not-triaging" as const) : ("flight" as const),
+            nextAt: triage.triaging ? triage.dueAt : at,
+          };
+        };
+        const seatQuestions = store.openQuestions().map((q) => ({
+          id: `ask:${q.id}`,
+          label: "question" as const,
+          from: q.agentId,
+          to: q.passedAt === null ? flightId : COMMS_CAPCOM,
+          ticket: store.run(q.runId)?.ticket ?? null,
+          text: q.text.slice(0, COMMS_OPEN_TEXT_MAX),
+          at: q.at,
+          ...seatQuestionStep(q.at, q.passedAt),
+        }));
+        return {
+          items: [...asked, ...seatQuestions]
+            .sort((a, b) => a.at - b.at)
+            .map(({ at: _at, ...item }) => item),
+        };
+      });
+      // Reader: apps/web/src/pages/Comms.tsx#Comms (the chart's travelling messages)
+      api.get("/comms/feed", (req, reply) => {
+        const query = z
+          .strictObject({
+            since: z.string().optional(),
+            limit: z.coerce.number().int().min(1).max(COMMS_FEED_MAX).optional(),
+          })
+          .safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: zodError(query.error) });
+        const sinceId = query.data.since === undefined ? 0 : commsMessageNumber(query.data.since);
+        if (sinceId === null) return reply.code(400).send({ error: "invalid Comms message id" });
+        return {
+          messages: store.commsFeed(
+            sinceId,
+            query.data.limit ?? COMMS_FEED_DEFAULT,
+            COMMS_OPEN_TEXT_MAX,
+          ),
         };
       });
       // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot)
@@ -3767,6 +3843,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
         return capAudit(store.audit(until - Number(match[1]) * 86_400_000, until, kinds));
       });
+      // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
+      api.get<{ Querystring: { days?: string } }>("/audit/tokens", async (req, reply) => {
+        const raw = req.query.days ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
+        const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
+        if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
+          return reply
+            .code(400)
+            .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
+        }
+        return tokenAuditView(store, config, now(), days);
+      });
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
         const footprint =
@@ -5027,8 +5114,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
-      // The verdict on a run's `## Controller check`. FLIGHT may record routine evidence, while
-      // checks of its own runtime and approval guidance require an independent controller.
+      // The verdict on a run's `## Controller check`. On a superuser repo FLIGHT records it on any
+      // path; on a standard repo FLIGHT may only record routine evidence.
       // Reader: docs/runbook.md#record-a-controller-check
       api.post<{ Params: { id: string } }>(
         "/runs/:id/controller-check",
@@ -5042,13 +5129,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           if (
             flightActor(req) &&
+            flightPowersOf(config, run.repoId) !== "superuser" &&
             run.loop.touches?.paths.some((path) =>
               FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
             )
           )
             return reply.code(403).send({
-              error:
-                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+              error: "The operator must check changes to FLIGHT's runtime or approval rules.",
             });
           if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
           if (deps.engine?.controllerCheck === undefined || deps.engine.status().on !== true) {
@@ -5153,10 +5240,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const control = externalPrControl(store, target.repo.id, number, target.sha);
           if (!control?.controllerRequired)
             return reply.code(404).send({ error: "this head has no outstanding controller check" });
-          if (flightActor(req) && control.protectedController)
+          if (
+            flightActor(req) &&
+            flightPowersOf(config, target.repo.id) !== "superuser" &&
+            control.protectedController
+          )
             return reply.code(403).send({
-              error:
-                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+              error: "The operator must check changes to FLIGHT's runtime or approval rules.",
             });
           if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
           setExternalPrControl(store, target.repo.id, number, target.sha, {
@@ -5166,6 +5256,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           store.addHubEvent(
             `Controller check ${body.data.verdict} for external PR ${target.repo.id}#${number} at ${target.sha}${body.data.note ? `: ${cleanText(body.data.note, 1000)}` : ""}`,
+            now(),
+          );
+          bus.emit("boards");
+          return { ok: true };
+        },
+      );
+      // Reader: docs/runbook.md#external-pr-merge-and-sign-off (asking this hub to review a hand-opened PR).
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/review-request",
+        async (req, reply) => {
+          const body = z
+            .strictObject({
+              sha: z.string().regex(/^[a-f0-9]{40}$/i),
+              action: z.enum(["ask", "withdraw"]).default("ask"),
+            })
+            .safeParse(req.body);
+          const number = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (!body.success || !Number.isSafeInteger(number) || number < 1)
+            return reply.code(400).send({ error: "invalid review-request" });
+          const who = flightActor(req) ? "FLIGHT" : "Controller";
+          if (body.data.action === "withdraw") {
+            // taking an ask back only narrows what this hub does: no GitHub read, works on a closed PR
+            if (!config.repos.some((r) => r.id === req.params.repoId))
+              return reply.code(404).send({ error: "unknown repo" });
+            if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+            if (withdrawExternalReview(store, req.params.repoId, number)) {
+              store.addHubEvent(
+                `${who} withdrew the ask for a QA review of external PR ${req.params.repoId}#${number}`,
+                now(),
+              );
+              bus.emit("boards");
+            }
+            return { ok: true };
+          }
+          const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
+          if (!target) return reply;
+          // asking again for the same head changes nothing and says nothing
+          if (externalReviewAsked(store, target.repo.id, number, target.sha)) return { ok: true };
+          askExternalReview(
+            store,
+            target.repo.id,
+            number,
+            flightActor(req) ? "FLIGHT" : "CAPCOM",
+            now(),
+            target.sha,
+          );
+          store.addHubEvent(
+            `${who} asked for a QA review of external PR ${target.repo.id}#${number} at ${target.sha}`,
             now(),
           );
           bus.emit("boards");
@@ -5613,6 +5751,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ),
           ),
       );
+      // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-flight-s-side-flight-is-the-gate (the Answered group; the web side is a follow-up ticket)
+      api.get("/attention/answered", async () =>
+        store.questionClosures(now() - ANSWERED_WINDOW_MS, ANSWERED_LIMIT),
+      );
       // Reader: apps/web/src/shell/ItemPanel.tsx (whole tag message on open)
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
@@ -5628,7 +5770,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           sharedCrew().rows,
           deps.hubLogin?.() ?? null,
           true,
-        ).filter((i) => i.hold),
+        ).filter((i) => i.hold && !nothingForOperator(i)),
       );
       // Reader: apps/web/src/comms/Decisions.tsx
       api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {

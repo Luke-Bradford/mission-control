@@ -3,6 +3,7 @@ import {
   BACKGROUND_SUITE_TEXT,
   closesIssue,
   codexCommand,
+  DETACHED_HEAD,
   decodeCharRefs,
   engineHitText,
   FREE_SUITE_HINT,
@@ -170,6 +171,13 @@ describe("FLIGHT's full profile", () => {
     expect(ruleOf(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => null })).toBe(
       "merge-push",
     );
+    // a detached HEAD moves no branch: FLIGHT merges main into a PR branch from one
+    expect(
+      guardDecision(bash("git merge origin/main"), {
+        ...flightFull,
+        flightGitBranch: () => DETACHED_HEAD,
+      }),
+    ).toEqual({ kind: "allow" });
   });
 
   it.each([

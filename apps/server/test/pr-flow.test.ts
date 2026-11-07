@@ -169,7 +169,7 @@ describe("PR flow ownership and clocks", () => {
       T + 2 * M,
     );
     expect(row()).toMatchObject({
-      owner: "controller",
+      owner: "FLIGHT",
       stage: "controller check",
       ownerSince: T + 2 * M,
     });

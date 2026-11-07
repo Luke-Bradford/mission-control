@@ -97,6 +97,7 @@ import {
   flightToolsDigest,
 } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
+import { closeSettledQuestions } from "../src/question-watch.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -775,8 +776,51 @@ describe("FLIGHT's flow queues", () => {
       queued: 0,
       waitMin: 0,
       running: 0,
-      seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
+      seats: [{ seat: "retro-1", queued: 0, running: 0, waitMin: 0, idle: true }],
     });
+  });
+
+  it("a reviewer at its quota stop is not idle, and a wait on idle-reviewers holds the fault", () => {
+    store.requestReview({
+      authorRunId: "r-author-q",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 9,
+      sha: "sha-q",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T0,
+    });
+    const later = T0 + 20 * MIN;
+    const seatState = () =>
+      flightState({ config, store, busy: [], now: later }).reviewQueue?.seats[0];
+    expect(seatState()).toMatchObject({ queued: 1, waitMin: 20, idle: true });
+    expect(wakeFacts(flightState({ config, store, busy: [], now: later }))).toContain(
+      '"reviews":["idle-reviewers"]',
+    );
+    recordFlightWait(store, "idle-reviewers", { on: "reviews", until: later + MIN, at: later });
+    expect(wakeFacts(flightState({ config, store, busy: [], now: later }))).toContain(
+      '"reviews":[]',
+    );
+    recordFlightWait(store, "reviews idle-reviewers", {
+      on: "reviews",
+      until: later + 60 * MIN,
+      at: later,
+    });
+    expect(wakeFacts(flightState({ config, store, busy: [], now: later }))).toContain(
+      '"reviews":[]',
+    );
+    // over the account's stop, the seat cannot start the review: not idle, no fault
+    store.addUsage({
+      accountId: "claude-main",
+      window: "5h",
+      at: later,
+      pct: 96,
+      resetAt: later + 60 * MIN,
+      source: "test",
+    });
+    expect(seatState()).toMatchObject({ queued: 1, idle: false });
   });
 
   it("names a machine hold that leaves queued reviews without a reviewer", () => {
@@ -851,8 +895,8 @@ describe("FLIGHT's flow queues", () => {
       waitMin: 0,
       running: 0,
       seats: [
-        { seat: "retro-1", queued: 3, running: 0, idle: true },
-        { seat: "retro-2", queued: 2, running: 0, idle: true },
+        { seat: "retro-1", queued: 3, running: 0, waitMin: 0, idle: true },
+        { seat: "retro-2", queued: 2, running: 0, waitMin: 0, idle: true },
       ],
     });
     expect(result.flowHolds).toContainEqual({
@@ -2816,11 +2860,101 @@ describe("wakeSummary", () => {
             queued,
             running: 0,
             waitMin,
-            seats: [{ seat: "retro-1", queued, running: 0, idle: true }],
+            seats: [{ seat: "retro-1", queued, running: 0, waitMin, idle: true }],
           },
         });
       expect(wakeFacts(queue(1, 9))).toBe(wakeFacts(queue(0, 0)));
       expect(wakeFacts(queue(1, 10))).not.toBe(wakeFacts(queue(0, 0)));
+    });
+
+    it("does not raise it when the queued review is on a working seat and the idle one has none", () => {
+      const quiet = wakeFacts(state({}));
+      expect(
+        wakeFacts(
+          state({
+            reviewQueue: {
+              queued: 3,
+              running: 1,
+              waitMin: 30,
+              seats: [
+                { seat: "retro-1", queued: 3, running: 1, waitMin: 30, idle: false },
+                { seat: "retro-cx", queued: 0, running: 0, waitMin: 0, idle: false },
+              ],
+            },
+          }),
+        ),
+      ).toBe(quiet);
+      // an idle seat with no queue of its own cannot take retro-1's review
+      expect(
+        wakeFacts(
+          state({
+            reviewQueue: {
+              queued: 3,
+              running: 1,
+              waitMin: 30,
+              seats: [
+                { seat: "retro-1", queued: 3, running: 1, waitMin: 30, idle: false },
+                { seat: "retro-2", queued: 0, running: 0, waitMin: 0, idle: true },
+              ],
+            },
+          }),
+        ),
+      ).toBe(quiet);
+    });
+
+    it("raises it for a review held on an unavailable seat while another review seat is idle", () => {
+      const quiet = wakeFacts(state({}));
+      const queue = (waitMin: number, other: { running: number; idle: boolean }) =>
+        state({
+          reviewQueue: {
+            queued: 1,
+            running: other.running,
+            waitMin,
+            seats: [
+              { seat: "retro-cx", queued: 1, running: 0, waitMin, idle: false },
+              { seat: "retro-1", queued: 0, ...other, waitMin: 0 },
+            ],
+          },
+        });
+      expect(wakeFacts(queue(30, { running: 0, idle: true }))).toContain(
+        '"reviews":["idle-reviewers"]',
+      );
+      expect(wakeLine(queue(30, { running: 0, idle: true }))).toContain(
+        "Queued reviews with idle review seats are a fault",
+      );
+      // not yet past the limit, or no seat free to take it: no fault
+      expect(wakeFacts(queue(9, { running: 0, idle: true }))).toBe(quiet);
+      expect(wakeFacts(queue(30, { running: 1, idle: false }))).toBe(quiet);
+    });
+
+    it("names the fault in the wake line only for an idle seat whose own review has waited", () => {
+      const fault = "Queued reviews with idle review seats are a fault";
+      const seats = (waited: number) => [
+        { seat: "retro-1", queued: 3, running: 1, waitMin: 30, idle: false },
+        { seat: "retro-2", queued: waited > 0 ? 1 : 0, running: 0, waitMin: waited, idle: true },
+      ];
+      const line = (waited: number) =>
+        wakeLine(
+          state({ reviewQueue: { queued: 4, running: 1, waitMin: 30, seats: seats(waited) } }),
+        );
+      expect(line(0)).not.toContain(fault);
+      expect(line(5)).not.toContain(fault);
+      expect(line(10)).toContain(fault);
+    });
+
+    it("holds the idle-reviewers fact while FLIGHT waits on it", () => {
+      const queue = (reviewsWaited: boolean) =>
+        state({
+          reviewQueue: {
+            queued: 1,
+            running: 0,
+            waitMin: 30,
+            seats: [{ seat: "retro-1", queued: 1, running: 0, waitMin: 30, idle: true }],
+          },
+          wake: { fit: {}, fresh: [], reviewsWaited },
+        });
+      expect(wakeFacts(queue(true))).toBe(wakeFacts(state({ wake: { fit: {}, fresh: [] } })));
+      expect(wakeFacts(queue(false))).not.toBe(wakeFacts(queue(true)));
     });
 
     it("ignores a free seat next to tickets that are not ready, until one is", () => {
@@ -4334,7 +4468,7 @@ describe("every wake ends with each reason handled", () => {
     nowMs += FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
     await watch.check();
-    expect(leftNotes()[0]?.text).toContain("q 1");
+    expect(leftNotes()[0]?.text).toContain("question 1");
     // the re-wake for the second question ends clean, but question 1 is still open
     flightIdle();
     decide({ questionId: q2 });
@@ -4358,7 +4492,7 @@ describe("every wake ends with each reason handled", () => {
     await watch.check();
     expect(leftNotes()).toHaveLength(1);
     expect(leftNotes()[0]).toMatchObject({ kind: "blocked", seatId: "flight-1" });
-    expect(leftNotes()[0]?.text).toContain("q 1");
+    expect(leftNotes()[0]?.text).toContain("question 1");
     // the operator sees it as itself, not as an item FLIGHT triages
     const item = attentionItems(config, store, nowMs).find((i) =>
       i.key.endsWith(FLIGHT_LEFT_NOTE_KEY),
@@ -5183,13 +5317,59 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls[0]?.text.split("\n")[0]).toContain("reviews");
   });
 
+  const pointedEntry = (): FlightLedgerEntry => ({
+    kind: "watch",
+    key: "w-pr",
+    title: "w-pr",
+    status: "active",
+    next: null,
+    owner: null,
+    waitsOn: null,
+    due: null,
+    refs: [],
+    priority: null,
+    createdAt: nowMs,
+    updatedAt: nowMs,
+    outcome: null,
+    basis: "ticket",
+    pointers: [{ kind: "pr", target: "mc#7", changedAt: null, change: null, readAt: null }],
+  });
+
+  it("a start wake lists the moved pointers, stamps them read and records wake id 0", async () => {
+    store.putFlightLedgerEntry("s1", pointedEntry(), 0);
+    store.markFlightPointers("pr", "mc#7", "CI failing", nowMs);
+    await watch.check();
+    const start = JSON.parse(startCalls[0]?.first?.split("\n").at(-1) ?? "") as FlightWake;
+    expect(start.moved).toEqual([
+      { entry: "w-pr", kind: "pr", target: "mc#7", change: "CI failing", at: nowMs },
+    ]);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+    expect(store.flightWakes(0)[0]?.wakeId).toBe("r-flight-1:0");
+  });
+
+  it("a sent wake lists the moved pointers, stamps them read and records its wake id", async () => {
+    liveCrew();
+    await watch.check();
+    store.putFlightLedgerEntry("s1", pointedEntry(), 0);
+    const markedAt = nowMs;
+    store.markFlightPointers("pr", "mc#7", "merged", markedAt);
+    ask();
+    await tick();
+    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
+    expect(sent.moved).toEqual([
+      { entry: "w-pr", kind: "pr", target: "mc#7", change: "merged", at: markedAt },
+    ]);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+    expect(store.flightWakes(0).at(-1)?.wakeId).toBe("r-flight:1");
+  });
+
   it("stores each wake's reasons on the run, and counts them per hour by reason", async () => {
     liveCrew();
     await watch.check();
     ask();
     await tick();
     expect(store.flightWakes(0)).toEqual([
-      { runId: "r-flight", at: nowMs, reasons: ["q", "items"] },
+      { runId: "r-flight", at: nowMs, reasons: ["q", "items"], wakeId: "r-flight:1" },
     ]);
     const view = flightView(config, store, nowMs + MIN);
     expect(view.wakeHistory?.byReason).toEqual([
@@ -5695,5 +5875,105 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       expect(later).toHaveLength(2);
       expect(later[1]).toContain("61 min");
     });
+  });
+});
+
+describe("question fact watch (#1532)", () => {
+  const card = (closed = false): BoardItem => ({
+    repoId: "mc",
+    issueNumber: 7,
+    title: "Ticket 7",
+    status: "In progress",
+    state: "in progress",
+    labels: [],
+    priority: null,
+    updatedAt: closed ? T0 + 1 : T0,
+    url: "u",
+    stage: null,
+    owner: null,
+    parent: null,
+    subIssues: null,
+    blockedBy: [],
+    milestone: null,
+    size: null,
+    closed,
+    prioritySource: null,
+    createdAt: T0 - 7,
+    itemId: "I7",
+    projectId: "P1",
+  });
+  const pr9 = (headSha: string, at: number): PullRequestView => ({
+    repoId: "mc",
+    number: 9,
+    title: "PR 9",
+    url: "u",
+    branch: "mc/7",
+    ticket: "mc#7",
+    state: "open",
+    isDraft: false,
+    review: null,
+    ci: "passing",
+    createdAt: T0,
+    updatedAt: at,
+    mergedAt: null,
+    headSha,
+    mergeable: "MERGEABLE",
+  });
+  const changed = () =>
+    flightState({ config, store, busy: [], now: nowMs }).signals.filter(
+      (s) => s.kind === "question_changed",
+    );
+
+  it("wakes FLIGHT once per change, never without one", async () => {
+    live("flight-1", "r-flight");
+    store.upsertRun(
+      run("r-guido", "guido-1", { ticket: "mc#7", loop: { ...NEW_LOOP, prNumber: 9 } }),
+    );
+    store.setSeatSession(row("guido-1", "r-guido"));
+    store.replaceBoard("mc", [card()]);
+    store.upsertPullRequests("mc", [pr9("a", T0)], T0);
+    const id = ask("guido-1", "r-guido", T0);
+    store.addBrief({
+      key: `ask:${id}`,
+      for: "operator",
+      by: "flight",
+      ask: "Which lane?",
+      assessment: "a",
+      context: "a",
+      recommendation: "Lane 2",
+      options: [],
+      basis: "b",
+      at: T0 + 1,
+    });
+    store.passQuestion(id, T0 + 1);
+    // first sight records, then nothing changes: no reason, however often it is read
+    nowMs = T0 + MIN;
+    expect(changed()).toEqual([]);
+    nowMs = T0 + 2 * MIN;
+    expect(changed()).toEqual([]);
+    // a new head is one change: exactly one untold reason, and it stays one
+    store.upsertPullRequests("mc", [pr9("b", nowMs)], nowMs);
+    nowMs += MIN;
+    const first = changed();
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({
+      told: false,
+      key: `ask:${id}@${T0}:ticket=open;pr=open:b;run=live`,
+      evidence: `ask:${id}: ticket=open;pr=open:a;run=live → ticket=open;pr=open:b;run=live`,
+    });
+    nowMs += MIN;
+    expect(changed()).toHaveLength(1);
+    // the ticket closes: a change that closes the question raises nothing until the hub closes it
+    const before = changed().length;
+    store.replaceBoard("mc", [card(true)]);
+    nowMs += MIN;
+    expect(changed()).toHaveLength(before);
+    expect(await closeSettledQuestions({ config, store, now: nowMs })).toBe(1);
+    nowMs += MIN;
+    const after = changed();
+    expect(after).toHaveLength(before + 1);
+    expect(after.filter((s) => s.key.endsWith(":closed"))).toHaveLength(1);
+    nowMs += MIN;
+    expect(changed()).toHaveLength(before + 1);
   });
 });

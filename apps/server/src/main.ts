@@ -72,6 +72,7 @@ import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./external-reviews.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
@@ -320,6 +321,7 @@ export async function main(): Promise<void> {
   const scheduler = createScheduler({
     config,
     teamsEnabled: !isPreview(port, process.env),
+    boardWrites: !preview,
     store,
     bus,
     cliHold,
@@ -330,6 +332,8 @@ export async function main(): Promise<void> {
     hasViewClients: () => browserStreamCount > 0,
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
+    // lazy: the supervisor is built below, and the check only runs once the scheduler starts
+    seatCheck: (tool) => supervisor.checkCli(tool),
     deliverDefault: async (seatId, text) => {
       await supervisor.message(seatId, text, { interrupt: false });
     },
@@ -374,6 +378,7 @@ export async function main(): Promise<void> {
           root: join(dirname(dbPath), "design-previews"),
           port: DESIGN_PREVIEW_PORT,
           hubPort: port,
+          repoId: previewRepoId,
           // the newest PR of the branch decides: a closed one takes its preview with it
           prOf: (branch) => store.pullRequestOfBranch(previewRepoId, branch),
           log: (line) => log(line),
@@ -1069,6 +1074,8 @@ export async function main(): Promise<void> {
       unlinkSync(pidPath);
     });
   }
+  // reviews already in flight when this hub updated keep finishing: they count as asked once
+  if (!preview) seedExternalReviewAsks(store, Date.now());
   scheduler.start();
   gitFiles?.start();
   supervisor.start();
