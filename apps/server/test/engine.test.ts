@@ -1526,6 +1526,7 @@ describe("refusals", () => {
       "Push checks failed; the full command list was sent to the seat.",
     ]);
     expect(store.comms(0).every((c) => Array.from(c.text).length <= COMMS_MESSAGE_MAX)).toBe(true);
+    expect(store.commsForAgent(SEAT)[0]).toMatchObject({ from: "MC", senderKind: "hub" });
     expect(store.notes()).toEqual([]);
     expect(h.moves.map((m) => m.column)).not.toContain("Blocked");
   });
@@ -7072,6 +7073,10 @@ describe("the engine runs reviews", () => {
       expect(h.sent).toEqual([]);
       const note = store.comms(0, RUN).at(-1);
       expect(note?.text).toBe("Controller check failed; the full note was sent to the seat.");
+      expect(store.commsForAgent(SEAT).find((m) => m.text === note?.text)).toMatchObject({
+        from: "MC",
+        senderKind: "hub",
+      });
       expect(Array.from(note?.text ?? "").length).toBeLessThanOrEqual(COMMS_MESSAGE_MAX);
       h.wakeError = null;
       h.asideOn = false;

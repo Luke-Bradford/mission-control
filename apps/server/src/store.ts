@@ -6188,6 +6188,11 @@ export class Store {
   }
 
   private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
+    // The sender's name must match its kind: CAPCOM is only ever the operator, and the hub is MC.
+    if (row.from === COMMS_CAPCOM && row.senderKind !== undefined && row.senderKind !== "operator")
+      throw new Error("Only the operator sends as CAPCOM.");
+    if (row.senderKind === "hub" && row.from !== COMMS_MC)
+      throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
         "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

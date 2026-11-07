@@ -191,7 +191,15 @@ describe("the hub closes a question on a recorded fact", () => {
     // the seat is told, in Comms and in its live run
     const told = questionClosedText("Which lane?", "mc#7 was closed.");
     expect(
-      store.comms(0).some((m) => m.from === COMMS_MC && m.to === "guido-1" && m.text === told),
+      store
+        .commsForAgent("guido-1")
+        .some(
+          (m) =>
+            m.from === COMMS_MC &&
+            m.senderKind === "hub" &&
+            m.to === "guido-1" &&
+            m.text === told,
+        ),
     ).toBe(true);
     expect(deliver).toHaveBeenCalledWith("guido-1", told);
     // once only

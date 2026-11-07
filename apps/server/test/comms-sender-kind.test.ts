@@ -142,6 +142,53 @@ describe("the sender of a message is judged by how it was sent", () => {
   });
 });
 
+describe("FLIGHT's reactions and pins through the operator tool are FLIGHT's", () => {
+  const flightHeaders = {
+    [OPERATOR_HEADER]: OPERATOR_TOKEN,
+    [FLIGHT_OPERATOR_ACTOR_HEADER]: JSON.stringify({ seatId: "flight-1", runId: "flight-run" }),
+  };
+
+  it("records a done reaction as FLIGHT's and says so in the hub event", async () => {
+    store.addComms({
+      at: NOW,
+      from: "guido-1",
+      to: "CAPCOM",
+      ticket: null,
+      text: "q",
+      label: "question",
+      senderKind: "seat",
+    });
+    const done = await app.inject({
+      method: "POST",
+      url: "/api/comms/comms:1/reactions",
+      headers: { "content-type": "application/json", ...flightHeaders },
+      payload: { reaction: "done" },
+    });
+    expect(done.statusCode).toBe(200);
+    expect(store.commsReactions("comms:1")[0]?.actor).toBe("flight-1");
+    const events = store.hubEvents(0).map((e) => e.text);
+    expect(events).toContain("Comms comms:1 marked done by FLIGHT.");
+    expect(events.join()).not.toContain("by the operator");
+  });
+
+  it("records a pin as FLIGHT's", async () => {
+    const row = await send({ [OPERATOR_HEADER]: OPERATOR_TOKEN });
+    const pin = await app.inject({
+      method: "PUT",
+      url: `/api/comms/${row?.id}/pin`,
+      headers: { "content-type": "application/json", ...flightHeaders },
+      payload: {},
+    });
+    expect(pin.statusCode).toBe(200);
+    expect(store.commsPins().find((p) => p.id === row?.id)).toBeDefined();
+    expect(
+      (store as unknown as { db: { prepare: (s: string) => { get: () => { pinned_by: string } } } }).db
+        .prepare("SELECT pinned_by FROM comms_pins")
+        .get().pinned_by,
+    ).toBe("flight-1");
+  });
+});
+
 describe("stored messages", () => {
   it("reads an old row back with its old sender and no kind", () => {
     store.addComms({ at: NOW, from: "CAPCOM", to: "guido-1", ticket: null, text: "old" });

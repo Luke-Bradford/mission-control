@@ -67,7 +67,7 @@ it("keeps a qualified PR question and its reply in the same repository thread", 
     knownSecrets: async () => [],
     senderKind: "seat" as const,
   };
-  const question = await sendComms({ ...deps, ticket: "repo#42" }, "CAPCOM", {
+  const question = await sendComms({ ...deps, ticket: "repo#42", senderKind: "operator" }, "CAPCOM", {
     to: "seat",
     ref: "PR 7",
     label: "question",
@@ -192,8 +192,13 @@ it("wakes for labelled CAPCOM direct Comms but not FYI, channel posts or reactio
     notify,
     seatSender: false,
   };
-  const direct = await sendComms(deps, "CAPCOM", { to: "seat", text: "direct", label: "handoff" });
-  await sendComms(deps, "CAPCOM", { to: "seat", text: "FYI" });
+  const asOperator = { ...deps, senderKind: "operator" as const };
+  const direct = await sendComms(asOperator, "CAPCOM", {
+    to: "seat",
+    text: "direct",
+    label: "handoff",
+  });
+  await sendComms(asOperator, "CAPCOM", { to: "seat", text: "FYI" });
   await sendComms(deps, "seat", { to: "CAPCOM", text: "channel" });
   reactComms(store, "seat", direct.id, "seen", undefined, 12);
 

@@ -1354,6 +1354,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
    * Who a request's message is from, judged by how it was made and never by its text: FLIGHT's
    * operator tool, the controller's credential, or a person using the app.
    */
+  /** Who reacts or pins: FLIGHT through its operator tool, the controller, or the operator. */
+  const commsActor = (req: FastifyRequest): string => commsSender(req).from;
   const commsSender = (req: FastifyRequest): { from: string; kind: CommsSenderKind } => {
     const actor = flightActor(req);
     if (actor !== null) return { from: actor.seatId, kind: "flight" };
@@ -1907,11 +1909,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           const reaction = reactComms(
             store,
-            controllerRequests.has(req) ? COMMS_CONTROLLER : COMMS_CAPCOM,
+            commsActor(req),
             req.params.id,
             body.data.reaction,
             body.data.reason,
             now(),
+            true,
           );
           bus.emit("agents");
           bus.emit("attention");
@@ -1930,7 +1933,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           try {
             pinComms(
               store,
-              controllerRequests.has(req) ? COMMS_CONTROLLER : COMMS_CAPCOM,
+              commsActor(req),
               req.params.id,
               pinned,
               now(),

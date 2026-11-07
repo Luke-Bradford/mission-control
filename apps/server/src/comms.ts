@@ -268,6 +268,8 @@ export function reactComms(
   reaction: CommsReactionKind,
   reason: string | undefined,
   at: number,
+  /** The request came with the operator's credential (FLIGHT's operator tool): reach as the operator does. */
+  operatorLevel = false,
 ): CommsReaction {
   if (
     reaction === "cant" &&
@@ -278,12 +280,18 @@ export function reactComms(
     throw new Error("Only cant may include a reason.");
   const message = store.commsMessage(id);
   if (message === null) throw new Error("Unknown Comms message.");
-  if (actor !== COMMS_CAPCOM && actor !== COMMS_CONTROLLER && !canReadComms(store, actor, message))
+  if (
+    !operatorLevel &&
+    actor !== COMMS_CAPCOM &&
+    actor !== COMMS_CONTROLLER &&
+    !canReadComms(store, actor, message)
+  )
     throw new Error("You cannot react to that Comms message.");
   const added = store.addCommsReaction(id, actor, reaction, reason, at);
   if (added === null) throw new Error("Unknown Comms message.");
-  if ((actor === COMMS_CAPCOM || actor === COMMS_CONTROLLER) && reaction === "done") {
-    const who = actor === COMMS_CAPCOM ? "the operator" : "the controller";
+  if ((operatorLevel || actor === COMMS_CAPCOM || actor === COMMS_CONTROLLER) && reaction === "done") {
+    const who =
+      actor === COMMS_CAPCOM ? "the operator" : actor === COMMS_CONTROLLER ? "the controller" : "FLIGHT";
     store.settleCommsItem(id, actor, `Marked done by ${who}`, at);
     store.addHubEvent(`Comms ${id} marked done by ${who}.`, at);
   }
