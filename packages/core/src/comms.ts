@@ -71,6 +71,65 @@ export interface CommsMessage {
   reactions: CommsReaction[];
   pinned?: boolean;
   operator: boolean;
+  /** When the recipient seat took the message; null while it is only stored. */
+  deliveredAt?: number | null;
+}
+
+/** Where a message stands: kept by the hub, or taken by its recipient. */
+export type CommsDeliveryState = "stored" | "delivered";
+
+/** What the page shows after a send: the state, and whether this was an exact repeat. */
+export interface CommsSendState {
+  state: CommsDeliveryState;
+  deliveredAt: number | null;
+  /** An identical message went within the last minute; `state` is the first copy's. */
+  alreadySent: boolean;
+  /** A reply to an ended run went here instead; absent when it went where it was addressed. */
+  redirectedTo?: string;
+}
+
+/** The small state line under a message: "Stored", or "Delivered" with the clock time. */
+export function commsStateLine(
+  state: CommsDeliveryState,
+  deliveredAt: number | null,
+  timeZone: string,
+): string {
+  if (state === "stored" || deliveredAt === null) return "Stored";
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone,
+  }).format(new Date(deliveredAt));
+  return `Delivered ${time}`;
+}
+
+/** Where a reply to a message will go, shown before it is sent. */
+export interface CommsReplyRoute {
+  /** The recipient the reply will be stored for. */
+  to: string;
+  /** The run that wrote the message has ended, so the reply goes elsewhere. */
+  redirected: boolean;
+  /** One plain line for the page; empty when the reply goes where it was addressed. */
+  note: string;
+}
+
+/** Where a seat's answer from a choice went. */
+export type ChoiceTargetKind = "seat" | "flight" | "flight-for-next-run";
+
+/** The receipt a choice returns: what was chosen, where it went and when it was delivered. */
+export interface ChoiceReceipt {
+  key: string;
+  optionId: string;
+  label: string;
+  /** The seat or FLIGHT the answer was stored for. */
+  to: string;
+  target: ChoiceTargetKind;
+  chosenAt: number;
+  /** When the recipient took it; null while it waits for its next turn. */
+  deliveredAt: number | null;
+  /** The same choice was made before: this is the first receipt. */
+  alreadyChosen: boolean;
 }
 /** One agent's Comms figures for the nav: messages in the last 24 hours, with its contacts, and the unread counts. */
 export interface CommsCount {

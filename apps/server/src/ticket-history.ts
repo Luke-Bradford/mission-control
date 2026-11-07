@@ -159,10 +159,11 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
       SOURCE_LIMIT,
     )
     .filter((m) => m.ticket === ref || i.singleRepo || i.repoOfSender(m.from) === repoId);
+  const choices = store.choicesOnTicket(ref, SOURCE_LIMIT);
   if (
     card === null &&
     i.issue === null &&
-    runs.length + prs.length + decisions.length + comms.length === 0
+    runs.length + prs.length + decisions.length + comms.length + choices.length === 0
   )
     return null;
 
@@ -223,6 +224,18 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
       to: m.to,
       label: m.label,
       text: m.text,
+    });
+  for (const c of choices)
+    events.push({
+      key: `choice:${c.key}:${c.briefAt}`,
+      at: c.chosenAt,
+      // shown as a decision, which the Ticket page already draws
+      kind: "decision",
+      id: 0,
+      decisionKind: "choice",
+      about: c.question,
+      decision: `The operator chose "${c.label}".`,
+      basis: `Delivered to ${c.target}.`,
     });
   events.sort(newestFirst);
 

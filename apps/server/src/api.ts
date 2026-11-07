@@ -183,6 +183,7 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import type { ChangeBus } from "./bus.ts";
+import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
@@ -210,12 +211,14 @@ import {
   COMMS_FEED_MAX,
   COMMS_OPEN_TEXT_MAX,
   COMMS_SNAPSHOT_LIMIT,
+  commsSendState,
   pinComms,
   reactComms,
   sendComms,
   threadMessages,
   validateCommsText,
 } from "./comms.ts";
+import { replyRoute } from "./comms-reply.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -1839,6 +1842,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply.code(400).send({ error: "unknown PR thread" });
           prThread = store.pullRequest(repo.id, Number(number))?.ticket ?? `${repo.id}#${number}`;
         }
+        // a reply to a seat whose run ended goes to the seat now on that ticket, or to FLIGHT
+        let input = body.data;
+        let redirectedTo: string | undefined;
+        if (input.replyTo !== undefined) {
+          const route = replyRoute({ config, store, crew: commsCrew }, input.replyTo);
+          if (route?.redirected === true && route.to !== input.to) {
+            const original = store.commsMessage(input.replyTo);
+            if (original !== null && original.from === input.to) {
+              redirectedTo = route.to;
+              input = { ...input, to: route.to };
+            }
+          }
+        }
         try {
           const message = await sendComms(
             {
@@ -1847,20 +1863,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
+              wakeUnlabelled: true,
               ...(prThread === undefined ? {} : { ticket: prThread }),
               notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
             },
             COMMS_CAPCOM,
-            body.data,
+            input,
           );
           bus.emit("agents");
           bus.emit("attention");
-          return { message };
+          const state = commsSendState(store, message.id, message.repeat === true, redirectedTo);
+          return { message: { ...message, deliveredAt: state.deliveredAt }, ...state };
         } catch (e) {
           return reply
             .code(400)
             .send({ error: e instanceof Error ? e.message : "Comms message refused." });
         }
+      });
+      // Reader: apps/web/src/App.tsx#App (the note before a reply to a seat whose run ended)
+      api.get<{ Params: { id: string } }>("/comms/:id/reply-route", async (req, reply) => {
+        const route = replyRoute({ config, store, crew: commsCrew }, req.params.id);
+        return route ?? reply.code(404).send({ error: "Unknown Comms message." });
+      });
+      // Reader: apps/web/src/App.tsx#App (a message's stored or delivered line)
+      api.get<{ Params: { id: string } }>("/comms/:id/state", async (req, reply) => {
+        const message = store.commsMessage(req.params.id);
+        return message === null
+          ? reply.code(404).send({ error: "Unknown Comms message." })
+          : commsSendState(store, message.id, false);
       });
       // Reader: apps/web/src/App.tsx#App (operator reactions)
       api.post<{ Params: { id: string } }>("/comms/:id/reactions", async (req, reply) => {
@@ -4435,6 +4465,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 knownSecrets: deps.knownSecrets ?? (async () => []),
                 now,
                 seatSender: false,
+                wakeUnlabelled: true,
                 notify: async (seatId, text) => {
                   await sup.message(seatId, text, { interrupt: b.interrupt === true });
                   delivered = true;
@@ -4449,7 +4480,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               },
             );
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
-            if (delivered) store.markCommsInboxRead(id, [sent.id]);
+            if (delivered) store.markCommsInboxRead(id, [sent.id], now());
+            return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
@@ -4457,7 +4489,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               e instanceof Error ? e.message : "Comms message refused.",
             );
           }
-          return { ok: true };
         },
         // Bound the encoded request before parsing; accepted messages stay whole.
         { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
@@ -5897,6 +5928,49 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } finally {
           discussionSends.delete(sendKey);
         }
+      });
+
+      const ChooseBody = z.strictObject({
+        optionId: z.string().min(1).max(100),
+        briefAt: z.number().int().nonnegative(),
+      });
+      // Reader: apps/web/src/comms/answer.ts#sendAnswer (the page's choice of an option)
+      api.post<{ Params: { key: string } }>("/attention/:key/choose", async (req, reply) => {
+        const body = ChooseBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const { key } = req.params;
+        try {
+          const receipt = await chooseOption(
+            {
+              config,
+              store,
+              now,
+              crew: commsCrew,
+              knownSecrets: deps.knownSecrets ?? (async () => []),
+              wake: (seatId) => deps.deliverComms?.(seatId, "", COMMS_CAPCOM),
+              ...(deps.engine?.reconcileRun === undefined
+                ? {}
+                : {
+                    reconcileRun: (runId: string) =>
+                      deps.engine?.reconcileRun?.(runId) ?? Promise.resolve(),
+                  }),
+            },
+            currentDiscussionItem(key),
+            key,
+            body.data,
+          );
+          bus.emit("attention");
+          bus.emit("agents");
+          return receipt;
+        } catch (e) {
+          if (e instanceof ChoiceRefused) return reply.code(e.status).send({ error: e.message });
+          throw e;
+        }
+      });
+      // Reader: apps/web/src/comms/answer.ts#sendAnswer (the receipt after a choice)
+      api.get<{ Params: { key: string } }>("/attention/:key/choice", async (req, reply) => {
+        const receipt = choiceReceipt(store, req.params.key);
+        return receipt ?? reply.code(404).send({ error: "No choice was made on that question." });
       });
 
       api.post("/attention/ack", async (req, reply) => {
