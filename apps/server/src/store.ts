@@ -25,12 +25,14 @@ import {
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
   type AuditChange,
+  type AuditItem,
   type AuditMetrics,
   type AuditOveruseFacts,
   type AuditPrSize,
   type AuditRunKind,
   type AuditTokenOveruse,
   type AuditView,
+  auditTier,
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
@@ -426,6 +428,13 @@ CREATE TABLE IF NOT EXISTS queues (
   taken_at INTEGER, PRIMARY KEY (seat_id, pos)
 );
 -- Needs-you notes the engine raises; cleared_at is set once the cause is gone, dismissed_at when the operator dismissed it (reset when it is raised again).
+-- Things the hub did or needs decided, with the risk tier fixed by the item's kind when recorded.
+CREATE TABLE IF NOT EXISTS audit_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, subject TEXT NOT NULL,
+  tier TEXT NOT NULL, state TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL,
+  UNIQUE (kind, subject)
+);
+CREATE INDEX IF NOT EXISTS audit_items_at ON audit_items(at);
 CREATE TABLE IF NOT EXISTS attention_notes (
   key TEXT PRIMARY KEY, kind TEXT NOT NULL, run_id TEXT, seat_id TEXT, repo_id TEXT,
   text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER, dismissed_at INTEGER
@@ -3871,8 +3880,39 @@ export class Store {
       flakes: this.auditFlakes(since, until),
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
+      items: this.auditItems(since, until),
       surgeonProposals: [],
     };
+  }
+
+  /**
+   * Records an Audit item once per kind and subject; its tier comes from the kind (unknown kinds
+   * are Go-ahead). A repeat leaves the item as it was, except that an open item may become done.
+   */
+  recordAuditItem(i: {
+    kind: string;
+    subject: string;
+    state: AuditItem["state"];
+    detail: string;
+    at: number;
+  }): void {
+    this.db
+      .prepare(
+        `INSERT INTO audit_items (kind, subject, tier, state, detail, at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(kind, subject) DO UPDATE SET state = excluded.state, detail = excluded.detail
+         WHERE audit_items.state = 'open' AND excluded.state = 'done'`,
+      )
+      .run(i.kind, i.subject, auditTier(i.kind), i.state, i.detail, i.at);
+  }
+
+  /** Items recorded in range, newest first. */
+  private auditItems(since: number, until: number): AuditItem[] {
+    return this.db
+      .prepare(
+        `SELECT id, kind, subject, tier, state, detail, at FROM audit_items
+         WHERE at >= ? AND at <= ? ORDER BY at DESC, id DESC`,
+      )
+      .all(since, until) as unknown as AuditItem[];
   }
 
   /** Merged PRs in range that have a recorded size, largest first. */

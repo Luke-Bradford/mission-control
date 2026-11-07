@@ -736,23 +736,14 @@
   overflow-wrap: anywhere;
 }
 
-.teams-selection {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2);
-  margin-block: var(--sp-2);
+/* A long feed name wraps inside its row instead of widening the form. */
+.teams-sources .fgroup,
+.teams-sources .tlist {
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.teams-selection label {
-  display: grid;
-  gap: var(--sp-1);
-  min-width: 0;
-  flex: 1 1 160px;
-}
-
-.teams-selection input,
-.teams-selection select {
-  width: 100%;
+.teams-sources .tlist li,
+.teams-sources .tlist li > span {
   min-width: 0;
 }
 
@@ -776,27 +767,20 @@
   display: block;
 }
 
-.template-editor fieldset {
-  display: grid;
-  gap: var(--sp-2);
-  min-width: 0;
-}
-
-.template-editor label {
-  display: grid;
-  gap: var(--sp-1);
-  min-width: 0;
-}
-
-.template-editor input,
-.template-editor select {
-  min-width: 0;
-  max-width: 100%;
-}
-
+/* One check: its kind and text side by side, the remove button on the text's baseline. */
 .template-check {
   display: grid;
-  gap: var(--sp-1);
+  grid-template-columns: minmax(96px, 160px) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .template-check {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
 }
 
 @media (max-width: 480px) {

@@ -1220,6 +1220,11 @@ export interface BriefOption {
 export interface AttentionBrief {
   /** Missing on briefs written before triage routing was introduced. */
   for?: "operator" | "flight";
+  /**
+   * The ticket (`repo#n`) the question is about, when the item has none of its own (#1543): a
+   * crew error, a stray, FLIGHT's own question.
+   */
+  ticket?: string;
   original?: string;
   assessment?: string;
   did?: { action: string; refs: string[] }[];
@@ -1271,6 +1276,21 @@ export interface AttentionItem {
   brief?: AttentionBrief;
   flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
+  /**
+   * Why the Needs you entry check sent this item back to FLIGHT, in words (#1543). Present only on
+   * an item that would otherwise have been the operator's.
+   */
+  returned?: string[];
+  /** Set by `/api/attention` on a hub alert (#1543): the hub raised it, whatever seat it names. */
+  alert?: true;
+  /**
+   * The ticket and PR the item is about, with their titles, for the operator's page (#1543). Each
+   * part is absent when the hub does not know it.
+   */
+  pinned?: {
+    ticket?: { ref: string; title: string | null; url: string | null };
+    pr?: { ref: string; number: number; title: string; url: string };
+  };
   /** When a recommended option applies; absent means no automatic default. */
   defaultDueAt?: number;
   /**

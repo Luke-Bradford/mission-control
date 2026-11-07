@@ -39,6 +39,8 @@ const config = (): CcConfig => ({
 });
 
 const option = { id: "go", label: "Go", answer: "Proceed." };
+/** Two options and a question: what Needs you takes of an operator brief (#1543). */
+const options = [option, { id: "wait", label: "Wait", answer: "Hold." }];
 const item = (key: string, kind: AttentionItem["kind"] = "decision"): AttentionItem => ({
   key,
   kind,
@@ -55,8 +57,9 @@ const item = (key: string, kind: AttentionItem["kind"] = "decision"): AttentionI
   brief: {
     for: "operator",
     context: "c",
+    ask: "Proceed?",
     recommendation: "Go",
-    options: [option],
+    options,
     basis: "b",
     at: ASKED,
     recommendedOptionId: "go",
@@ -202,6 +205,25 @@ describe("decision defaults", () => {
   });
 
   it("applies an ordinary reversible decision once at its deadline", async () => {
+    // the question's run carries the ticket it is about (#1543)
+    store.upsertRun({
+      id: "run",
+      agentId: "GUIDO-1",
+      repoId: "repo",
+      seq: 1,
+      startedAt: ASKED,
+      endedAt: null,
+      status: "running",
+      sessionId: "cli",
+      model: "x",
+      branch: null,
+      ticket: "repo#1",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "/x",
+      prs: [],
+      summary: null,
+    });
     const id = store.addQuestion({ agentId: "GUIDO-1", runId: "run", text: "Proceed?", at: ASKED });
     store.setSeatSession({
       seatId: "GUIDO-1",

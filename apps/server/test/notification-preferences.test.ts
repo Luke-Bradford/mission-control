@@ -300,7 +300,7 @@ it("notifies only above 90 percent and only once per quota crossing", async () =
   }
 });
 
-it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM opted in", async () => {
+it("notifies FLIGHT's @CAPCOM question only once briefed for the operator, never narration (#1543)", async () => {
   await app.close();
   const crewConfig: CcConfig = {
     ...config,
@@ -345,7 +345,7 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM 
   bus.emit("agents");
   // messages are not Needs you: narration and FLIGHT's summaries raise nothing to notify
   expect(await events()).toEqual([]);
-  store.addComms({
+  const raw = store.addComms({
     at: Date.now(),
     from: "demo-seat",
     to: "peer",
@@ -353,19 +353,29 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM 
     text: "@CAPCOM review this?",
   });
   bus.emit("agents");
-  expect(await events()).toMatchObject([{ category: "capcom", text: "@CAPCOM review this?" }]);
-  bus.emit("agents");
-  expect(await events()).toHaveLength(1);
-  p.categories.capcom = false;
-  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
-  store.addComms({
-    at: Date.now(),
-    from: "demo-seat",
-    to: "peer",
-    ticket: null,
-    text: "@CAPCOM suppressed?",
-  });
-  bus.emit("agents");
+  // #1543: FLIGHT's raw @CAPCOM question does not reach Needs you, so it raises nothing
+  expect(await events()).toEqual([]);
+  // briefed for the operator, complete, it does, and notifies once as a question asked of the
+  // operator; the @CAPCOM category covers raw tags only on a hub with no FLIGHT seat
+  const briefIt = (id: string | number | undefined) =>
+    store.addBrief({
+      key: `tag:demo-seat:${id}`,
+      for: "operator",
+      ask: "Review PR 7 now, or after the release?",
+      ticket: "demo#7",
+      context: "PR 7 is ready.",
+      recommendation: "Review now.",
+      options: [
+        { label: "Now", answer: "Review PR 7 now." },
+        { label: "Later", answer: "Review after the release." },
+      ],
+      basis: "PR 7",
+      at: Date.now(),
+    });
+  briefIt(raw?.id);
+  bus.emit("attention");
+  expect(await events()).toMatchObject([{ category: "asks" }]);
+  bus.emit("attention");
   expect(await events()).toHaveLength(1);
 });
 
