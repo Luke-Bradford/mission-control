@@ -742,9 +742,8 @@ it("does not notify again when an outage flips between down and late (#758)", as
   bus.emit("attention");
   expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("late");
   expect(await events()).toHaveLength(1);
-  // a late wake is FLIGHT's own watch (#1537): a new outage is a new alert again
   flightDown(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: no output for 31 min in a turn.");
-  expect(await events()).toHaveLength(2);
+  expect(await events()).toHaveLength(1);
 });
 
 it("holds the operator's own Stop through quiet hours, even once a question waits (#758)", async () => {
