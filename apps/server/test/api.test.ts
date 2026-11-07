@@ -1564,6 +1564,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
+  ["GET", "/api/attention/answered"],
   ["GET", "/api/attention/held"],
   ["POST", "/api/attention/example/hold", { reason: "Waiting", condition: { kind: "manual" } }],
   ["POST", "/api/attention/example/hold/release", {}],
