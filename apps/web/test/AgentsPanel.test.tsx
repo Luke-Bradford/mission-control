@@ -271,7 +271,7 @@ it("links the issue that pauses a watched loop, and shows no pause line without 
   const { container } = render(<AgentsPanel />);
 
   await screen.findByText("watched");
-  const link = screen.getByRole("link", { name: "shop-app#7" });
+  const link = screen.getByRole("link", { name: "shop-app#7 on GitHub" });
   expect(link.getAttribute("href")).toBe("https://github.com/acme/shop-app/issues/7");
   expect(link.getAttribute("target")).toBe("_blank");
   expect(link.getAttribute("rel")).toContain("noopener");
@@ -283,6 +283,38 @@ it("links the issue that pauses a watched loop, and shows no pause line without 
   );
   expect(free?.textContent).not.toContain("shop-app#7");
   expect(free?.querySelector("a[target=_blank]")).toBeNull();
+});
+
+it("keeps the pause line beside a loop-owned decision on the same card", async () => {
+  stub(
+    [
+      seatRow({
+        id: "watched",
+        hudState: "parked",
+        paused: true,
+        pausedBy: "shop-app#7",
+        pausedByUrl: "https://github.com/acme/shop-app/issues/7",
+      }),
+    ],
+    true,
+    [
+      item({
+        key: "esc:shop-app#7",
+        escalationId: "shop-app#7",
+        ticket: "shop-app#7",
+        owner: "loop",
+        kind: "decision",
+        agentId: "watched",
+      }),
+    ],
+  );
+  render(<AgentsPanel />);
+
+  await screen.findByText("watched");
+  const link = screen.getByRole("link", { name: "shop-app#7 on GitHub" });
+  expect(link.getAttribute("href")).toBe("https://github.com/acme/shop-app/issues/7");
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.closest(".work-cell")?.textContent).toContain("Decision for");
 });
 
 it("names and confirms the waiver for a review-parked seat", async () => {

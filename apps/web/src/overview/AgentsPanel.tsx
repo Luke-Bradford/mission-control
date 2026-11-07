@@ -22,6 +22,7 @@ import { SeatControls } from "../agent/Header.tsx";
 import { reviewPark, WaiveReviewFindings, WaiveReviewMenu } from "../agent/reviewPark.tsx";
 import { useNow, useSecond, useSecondWhile, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
+import { ExternalLink } from "../components/ExternalLink.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { NeedButton } from "../components/NeedButton.tsx";
@@ -107,19 +108,21 @@ function revealCrewFocus(event: FocusEvent<HTMLDivElement>) {
 
 const OPEN_RUN_LINE = "Run open, not in a turn";
 
-/** The issue that pauses a watched loop; a link when the server knows its page, else plain text. */
+/** The issue that pauses a watched loop; a link when the server knows its GitHub page, else plain text. */
 function PausedBy({ by, url }: { by: string; url: string | null }) {
   return (
-    <span className="ellip xs muted" title={`Paused by ${by}`}>
+    <>
       Paused by{" "}
-      {url ? (
-        <a href={url} target="_blank" rel="noopener noreferrer">
-          {by}
-        </a>
-      ) : (
-        by
-      )}
-    </span>
+      <span className="rref">
+        {url ? (
+          <ExternalLink url={url} label={`${by} on GitHub`}>
+            {by}
+          </ExternalLink>
+        ) : (
+          by
+        )}
+      </span>
+    </>
   );
 }
 
@@ -174,17 +177,28 @@ function WorkCell({
     const refs = [row?.ticket?.replace(/^.*#/, "#"), prNumber ? `PR #${prNumber}` : null]
       .filter(Boolean)
       .join(" · ");
+    // An issue-paused loop leads with the pause; the doing line ("Paused by you") would contradict it.
+    const second =
+      note ??
+      (!row?.pausedBy && (line || !refs) ? (
+        <span className="ellip xs muted" title={line}>
+          {line || DASH}
+        </span>
+      ) : null);
     return (
       <span role="cell" className="ellip s ticket-cell work-cell muted">
-        {refs && <span className="ellip">last {refs}</span>}
-        {note ??
-          (row?.pausedBy ? (
+        {row?.pausedBy ? (
+          <span
+            className="ellip"
+            title={`Paused by ${row.pausedBy}${refs ? ` · last ${refs}` : ""}`}
+          >
             <PausedBy by={row.pausedBy} url={row.pausedByUrl ?? null} />
-          ) : line || !refs ? (
-            <span className="ellip xs muted" title={line}>
-              {line || DASH}
-            </span>
-          ) : null)}
+            {refs && ` · last ${refs}`}
+          </span>
+        ) : (
+          refs && <span className="ellip">last {refs}</span>
+        )}
+        {second}
         {actions}
       </span>
     );
