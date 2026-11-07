@@ -1273,6 +1273,16 @@ export const FLIGHT_COST_DAYS = 14;
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
 export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+/**
+ * ...but only once it has grown this much since the session's first turn. A fresh session that
+ * starts above the line would otherwise hand over on every first turn: on 7 November FLIGHT
+ * started at 157K and handed over 300 times in five hours.
+ */
+export const FLIGHT_CONTEXT_GROWTH_TOKENS = 50_000;
+/** Handovers (rotations) in an hour before the watch stops restarting FLIGHT and says why. */
+export const FLIGHT_ROTATIONS_MAX = 4;
+export const flightRotationLoopText = (n: number, startTokens: number | null): string =>
+  `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start.`;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
