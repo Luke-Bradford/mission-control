@@ -1448,14 +1448,7 @@ function buildAttentionItems(
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
     const ackAt = acks.get(i.key);
-    // FLIGHT's own question is read against its latest brief: a rebrief after FLIGHT dismissed it
-    // is unread even with the same ask (#1543)
-    const askAt =
-      brief !== undefined && brief.for !== "flight"
-        ? ownReply(i, flightId)
-          ? brief.at
-          : (brief.askAt ?? brief.at)
-        : 0;
+    const askAt = brief !== undefined && brief.for !== "flight" ? (brief.askAt ?? brief.at) : 0;
     const item: AttentionItem = {
       ...i,
       ...(brief === undefined ? {} : { brief }),

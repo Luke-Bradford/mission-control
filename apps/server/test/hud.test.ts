@@ -2881,7 +2881,8 @@ describe("messages are not Needs you", () => {
     expect(chatter().find((i) => i.key === key)?.flightTriage).toBe("handling");
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).not.toContain(key);
     expect(alertAt(NOW + FLIGHT_TRIAGE_WAIT_MS)).toBeUndefined();
-    // briefed again after the dismiss, with the same ask: the operator's, and unread
+    // briefed again after the dismiss: the operator's again (whether a same-ask rebrief reads as
+    // unread is #1546, with decision defaults in mind)
     store.addBrief({
       key,
       for: "operator",
@@ -2893,7 +2894,7 @@ describe("messages are not Needs you", () => {
       at: NOW + MIN,
     });
     expect(chatter(c, NOW + 2 * MIN)).toEqual([
-      expect.objectContaining({ key, owner: "operator", acked: false }),
+      expect.objectContaining({ key, owner: "operator" }),
     ]);
   });
 
