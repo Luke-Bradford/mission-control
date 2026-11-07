@@ -59,8 +59,6 @@ describe("DEFAULT_REPO_RULES", () => {
       "packages/core/src/guard.ts",
       "packages/core/src/flight.ts",
       "packages/core/src/loop.ts",
-      "packages/core/src/loop-config.ts",
-      "packages/core/src/loop-config-model.ts",
       "packages/core/src/repo-rules.ts",
       "packages/core/src/runtime.ts",
       "packages/core/src/flight-model.ts",
