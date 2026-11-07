@@ -257,6 +257,34 @@ it("keeps a long latest message clipped inside its Crew Work cell", async () => 
   ).toHaveLength(11);
 });
 
+it("links the issue that pauses a watched loop, and shows no pause line without one", async () => {
+  stub([
+    seatRow({
+      id: "watched",
+      hudState: "parked",
+      paused: true,
+      pausedBy: "shop-app#7",
+      pausedByUrl: "https://github.com/acme/shop-app/issues/7",
+    }),
+    seatRow({ id: "free", index: 2, hudState: "parked", paused: true }),
+  ]);
+  const { container } = render(<AgentsPanel />);
+
+  await screen.findByText("watched");
+  const link = screen.getByRole("link", { name: "shop-app#7" });
+  expect(link.getAttribute("href")).toBe("https://github.com/acme/shop-app/issues/7");
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.getAttribute("rel")).toContain("noopener");
+  expect(link.closest(".work-cell")?.textContent).toContain("Paused by shop-app#7");
+  const rows = rowsIn(container);
+  const free = rows.find((r) => r.textContent?.includes("free"));
+  expect(rows.find((r) => r.textContent?.includes("watched"))?.textContent).not.toContain(
+    "Paused by you",
+  );
+  expect(free?.textContent).not.toContain("shop-app#7");
+  expect(free?.querySelector("a[target=_blank]")).toBeNull();
+});
+
 it("names and confirms the waiver for a review-parked seat", async () => {
   const loop = {
     phase: "parked" as const,

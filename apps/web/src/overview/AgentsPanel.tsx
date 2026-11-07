@@ -107,6 +107,22 @@ function revealCrewFocus(event: FocusEvent<HTMLDivElement>) {
 
 const OPEN_RUN_LINE = "Run open, not in a turn";
 
+/** The issue that pauses a watched loop; a link when the server knows its page, else plain text. */
+function PausedBy({ by, url }: { by: string; url: string | null }) {
+  return (
+    <span className="ellip xs muted" title={`Paused by ${by}`}>
+      Paused by{" "}
+      {url ? (
+        <a href={url} target="_blank" rel="noopener noreferrer">
+          {by}
+        </a>
+      ) : (
+        by
+      )}
+    </span>
+  );
+}
+
 function WorkCell({
   row,
   doing,
@@ -162,7 +178,9 @@ function WorkCell({
       <span role="cell" className="ellip s ticket-cell work-cell muted">
         {refs && <span className="ellip">last {refs}</span>}
         {note ??
-          (line || !refs ? (
+          (row?.pausedBy ? (
+            <PausedBy by={row.pausedBy} url={row.pausedByUrl ?? null} />
+          ) : line || !refs ? (
             <span className="ellip xs muted" title={line}>
               {line || DASH}
             </span>
