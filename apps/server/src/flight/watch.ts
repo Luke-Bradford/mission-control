@@ -183,6 +183,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   const firstContext = new Map<string, number>();
   let rotationRequested = false;
   let lastFailure: string | null = null;
+  /** The failure in plain words for the operator's alert; the raw error stays in the hub log. */
+  let lastReason: string | null = null;
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
   const announced = new Set<string>();
@@ -458,7 +460,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (row?.state === "parked" && !noteOpen())
         raiseDown(id, found.session.repoId, "it is parked", t);
       else if (atStop && row?.state !== "stopped" && !noteOpen())
-        raiseDown(id, found.session.repoId, `${accountId} is at its stop line`, t);
+        raiseDown(id, found.session.repoId, "its account is at its usage stop line", t);
       else clearDown(t);
       if (row?.state === "stopped" || row?.state === "parked" || atStop) return;
       // parked or at the stop line, FLIGHT waits for that first; a run left with no session goes
@@ -495,7 +497,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           runId: null,
           seatId: id,
           repoId: found.session.repoId,
-          text: flightStartFailedText(lastFailure ?? "it stopped 3 times in an hour"),
+          text: flightStartFailedText(lastReason ?? "it stopped 3 times in an hour"),
           at: t,
         });
         processGone = false; // said once, in this note
@@ -565,6 +567,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         lastFailure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
+        lastReason = processGone
+          ? "its process is gone and it would not restart; the hub log has the error"
+          : "it would not start; the hub log has the error";
         log(`flight watch: start failed: ${lastFailure}`);
       }
       return;

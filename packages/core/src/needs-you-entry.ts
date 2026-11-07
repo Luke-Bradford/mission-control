@@ -60,6 +60,9 @@ const ID_TEXT: readonly [RegExp, string][] = [
   [/\bmc(?:__|\s)[a-z]+(?:_[a-z]+)*_[a-z_]+\b/i, "a tool name"],
 ];
 
+/** Whether `text` holds an id a person cannot read (a ticket number, commit code, path and so on). */
+export const hasUnreadableId = (text: string): boolean => ID_TEXT.some(([re]) => re.test(text));
+
 const plainFaults = (
   part: string,
   text: string,

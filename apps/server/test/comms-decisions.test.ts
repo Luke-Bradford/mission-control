@@ -90,6 +90,45 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     expect(store.briefs().get(keyOf(id))?.at).toBe(STALLED);
   });
 
+  it.each([
+    "`packages/core/src/x.ts` lets ids through",
+    "Follow-up to #1543: tidy the sweep",
+    "x".repeat(200),
+    "A plain title for the sweep",
+  ])("reaches the operator whatever the ticket title is: %s", (title) => {
+    store.replaceBoard("repo", [
+      {
+        repoId: "repo",
+        issueNumber: 906,
+        title,
+        status: "In progress",
+        state: "in progress",
+        labels: [],
+        priority: null,
+        updatedAt: SENT,
+        url: "https://github.com/o/repo/issues/906",
+        stage: null,
+        owner: null,
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: 1,
+        itemId: null,
+        projectId: null,
+      },
+    ]);
+    const { id } = send();
+    expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED })).toBe(1);
+    const got = find(id, STALLED);
+    expect(got?.owner).toBe("operator");
+    expect(got?.returned).toBeUndefined();
+    expect(got?.brief?.ask?.length).toBeLessThan(300);
+  });
+
   it("carries FLIGHT's recommendation when it has briefed the item for itself", () => {
     const { id } = send("blocker");
     store.addBrief({

@@ -1,4 +1,4 @@
-import { flightNotTriagingText } from "@mc/core";
+import { flightDownText, flightNotTriagingText, flightStartFailedText } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { leftWakeText } from "../src/flight/state.ts";
 import { hubCodeHeldText } from "../src/update.ts";
@@ -68,6 +68,23 @@ describe("the not-triaging alert", () => {
       expectPlain(flightNotTriagingText(cause, 3, "14:30", null));
       expectPlain(flightNotTriagingText(cause, 0, null, null));
     }
+    // the watch's notes carry the failure in words, never the raw error
+    expectPlain(
+      flightNotTriagingText(
+        "start-failed",
+        3,
+        "14:30",
+        flightStartFailedText("it would not start; the hub log has the error"),
+      ),
+    );
+    expectPlain(
+      flightNotTriagingText(
+        "down",
+        3,
+        "14:30",
+        flightDownText("its account is at its usage stop line"),
+      ),
+    );
     expect(flightNotTriagingText("late", 3, "14:30", null)).toContain("3 waiting since 14:30");
   });
 });

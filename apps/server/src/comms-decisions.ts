@@ -5,6 +5,7 @@ import {
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
+  hasUnreadableId,
 } from "@mc/core";
 import { protectedDecisionItem } from "./attention-holds.ts";
 import type { CcConfig } from "./config.ts";
@@ -14,6 +15,7 @@ import { parseTicket } from "./runview.ts";
 import type { Store } from "./store.ts";
 
 const ASK_MAX = 300;
+const TITLE_MAX = 120;
 
 /**
  * Raises one CAPCOM decision for each labelled question or blocker that has waited 15 minutes for
@@ -48,7 +50,10 @@ export function raiseStalledCommsDecisions(d: {
     const about = (ticket: string | null): string => {
       const t = ticket === null ? null : parseTicket(ticket);
       const title = t === null ? null : store.boardItem(t.repoId, t.number)?.title;
-      return title ? `"${title}"` : "a ticket";
+      if (!title) return "a ticket";
+      const short = title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX).trimEnd()}…` : title;
+      // a title with an id would make the whole question fail the entry check; the link names it
+      return hasUnreadableId(short) ? "a ticket" : `"${short}"`;
     };
     const blocker = message.label === "blocker";
     const flight = briefs.get(key);
