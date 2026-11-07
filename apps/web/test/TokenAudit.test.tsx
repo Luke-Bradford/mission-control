@@ -138,3 +138,20 @@ it("says when the hub is not recording controller sessions, and shows them when 
     "7 controller sessions",
   );
 });
+
+it("opens as the last tab of Audit, reached with End, without a code-health read", async () => {
+  const fetch = stubFetch({
+    "/api/config": { operator: { id: "operator" }, repos: [{ id: "sample", github: "x/sample" }] },
+    "/api/code-health?repo=sample&window=30d&tab=overview": {
+      data: { tab: "overview" },
+      coverage: [],
+    },
+    [PATH(7)]: tokenAuditFixture(),
+  });
+  const { CodeHealth } = await import("../src/code-health/CodeHealth.tsx");
+  render(<CodeHealth />);
+  fireEvent.keyDown(await screen.findByRole("tab", { name: "Overview" }), { key: "End" });
+  expect(screen.getByRole("tab", { name: "Tokens" }).getAttribute("aria-selected")).toBe("true");
+  await screen.findByRole("list", { name: "Token figures" });
+  expect(fetch.mock.calls.some(([url]) => String(url).includes("tab=tokens"))).toBe(false);
+});
