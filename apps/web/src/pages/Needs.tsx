@@ -50,7 +50,6 @@ function Open({ item, items }: { item: AttentionItem; items: readonly AttentionI
 export function Needs({ item }: { item: string | null }) {
   const attentionRes = useResource<AttentionItem[]>(RESOURCES.attention);
   const attention = attentionRes.data;
-  const heldRes = useResource<AttentionItem[]>(RESOURCES.heldAttention);
   const notes = useResource<NotificationsView>(RESOURCES.notifications);
   const { inRepo } = useSessionScope();
   const connection = useStore(streamStatus);
@@ -84,7 +83,6 @@ export function Needs({ item }: { item: string | null }) {
           <NeedsList
             asks={asks}
             defaulted={defaulted}
-            held={heldRes.data ?? []}
             selected={current?.key ?? null}
             footer={
               handled.length > 0 && (
