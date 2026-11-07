@@ -60,7 +60,11 @@ const ID_TEXT: readonly [RegExp, string][] = [
   [/\bmc(?:__|\s)[a-z]+(?:_[a-z]+)*_[a-z_]+\b/i, "a tool name"],
 ];
 
-const plainFaults = (part: string, text: string, raw: readonly (readonly [RegExp, string])[]): string[] => [
+const plainFaults = (
+  part: string,
+  text: string,
+  raw: readonly (readonly [RegExp, string])[],
+): string[] => [
   ...raw.filter(([re]) => re.test(text)).map(([, what]) => `the ${part} has ${what}`),
   ...ID_TEXT.filter(([re]) => re.test(text)).map(
     ([, what]) => `the ${part} has ${what}: say it in words`,

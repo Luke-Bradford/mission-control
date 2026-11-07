@@ -5180,7 +5180,7 @@ describe("brief_item", () => {
     });
   const B = (over: Record<string, unknown> = {}) => ({
     key: KEY,
-    context: "mc#7 is parked since 11:00.",
+    context: "The seat is parked since 11:00 and waits for you.",
     ask: "Should I un-park it?",
     recommendation: "Un-park it.",
     options: [
@@ -5224,7 +5224,7 @@ describe("brief_item", () => {
   it("stores a brief on an operator item and emits attention", async () => {
     expect(await call("brief_item", B())).toEqual({ text: BRIEFED_TEXT });
     expect(store.briefs().get(KEY)).toMatchObject({
-      context: "mc#7 is parked since 11:00.",
+      context: "The seat is parked since 11:00 and waits for you.",
       recommendation: "Un-park it.",
       options: [
         { label: "Un-park", answer: "go" },
@@ -5433,7 +5433,9 @@ describe("brief_item", () => {
   });
 
   it("stores the full triage brief and passes an item up immediately", async () => {
-    const long = "x".repeat(BRIEF_INPUT_MAX);
+    // the assessment is the context, and the entry check wants at least one sentence in it
+    const tail = " is a very long note, so read it.";
+    const long = "x".repeat(BRIEF_INPUT_MAX - tail.length) + tail;
     raise("full", { text: long });
     const fields = {
       for: "operator",
@@ -6789,7 +6791,7 @@ it.each([
         (
           await call("brief_item", {
             key: `person:199:${NOW}`,
-            context: "Review",
+            context: "Someone asked you to review the plan and is waiting.",
             ask: "Will you review it?",
             options: [
               { label: "Review it", answer: "yes" },
@@ -7688,7 +7690,7 @@ describe("superuser housekeeping", () => {
     expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
       owner: "operator",
       brief: {
-        ask: "FLIGHT-1 has waited on GUIDO-1 about mc#909: let it proceed on its best judgment, or hold?",
+        ask: "A crew member has waited 45 minutes for another's answer about a ticket: should it go ahead on its best judgment, or hold?",
       },
     });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
@@ -9276,7 +9278,7 @@ describe("brief_item with a hold (#760)", () => {
       store.addBrief({
         ...brief(),
         original: "",
-        context: "x",
+        context: "The crew asked a question and waits for your answer.",
         did: [],
         at: at + 1,
         defaultEligible: false,
@@ -10011,7 +10013,7 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       const briefed = await call("brief_item", {
         key: "note:ready:briefed",
         for: "operator",
-        assessment: "A product call.",
+        assessment: "A product call that only you can make.",
         ask: "Merge?",
         options: [
           { label: "Merge", answer: "merge" },
@@ -10947,7 +10949,7 @@ describe("return_question and withdraw_question (#1532)", () => {
         ...(by === "flight" ? { by: "flight" as const } : { by: "hub" as const }),
         ask: "Merge now?",
         assessment: "Ready.",
-        context: "Ready.",
+        context: "The crew asked a question and waits for your answer.",
         recommendation: "Merge.",
         ticket: "mc#7",
         options: [

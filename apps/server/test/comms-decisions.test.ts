@@ -95,7 +95,7 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     store.addBrief({
       key: keyOf(id),
       for: "flight",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Keep the newer behaviour.",
       options: [],
       basis: "b",
@@ -111,7 +111,7 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     store.addBrief({
       key: keyOf(id),
       for: "flight",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Still looking.",
       options: [],
       basis: "b",

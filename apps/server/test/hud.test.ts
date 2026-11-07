@@ -741,7 +741,7 @@ describe("attention items", () => {
     const brief = (ask: string, at: number) =>
       store.addBrief({
         key: "note:blocked:y",
-        context: "c",
+        context: "The crew asked a question and waits for your answer.",
         ask,
         recommendation: "r",
         options: [],
@@ -2199,7 +2199,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     // FLIGHT's brief for the operator is the only way it becomes theirs
     store.addBrief({
       key: `ask:${id}`,
-      context: "GUIDO-1 needs a product call.",
+      context: "A seat needs a product call from you.",
       ask: "One lane per customer?",
       recommendation: "Yes.",
       options: TWO_OPTIONS,
@@ -2817,7 +2817,7 @@ describe("messages are not Needs you", () => {
     store.addBrief({
       key,
       for: "operator",
-      ask: "Merge #551 now, or wait for #498?",
+      ask: "Merge the dependencies view now, or wait for the older change?",
       context: "Both touch the parser.",
       recommendation: "Wait for #498.",
       options: TWO_OPTIONS,
@@ -2837,7 +2837,9 @@ describe("messages are not Needs you", () => {
         flightTriage: "waiting",
         triageDueAt: NOW - 2 * MIN + FLIGHT_TRIAGE_WAIT_MS,
         returned: [FLIGHT_ASKED_AGAIN],
-        brief: expect.objectContaining({ ask: "Merge #551 now, or wait for #498?" }),
+        brief: expect.objectContaining({
+          ask: "Merge the dependencies view now, or wait for the older change?",
+        }),
       }),
     ]);
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain(key);
@@ -2887,7 +2889,7 @@ describe("messages are not Needs you", () => {
     store.addBrief({
       key,
       for: "operator",
-      ask: "Merge #551 now, or wait for #498?",
+      ask: "Merge the dependencies view now, or wait for the older change?",
       context: "Both touch the parser.",
       recommendation: "Yes.",
       options: TWO_OPTIONS,
@@ -2952,8 +2954,8 @@ describe("messages are not Needs you", () => {
       expect(chatter()).toEqual([expect.objectContaining({ kind, owner: "flight" })]);
       store.addBrief({
         key,
-        context: "GUIDO-1 needs the operator.",
-        ask: "Decide for GUIDO-1?",
+        context: "A seat needs a decision from you.",
+        ask: "Decide for the seat?",
         recommendation: "Yes.",
         options: TWO_OPTIONS,
         basis: "product direction",
@@ -2969,7 +2971,7 @@ describe("messages are not Needs you", () => {
           kind,
           owner: "operator",
           text: next,
-          brief: expect.objectContaining({ ask: "Decide for GUIDO-1?" }),
+          brief: expect.objectContaining({ ask: "Decide for the seat?" }),
         }),
       ]);
     },
@@ -2981,7 +2983,7 @@ describe("messages are not Needs you", () => {
     const key = chatter()[0]?.key ?? "";
     store.addBrief({
       key,
-      context: "GUIDO-1 needs a production key.",
+      context: "A seat needs a production key from you.",
       ask: "Add the key to the vault?",
       recommendation: "Add it.",
       options: TWO_OPTIONS,
@@ -3484,7 +3486,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     // FLIGHT keeps one and answers the other: the item clears
     store.addBrief({
       key: `ask:${id}`,
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "r",
       options: [],
       basis: "b",
@@ -3618,7 +3620,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       key: "note:flag-x",
       for: "operator",
       ask: "[operator-decision] prFlow 1407:stage:clearance:1793825335003",
-      context: "x",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Merge.",
       options: [{ label: "Merge", answer: "Merge it." }],
       basis: "b",
@@ -3714,7 +3716,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
         key,
         for: "operator",
         ask: "Go?",
-        context: "c",
+        context: "The crew asked a question and waits for your answer.",
         recommendation: "Go.",
         options: [{ label: "Go", answer: "Go." }],
         basis: "b",
@@ -3748,7 +3750,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     });
     store.addBrief({
       key: "note:legacy",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Go.",
       options: [{ label: "Go", answer: "Go." }],
       basis: "b",
@@ -3775,7 +3777,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     store.addBrief({
       key: "note:kept",
       for: "flight",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Wait for CI.",
       options: [],
       basis: "b",

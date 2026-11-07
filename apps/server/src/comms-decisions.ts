@@ -5,12 +5,12 @@ import {
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
-  seatCallSign,
 } from "@mc/core";
 import { protectedDecisionItem } from "./attention-holds.ts";
 import type { CcConfig } from "./config.ts";
 import { flightSeat } from "./flight/state.ts";
 import { attentionItems, NO_LOCK } from "./hud.ts";
+import { parseTicket } from "./runview.ts";
 import type { Store } from "./store.ts";
 
 const ASK_MAX = 300;
@@ -45,13 +45,18 @@ export function raiseStalledCommsDecisions(d: {
     const key = `${COMMS_OPEN_PREFIX}${message.id}`;
     const item = items.find((i) => i.key === key);
     if (item === undefined || protectedDecisionItem(store, item, config, now)) continue;
+    const about = (ticket: string | null): string => {
+      const t = ticket === null ? null : parseTicket(ticket);
+      const title = t === null ? null : store.boardItem(t.repoId, t.number)?.title;
+      return title ? `"${title}"` : "a ticket";
+    };
     const blocker = message.label === "blocker";
     const flight = briefs.get(key);
     const brief: AttentionBrief = {
       for: "operator",
       original: message.text,
-      context: `${seatCallSign(message.from)} sent ${seatCallSign(message.to)} a ${message.label}${message.ticket === null ? "" : ` on ${message.ticket}`} and nobody has settled it: ${message.text}`,
-      ask: `${seatCallSign(message.from)} has waited on ${seatCallSign(message.to)} about ${message.ticket}: let it proceed on its best judgment, or hold?`.slice(
+      context: `One crew member sent another a ${message.label} about ${about(message.ticket)} and nobody has settled it in 45 minutes. The crew member is held up until someone decides. If you do not decide, it stays held up.`,
+      ask: `A crew member has waited 45 minutes for another's answer about ${about(message.ticket)}: should it go ahead on its best judgment, or hold?`.slice(
         0,
         ASK_MAX,
       ),
