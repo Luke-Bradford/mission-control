@@ -337,7 +337,8 @@
 
 .comms-chat-title {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 1fr);
+  /* The trail keeps its width and the hint gives way (ellipsis), so beside the fly-out they never overlap. */
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
   width: 100%;
   align-items: center;
   gap: var(--sp-3);
@@ -372,6 +373,7 @@
 
 .comms-chat-title .comms-breadcrumb {
   min-width: 0;
+  overflow: hidden;
 }
 
 .comms-mentions {

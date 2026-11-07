@@ -626,6 +626,30 @@ describe("stopped FLIGHT", () => {
   });
 });
 
+describe("when FLIGHT's state cannot load", () => {
+  it("says so with a Retry, keeps the typed text, and does not wait on 'Checking' for ever", async () => {
+    const fn = stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      { "/api/flight": () => ({ status: 500, body: { error: "down" } }) },
+    );
+    const { container } = render(<Dock />);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: "hello" } });
+    await waitFor(() =>
+      expect(container.querySelector("#dockState")?.textContent).toContain(
+        "Could not check FLIGHT",
+      ),
+    );
+    expect(container.querySelector("#dockState")?.textContent).not.toContain("Checking FLIGHT");
+    expect(input.value).toBe("hello");
+    const before = fn.mock.calls.filter(([p]) => p === "/api/flight").length;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() =>
+      expect(fn.mock.calls.filter(([p]) => p === "/api/flight").length).toBeGreaterThan(before),
+    );
+  });
+});
+
 describe("the box", () => {
   const typeIn = async (container: HTMLElement) => {
     const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;

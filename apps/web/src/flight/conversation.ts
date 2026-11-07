@@ -138,3 +138,12 @@ export function dockRows(
   out.push(...pending.slice(next));
   return out;
 }
+
+/**
+ * The line the hub puts in FLIGHT's stream when it hands over stored Comms messages. The server writes it
+ * (`commsInboxContext`), so this follows its wording; it should move to mc/core beside it.
+ */
+export const COMMS_INBOX_HEADING = "Comms inbox (messages addressed to you";
+
+/** Whether a stream line is the hub's inbox delivery (a JSON dump), not something the operator said. */
+export const isInboxDelivery = (text: string): boolean => text.startsWith(COMMS_INBOX_HEADING);

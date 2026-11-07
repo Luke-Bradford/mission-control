@@ -28,6 +28,7 @@ import {
   chatRows,
   type DockRow,
   dockRows,
+  isInboxDelivery,
   kindLabel,
   type PendingMsg,
   sameMessage,
@@ -126,18 +127,29 @@ export type SendState = "sent" | "delivered" | "waiting";
 function StateLine({
   seat,
   loaded,
+  loadFailed,
   last,
   onStart,
   starting,
 }: {
   seat: FlightSeat | null;
   loaded: boolean;
+  loadFailed: boolean;
   last: SendState | null;
   onStart: () => void;
   starting: boolean;
 }) {
   const live = seat?.live === true;
   let words: string;
+  if (!loaded && loadFailed)
+    return (
+      <div className="dstate" id="dockState" aria-live="polite">
+        <span className="warn-t">Could not check FLIGHT, so Send waits. Your text is kept.</span>
+        <button type="button" className="sm" onClick={() => hub.refetch(RESOURCES.flight.path)}>
+          Retry
+        </button>
+      </div>
+    );
   if (!loaded) words = "Checking FLIGHT… your text is kept.";
   else if (!seat) words = FLIGHT_NO_SEAT;
   else if (!live)
@@ -164,6 +176,7 @@ function StateLine({
 function Composer({
   seat,
   loaded,
+  loadFailed,
   busy,
   err,
   onSend,
@@ -176,6 +189,8 @@ function Composer({
   seat: FlightSeat | null;
   /** FLIGHT's state has arrived; until then the box takes text but Send waits. */
   loaded: boolean;
+  /** FLIGHT's state could not be read, and none has arrived. */
+  loadFailed: boolean;
   busy: boolean;
   err: string | null;
   onSend: (body: string, context: string | null) => Promise<boolean>;
@@ -245,7 +260,14 @@ function Composer({
         onKeyDown={onKey}
       />
       <div className="dsend">
-        <StateLine seat={seat} loaded={loaded} last={last} onStart={onStart} starting={starting} />
+        <StateLine
+          seat={seat}
+          loaded={loaded}
+          loadFailed={loadFailed}
+          last={last}
+          onStart={onStart}
+          starting={starting}
+        />
         <button type="submit" className="primary" disabled={!canSend || busy || text.trim() === ""}>
           Send
         </button>
@@ -306,9 +328,11 @@ export function FlightChat({
         : { kind: "flight", id: `c:${m.id}`, at: m.at, text: m.text },
     );
     // The stored thread is the record; a stream copy of something stored shows once.
+    // The hub's inbox delivery to FLIGHT is a stream line of JSON, not something the operator said.
     const own = streamRows.filter(
       (r) =>
         (r.kind === "you" || r.kind === "flight") &&
+        !(r.kind === "you" && isInboxDelivery(r.text)) &&
         !(r.kind === "you" && thread.some((t) => t.kind === "you" && sameMessage(r.text, t.text))),
     );
     return [...thread, ...own].sort(byTime);
@@ -323,10 +347,18 @@ export function FlightChat({
   }, [open, pending]);
 
   // The newest operator message: stored (sent), taken up (delivered) or kept for a stopped FLIGHT.
-  const lastYou = [...shown].reverse().find((r) => r.kind === "you");
+  const lastStored = [...(stored?.messages ?? [])].reverse().find((m) => m.from === COMMS_CAPCOM);
+  // Taken up: a later inbox delivery to FLIGHT carries the stored message's id.
   const taken =
-    lastYou?.at != null &&
-    streamRows.some((r) => r.kind === "you" && r.at !== null && r.at >= (lastYou.at as number));
+    lastStored !== undefined &&
+    streamRows.some(
+      (r) =>
+        r.kind === "you" &&
+        r.at !== null &&
+        r.at >= lastStored.at &&
+        isInboxDelivery(r.text) &&
+        r.text.includes(`"id":"${lastStored.id}"`),
+    );
   const [justSent, setJustSent] = useState(false);
   // Only a message sent here gets a state line; older history says nothing about itself.
   const last: SendState | null = !justSent
@@ -414,6 +446,7 @@ export function FlightChat({
       <Composer
         seat={seat}
         loaded={flight !== undefined}
+        loadFailed={flight === undefined && Boolean(flightRes.error)}
         busy={busy}
         err={err}
         onSend={send}

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
 import { isSendKey, SEND_HINT } from "../src/components/sendKey.ts";
 import { hub } from "../src/data.ts";
+import { COMMS_INBOX_HEADING } from "../src/flight/conversation.ts";
 import { Dock } from "../src/shell/Dock.tsx";
 import { flyoutContext, stripContext, withContext } from "../src/shell/flyoutContext.ts";
 import { resetOverlays } from "../src/shell/overlays.ts";
@@ -132,9 +133,22 @@ describe("what the line under the box says", () => {
     await send("status?");
     const state = () => container.querySelector("#dockState")?.textContent ?? "";
     await waitFor(() => expect(state()).toContain("Sent."));
-    events = [{ id: "1:0", at: NOW + 1000, kind: "op", text: "[from CAPCOM] status?" }];
+    // What the hub really writes into FLIGHT's stream when it hands the message over.
+    const stored1 = stored[0] as { id: string; text: string };
+    events = [
+      {
+        id: "1:0",
+        at: NOW + 100_000,
+        kind: "op",
+        text: `${COMMS_INBOX_HEADING} the operator's own messages and replies):\n${JSON.stringify([stored1])}`,
+      },
+    ];
     await waitFor(() => hub.refetchAll());
     await waitFor(() => expect(state()).toContain("Delivered to FLIGHT."));
+    // The JSON dump is not a message from the operator: the conversation shows the one they typed.
+    expect(container.querySelectorAll(".dmsg.you")).toHaveLength(1);
+    expect(container.querySelector(".dmsg.you")?.textContent).toContain("status?");
+    expect(container.textContent).not.toContain("Comms inbox");
   });
 
   it("says waiting while FLIGHT is stopped, with Start FLIGHT beside it", async () => {

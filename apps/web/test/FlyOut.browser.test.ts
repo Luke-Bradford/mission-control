@@ -9,6 +9,7 @@ import {
   describeRendered,
   type RenderedPage,
 } from "./browserRunner.ts";
+import { CONFIG } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const HARNESS = "test/demoBrowser.html";
@@ -63,6 +64,87 @@ describeRendered("The FLIGHT fly-out in the production App", () => {
       await eventually(page, async () => !(await flyOutOpen(page)), "the fly-out to close");
       await page.press("f");
       await eventually(page, () => flyOutOpen(page), `the fly-out to open on ${path}`);
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  const stoppedApi = {
+    "/api/config": CONFIG,
+    "/api/attention": [],
+    "/api/crew?shape=summary": { rows: [], firstRunToday: null },
+    "/api/flight": {
+      seat: { id: "flight-1", call: "FLIGHT-1", model: "opus", state: "stopped", live: false },
+      decisions: [],
+    },
+    "/api/comms/flight": { messages: [] },
+  };
+  const openStopped = async (path: string, width: number, height = 900) => {
+    const page = await renderAt({
+      page: HARNESS,
+      width,
+      height,
+      search: `?at=${encodeURIComponent(path)}`,
+      api: stoppedApi,
+    });
+    await page.box("header");
+    if (!(await flyOutOpen(page))) await page.press("f");
+    await eventually(page, () => flyOutOpen(page), "the fly-out");
+    return page;
+  };
+
+  it(
+    "with FLIGHT stopped, the box takes text, the line says FLIGHT is stopped with Start FLIGHT, and Send fits its button",
+    async () => {
+      for (const [path, width] of [
+        [PAGE_PATHS.needs, 1280],
+        [PAGE_PATHS.comms, 1600],
+        [PAGE_PATHS.board, 1920],
+      ] as const) {
+        const page = await openStopped(path, width);
+        await page.click("#dockInput");
+        await page.press("h");
+        await page.press("i");
+        await eventually(
+          page,
+          () =>
+            page.evaluate(() => {
+              const box = document.querySelector<HTMLTextAreaElement>("#dockInput");
+              const state = document.querySelector("#dockState")?.textContent ?? "";
+              const start = [...document.querySelectorAll<HTMLElement>("#dockState button")].find(
+                (b) => b.textContent === "Start FLIGHT",
+              );
+              const send = document.querySelector<HTMLElement>(".dsend button[type=submit]");
+              const visible = (e: HTMLElement | null | undefined) =>
+                Boolean(e && e.getBoundingClientRect().width > 0);
+              return (
+                box?.disabled === false &&
+                box.value === "hi" &&
+                state.includes("FLIGHT is stopped") &&
+                visible(start) &&
+                visible(send) &&
+                (send?.scrollWidth ?? 1) <= (send?.clientWidth ?? 0)
+              );
+            }, null),
+          `the stopped state at ${width} on ${path}`,
+        );
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "beside the open fly-out at 1600, Comms' breadcrumb ends before its hint begins",
+    async () => {
+      const page = await openStopped(PAGE_PATHS.comms, 1600);
+      await page.box(".comms-chat-title");
+      expect(
+        await page.evaluate(() => {
+          const crumb = document.querySelector(".comms-chat-title .comms-breadcrumb");
+          const hint = document.querySelector(".comms-chat-title .comms-chat-hint");
+          if (!crumb || !hint) return false;
+          return crumb.getBoundingClientRect().right <= hint.getBoundingClientRect().left + 0.5;
+        }, null),
+      ).toBe(true);
     },
     BROWSER_TEST_TIMEOUT_MS,
   );

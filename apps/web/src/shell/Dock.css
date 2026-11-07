@@ -167,7 +167,11 @@
   justify-content: space-between;
   gap: var(--sp-3);
 }
+.dsend > button[type="submit"] {
+  flex: none;
+}
 .dstate {
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
