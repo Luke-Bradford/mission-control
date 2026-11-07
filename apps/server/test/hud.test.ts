@@ -3335,7 +3335,8 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       current,
     );
     expect(all(current).some((item) => item.key === key)).toBe(true);
-    expect(needsYouItems(all(current))).toHaveLength(1);
+    // FLIGHT's own question is FLIGHT's to brief; the late alert is FLIGHT's watch (#1537)
+    expect(needsYouItems(all(current))).toHaveLength(0);
 
     store.replacePullRequests(
       "shop-app",
@@ -3469,15 +3470,15 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     const id2 = ask(NOW - 25 * MIN);
     const item = aggregate();
     expect(item).toMatchObject({
-      owner: "operator",
+      owner: "flight",
       kind: "blocked",
       agentId: "flight-1",
       text: "FLIGHT is not triaging: 2 waiting since 12:30. FLIGHT has not triaged them within its window.",
       at: NOW - 30 * MIN,
       notTriaging: { cause: "late", keys: [`ask:${id}`, `ask:${id2}`], since: NOW - 30 * MIN },
     });
-    // the raw items stay FLIGHT's, so Needs you holds the one item
-    expect(needsYouItems(all()).map((i) => i.key)).toEqual([FLIGHT_NOT_TRIAGING_KEY]);
+    // a late wake is FLIGHT's own watch (#1537): the operator's Needs you holds none of it
+    expect(needsYouItems(all())).toEqual([]);
     noRawAsk();
     // FLIGHT keeps one and answers the other: the item clears
     store.addBrief({

@@ -4333,7 +4333,7 @@ describe("every wake ends with each reason handled", () => {
     nowMs += FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
     await watch.check();
-    expect(leftNotes()[0]?.text).toContain("q 1");
+    expect(leftNotes()[0]?.text).toContain("question 1");
     // the re-wake for the second question ends clean, but question 1 is still open
     flightIdle();
     decide({ questionId: q2 });
@@ -4357,7 +4357,7 @@ describe("every wake ends with each reason handled", () => {
     await watch.check();
     expect(leftNotes()).toHaveLength(1);
     expect(leftNotes()[0]).toMatchObject({ kind: "blocked", seatId: "flight-1" });
-    expect(leftNotes()[0]?.text).toContain("q 1");
+    expect(leftNotes()[0]?.text).toContain("question 1");
     // the operator sees it as itself, not as an item FLIGHT triages
     const item = attentionItems(config, store, nowMs).find((i) =>
       i.key.endsWith(FLIGHT_LEFT_NOTE_KEY),

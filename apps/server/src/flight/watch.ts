@@ -79,6 +79,7 @@ import {
   type WakeReason,
   wakeFacts,
   wakeReasons,
+  wakeReasonWords,
 } from "./state.ts";
 
 export interface FlightWatchDeps {
@@ -272,7 +273,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       runId: null,
       seatId,
       repoId,
-      text: `FLIGHT left ${left.length} wake reason${left.length === 1 ? "" : "s"} without a decision after two wakes: ${left.map((r) => r.label).join("; ")}`.slice(
+      text: `FLIGHT left ${left.length} wake reason${left.length === 1 ? "" : "s"} without a decision after two wakes: ${left.map((r) => wakeReasonWords(r, config.operator.timezone)).join("; ")}`.slice(
         0,
         600,
       ),

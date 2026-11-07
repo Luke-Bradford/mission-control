@@ -107,6 +107,14 @@ export function evaluateHolds(
   }
   return changed;
 }
+const NOTHING_FOR_OPERATOR = /\bnone for the operator\.?\s*$/i;
+/**
+ * A held item whose hold or text says it has nothing for the operator ("None for the operator.").
+ * It stays held (other holds may wait on it), but the Held group in Needs you does not list it.
+ */
+export const nothingForOperator = (item: AttentionItem): boolean =>
+  NOTHING_FOR_OPERATOR.test(item.hold?.reason ?? "") || NOTHING_FOR_OPERATOR.test(item.text);
+
 export function partitionAttention(
   store: Store,
   items: AttentionItem[],

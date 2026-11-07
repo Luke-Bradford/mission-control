@@ -215,6 +215,13 @@ error in health, not as a crash. A missing `worktree` is not an error: the in-fl
 branch (and so its ticket) is just null. For the studio loop it also means no live session can
 match, so an open fire shows as `unknown` (see "Loop liveness" below).
 
+A loop can say how it is paused with `paused_by:` under `loops:`, either `{ stop_file: <path> }`
+(paused while the file exists) or `{ issue: <repo id>#<number> }` (paused while that issue is open on
+the board). The hub only reads it. A paused loop's issues and PRs stay on its card, which shows
+"Paused by <repo>#<number>", and never count in Needs you. A TA loop is also paused by its `PAUSE`
+file. The live config needs `paused_by: { issue: autonomy-engine#1818 }` on the paused loop (and the
+studio loop's own setting, if it has one); without it the hub cannot tell the loop is paused.
+
 The config is rejected at start-up if an id repeats within `accounts`, `repos` or `loops`, or if
 two accounts share a vendor: the usage readers use this Mac's single Claude login (Keychain
 OAuth) and single Codex login, so a second account would report the first one's usage.

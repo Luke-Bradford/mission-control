@@ -168,6 +168,7 @@ import {
   AttentionHoldInput,
   attentionHoldError,
   holdItem,
+  nothingForOperator,
   releaseHold,
 } from "./attention-holds.ts";
 import {
@@ -5631,7 +5632,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           sharedCrew().rows,
           deps.hubLogin?.() ?? null,
           true,
-        ).filter((i) => i.hold),
+        ).filter((i) => i.hold && !nothingForOperator(i)),
       );
       // Reader: apps/web/src/comms/Decisions.tsx
       api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
