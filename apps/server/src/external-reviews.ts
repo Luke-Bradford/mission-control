@@ -11,6 +11,7 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "./config.ts";
 import { externalReviewAsked } from "./external-pr-control.ts";
+import { externalReviewKey, isExternalReview } from "./external-review-key.ts";
 import type { GhRunner } from "./mcp/gh.ts";
 import { ownsPr } from "./ownership.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
@@ -18,10 +19,7 @@ import { postPrEvidence } from "./pr-evidence/sweep.ts";
 import { qaReportGitSummary } from "./qa-reports.ts";
 import type { Store } from "./store.ts";
 
-/** A review subject identity, deliberately not the id of a stored build run. */
-export const externalReviewKey = (repo: string, pr: number): string => `external-pr:${repo}#${pr}`;
-export const isExternalReview = (row: ReviewRow): boolean =>
-  row.authorRunId === externalReviewKey(row.repoId, row.prNumber);
+export { externalReviewKey, isExternalReview } from "./external-review-key.ts";
 
 /**
  * A branch the crew or an observed loop still owns: a build run that has not ended, any run of a
