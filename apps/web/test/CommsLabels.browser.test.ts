@@ -116,12 +116,21 @@ describeRendered("Comms role labels", () => {
         const [a, b] = labels;
         if (!a || !b) throw Error("labels");
         expect(a.right <= b.x || b.right <= a.x || a.bottom <= b.y || b.bottom <= a.y).toBe(true);
-        // The graph column is 420 when the page itself is 1540 or wider; the FLIGHT fly-out, open in this
-        // shell, takes 380 of a 1600 window, so the page is narrower and the column keeps its 380.
-        const pageWidth = (await page.box(".comms-page")).width;
-        expect((await page.box(".comms-right")).width).toBeGreaterThanOrEqual(
-          pageWidth >= 1540 ? 420 : 380,
-        );
+        // The shell starts with the FLIGHT fly-out open, which takes 380 px, so the page keeps its 380 px
+        // graph column. Folded to its rail (the default), a 1600 window gives the page 1500 px or more and
+        // the column takes its 420 px.
+        expect((await page.box(".comms-right")).width).toBeGreaterThanOrEqual(380);
+        if (width >= 1600) {
+          await page.click("#dockHead button[aria-controls=dockBody]");
+          await page.evaluate(
+            () =>
+              new Promise<void>((resolve) =>
+                requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+              ),
+            null,
+          );
+          expect((await page.box(".comms-right")).width).toBeGreaterThanOrEqual(420);
+        }
         const shots = process.env.MC_MAP_PERFORMANCE_SHOTS;
         if (shots) {
           mkdirSync(shots, { recursive: true });

@@ -349,9 +349,10 @@ export function FlightChat({
 
   // The newest operator message: stored (sent), taken up (delivered) or kept for a stopped FLIGHT.
   const lastStored = [...(stored?.messages ?? [])].reverse().find((m) => m.from === COMMS_CAPCOM);
-  // Taken up: FLIGHT has seen the message or answered it. The hub hands an unlabelled message over
-  // inside a wake or the start brief (a 'hub' line), a labelled one as a bare inbox line ('you'); both
-  // carry the stored message's id in the inbox JSON. A reply from FLIGHT after it counts as well.
+  // Taken up: the hub hands an unlabelled message over inside a wake or the start brief (a 'hub' line),
+  // a labelled one as a bare inbox line ('you'); both carry the stored message's id in the inbox JSON.
+  // A stored reply to it counts too. Text FLIGHT streams on its own does not: it may belong to a turn
+  // that began before the message, which FLIGHT reads only at its next wake.
   const taken =
     lastStored !== undefined &&
     (streamRows.some(
@@ -362,7 +363,7 @@ export function FlightChat({
         r.text.includes(COMMS_INBOX_HEADING) &&
         r.text.includes(`"id":"${lastStored.id}"`),
     ) ||
-      all.some((r) => r.kind === "flight" && r.at !== null && r.at > lastStored.at));
+      (stored?.messages ?? []).some((m) => m.from !== COMMS_CAPCOM && m.replyTo === lastStored.id));
   const [justSent, setJustSent] = useState(false);
   // Only a message sent here gets a state line; older history says nothing about itself.
   const last: SendState | null = !justSent

@@ -175,16 +175,43 @@ describe("what the line under the box says", () => {
     expect(container.querySelectorAll(".dmsg.you")).toHaveLength(1);
   });
 
-  it("says delivered once FLIGHT has answered, whatever the stream shows of the hand-over", async () => {
+  it("keeps saying sent while FLIGHT streams text from a turn already running, until the hand-over carries the message", async () => {
     stub();
     const { container } = render(<Dock />);
     await send("status?");
     const state = () => container.querySelector("#dockState")?.textContent ?? "";
     await waitFor(() => expect(state()).toContain("Sent."));
-    events = [{ id: "2:0", at: NOW + 200_000, kind: "msg", text: "All seats busy." }];
+    // FLIGHT is mid-turn on other work: its text is not an answer to a message it has not read.
+    events = [{ id: "2:0", at: NOW + 200_000, kind: "msg", text: "Still checking PR 1549." }];
+    await waitFor(() => hub.refetchAll());
+    await waitFor(() => expect(container.textContent).toContain("Still checking PR 1549."));
+    expect(state()).toContain("Sent.");
+    expect(state()).not.toContain("Delivered");
+    // Its next wake carries the stored message: now it has it.
+    const stored1 = stored[0] as { id: string };
+    events = [
+      ...events,
+      {
+        id: "3:0",
+        at: NOW + 300_000,
+        kind: "op",
+        text: `${MC_LINE_PREFIX} Wake: 1 operator message\n\n${COMMS_INBOX_HEADING} the operator's own messages and replies):\n${JSON.stringify([stored1])}`,
+      },
+    ];
     await waitFor(() => hub.refetchAll());
     await waitFor(() => expect(state()).toContain("Delivered to FLIGHT."));
-    expect(container.textContent).toContain("All seats busy.");
+  });
+
+  it("says delivered once FLIGHT has stored a reply to the message", async () => {
+    stub();
+    const { container } = render(<Dock />);
+    await send("status?");
+    const state = () => container.querySelector("#dockState")?.textContent ?? "";
+    await waitFor(() => expect(state()).toContain("Sent."));
+    const stored1 = stored[0] as { id: string };
+    stored.push({ ...message("flight-1", COMMS_CAPCOM, "All seats busy."), replyTo: stored1.id });
+    await waitFor(() => hub.refetchAll());
+    await waitFor(() => expect(state()).toContain("Delivered to FLIGHT."));
   });
 
   it("says waiting while FLIGHT is stopped, with Start FLIGHT beside it", async () => {

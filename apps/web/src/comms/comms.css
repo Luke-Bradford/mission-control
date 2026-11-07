@@ -862,8 +862,8 @@ a.comms-ref {
   margin: 0 0 var(--sp-1);
 }
 
-/* 1076px of page is a 1100px window with no fly-out; with it open the same width is reached at 1480. */
-@container (max-width: 1076px) {
+/* 1016px of page is a 1100px window with the fly-out folded to its 48px rail (its default); open, the same page width is a 1440px window. */
+@container (max-width: 1016px) {
   .comms-grid {
     grid-template-columns: 240px minmax(0, 1fr);
   }
@@ -963,7 +963,8 @@ a.comms-ref {
   gap: var(--sp-2);
 }
 
-@container (min-width: 1540px) {
+/* 1500px of page is a 1600px window with the rail folded; open, the page is about 1196px and keeps 380. */
+@container (min-width: 1500px) {
   .comms-grid {
     grid-template-columns: 280px minmax(0, 1fr) 420px;
   }
