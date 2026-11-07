@@ -249,13 +249,9 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         });
         if (!r.ok) return stop(r.reason);
         // its own kind, not promote's
-        store.addFlightDecision({
-          at: now(),
+        h.record(now(), {
           kind: "status",
-          seatId: null,
-          targetRunId: null,
           ref,
-          questionId: null,
           about: `${ref}: ${found.title}`,
           decision: `Set status to ${a.status}`,
           basis: a.basis,

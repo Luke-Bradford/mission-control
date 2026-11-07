@@ -332,6 +332,8 @@ export async function main(): Promise<void> {
     hasViewClients: () => browserStreamCount > 0,
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
+    // lazy: the supervisor is built below, and the check only runs once the scheduler starts
+    seatCheck: (tool) => supervisor.checkCli(tool),
     deliverDefault: async (seatId, text) => {
       await supervisor.message(seatId, text, { interrupt: false });
     },

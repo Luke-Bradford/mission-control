@@ -34,9 +34,11 @@ import {
   FLIGHT_MEMORY_RECALL_MAX,
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_METRICS_DAY_MS,
+  FLIGHT_MOVED_LISTED,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OPERATOR_UNREAD_MS,
+  FLIGHT_PR_ENTRY_CHANGES,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
@@ -59,6 +61,7 @@ import {
   type FlightMemoryKind,
   type FlightMemoryNote,
   type FlightMemoryTitle,
+  type FlightMovedPointer,
   type FlightPark,
   type FlightScheduleView,
   type FlightSeatState,
@@ -329,8 +332,26 @@ const causeReason = (cause: string): string =>
   cause.startsWith(FLIGHT_LEFT_HEAD) ? "left" : cause.replace(/ \(\d+\)$/, "");
 
 /** Stores a wake on its run, with the fact categories (not the counts) that caused it. */
-export function recordWakeReasons(store: Store, runId: string, at: number, causes: string[]): void {
-  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))]);
+export function recordWakeReasons(
+  store: Store,
+  runId: string,
+  at: number,
+  causes: string[],
+  wakeId?: string,
+): void {
+  store.addFlightWake(runId, at, [...new Set(causes.map(causeReason))], wakeId);
+}
+
+/** FLIGHT has received `s`: the pointers it lists as moved are read, and not listed again. */
+export function markPointersShown(
+  store: Store,
+  config: CcConfig,
+  s: FlightState,
+  at: number,
+): void {
+  const session = flightSeat(config)?.session.id;
+  const shown = [...(s.moved ?? []), ...(s.wake?.movedCovered ?? [])];
+  if (session !== undefined && shown.length > 0) store.markFlightPointersRead(session, shown, at);
 }
 
 /** The last day's wakes, by reason and by hour (24 buckets, the last one ending at `now`). */
@@ -680,6 +701,10 @@ const waitingOn = (waits: Record<string, { until: number }>, target: string, now
   );
 
 /** What `wakeFacts` reads beyond the digest: where a Ready ticket could start, and which items are new. */
+function withCovered(inputs: FlightWakeInputs, covered: FlightMovedPointer[]): FlightWakeInputs {
+  return covered.length === 0 ? inputs : { ...inputs, movedCovered: covered };
+}
+
 function wakeInputs(i: {
   /** The slow pace's check while it is on: tickets it refuses are not startable, so wake no one. */
   pace?: PaceCheck | undefined;
@@ -870,6 +895,7 @@ export function flightState(i: {
   const ledger = openLedger
     .slice(0, FLIGHT_LEDGER_INDEX_MAX)
     .map(({ kind, key, title, status, next }) => ({ kind, key, title, status, next }));
+  const movedAll = found === null ? [] : store.movedFlightPointers(found.session.id);
   const notes: readonly string[] = FLIGHT_NOTE_SECTIONS;
   const brief = flightBriefSections(store, found?.session.id ?? null)
     .filter((b) => notes.includes(b.section))
@@ -1358,6 +1384,12 @@ export function flightState(i: {
 
   const planned = flightScheduleView(config, store, now).entries;
   const pace = paceView(store, config, now);
+  // a PR the digest lists already shows a change to its state or head; the pointer is read with the wake, not repeated
+  const listedPrs = new Set(prs.map((p) => `${session.repoId}#${p.pr}`));
+  const covered = movedAll.filter(
+    (m) => m.kind === "pr" && listedPrs.has(m.target) && FLIGHT_PR_ENTRY_CHANGES.includes(m.change),
+  );
+  const moved = movedAll.filter((m) => !covered.includes(m)).slice(0, FLIGHT_MOVED_LISTED);
   return {
     prFlow: flow,
     ...flightSignals({
@@ -1391,18 +1423,21 @@ export function flightState(i: {
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
     ...(planned.length > 0 ? { planned } : {}),
     discussions,
-    wake: wakeInputs({
-      pace: paceStartCheck(store, config, now),
-      store,
-      seats,
-      tickets,
-      allTickets: openTickets,
-      items,
-      areas: i.areas,
-      hubLogin: i.hubLogin ?? null,
-      flightId: found?.seat.id ?? null,
-      now,
-    }),
+    wake: withCovered(
+      wakeInputs({
+        pace: paceStartCheck(store, config, now),
+        store,
+        seats,
+        tickets,
+        allTickets: openTickets,
+        items,
+        areas: i.areas,
+        hubLogin: i.hubLogin ?? null,
+        flightId: found?.seat.id ?? null,
+        now,
+      }),
+      covered,
+    ),
     time: clockHm(now, tz),
     ...(digestMatches.length > 0
       ? {
@@ -1432,6 +1467,7 @@ export function flightState(i: {
     ...headline,
     ledger,
     ledgerMore: openLedger.length - ledger.length,
+    ...(moved.length === 0 ? {} : { moved }),
   };
 }
 

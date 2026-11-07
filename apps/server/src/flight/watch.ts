@@ -35,6 +35,7 @@ import {
   flightDownText,
   flightRotationLoopText,
   flightStartFailedText,
+  flightWakeId,
   freshStartLine,
   HUD_STATE_LABEL,
   type HudState,
@@ -64,6 +65,7 @@ import {
   flightWakes,
   idleSeatLine,
   markItemsShown,
+  markPointersShown,
   markPrsShown,
   nextWakeAt,
   onlySettled,
@@ -550,11 +552,18 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markPrsShown(store, state);
         markItemsShown(store, state);
         markRetrospectiveShown(store, state);
+        markPointersShown(store, config, state, t);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
         const woke = causes.length > 0 ? causes : ["initial"];
         recordFlightWake(store, found.session.repoId, t, woke);
-        recordWakeReasons(store, runId, t, left === null ? woke : [leftLine(left), ...causes]);
+        recordWakeReasons(
+          store,
+          runId,
+          t,
+          left === null ? woke : [leftLine(left), ...causes],
+          flightWakeId(runId, 0),
+        );
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
@@ -711,11 +720,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         markPrsShown(store, state);
         markItemsShown(store, state);
         markRetrospectiveShown(store, state);
+        markPointersShown(store, config, state, t);
         lastFacts = deliveredFacts(state);
         lastWakeAt = t;
         const woke = causes.length > 0 ? causes : [FLIGHT_WAKE_REMINDER];
         recordFlightWake(store, found.session.repoId, t, woke);
-        recordWakeReasons(store, runId, t, woke);
+        recordWakeReasons(store, runId, t, woke, flightWakeId(runId, n + 1));
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       }
     } else if (!listed) {

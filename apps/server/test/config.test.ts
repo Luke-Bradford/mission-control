@@ -149,6 +149,21 @@ describe("loadConfig", () => {
     expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 });
   });
 
+  it("reads audit.controller_sessions, defaulting to off, and refuses unknown audit keys", () => {
+    expect(loadConfig(EXAMPLE).audit).toEqual({ controllerSessions: false });
+    const on = tmpConfig((y) => `${y}\naudit:\n  controller_sessions: true\n`);
+    expect(loadConfig(on).audit).toEqual({ controllerSessions: true });
+    const where = tmpConfig(
+      (y) => `${y}\naudit:\n  controller_sessions: true\n  controller_checkout: /Users/op/repo\n`,
+    );
+    expect(loadConfig(where).audit).toEqual({
+      controllerSessions: true,
+      controllerCheckout: "/Users/op/repo",
+    });
+    const bad = tmpConfig((y) => `${y}\naudit:\n  other: 1\n`);
+    expect(() => loadConfig(bad)).toThrow(ConfigError);
+  });
+
   it("reads updates.cli, defaulting to off", () => {
     expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off", cli: "off" });
     const on = tmpConfig((y) => `${y}\nupdates:\n  cli: between_runs\n`);

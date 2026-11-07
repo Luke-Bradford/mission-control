@@ -230,6 +230,11 @@ export type TeamsConfig = z.infer<typeof TeamsConfig>;
 
 export interface CcConfig {
   sources?: { teams?: TeamsConfig };
+  /**
+   * Token audit options. `controllerSessions` (default off): read usage numbers of controller
+   * sessions from the operator's Claude Code folder for `controllerCheckout` (default: the hub's own checkout).
+   */
+  audit?: { controllerSessions: boolean; controllerCheckout?: string };
   operator: { id: string; timezone: string; githubLogins?: string[] };
   accounts: {
     id: AccountId;
@@ -565,6 +570,12 @@ const fileSchema = z
       github_seconds: z.number().min(30).max(3600),
       board_minutes: z.number().min(5).max(60).default(15),
     }),
+    audit: z
+      .strictObject({
+        controller_sessions: z.boolean().default(false),
+        controller_checkout: nonEmpty.optional(),
+      })
+      .default({ controller_sessions: false }),
     updates: z
       .strictObject({
         hub: z.enum(HUB_UPDATES).default("off"),
@@ -749,6 +760,12 @@ const fileSchema = z
         usageMinutes: f.poll.usage_minutes,
         githubSeconds: f.poll.github_seconds,
         boardMinutes: f.poll.board_minutes,
+      },
+      audit: {
+        controllerSessions: f.audit.controller_sessions,
+        ...(f.audit.controller_checkout === undefined
+          ? {}
+          : { controllerCheckout: f.audit.controller_checkout }),
       },
       updates: { hub: f.updates.hub, cli: f.updates.cli },
       ...(f.crew === undefined

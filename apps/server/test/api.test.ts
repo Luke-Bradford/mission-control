@@ -239,6 +239,7 @@ const stubSupervisor = (): Supervisor => {
     transferAccount: call("transfer", { outcome: "resumed" as const }),
     startRun: call("start", { runId: "r-1", branch: "feature/5-x" }),
     startWatch: call("startWatch", { runId: "r-3" }),
+    checkCli: call("checkCli", { kind: "no-seat" as const }),
     startReview: call("startReview", { runId: "r-2" }),
     message: call("message", undefined),
     interrupt: call("interrupt", undefined),
@@ -1544,6 +1545,7 @@ const NEW_REPO = {
 /** `[method, url, body?]`: a POST is sent with its valid body (default `{}`). */
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
+  ["GET", "/api/audit/tokens?days=7"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],

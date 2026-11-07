@@ -66,6 +66,7 @@ import {
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
+  flightWakeId,
   GH_READ_BAD_PATH,
   GH_READ_CUT,
   GH_READ_NOT_FOUND,
@@ -679,6 +680,13 @@ describe("log_decision", () => {
       },
     ]);
     expect(seen).toEqual(["flight"]);
+  });
+
+  it("stamps a decision with the id of the wake FLIGHT is in", async () => {
+    store.addFlightWake("r-flight", NOW - 5000, ["pr"], flightWakeId("r-flight", 0));
+    store.addFlightWake("r-flight", NOW - 1000, ["items"], flightWakeId("r-flight", 1));
+    await tool.call(ctx(), args());
+    expect(store.flightDecisions(0, 10)[0]?.wakeId).toBe(flightWakeId("r-flight", 1));
   });
 
   it("refuses a seat that is not in its session", async () => {
@@ -7834,6 +7842,43 @@ describe("track", () => {
     basis: "ticket",
   };
 
+  it("refuses a pointer target that the hub could never mark, naming the form", async () => {
+    for (const [kind, target] of [
+      ["pr", "#7"],
+      ["pr", "o/mc#7"],
+      ["pr", "nope#7"],
+      ["pr", "7"],
+      ["ticket", "mc#0"],
+    ] as const) {
+      const r = await call("track", { ...entry, pointers: [{ kind, target }] });
+      expect(r.isError, `${kind} ${target}`).toBe(true);
+      expect(r.text).toContain(`a ${kind} pointer is`);
+    }
+    expect(store.flightLedger("s1")).toEqual([]);
+    for (const [kind, target] of [
+      ["seat", "guido-1"],
+      ["repo", "mc"],
+      ["person", "octocat"],
+      ["metric", "merged"],
+    ] as const) {
+      const r = await call("track", { ...entry, pointers: [{ kind, target }] });
+      expect(r.isError, kind).toBe(true);
+      expect(r.text).toContain(`no hub event moves a ${kind} pointer`);
+    }
+    const good = [
+      { kind: "pr", target: "mc#7" },
+      { kind: "ticket", target: "mc#8" },
+    ];
+    expect((await call("track", { ...entry, pointers: good })).isError).toBeUndefined();
+  });
+
+  it("stamps the moved pointers flight_state shows as read", async () => {
+    await call("track", { ...entry, pointers: [{ kind: "pr", target: "mc#7" }] });
+    store.markFlightPointers("pr", "mc#7", "CI failing", NOW - 1000);
+    expect(JSON.parse((await call("flight_state", {})).text).moved).toHaveLength(1);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+  });
+
   it("keeps #533 ledger tools available while away", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     expect(await call("track", entry)).toEqual({ text: trackedText(entry.key, true) });
@@ -9560,6 +9605,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       moveCalls.length = 0;
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
       expect(moveCalls).toHaveLength(1);
+    });
+    it("stamps the status decision set_fields writes with the wake FLIGHT is in", async () => {
+      board(card(7));
+      store.addFlightWake("r-flight", NOW - 1000, ["items"], flightWakeId("r-flight", 1));
+      expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
+      expect(decisions().find((d) => d.kind === "status")?.wakeId).toBe("r-flight:1");
     });
     it("sets status, size, priority, labels and a milestone in one call", async () => {
       liveLabels = ["lane:home"];

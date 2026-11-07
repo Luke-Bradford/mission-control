@@ -5317,13 +5317,59 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls[0]?.text.split("\n")[0]).toContain("reviews");
   });
 
+  const pointedEntry = (): FlightLedgerEntry => ({
+    kind: "watch",
+    key: "w-pr",
+    title: "w-pr",
+    status: "active",
+    next: null,
+    owner: null,
+    waitsOn: null,
+    due: null,
+    refs: [],
+    priority: null,
+    createdAt: nowMs,
+    updatedAt: nowMs,
+    outcome: null,
+    basis: "ticket",
+    pointers: [{ kind: "pr", target: "mc#7", changedAt: null, change: null, readAt: null }],
+  });
+
+  it("a start wake lists the moved pointers, stamps them read and records wake id 0", async () => {
+    store.putFlightLedgerEntry("s1", pointedEntry(), 0);
+    store.markFlightPointers("pr", "mc#7", "CI failing", nowMs);
+    await watch.check();
+    const start = JSON.parse(startCalls[0]?.first?.split("\n").at(-1) ?? "") as FlightWake;
+    expect(start.moved).toEqual([
+      { entry: "w-pr", kind: "pr", target: "mc#7", change: "CI failing", at: nowMs },
+    ]);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+    expect(store.flightWakes(0)[0]?.wakeId).toBe("r-flight-1:0");
+  });
+
+  it("a sent wake lists the moved pointers, stamps them read and records its wake id", async () => {
+    liveCrew();
+    await watch.check();
+    store.putFlightLedgerEntry("s1", pointedEntry(), 0);
+    const markedAt = nowMs;
+    store.markFlightPointers("pr", "mc#7", "merged", markedAt);
+    ask();
+    await tick();
+    const sent = JSON.parse(sendCalls[0]?.text.split("\n").at(-1) ?? "") as FlightWake;
+    expect(sent.moved).toEqual([
+      { entry: "w-pr", kind: "pr", target: "mc#7", change: "merged", at: markedAt },
+    ]);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+    expect(store.flightWakes(0).at(-1)?.wakeId).toBe("r-flight:1");
+  });
+
   it("stores each wake's reasons on the run, and counts them per hour by reason", async () => {
     liveCrew();
     await watch.check();
     ask();
     await tick();
     expect(store.flightWakes(0)).toEqual([
-      { runId: "r-flight", at: nowMs, reasons: ["q", "items"] },
+      { runId: "r-flight", at: nowMs, reasons: ["q", "items"], wakeId: "r-flight:1" },
     ]);
     const view = flightView(config, store, nowMs + MIN);
     expect(view.wakeHistory?.byReason).toEqual([
