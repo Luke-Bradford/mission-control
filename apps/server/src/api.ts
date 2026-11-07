@@ -115,7 +115,6 @@ import {
   pace5h,
   packMapTree,
   percentile,
-  projectAtReset,
   QA_FLOW_METRICS,
   QA_RETENTION_DAYS,
   type QaFindingsView,
@@ -182,6 +181,7 @@ import {
   awayDigest,
   readAwaySettings,
 } from "./away.ts";
+import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
@@ -450,7 +450,6 @@ export const TRANSCRIPT_NOT_FOUND = "transcript not found";
 const DEFAULT_TELEMETRY_RANGE = "6h";
 const HOUR_MS = 3600e3;
 const DAY_MS = 24 * HOUR_MS;
-const WEEK_MS = 7 * DAY_MS;
 const FIVE_HOURS_MS = 5 * HOUR_MS;
 
 /** Never log credentials: request/response headers that can carry them are censored. */
@@ -6290,11 +6289,12 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
         });
         continue;
       }
-      const samples: UsageSample[] = store.usage(acct.id, window, resetAt - WEEK_MS);
+      const week = weeklyProjection(store, acct.id);
+      const samples: UsageSample[] = week?.samples ?? [];
       rows.push({
         ...base,
         window,
-        projected: projectAtReset(samples, resetAt),
+        projected: week?.projected ?? null,
         stopForecast: stopForecast(samples, acct.stopAt, resetAt),
         fullAt: stopForecast(samples, METER_FULL_PCT, resetAt),
         history: hourlyReadings(samples),

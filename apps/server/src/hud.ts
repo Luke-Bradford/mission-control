@@ -12,6 +12,7 @@ import {
   type AttentionOwner,
   agentState,
   type BoardItem,
+  BUDGET_BRAKE_KEY,
   CI_TRIES,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
@@ -979,6 +980,8 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
+  // the budget brake on an account (budget-brake.ts)
+  `${NOTE_KEY}${BUDGET_BRAKE_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
   // a seat's focus could not be imported: the operator's config to fix (instruction-notices.ts)

@@ -2285,6 +2285,34 @@ describe("start_seat", () => {
     );
   });
 
+  it("4b: refuses a start while the weekly projection passes 100% and starts once it falls", async () => {
+    const week = (from: number, to: number, at: number) => {
+      for (const [t, pct] of [
+        [at - 6 * 3600e3, from],
+        [at, to],
+      ] as const)
+        store.addUsage({
+          accountId: "claude-main",
+          window: "7d",
+          at: t,
+          pct,
+          resetAt: nowMs + 24 * 3600e3,
+          source: "t",
+        });
+    };
+    week(40, 60, nowMs);
+    const braked = await start();
+    expect(braked.isError).toBe(true);
+    expect(braked.text).toMatch(
+      /^Not started: the budget brake is on\. GUIDO-1's account claude-main/,
+    );
+    expect(startCalls).toEqual([]);
+    week(10, 10, nowMs + 1);
+    nowMs += 1;
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+  });
+
   it("5: has no hourly cap on starts", async () => {
     for (let i = 0; i < 12; i++) addDecision({ kind: "start", ref: `mc#${100 + i}` });
     expect((await start()).isError).toBeUndefined();
