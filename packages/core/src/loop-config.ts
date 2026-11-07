@@ -5,6 +5,10 @@
  */
 import { PLAN_SIZES } from "./flight.ts";
 import {
+  LOOP_CAP_MAX,
+  LOOP_RETURN_FROM,
+  LOOP_RETURN_IDS,
+  LOOP_STEP_SHAPE,
   type LoopDef,
   type LoopReturnDef,
   type LoopStepDef,
@@ -14,6 +18,7 @@ import {
 import type { Profile } from "./profiles-model.ts";
 
 export {
+  LOOP_CAP_MAX,
   LOOP_PROMPT_MAX,
   LOOP_REPORT_TOOLS,
   LOOP_RETURN_IDS,
@@ -34,8 +39,13 @@ const MERGE_CONFLICT_CAP = 1;
 /** Why the engine cannot run `def`, or null when it can. */
 export function validateLoop(def: LoopDef): string | null {
   const refuse = (why: string): string => `loop ${def.name}: ${why}`;
+  const given = new Set<string>();
   for (const r of def.returns) {
+    if (given.has(r.id)) return refuse(`return path ${r.id} is given twice`);
+    given.add(r.id);
     if (!Number.isInteger(r.cap) || r.cap < 1) return refuse(`return path ${r.id} has no cap`);
+    if (r.cap > LOOP_CAP_MAX)
+      return refuse(`return path ${r.id} cap must be at most ${LOOP_CAP_MAX}`);
     if (r.to !== "build") return refuse(`return path ${r.id} must return to build`);
     if (r.id === "merge-conflict" && r.cap !== MERGE_CONFLICT_CAP)
       return refuse("return path merge-conflict must have cap 1");
@@ -57,6 +67,10 @@ export function validateLoop(def: LoopDef): string | null {
     }
     if (!stops) return refuse(`step ${start.id} cannot reach Done or FLIGHT`);
   }
+  // Every return path needs its own cap, so a missing one is a path with no cap.
+  for (const id of LOOP_RETURN_IDS) {
+    if (!given.has(id)) return refuse(`return path ${id} has no cap`);
+  }
   for (const s of def.steps) {
     if ((s.runner === "agent" || s.runner === "fresh-agent") && s.report === undefined)
       return refuse(`agent step ${s.id} has no report tool`);
@@ -67,6 +81,22 @@ export function validateLoop(def: LoopDef): string | null {
     return refuse(
       "the hub runs build, ci, review, merge and done in that order; plan is optional at the start",
     );
+  for (const s of def.steps) {
+    const shape = LOOP_STEP_SHAPE[s.id];
+    if (s.runner !== shape.runner) return refuse(`step ${s.id} must be run by ${shape.runner}`);
+    if (s.next !== shape.next)
+      return refuse(`step ${s.id} must go to ${shape.next ?? "nothing (it is the last step)"}`);
+    if ((s.report ?? null) !== shape.report)
+      return refuse(
+        shape.report === null
+          ? `step ${s.id} takes no report tool`
+          : `step ${s.id} must report with ${shape.report}`,
+      );
+  }
+  for (const r of def.returns) {
+    if (r.from !== LOOP_RETURN_FROM[r.id])
+      return refuse(`return path ${r.id} must leave from ${LOOP_RETURN_FROM[r.id]}`);
+  }
   return null;
 }
 

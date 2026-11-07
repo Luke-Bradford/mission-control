@@ -138,6 +138,62 @@ describe("validateLoop refuses", () => {
       },
       "loop feature: the hub runs build, ci, review, merge and done in that order; plan is optional at the start",
     ],
+    [
+      "a missing return path",
+      (d) => {
+        d.returns = d.returns.filter((r) => r.id !== "merge-conflict");
+      },
+      "loop feature: return path merge-conflict has no cap",
+    ],
+    [
+      "a repeated return path",
+      (d) => {
+        d.returns.push({ ...ret(d, "ci-fail") });
+      },
+      "loop feature: return path ci-fail is given twice",
+    ],
+    [
+      "a cap above the most",
+      (d) => {
+        ret(d, "ci-fail").cap = 11;
+      },
+      "loop feature: return path ci-fail cap must be at most 10",
+    ],
+    [
+      "a return path from the wrong step",
+      (d) => {
+        ret(d, "ci-fail").from = "review";
+      },
+      "loop feature: return path ci-fail must leave from ci",
+    ],
+    [
+      "a step run by the wrong runner",
+      (d) => {
+        step(d, "ci").runner = "hub";
+      },
+      "loop feature: step ci must be run by check",
+    ],
+    [
+      "a step that goes to the wrong next step",
+      (d) => {
+        step(d, "build").next = "review";
+      },
+      "loop feature: step build must go to ci",
+    ],
+    [
+      "a step with the wrong report tool",
+      (d) => {
+        step(d, "review").report = "report_evidence";
+      },
+      "loop feature: step review must report with report_findings",
+    ],
+    [
+      "a report tool on a step that takes none",
+      (d) => {
+        step(d, "merge").report = "report_findings";
+      },
+      "loop feature: step merge takes no report tool",
+    ],
   ])("%s", (_name, mutate, text) => {
     const d = feature();
     mutate(d);

@@ -12,6 +12,7 @@ import {
   type ChosenProfile,
   type ConfigView,
   DEFAULT_PROFILES,
+  LOOP_CAP_MAX,
   LOOP_PROMPT_MAX,
   LOOP_REPORT_TOOLS,
   LOOP_RETURN_IDS,
@@ -43,7 +44,7 @@ export const PROFILES_FILE = "profiles.yaml";
 export class ProfilesError extends Error {}
 
 const CHECKLIST_MAX = 4000;
-const LIMIT = z.number().int().min(1).max(10);
+const LIMIT = z.number().int().min(1).max(LOOP_CAP_MAX);
 
 const loopStep = z.strictObject({
   id: z.enum(LOOP_STEP_IDS),
@@ -147,6 +148,17 @@ function loopMismatch(f: z.infer<typeof fileProfile>, loop: LoopDef): string | n
   return null;
 }
 
+/** The first loop the engine cannot run, or one that disagrees with its profile; null when all are fine. */
+function firstLoopRefusal(list: readonly z.infer<typeof fileProfile>[]): string | null {
+  for (const [i, f] of list.entries()) {
+    if (f.loop === undefined) continue;
+    const loop = f.loop as LoopDef;
+    const why = validateLoop(loop) ?? loopMismatch(f, loop);
+    if (why !== null) return `profiles.${i}.loop: ${why}`;
+  }
+  return null;
+}
+
 const toProfile = (f: z.infer<typeof fileProfile>): Profile => {
   const loop = f.loop as LoopDef | undefined;
   const limits = loop === undefined ? null : loopLimits(loop);
@@ -204,12 +216,8 @@ export function loadProfiles(path: string): readonly Profile[] | ProfilesError {
     const at = ["profiles", ...(i?.path ?? [])].join(".");
     return new ProfilesError(`${at}: ${i?.message ?? "invalid"}`);
   }
-  for (const [i, f] of parsed.data.entries()) {
-    if (f.loop === undefined) continue;
-    const loop = f.loop as LoopDef;
-    const why = validateLoop(loop) ?? loopMismatch(f, loop);
-    if (why !== null) return new ProfilesError(`profiles.${i}.loop: ${why}`);
-  }
+  const badLoop = firstLoopRefusal(parsed.data);
+  if (badLoop !== null) return new ProfilesError(badLoop);
   const ps = parsed.data.map(toProfile);
   const seen = new Set<string>();
   for (const p of ps) {
@@ -427,6 +435,8 @@ export function createProfile(path: string, input: unknown, base: string, now: n
       .safeParse((parseYaml(text) as { profiles: unknown }).profiles);
     if (!checked.success)
       throw new ConfigWriteError("invalid", "the new profiles file would not load");
+    const badLoop = firstLoopRefusal(checked.data);
+    if (badLoop !== null) throw new ConfigWriteError("invalid", badLoop);
     let latest: Buffer | null = null;
     try {
       latest = await readFile(path);

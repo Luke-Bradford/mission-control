@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_PROFILES, type LoopDef, loopOf, type Profile, standardLoop } from "@mc/core";
@@ -260,6 +260,25 @@ describe("loops in the file", () => {
     expect(chooseRunProfile(ps, [], "S", null)).toHaveProperty("refusal");
   });
 
+  it("refuses a cap above the most", () => {
+    const loop = std("extra", [], false);
+    const bad = {
+      ...loop,
+      returns: loop.returns.map((r) => (r.id === "ci-fail" ? { ...r, cap: 11 } : r)),
+    };
+    expect((loadProfiles(file(withLoop(bad))) as ProfilesError).message).toBe(
+      "profiles.2.loop: loop extra: return path ci-fail cap must be at most 10",
+    );
+  });
+
+  it("refuses a loop with a return path left out", () => {
+    const loop = std("extra", [], false);
+    const bad = { ...loop, returns: loop.returns.filter((r) => r.id !== "review-changes") };
+    expect((loadProfiles(file(withLoop(bad))) as ProfilesError).message).toBe(
+      "profiles.2.loop: loop extra: return path review-changes has no cap",
+    );
+  });
+
   it("refuses given fields that disagree with the loop", () => {
     const ps = loadProfiles(file(withLoop(std("extra", [], false), { tries: 3 })));
     expect((ps as ProfilesError).message).toBe(
@@ -313,6 +332,47 @@ describe("profile creation", () => {
       await expect(createProfile(path, profile, base, 1)).rejects.toThrow(/Too big/);
     }
     expect(loadProfiles(path)).toEqual(loadProfiles(file(two)));
+  });
+
+  it("refuses a bad loop on creation and leaves the file unchanged", async () => {
+    const { createProfile, profilesVersion } = await import("../src/profiles.ts");
+    const path = file(two);
+    const before = readFileSync(path, "utf8");
+    const base = profilesVersion(loadProfiles(path) as Profile[]);
+    const loop = standardLoop({
+      name: "custom",
+      labels: [],
+      planRequired: false,
+      tries: 2,
+      rounds: 2,
+    });
+    for (const [bad, text] of [
+      [
+        {
+          ...loop,
+          returns: loop.returns.map((r) => (r.id === "ci-fail" ? { ...r, to: "plan" } : r)),
+        },
+        /must return to build/,
+      ],
+      [{ ...loop, returns: loop.returns.slice(1) }, /ci-fail has no cap/],
+    ] as const) {
+      await expect(
+        createProfile(
+          path,
+          {
+            ...input,
+            plan_required: undefined,
+            tries: undefined,
+            rounds: undefined,
+            labels: undefined,
+            loop: bad,
+          },
+          base,
+          1,
+        ),
+      ).rejects.toThrow(text);
+      expect(readFileSync(path, "utf8")).toBe(before);
+    }
   });
 
   it("creates and reloads, preserving fallbacks and a started snapshot", async () => {

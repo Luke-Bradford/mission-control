@@ -12,6 +12,32 @@ export type LoopReturnId = (typeof LOOP_RETURN_IDS)[number];
 export const LOOP_RUNNERS = ["agent", "check", "fresh-agent", "hub"] as const;
 export const LOOP_REPORT_TOOLS = ["report_plan", "report_evidence", "report_findings"] as const;
 export const LOOP_PROMPT_MAX = 2000;
+/** The most times one return path may send a run back to Build. */
+export const LOOP_CAP_MAX = 10;
+
+/** What the engine fixes for each step: who runs it, where it goes next and which tool it reports with. */
+export const LOOP_STEP_SHAPE: Record<
+  LoopStepId,
+  {
+    runner: (typeof LOOP_RUNNERS)[number];
+    next: LoopStepId | null;
+    report: (typeof LOOP_REPORT_TOOLS)[number] | null;
+  }
+> = {
+  plan: { runner: "agent", next: "build", report: "report_plan" },
+  build: { runner: "agent", next: "ci", report: "report_evidence" },
+  ci: { runner: "check", next: "review", report: null },
+  review: { runner: "fresh-agent", next: "merge", report: "report_findings" },
+  merge: { runner: "hub", next: "done", report: null },
+  done: { runner: "hub", next: null, report: null },
+};
+
+/** The step each return path leaves from. */
+export const LOOP_RETURN_FROM: Record<LoopReturnId, LoopStepId> = {
+  "ci-fail": "ci",
+  "review-changes": "review",
+  "merge-conflict": "merge",
+};
 
 export interface LoopStepDef {
   id: LoopStepId;
