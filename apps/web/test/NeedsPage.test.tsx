@@ -166,6 +166,7 @@ describe("Needs you page", () => {
         pinned: {
           ticket: {
             ref: "mission-control#1400",
+            title: null,
             url: "https://github.com/o/mission-control/issues/1400",
           },
           pr: {
