@@ -520,6 +520,19 @@ describe("reviewBrief", () => {
     fullSuite: [],
   };
 
+  it("lists the ticket's answered questions in a review brief too, ten at most", () => {
+    const decisions = Array.from({ length: 12 }, (_, n) => ({
+      question: `Q${n}?`,
+      answer: `A${n}`,
+    }));
+    const out = reviewBrief({ ...review, decisions });
+    expect(out).toContain("## Already decided on this ticket");
+    expect(out).toContain("- Q0? -> A0");
+    expect(out).toContain("- Q9? -> A9");
+    expect(out).not.toContain("- Q10? -> A10");
+    expect(reviewBrief(review)).not.toContain("Already decided");
+  });
+
   it("names the repo's review commands, with no pnpm", () => {
     const out = reviewBrief({ ...review, commands: ["uv run pytest"] });
     expect(out).toContain("Configured review checks are `uv run pytest`");
@@ -986,5 +999,40 @@ describe("repository references", async () => {
     expect(await index()).toBe("");
     symlinkSync(dir, join(dir, ".claude"));
     expect(await index()).toBe("");
+  });
+});
+
+describe("the ticket brief's answered questions", () => {
+  const decisions = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ question: `Q${i}?`, answer: `A${i}` }));
+  const section = (brief: string) => {
+    const at = brief.indexOf("## Already decided on this ticket");
+    if (at < 0) return [];
+    return brief
+      .slice(at)
+      .split("\n")
+      .filter((line) => line.startsWith("- "));
+  };
+
+  it("lists exactly ten lines for twelve decisions", () => {
+    const lines = section(ticketBrief({ ...input, decisions: decisions(12) }));
+    expect(lines).toHaveLength(10);
+    expect(lines[0]).toBe("- Q0? -> A0");
+  });
+
+  it("cuts a long multi-line question to one line of at most 300 characters", () => {
+    const long = `first line\nsecond ${"x".repeat(500)}`;
+    const lines = section(
+      ticketBrief({ ...input, decisions: [{ question: long, answer: "yes" }] }),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.length).toBeLessThanOrEqual(300);
+    expect(lines[0]).not.toContain("\n");
+    expect(lines[0]).toMatch(/^- first line second x+/);
+  });
+
+  it("has no section without decisions", () => {
+    expect(ticketBrief(input)).not.toContain("Already decided");
+    expect(ticketBrief({ ...input, decisions: [] })).not.toContain("Already decided");
   });
 });

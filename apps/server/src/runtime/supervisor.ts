@@ -202,6 +202,7 @@ import {
 } from "../store.ts";
 import {
   AGENTS_MD_HEADING,
+  BRIEF_DECISIONS_MAX,
   CLAUDE_MD_HEADING,
   cutNoteText,
   type RepoDocs,
@@ -3720,6 +3721,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         leftoverChanges: checkout.leftoverChanges,
         ...(run.profile ? { profile: run.profile } : {}),
         ...(def.loop === "build" && plan === undefined ? { planless: true } : {}),
+        decisions: store.answeredQuestionsOn(
+          run.ticket ?? `${info.repo.id}#${issue}`,
+          BRIEF_DECISIONS_MAX,
+        ),
         ...(Array.isArray(profiles) ? { profileNames: profiles.map((p) => p.name) } : {}),
       });
       if (handoff)
@@ -4176,6 +4181,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         bodyTruncated: ticket.bodyTruncated,
         bodyLength: ticket.bodyLength ?? ticket.body.length,
         notes: evidence.map((e) => e.note),
+        decisions: run.ticket ? store.answeredQuestionsOn(run.ticket, BRIEF_DECISIONS_MAX) : [],
         doneWhen: evidence.at(-1)?.doneWhen ?? [],
         prevSha: prev?.sha ?? null,
         prevReviewId: prev?.id ?? null,

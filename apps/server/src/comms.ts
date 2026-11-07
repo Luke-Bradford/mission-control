@@ -34,6 +34,25 @@ export interface CommsServiceDeps {
   /** Labelled direct or tagged delivery wakes a worker; reactions never use it. */
   notify?: (to: string, text: string, from: string) => void | Promise<void>;
   seatSender?: boolean;
+  /** The sender's run ticket in `repo#n` form: the ticket of a message that names none. */
+  senderTicket?: string;
+  /** The sender's run and its newest open PR, which the hub stamps on the stored message. */
+  senderRunId?: string;
+  senderPr?: number;
+}
+
+/** An exact repeat within this long is not stored again. */
+export const COMMS_REPEAT_WINDOW_MS = 60_000;
+
+/** A message `sendComms` stored, or, flagged `repeat`, the identical one it already had. */
+export type SentComms = CommsMessage & { repeat?: true };
+
+/** The one stored ticket form, `repo#n`; a bare `#n` takes the repo of `like`, when it has one. */
+export function commsTicketForm(ticket: string | null | undefined, like?: string): string | null {
+  if (ticket === null || ticket === undefined) return null;
+  if (!/^#\d+$/.test(ticket)) return ticket;
+  const repo = like === undefined ? "" : like.slice(0, like.lastIndexOf("#"));
+  return repo === "" ? ticket : `${repo}${ticket}`;
 }
 
 const message = (row: ReturnType<Store["commsMessage"]>): CommsMessage => {
@@ -57,7 +76,7 @@ export async function sendComms(
   deps: CommsServiceDeps,
   from: string,
   input: CommsSendInput,
-): Promise<CommsMessage> {
+): Promise<SentComms> {
   if (Array.from(input.text).length > COMMS_MESSAGE_MAX) throw new Error(commsTooLongText);
   const now = deps.now?.() ?? Date.now();
   let crew = deps.crew();
@@ -95,17 +114,28 @@ export async function sendComms(
         at: now,
         from,
         to: input.to,
-        ticket: deps.ticket ?? replyTicket ?? input.ref ?? null,
+        ticket: commsTicketForm(
+          deps.ticket ??
+            replyTicket ??
+            (input.ref?.startsWith("#") ? input.ref : undefined) ??
+            deps.senderTicket ??
+            input.ref,
+          deps.senderTicket,
+        ),
         text: input.text,
         label: input.label,
         ref: input.ref,
         replyTo: input.replyTo,
         targetRunId: input.targetRunId,
+        fromRunId: deps.senderRunId ?? null,
+        pr: deps.senderPr ?? null,
         mentions: [...mentions],
       },
       deps.seatSender
         ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
         : undefined,
+      // an exact repeat is stored once, whoever sends it
+      now - COMMS_REPEAT_WINDOW_MS,
     );
   // A seat's rate limit is enforced atomically before it can wake anyone.
   let stored = deps.seatSender ? storeMessage() : null;
@@ -113,9 +143,23 @@ export async function sendComms(
     throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
   if (!deps.seatSender) stored = storeMessage();
   if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
-  const sent = message(stored);
+  const sent: SentComms = message(stored);
+  // An exact repeat was stored once already. It wakes no one a second time, unless the first wake
+  // failed: then the retry wakes them now.
+  if (stored.repeat && !deps.store.commsWakeFailed(sent.id)) return { ...sent, repeat: true };
   // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat.
-  if (sent.label !== null) for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
+  if (sent.label !== null) {
+    try {
+      for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
+    } catch (e) {
+      deps.store.markCommsWakeFailed(sent.id, now);
+      throw e;
+    }
+  }
+  if (stored.repeat) {
+    deps.store.clearCommsWakeFailed(sent.id);
+    return { ...sent, repeat: true };
+  }
   return sent;
 }
 
@@ -128,7 +172,10 @@ export function commsInboxContext(
   const pins = new Set(store.commsPins().map((row) => row.id));
   const rows = store
     .commsInboxRun(seatId, runId)
-    .filter((row) => canReadComms(store, seatId, row, pins))
+    // a seat is pushed each message once: what it has been given stays in comms_inbox
+    .filter(
+      (row) => !store.commsInboxRead(seatId, row.id) && canReadComms(store, seatId, row, pins),
+    )
     .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)));
   let omitted = Math.max(0, rows.length - COMMS_INBOX_PROMPT_ROWS);
   const lines = rows.slice(-COMMS_INBOX_PROMPT_ROWS).map((row) => ({
@@ -142,16 +189,17 @@ export function commsInboxContext(
     replyTo: row.replyTo,
     mentions: row.mentions,
     pinned: pins.has(row.id),
-    unread: !store.commsInboxRead(seatId, row.id),
   }));
   const heading =
     "Comms inbox (messages addressed to you, tags, replies to your messages and pins):";
   const render = () =>
-    [
-      heading,
-      omitted === 0 ? "" : `${omitted} older: use comms_inbox`,
-      ...lines.map((line) => JSON.stringify(line)),
-    ].join("\n");
+    rows.length === 0
+      ? ""
+      : [
+          heading,
+          omitted === 0 ? "" : `${omitted} older: use comms_inbox`,
+          ...lines.map((line) => JSON.stringify(line)),
+        ].join("\n");
   while (lines.length > 0 && render().length > COMMS_INBOX_PROMPT_MAX) {
     if (lines.length === 1) {
       const line = lines[0];

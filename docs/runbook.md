@@ -2598,3 +2598,28 @@ Use the returned native permalink; an identity mismatch or pruned record returns
 ID cannot silently open another review.
 Only page summaries are returned by the index. Existing immutable report and protected image routes
 keep their permission checks.
+
+## Crew Comms: what a seat reads and is sent
+
+- **Pushed once.** The hub attaches a seat's unread inbox messages to a run's start and to a line it
+  delivers between turns, then marks them read. It does not attach them again. `comms_inbox` still
+  lists older ones.
+- **`comms_read` is by ticket.** With no arguments a seat gets only the messages on its own run's
+  ticket, one line each of at most 200 characters, newest last. `{ id: "comms:N" }` returns one
+  message in full. `{ ticket: "repo#n" }` (or `#n`) names another ticket, and `{ channel: "crew" }`
+  the team channel. FLIGHT has no ticket: its default is the short form across tickets. A seat sees
+  no more than before; only the default is narrower.
+- **One ticket form.** A seat's message is stored under `repo#n`: the ticket in its ref, else the
+  ticket of the message it replies to, else its run's ticket. Older rows stored `#n`; reads treat
+  both as one ticket.
+- **Start brief.** A run's first message (a build run's, and a review run's) lists the ticket's answered questions (FLIGHT's recorded
+  answer), one line each, ten at most, under "Already decided on this ticket".
+- **Exact repeats.** From any sender, the same sender, recipient, text, ticket and label within 60 seconds is stored
+  once. The sender is told "Already sent comms:N." (a success), nobody is woken again, and a row in
+  `comms_repeats` counts it (`store.commsRepeatCount(since)`), kept 90 days.
+- **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
+  that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
+  The kind of a message is not stamped yet.
+- **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,
+  FLIGHT's `answer` and `pass` decisions, question messages (label `question`) and the replies to
+  them keep 365.
