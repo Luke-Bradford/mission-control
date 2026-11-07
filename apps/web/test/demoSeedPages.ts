@@ -22,6 +22,7 @@ import { prFlowFixture } from "./prFlowFixture.ts";
 import { qaAcceptanceFixture } from "./qaAcceptanceFixture.ts";
 import { qaHistoryApi, qaHistorySavedReport } from "./qaHistoryFixture.ts";
 import { testHealthFixture } from "./testHealthFixtures.ts";
+import { tokenAuditFixture } from "./tokenAuditFixture.ts";
 
 export const DEMO_REPO = "shop-app";
 export const DEMO_REPOS = [DEMO_REPO, "site-builder"] as const;
@@ -893,6 +894,9 @@ export function demoPageAnswers(
   }
   return {
     ...health,
+    ...Object.fromEntries(
+      [1, 7, 30].map((days) => [`/api/audit/tokens?days=${days}`, tokenAuditFixture({ days })]),
+    ),
     ...history,
     ...memoryApi(),
     ...seatApi(),

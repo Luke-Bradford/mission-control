@@ -14,12 +14,13 @@ import { type Action, ActionDialog, EvidenceDialog, HistoryDialog } from "./dial
 import { date, label } from "./format.ts";
 import { Categories, Comparison, ReviewRounds } from "./ReviewQuality.tsx";
 import { TestHealth } from "./TestHealth.tsx";
+import { TokenAudit } from "./TokenAudit.tsx";
 import "./code-health.css";
 
 const Legacy = lazy(() =>
   import("../pages/LegacyAudit.tsx").then((m) => ({ default: m.LegacyAudit })),
 );
-const TABS = ["overview", "review", "risk", "test"] as const;
+const TABS = ["overview", "review", "risk", "test", "tokens"] as const;
 type Tab = (typeof TABS)[number];
 /** The shared operator question, with one bounded read for the selected repo/window/tab. */
 export function CodeHealth() {
@@ -60,7 +61,7 @@ export function CodeHealth() {
     }
   }, [config.data, repo]);
   const ref = useMemo(
-      () => (repo ? RESOURCES.codeHealth(repo, window, tab) : null),
+      () => (repo && tab !== "tokens" ? RESOURCES.codeHealth(repo, window, tab) : null),
       [repo, window, tab],
     ),
     res = useResource<CodeHealthView>(ref);
@@ -161,7 +162,7 @@ export function CodeHealth() {
           </h1>
           <p>Where should we invest in code health next?</p>
         </div>
-        <div className="ch-filters">
+        <div className="ch-filters" hidden={tab === "tokens"}>
           <label>
             Repo
             <select
@@ -192,7 +193,7 @@ export function CodeHealth() {
           </fieldset>
         </div>
       </div>
-      <div className="ch-coverage">
+      <div className="ch-coverage" hidden={tab === "tokens"}>
         <strong className={blocked ? "warn-t" : "ok-t"}>
           {disconnected
             ? reconnecting
@@ -265,7 +266,9 @@ export function CodeHealth() {
                 ? "Review quality"
                 : t === "risk"
                   ? "Code risk"
-                  : "Test health"}
+                  : t === "test"
+                    ? "Test health"
+                    : "Tokens"}
           </button>
         ))}
         <span className="ch-links">
@@ -304,6 +307,7 @@ export function CodeHealth() {
         </p>
       )}
       <div id="ch-panel" role="tabpanel" aria-labelledby={`ch-tab-${tab}`} aria-busy={res.loading}>
+        {tab === "tokens" && <TokenAudit />}
         {view && tab === "test" && view.data.tab === "test" && (
           <TestHealth
             data={view.data}
