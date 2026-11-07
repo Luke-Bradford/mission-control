@@ -1,5 +1,3 @@
-import type { BriefOption } from "./types.ts";
-
 /** What the operator can do with a question on Needs you besides pick an option or hold it. */
 export const NEEDS_YOU_OFFERS = ["not-now", "drop"] as const;
 export type NeedsYouOffer = (typeof NEEDS_YOU_OFFERS)[number];
@@ -13,7 +11,7 @@ export const WAITING_OPERATOR_COLOR = "fbca04";
  */
 export function notNowComment(
   question: string,
-  options: readonly Pick<BriefOption, "label" | "answer">[],
+  options: readonly { label: string; answer: string }[],
   at: number,
 ): string {
   const lines = [
