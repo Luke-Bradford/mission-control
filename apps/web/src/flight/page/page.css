@@ -16,7 +16,7 @@
   min-height: var(--sp-5);
 }
 .fp-title h1 {
-  font: 600 20px / 28px var(--display);
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -25,7 +25,7 @@
 }
 .fp-board {
   display: inline-block;
-  line-height: var(--sp-5);
+  line-height: var(--lh);
   min-height: var(--sp-5);
   min-width: var(--sp-5);
   vertical-align: middle;
@@ -60,13 +60,13 @@
   border-left: 0;
 }
 .fp-k {
-  font: 11px / 16px var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
 }
 .fp-v {
-  font: 600 20px / 28px var(--mono);
+  font: 600 var(--fs-title) / var(--lh-title) var(--mono);
   font-variant-numeric: tabular-nums;
   display: flex;
   align-items: baseline;
@@ -74,15 +74,15 @@
   flex-wrap: wrap;
 }
 .fp-v small {
-  font: 400 12px / 16px var(--mono);
+  font: 400 var(--fs-s) / var(--lh-s) var(--mono);
   color: var(--fg-2);
 }
 .fp-v .fp-muted {
-  font: 400 14px / 28px var(--sans);
+  font: 400 var(--fs-panel) / var(--lh-title) var(--sans);
 }
 .fp-d {
-  font-size: 12px;
-  line-height: 16px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
   color: var(--fg-2);
 }
 .fp-state {
@@ -148,12 +148,12 @@
   align-items: center;
   gap: var(--sp-2);
   border-bottom: 1px solid var(--line);
-  font: 600 14px / 20px var(--sans);
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
   color: var(--fg);
 }
 .fp-sub {
   color: var(--muted);
-  font: 400 12px / 16px var(--mono);
+  font: 400 var(--fs-s) / var(--lh-s) var(--mono);
 }
 .fp-note {
   padding: var(--sp-4);
@@ -205,7 +205,7 @@
 .fp-t {
   flex: none;
   width: var(--sp-7);
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
@@ -248,7 +248,7 @@
   flex: none;
   height: var(--sp-6);
   border-bottom: 1px solid var(--line);
-  font: 11px / 16px var(--mono);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted);
@@ -288,7 +288,7 @@
 }
 .fp-owner {
   justify-self: start;
-  font: 12px / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
   padding: 0 var(--sp-2);
   border-radius: 3px;
   color: var(--fg-2);
@@ -303,7 +303,7 @@
   background: color-mix(in srgb, var(--crit) 14%, transparent);
 }
 .fp-wait {
-  font: 600 13px / 20px var(--mono);
+  font: 600 var(--fs) / var(--lh) var(--mono);
   font-variant-numeric: tabular-nums;
 }
 .fp-empty {
