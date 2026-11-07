@@ -2,9 +2,11 @@
  * Keeps the `claude` and `codex` CLIs current by themselves, behind a live check, when
  * `updates.cli` is `between_runs`. Only a patch or minor step is taken (a risk tier of Auto, see
  * `AUDIT_KIND_TIERS`); a new major version is recorded as a Go-ahead Audit item and never
- * installed. The step: hold new runs, install the new version, run one seat's tool on it against
- * a harmless recorded task, keep it if that passes, else put the previous version back, hold the
- * failed version until a newer one appears and raise one item for FLIGHT. Every step is logged.
+ * installed. The step: hold new runs, install the new version, start one idle seat on it through
+ * the supervisor's own start path against a harmless recorded task, keep it if that passes, else
+ * put the previous version back, hold the failed version until a newer one appears and raise one
+ * item for FLIGHT. A check that could not run (every seat of the vendor is busy) proves nothing
+ * and rolls nothing back: the update waits, held, for the next pass. Every step is logged.
  */
 import { randomBytes } from "node:crypto";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -13,6 +15,7 @@ import { join, sep } from "node:path";
 import { CODEX_COMMAND, CODEX_MIN_VERSION } from "@mc/core";
 import type { CliHold, ExecFn } from "./cli-update.ts";
 import { CLAUDE_COMMAND, resolveOnPath } from "./cli-version.ts";
+import type { CliCheckResult } from "./runtime/cli-check.ts";
 import { codexVersionAllowed } from "./runtime/codex-floor.ts";
 import type { Store } from "./store.ts";
 
@@ -33,6 +36,8 @@ const INSTALL_TIMEOUT_MS = 5 * 60_000;
 const VERSION_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_MS = 2 * 60_000;
 const MAX_LINE = 200;
+/** How long an update may wait for its live check to be able to run before the previous version goes back. */
+export const CLI_CHECK_WAIT_MAX_MS = 60 * 60_000;
 
 /** What the update needs from a tool: its version source, its installer and its live check. */
 export interface CliToolOps {
@@ -41,9 +46,15 @@ export interface CliToolOps {
   /** The version a seat would start now, or null when the tool is not there. */
   installed(): Promise<string | null>;
   install(version: string): Promise<{ ok: boolean; error?: string }>;
-  /** The live check of `version`: the tool runs a recorded harmless task. */
-  check(version: string): Promise<{ ok: boolean; detail: string }>;
+  /**
+   * The live check of `version`: a seat runs a recorded harmless task on it. `retry`: the check
+   * could not run (no seat was free), so the version is neither proven nor failed.
+   */
+  check(version: string): Promise<{ ok: boolean; detail: string; retry?: boolean }>;
 }
+
+/** Runs the live check through a seat of `tool`'s vendor (the supervisor's `checkCli`). */
+export type SeatCheck = (tool: AutoCliTool) => Promise<CliCheckResult>;
 
 export type AutoCliOutcome =
   | "current"
@@ -51,6 +62,8 @@ export type AutoCliOutcome =
   | "busy"
   | "major"
   | "applied"
+  | "waiting"
+  | "gave-up"
   | "rolled-back"
   | "rollback-failed";
 
@@ -101,6 +114,8 @@ export const cliAutoHoldOwner = (tool: AutoCliTool) => `cli-auto:${tool}`;
 export interface PendingCliUpdate {
   from: string;
   to: string;
+  /** When the live check first could not run (no free seat); absent while it has not had to wait. */
+  waitingSince?: number;
 }
 
 /** The update of `tool` the hub began and did not finish (it restarted, or the rollback failed), else null. */
@@ -110,7 +125,11 @@ export function pendingCliUpdate(store: Store, tool: AutoCliTool): PendingCliUpd
   try {
     const v = JSON.parse(raw) as Partial<PendingCliUpdate>;
     return asVersion(v.from ?? null) !== null && asVersion(v.to ?? null) !== null
-      ? { from: v.from as string, to: v.to as string }
+      ? {
+          from: v.from as string,
+          to: v.to as string,
+          ...(typeof v.waitingSince === "number" ? { waitingSince: v.waitingSince } : {}),
+        }
       : null;
   } catch {
     return null;
@@ -215,10 +234,39 @@ async function pass(
     return "rollback-failed";
   };
 
+  /**
+   * The live check never got to run for `CLI_CHECK_WAIT_MAX_MS`: `to` is unproven, not bad. The
+   * previous version goes back, `to` is not held (a later pass tries it again) and runs are freed.
+   */
+  const giveUp = async (from: string, to: string, why: string): Promise<AutoCliOutcome> => {
+    log(
+      `live check could not run for too long (${why}); putting ${from} back and trying again later`,
+    );
+    let error: string | null = null;
+    if ((await ops.installed()) !== from) {
+      const back = await ops.install(from);
+      if (!back.ok) error = back.error ?? "no reason given";
+    }
+    if ((await ops.installed()) === from) return done("gave-up");
+    log(`rollback to ${from} failed (${error ?? "wrong version after install"})`);
+    hold.hold(cliAutoHoldText(tool, to), owner);
+    return "rollback-failed";
+  };
+
   /** The live check of the installed `to`; keeps it on a pass, else rolls back to `from`. */
   const verify = async (from: string, to: string): Promise<AutoCliOutcome> => {
     log(`${to} installed, running the live check`);
     const checked = await ops.check(to);
+    if (checked.retry === true) {
+      // nothing was proven: the hold and the pending record stay, and the next pass checks again;
+      // but not for ever, since the hold keeps every seat's next run from starting
+      const since = pendingCliUpdate(store, tool)?.waitingSince ?? now();
+      if (now() - since >= CLI_CHECK_WAIT_MAX_MS) return giveUp(from, to, checked.detail);
+      store.setSetting(pendingKey(tool), JSON.stringify({ from, to, waitingSince: since }));
+      log(`live check could not run (${checked.detail}); ${to} stays held until it can`);
+      hold.hold(cliAutoHoldText(tool, to), owner);
+      return "waiting";
+    }
     if (!checked.ok) return rollBack(from, to, `live check failed: ${checked.detail}`);
     store.recordAuditItem({
       kind: "cli-update",
@@ -300,6 +348,7 @@ export function realCliOps(
   exec: ExecFn,
   prefix: string,
   env?: NodeJS.ProcessEnv,
+  seatCheck?: SeatCheck,
 ): CliToolOps {
   const command = COMMANDS[tool];
   const pkg = NPM_PACKAGES[tool];
@@ -342,6 +391,18 @@ export function realCliOps(
           ok: false,
           detail: `codex ${version} is under the seat floor ${CODEX_MIN_VERSION}`,
         };
+      }
+      // The check a seat's own start path runs, in a throwaway worktree. It is not repeated here.
+      if (seatCheck !== undefined) {
+        const seat = await seatCheck(tool);
+        if (seat.kind === "ran") return { ok: seat.ok, detail: seat.detail };
+        if (seat.kind === "busy") {
+          return { ok: false, retry: true, detail: `every ${tool} seat is busy` };
+        }
+        if (seat.kind === "unproven") {
+          return { ok: false, retry: true, detail: `the check could not start: ${seat.detail}` };
+        }
+        // no seat of this vendor is configured: no run can break on this tool, so the bare check stands
       }
       // The task: read a file the harness just wrote and say what is in it. Only a tool call
       // can know the nonce, so a model that merely answers does not pass. No permission bypass,

@@ -14,15 +14,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
 import {
   autoUpdateCli,
+  CLI_CHECK_WAIT_MAX_MS,
   type CliToolOps,
   cliUpdateKind,
   heldCliVersion,
   npmPrefix,
   pendingCliUpdate,
   realCliOps,
+  type SeatCheck,
   settlePending,
 } from "../src/cli-auto.ts";
-import { CliHold, type ExecFn } from "../src/cli-update.ts";
+import { CLI_RETRY_MS, CliHold, type ExecFn } from "../src/cli-update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { createScheduler } from "../src/scheduler.ts";
 import { Store } from "../src/store.ts";
@@ -293,7 +295,7 @@ describe("autoUpdateCli", () => {
         v === "2.1.0" && broken ? { ok: false, error: "EACCES" } : ops.install(v),
     };
     expect(await run("claude", flaky)).toBe("rollback-failed");
-    expect(pendingCliUpdate(store, "claude")).toEqual({ from: "2.1.0", to: "2.1.1" });
+    expect(pendingCliUpdate(store, "claude")).toMatchObject({ from: "2.1.0", to: "2.1.1" });
     expect(hold.heldBy("cli-auto:claude")).toBe(true);
     broken = false;
     expect(await run("claude", flaky)).toBe("rolled-back");
@@ -420,6 +422,177 @@ describe("realCliOps", () => {
   });
 });
 
+describe("the live check through a seat's start path", () => {
+  const PREFIX = "/opt/npm";
+  /** An npm-and-CLI fake: `npm install` changes the version `--version` prints; a bare `-p` check answers fine. */
+  function npmWorld(start: string, latest: string) {
+    const world = { version: start, bare: 0 };
+    const exec: ExecFn = async (file, args, opts) => {
+      if (file === "npm" && args[0] === "view")
+        return { code: 0, stdout: `${latest}\n`, stderr: "" };
+      if (file === "npm") {
+        world.version = /@(\d+\.\d+\.\d+)$/.exec(args.at(-1) ?? "")?.[1] ?? world.version;
+        return { code: 0, stdout: "", stderr: "" };
+      }
+      if (args[0] === "--version")
+        return { code: 0, stdout: `${world.version} (Claude Code)\n`, stderr: "" };
+      // a bare `claude -p`: answers the nonce the harness wrote, whatever a seat's config says
+      world.bare++;
+      const name = /check-[a-f0-9]+\.txt/.exec(args.at(-1) ?? "")?.[0] ?? "";
+      return { code: 0, stdout: readFileSync(join(opts.cwd ?? "", name), "utf8"), stderr: "" };
+    };
+    return { world, exec };
+  }
+  const pass = (ops: CliToolOps) => run("claude", ops);
+
+  it("fails, rolls back, holds the version and raises one item for a version that breaks only under a seat's config", async () => {
+    const { world, exec } = npmWorld("2.1.0", "2.1.1");
+    // the bare check passes this very version (the narrower check this replaces)
+    const bare = npmWorld("2.1.0", "2.1.1");
+    expect(await pass(realCliOps("claude", bare.exec, PREFIX))).toBe("applied");
+    store.deleteSetting("cli-auto-pending:claude");
+    store.deleteSetting("cli-auto-held:claude");
+    for (const i of store.audit(NOW - 1000, NOW + 1000).items ?? []) expect(i.state).toBe("done");
+
+    const seatCheck: SeatCheck = vi.fn(async () => ({
+      kind: "ran" as const,
+      ok: false,
+      detail: "Error: invalid seat settings (unknown key in mcp config)",
+    }));
+    expect(await pass(realCliOps("claude", exec, PREFIX, undefined, seatCheck))).toBe(
+      "rolled-back",
+    );
+    expect(seatCheck).toHaveBeenCalledWith("claude");
+    expect(world.version).toBe("2.1.0");
+    expect(world.bare).toBe(0);
+    expect(heldCliVersion(store, "claude")).toBe("2.1.1");
+    expect(hold.reason).toBeNull();
+    const open = store.notes().filter((n) => n.clearedAt === null);
+    expect(open).toHaveLength(1);
+    expect(open[0].text).toMatch(/2\.1\.1 failed.*invalid seat settings.*rolled back to 2\.1\.0/s);
+    const failed = (store.audit(NOW - 1000, NOW + 1000).items ?? []).filter(
+      (i) => i.kind === "cli-update-failed",
+    );
+    expect(failed).toHaveLength(1);
+    // the held version is not tried again
+    expect(await pass(realCliOps("claude", exec, PREFIX, undefined, seatCheck))).toBe("held");
+    expect(seatCheck).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a version that passes through a seat, without the bare check", async () => {
+    const { world, exec } = npmWorld("2.1.0", "2.1.1");
+    const seatCheck: SeatCheck = async () => ({ kind: "ran", ok: true, detail: "fine" });
+    expect(await pass(realCliOps("claude", exec, PREFIX, undefined, seatCheck))).toBe("applied");
+    expect(world.version).toBe("2.1.1");
+    expect(world.bare).toBe(0);
+    expect(hold.reason).toBeNull();
+    expect(items()).toMatchObject([{ kind: "cli-update", state: "done" }]);
+  });
+
+  it("does not run a seat check on a version that fails --version or the codex floor", async () => {
+    const seatCheck = vi.fn(async () => ({ kind: "ran" as const, ok: true, detail: "" }));
+    const lie: ExecFn = async () => ({ code: 0, stdout: "9.9.9\n", stderr: "" });
+    expect((await realCliOps("claude", lie, PREFIX, undefined, seatCheck).check("2.3.4")).ok).toBe(
+      false,
+    );
+    const low: ExecFn = async () => ({ code: 0, stdout: "codex-cli 0.5.6\n", stderr: "" });
+    expect((await realCliOps("codex", low, PREFIX, undefined, seatCheck).check("0.5.6")).ok).toBe(
+      false,
+    );
+    expect(seatCheck).not.toHaveBeenCalled();
+  });
+
+  it("waits, held and unchanged, while every seat is busy, and proves the version on a later pass", async () => {
+    const { world, exec } = npmWorld("2.1.0", "2.1.1");
+    let answer: Awaited<ReturnType<SeatCheck>> = { kind: "busy" };
+    const seatCheck: SeatCheck = async () => answer;
+    const ops = realCliOps("claude", exec, PREFIX, undefined, seatCheck);
+    expect(await pass(ops)).toBe("waiting");
+    // nothing was rolled back, held back or raised; runs stay held on the new version
+    expect(world.version).toBe("2.1.1");
+    expect(hold.reason).toMatch(/claude CLI 2\.1\.1 has not passed/);
+    expect(heldCliVersion(store, "claude")).toBeNull();
+    expect(pendingCliUpdate(store, "claude")).toMatchObject({ from: "2.1.0", to: "2.1.1" });
+    expect(store.notes()).toEqual([]);
+    expect(items()).toEqual([]);
+
+    answer = { kind: "ran", ok: true, detail: "fine" };
+    expect(await pass(ops)).toBe("applied");
+    expect(world.version).toBe("2.1.1");
+    expect(hold.reason).toBeNull();
+    expect(pendingCliUpdate(store, "claude")).toBeNull();
+    expect(items()).toMatchObject([{ kind: "cli-update", state: "done" }]);
+  });
+
+  it("gives the previous version back, unheld and unflagged, when the check cannot run for too long", async () => {
+    const { world, exec } = npmWorld("2.1.0", "2.1.1");
+    const seatCheck: SeatCheck = async () => ({ kind: "busy" });
+    const ops = realCliOps("claude", exec, PREFIX, undefined, seatCheck);
+    let at = NOW;
+    const at$ = () =>
+      autoUpdateCli("claude", ops, { store, hold, log: (l) => lines.push(l), now: () => at });
+    expect(await at$()).toBe("waiting");
+    at += CLI_CHECK_WAIT_MAX_MS - 1;
+    expect(await at$()).toBe("waiting");
+    expect(hold.reason).not.toBeNull();
+    at += 1;
+    expect(await at$()).toBe("gave-up");
+    expect(world.version).toBe("2.1.0");
+    expect(hold.reason).toBeNull();
+    expect(heldCliVersion(store, "claude")).toBeNull();
+    expect(pendingCliUpdate(store, "claude")).toBeNull();
+    expect(store.notes()).toEqual([]);
+    expect(items()).toEqual([]);
+    expect(lines.some((l) => /trying again later/.test(l))).toBe(true);
+  });
+
+  it("treats a check that failed before the CLI started as unproven: it waits, with no held version and no note", async () => {
+    const { world, exec } = npmWorld("2.1.0", "2.1.1");
+    const seatCheck: SeatCheck = async () => ({ kind: "unproven", detail: "git fetch failed" });
+    expect(await pass(realCliOps("claude", exec, PREFIX, undefined, seatCheck))).toBe("waiting");
+    expect(world.version).toBe("2.1.1");
+    expect(heldCliVersion(store, "claude")).toBeNull();
+    expect(store.notes()).toEqual([]);
+    expect(items()).toEqual([]);
+    expect(lines.some((l) => /git fetch failed/.test(l))).toBe(true);
+  });
+
+  it("falls back to the bare check when no seat of the vendor is configured", async () => {
+    const { world, exec } = npmWorld("2.1.0", "2.1.1");
+    const seatCheck: SeatCheck = async () => ({ kind: "no-seat" });
+    expect(await pass(realCliOps("claude", exec, PREFIX, undefined, seatCheck))).toBe("applied");
+    expect(world.bare).toBe(1);
+  });
+
+  it("hands the scheduler's seat check to the collector's ops", async () => {
+    const seen: (SeatCheck | undefined)[] = [];
+    const seatCheck: SeatCheck = async () => ({ kind: "busy" });
+    const scheduler = createScheduler({
+      config: {
+        operator: { id: "operator", timezone: "Europe/London" },
+        accounts: [],
+        repos: [],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+        updates: { hub: "off", cli: "between_runs" },
+      },
+      store,
+      bus: new ChangeBus(),
+      cliHold: hold,
+      seatCheck,
+      collectors: {
+        cliOps: (_tool, check) => {
+          seen.push(check);
+          return null;
+        },
+      },
+    });
+    await scheduler.tick("cliAuto");
+    expect(seen).toEqual([seatCheck, seatCheck]);
+    await scheduler.stop();
+  });
+});
+
 describe("the cliAuto job", () => {
   const config = (cli: "off" | "between_runs"): CcConfig => ({
     operator: { id: "operator", timezone: "Europe/London" },
@@ -447,6 +620,54 @@ describe("the cliAuto job", () => {
     expect(claude.state.installed).toBe("2.1.1");
     expect(codex.state.installed).toBe("0.2.0");
     await scheduler.stop();
+  });
+
+  it("re-checks a waiting update after CLI_RETRY_MS, and stop() cancels the armed re-check", async () => {
+    vi.useFakeTimers();
+    try {
+      const { ops } = fakeOps("2.1.0", "2.1.1");
+      let checks = 0;
+      const waiting: CliToolOps = {
+        ...ops,
+        check: async (v) => {
+          checks++;
+          return checks === 1
+            ? { ok: false, retry: true, detail: "every claude seat is busy" }
+            : ops.check(v);
+        },
+      };
+      const scheduler = make("between_runs", { claude: waiting });
+      await scheduler.tick("cliAuto");
+      expect(checks).toBe(1);
+      expect(hold.reason).toMatch(/claude/);
+      await vi.advanceTimersByTimeAsync(CLI_RETRY_MS);
+      expect(checks).toBe(2);
+      expect(hold.reason).toBeNull();
+      expect(store.audit(0, Date.now() + 1000).items ?? []).toMatchObject([
+        { kind: "cli-update", state: "done" },
+      ]);
+      await scheduler.stop();
+
+      // a stopped scheduler does not re-check
+      store.deleteSetting("cli-auto-pending:claude");
+      const again = fakeOps("3.1.0", "3.1.1");
+      let n = 0;
+      const stuck: CliToolOps = {
+        ...again.ops,
+        check: async () => {
+          n++;
+          return { ok: false, retry: true, detail: "busy" };
+        },
+      };
+      const second = make("between_runs", { claude: stuck });
+      await second.tick("cliAuto");
+      expect(n).toBe(1);
+      await second.stop();
+      await vi.advanceTimersByTimeAsync(CLI_RETRY_MS * 2);
+      expect(n).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does nothing when updates.cli is off", async () => {

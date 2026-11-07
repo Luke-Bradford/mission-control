@@ -309,6 +309,9 @@ function make(
     externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
     fileContext?: SupervisorDeps["fileContext"];
     command?: string;
+    /** The fake CLI script to run in place of fake-claude.mjs. */
+    fake?: string;
+    cliCheckTimeoutMs?: number;
     codexCommand?: string;
     codexAuthPath?: string;
     worktrees?: string;
@@ -384,8 +387,11 @@ function make(
     codexCommand: over.codexCommand,
     codexAuthPath,
     commandArgs:
-      over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
+      over.command === undefined
+        ? [over.fake ?? FAKE, "--record", recordFile, ...(over.extraArgs ?? [])]
+        : [],
     resumeWindowMs: over.resumeWindowMs ?? 500,
+    ...(over.cliCheckTimeoutMs === undefined ? {} : { cliCheckTimeoutMs: over.cliCheckTimeoutMs }),
     fetchTicket,
     flightEnvironment: over.flightEnvironment,
     ...(over.externalReviewSubject === undefined
