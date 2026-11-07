@@ -1137,9 +1137,26 @@ describe("ItemPanel item chat isolation", () => {
         seat: { id: "flight-1", live: true, call: "FLIGHT-1", model: "opus", state: "idle" },
         decisions: [],
       },
-      "/api/agents/flight-1/stream?limit=20": {
-        events: [{ id: "global", kind: "msg", text: "Global conversation", at: NOW }],
-        total: 1,
+      "/api/agents/flight-1/stream?limit=20": { events: [], total: 0 },
+      // The fly-out's conversation is the stored FLIGHT thread, the one Comms shows.
+      "/api/comms/flight": {
+        messages: [
+          {
+            id: "comms:1",
+            at: NOW,
+            from: "flight-1",
+            to: "CAPCOM",
+            text: "Global conversation",
+            ticket: null,
+            label: null,
+            ref: null,
+            replyTo: null,
+            mentions: [],
+            reactions: [],
+            operator: false,
+          },
+        ],
+        hasMore: false,
       },
       "POST /api/seats/mc-dev-1/message": {},
       [discussionPath(a.key)]: first,
