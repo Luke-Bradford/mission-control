@@ -1,6 +1,6 @@
 // @vitest-environment node
 
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
@@ -95,6 +95,14 @@ describeRendered("FLIGHT page mockup in a browser", () => {
                 theme: doc.dataset.theme,
               };
             }, null);
+            // Set MC_FLIGHT_PAGE_SHOTS to a folder to keep a PNG of each size, state and theme.
+            const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
+            if (shots) {
+              mkdirSync(shots, { recursive: true });
+              await page.screenshot(
+                join(shots, `flight-page-${width}x${height}-${state}-${theme}.png`),
+              );
+            }
             expect(r.pageScroll, `${where}: page scroll`).toBeLessThanOrEqual(0);
             expect(r.sideScroll, `${where}: sideways scroll`).toBeLessThanOrEqual(0);
             expect(r.listScroll, `${where}: a list needs its own scroll`).toBe(false);
