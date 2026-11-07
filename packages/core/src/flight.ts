@@ -1406,6 +1406,21 @@ export function wakeSummary(s: FlightState): string {
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }
 
+/**
+ * Whether queued reviews stand still while a review seat could take work. Two cases, each past
+ * FLIGHT_IDLE_MS: an idle seat's own queued review (the engine only moves a review off a seat that
+ * is busy or at its stop, not off a free one that has not started it), or a review queued on a seat
+ * that is neither idle nor running a review (unavailable or paused) while another review seat is
+ * idle. A review waiting behind a seat that is running one is routine.
+ */
+export function reviewFaultStands(q: FlightState["reviewQueue"]): boolean {
+  const seats = (q?.seats ?? []).filter(
+    (x) => x.queued > 0 && (x.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS,
+  );
+  const anyIdle = q?.seats.some((x) => x.idle) === true;
+  return seats.some((x) => x.idle || (anyIdle && x.running === 0));
+}
+
 export function wakeLine(
   s: FlightState,
   digest: FlightWake | FlightState = s,
@@ -1415,9 +1430,7 @@ export function wakeLine(
   const productPass = s.prs.some((p) => p.state === "merged")
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
-  const idleReviewFault = s.reviewQueue?.seats.some(
-    (seat) => seat.idle && seat.queued > 0 && (seat.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS,
-  )
+  const idleReviewFault = reviewFaultStands(s.reviewQueue)
     ? " Queued reviews with idle review seats are a fault (wait_on target `idle-reviewers`): name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
     : "";
   const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";

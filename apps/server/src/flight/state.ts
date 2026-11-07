@@ -83,6 +83,7 @@ import {
   READY_LABEL,
   RULING_PARK,
   type Run,
+  reviewFaultStands,
   STUCK_PARK,
   seatCallSign,
   seatDef,
@@ -1571,11 +1572,7 @@ export function wakeFacts(
   // The engine re-routes a queued review to the seat `reviewerOf` picks, so an idle seat with no queue
   // of its own gets one without FLIGHT. The fault is an idle seat whose own queued review has stood
   // still; a seat at its quota stop is not idle. A wait on it holds the fact.
-  const reviewFault =
-    s.wake?.reviewsWaited !== true &&
-    s.reviewQueue?.seats.some(
-      (seat) => seat.idle && seat.queued > 0 && (seat.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS,
-    );
+  const reviewFault = s.wake?.reviewsWaited !== true && reviewFaultStands(s.reviewQueue);
   return JSON.stringify({
     instructions:
       s.instructionRevision && s.instructionRevision !== "0" ? [s.instructionRevision] : [],

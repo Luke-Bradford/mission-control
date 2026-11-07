@@ -2835,6 +2835,31 @@ describe("wakeSummary", () => {
       ).toBe(quiet);
     });
 
+    it("raises it for a review held on an unavailable seat while another review seat is idle", () => {
+      const quiet = wakeFacts(state({}));
+      const queue = (waitMin: number, other: { running: number; idle: boolean }) =>
+        state({
+          reviewQueue: {
+            queued: 1,
+            running: other.running,
+            waitMin,
+            seats: [
+              { seat: "retro-cx", queued: 1, running: 0, waitMin, idle: false },
+              { seat: "retro-1", queued: 0, ...other, waitMin: 0 },
+            ],
+          },
+        });
+      expect(wakeFacts(queue(30, { running: 0, idle: true }))).toContain(
+        '"reviews":["idle-reviewers"]',
+      );
+      expect(wakeLine(queue(30, { running: 0, idle: true }))).toContain(
+        "Queued reviews with idle review seats are a fault",
+      );
+      // not yet past the limit, or no seat free to take it: no fault
+      expect(wakeFacts(queue(9, { running: 0, idle: true }))).toBe(quiet);
+      expect(wakeFacts(queue(30, { running: 1, idle: false }))).toBe(quiet);
+    });
+
     it("names the fault in the wake line only for an idle seat whose own review has waited", () => {
       const fault = "Queued reviews with idle review seats are a fault";
       const seats = (waited: number) => [
