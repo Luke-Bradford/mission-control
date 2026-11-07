@@ -2355,6 +2355,52 @@ describe("board and PR cadence", () => {
     },
   );
 
+  it.each(["github", "prs"] as const)(
+    "a preview polls on %s but never follows PRs",
+    async (job) => {
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        boardWrites: false,
+      });
+      await s.tick(job);
+      const poll = job === "github" ? c.github : c.prSweep;
+      expect(poll).toHaveBeenCalled();
+      expect(c.followPrs).not.toHaveBeenCalled();
+      await s.stop();
+    },
+  );
+
+  it("a preview does not follow PRs after a waited PR poll either", async () => {
+    vi.useFakeTimers({ now: NOW });
+    config.poll = { usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 };
+    const c = stubs({ followPrs: vi.fn(async () => true) });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: Date.now,
+      collectors: c,
+      waitedPrs: () => [7],
+      boardWrites: false,
+    });
+    await s.tick("github");
+    await s.tick("github");
+    expect(c.githubPrs).toHaveBeenCalled();
+    expect(c.followPrs).not.toHaveBeenCalled();
+    await s.stop();
+  });
+
+  it("main.ts hands the scheduler boardWrites: !preview", async () => {
+    const { readFileSync } = await import("node:fs");
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(main).toContain("boardWrites: !preview,");
+  });
+
   it("follows PRs after a waited PR poll and emits a board move", async () => {
     vi.useFakeTimers({ now: NOW });
     config.poll = { usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 };

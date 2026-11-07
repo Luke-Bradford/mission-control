@@ -2938,6 +2938,21 @@ export class Store {
     return rows.map((r) => this.boardMoveOf(r));
   }
 
+  /**
+   * Whether a real run in this store moved the issue's card to a column (done). Rows under
+   * `pr:` and `dep:` ids have no run, so another hub's moves never count.
+   */
+  runMovedCard(repoId: RepoId, issue: number): boolean {
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM board_moves m JOIN runs r ON r.id = m.run_id
+           WHERE m.repo_id = ? AND m.issue = ? AND m.state = 'done' LIMIT 1`,
+        )
+        .get(repoId, issue) !== undefined
+    );
+  }
+
   /** Every move of the run's card, oldest first, pending ones too. */
   boardMovesOfRun(runId: string): BoardMove[] {
     const rows = this.db
@@ -5211,6 +5226,16 @@ export class Store {
       AND instr(report, ?) > 0 LIMIT 1`)
         .get(...repoIds, `/api/qa-report-assets/${id}`) !== undefined
     );
+  }
+
+  /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
+  externalReviewRows(): ReviewRow[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM reviews WHERE author_run_id LIKE 'external-pr:%' AND state != 'superseded' ORDER BY id",
+      )
+      .all() as Row[];
+    return rows.map(toReview);
   }
 
   reviewsOfRun(authorRunId: string): ReviewRow[] {

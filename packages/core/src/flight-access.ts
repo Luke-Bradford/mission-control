@@ -26,6 +26,7 @@ export const FLIGHT_OPERATOR_ROUTES: readonly string[] = [
   "/runs/:id/end",
   "/runs/:id/message",
   "/runs/:id/controller-check",
+  "/prs/:repo/:number/review-request",
   "/prs/:repo/:number/controller-check",
   "/prs/:repo/:number/merge-hold",
   "/runs/:id/merge-hold",

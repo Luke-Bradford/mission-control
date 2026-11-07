@@ -9,8 +9,15 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { reviewerOf } from "../src/engine/engine.ts";
+import {
+  askExternalReview,
+  externalReviewAsked,
+  seedExternalReviewAsks,
+  withdrawExternalReview,
+} from "../src/external-pr-control.ts";
 import { branchOwned, createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import { ownsPr } from "../src/ownership.ts";
 import { prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
@@ -61,6 +68,8 @@ let store: Store;
 beforeEach(() => {
   store = new Store(":memory:");
   store.upsertPullRequests("sample", [pr()], 1);
+  // a review is asked-for work: the operator or FLIGHT asked this hub to review PR 7
+  askExternalReview(store, "sample", 7, "CAPCOM", 1, SHA);
 });
 afterEach(() => store.close());
 
@@ -100,6 +109,114 @@ function harness() {
 }
 
 describe("external PR review subjects", () => {
+  it("queues nothing and writes nothing for a PR nobody asked this hub to review", async () => {
+    store.deleteSetting("external-review-ask:sample#7");
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toEqual([]);
+    expect(h.writes).toEqual([]);
+  });
+
+  it("reviews an ended run's PR with no ask, because a run here made the branch", async () => {
+    store.deleteSetting("external-review-ask:sample#7");
+    store.upsertRun({
+      id: "r1",
+      agentId: "guido-1",
+      repoId: "sample",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: null,
+      branch: "feature/sample",
+      ticket: null,
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      reviewId: null,
+    });
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
+  });
+
+  it("an ask withdrawn stops the review", async () => {
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    expect(service.wanted(row)).toBe(true);
+    expect(withdrawExternalReview(store, "sample", 7)).toBe(true);
+    expect(withdrawExternalReview(store, "sample", 7)).toBe(false);
+    expect(service.wanted(row)).toBe(false);
+  });
+
+  it("Update seeds an ask for each review already in flight, once", async () => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    store.deleteSetting("external-review-ask:sample#7");
+    seedExternalReviewAsks(store, 5);
+    expect(externalReviewAsked(store, "sample", 7, SHA, true)).toBe(true);
+    expect(externalReviewAsked(store, "sample", 7, NEXT, true)).toBe(false);
+    // it counts for finishing that review only: not for card moves or PR body edits
+    expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+    expect(ownsPr(store, "sample", pr())).toBe(false);
+    withdrawExternalReview(store, "sample", 7);
+    seedExternalReviewAsks(store, 6);
+    expect(externalReviewAsked(store, "sample", 7, SHA, true)).toBe(false);
+  });
+
+  it("a seeded ask keeps the in-flight review wanted, with no run here", async () => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    store.deleteSetting("external-review-ask:sample#7");
+    seedExternalReviewAsks(store, 5);
+    const service = createExternalReviews(h.deps);
+    expect(service.wanted(row)).toBe(true);
+    await service.sync();
+    expect(store.review(row.id)?.state).not.toBe("superseded");
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toHaveLength(1);
+  });
+
+  it.each([
+    ["reported", ["starting", "running", "reported"]],
+    ["failed", ["starting", "running", "failed"]],
+  ] as const)("Update seeds no ask for a %s review", async (_name, path) => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    let from: "queued" | "starting" | "running" = "queued";
+    for (const to of path) {
+      store.setReviewState(row.id, [from], to, { at: 3, runId: "retro:x", failure: "x" });
+      from = to as typeof from;
+    }
+    expect(store.review(row.id)?.state).toBe(path.at(-1));
+    store.deleteSetting("external-review-ask:sample#7");
+    seedExternalReviewAsks(store, 5);
+    expect(externalReviewAsked(store, "sample", 7, SHA, true)).toBe(false);
+  });
+
+  it("Update seeds no ask when no review is in flight", () => {
+    store.deleteSetting("external-review-ask:sample#7");
+    seedExternalReviewAsks(store, 5);
+    expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+  });
+
+  it("an older queued row with no ask is no longer wanted", async () => {
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    expect(service.wanted(row)).toBe(true);
+    store.deleteSetting("external-review-ask:sample#7");
+    expect(service.wanted(row)).toBe(false);
+  });
+
   it("queues one exact-head review without adding a developer run and survives restart", async () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
@@ -388,6 +505,10 @@ describe("external PR review subjects", () => {
     h.current({
       head: { sha: NEXT, ref: "feature/sample", repo: { full_name: "example/sample" } },
     });
+    // the ask bound the old head: the push is not reviewed until someone asks for it
+    await service.sync();
+    expect(store.reviewsIn(["queued"]).map((row) => row.sha)).toEqual([SHA]);
+    askExternalReview(store, "sample", 7, "CAPCOM", 3, NEXT);
     await service.sync();
     expect(service.wanted(old)).toBe(false);
     expect(store.reviewsIn(["queued"]).map((row) => row.sha)).toEqual([SHA, NEXT]);

@@ -1956,6 +1956,24 @@ describe("The operator's message", () => {
     expect(noteKeys()).toEqual([`blocked:${RUN}:1`]);
   });
 
+  it("a closed PR parks the run and writes nothing", async () => {
+    await parkOnCi();
+    clock += MIN;
+    await h.engine.onOperatorMessage(RUN);
+    h.pushes.length = 0;
+    h.steps.length = 0;
+    h.moves.length = 0;
+    h.statusCalls.length = 0;
+    setPr({ state: "closed" });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf().phase).toBe("parked");
+    expect(loopOf().parked?.kind).toBe("pr-closed");
+    expect(h.pushes).toEqual([]);
+    expect(h.steps).toEqual([]);
+    expect(h.moves).toEqual([]);
+    expect(h.statusCalls).toEqual([]);
+  });
+
   it("FLIGHT's un-park records resumed by FLIGHT", async () => {
     await parkOnCi();
     clock += MIN;

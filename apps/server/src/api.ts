@@ -256,10 +256,13 @@ import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
+  askExternalReview,
   externalMergeHold,
   externalPrControl,
+  externalReviewAsked,
   setExternalMergeHold,
   setExternalPrControl,
+  withdrawExternalReview,
 } from "./external-pr-control.ts";
 import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
@@ -5173,6 +5176,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           store.addHubEvent(
             `Controller check ${body.data.verdict} for external PR ${target.repo.id}#${number} at ${target.sha}${body.data.note ? `: ${cleanText(body.data.note, 1000)}` : ""}`,
+            now(),
+          );
+          bus.emit("boards");
+          return { ok: true };
+        },
+      );
+      // Reader: docs/runbook.md#external-pr-merge-and-sign-off (asking this hub to review a hand-opened PR).
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/review-request",
+        async (req, reply) => {
+          const body = z
+            .strictObject({
+              sha: z.string().regex(/^[a-f0-9]{40}$/i),
+              action: z.enum(["ask", "withdraw"]).default("ask"),
+            })
+            .safeParse(req.body);
+          const number = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (!body.success || !Number.isSafeInteger(number) || number < 1)
+            return reply.code(400).send({ error: "invalid review-request" });
+          const who = flightActor(req) ? "FLIGHT" : "Controller";
+          if (body.data.action === "withdraw") {
+            // taking an ask back only narrows what this hub does: no GitHub read, works on a closed PR
+            if (!config.repos.some((r) => r.id === req.params.repoId))
+              return reply.code(404).send({ error: "unknown repo" });
+            if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+            if (withdrawExternalReview(store, req.params.repoId, number)) {
+              store.addHubEvent(
+                `${who} withdrew the ask for a QA review of external PR ${req.params.repoId}#${number}`,
+                now(),
+              );
+              bus.emit("boards");
+            }
+            return { ok: true };
+          }
+          const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
+          if (!target) return reply;
+          // asking again for the same head changes nothing and says nothing
+          if (externalReviewAsked(store, target.repo.id, number, target.sha)) return { ok: true };
+          askExternalReview(
+            store,
+            target.repo.id,
+            number,
+            flightActor(req) ? "FLIGHT" : "CAPCOM",
+            now(),
+            target.sha,
+          );
+          store.addHubEvent(
+            `${who} asked for a QA review of external PR ${target.repo.id}#${number} at ${target.sha}`,
             now(),
           );
           bus.emit("boards");

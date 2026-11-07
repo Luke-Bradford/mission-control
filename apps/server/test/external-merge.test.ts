@@ -5,8 +5,10 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
+  askExternalReview,
   externalMergeHold,
   externalPrControl,
+  externalReviewAsked,
   setExternalMergeHold,
 } from "../src/external-pr-control.ts";
 import { externalReviewKey } from "../src/external-reviews.ts";
@@ -14,6 +16,7 @@ import { mergeExternalPr } from "../src/flight/external-merge.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
 import { grantApproval, mergeFloorScope } from "../src/flight-approvals.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import { ownsPr } from "../src/ownership.ts";
 import { prAcceptanceFor, prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
@@ -245,6 +248,110 @@ describe("external PR controller merge", () => {
       expect(externalMergeHold(store, "sample", 7)).not.toBeNull();
       store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
       expect((await hold()).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("records an ask for a QA review in this store and refuses an unfinished run", async () => {
+    const h = harness();
+    buildRun(2);
+    const post = (app: Awaited<ReturnType<typeof buildApp>>) =>
+      app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/review-request",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA }),
+      });
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+    });
+    try {
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+      expect((await post(app)).statusCode).toBe(200);
+      expect((await post(app)).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+      // asking again for the same head writes no second Activity line
+      expect(
+        store.hubEvents(0).filter((e) => e.text.includes("asked for a QA review of external PR")),
+      ).toHaveLength(1);
+      // a withdrawn ask is gone, and asking is repeatable after it
+      const withdraw = () =>
+        app.inject({
+          method: "POST",
+          url: "/api/prs/sample/7/review-request",
+          headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+          payload: JSON.stringify({ sha: SHA, action: "withdraw" }),
+        });
+      expect((await withdraw()).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+      expect((await withdraw()).statusCode).toBe(200);
+      expect((await post(app)).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      expect((await post(app)).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("an ask over Update's seeded ask for the same head is stored and logged once", async () => {
+    const h = harness();
+    buildRun(2);
+    askExternalReview(store, "sample", 7, "Update", 1, SHA);
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+    });
+    const post = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/review-request",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA }),
+      });
+    try {
+      expect((await post()).statusCode).toBe(200);
+      expect((await post()).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+      expect(ownsPr(store, "sample", pr)).toBe(true);
+      expect(
+        store.hubEvents(0).filter((e) => e.text.includes("asked for a QA review of external PR")),
+      ).toHaveLength(1);
+      // Update does not downgrade the real ask
+      askExternalReview(store, "sample", 7, "Update", 2, SHA);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("answers 409 to an ask on a hub that writes nothing", async () => {
+    const h = harness();
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+      noLoopWrites: true,
+    });
+    try {
+      const r = await app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/review-request",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA }),
+      });
+      expect(r.statusCode).toBe(409);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
     } finally {
       await app.close();
     }

@@ -72,6 +72,7 @@ import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./external-reviews.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
@@ -320,6 +321,7 @@ export async function main(): Promise<void> {
   const scheduler = createScheduler({
     config,
     teamsEnabled: !isPreview(port, process.env),
+    boardWrites: !preview,
     store,
     bus,
     cliHold,
@@ -1069,6 +1071,8 @@ export async function main(): Promise<void> {
       unlinkSync(pidPath);
     });
   }
+  // reviews already in flight when this hub updated keep finishing: they count as asked once
+  if (!preview) seedExternalReviewAsks(store, Date.now());
   scheduler.start();
   gitFiles?.start();
   supervisor.start();

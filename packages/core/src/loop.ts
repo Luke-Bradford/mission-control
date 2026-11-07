@@ -1745,7 +1745,10 @@ function desiredStep(s: LoopSnapshot, loop: RunLoop): LoopAction[] {
   }
   const notes = loop.phase === "done" ? new Map<string, DesiredNote>() : desiredNotes(s, loop);
 
-  if (loop.phase !== "done") {
+  // A PR closed by someone else is no signal to write: the card stays where it is, and the agent
+  // or FLIGHT decides what the closed PR means.
+  const closedPark = loop.phase === "parked" && loop.parked?.kind === "pr-closed";
+  if (loop.phase !== "done" && !closedPark) {
     // A review with blocking findings is rework: the card goes back In progress with its seat (In
     // review means a review is queued or running). An ended run's reviewed card goes to Ready.
     const reviewed = rv.blocked && !rv.waived;

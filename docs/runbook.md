@@ -1498,6 +1498,30 @@ FLIGHT may manage its own holds and evidence checks (on a standard repo not thos
 while operator holds remain the operator's. These records do not replace CI or QA,
 and they never stand in for #1214's day-long post-Update observation.
 
+#### Which PRs a hub acts on
+
+Several hubs can run on one repo, even under one GitHub login. A hub's automatic GitHub writes (a
+card move, a branch delete, the screenshot section of a PR body, a review comment or `mc/review`
+status) are limited to work it owns, so a hub with no runs writes nothing:
+
+- A branch is owned when a work run in this hub's store has it, ended or not (a review run does not
+  count). A PR is owned when its branch is, or when someone asked this hub to review it.
+- A card is owned when a work run here has its ticket, or a run here moved it. A Blocked card with
+  no run here is not released by this hub when its wait resolves.
+- A PR opened by hand has no run. Ask this hub to review it with
+  `POST /api/prs/:repo/:number/review-request { sha }` (FLIGHT: `mc operator`). The ask is kept in
+  this hub's store only and binds the head `sha` it was made for: a push needs a new ask, so an
+  ask on another hub's PR does not follow that PR's later heads. It starts the QA review, the
+  `mc/review` status, the card follow and the screenshot evidence for that head. Asking again for
+  the same head changes nothing and writes no Activity line. Take it back with
+  `{ sha, action: "withdraw" }` (it needs no GitHub read, so it works on a closed PR).
+  Without an ask the PR is read and shown, never written to. A PR whose branch a run in this
+  hub's store made, ended or not, needs no ask for its QA review.
+- On Update, the hub records an ask once for each external review already in flight, so a review
+  that was running is finished and its pending `mc/review` status is not left behind.
+- A preview never moves a card: it polls GitHub and shows it (`boardWrites` is off for a preview).
+- Hubs still read and show every PR, including another hub's.
+
 ### FLIGHT approvals
 
 A controller (the controller session or the operator) lets FLIGHT go past one rule for one scope until a
@@ -2344,7 +2368,8 @@ touched.
   branch with no run in this hub's store is left alone; a hub with no runs of its own deletes nothing.
   FLIGHT's `delete_branch` is a separate, explicit action with its own checks.
 - **A closed PR deletes nothing.** The hub does not remove the branch of a PR that closed without
-  merging; the agents decide what to do with it.
+  merging; the agents decide what to do with it. A closed PR is no signal for any hub write: it
+  moves no card either.
 - **Daily sweep.** Once a day (first run 10 minutes after the hub starts) the hub deletes a remote
   branch with no open PR, no live run, no commit for 24 hours, and a tip that a merged PR carried as
   its head, so unmerged commits are never swept. A branch that is the base of an open PR stays. Any

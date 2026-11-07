@@ -40,6 +40,7 @@ import {
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
+import { ownsCard } from "../ownership.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -371,6 +372,7 @@ export function flightSignals(i: {
   for (const line of releasedLines(
     record.released.filter((r) => onBoard.has(r.ref)),
     verb,
+    (ref) => ownsCard(store, repo, Number(ref.slice(ref.lastIndexOf("#") + 1))),
   )) {
     triage(line.ref, "dependency", line.at, line.text);
   }

@@ -1561,6 +1561,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/prs/shop-app/12/uat", { action: "accept", sha: "a".repeat(40) }],
   ["POST", "/api/prs/shop-app/12/controller-check", { verdict: "pass", sha: "a".repeat(40) }],
   ["POST", "/api/prs/shop-app/12/merge-hold", { action: "release", sha: "a".repeat(40) }],
+  ["POST", "/api/prs/shop-app/12/review-request", { sha: "a".repeat(40) }],
   ["POST", "/api/runs/shop-app-ta/merge-hold", { action: "release" }],
   ["GET", "/api/seats/guido-1/context"],
   ["GET", "/api/attention"],
@@ -2785,7 +2786,7 @@ describe("local access", () => {
             .replace(/\/tickets\/:repoId\/7$/, "/tickets/:repoId/:number")
             .replace(/\/prs\/4$/, "/prs/:number")
             .replace(
-              /\/prs\/:repoId\/12\/(uat|controller-check|merge-hold)$/,
+              /\/prs\/:repoId\/12\/(uat|controller-check|merge-hold|review-request)$/,
               "/prs/:repoId/:number/$1",
             )
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
