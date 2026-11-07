@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { vitestVerdict } from "../src/ci-vitest.ts";
+import { vitestVerdict, WORKER_RPC_TIMEOUT } from "../src/ci-vitest.ts";
 
-const RPC = 'Error: [vitest-worker]: Timeout calling "onTaskUpdate"';
+const RPC = `Error: ${WORKER_RPC_TIMEOUT}`;
 const passed = { numFailedTests: 0, numFailedTestSuites: 0, numTotalTestSuites: 100 };
 const output = (...errors: string[]) =>
   [
@@ -31,6 +31,15 @@ describe("vitestVerdict", () => {
   it("fails on any other unhandled error, alone or beside the timeout", () => {
     expect(vitestVerdict(1, passed, output("Error: boom"))).toBe(1);
     expect(vitestVerdict(1, passed, output(RPC, "Error: boom"))).toBe(1);
+  });
+
+  it("matches only the onTaskUpdate timeout, not other worker RPC timeouts", () => {
+    expect(WORKER_RPC_TIMEOUT).toBe('[vitest-worker]: Timeout calling "onTaskUpdate"');
+    expect(vitestVerdict(1, passed, output(RPC))).toBe(0);
+    expect(
+      vitestVerdict(1, passed, output('Error: [vitest-worker]: Timeout calling "onCollected"')),
+    ).toBe(1);
+    expect(vitestVerdict(1, passed, output(`${RPC} and more`))).toBe(1);
   });
 
   it("fails when the exit has no explained cause, or no report was read", () => {
