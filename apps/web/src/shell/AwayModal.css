@@ -21,9 +21,12 @@
   align-items: flex-start;
 }
 
-/* a long label must not squeeze its checkbox */
+/* a long label must not squeeze its checkbox, which is a Tab stop of its own: 24px square */
 .sw input {
   flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
 }
 
 .sw.locked {
@@ -51,6 +54,11 @@
 /* away modal: spacing the mockup set inline */
 .awayctl {
   margin-bottom: var(--sp-3);
+}
+
+.awaypanel .pfoot {
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--line);
 }
 
 .awaypanel h3.gap {
