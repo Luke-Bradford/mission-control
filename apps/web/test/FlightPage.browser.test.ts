@@ -24,10 +24,10 @@ describeRendered("FLIGHT page in a browser", () => {
           `answers working, doing now and blocked on one screen at ${where}`,
           async () => {
             const page = await renderAt({
-              page: "test/flightPageBrowser.html",
+              page: "test/flightBrowser.html",
               width,
               height,
-              search: `?theme=${theme}`,
+              search: `?view=page&theme=${theme}`,
               colorScheme: theme,
               api: flightPageApi(state),
             });
