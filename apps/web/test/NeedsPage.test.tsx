@@ -249,7 +249,7 @@ describe("Needs you page", () => {
     ).toHaveLength(1);
   });
 
-  it("lists Held items as links to the Held panel, and Handled today under the list", async () => {
+  it("leaves Held items off Needs you (#1543), and lists Handled today under the list", async () => {
     routes([], {
       "/api/attention/held": [
         item({
@@ -276,11 +276,11 @@ describe("Needs you page", () => {
       },
     });
     render(<Needs item={null} />);
-    const held = await screen.findByRole("link", { name: /Held item/ });
-    expect(held.getAttribute("href")).toBe("/flight#heldP");
     expect((await screen.findByTestId("handled-today")).textContent).toBe(
       "Handled today: bob (marked handled)",
     );
+    expect(screen.queryByText(/Held item/)).toBeNull();
+    expect(screen.queryByRole("region", { name: "Held" })).toBeNull();
   });
 
   it("says the GitHub threads could not load, with Retry, and keeps the asks standing", async () => {
