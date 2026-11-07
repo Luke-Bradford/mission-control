@@ -42,6 +42,8 @@ export interface CommsServiceDeps {
   seatSender?: boolean;
   /** Wake the recipient for an unlabelled message too (the operator's own message or answer). */
   wakeUnlabelled?: boolean;
+  /** False: a reply does not mention (or wake) the author of the message it answers. */
+  replyAuthorMention?: boolean;
   /** The sender's run ticket in `repo#n` form: the ticket of a message that names none. */
   senderTicket?: string;
   /** The sender's run and its newest open PR, which the hub stamps on the stored message. */
@@ -112,7 +114,7 @@ export async function sendComms(
   for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
     if (members.has(found[2])) mentions.add(found[2]);
   }
-  if (replyFrom !== undefined) mentions.add(replyFrom);
+  if (replyFrom !== undefined && deps.replyAuthorMention !== false) mentions.add(replyFrom);
   const notify = new Set<string>();
   if (crew.includes(input.to)) notify.add(input.to);
   for (const to of mentions) if (crew.includes(to)) notify.add(to);

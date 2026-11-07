@@ -6288,6 +6288,22 @@ export class Store {
     return { row, fresh: Number(r.changes) > 0 };
   }
 
+  /** Names the message that carries a claimed choice's answer. */
+  setChoiceMessage(key: string, briefAt: number, messageId: string): void {
+    const n = commsMessageNumber(messageId);
+    if (n !== null)
+      this.db
+        .prepare("UPDATE question_choices SET message_id = ? WHERE key = ? AND brief_at = ?")
+        .run(n, key, briefAt);
+  }
+
+  /** Drops a claim whose answer could not be sent. */
+  releaseChoice(key: string, briefAt: number): void {
+    this.db
+      .prepare("DELETE FROM question_choices WHERE key = ? AND brief_at = ?")
+      .run(key, briefAt);
+  }
+
   private choiceOf(r: Row): QuestionChoiceRow {
     return {
       key: r.key as string,

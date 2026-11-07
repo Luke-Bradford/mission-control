@@ -1851,7 +1851,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const original = store.commsMessage(input.replyTo);
             if (original !== null && original.from === input.to) {
               redirectedTo = route.to;
-              input = { ...input, to: route.to };
+              // the reply is no longer read as an answer to the ended run's seat: it keeps the
+              // ticket but not the link to that seat's message
+              prThread ??= original.ticket ?? undefined;
+              const { replyTo: _dropped, ...rest } = input;
+              input = { ...rest, to: route.to };
             }
           }
         }
@@ -1864,6 +1868,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               now,
               seatSender: false,
               wakeUnlabelled: true,
+              // redirected away from the ended run: its seat is not told of the reply
+              ...(redirectedTo === undefined ? {} : { replyAuthorMention: false }),
               ...(prThread === undefined ? {} : { ticket: prThread }),
               notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
             },
@@ -4472,9 +4478,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 knownSecrets: deps.knownSecrets ?? (async () => []),
                 now,
                 seatSender: false,
+                wakeUnlabelled: true,
                 notify: async (seatId, text) => {
-                  await sup.message(seatId, text, { interrupt: b.interrupt === true });
-                  delivered = true;
+                  try {
+                    await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                    delivered = true;
+                  } catch (e) {
+                    // a plain message stays stored for the seat's next turn; only an interrupt must land
+                    if (b.interrupt === true) throw e;
+                  }
                 },
               },
               COMMS_CAPCOM,
@@ -4487,10 +4499,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
             if (delivered) store.markCommsInboxRead(id, [sent.id], now());
-            // an exact repeat is a success that says so, with the first copy's state
-            return sent.repeat === true
-              ? { ok: true, ...commsSendState(store, sent.id, true) }
-              : { ok: true };
+            return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(

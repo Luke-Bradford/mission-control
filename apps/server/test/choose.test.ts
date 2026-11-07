@@ -238,3 +238,44 @@ it("refuses what the bound ids do not name, and a second pick returns the first 
   expect(second).toMatchObject({ optionId: "yes", alreadyChosen: true, chosenAt: first.chosenAt });
   expect(store.comms(0).filter((m) => m.to === "guido-1")).toHaveLength(1);
 });
+
+it("two picks on one brief at the same moment deliver once, and both receipts name the first pick", async () => {
+  const q = ask();
+  const key = `ask:${q}`;
+  const go = (optionId: string) =>
+    chooseOption(deps(), item(key), key, { optionId, briefAt: BRIEF_AT });
+  const [a, b] = await Promise.all([go("yes"), go("no")]);
+  expect(store.comms(0).filter((m) => m.to === "guido-1")).toHaveLength(1);
+  expect(b.optionId).toBe(a.optionId);
+  expect(wake).toHaveBeenCalledTimes(1);
+});
+
+it("lets the operator choose again when the answer could not be sent", async () => {
+  const q = ask();
+  const key = `ask:${q}`;
+  const failing = { ...deps(), knownSecrets: async () => ["Go ahead and ship."] };
+  await expect(
+    chooseOption(failing, item(key), key, { optionId: "yes", briefAt: BRIEF_AT }),
+  ).rejects.toBeInstanceOf(ChoiceRefused);
+  expect(store.choice(key, BRIEF_AT)).toBeNull();
+  const receipt = await chooseOption(deps(), item(key), key, {
+    optionId: "yes",
+    briefAt: BRIEF_AT,
+  });
+  expect(receipt.alreadyChosen).toBe(false);
+});
+
+it("refuses a brief the hub wrote, which acts through its own buttons, and changes nothing", async () => {
+  const key = "note:queue-swap";
+  await expect(
+    chooseOption(
+      deps(),
+      item(key, { agentId: "flight-1", kind: "blocked", brief: { ...brief, by: "hub" } }),
+      key,
+      { optionId: "yes", briefAt: BRIEF_AT },
+    ),
+  ).rejects.toMatchObject({ status: 409 });
+  expect(store.comms(0)).toHaveLength(0);
+  expect(store.choice(key, BRIEF_AT)).toBeNull();
+  expect(wake).not.toHaveBeenCalled();
+});

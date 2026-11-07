@@ -72,6 +72,8 @@ export async function chooseOption(
   const brief = item.brief;
   if (brief === undefined || brief.for !== "operator")
     throw new ChoiceRefused(409, "That question has no options for you to pick from.");
+  // a brief the hub wrote acts through its own route (a queue change has Approve and Deny buttons)
+  if (brief.by === "hub") throw new ChoiceRefused(409, "Use the item's own buttons for this one.");
   if (brief.at !== input.briefAt)
     throw new ChoiceRefused(
       409,
@@ -109,9 +111,25 @@ export async function chooseOption(
       ? `${lead}\n\n${option.answer}\n\nThe run that asked has ended. Pass this on to the next run on ${ticket ?? "that ticket"}.`
       : `${lead}\n\n${option.answer}`;
 
-  let sent: Awaited<ReturnType<typeof sendComms>>;
+  // Claim the brief before anything is sent, with no wait in between: a second pick at the same
+  // moment finds the claim and gets the first receipt, and nothing is delivered twice.
+  const claimed = store.claimChoice({
+    key,
+    briefAt: input.briefAt,
+    optionId: input.optionId,
+    label: option.label,
+    answer: option.answer,
+    question: asked,
+    ticket,
+    target: to,
+    targetKind,
+    messageId: null,
+    chosenAt: now,
+  });
+  if (!claimed.fresh) return receipt(store, claimed.row, true);
+
   try {
-    sent = await sendComms(
+    const sent = await sendComms(
       {
         store,
         crew: d.crew,
@@ -129,26 +147,15 @@ export async function chooseOption(
         ...(runId === undefined ? {} : { targetRunId: runId }),
       },
     );
+    store.setChoiceMessage(key, input.briefAt, sent.id);
+    // a run set aside is not the run on its seat: the engine wakes it
+    if (runId !== undefined && store.seatSession(to)?.runId !== runId)
+      await d.reconcileRun?.(runId);
   } catch (e) {
+    // nothing was delivered: let the operator choose again
+    store.releaseChoice(key, input.briefAt);
     throw new ChoiceRefused(400, e instanceof Error ? e.message : "The answer could not be sent.");
   }
-  // a run set aside is not the run on its seat: the engine wakes it
-  if (runId !== undefined && store.seatSession(to)?.runId !== runId) await d.reconcileRun?.(runId);
-
-  const claimed = store.claimChoice({
-    key,
-    briefAt: input.briefAt,
-    optionId: input.optionId,
-    label: option.label,
-    answer: option.answer,
-    question: asked,
-    ticket,
-    target: to,
-    targetKind,
-    messageId: sent.id,
-    chosenAt: now,
-  });
-  if (!claimed.fresh) return receipt(store, claimed.row, true);
 
   // close the question; the ticket's history reads the stored choice
   if (question !== null) store.answerQuestion(question.id, now);

@@ -2,6 +2,7 @@ import type { Run } from "@mc/core";
 import { expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { commsInboxContext } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
@@ -111,7 +112,7 @@ it("an identical send within a minute is stored once and answers already sent wi
 });
 
 it("a reply to a seat whose run ended goes to the seat now on that ticket, else to FLIGHT", async () => {
-  const { store, app, send } = setup();
+  const { store, app, send, woken } = setup();
   store.upsertRun(run({ id: "r1", endedAt: 2_000, status: "ok" }));
   const original = store.addComms({
     at: 1_500,
@@ -126,9 +127,23 @@ it("a reply to a seat whose run ended goes to the seat now on that ticket, else 
   const route = await app.inject({ url: `/api/comms/${original.id}/reply-route`, headers });
   expect(route.json()).toMatchObject({ to: "flight-1", redirected: true });
   expect(route.json().note).toContain("ended");
+  // guido-1 is on another ticket now: the reply must not reach it
+  store.upsertRun(run({ id: "r5", seq: 5, ticket: "mc#99" }));
+  store.setSeatSession({
+    seatId: "guido-1",
+    runId: "r5",
+    cliSessionId: null,
+    state: "running",
+    reason: null,
+    worktree: null,
+    updatedAt: 1,
+  });
   const toFlight = await send({ to: "guido-1", text: "thanks", replyTo: original.id });
   expect(toFlight.json()).toMatchObject({ redirectedTo: "flight-1" });
   expect(toFlight.json().message.to).toBe("flight-1");
+  expect(toFlight.json().message.mentions).not.toContain("guido-1");
+  expect(woken).toEqual(["flight-1"]);
+  expect(commsInboxContext(store, "guido-1", "r5").messageIds).toEqual([]);
   // another seat now works the ticket
   store.upsertRun(run({ id: "r9", agentId: "inco-1", seq: 1 }));
   store.setSeatSession({

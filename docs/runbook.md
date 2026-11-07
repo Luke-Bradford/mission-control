@@ -2715,19 +2715,19 @@ keep their permission checks.
   once. The sender is told "Already sent comms:N." (a success), nobody is woken again, and a row in
   `comms_repeats` counts it (`store.commsRepeatCount(since)`), kept 90 days. The operator's routes
   (`POST /api/comms`, `POST /api/seats/:id/message`) answer such a send with 200 and
-  `alreadySent: true`, with the first copy's state.
+  `alreadySent: true`, with the first copy's state. Both also return `state` and `deliveredAt`.
 - **Stored, then delivered.** Every message has `deliveredAt`, null while only stored. It is set the
   first time the recipient seat takes the message (its inbox is attached to a turn). An operator
-  message wakes the seat it is sent to; a working seat takes it at its next turn. `POST /api/comms`
+  message (either route) wakes the seat it is sent to; a plain message to a seat with no live session stays stored; a working seat takes it at its next turn. `POST /api/comms`
   returns `{ state: "stored" | "delivered", deliveredAt, alreadySent }`; `GET /api/comms/:id/state`
   reads it later.
 - **A reply to an ended run.** `GET /api/comms/:id/reply-route` says before sending where the
   operator's reply to a seat's message goes. If the run that wrote it has ended, it goes to the seat
-  now on that ticket, else to FLIGHT, and `POST /api/comms` reports `redirectedTo`. Replies only:
+  now on that ticket, else to FLIGHT, and `POST /api/comms` reports `redirectedTo`. The redirected reply keeps the ticket but is not linked to the ended run's message and does not mention or wake its seat. Replies only:
   an answer to a question never takes this route.
 - **Choosing an option.** `POST /api/attention/:key/choose` with `{ optionId, briefAt }` is the one
   way a choice acts; chat text never picks an option. `briefAt` must equal the open brief's time and
-  `optionId` must be one of its options. The answer goes to the run that asked and wakes it; if
+  `optionId` must be one of its options. A brief the hub wrote (`by: "hub"`, such as a queue change) is refused with 409: it acts through its own buttons. The brief is claimed before anything is sent, so two picks at once deliver once. The answer goes to the run that asked and wakes it; if
   that run has ended it goes to FLIGHT, to pass to the ticket's next run, never to another run
   directly. FLIGHT's own question goes to FLIGHT, woken. When a seat asked, FLIGHT gets one
   unlabelled line at its next wake (no wake). The question closes, the choice is stored in
