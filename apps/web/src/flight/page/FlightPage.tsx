@@ -46,7 +46,7 @@ export function FlightPage() {
   return (
     <section id="page-flight" className="fp">
       <div className="fp-title">
-        <h1>FLIGHT</h1>
+        <h1>Flight</h1>
         <span className="fp-q">
           Is FLIGHT working, what is it doing, and what blocks it? PR flow is on the{" "}
           <a className="fp-board" href={board} onClick={(e) => followLink(e, board)}>

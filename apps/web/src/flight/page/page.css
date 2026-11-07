@@ -18,6 +18,7 @@
 .fp-title h1 {
   font: 600 20px / 28px var(--display);
   letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .fp-q {
   color: var(--fg-2);
