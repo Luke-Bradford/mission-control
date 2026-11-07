@@ -1,0 +1,316 @@
+/* The FLIGHT page (mockups/flight-page): title row, status band, Doing now beside Blockers, then
+   Recent decisions in the space left. Rows keep their height and sit at the top; spare height
+   shows more rows, never a gap. */
+.fp {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  min-width: 0;
+}
+.fp-title {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  min-height: var(--sp-5);
+}
+.fp-title h1 {
+  font: 600 20px / 28px var(--display);
+  letter-spacing: 0.04em;
+}
+.fp-q {
+  color: var(--fg-2);
+}
+.fp-board {
+  display: inline-block;
+  line-height: var(--sp-5);
+  min-height: var(--sp-5);
+  min-width: var(--sp-5);
+  vertical-align: middle;
+}
+.fp-err {
+  color: var(--crit);
+}
+.fp-muted {
+  color: var(--muted);
+}
+.fp-ok {
+  color: var(--ok);
+}
+
+.fp-band {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+}
+.fp-stat {
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 1px solid var(--line);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.fp-stat:first-child {
+  border-left: 0;
+}
+.fp-k {
+  font: 11px / 16px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fp-v {
+  font: 600 20px / 28px var(--mono);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.fp-v small {
+  font: 400 12px / 16px var(--mono);
+  color: var(--fg-2);
+}
+.fp-v .fp-muted {
+  font: 400 14px / 28px var(--sans);
+}
+.fp-d {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--fg-2);
+}
+.fp-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.fp-state::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: currentColor;
+  align-self: center;
+}
+.fp-state.running {
+  color: var(--ok);
+}
+.fp-state.held {
+  color: var(--warn);
+}
+.fp-state.stopped {
+  color: var(--crit);
+}
+.fp-state.stopped::before {
+  background: none;
+  border: 2px solid currentColor;
+  border-radius: 2px;
+}
+.fp-start {
+  border-color: var(--crit);
+  color: var(--crit);
+  font-weight: 600;
+  min-height: 28px;
+}
+.fp-meter {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  overflow: hidden;
+}
+.fp-meter i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.fp-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.fp-head {
+  flex: none;
+  height: 40px;
+  padding: 0 var(--sp-4);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  font: 600 14px / 20px var(--sans);
+  color: var(--fg);
+}
+.fp-sub {
+  color: var(--muted);
+  font: 400 12px / 16px var(--mono);
+}
+.fp-note {
+  padding: var(--sp-4);
+  color: var(--fg-2);
+}
+.fp-mid {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 50%;
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  gap: var(--sp-3);
+}
+.fp-dec {
+  flex: 1 1 0;
+}
+
+.fp-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.fp-lines li {
+  flex: 0 0 auto;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.fp-lines li:last-child {
+  border-bottom: 0;
+}
+.fp-decisions {
+  overflow: hidden;
+}
+.fp-decisions li {
+  height: var(--sp-6);
+  min-height: var(--sp-6);
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.fp-t {
+  flex: none;
+  width: var(--sp-7);
+  font: 12px / 16px var(--mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fp-w {
+  min-width: 0;
+}
+.fp-w b {
+  font-weight: 600;
+}
+.fp-w > span {
+  color: var(--fg-2);
+}
+.fp-one {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fp-blockers {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fp-brows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.fp-bhead,
+.fp-brow {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) 128px 80px minmax(0, 6fr);
+  column-gap: var(--sp-4);
+  padding: 0 var(--sp-4);
+  align-items: center;
+}
+.fp-bhead {
+  flex: none;
+  height: var(--sp-6);
+  border-bottom: 1px solid var(--line);
+  font: 11px / 16px var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fp-r,
+.fp-wait {
+  text-align: right;
+}
+.fp-brow {
+  min-height: 72px;
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+}
+.fp-brow:last-child {
+  border-bottom: 0;
+}
+.fp-what b,
+.fp-what span {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.fp-what b {
+  font-weight: 600;
+}
+.fp-what span,
+.fp-act {
+  color: var(--fg-2);
+}
+.fp-act {
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.fp-owner {
+  justify-self: start;
+  font: 12px / 16px var(--mono);
+  padding: 0 var(--sp-2);
+  border-radius: 3px;
+  color: var(--fg-2);
+  background: color-mix(in srgb, var(--fg-2) 14%, transparent);
+}
+.fp-owner.operator {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.fp-owner.ci {
+  color: var(--crit);
+  background: color-mix(in srgb, var(--crit) 14%, transparent);
+}
+.fp-wait {
+  font: 600 13px / 20px var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.fp-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-4);
+}
+.fp-empty b {
+  font-weight: 600;
+}

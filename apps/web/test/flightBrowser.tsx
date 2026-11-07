@@ -9,7 +9,7 @@ import "@fontsource/ibm-plex-mono/latin-500.css";
 import "@fontsource/ibm-plex-mono/latin-600.css";
 import "../src/hud.css";
 import { createRoot } from "react-dom/client";
-import { Flight } from "../src/pages/Flight.tsx";
+import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 
 const root = document.getElementById("root");
 if (!root) throw new Error("#root missing");
@@ -18,7 +18,7 @@ createRoot(root).render(
   <div className="app">
     <div className="shell shell-full">
       <main>
-        <Flight />
+        <FlightTabs />
       </main>
     </div>
   </div>,

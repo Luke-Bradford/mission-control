@@ -1,10 +1,10 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
 import { NextActionsPanel } from "../src/overview/NextActionsPanel.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
-import { Flight } from "../src/pages/Flight.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
 import { Dock } from "../src/shell/Dock.tsx";
 import { Header } from "../src/shell/Header.tsx";
@@ -160,7 +160,7 @@ describe("one Needs-you count", () => {
         <Dock />
         <Comms item={null} view={{ kind: "flight" }} />
         <BoardPage repoId={null} ticket={null} />
-        <Flight />
+        <FlightTabs />
         <Needs item={null} />
       </>,
     );
