@@ -153,6 +153,7 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
     rewriteSummaries: vi.fn(() => ({ rewritten: 0, done: true })),
     fillTitles: vi.fn(async () => ({ filled: 0, done: true })),
     cli: vi.fn(async () => ({ cask: false as const, found: true })),
+    cliOps: vi.fn(() => null),
     claude: vi.fn(async () => []),
     codex: vi.fn(async () => []),
     machine: vi.fn(async (_prevCpus, prev, now) => ({

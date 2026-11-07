@@ -1495,7 +1495,8 @@ describe("read_ticket", () => {
 
 describe("answer_question", () => {
   const ask = (agentId = "guido-1", runId = "r-guido") => {
-    live(agentId, runId);
+    // the run's ticket is what the question is about; Needs you takes no question without one (#1543)
+    live(agentId, runId, { ticket: "mc#7" });
     return store.addQuestion({ agentId, runId, text: "Which lane?", at: NOW });
   };
   const A = (id: number, over: Record<string, unknown> = {}) => ({
@@ -1572,6 +1573,10 @@ describe("answer_question", () => {
       for: "operator",
       assessment: "Spending is the operator's call.",
       ask: "Which lane?",
+      options: [
+        { label: "Lane 2", answer: "Lane 2" },
+        { label: "Lane 3", answer: "Lane 3" },
+      ],
       recommendation: "Lane 2.",
       basis,
     });
@@ -3849,7 +3854,7 @@ describe("flight_state", () => {
         {
           key: "ask:1",
           kind: "question",
-          ticket: null,
+          ticket: "mc#5", // the asking run's ticket (#1543)
           text: "INCO-1 asks: Which lane?",
           ageMin: 5,
           // asked before this FLIGHT run started: its window runs from the run's start (#758)
@@ -4089,7 +4094,7 @@ describe("promote", () => {
     rulesNow = { ...rulesNow, promoteBacklog: false };
     expect(await call("promote", P())).toEqual(
       refused(
-        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.",
+        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question, then brief the item it raises with mc brief_item.",
       ),
     );
   });
@@ -5047,11 +5052,13 @@ describe("comment_ticket", () => {
 
 describe("brief_item", () => {
   const KEY = "note:blocked:r1:0";
+  /** The note's run carries the ticket the question is about; Needs you takes no item without one (#1543). */
+  const NOTE_RUN = "r-note";
   const raise = (key = "blocked:r1:0", over: Record<string, unknown> = {}) =>
     store.raiseNote({
       key,
       kind: "blocked",
-      runId: null,
+      runId: NOTE_RUN,
       seatId: "guido-1",
       repoId: "mc",
       text: "mc#7 parked",
@@ -5071,6 +5078,7 @@ describe("brief_item", () => {
     ...over,
   });
   beforeEach(() => {
+    store.upsertRun(run(NOTE_RUN, "guido-1", { ticket: "mc#7" }));
     raise();
     seen.length = 0;
   });
@@ -5273,7 +5281,18 @@ describe("brief_item", () => {
     const key = `lock:r-lock:${NOW - 30 * 60_000}`;
     const state = JSON.parse((await call("flight_state", {})).text);
     expect(state.items).toContainEqual(expect.objectContaining({ key, kind: "lock" }));
-    expect((await call("brief_item", B({ key, for: "operator" }))).isError).toBeUndefined();
+    // a lock names no ticket or PR: refused for the operator until FLIGHT names one (#1543)
+    const refused = await call("brief_item", B({ key }));
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("no ticket or PR: name it with ticket in brief_item");
+    const unknown = await call("brief_item", B({ key, ticket: "nope#7" }));
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("ticket nope#7 names no repo of this hub");
+    expect((await call("brief_item", B({ key, ticket: "mc#7" }))).isError).toBeUndefined();
+    expect(attentionItems(cfg, store, nowMs, lockNow).find((i) => i.key === key)).toMatchObject({
+      owner: "operator",
+      brief: { ticket: "mc#7" },
+    });
   });
 
   it("fills the original question and removes an answered question from triage", async () => {
@@ -5307,7 +5326,8 @@ describe("brief_item", () => {
       for: "operator",
       assessment: long,
       did: [{ action: long, refs: ["mc#466"] }],
-      ask: long,
+      // the entry check takes a one-sentence question (#1543); the other fields stay at full length
+      ask: "Go now, or wait?",
       recommendation: long,
       options: [
         { label: "Go", answer: long },
@@ -5412,6 +5432,7 @@ describe("brief_item", () => {
   it.each(["budget", "account"])("requires passing up a %s park with a brief", async (kind) => {
     store.upsertRun(
       run("r-budget", "guido-1", {
+        ticket: "mc#7",
         loop: {
           ...NEW_LOOP,
           phase: "parked",
@@ -5457,16 +5478,16 @@ describe("brief_item", () => {
       };
       store.addStrays([stray]);
       const key = store.strays()[0]?.key;
-      expect((await call("brief_item", B({ key, for: forWhom }))).isError).toBeUndefined();
+      const briefed = await call("brief_item", B({ key, for: forWhom }));
+      // a stray names no ticket or PR, so a brief for the operator is refused (#1543) and the
+      // item stays FLIGHT's; its time stays first-seen either way
+      if (forWhom === "operator") expect(briefed.isError).toBe(true);
+      else expect(briefed.isError).toBeUndefined();
       nowMs += 1000;
       store.addStrays([{ ...stray, at: nowMs }]);
       const item = attentionItems(cfg, store, nowMs).find((i) => i.key === key);
       if (forWhom === "operator") {
-        expect(item).toMatchObject({
-          owner: "operator",
-          at: NOW,
-          brief: { for: "operator", at: NOW },
-        });
+        expect(item).toMatchObject({ owner: "flight", at: NOW });
       } else {
         expect(item).toMatchObject({
           owner: "flight",
@@ -5486,9 +5507,14 @@ describe("brief_item", () => {
     }
   });
 
-  it("keeps legacy context uncut, allows no options, and rejects oversized text", async () => {
+  it("keeps legacy context uncut, allows no options for FLIGHT's own brief, and rejects oversized text", async () => {
     const long = "x".repeat(BRIEF_INPUT_MAX);
-    await call("brief_item", B({ context: long, options: undefined }));
+    // #1543: an operator brief with no options is refused; a brief FLIGHT keeps may have none
+    const none = await call("brief_item", B({ context: long, options: undefined }));
+    expect(none.isError).toBe(true);
+    expect(none.text).toContain("options");
+    expect(store.briefs().size).toBe(0);
+    await call("brief_item", B({ context: long, options: undefined, for: "flight" }));
     expect(store.briefs().get(KEY)).toMatchObject({ context: long, assessment: long, options: [] });
     for (const field of ["context", "assessment", "ask", "recommendation"]) {
       expect((await call("brief_item", B({ [field]: `${long}x` }))).isError).toBe(true);
@@ -6652,6 +6678,10 @@ it.each([
             key: `person:199:${NOW}`,
             context: "Review",
             ask: "Will you review it?",
+            options: [
+              { label: "Review it", answer: "yes" },
+              { label: "Skip it", answer: "no" },
+            ],
             recommendation: "Check it",
             basis: "Read message",
             person: { source, assessment: ["Needs review"] },
@@ -7541,8 +7571,12 @@ describe("superuser housekeeping", () => {
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
     expect(raiseStalledCommsDecisions({ config: cfg, store, now: nowMs })).toBe(1);
+    // the hub's fallback brief is a complete question on the ticket, so it passes the entry check
     expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
       owner: "operator",
+      brief: {
+        ask: "FLIGHT-1 has waited on GUIDO-1 about mc#909: let it proceed on its best judgment, or hold?",
+      },
     });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
       "isError",
@@ -9000,10 +9034,16 @@ describe("attention hold tools", () => {
 
 describe("brief_item with a hold (#760)", () => {
   const key = "note:blocked:wait-test";
+  /** The notes' run carries the ticket Needs you requires of an operator brief (#1543). */
+  const HOLD_RUN = "r-hold";
   const brief = (over: Record<string, unknown> = {}) => ({
     key,
     assessment: "Nothing to do yet.",
     ask: "Leave it parked?",
+    options: [
+      { label: "Leave it", answer: "wait" },
+      { label: "Un-park it", answer: "go" },
+    ],
     recommendation: "Leave it until the condition is met.",
     basis: "read the park",
     ...over,
@@ -9013,10 +9053,11 @@ describe("brief_item with a hold (#760)", () => {
   const needsYou = (at = NOW + 1) =>
     operatorItems(config(), store, at, null).filter((i) => i.key === key);
   beforeEach(() => {
+    store.upsertRun(run(HOLD_RUN, "guido-1", { ticket: "mc#7" }));
     store.raiseNote({
       key: "blocked:wait-test",
       kind: "blocked",
-      runId: null,
+      runId: HOLD_RUN,
       seatId: null,
       repoId: null,
       text: "Choose",
@@ -9036,7 +9077,7 @@ describe("brief_item with a hold (#760)", () => {
       store.raiseNote({
         key: "blocked:other",
         kind: "blocked",
-        runId: null,
+        runId: HOLD_RUN,
         seatId: null,
         repoId: null,
         text: "Other",
@@ -9079,12 +9120,11 @@ describe("brief_item with a hold (#760)", () => {
       expect(needsYou(at)).toHaveLength(1);
       expect(items(at).map((i) => i.key)).toEqual([key]);
       expect(items(at)[0]?.holdReleased).toBeTruthy();
-      // a fresh brief settles it
+      // a fresh, complete brief settles it
       store.addBrief({
         ...brief(),
         original: "",
         context: "x",
-        options: [],
         did: [],
         at: at + 1,
         defaultEligible: false,
@@ -9107,7 +9147,7 @@ describe("brief_item with a hold (#760)", () => {
     store.raiseNote({
       key: "blocked:other",
       kind: "blocked",
-      runId: null,
+      runId: HOLD_RUN,
       seatId: null,
       repoId: null,
       text: "Other",
@@ -9815,6 +9855,10 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         for: "operator",
         assessment: "A product call.",
         ask: "Merge?",
+        options: [
+          { label: "Merge", answer: "merge" },
+          { label: "Hold", answer: "hold" },
+        ],
         recommendation: "Yes.",
         basis: "the ticket",
       });
