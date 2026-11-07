@@ -128,7 +128,7 @@ describeRendered("FLIGHT page mockup in a browser", () => {
             expect(r.boardLink).toMatch(/Board/);
             expect(r.doing, `${where}: Doing now has 1 to 5 lines`).toBeGreaterThan(0);
             expect(r.doing).toBeLessThanOrEqual(5);
-            expect(r.decisions).toBeGreaterThanOrEqual(3);
+            expect(r.decisions).toBeGreaterThanOrEqual(width >= 2560 ? 12 : 8);
             expect(r.startVisible, `${where}: Start FLIGHT only when stopped`).toBe(
               state === "stopped",
             );

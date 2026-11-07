@@ -13,7 +13,7 @@ Is FLIGHT working, what is it doing, and what blocks it, and who owns each block
 1. **Status band** (top left): FLIGHT running or stopped, with Start FLIGHT when stopped; cost per hour; sessions per hour; context size.
 2. **Doing now**: three to five plain lines.
 3. **Blockers**: one row each with the blocker, its owner (Operator, a seat, CI, GitHub or the hub), how long it has waited, and what FLIGHT is doing about it. Longest wait first. With nothing blocking, the panel says so.
-4. **Recent decisions**: the last eight, one line each, newest first.
+4. **Recent decisions**: one line each, newest first. The list shows as many as fit the panel (about nine at 1920x940, more at 2560x1200).
 
 ## What each number is computed from
 
@@ -35,4 +35,4 @@ A stopped FLIGHT reads $0.00 and 0 sessions when it has been stopped for the who
 ## Limits
 
 - Not rendered by its author, whose sandbox cannot start Chrome. CI renders it: `apps/web/test/FlightPageMockup.browser.test.ts` checks no vertical or sideways scroll, no list scrolling inside its panel, controls of at least 24 px, and the three states, at 1920x940 and 2560x1200 in dark and light.
-- Spare height at 2560x1200 goes to row height (capped), so a panel can have some room under its last row.
+- Rows keep a fixed height and sit at the top of their panel. Spare height at 2560x1200 goes to more decisions, not taller rows; Doing now and Blockers keep some room under their last row.

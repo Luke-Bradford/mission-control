@@ -60,27 +60,28 @@
       .meter{height:4px;border-radius:2px;background:var(--line);overflow:hidden}
       .meter i{display:block;height:100%;background:var(--accent)}
       /* Middle row and decisions share the spare height; rows stretch up to a cap. */
-      .mid{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--sp-3)}
+      .mid{flex:0 0 auto;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--sp-3)}
       .lines{list-style:none;margin:0;padding:0;flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
-      .lines li{flex:1 1 40px;max-height:72px;display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--line)}
+      .lines li{flex:0 0 auto;min-height:40px;display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--line)}
       .lines li:last-child{border-bottom:0}
+      .lines li[hidden]{display:none}
       .lines .t{flex:none;width:48px;font:12px/16px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
       .lines .w{min-width:0}
       .lines .w b{font-weight:600}
       .lines .w span{color:var(--fg-2)}
-      .dec{flex:1 1 auto}
-      .dec .lines li{max-height:48px;flex-basis:32px}
+      .dec{flex:1 1 0}
+      .dec .lines li{min-height:36px}
       .bhead,.brow{display:grid;grid-template-columns:minmax(0,5fr) 128px 80px minmax(0,6fr);column-gap:var(--sp-4);padding:0 var(--sp-4);align-items:center}
       .bhead{flex:none;height:32px;border-bottom:1px solid var(--line);font:11px/16px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
       .bhead .r,.brow .wait{text-align:right}
-      .brow{flex:1 1 56px;max-height:112px;padding-top:var(--sp-2);padding-bottom:var(--sp-2)}
+      .brow{flex:0 0 auto;min-height:72px;padding-top:var(--sp-2);padding-bottom:var(--sp-2)}
       .brow .what b{display:block;font-weight:600}
       .brow .what span,.brow .act{color:var(--fg-2)}
       .owner{justify-self:start;font:12px/16px var(--mono);padding:0 var(--sp-2);border-radius:3px;color:var(--fg-2);background:color-mix(in srgb,var(--fg-2) 14%,transparent)}
       .owner.operator{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
       .owner.ci{color:var(--crit);background:color-mix(in srgb,var(--crit) 14%,transparent)}
       .wait{font:600 13px/20px var(--mono);font-variant-numeric:tabular-nums}
-      .empty{flex:1;display:flex;flex-direction:column;justify-content:center;gap:var(--sp-1);padding:var(--sp-4)}
+      .empty{flex:1;display:flex;flex-direction:column;justify-content:flex-start;gap:var(--sp-1);padding:var(--sp-4)}
       .empty b{font-weight:600}
     </style>
   </head>
@@ -118,7 +119,7 @@
           </section>
         </div>
         <section class="panel dec" id="decPanel" aria-labelledby="decH">
-          <div class="head" id="decH">Recent decisions <span class="sub">last 8 · newest first</span></div>
+          <div class="head" id="decH">Recent decisions <span class="sub" id="decSub">newest first</span></div>
           <ul class="lines" id="decisions"></ul>
         </section>
       </main>
@@ -174,6 +175,18 @@
         [96, "Started a new session", "context passed 70%, so it handed over"],
         [131, "Moved a merged ticket to Done", "PR merged, CI green"],
         [158, "Left a ticket in Backlog", "it has no Size"],
+        [190, "Re-asked RETRO-1 for a review", "the first one covered an older head"],
+        [224, "Paused a loop after three failed pushes", "the same check failed each time"],
+        [251, "Moved a ticket back to Ready", "its seat was stopped before it started"],
+        [283, "Answered a seat's question from the ticket", "the ticket already said which file"],
+        [320, "Held a merge", "CI had not finished on the current head"],
+        [356, "Started the day's first session", "the hub came up with open work"],
+        [391, "Skipped a Backlog ticket", "its Done when line was missing"],
+        [428, "Told a seat to rebase", "main had moved under its branch"],
+        [466, "Marked a review round clean", "no Critical or Important findings left"],
+        [505, "Asked a seat to split a large ticket", "it touched three areas"],
+        [547, "Cleared a stale hold", "the PR it waited on had merged"],
+        [590, "Handed over to a new session", "context passed 70% again"],
       ];
 
       let state = STATES.includes(q.get("state")) ? q.get("state") : "blocked";
@@ -196,6 +209,18 @@
           `<div class="stat"${id ? ` id="${id}"` : ""}><div class="k">${k}</div><div class="v">${v}</div>${i === 3 && !stopped ? `<div class="meter" aria-hidden="true"><i style="width:37%"></i></div>` : ""}<div class="d">${d}</div></div>`).join("");
       }
 
+      // Show as many decisions as fit the panel, newest first, so no row stretches and no space is left blank.
+      function fitDecisions() {
+        const list = document.getElementById("decisions");
+        const rows = [...list.children];
+        for (const li of rows) { li.hidden = false; li.style.borderBottom = ""; }
+        let n = rows.length;
+        while (n > 3 && list.scrollHeight > list.clientHeight + 1) rows[--n].hidden = true;
+        if (rows[n - 1]) rows[n - 1].style.borderBottom = "0";
+        document.getElementById("decSub").textContent = `last ${n} · newest first`;
+      }
+      window.addEventListener("resize", fitDecisions);
+
       function render() {
         const end = state === "stopped" ? STOP_MIN : NOW_MIN;
         document.getElementById("band").innerHTML = band(state);
@@ -211,6 +236,7 @@
           : `<div class="empty"><b class="ok">Nothing is blocking FLIGHT</b><span class="fg2">If something stalls, it appears here with its owner and how long it has waited.</span></div>`;
         document.getElementById("decisions").innerHTML = DECISIONS.map(([ago, a, why]) =>
           `<li><span class="t">${clock(end - ago)}</span><span class="w"><b>${esc(a)}</b> <span>${esc(why)}</span></span></li>`).join("");
+        fitDecisions();
         document.getElementById("railN").textContent = state === "stopped" ? "!" : String(rows.length || "");
         document.getElementById("dockLine").innerHTML = state === "stopped" ? "<b class='crit'>Stopped</b>" : `<b>${rows.length ? rows.length + " blocked" : "Running"}</b>`;
         for (const b of document.querySelectorAll(".switch [data-state]")) b.setAttribute("aria-pressed", String(b.dataset.state === state));
