@@ -10,7 +10,7 @@ import {
   describeRendered,
   type RenderedPage,
 } from "./browserRunner.ts";
-import { demoSeed } from "./overviewDensityFixtures.ts";
+import { demoSeed, overviewDensityFixture } from "./overviewDensityFixtures.ts";
 
 const { renderAt } = browserSession();
 const HARNESS = "test/demoBrowser.html";
@@ -247,6 +247,41 @@ describeRendered("Demo, rendered", () => {
       expect(back).toContain("/api/stream");
       expect(back).toContain("/api/crew?shape=summary");
       expect(await page.evaluate(() => window.__noReload, undefined)).toBe(true);
+      expect(page.errors()).toEqual([]);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "plays Demo when the hub has no runs",
+    async () => {
+      // The live API answers as an empty hub: no runs, no seats working.
+      const empty = overviewDensityFixture("empty");
+      expect(empty.rows).toEqual([]);
+      const page = await renderAt({
+        page: HARNESS,
+        width: 1600,
+        height: 900,
+        search: "?demo=1&at=%2F",
+        api: empty.api,
+      });
+      await page.box(".demo-marker");
+      expect(await text(page, ".demo-marker")).toBe("DEMO");
+      await eventually(
+        page,
+        async () => (await count(page, "#agentsList .trow:not(.head)")) >= 10,
+        "the Demo crew",
+      );
+      expect(apiRequests(page)).toEqual([]);
+      await page.click(".demo-switch");
+      await eventually(
+        page,
+        async () => (await count(page, ".demo-marker")) === 0,
+        "the marker to go",
+      );
+      await page.evaluate(() => new Promise((r) => setTimeout(r, 800)), undefined);
+      expect(await count(page, "[role=alert]")).toBe(0);
       expect(page.errors()).toEqual([]);
       await page.close();
     },
