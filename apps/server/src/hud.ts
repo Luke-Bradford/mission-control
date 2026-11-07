@@ -18,7 +18,6 @@ import {
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
-  CONTROLLER_CHECK_PARK,
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
@@ -41,7 +40,6 @@ import {
   FLIGHT_TRIAGE_WAIT_MS,
   type FlightNotTriagingCause,
   fixesSent,
-  flightFloorBlocked,
   flightNotTriagingText,
   hardRulesBySettingKey,
   hudState,
@@ -859,7 +857,7 @@ interface FlightTriage {
 /**
  * The operator's call (#758): FLIGHT may brief it for the operator but never keep it. Unless it is
  * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, the
- * held hub Update, and a run parked on its budget or account, a controller check or acceptance.
+ * held hub Update, and a run parked on its budget or account, or on the operator's acceptance.
  */
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
@@ -867,9 +865,7 @@ export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store:
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
   const park = noteParkOf(item, store);
-  return (
-    park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
-  );
+  return park === "budget" || park === "account" || park === UAT_PARK;
 }
 
 /**
@@ -1708,7 +1704,7 @@ function noteOwner(
     (isHardRulesFlagKey(n.key) || n.key.startsWith("ready:"))
   ) {
     const loop = n.runId === null ? null : store.run(n.runId)?.loop;
-    return loop && !flightFloorBlocked(loop) ? OWNER_FLIGHT : OWNER_OPERATOR;
+    return loop?.touches ? OWNER_FLIGHT : OWNER_OPERATOR;
   }
   if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key) || isNoReportNoteKey(n.key))
     return OWNER_CONTROLLER;

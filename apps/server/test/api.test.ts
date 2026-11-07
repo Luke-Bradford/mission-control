@@ -8303,7 +8303,7 @@ describe("the first loop's engine", () => {
       payload: {},
     });
     expect(r.statusCode).toBe(409);
-    expect(r.json().error).toContain("only the controller can merge it");
+    expect(r.json().error).toContain("use second_review or send it for rework");
     await a.close();
   });
 

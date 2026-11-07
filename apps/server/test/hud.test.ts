@@ -3876,7 +3876,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(isOperatorCall({ key: "note:blocked:r-budget:0", kind: "blocked" }, store)).toBe(true);
     expect(isOperatorCall({ key: "note:hub-update-held", kind: "question" }, store)).toBe(true);
     expect(isOperatorCall({ key: "note:plain", kind: "question" }, store)).toBe(false);
-    // a controller check is the operator's call too
+    // a controller check is FLIGHT's to do, so it is not the operator's call
     store.upsertRun(
       run({
         id: "r-cc",
@@ -3888,8 +3888,8 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       }),
     );
     raise("blocked:r-cc:0", "blocked", "r-cc");
-    expect(isOperatorCall({ key: "note:blocked:r-cc:0", kind: "blocked" }, store)).toBe(true);
-    // so is a PR waiting for the operator's acceptance
+    expect(isOperatorCall({ key: "note:blocked:r-cc:0", kind: "blocked" }, store)).toBe(false);
+    // a PR waiting for the operator's acceptance
     store.upsertRun(
       run({
         id: "r-uat",
