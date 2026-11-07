@@ -34,7 +34,9 @@ async function shellMetrics(page: RenderedPage) {
     const visible = (element: Element) =>
       element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0;
     const smallControls = [
-      ...document.querySelectorAll("#dock button,#dock input,#dock a[href],#dock summary"),
+      ...document.querySelectorAll(
+        "#dock button,#dock input,#dock textarea,#dock a[href],#dock summary",
+      ),
     ]
       .filter(visible)
       .filter((element) => {
@@ -54,7 +56,7 @@ async function shellMetrics(page: RenderedPage) {
       smallControls,
       selected: document.activeElement?.id,
       collapsed: dock?.classList.contains("collapsed"),
-      summaryItems: document.querySelectorAll(".dock-summary-item").length,
+      needsLines: document.querySelectorAll("#dock .dock-needs").length,
       panelHead: document.querySelector(".ph h2")
         ? getComputedStyle(document.querySelector(".ph h2") as Element).fontSize
         : null,
@@ -104,13 +106,13 @@ describeRendered("Approved compact desktop shell", () => {
             expect(initial.rows.every((height) => height >= 40)).toBe(true);
             await capture(page, `desktop-${width}x${height}-${scheme}-default-after`);
             if (width < 2200) await page.click(".dockrail button");
-            // Beside the Overview's Needs you panel (from 2200 px) the dock leaves its waiting list out.
-            if (width < 2200) await page.boxes(".dock-summary-item");
+            // The fly-out holds the conversation: one line to Needs you, no waiting list, at every width.
+            await page.boxes("#dock .dock-needs");
             const expanded = await shellMetrics(page);
             expect(expanded.dockWidth).toBe(
               width < 1500 ? 380 : width < 1700 ? 540 : width < 2200 ? 620 : 380,
             );
-            expect(expanded.summaryItems).toBe(width < 2200 ? 3 : 0);
+            expect(expanded.needsLines).toBe(1);
             expect(expanded.smallControls).toEqual([]);
             if (width < 2200) expect(expanded.selected).toBe("dockHeading");
             expect(
@@ -123,17 +125,9 @@ describeRendered("Approved compact desktop shell", () => {
             expect(page.errors()).toEqual([]);
             await capture(page, `desktop-${width}x${height}-${scheme}-expanded-after`);
             if (height === 700) {
-              const scroll = await page.evaluate(() => {
-                const summary = document.querySelector<HTMLElement>(".dock-summary");
-                const next = document.querySelector<HTMLButtonElement>(".dock-next button");
-                next?.focus();
-                return {
-                  overflow: summary ? getComputedStyle(summary).overflowY : null,
-                  scrollable: summary ? summary.scrollHeight > summary.clientHeight : false,
-                  moved: (summary?.scrollTop ?? 0) > 0,
-                };
-              }, undefined);
-              expect(scroll).toEqual({ overflow: "auto", scrollable: true, moved: true });
+              // Short window: the box and its state line stay reachable under the conversation.
+              expect((await page.reachable("#dockInput", "#dock")).every(Boolean)).toBe(true);
+              expect((await page.reachable("#dockState", "#dock")).every(Boolean)).toBe(true);
               await capture(page, `desktop-${width}x${height}-${scheme}-focused-scroll-after`);
             }
             receipts.push({
@@ -181,9 +175,9 @@ describeRendered("Approved compact desktop shell", () => {
           }, undefined),
         ).toBe("solid");
         await page.evaluate(() => {
-          const input = document.querySelector<HTMLInputElement>("#dockInput");
+          const input = document.querySelector<HTMLTextAreaElement>("#dockInput");
           if (!input) throw Error("Missing composer");
-          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+          const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
           set?.call(input, "Keep the selected decision draft");
           input.dispatchEvent(new Event("input", { bubbles: true }));
         }, undefined);
@@ -200,7 +194,7 @@ describeRendered("Approved compact desktop shell", () => {
         await page.click(".dockrail button");
         expect(
           await page.evaluate(
-            () => (document.querySelector("#dockInput") as HTMLInputElement).value,
+            () => (document.querySelector("#dockInput") as HTMLTextAreaElement).value,
             undefined,
           ),
         ).toBe("Keep the selected decision draft");
@@ -247,9 +241,9 @@ describeRendered("Approved compact desktop shell", () => {
               () => document.querySelector(".dock-summary")?.textContent ?? "",
               undefined,
             );
-            if (scenario === "empty") expect(summary).toContain("Nothing is waiting");
+            if (scenario === "empty") expect(summary).toContain("No questions wait");
             if (scenario === "many") {
-              expect(summary).toContain("View all 50 waiting items");
+              expect(summary).toContain("50 questions wait");
               const log = await page.evaluate(() => {
                 const element = document.querySelector<HTMLElement>(".dmsgs");
                 return {
@@ -276,20 +270,9 @@ describeRendered("Approved compact desktop shell", () => {
                 ),
               ).toBe(100);
             }
-            if (scenario === "loading") expect(summary).toContain("Loading waiting items");
-            if (scenario === "error") expect(summary).toContain("could not refresh");
-            if (scenario === "stale") expect(summary).toContain("Stale headline");
+            if (scenario === "loading") expect(summary).toContain("Loading open questions");
+            if (scenario === "error") expect(summary).toContain("could not load");
             if (scenario === "disconnected") expect(summary).toContain("Disconnected");
-            if (scenario === "long") {
-              await page.click(".dock-headline summary");
-              expect(
-                await page.evaluate(
-                  () => document.querySelector(".dock-headline[open] p")?.textContent?.length ?? 0,
-                  undefined,
-                ),
-              ).toBeGreaterThan(140);
-            }
-            expect((await shellMetrics(page)).summaryItems).toBeLessThanOrEqual(3);
             expect((await shellMetrics(page)).smallControls).toEqual([]);
             expect(page.errors()).toEqual([]);
             await capture(page, `desktop-state-${scenario}-1600x700-${scheme}-after`);

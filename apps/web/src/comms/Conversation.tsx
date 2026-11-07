@@ -18,6 +18,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { isSendKey, SEND_HINT } from "../components/sendKey.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
@@ -36,6 +37,7 @@ import {
   navigate,
   ticketPath,
 } from "../router.ts";
+import { stripContext } from "../shell/flyoutContext.ts";
 import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
 import { type CommsView, ticketForRef } from "./model.ts";
@@ -209,7 +211,7 @@ function Breadcrumb({ view }: { view: CommsView }) {
               ? ["Comms", "Agents", view.agentId, "Inbox"]
               : ["Comms", "Agents", view.agentId];
   return (
-    <nav className="comms-breadcrumb" aria-label="Breadcrumb">
+    <nav className="comms-breadcrumb" aria-label="Breadcrumb" title={parts.join(" › ")}>
       {parts.map((part, index) => (
         <span key={part}>
           {index > 0 && <i aria-hidden="true">›</i>}
@@ -395,12 +397,12 @@ function MessagePane({
                   type="button"
                   onClick={() => onOpenMessage(viewForMessage(quote, flightId), quote.id)}
                 >
-                  <b>{quote.from}</b> · {time(quote.at)} · {quote.text}
+                  <b>{quote.from}</b> · {time(quote.at)} · {stripContext(quote.text)}
                 </button>
               )}
               <div className="comms-bubble-body">
                 <MessageRefs
-                  text={message.text}
+                  text={stripContext(message.text)}
                   ticket={message.ticket}
                   from={message.from}
                   to={message.to}
@@ -488,14 +490,24 @@ function Composer({
       )}
       <label htmlFor="comms-compose">{label}</label>
       <div>
-        <input
+        <textarea
           id="comms-compose"
+          rows={2}
           value={text}
           onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (!isSendKey(event)) return;
+            event.preventDefault();
+            send(event);
+          }}
+          aria-describedby="comms-compose-hint"
           placeholder={placeholder}
         />
         <button type="submit">Send</button>
       </div>
+      <p id="comms-compose-hint" className="note s">
+        {SEND_HINT}
+      </p>
       {error && <p role="alert">{error}</p>}
     </form>
   );
@@ -662,7 +674,7 @@ function PinnedMessage({ message }: { message: CommsMessage }) {
   };
   return (
     <span>
-      {message.from}: {message.text}
+      {message.from}: {stripContext(message.text)}
       <button type="button" onClick={unpin}>
         Unpin
       </button>

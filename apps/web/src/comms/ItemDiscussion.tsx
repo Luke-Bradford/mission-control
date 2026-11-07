@@ -2,6 +2,7 @@ import { DISCUSSION_TEXT_MAX, type ItemDiscussion as Discussion } from "@mc/core
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Expandable } from "../components/Expandable.tsx";
 import { Markdown, OpenLinks } from "../components/Markdown.tsx";
+import { isSendKey, SEND_HINT } from "../components/sendKey.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { askFlight } from "./answer.ts";
 import { clearDraft, getDraft, setDraft } from "./drafts.ts";
@@ -132,7 +133,7 @@ function DiscussionBody({
     if (page && el && following.current) el.scrollTop = el.scrollHeight;
   }, [page, count, receipt]);
   const onKey = (ev: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) {
+    if (isSendKey(ev)) {
       ev.preventDefault();
       void send();
     }
@@ -215,7 +216,7 @@ function DiscussionBody({
           <textarea
             ref={input}
             aria-label="Ask FLIGHT about this"
-            placeholder="Ask FLIGHT about this… (Ctrl or ⌘ + Enter sends)"
+            placeholder={`Ask FLIGHT about this… (${SEND_HINT})`}
             rows={3}
             maxLength={DISCUSSION_TEXT_MAX}
             value={text}

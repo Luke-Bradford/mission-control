@@ -468,9 +468,18 @@ describe("Header", () => {
     fireEvent.click(chat);
     expect(window.location.pathname).toBe("/setup");
     unmount();
-    render(<Header page="comms" />);
-    const open = screen.getByRole("button", { name: "FLIGHT chat" });
-    expect(open.title).toBe("FLIGHT chat is open in Comms");
-    expect(open.getAttribute("aria-pressed")).toBe("true");
+    // Every page has the fly-out, Comms, FLIGHT and Needs you included: the button toggles it there.
+    for (const page of ["comms", "flight", "needs"] as const) {
+      const { unmount: leave } = render(<Header page={page} />);
+      const toggle = screen.getByRole("button", { name: "FLIGHT chat" });
+      expect(toggle.title).toBe("Show or hide FLIGHT's chat (f)");
+      const before = toggle.getAttribute("aria-pressed");
+      fireEvent.click(toggle);
+      expect(window.location.pathname).toBe("/setup");
+      expect(
+        screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed"),
+      ).not.toBe(before);
+      leave();
+    }
   });
 });

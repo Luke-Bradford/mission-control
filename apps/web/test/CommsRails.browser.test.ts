@@ -112,7 +112,10 @@ const measure = (page: RenderedPage) =>
       scrolls: scroll ? scroll.scrollHeight > scroll.clientHeight + 1 : false,
       canvasW: canvas?.width ?? 0,
       canvasH: canvas?.height ?? 0,
-      viewW: window.innerWidth,
+      // The window beside the FLIGHT fly-out, which every page has and which sits beside the page.
+      viewW:
+        window.innerWidth -
+        (document.querySelector<HTMLElement>("#dock")?.getBoundingClientRect().width ?? 0),
       viewH: window.innerHeight,
       pane: document.querySelector(".comms-chart-pane") !== null,
       chip: document.querySelector(".comms-filter-chip")?.textContent ?? null,

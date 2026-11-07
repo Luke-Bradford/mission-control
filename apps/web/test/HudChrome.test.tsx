@@ -338,7 +338,7 @@ describe("HUD chrome", () => {
     expect(screen.queryByText("Ticket 3")).toBeNull();
   });
 
-  it("shows FLIGHT's doing line and the target tag on every waiting ask as inert text", async () => {
+  it("shows FLIGHT's doing line as inert text and lists no asks", async () => {
     stub({
       "/api/flight": {
         seat: {
@@ -368,9 +368,8 @@ describe("HUD chrome", () => {
         "Checking <b>the lock</b>",
       ),
     );
-    const asks = await screen.findAllByTestId("waiting-ask");
-    expect(asks.map((a) => a.querySelector(".ag")?.textContent)).toEqual(["guido-1", "inco-1"]);
-    expect(asks[1]?.textContent).toContain("Use <img src=x> here?");
-    expect(container.querySelector("#dockHead .meta b, .dask img")).toBeNull();
+    // The fly-out lists no asks: the count line opens Needs you, and no ask text is injected as HTML.
+    expect(screen.queryAllByTestId("waiting-ask")).toHaveLength(0);
+    expect(container.querySelector("#dockHead .meta b, #dock img")).toBeNull();
   });
 });

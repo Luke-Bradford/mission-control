@@ -20,6 +20,8 @@
 .comms-page {
   height: 100%;
   overflow: hidden;
+  /* The layout answers to the width the page gets, which the FLIGHT fly-out takes 380 px of. */
+  container-type: inline-size;
 }
 
 .comms-grid {
@@ -321,6 +323,14 @@
   font-style: normal;
 }
 
+/* A trail too long for its room ends in an ellipsis; the whole trail is the nav's title. */
+.comms-breadcrumb > span:last-child {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .comms-breadcrumb button {
   padding: 0;
   color: inherit;
@@ -337,7 +347,8 @@
 
 .comms-chat-title {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(160px, 1fr);
+  /* The trail keeps its width and the hint gives way (ellipsis), so beside the fly-out they never overlap. */
+  grid-template-columns: minmax(0, max-content) minmax(0, 1fr);
   width: 100%;
   align-items: center;
   gap: var(--sp-3);
@@ -372,6 +383,7 @@
 
 .comms-chat-title .comms-breadcrumb {
   min-width: 0;
+  overflow: hidden;
 }
 
 .comms-mentions {
@@ -789,24 +801,26 @@ a.comms-ref {
   gap: var(--sp-2);
 }
 
-.comms-composer input {
+.comms-composer :is(input, textarea) {
   flex: 1;
   min-width: 0;
 }
 
-.comms-composer input {
+.comms-composer :is(input, textarea) {
   min-height: 40px;
+  resize: vertical;
+  font: inherit;
   border-color: var(--line-2);
   border-radius: 2px;
 }
 
-.comms-composer input:focus {
+.comms-composer :is(input, textarea):focus {
   border-color: var(--accent);
   outline: none;
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
-.comms-composer input + button {
+.comms-composer :is(input, textarea) + button {
   min-height: 40px;
   padding: 0 var(--sp-4);
   border-radius: 2px;
@@ -848,7 +862,8 @@ a.comms-ref {
   margin: 0 0 var(--sp-1);
 }
 
-@media (max-width: 1100px) {
+/* 1016px of page is a 1100px window with the fly-out folded to its 48px rail (its default); open, the same page width is a 1440px window. */
+@container (max-width: 1016px) {
   .comms-grid {
     grid-template-columns: 240px minmax(0, 1fr);
   }
@@ -948,7 +963,8 @@ a.comms-ref {
   gap: var(--sp-2);
 }
 
-@media (min-width: 1600px) {
+/* 1500px of page is a 1600px window with the rail folded; open, the page is about 1196px and keeps 380. */
+@container (min-width: 1500px) {
   .comms-grid {
     grid-template-columns: 280px minmax(0, 1fr) 420px;
   }

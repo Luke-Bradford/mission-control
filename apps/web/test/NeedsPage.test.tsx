@@ -529,7 +529,7 @@ describe("actions on the page", () => {
     );
   });
 
-  it("Ctrl or Cmd+Enter sends the answer; plain Enter does not", async () => {
+  it("Enter sends the answer; Shift+Enter breaks the line; Ctrl or Cmd+Enter also sends", async () => {
     const fn = routes([ask("q1", { agentId: "flight-1" })], {
       "/api/flight": LIVE_FLIGHT,
       "POST /api/seats/flight-1/message": { ok: true },
@@ -540,13 +540,13 @@ describe("actions on the page", () => {
     })) as HTMLTextAreaElement;
     await waitFor(() => expect(box.disabled).toBe(false));
     fireEvent.change(box, { target: { value: "Go with the list" } });
-    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
     expect(bodies(fn, "/api/seats/flight-1/message")).toHaveLength(0);
-    fireEvent.keyDown(box, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(box, { key: "Enter" });
     await waitFor(() => expect(bodies(fn, "/api/seats/flight-1/message")).toHaveLength(1));
   });
 
-  it("Ctrl or Cmd+Enter sends the question to FLIGHT; plain Enter does not", async () => {
+  it("Enter sends the question to FLIGHT; Shift+Enter does not; Cmd+Enter also sends", async () => {
     const fn = routes([ask("q1")], {
       "/api/flight": LIVE_FLIGHT,
       [`POST ${discussionPath("q1")}`]: { id: "d:q1", itemKey: "q1", version: "v2", messages: [] },
@@ -555,7 +555,7 @@ describe("actions on the page", () => {
     const box = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLTextAreaElement;
     await waitFor(() => expect(box.disabled).toBe(false));
     fireEvent.change(box, { target: { value: "Why this one?" } });
-    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
     expect(bodies(fn, discussionPath("q1"))).toHaveLength(0);
     fireEvent.keyDown(box, { key: "Enter", metaKey: true });
     await waitFor(() => expect(bodies(fn, discussionPath("q1"))).toHaveLength(1));

@@ -101,12 +101,6 @@ export type Route =
 export const tabOf = (r: Route): Page =>
   r.page === "ticket" ? "board" : r.page === "commsChart" ? "comms" : r.page;
 
-/**
- * Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. The FLIGHT
- * page is one: it says what the dock would, so the dock stays out of its way.
- */
-export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["flight", "needs"]);
-
 /** Each page's own path (the header tabs and `g` keys go here). */
 export const PAGE_PATHS: Record<Page, string> = { ...HUD_PAGE_PATHS, needs: "/needs-you" };
 
