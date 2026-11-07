@@ -130,7 +130,7 @@
 }
 .ta-missing li {
   display: grid;
-  gap: 2px;
+  gap: var(--sp-1);
 }
 .ta-missing span {
   color: var(--fg-2);
