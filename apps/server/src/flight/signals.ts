@@ -2,6 +2,7 @@
 import {
   BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
+  COMMS_CONTROLLER,
   FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_COST_DAYS,
@@ -715,7 +716,7 @@ export function flightSignals(i: {
   const flightId = flightSeatId(config);
   const answers = store
     .comms(now - FLIGHT_HOUR_MS * 6)
-    .filter((m) => m.from === COMMS_CAPCOM && m.to === flightId)
+    .filter((m) => (m.from === COMMS_CAPCOM || m.from === COMMS_CONTROLLER) && m.to === flightId)
     .map((m) => m.at);
   for (const d of store.flightDecisions(now - FLIGHT_HOUR_MS * 6, 200)) {
     if (!d.about.includes(FOR_THE_CONTROLLER) && !d.decision.includes(FOR_THE_CONTROLLER)) continue;

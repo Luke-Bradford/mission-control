@@ -1344,6 +1344,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     store.addComms({
       at,
       from: ctx.seatId,
+      senderKind: "flight",
       to: q.agentId,
       ticket: store.run(q.runId)?.ticket ?? null,
       text: Array.from(answer).length > COMMS_MESSAGE_MAX ? FLIGHT_ANSWER_COMMS_POINTER : answer,
@@ -1461,6 +1462,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     store.addComms({
       at,
       from: ctx.seatId,
+      senderKind: "flight",
       to: seatId,
       ticket,
       text: returnedQuestionText(missing),
@@ -1516,7 +1518,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       const told = questionClosedText(question, reason);
       try {
         await deps.supervisor.message(seatId, told, { interrupt: false, questions: "none" });
-        store.addComms({ at, from: ctx.seatId, to: seatId, ticket: item.ticket, text: told });
+        store.addComms({
+          at,
+          from: ctx.seatId,
+          senderKind: "flight",
+          to: seatId,
+          ticket: item.ticket,
+          text: told,
+        });
       } catch {
         // the closure stands; the seat is not told
       }
@@ -1750,6 +1759,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     store.addComms({
       at: now(),
       from: ctx.seatId,
+      senderKind: "flight",
       to: seat,
       ticket: ref,
       text: `Assigned ${ref}: ${card.title}`,
@@ -1885,6 +1895,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           knownSecrets: deps.knownSecrets,
           now: () => at,
           seatSender: false,
+          senderKind: "flight",
           notify: async (to, _text) => {
             // A set-aside run has no seat to message, and FLIGHT only wakes its addressee.
             if (to !== seat || (lift !== null && !lift.onSeat)) return;

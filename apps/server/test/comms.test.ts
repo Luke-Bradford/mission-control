@@ -61,7 +61,12 @@ it("keeps an ended run's old question resolved after its sender starts another r
 });
 
 it("keeps a qualified PR question and its reply in the same repository thread", async () => {
-  const deps = { store, crew: () => ["seat", "other"], knownSecrets: async () => [] };
+  const deps = {
+    store,
+    crew: () => ["seat", "other"],
+    knownSecrets: async () => [],
+    senderKind: "seat" as const,
+  };
   const question = await sendComms({ ...deps, ticket: "repo#42" }, "CAPCOM", {
     to: "seat",
     ref: "PR 7",
@@ -118,6 +123,7 @@ it("stores labels, reply mentions and reactions without waking for a reaction", 
       store,
       crew: () => ["seat", "other"],
       knownSecrets: async () => [],
+      senderKind: "seat" as const,
       now: () => 10,
       notify,
       seatSender: true,
@@ -130,6 +136,7 @@ it("stores labels, reply mentions and reactions without waking for a reaction", 
       store,
       crew: () => ["seat", "other"],
       knownSecrets: async () => [],
+      senderKind: "seat" as const,
       now: () => 11,
       notify,
       seatSender: true,
@@ -153,6 +160,7 @@ it("notifies direct recipients, mentions and reply authors once each", async () 
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     now: () => 10,
     notify,
     seatSender: true,
@@ -180,6 +188,7 @@ it("wakes for labelled CAPCOM direct Comms but not FYI, channel posts or reactio
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     notify,
     seatSender: false,
   };
@@ -208,6 +217,7 @@ it.each(["seat", "other"])(
           }),
         notify,
         seatSender: true,
+        senderKind: "seat",
       },
       "seat",
       { to: "other", text: "hello" },
@@ -227,6 +237,7 @@ it("refuses guessed private messages for reactions and replies", async () => {
     store,
     crew: () => ["seat", "other", "third"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     seatSender: true,
   };
   const privateMessage = await sendComms(deps, "seat", { to: "other", text: "private" });
@@ -248,6 +259,7 @@ it("builds an inbox from direct, mention, reply and pinned messages without dupl
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     now: () => at++,
     seatSender: true,
   };
@@ -371,6 +383,7 @@ it("stores a seat message with the sender's run ticket in repo#n form", async ()
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     now: () => 10,
     seatSender: true,
     senderTicket: "mc#42",
@@ -394,6 +407,7 @@ it("stores an identical message sent again within a minute once, and counts the 
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     now: () => at,
     seatSender: true,
     notify,
@@ -423,6 +437,7 @@ it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", asy
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     now: () => at++,
     seatSender: true,
   };

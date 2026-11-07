@@ -35,7 +35,6 @@ import {
   CI_PASSED_EVENT_PREFIX,
   CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
-  COMMS_CAPCOM,
   COMMS_MC,
   COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_PARK,
@@ -1240,7 +1239,9 @@ export function createEngine(deps: EngineDeps): Engine {
   ): Promise<boolean> {
     const row = {
       at: now(),
-      from: COMMS_CAPCOM,
+      // the hub's own note about a verdict; never the operator's name
+      from: COMMS_MC,
+      senderKind: "hub" as const,
       to: run.agentId,
       ticket: run.ticket ?? null,
       ref: run.ticket ?? null,
@@ -1337,7 +1338,14 @@ export function createEngine(deps: EngineDeps): Engine {
     };
     /** A line sent to the run's seat, recorded as a hand-off to it about the run's ticket. */
     const handOff = (from: string, text: string): void => {
-      store.addComms({ at, from, to: run.agentId, ticket: run.ticket ?? null, text });
+      store.addComms({
+        at,
+        from,
+        senderKind: from === COMMS_MC ? "hub" : "seat",
+        to: run.agentId,
+        ticket: run.ticket ?? null,
+        text,
+      });
       bus.emit("agents");
     };
     /** The run as the merge steps see it: its stored row, with the loop this pass is writing. */
@@ -3051,7 +3059,8 @@ export function createEngine(deps: EngineDeps): Engine {
                 from:
                   config.crew?.sessions
                     .flatMap((x) => x.seats)
-                    .find((x) => seatDef(x).loop === "watch")?.id ?? COMMS_CAPCOM,
+                    .find((x) => seatDef(x).loop === "watch")?.id ?? COMMS_MC,
+                senderKind: "flight",
                 to: run.agentId,
                 ticket: run.ticket ?? null,
                 ref: run.ticket ?? null,

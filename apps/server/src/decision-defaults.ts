@@ -36,6 +36,7 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
       {
         at: now,
         from: flightId ?? COMMS_MC,
+        senderKind: flightId === null ? "hub" : "flight",
         to: COMMS_CAPCOM,
         ticket: item.ticket,
         text: defaultAppliedText(def.option.label, item.brief?.ask || item.text),
