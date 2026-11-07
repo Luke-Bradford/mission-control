@@ -451,6 +451,8 @@ export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt"
  */
 /** A branch's built web app, kept to show as the real app in Demo (the operator opens it from Needs you). */
 export interface DesignPreviewView {
+  /** The repo the preview was published for; ticket numbers are only unique within one repo. */
+  repoId: RepoId;
   ticket: number;
   branch: string;
   sha: string;
