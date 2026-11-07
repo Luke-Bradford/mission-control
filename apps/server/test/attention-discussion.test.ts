@@ -154,3 +154,19 @@ it("opens a discussion on an operator's item they have already read (#1543)", as
   expect(res.statusCode).toBe(200);
   expect(res.json().id).toEqual(expect.any(String));
 });
+
+it("marks the hub's alerts on /api/attention, and only them (#1543)", async () => {
+  const app = buildApp({ config: { ...config, crew: undefined }, store, bus: new ChangeBus() });
+  store.raiseNote({
+    key: "hub-update-held",
+    kind: "blocked",
+    runId: null,
+    seatId: "guido-1",
+    repoId: null,
+    text: "Update waits for you.",
+    at: 2,
+  });
+  const items = (await app.inject("/api/attention")).json() as { key: string; alert?: true }[];
+  expect(items.find((i) => i.key === "note:hub-update-held")?.alert).toBe(true);
+  expect(items.find((i) => i.key === "note:blocked:demo")?.alert).toBeUndefined();
+});

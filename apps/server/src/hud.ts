@@ -941,7 +941,7 @@ export function pinned(item: AttentionItem, store: Store, config: CcConfig): Att
 
 /** Why FLIGHT's own question goes back to it after it wrote again past its brief (#1543). */
 export const FLIGHT_ASKED_AGAIN =
-  "FLIGHT asked again after this brief: brief the newest question with brief_item";
+  "FLIGHT asked again after this brief: brief_item one question that covers every question still open here, the earlier brief's ask included unless the operator answered it";
 
 /**
  * Hub alerts the entry check passes that need the store to tell (#1543): the runaway breaker, and
@@ -1523,6 +1523,13 @@ function buildAttentionItems(
     // a default applies only to the operator's item, so a returned one carries none
     const { defaultDueAt: _default, ...rest } = item;
     const back: AttentionItem = { ...rest, owner: OWNER_FLIGHT, returned };
+    // restated: FLIGHT owes a new brief on a question the operator was already shown, so a
+    // missed rebrief counts under the not-triaging alert rather than going quiet
+    if (restated) {
+      if (!triaging) return { ...back, flightTriage: "down" };
+      const triageDueAt = item.at + FLIGHT_TRIAGE_WAIT_MS;
+      return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
+    }
     // FLIGHT's own line to the operator: FLIGHT wrote it, so it is never work waiting on FLIGHT
     if (ownReply(item, flightId) || flightAsks.has(item.key))
       return { ...back, flightTriage: "handling" };

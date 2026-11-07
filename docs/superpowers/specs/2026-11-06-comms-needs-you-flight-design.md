@@ -216,7 +216,8 @@ lands. The check is one function, so each later rule is one more line in it.
   so FLIGHT fixes it in one try.
 - **FLIGHT's own question** for a decision with no item: FLIGHT asks it with `@CAPCOM`, its digest
   lists the item that raises, and FLIGHT briefs that item. A raw `@CAPCOM` question never reaches
-  Needs you.
+  Needs you. A further `@CAPCOM` question after the brief sends the item back to FLIGHT until one
+  brief covers every question still open; until #1546, FLIGHT has one such item open at a time.
 - **Anything else that fails goes to FLIGHT.** Protected items are included. The item carries the
   failed rules, and FLIGHT's state lists them. It does not count in the operator's tab.
 - **FLIGHT keeps, answers or briefs it.** A wait goes on FLIGHT's watch list. A question FLIGHT

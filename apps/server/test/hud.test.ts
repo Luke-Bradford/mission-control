@@ -2832,12 +2832,17 @@ describe("messages are not Needs you", () => {
       expect.objectContaining({
         key,
         owner: "flight",
-        flightTriage: "handling",
+        // owed a rebrief: on FLIGHT's clock, so a missed one is counted under the alert
+        flightTriage: "waiting",
+        triageDueAt: NOW - 2 * MIN + FLIGHT_TRIAGE_WAIT_MS,
         returned: [FLIGHT_ASKED_AGAIN],
         brief: expect.objectContaining({ ask: "Merge #551 now, or wait for #498?" }),
       }),
     ]);
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain(key);
+    expect(
+      attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS).find((i) => i.key === key),
+    ).toMatchObject({ owner: "flight", flightTriage: "missed" });
     // briefed again, past the newest line: the operator's once more
     store.addBrief({
       key,
