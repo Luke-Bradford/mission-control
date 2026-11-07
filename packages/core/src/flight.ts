@@ -622,7 +622,7 @@ export const PROMOTE_ENGINE_OFF =
   "Not moved: the loop engine is off on this server, so no card moves.";
 export const PROMOTE_NO_RULES = "Not moved: the repo's rules could not be read.";
 export const promoteOffText = (repoId: string): string =>
-  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.`;
+  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question, then brief the item it raises with mc brief_item.`;
 export const moveNotOnBoardText = (ref: string): string => `Not moved: ${ref} is not on the board.`;
 export const moveWrongColumnText = (ref: string, column: string): string =>
   `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and Ready or Refinement to Backlog.`;
@@ -1103,6 +1103,11 @@ export interface FlightState {
     triageRemainingMs: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
+    /**
+     * Set when the Needs you entry check sent the item back (#1543): what it lacks before it may
+     * reach the operator. Fix the brief with brief_item, or keep the item (brief it for FLIGHT).
+     */
+    returned?: string[];
   }[];
   /**
    * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of

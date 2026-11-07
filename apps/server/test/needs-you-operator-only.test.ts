@@ -113,8 +113,13 @@ describe("Needs you counts only what the operator must answer", () => {
     expect(operatorItems(config())).toEqual([]);
     const view = agentViews(config(), store, NOW).find((v) => v.id === "studio");
     expect(view).toMatchObject({ paused: true, pausedBy: "repo#1818" });
-    // the same issues ask the operator once the loop is not paused
-    expect(operatorItems(config(false)).length).toBe(2);
+    const escOwners = (c: CcConfig) =>
+      attentionItems(c, store, NOW)
+        .filter((i) => i.key.startsWith("esc:"))
+        .map((i) => i.owner);
+    // they stay the loop's while it is paused, and are not the loop's once it runs again
+    expect(escOwners(config())).toEqual(["loop", "loop"]);
+    expect(escOwners(config(false))).not.toContain("loop");
   });
 
   it("a held item with nothing for the operator is not listed, yet holds waiting on it stay", () => {
