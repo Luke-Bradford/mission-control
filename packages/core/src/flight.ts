@@ -54,6 +54,8 @@ export const watchOrPlanToolText = (t: string): string => `${t} is only for a wa
 export const FLIGHT_DECISION_KINDS = [
   "answer",
   "pass",
+  "return",
+  "withdraw",
   "start",
   "message",
   "unpark",
@@ -558,6 +560,33 @@ export const answerMessageText = (answer: string): string => `FLIGHT answers: ${
 export const notSentText = (why: string): string => `Not sent: ${why}`;
 export const answeredText = (call: string): string => `Answered ${call}.`;
 
+/** The label on a ticket the operator set aside from Needs you; FLIGHT does not promote it. */
+export const WAITING_OPERATOR_LABEL = "waiting:operator";
+export const PROTECTED_ITEM_REFUSED =
+  "Refused: this item is protected and always reaches the operator. Add a brief; you cannot hold, return or withdraw it.";
+export const RETURN_NOT_SEAT_QUESTION = "Refused: only a seat's question can be returned.";
+export const WITHDRAW_NOT_YOURS =
+  "Refused: you can withdraw only a question you wrote for the operator.";
+export const WITHDRAW_SEAT_QUESTION =
+  "Refused: this is a seat's question. Answer it with mc answer_question, or send it back with mc return_question.";
+/** The longest `missing` of return_question and `reason` of withdraw_question. */
+export const QUESTION_REASON_MAX = 300;
+export const returnedQuestionText = (missing: string): string =>
+  `FLIGHT sent your question back: ${missing}\nAsk again with mc ask_flight once you can add it, or decide as FLIGHT says.`;
+export const returnedText = (call: string): string => `Returned to ${call}.`;
+export const withdrawnText = (key: string): string => `Withdrew ${key}.`;
+export const questionClosedText = (question: string, reason: string): string =>
+  `Your question was closed without an answer. ${reason}\nQuestion: ${question}`;
+export const waitingOperatorPromoteText = (ref: string): string =>
+  `Not moved: ${ref} is labelled waiting:operator. It moves when the operator answers its question or moves the card.`;
+export const waitingOperatorStartText = (ref: string): string =>
+  `Not started: ${ref} is labelled waiting:operator. It starts when the operator answers its question or moves the card.`;
+/** Why the hub closed a question on a recorded fact. */
+export const ticketClosedReason = (ticket: string): string => `${ticket} was closed.`;
+export const prMergedReason = (n: number): string => `PR ${n} merged.`;
+export const prClosedReason = (n: number): string => `PR ${n} was closed without merging.`;
+export const ASKING_RUN_ENDED_REASON = "The asking run ended.";
+
 export const notStartableSeatText = (call: string): string =>
   `Not started: ${call} is not a developer or planner seat.`;
 export const planAlreadyText = (ref: string): string =>
@@ -1003,6 +1032,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "controller_unanswered",
   "wait_over",
   "seat_call",
+  "question_changed",
 ] as const;
 export interface FlightSignal {
   checks?: string[];

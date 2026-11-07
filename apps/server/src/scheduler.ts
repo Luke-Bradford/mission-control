@@ -122,6 +122,7 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "./machine-capacity.ts";
+import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
@@ -556,6 +557,14 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
               `${repo.id} PR #${pr.number} is still a draft.`,
               pr.updatedAt + PR_WAIT_MS,
             );
+      const closed = await closeSettledQuestions({
+        config,
+        store,
+        now: now(),
+        lock: deps.lockState?.(),
+        deliver: deps.deliverDefault,
+      });
+      if (closed > 0) bus.emit("attention");
       const raised = raiseStalledCommsDecisions({ config, store, now: now() });
       if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({

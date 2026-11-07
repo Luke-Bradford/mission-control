@@ -87,6 +87,7 @@ import {
   seatCallSign,
   seatDef,
   type TestLockState,
+  WAITING_OPERATOR_LABEL,
   wakeKeyPrefix,
 } from "@mc/core";
 import { runAccountId } from "../account-bindings.ts";
@@ -110,6 +111,13 @@ import {
   machineCapacitySince,
 } from "../machine-capacity.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr-flow.ts";
+import {
+  closingFact,
+  factsText,
+  openQuestionSubjects,
+  questionFacts,
+  subjectId,
+} from "../question-watch.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
@@ -987,6 +995,7 @@ export function flightState(i: {
     .filter(
       (b) =>
         !b.closed &&
+        !b.labels.includes(WAITING_OPERATOR_LABEL) &&
         inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
         FLIGHT_STARTABLE.includes(hudColumnOf(b)) &&
         !active.has(`${b.repoId}#${b.issueNumber}`) &&
@@ -1330,6 +1339,14 @@ export function flightState(i: {
         return p.state === "open" && p.ready && at !== undefined
           ? [{ ref: p.ref, pr: p.pr, at }]
           : [];
+      }),
+      questions: openQuestionSubjects({ config, store, now, lock: i.lock }).map((q) => {
+        const facts = questionFacts(store, q);
+        return {
+          id: subjectId(q),
+          facts: factsText(facts),
+          closing: closingFact(q, facts) !== null,
+        };
       }),
       now,
     }),
