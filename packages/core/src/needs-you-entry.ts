@@ -43,8 +43,32 @@ const RAW_TEXT: readonly [RegExp, string][] = [
   [/https?:\/\//i, "a web address (put links in the ticket or PR, not the question)"],
   [/\b[\w-]+:[\w./#-]+:\d{10,}\b/, "a raw signal id such as kind:key:1793825335003"],
   [/\b\d{12,}\b/, "a raw timestamp"],
-  [/^\s*\[[^\]]+\]/, "a [tag] prefix"],
 ];
+const TAG_PREFIX: readonly [RegExp, string] = [/^\s*\[[^\]]+\]/, "a [tag] prefix"];
+
+/**
+ * Ids a person cannot read (#1582): a question must make sense to someone who has never seen the
+ * project, so ticket and PR numbers, commit codes, paths, seat ids and tool names stay in the links.
+ */
+const ID_TEXT: readonly [RegExp, string][] = [
+  [/#\d+|\bPR\s*\d+/i, "a ticket or PR number"],
+  // a hex run with both a digit and a letter, so words like "decade" pass
+  [/\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/i, "a commit code"],
+  [/\/[\w.-]+\.[a-z]\w{0,7}\b/i, "a file path"],
+  [/\b[a-z]{3,}-\d+\b/i, "a seat id"],
+  [/@capcom\b/i, "the CAPCOM tag"],
+  [/\bmc(?:__|\s)[a-z]+(?:_[a-z]+)*_[a-z_]+\b/i, "a tool name"],
+];
+
+const plainFaults = (part: string, text: string, raw: readonly (readonly [RegExp, string])[]): string[] => [
+  ...raw.filter(([re]) => re.test(text)).map(([, what]) => `the ${part} has ${what}`),
+  ...ID_TEXT.filter(([re]) => re.test(text)).map(
+    ([, what]) => `the ${part} has ${what}: say it in words`,
+  ),
+];
+
+/** A context is at least one sentence: four or more words, ending in a full stop, ? or !. */
+const SENTENCE = /^(?:\S+\s+){3,}\S*[.?!]["')]?$/;
 
 /**
  * Why an item may not count in Needs you, in words FLIGHT can act on in one try. Empty when it
@@ -65,8 +89,14 @@ export function needsYouEntryFaults(
     if (!/\?\s*$/.test(ask)) faults.push("the question does not end with ?: ask one question");
     if (ask.length > NEEDS_YOU_ASK_MAX)
       faults.push(`the question is over ${NEEDS_YOU_ASK_MAX} characters: one sentence`);
-    for (const [re, what] of RAW_TEXT) if (re.test(ask)) faults.push(`the question has ${what}`);
+    faults.push(...plainFaults("question", ask, [...RAW_TEXT, TAG_PREFIX]));
   }
+  const context = brief.context?.trim() ?? "";
+  if (!SENTENCE.test(context))
+    faults.push(
+      "no context: write two or three sentences saying what this is and why it comes up now",
+    );
+  else faults.push(...plainFaults("context", context, RAW_TEXT));
   const replies = brief.person?.replies?.length ?? 0;
   const n = brief.options.length;
   if (replies === 0 && (n < 2 || n > 4))

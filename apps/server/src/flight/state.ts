@@ -1978,6 +1978,45 @@ export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
   }
 }
 
+/** The plain noun phrase a wake reason counts under in the wake-left alert. */
+function leftWakeGroup(reason: WakeReason): readonly [string, string] {
+  const { category, item } = ((): { category: string; item: string } => {
+    const split = /^([^:]+):([\s\S]*)$/.exec(reason.id);
+    return { category: split?.[1] ?? "", item: split?.[2] ?? "" };
+  })();
+  if (category === "prFlow" || category === "prs" || item.startsWith('"pr:'))
+    return ["pull request waiting for a next step", "pull requests waiting for a next step"];
+  if (category === "q" || item.startsWith('"comms-open:') || item.startsWith('"esc:'))
+    return ["question waiting for an answer", "questions waiting for an answer"];
+  if (category === "free") return ["free seat", "free seats"];
+  if (category === "t") return ["ticket ready to start", "tickets ready to start"];
+  if (category === "parked" || category === "stopped" || category === "idle")
+    return ["seat that needs a look", "seats that need a look"];
+  if (category === "triage") return ["item waiting for FLIGHT", "items waiting for FLIGHT"];
+  return ["other thing to look at", "other things to look at"];
+}
+
+/**
+ * The wake-left alert in plain words: how many things FLIGHT was woken about and left undecided,
+ * when it was woken, and a count by kind. Never a PR, ticket or seat id, or a raw key.
+ */
+export function leftWakeText(
+  left: readonly WakeReason[],
+  wokeAt: number,
+  timeZone: string,
+): string {
+  const groups = new Map<string, { one: string; many: string; n: number }>();
+  for (const r of left) {
+    const [one, many] = leftWakeGroup(r);
+    const g = groups.get(one) ?? { one, many, n: 0 };
+    g.n += 1;
+    groups.set(one, g);
+  }
+  const parts = [...groups.values()].map((g) => `${g.n} ${g.n === 1 ? g.one : g.many}`);
+  const things = left.length === 1 ? "1 thing" : `${left.length} things`;
+  return `FLIGHT was woken at ${clockHm(wokeAt, timeZone)} about ${things} and left ${left.length === 1 ? "it" : "them"} undecided after two tries: ${parts.join(", ")}.`;
+}
+
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */
 const LIFTS_WAKE: ReadonlySet<string> = new Set(["breaker", "holdsInForce"]);
 

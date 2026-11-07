@@ -11,12 +11,13 @@ import type { AttentionBrief, AttentionItem } from "../src/types.ts";
 
 const brief = (over: Partial<AttentionBrief> = {}): AttentionBrief => ({
   for: "operator",
-  ask: "Merge PR 1412, which changes the away-mode rules, now that review and CI passed?",
-  context: "PR 1412 changes packages/core/src/away.ts.",
+  ask: "Merge the change to the away-mode rules now that review and the checks have passed?",
+  context:
+    "The crew changed how away mode decides what to do while you are out. Review found nothing wrong and the checks passed. If you do not decide, it stays open and the crew moves on to other work.",
   recommendation: "Merge: review is clean on the most capable model.",
   options: [
-    { id: "merge", label: "Merge", answer: "Merge PR 1412." },
-    { id: "hold", label: "Hold", answer: "Leave PR 1412 open." },
+    { id: "merge", label: "Merge", answer: "Merge: the change goes live and the crew moves on." },
+    { id: "hold", label: "Hold", answer: "Hold: it stays open until you say." },
   ],
   recommendedOptionId: "merge",
   basis: "RETRO-1 review",
@@ -116,6 +117,60 @@ describe("needsYouEntryFaults", () => {
     ["[operator-decision] Resume the studio loop?", /\[tag\] prefix/],
   ])("refuses machine text in the question: %s", (ask, fault) => {
     expect(needsYouEntryFaults(item({ brief: brief({ ask }) })).join("; ")).toMatch(fault);
+  });
+
+  const asking = (ask: string) => needsYouEntryFaults(item({ brief: brief({ ask }) }));
+  const context = (c: string) => needsYouEntryFaults(item({ brief: brief({ context: c }) }));
+
+  it.each([
+    ["Merge PR 1412 now?", "a ticket or PR number"],
+    ["Merge PR #1412 now?", "a ticket or PR number"],
+    ["Merge repo#1412 now?", "a ticket or PR number"],
+    ["Merge #1412 now?", "a ticket or PR number"],
+    ["Merge commit a1b2c3d now?", "a commit code"],
+    ["Merge 0123456789abcdef0123456789abcdef01234567 now?", "a commit code"],
+    ["Is packages/core/src/away.ts right?", "a file path"],
+    ["Is /etc/hosts.conf right?", "a file path"],
+    ["Should guido-1 carry on?", "a seat id"],
+    ["Should INCO-2 carry on?", "a seat id"],
+    ["Should @CAPCOM decide?", "the CAPCOM tag"],
+    ["Run mc flight_state first?", "a tool name"],
+  ])("refuses an id in the question, naming it: %s", (ask, what) => {
+    expect(asking(ask)).toEqual([`the question has ${what}: say it in words`]);
+  });
+
+  it("refuses the same ids in the context, naming the part", () => {
+    const sentence = (x: string) =>
+      `The crew changed ${x} last week. Nothing happens until you decide.`;
+    expect(context(sentence("PR 1412"))).toEqual([
+      "the context has a ticket or PR number: say it in words",
+    ]);
+    expect(context(sentence("deadbee1"))).toEqual([
+      "the context has a commit code: say it in words",
+    ]);
+    expect(context(sentence("docs/away.md"))).toEqual([
+      "the context has a file path: say it in words",
+    ]);
+    expect(context(sentence("guido-1"))).toEqual(["the context has a seat id: say it in words"]);
+    expect(context(sentence("@capcom"))).toEqual([
+      "the context has the CAPCOM tag: say it in words",
+    ]);
+    expect(context(sentence("mc ask_flight"))).toEqual([
+      "the context has a tool name: say it in words",
+    ]);
+  });
+
+  it("lets plain words through, including words that look a little like ids", () => {
+    expect(asking("Approve the new dependencies view and/or hold it until Friday?")).toEqual([]);
+    expect(asking("Is a decade of data enough, or 24/7 coverage?")).toEqual([]);
+  });
+
+  it("wants a context of at least one sentence", () => {
+    const missing =
+      "no context: write two or three sentences saying what this is and why it comes up now";
+    expect(context("")).toEqual([missing]);
+    expect(context("Away mode.")).toEqual([missing]);
+    expect(context("The crew changed away mode and review passed.")).toEqual([]);
   });
 
   it("refuses fewer than 2 or more than 4 options, and incomplete ones", () => {

@@ -109,15 +109,14 @@ export const HUB_CODE_NEEDS_PERSON =
 /** Update refuses rather than letting pnpm remove the running hub's modules directory. */
 export const HUB_INSTALL_NEEDS_PERSON =
   "Update waits for you: pnpm needs to rebuild node_modules. The running hub will not purge its modules; stop the hub and run pnpm install --frozen-lockfile from an interactive shell, then start it again.";
-const HELD_NAMED = 5;
-const named = (xs: readonly string[]) =>
-  xs.length > HELD_NAMED
-    ? `${xs.slice(0, HELD_NAMED).join(", ")} and ${xs.length - HELD_NAMED} more`
-    : xs.join(", ");
-export const hubCodeHeldText = (held: HeldRange): string =>
-  held.unsafePaths !== undefined && held.unsafePaths.length > 0
-    ? `Update waits for you: main adds a symlink or submodule (${named(held.unsafePaths)}), which auto-Update never applies: run Update after checking it. Commits: ${named(held.commits)}.`
-    : `Update waits for you: main changes more than the page and docs. Auto-Update leaves that to a person: run Update. Commits: ${named(held.commits)}. Paths: ${named(held.paths)}.`;
+const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+/** The held-Update alert in plain words: how much main changed, never the commits or paths. */
+export const hubCodeHeldText = (held: HeldRange): string => {
+  const size = `${counted(held.commits.length, "change", "changes")} touching ${counted(held.paths.length, "file", "files")}`;
+  return held.unsafePaths !== undefined && held.unsafePaths.length > 0
+    ? `A new version of Mission Control is waiting for you (${size}). It adds a link to another file or folder, which automatic updating never applies. Check it, then run Update; nothing changes until you do.`
+    : `A new version of Mission Control is waiting for you (${size}). It changes more than the page and docs, so automatic updating leaves it to you. Run Update when you are ready; nothing changes until you do.`;
+};
 /** Auto-Update's refusal when the checkout's HEAD is not on origin/main's history. */
 export const HUB_HEAD_OFF_MAIN =
   "the checkout's HEAD is not on origin/main's history; a person runs this Update";

@@ -1563,7 +1563,7 @@ describe("auto update", () => {
       expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
       const held = a.held.mock.calls.at(-1)?.[0];
       expect(held?.unsafePaths).toEqual(["docs/linked"]);
-      expect(hubCodeHeldText(held)).toContain("symlink or submodule");
+      expect(hubCodeHeldText(held)).toContain("link to another file or folder");
       await expect(a.u.update({ auto: true })).rejects.toMatchObject({
         status: 409,
         message: HUB_CODE_NEEDS_PERSON,
@@ -1645,13 +1645,24 @@ describe("auto update", () => {
     expect(a.held).toHaveBeenCalledWith(null);
   });
 
-  it("the held text names the commits and the paths", () => {
+  it("the held text says what is waiting in words, with counts, not commits or paths", () => {
     const text = hubCodeHeldText({
-      commits: ["a1 one", "b2 two"],
+      commits: ["a1b2c3d one", "b2c3d4e two"],
       paths: ["apps/server/src/x.ts", "package.json"],
     });
-    expect(text).toContain("a1 one, b2 two");
-    expect(text).toContain("apps/server/src/x.ts, package.json");
+    expect(text).toContain("2 changes");
+    expect(text).toContain("2 files");
+    expect(text).not.toMatch(/a1b2c3d|\.ts|package\.json|\/|Commits:|Paths:/);
+    expect(text).not.toMatch(/\d{10,}|\w+:[\w-]+:\d/);
+    const one = hubCodeHeldText({ commits: ["a1b2c3d one"], paths: ["package.json"] });
+    expect(one).toContain("1 change ");
+    expect(one).toContain("1 file");
+    const link = hubCodeHeldText({
+      commits: ["a1b2c3d one"],
+      paths: ["docs/linked"],
+      unsafePaths: ["docs/linked"],
+    });
+    expect(link).not.toMatch(/docs\/linked|a1b2c3d/);
   });
 
   it("does nothing when main has not moved", async () => {
