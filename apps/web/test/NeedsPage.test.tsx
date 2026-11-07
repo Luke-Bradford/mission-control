@@ -141,7 +141,12 @@ describe("Needs you page", () => {
     expect(pins.textContent).toContain("Loop schema in core (stage A)");
     // the list row shows the same title and the raised time
     const list = screen.getByRole("navigation", { name: "Waiting on you" });
-    expect(within(list).getAllByRole("link")[0]?.textContent).toContain("Loop schema in core");
+    const row = within(list).getAllByRole("link")[0]?.textContent ?? "";
+    expect(row).toContain("Loop schema in core");
+    // two items on one ticket differ by their question; the row names who asks
+    expect(row).toContain("Merge PR 1412 now that review and CI passed?");
+    expect(row).toContain("Asked by ");
+    expect(band.textContent).toContain("Asked by ");
   });
 
   it("says nobody is waiting with no items", async () => {

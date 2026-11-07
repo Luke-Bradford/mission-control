@@ -563,6 +563,11 @@ const BriefItemArgs = z
     ...StructuredBriefArgs.shape,
     key: z.string().min(1).max(BRIEF_KEY_MAX),
     for: z.enum(["operator", "flight"]).default("operator"),
+    /** The ticket the question is about, for an item with none of its own (#1543). */
+    ticket: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,100}#[1-9]\d{0,9}$/)
+      .optional(),
     assessment: text(BRIEF_INPUT_MAX).optional(),
     context: text(BRIEF_INPUT_MAX).optional(),
     did: z
@@ -2695,7 +2700,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const item = operatorItems(config, store, at, deps.login, undefined, deps.lockState?.()).find(
       (i) => i.key === key,
     );
-    if (item === undefined || ownReply(item, flightSeat(config)?.seat.id ?? null)) {
+    // FLIGHT's own @CAPCOM question reaches the operator only through its brief (#1543)
+    if (
+      item === undefined ||
+      (structured.for !== "operator" && ownReply(item, flightSeat(config)?.seat.id ?? null))
+    ) {
       return fail(briefNoItemText(key));
     }
     // the Needs you entry check (#1543), at the source: a brief that would not reach the operator
@@ -2711,6 +2720,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           options: options ?? [],
           basis,
           at,
+          ...(structured.ticket === undefined ? {} : { ticket: structured.ticket }),
           ...(structured.person === undefined ? {} : { person: structured.person }),
         },
       });

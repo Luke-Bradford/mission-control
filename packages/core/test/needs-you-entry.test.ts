@@ -51,6 +51,22 @@ describe("needsYouEntryFaults", () => {
       expect(needsYouEntryFaults(item({ key, kind: "blocked", brief: undefined }))).toEqual([]);
     }
     expect(needsYouEntryFaults(item({ kind: "ratelimit", brief: undefined }))).toEqual([]);
+    // the operator's own request (a queue reorder): its choices are the hub's, not FLIGHT's
+    expect(needsYouEntryFaults(item({ kind: "approval", ticket: null, url: null }))).toEqual([]);
+  });
+
+  it("takes the ticket FLIGHT names when the item has none", () => {
+    const bare = { ticket: null, url: null };
+    expect(needsYouEntryFaults(item({ ...bare, brief: brief({ ticket: "mc#7" }) }))).toEqual([]);
+    expect(needsYouEntryFaults(item(bare))).toEqual([
+      "no ticket or PR: name it with ticket in brief_item",
+    ]);
+  });
+
+  it("wants the question to end with ?", () => {
+    expect(needsYouEntryFaults(item({ brief: brief({ ask: "Merge? It is ready." }) }))).toEqual([
+      "the question does not end with ?: ask one question",
+    ]);
   });
 
   it("refuses an item with no brief, or one FLIGHT kept", () => {
@@ -67,7 +83,7 @@ describe("needsYouEntryFaults", () => {
       "no question: say in one sentence what the operator must decide",
     ]);
     expect(needsYouEntryFaults(item({ brief: brief({ ask: "None for the operator." }) }))).toEqual([
-      "the question does not ask anything: end it with ?",
+      "the question does not end with ?: ask one question",
     ]);
   });
 
@@ -120,7 +136,7 @@ describe("needsYouEntryFaults", () => {
       ),
     ).toEqual([
       "no recommendation: say which option FLIGHT would pick, and why",
-      "no ticket or PR: name what the question is about",
+      "no ticket or PR: name it with ticket in brief_item",
       "no time raised",
     ]);
   });

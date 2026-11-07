@@ -4086,7 +4086,7 @@ describe("promote", () => {
     rulesNow = { ...rulesNow, promoteBacklog: false };
     expect(await call("promote", P())).toEqual(
       refused(
-        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.",
+        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question, then brief the item it raises with mc brief_item.",
       ),
     );
   });
@@ -5273,8 +5273,15 @@ describe("brief_item", () => {
     const key = `lock:r-lock:${NOW - 30 * 60_000}`;
     const state = JSON.parse((await call("flight_state", {})).text);
     expect(state.items).toContainEqual(expect.objectContaining({ key, kind: "lock" }));
-    // a lock names no ticket or PR, so it cannot reach the operator's list (#1543): FLIGHT keeps it
-    expect((await call("brief_item", B({ key, for: "flight" }))).isError).toBeUndefined();
+    // a lock names no ticket or PR: refused for the operator until FLIGHT names one (#1543)
+    const refused = await call("brief_item", B({ key }));
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("no ticket or PR: name it with ticket in brief_item");
+    expect((await call("brief_item", B({ key, ticket: "mc#7" }))).isError).toBeUndefined();
+    expect(attentionItems(cfg, store, nowMs, lockNow).find((i) => i.key === key)).toMatchObject({
+      owner: "operator",
+      brief: { ticket: "mc#7" },
+    });
   });
 
   it("fills the original question and removes an answered question from triage", async () => {
@@ -7480,10 +7487,12 @@ describe("superuser housekeeping", () => {
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
     expect(raiseStalledCommsDecisions({ config: cfg, store, now: nowMs })).toBe(1);
-    // FLIGHT's own unbriefed Comms item is FLIGHT's to settle, not the operator's (#1543)
+    // the hub's fallback brief is a complete question on the ticket, so it passes the entry check
     expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
-      owner: "flight",
-      flightTriage: "waiting",
+      owner: "operator",
+      brief: {
+        ask: "flight-1 has waited on guido-1 about mc#909: let it proceed on its best judgment, or hold?",
+      },
     });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
       "isError",

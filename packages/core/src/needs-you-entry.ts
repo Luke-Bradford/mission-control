@@ -22,7 +22,9 @@ export function needsYouAlert(item: Pick<AttentionItem, "key" | "kind">): boolea
   return (
     ALERT_KEYS.has(item.key) ||
     item.key.startsWith(`note:${GUARD_ACK_PREFIX}`) ||
-    item.kind === "ratelimit"
+    item.kind === "ratelimit" ||
+    // the operator's own request, such as a queue reorder, with its choices written by the hub
+    item.kind === "approval"
   );
 }
 
@@ -55,7 +57,7 @@ export function needsYouEntryFaults(
   const ask = brief.ask?.trim() ?? "";
   if (ask === "") faults.push("no question: say in one sentence what the operator must decide");
   else {
-    if (!ask.includes("?")) faults.push("the question does not ask anything: end it with ?");
+    if (!/\?\s*$/.test(ask)) faults.push("the question does not end with ?: ask one question");
     if (ask.length > NEEDS_YOU_ASK_MAX)
       faults.push(`the question is over ${NEEDS_YOU_ASK_MAX} characters: one sentence`);
     for (const [re, what] of RAW_TEXT) if (re.test(ask)) faults.push(`the question has ${what}`);
@@ -64,12 +66,13 @@ export function needsYouEntryFaults(
   const n = brief.options.length;
   if (replies === 0 && (n < 2 || n > 4))
     faults.push(`${n} options: give 2 to 4, each with what happens if chosen`);
-  if (brief.options.some((o) => o.label.trim() === "" || o.answer.trim() === ""))
+  // stored briefs are read without validation: a legacy option may lack a field
+  if (brief.options.some((o) => (o.label ?? "").trim() === "" || (o.answer ?? "").trim() === ""))
     faults.push("an option has no label or no answer");
   if (brief.recommendation.trim() === "")
     faults.push("no recommendation: say which option FLIGHT would pick, and why");
-  if (item.ticket === null && item.url === null)
-    faults.push("no ticket or PR: name what the question is about");
+  if (item.ticket === null && item.url === null && !brief.ticket)
+    faults.push("no ticket or PR: name it with ticket in brief_item");
   if (item.at <= 0) faults.push("no time raised");
   return faults;
 }

@@ -108,7 +108,7 @@
 
 .needs-band {
   flex: none;
-  max-height: 40vh;
+  max-height: 33vh;
   overflow: auto;
   padding: var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--line);
@@ -176,6 +176,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.needs-row-ask {
+  min-width: 0;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.needs-row-who {
+  color: var(--fg-2);
 }
 
 .needs-more > summary {

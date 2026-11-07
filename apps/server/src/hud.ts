@@ -866,8 +866,7 @@ export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store:
   if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
-  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
-  const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+  const park = noteParkOf(item, store);
   return (
     park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
   );
@@ -891,28 +890,40 @@ const STUCK_KINDS: readonly AttentionItem["kind"][] = [
  * (#1543): the page pins them so a number never stands alone. The PR is the item's own (a PR item
  * or a PR address), else the open PR for its ticket.
  */
-export function pinned(item: AttentionItem, store: Store): AttentionItem {
-  const ref = item.ticket === null ? null : parseTicket(item.ticket);
+export function pinned(item: AttentionItem, store: Store, config: CcConfig): AttentionItem {
+  // the item's own ticket, else the one FLIGHT named in its brief
+  const ticket = item.ticket ?? item.brief?.ticket ?? null;
+  const ref = ticket === null ? null : parseTicket(ticket);
   const card =
     ref === null ? undefined : store.board(ref.repoId).find((b) => b.issueNumber === ref.number);
-  const own =
-    /^pr:([^#]+)#(\d+):/.exec(item.key) ??
-    /github\.com\/[^/]+\/([^/]+)\/pull\/(\d+)/.exec(item.url ?? "");
-  const repoId = own?.[1] ?? ref?.repoId ?? item.repoId;
-  const prs = repoId === null || repoId === undefined ? [] : store.pullRequests(repoId);
+  const key = /^pr:([^#]+)#(\d+):/.exec(item.key);
+  const address = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(item.url ?? "");
+  // a PR address names the GitHub repo, which maps to a configured repo id
+  const own: [string, number] | null =
+    key !== null
+      ? [key[1] as string, Number(key[2])]
+      : address !== null
+        ? [
+            config.repos.find((r) => r.github.toLowerCase() === address[1]?.toLowerCase())?.id ??
+              "",
+            Number(address[2]),
+          ]
+        : null;
+  const repoId = own?.[0] || ref?.repoId || item.repoId;
+  const prs = repoId ? store.pullRequests(repoId) : [];
   const pr =
     own !== null
-      ? prs.find((p) => p.number === Number(own[2]))
-      : item.ticket === null
+      ? prs.find((p) => p.number === own[1])
+      : ticket === null
         ? undefined
-        : prs.find((p) => p.ticket === item.ticket && p.state === "open");
-  if (item.ticket === null && pr === undefined) return item;
+        : prs.find((p) => p.ticket === ticket && p.state === "open");
+  if (ticket === null && pr === undefined) return item;
   return {
     ...item,
     pinned: {
-      ...(item.ticket === null
+      ...(ticket === null
         ? {}
-        : { ticket: { ref: item.ticket, title: card?.title ?? null, url: card?.url ?? null } }),
+        : { ticket: { ref: ticket, title: card?.title ?? null, url: card?.url ?? null } }),
       ...(pr === undefined
         ? {}
         : {
@@ -934,10 +945,28 @@ export function pinned(item: AttentionItem, store: Store): AttentionItem {
  */
 export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
+  // hub stops only the operator clears: new runs paused for the machine, the CLI held
+  if (HUB_STOP_KEYS.some((k) => item.key === k || item.key.startsWith(`${k}:`))) return true;
   if (item.kind !== "blocked") return false;
-  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
-  const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+  const park = noteParkOf(item, store);
   return park === "budget" || park === "account";
+}
+
+/**
+ * Hub stops that only the operator clears, by note key or key prefix: machine capacity
+ * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts) and the CLI
+ * auto-rollback (cli-auto.ts). hud.test.ts pins them to those modules' keys.
+ */
+export const HUB_STOP_KEYS = [
+  `${NOTE_KEY}machine-capacity`,
+  `${NOTE_KEY}cli:claude`,
+  `${NOTE_KEY}cli-auto`,
+] as const;
+
+/** The park kind of the run behind a note item, if any. */
+function noteParkOf(item: Pick<AttentionItem, "key">, store: Store): string | undefined {
+  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
+  return note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
 }
 
 /** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
@@ -1475,13 +1504,27 @@ function buildAttentionItems(
     if (triage === null || item.owner !== OWNER_OPERATOR || hubAlert(item, store)) return item;
     const returned = needsYouEntryFaults(item);
     if (returned.length === 0) return item;
-    const back: AttentionItem = { ...item, owner: OWNER_FLIGHT, returned };
-    if (!triaging) return { ...back, flightTriage: "down" };
+    // a default applies only to the operator's item, so a returned one carries none
+    const { defaultDueAt: _default, ...rest } = item;
+    const back: AttentionItem = { ...rest, owner: OWNER_FLIGHT, returned };
     // FLIGHT's own line to the operator, or an item FLIGHT kept: FLIGHT already has it
     if (item.brief?.for === "flight" || ownReply(item, flightId) || flightAsks.has(item.key))
       return { ...back, flightTriage: "handling" };
+    // read, and FLIGHT may have dismissed it (dismiss acks): dealt with unless protected, which
+    // FLIGHT cannot dismiss, so the read was the operator's and FLIGHT still owes it a brief
+    if (item.acked && !protectedDecisionItem(store, item, config, now))
+      return { ...back, flightTriage: "handling" };
+    if (!triaging) return { ...back, flightTriage: "down" };
+    // FLIGHT's window starts when it could first see the item as its own: raised, briefed,
+    // released from a hold, FLIGHT live, or this hub started (so a rollout is not "late" at once)
     const triageDueAt =
-      Math.max(item.at, item.brief?.at ?? 0, triage.liveSince) + FLIGHT_TRIAGE_WAIT_MS;
+      Math.max(
+        item.at,
+        item.brief?.at ?? 0,
+        item.holdReleasedAt ?? 0,
+        triage.liveSince,
+        hubStartedAt ?? 0,
+      ) + FLIGHT_TRIAGE_WAIT_MS;
     return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
   };
   const result: AttentionItem[] = items

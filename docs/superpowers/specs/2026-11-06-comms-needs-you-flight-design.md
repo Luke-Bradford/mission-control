@@ -195,14 +195,15 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
    - the runaway breaker tripped;
    - a run stopped on a budget or account limit;
    - an account at its rate limit;
-   - a safety stop.
+   - a safety stop: new runs paused for the machine, the CLI held, upgraded or rolled back;
+   - the operator's own request, such as a queue reorder, whose choices the hub writes.
 2. **FLIGHT's complete question.** FLIGHT's brief for the operator, with all of these:
    - a question: one sentence that asks, ending in `?`, at most 300 characters;
    - no web address, raw signal id, raw timestamp or `[tag]` prefix in the question;
    - 2 to 4 options, each with a label and what happens if chosen; a person's message may offer
      suggested replies instead;
    - a recommendation;
-   - the ticket or PR it is about;
+   - the ticket or PR it is about: the item's own, or one FLIGHT names with `ticket`;
    - the time it was raised.
 
 Rule 4's further parts (title, priority, picture for a looks question) join this check when #1510
@@ -212,12 +213,19 @@ lands. The check is one function, so each later rule is one more line in it.
 
 - **FLIGHT's brief is refused when written.** `brief_item` for the operator names each failed rule,
   so FLIGHT fixes it in one try.
+- **FLIGHT's own question** for a decision with no item: FLIGHT asks it with `@CAPCOM`, its digest
+  lists the item that raises, and FLIGHT briefs that item. A raw `@CAPCOM` question never reaches
+  Needs you.
 - **Anything else that fails goes to FLIGHT.** Protected items are included. The item carries the
   failed rules, and FLIGHT's state lists them. It does not count in the operator's tab.
 - **FLIGHT keeps, answers or briefs it.** A wait goes on FLIGHT's watch list. A question FLIGHT
   cannot state goes back to the seat (#1532).
 - **When FLIGHT is not triaging,** failed items are counted under the one "FLIGHT is not triaging"
   alert. The operator learns that work waits, and starting FLIGHT is the fix.
+- **FLIGHT's window** for a returned item starts when FLIGHT could first see it: raised, briefed,
+  released from a hold, FLIGHT live or the hub started. A rollout is not "late" at once.
+- **An item the operator already read** is dealt with when it is ordinary. When it is protected,
+  FLIGHT still owes it a brief, and its digest lists it.
 - **With no FLIGHT seat** the check does not apply. Rule 3's exception stands.
 
 ### The page, simplest form

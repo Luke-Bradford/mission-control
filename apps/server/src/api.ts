@@ -5593,7 +5593,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       const pinnedFor = (item: AttentionItem): AttentionItem =>
-        isOperatorItem(item) ? pinned(item, store) : item;
+        isOperatorItem(item) ? pinned(item, store, config) : item;
       api.get(
         "/attention",
         async (): Promise<AttentionItem[]> =>

@@ -1219,6 +1219,11 @@ export interface BriefOption {
 export interface AttentionBrief {
   /** Missing on briefs written before triage routing was introduced. */
   for?: "operator" | "flight";
+  /**
+   * The ticket (`repo#n`) the question is about, when the item has none of its own (#1543): a
+   * crew error, a stray, FLIGHT's own question.
+   */
+  ticket?: string;
   original?: string;
   assessment?: string;
   did?: { action: string; refs: string[] }[];

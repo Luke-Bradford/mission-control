@@ -15,6 +15,13 @@ export const questionOf = (item: AttentionItem): string => item.brief?.ask?.trim
 export const titleOf = (item: AttentionItem): string =>
   item.pinned?.ticket?.title ?? item.pinned?.pr?.title ?? questionOf(item);
 
+/**
+ * Who asks: the seat or loop behind the item, else FLIGHT when it briefed the question, else the
+ * hub (an alert).
+ */
+export const askerOf = (item: AttentionItem, callSign?: string | null): string =>
+  callSign ?? item.agentId ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub");
+
 /** The recommended option's label, when the brief names one. */
 export function recommendedLabel(item: AttentionItem): string | null {
   const id = item.brief?.recommendedOptionId;
@@ -88,9 +95,7 @@ export function QuestionBand({
     <section className="needs-band" aria-label="The question">
       <div className="needs-band-meta">
         <Pill tone={item.kind === "decision" ? "warn" : "plain"}>{ATTENTION_LABEL[item.kind]}</Pill>
-        <span className="needs-band-who">
-          {`Raised by ${row?.displayCallSign ?? item.agentId ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub")}`}
-        </span>
+        <span className="needs-band-who">{`Asked by ${askerOf(item, row?.displayCallSign)}`}</span>
         <Raised at={item.at} />
         {actions}
       </div>

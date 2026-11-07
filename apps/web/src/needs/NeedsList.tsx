@@ -4,7 +4,7 @@ import { MarkdownInline } from "../components/Markdown.tsx";
 import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { followLink, needsYouPath, PAGE_PATHS } from "../router.ts";
-import { questionOf, titleOf } from "./QuestionBand.tsx";
+import { askerOf, questionOf, titleOf } from "./QuestionBand.tsx";
 
 /** Times tick here, in the row's child, so the list is not rebuilt each second. */
 function RowAge({ at }: { at: number }) {
@@ -12,7 +12,7 @@ function RowAge({ at }: { at: number }) {
   const tz = useTz();
   if (at <= 0 || tz === null) return <span className="s">—</span>;
   return (
-    <time className="s" dateTime={new Date(at).toISOString()} title={raisedAt(at, tz)}>
+    <time className="s" dateTime={new Date(at).toISOString()}>
       {`${raisedAt(at, tz)} · ${rel(at, now, tz)}`}
     </time>
   );
@@ -35,6 +35,12 @@ function Row({ item, current }: { item: AttentionItem; current: boolean }) {
       <span className="needs-row-text">
         <MarkdownInline text={titleOf(item)} max={160} />
       </span>
+      {questionOf(item) !== titleOf(item) && (
+        <span className="needs-row-ask s">
+          <MarkdownInline text={questionOf(item)} max={120} />
+        </span>
+      )}
+      <span className="needs-row-who s">{`Asked by ${askerOf(item)}`}</span>
     </a>
   );
 }

@@ -32,18 +32,21 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli-update.ts";
 import type { CcConfig } from "../src/config.ts";
-import { operatorItems } from "../src/flight/state.ts";
+import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {
   agentViews,
   attentionItems,
   crew,
   flightNotTriagingDueAt,
+  HUB_STOP_KEYS,
   isOperatorCall,
   markHubStarted,
   NO_LOCK,
   pinned,
 } from "../src/hud.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -944,7 +947,7 @@ describe("attentionItems: PRs waiting on you", () => {
     seed([pr()]);
     const item = prItems()[0];
     if (item === undefined) throw new Error("no PR item");
-    expect(pinned(item, store).pinned).toEqual({
+    expect(pinned(item, store, config).pinned).toEqual({
       ticket: {
         ref: "shop-app#42",
         title: "Fix the fence",
@@ -2203,16 +2206,18 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     const held = asked("GUIDO-1", "c1");
     flightRow({ runId: null, state: "stopped" });
     expect(keys(NOW)).not.toContain(`ask:${held}`);
-    // FLIGHT's own unbriefed question is counted too: nothing raw reaches Needs you (#1543)
+    // FLIGHT's own unbriefed question stays FLIGHT's and is not work waiting on it (#1543)
     expect(flight(NOW)).toEqual([
-      [`ask:${own}`, "down"],
+      [`ask:${own}`, "handling"],
       [`ask:${held}`, "down"],
     ]);
-    const stopped = attentionItems(c, store, NOW).find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY);
-    expect(stopped?.notTriaging?.cause).toBe("stopped");
-    expect(stopped?.notTriaging?.keys).toEqual(
-      expect.arrayContaining([`ask:${own}`, `ask:${held}`]),
-    );
+    expect(
+      attentionItems(c, store, NOW).find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging,
+    ).toMatchObject({
+      cause: "stopped",
+      // the unbriefed decision and flag from above are counted too
+      keys: [`ask:${held}`, "esc:shop-app#9", "note:triage"],
+    });
   });
 
   it("FLIGHT triages questions from every session", () => {
@@ -2800,6 +2805,21 @@ describe("messages are not Needs you", () => {
         returned: [expect.stringMatching(/^no brief for the operator/)],
       }),
     ]);
+    // FLIGHT's digest lists it so FLIGHT can brief it; briefed complete, it reaches Needs you
+    const key = chatter()[0]?.key ?? "";
+    expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain(key);
+    store.addBrief({
+      key,
+      for: "operator",
+      ask: "Merge #551 now, or wait for #498?",
+      context: "Both touch the parser.",
+      recommendation: "Wait for #498.",
+      options: TWO_OPTIONS,
+      basis: "the two PRs",
+      at: NOW - 7 * MIN,
+    });
+    expect(chatter()).toEqual([expect.objectContaining({ key, owner: "operator" })]);
+    expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).not.toContain(key);
   });
 
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {
@@ -3556,6 +3576,107 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     });
   });
 
+  it("keeps the hub's machine and CLI stops as alerts, pinned to their modules' keys (#1543)", () => {
+    flight();
+    expect(HUB_STOP_KEYS).toEqual([
+      `note:${MACHINE_CAPACITY_KEY}`,
+      `note:${CLI_NOTE_KEY}`,
+      "note:cli-auto",
+    ]);
+    expect(CLI_UPGRADE_NOTE_KEY.startsWith(`${CLI_NOTE_KEY}:`)).toBe(true);
+    for (const [key, kind] of [
+      [MACHINE_CAPACITY_KEY, "flag"],
+      [CLI_NOTE_KEY, "blocked"],
+      [CLI_UPGRADE_NOTE_KEY, "blocked"],
+      ["cli-auto:claude:2.0.1", "blocked"],
+    ] as const)
+      store.raiseNote({
+        key,
+        kind,
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: key,
+        at: NOW - HOUR,
+      });
+    expect(
+      needsYouItems(all())
+        .map((i) => i.key)
+        .sort(),
+    ).toEqual(
+      [
+        `note:${MACHINE_CAPACITY_KEY}`,
+        `note:${CLI_NOTE_KEY}`,
+        `note:${CLI_UPGRADE_NOTE_KEY}`,
+        "note:cli-auto:claude:2.0.1",
+      ].sort(),
+    );
+  });
+
+  it("holds FLIGHT to a protected item the operator already read; a read ordinary one is dealt with (#1543)", () => {
+    flight();
+    const raise = (key: string, kind: "flag" | "question") =>
+      store.raiseNote({
+        key,
+        kind,
+        runId: null,
+        seatId: null,
+        repoId: "shop-app",
+        text: key,
+        at: NOW - MIN,
+      });
+    raise("prot", "flag");
+    raise("plain", "question");
+    // an old operator brief that the entry check refuses (one option): returned to FLIGHT
+    for (const key of ["note:prot", "note:plain"])
+      store.addBrief({
+        key,
+        for: "operator",
+        ask: "Go?",
+        context: "c",
+        recommendation: "Go.",
+        options: [{ label: "Go", answer: "Go." }],
+        basis: "b",
+        at: NOW - MIN,
+      });
+    store.ack(["note:prot", "note:plain"], NOW);
+    expect(all().find((i) => i.key === "note:prot")).toMatchObject({
+      owner: "flight",
+      flightTriage: "waiting",
+      acked: true,
+    });
+    expect(all().find((i) => i.key === "note:plain")).toMatchObject({
+      owner: "flight",
+      flightTriage: "handling",
+    });
+    const triage = flightTriageItems(c, store, NOW, null, []).map((i) => i.key);
+    expect(triage).toContain("note:prot");
+    expect(triage).not.toContain("note:plain");
+  });
+
+  it("starts FLIGHT's window at the hub's start and at a hold's release, not at once (#1543)", () => {
+    flight();
+    store.raiseNote({
+      key: "old",
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: "shop-app",
+      text: "old",
+      at: NOW - 30 * DAY,
+    });
+    markHubStarted(NOW - MIN);
+    try {
+      expect(all().find((i) => i.key === "note:old")).toMatchObject({
+        flightTriage: "waiting",
+        triageDueAt: NOW - MIN + FLIGHT_TRIAGE_WAIT_MS,
+      });
+      expect(aggregate()).toBeUndefined();
+    } finally {
+      markHubStarted(null);
+    }
+  });
+
   it("is never FLIGHT's to triage", () => {
     flight({ runId: null, state: "stopped" });
     ask();
@@ -3658,13 +3779,24 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     const error = all().find((i) => i.kind === "error");
     // unbriefed, an error fails the Needs you entry check: FLIGHT's, counted by the alert (#1543)
     expect(error).toMatchObject({ owner: "flight", flightTriage: "missed" });
-    expect(aggregate()?.notTriaging?.keys).toContain("note:plain");
-    expect(aggregate()?.notTriaging?.keys).toContain(error?.key);
+    // the controller-check and acceptance parks need FLIGHT's brief too: counted, not raw
+    expect(aggregate()?.notTriaging?.keys).toEqual([
+      error?.key,
+      "note:plain",
+      "note:blocked:r-cc:0",
+      "note:blocked:r-uat:0",
+    ]);
     // reported down while live: a stuck run is counted by the alert too
     raise("blocked:other", "blocked");
     watchNote(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
     expect(all().find((i) => i.key === "note:blocked:other")?.owner).toBe("flight");
-    expect(aggregate()?.notTriaging?.keys).toContain("note:blocked:other");
+    expect(aggregate()?.notTriaging?.keys).toEqual([
+      error?.key,
+      "note:plain",
+      "note:blocked:other",
+      "note:blocked:r-cc:0",
+      "note:blocked:r-uat:0",
+    ]);
   });
 
   it("reads as unread again when a new item joins after the operator acked it", () => {
