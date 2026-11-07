@@ -7,38 +7,29 @@
   max-width: 100%;
 }
 
-.crew-pause-form {
-  position: fixed;
-  top: 16px;
-  right: 16px;
-  z-index: 1000;
-  width: min(300px, calc(100vw - 32px));
-  max-height: calc(calc(100 * var(--dvh)) - 32px);
-  overflow-y: auto;
-  box-sizing: border-box;
-  padding: var(--sp-3);
-  display: grid;
-  gap: var(--sp-2);
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: var(--shadow);
+.modal .panel.crew-pause-panel {
+  width: min(640px, 100%);
 }
 
-.crew-pause-form label {
-  display: flex;
-  align-items: center;
+.crew-pause-panel .pfoot {
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+
+.crew-pause-seats {
+  padding-left: var(--sp-4);
+}
+
+.crew-pause-duration {
   gap: var(--sp-1);
 }
 
-.crew-pause-form input:not([type="checkbox"]) {
-  min-width: 0;
-  flex: 1;
+.crew-pause-duration > legend {
+  margin-bottom: var(--sp-1);
 }
 
-.crew-pause-form input[type="checkbox"] {
-  width: 24px;
-  height: 24px;
+.crew-pause-duration > p {
+  margin: 0;
 }
 
 .crew-pause-audit,
@@ -51,9 +42,13 @@
 }
 
 .crew-pause-audit {
-  padding-bottom: var(--sp-2);
-  border-bottom: 1px solid var(--line);
+  padding-top: var(--sp-4);
+  border-top: 1px solid var(--line);
   font-size: var(--fs-s);
+}
+
+.crew-pause-audit h3 {
+  margin: 0;
 }
 
 .crew-pause-audit ul {

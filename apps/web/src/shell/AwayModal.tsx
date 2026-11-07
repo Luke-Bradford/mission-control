@@ -1,7 +1,16 @@
 import type { AwaySettings } from "@mc/core";
 import { useEffect, useId, useRef, useState } from "react";
-import { apiPost } from "../api.ts";
+import { ApiError, apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
+import {
+  ErrorSummary,
+  FieldError,
+  type FieldIssue,
+  fieldProps,
+  isUncertain,
+  UNCERTAIN_TEXT,
+  useSubmitGuard,
+} from "../components/formSupport.tsx";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { isoDay, untilLabel } from "../fmt.ts";
 import { Seg } from "../hud/Seg.tsx";
@@ -67,7 +76,23 @@ const ON_OFF = [
   { value: "on", label: "On" },
 ] as const;
 
-/** Away mode (catalogue §2.8): what Mission Control may do while the operator is away, saved as one record. */
+/** A date field's value: empty (until you turn it off), or a real calendar day as YYYY-MM-DD. */
+const validDay = (value: string): boolean => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(Date.UTC(y, mo - 1, d));
+  return date.getUTCFullYear() === y && date.getUTCMonth() === mo - 1 && date.getUTCDate() === d;
+};
+
+/** Shown under the Until field when the browser could not read what was typed. */
+export const AWAY_BAD_DATE =
+  "Enter a real date, or clear the field to stay away until you turn it off.";
+
+/**
+ * Away mode (catalogue §2.8): what Mission Control may do while the operator is away, saved as one
+ * record. The form edits a draft; nothing is sent until Save, and the draft survives a failed save.
+ */
 export function AwayModal() {
   const open = useAwayOpen();
   useOverlay("away", open, closeAway);
@@ -81,35 +106,40 @@ export function AwayModal() {
 
   const tz = useTz();
   const server = useResource<AwaySettings>(RESOURCES.away).data;
-  // What was just changed and is still being saved: shown until the server's copy arrives, or the
-  // save fails and the page goes back to the server's copy.
-  const [pending, setPending] = useState<AwaySettings | null>(null);
-  const saving = useRef(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `server` is the trigger, not a value read: a fresh copy from the server ends the optimistic one
+  // What the operator has changed and not saved. Null until the first change, so the form follows
+  // the server's copy while untouched; once edited it stays put, whatever a refetch brings.
+  const [draft, setDraft] = useState<AwaySettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const [badDate, setBadDate] = useState(false);
+  const [attempted, setAttempted] = useState(false);
+  const [focusKey, setFocusKey] = useState(0);
+  const guard = useSubmitGuard();
   useEffect(() => {
-    if (saving.current === 0) setPending(null);
-  }, [server]);
+    if (open) return;
+    setDraft(null);
+    setFailure(null);
+    setUncertain(false);
+    setBadDate(false);
+    setAttempted(false);
+  }, [open]);
 
-  const away = pending ?? server;
+  const away = draft ?? server;
   if (!open) return null;
 
-  function save(next: AwaySettings, message: string | null): void {
-    setPending(next);
-    saving.current++;
-    apiPost<AwaySettings>(ACTIONS.away, next).then(
-      () => {
-        saving.current--;
-        toast(message === null ? AWAY_SAVED : `${message} ${AWAY_SAVED}`);
-        hub.refetch(RESOURCES.away.path);
-      },
-      (err: unknown) => {
-        saving.current--;
-        if (saving.current === 0) setPending(null);
-        toast(`Could not save away mode: ${err instanceof Error ? err.message : String(err)}`);
-        hub.refetch(RESOURCES.away.path);
-      },
-    );
-  }
+  const defaultUntil = tz ? isoDay(Date.now(), tz, DEFAULT_AWAY_DAYS) : "";
+  const shownUntil = away ? away.until || (away.on ? "" : defaultUntil) : "";
+  const dateError =
+    away && (badDate || !(shownUntil === "" || validDay(shownUntil))) ? AWAY_BAD_DATE : undefined;
+  const issues: FieldIssue[] = attempted && dateError ? [{ id: untilId, message: dateError }] : [];
+  const dirty = draft !== null && JSON.stringify(draft) !== JSON.stringify(server);
+
+  const edit = (next: AwaySettings): void => {
+    setDraft(next);
+    setFailure(null);
+    setUncertain(false);
+  };
 
   const onMessage = (until: string): string =>
     `Away mode on ${untilLabel(until)}. Safe tickets can reach ready for review; others stay in draft, and comments wait for you.`;
@@ -117,7 +147,7 @@ export function AwayModal() {
   function setOn(on: boolean): void {
     if (!away || on === away.on) return;
     if (!on) {
-      save({ ...away, on: false }, "Away mode off. Everything waits for you as usual.");
+      edit({ ...away, on: false });
       return;
     }
     // no date yet: ten days from today, in the operator's zone (nothing to compute while it loads)
@@ -126,20 +156,61 @@ export function AwayModal() {
       toast(AWAY_WAITING);
       return;
     }
-    save({ ...away, on: true, until }, onMessage(until));
+    edit({ ...away, on: true, until });
   }
 
-  function setUntil(until: string): void {
-    if (!away) return;
-    save({ ...away, until }, away.on ? onMessage(until) : null);
+  async function submit(): Promise<void> {
+    if (!away || !guard.take()) return;
+    if (dateError) {
+      guard.release();
+      setAttempted(true);
+      setFocusKey((key) => key + 1);
+      return;
+    }
+    const next = away;
+    setAttempted(false);
+    setBusy(true);
+    setFailure(null);
+    setUncertain(false);
+    try {
+      await apiPost<AwaySettings>(ACTIONS.away, next);
+      const message = !server
+        ? null
+        : next.on
+          ? !server.on || next.until !== server.until
+            ? onMessage(next.until)
+            : null
+          : server.on
+            ? "Away mode off. Everything waits for you as usual."
+            : null;
+      toast(message === null ? AWAY_SAVED : `${message} ${AWAY_SAVED}`);
+      setDraft(next);
+    } catch (err) {
+      setFailure(err instanceof Error ? err.message : String(err));
+      setUncertain(isUncertain(err instanceof ApiError ? err.status : undefined));
+      setFocusKey((key) => key + 1);
+    } finally {
+      // The server may have acted before the answer was lost: read what is saved.
+      hub.refetch(RESOURCES.away.path);
+      guard.release();
+      setBusy(false);
+    }
   }
-
-  const defaultUntil = tz ? isoDay(Date.now(), tz, DEFAULT_AWAY_DAYS) : "";
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop takes focus from a click, so Tab stays trapped
     <div className="modal" tabIndex={-1} onKeyDown={trapTab}>
-      <div className="panel awaypanel" role="dialog" aria-modal="true" aria-labelledby={head}>
+      <form
+        className="panel awaypanel"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={head}
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void submit();
+        }}
+      >
         <div className="ph">
           <h2 id={head}>Away mode</h2>
           <span className="sub">
@@ -152,33 +223,54 @@ export function AwayModal() {
             </button>
           </span>
         </div>
-        <div className="pb scroll" id="awayBody">
+        <div className="pb scroll fform" id="awayBody">
           {away === undefined ? (
             <p className="note">Loading away mode…</p>
           ) : (
             <>
-              <div className="row awayctl">
-                <Seg
-                  label="Away mode"
-                  options={ON_OFF}
-                  value={away.on ? "on" : "off"}
-                  onChange={(v) => setOn(v === "on")}
-                />
-                <label className="s fg2" htmlFor={untilId}>
-                  Until
-                </label>
-                <input
-                  type="date"
-                  id={untilId}
-                  value={away.until || (away.on ? "" : defaultUntil)}
-                  onChange={(e) => setUntil(e.target.value)}
-                />
-                <span className="s fg2" role="status">
-                  {away.on
-                    ? `Away mode is on ${untilLabel(away.until)}.`
+              <ErrorSummary
+                title="Away mode was not saved"
+                issues={issues}
+                message={failure}
+                focusKey={focusKey}
+              >
+                {uncertain && <p className="s">{UNCERTAIN_TEXT}</p>}
+              </ErrorSummary>
+              <fieldset className="fgroup fform-480 awayctl">
+                <legend>When</legend>
+                <div className="ffield">
+                  <span className="s fg2">Away mode</span>
+                  <Seg
+                    label="Away mode"
+                    options={ON_OFF}
+                    value={away.on ? "on" : "off"}
+                    onChange={(v) => setOn(v === "on")}
+                  />
+                </div>
+                <div className="ffield">
+                  <label htmlFor={untilId}>Until</label>
+                  <input
+                    {...fieldProps(untilId, dateError, `${untilId}-hint`)}
+                    type="date"
+                    value={shownUntil}
+                    onChange={(e) => {
+                      setBadDate(e.target.validity.badInput);
+                      edit({ ...away, until: e.target.value });
+                    }}
+                  />
+                  <span id={`${untilId}-hint`} className="fhint muted xs">
+                    The last day away mode runs, in your timezone. Clear it to stay away until you
+                    turn it off.
+                  </span>
+                  <FieldError id={untilId} error={dateError} />
+                </div>
+                <p className="s fg2" role="status">
+                  {server?.on
+                    ? `Away mode is on ${untilLabel(server.until)}.`
                     : "Off: everything waits for you as usual."}
-                </span>
-              </div>
+                  {dirty ? " Unsaved changes." : ""}
+                </p>
+              </fieldset>
               <div className="awaygrid">
                 <div>
                   <h3>While I'm away, Mission Control may</h3>
@@ -189,7 +281,7 @@ export function AwayModal() {
                           type="checkbox"
                           checked={away.may[key]}
                           onChange={(e) =>
-                            save({ ...away, may: { ...away.may, [key]: e.target.checked } }, null)
+                            edit({ ...away, may: { ...away.may, [key]: e.target.checked } })
                           }
                         />
                         <span>{label}</span>
@@ -231,7 +323,17 @@ export function AwayModal() {
             </>
           )}
         </div>
-      </div>
+        {away !== undefined && (
+          <div className="pfoot fact">
+            <button type="submit" className="sm" disabled={busy}>
+              Save away mode
+            </button>
+            <button type="button" className="sm" onClick={closeAway}>
+              Cancel
+            </button>
+          </div>
+        )}
+      </form>
     </div>
   );
 }

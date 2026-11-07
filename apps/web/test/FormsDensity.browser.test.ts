@@ -1073,3 +1073,191 @@ describeRendered("F14 template editor and F15 Teams sources, rendered in the Set
       expect(captures.length).toBe(8);
     });
 });
+
+/** F16 to F18: the crew pause modal (new and edit, with a long audit) and the Away mode modal. */
+const PAUSE_FORMS = [
+  {
+    id: "F16",
+    page: "pause",
+    form: ".crew-pause-panel",
+    cap: 640,
+    open: "Pause crew",
+    edit: false,
+  },
+  {
+    id: "F17",
+    page: "pause",
+    form: ".crew-pause-panel",
+    cap: 640,
+    open: "Edit crew pause",
+    edit: true,
+  },
+  { id: "F18", page: "away", form: ".awayctl", cap: 480, open: null, edit: false },
+] as const;
+type PauseForm = (typeof PAUSE_FORMS)[number];
+
+const PAUSE_EXCEPTIONS = Array.from({ length: 12 }, (_, i) => ({
+  seat: `guido-${i + 1}`,
+  runId: `guido-${i + 1}:20261102-1200${String(i).padStart(2, "0")}`,
+  by: "FLIGHT",
+  at: 1792756800000 + i * 60_000,
+  reason: `Finish the approved fix only ${"and nothing else ".repeat(6)}`,
+}));
+
+async function openPause(form: PauseForm, o: { width: number; height: number; dark?: boolean }) {
+  const crew = CREW_CONFIG.crew;
+  if (!crew) throw new Error("fixture has no crew");
+  const seats = Array.from({ length: 12 }, (_, i) => ({
+    id: `guido-${i + 1}`,
+    role: "GUIDO",
+    accountId: "codex-main",
+    model: "sonnet",
+    area: ["apps/**"],
+    mode: "writer",
+  }));
+  const page = await renderAt({
+    page: "test/formsBrowser.html",
+    width: o.width,
+    height: o.height,
+    search: `?form=${form.page}`,
+    colorScheme: o.dark ? "dark" : "light",
+    // every request the page makes is listed; a write is not, so it is refused (404) with no effect
+    api: {
+      [RESOURCES.config.path]: {
+        ...CREW_CONFIG,
+        crew: {
+          ...crew,
+          sessions: crew.sessions.map((session, i) => (i === 0 ? { ...session, seats } : session)),
+        },
+      },
+      [RESOURCES.crewPause.path]: form.edit
+        ? {
+            seats: "all",
+            reason: "Save tokens",
+            by: "operator",
+            at: 1792756800000,
+            except: PAUSE_EXCEPTIONS,
+          }
+        : null,
+      [RESOURCES.away.path]: {
+        on: false,
+        until: "",
+        may: { pickUp: true, research: true, check: true, status: true, safePr: true },
+      },
+      [RESOURCES.crew.path]: { rows: [], firstRunToday: null },
+      [RESOURCES.attention.path]: [],
+    },
+  });
+  await page.box(form.page === "away" ? ".awaypanel" : "main");
+  if (form.open) {
+    const name = form.open;
+    await page.evaluate(async (label) => {
+      for (let i = 0; i < 120; i++) {
+        const button = [...document.querySelectorAll("button")].find(
+          (b) => b.textContent === label && !b.disabled,
+        );
+        if (button) {
+          button.focus();
+          button.click();
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      throw new Error(`no ${label} button`);
+    }, name);
+  }
+  await page.box(form.form);
+  return page;
+}
+
+async function expectPauseDense(page: RenderedPage, form: PauseForm) {
+  const measured = await page.evaluate(
+    (arg) => {
+      const root = document.querySelector(arg.form);
+      const panel = document.querySelector<HTMLElement>(".crew-pause-panel, .awaypanel");
+      if (!root || !panel) return null;
+      const doc = document.documentElement;
+      const targets = [...panel.querySelectorAll("button, a[href], input, select, textarea")]
+        .filter((el) => el.getClientRects().length > 0)
+        .map((el) => el.getBoundingClientRect());
+      const submit = [...panel.querySelectorAll<HTMLButtonElement>("button[type=submit]")].at(-1);
+      const rect = submit?.getBoundingClientRect();
+      return {
+        width: root.getBoundingClientRect().width,
+        controls: [
+          ...root.querySelectorAll(
+            "input:not([type=checkbox]):not([type=radio]), select, textarea",
+          ),
+        ].map((c) => c.getBoundingClientRect().height),
+        smallTargets: targets.filter((r) => r.width < 23.5 || r.height < 23.5).length,
+        formOverflow: root.scrollWidth - root.clientWidth,
+        pageOverflow: doc.scrollWidth - doc.clientWidth,
+        actionInView:
+          !!rect && rect.top >= 0 && rect.bottom <= window.innerHeight && rect.width > 0,
+      };
+    },
+    { form: form.form },
+  );
+  expect(measured).not.toBeNull();
+  if (!measured) return;
+  expect(measured.width).toBeGreaterThan(0);
+  expect(measured.width).toBeLessThanOrEqual(form.cap + 1);
+  for (const height of measured.controls) expect(Math.abs(height - 32)).toBeLessThan(0.5);
+  expect(measured.smallTargets).toBe(0);
+  expect(measured.formOverflow).toBeLessThanOrEqual(1);
+  expect(measured.pageOverflow).toBeLessThanOrEqual(1);
+  expect(measured.actionInView).toBe(true);
+  expect((await page.unclipped(`${form.form} .fgroup`)).every(Boolean)).toBe(true);
+  expect(page.errors()).toEqual([]);
+  // no fixture sends a real pause or Away write
+  expect(page.requests().filter((r) => r.method !== "GET")).toEqual([]);
+}
+
+describeRendered("F16 to F18 crew pause and Away mode, rendered", () => {
+  for (const form of PAUSE_FORMS) {
+    for (const [width, height] of VIEWPORTS) {
+      it(
+        `${form.id} is within ${form.cap}px with 32px controls, 24px targets and its final action in view at ${width}x${height} light`,
+        async () => {
+          const page = await openPause(form, { width, height });
+          await expectPauseDense(page, form);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+    for (const [width, height] of [
+      [1920, 1080],
+      [1600, 700],
+    ] as const) {
+      it(
+        `${form.id} holds the same at ${width}x${height} dark`,
+        async () => {
+          const page = await openPause(form, { width, height, dark: true });
+          await expectPauseDense(page, form);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  it(
+    "F16 with an error summary showing still keeps its final action in view at 1600x700",
+    async () => {
+      const form = PAUSE_FORMS[0];
+      const page = await openPause(form, { width: 1600, height: 700 });
+      await page.evaluate(async () => {
+        const submit = document.querySelector<HTMLButtonElement>(
+          ".crew-pause-panel button[type=submit]",
+        );
+        submit?.click();
+        await new Promise((r) => setTimeout(r, 100));
+      }, null);
+      await page.box(".crew-pause-panel .fsum");
+      await expectPauseDense(page, form);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+});
