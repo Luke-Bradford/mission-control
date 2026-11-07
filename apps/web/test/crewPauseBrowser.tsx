@@ -1,6 +1,8 @@
 import "@fontsource/ibm-plex-sans/latin-400.css";
 import "@fontsource/ibm-plex-sans/latin-600.css";
 import "../src/hud.css";
+// the modal overlay and panel rules the app loads with its panels
+import "../src/hud/shared.css";
 import { createRoot } from "react-dom/client";
 import { CrewPauseControl } from "../src/components/CrewPause.tsx";
 
