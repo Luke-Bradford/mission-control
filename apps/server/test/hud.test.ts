@@ -2840,6 +2840,16 @@ describe("messages are not Needs you", () => {
       }),
     ]);
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain(key);
+    // an ack from before FLIGHT wrote again does not clear it
+    store.ack([key], NOW - 3 * MIN);
+    expect(chatter().find((i) => i.key === key)?.flightTriage).toBe("waiting");
+    // a hub start after the line gives FLIGHT a fresh window
+    markHubStarted(NOW);
+    try {
+      expect(chatter().find((i) => i.key === key)?.triageDueAt).toBe(NOW + FLIGHT_TRIAGE_WAIT_MS);
+    } finally {
+      markHubStarted(null);
+    }
     const late = attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS);
     expect(late.find((i) => i.key === key)).toMatchObject({
       owner: "flight",
@@ -2858,28 +2868,33 @@ describe("messages are not Needs you", () => {
       at: NOW - 10 * MIN,
     });
     expect(chatter().find((i) => i.key === key)?.flightTriage).toBe("down");
+    expect(
+      attentionItems(c, store, NOW).find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY)?.notTriaging
+        ?.keys,
+    ).toContain(key);
     store.clearNote(FLIGHT_DOWN_NOTE_KEY, NOW);
-    // FLIGHT dismissing it (an ack past the newest line) clears it
+    const alertAt = (at: number) =>
+      attentionItems(c, store, at).find((i) => i.key === FLIGHT_NOT_TRIAGING_KEY);
+    expect(alertAt(NOW + FLIGHT_TRIAGE_WAIT_MS)?.notTriaging?.keys).toContain(key);
+    // FLIGHT dismissing it (an ack past the newest line) withdraws it
     store.ack([key], NOW);
     expect(chatter().find((i) => i.key === key)?.flightTriage).toBe("handling");
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).not.toContain(key);
-    expect(
-      attentionItems(c, store, NOW + FLIGHT_TRIAGE_WAIT_MS).find(
-        (i) => i.key === FLIGHT_NOT_TRIAGING_KEY,
-      ),
-    ).toBeUndefined();
-    // briefed again, past the newest line: the operator's once more
+    expect(alertAt(NOW + FLIGHT_TRIAGE_WAIT_MS)).toBeUndefined();
+    // briefed again after the dismiss, with the same ask: the operator's, and unread
     store.addBrief({
       key,
       for: "operator",
-      ask: "Merge #551 now and drop #498 after?",
+      ask: "Merge #551 now, or wait for #498?",
       context: "Both touch the parser.",
       recommendation: "Yes.",
       options: TWO_OPTIONS,
       basis: "the two PRs",
-      at: NOW - MIN,
+      at: NOW + MIN,
     });
-    expect(chatter()).toEqual([expect.objectContaining({ key, owner: "operator" })]);
+    expect(chatter(c, NOW + 2 * MIN)).toEqual([
+      expect.objectContaining({ key, owner: "operator", acked: false }),
+    ]);
   });
 
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {

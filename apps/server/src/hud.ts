@@ -1448,7 +1448,14 @@ function buildAttentionItems(
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
     const ackAt = acks.get(i.key);
-    const askAt = brief !== undefined && brief.for !== "flight" ? (brief.askAt ?? brief.at) : 0;
+    // FLIGHT's own question is read against its latest brief: a rebrief after FLIGHT dismissed it
+    // is unread even with the same ask (#1543)
+    const askAt =
+      brief !== undefined && brief.for !== "flight"
+        ? ownReply(i, flightId)
+          ? brief.at
+          : (brief.askAt ?? brief.at)
+        : 0;
     const item: AttentionItem = {
       ...i,
       ...(brief === undefined ? {} : { brief }),
@@ -1526,12 +1533,14 @@ function buildAttentionItems(
     // restated: FLIGHT owes a new brief on a question the operator was already shown, so a
     // missed rebrief counts under the not-triaging alert rather than going quiet
     if (restated) {
-      // acked at or after the newest line (FLIGHT's dismiss acks): dealt with
+      // acked at or after the newest line: FLIGHT's dismiss withdraws its own question, briefed ask
+      // included, as the spec lets FLIGHT withdraw a question it wrote that is not protected
       if (item.acked) return { ...back, flightTriage: "handling" };
       if (!triaging) return { ...back, flightTriage: "down" };
       // a fresh window after FLIGHT restarts or the hub updates, as for any returned item
       const triageDueAt =
-        Math.max(item.at, triage.liveSince, hubStartedAt ?? 0) + FLIGHT_TRIAGE_WAIT_MS;
+        Math.max(item.at, item.holdReleasedAt ?? 0, triage.liveSince, hubStartedAt ?? 0) +
+        FLIGHT_TRIAGE_WAIT_MS;
       return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
     }
     // FLIGHT's own line to the operator: FLIGHT wrote it, so it is never work waiting on FLIGHT
