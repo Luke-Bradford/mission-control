@@ -4,6 +4,7 @@ import {
   type ConfigView,
   type Crew,
   DONE_RANGES,
+  type FlightPrFlowView,
   HUD_COLUMNS,
   type HudColumn,
   type OverviewSummary,
@@ -40,6 +41,7 @@ import {
 } from "../board/cards.ts";
 import { Kanban } from "../board/Kanban.tsx";
 import { ALL_LANE, lanesFor, MINE_LANE, resolveLane } from "../board/lanes.ts";
+import { flowByPr } from "../board/prFlowChip.ts";
 import {
   BOARD_VIEW_BUTTON_ID,
   type BoardLayout,
@@ -107,6 +109,9 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const prRes = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
   const crewRes = useResource<Crew>(RESOURCES.crew);
+  // Each PR chip names the stage and owner the FLIGHT page's PR flow does.
+  const flowRes = useResource<FlightPrFlowView>(RESOURCES.prFlow);
+  const flow = useMemo(() => flowByPr(flowRes.data), [flowRes.data]);
   // The server's rework facts ride on the Overview's pipeline cards
   const overviewRes = useResource<OverviewSummary>(RESOURCES.overview());
   const rework = useMemo(() => {
@@ -262,6 +267,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     tz,
     todayStart,
     rework,
+    flow,
     metrics: {
       "In progress": {
         label: metricText("inProgress").label,
@@ -279,6 +285,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     boards.every((res) => Boolean(res.data || res.error)) &&
     prRes.every((res) => Boolean(res.data || res.error)) &&
     Boolean(crewRes.data || crewRes.error) &&
+    Boolean(flowRes.data || flowRes.error) &&
     Boolean(overviewRes.data || overviewRes.error) &&
     Boolean(attentionRes.data || attentionRes.error) &&
     Boolean(configRes.data || configRes.error) &&
