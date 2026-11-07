@@ -158,16 +158,52 @@ export async function crewGitBytes(
 
 export class SeatGitError extends Error {}
 
+const SEAT_GIT_FLOOR = "git ≥ 2.32 required for seat isolation";
+/** Commands whose version passed, for the hub's lifetime: a busy moment can't fail a later start. */
+const seatGitVersionOk = new Set<string>();
+
+const clip = (v: unknown): string => String(v ?? "").slice(0, 200);
+
+/** Run `<command> --version` once; what it printed (or why it failed) comes back either way. */
+async function readGitVersion(command: string): Promise<{ stdout: string; stderr: string }> {
+  try {
+    const { stdout, stderr } = await execFileP(command, ["--version"], {
+      timeout: GIT_TIMEOUT_MS,
+      env: gitEnv(process.env),
+    });
+    return { stdout: String(stdout), stderr: String(stderr) };
+  } catch (e) {
+    const err = e as { stdout?: unknown; stderr?: unknown; message?: unknown };
+    return {
+      stdout: String(err.stdout ?? ""),
+      stderr: String(err.stderr ?? "") || String(err.message ?? ""),
+    };
+  }
+}
+
 /** Only modern git honours the config isolation variables used by seats. */
 export async function assertSeatGitVersion(command = "git"): Promise<void> {
-  const { stdout } = await execFileP(command, ["--version"], {
-    timeout: GIT_TIMEOUT_MS,
-    env: gitEnv(process.env),
-  });
-  const match = /^git version (\d+)\.(\d+)(?:\.|$)/.exec(stdout.trim());
-  if (match === null || Number(match[1]) < 2 || (Number(match[1]) === 2 && Number(match[2]) < 32)) {
-    throw new SeatGitError("git ≥ 2.32 required for seat isolation");
+  if (seatGitVersionOk.has(command)) return;
+  const parse = (out: string) => /^git version (\d+)\.(\d+)(?:\.|$)/.exec(out.trim());
+  let seen = await readGitVersion(command);
+  let match = parse(seen.stdout);
+  if (match === null) {
+    // empty or cut-off output on a busy machine: ask once more before failing
+    seen = await readGitVersion(command);
+    match = parse(seen.stdout);
   }
+  if (match === null) {
+    throw new SeatGitError(
+      `${SEAT_GIT_FLOOR} (${command} --version printed ${JSON.stringify(clip(seen.stdout))}` +
+        `${seen.stderr === "" ? "" : ` and ${JSON.stringify(clip(seen.stderr))} on stderr`})`,
+    );
+  }
+  if (Number(match[1]) < 2 || (Number(match[1]) === 2 && Number(match[2]) < 32)) {
+    throw new SeatGitError(
+      `${SEAT_GIT_FLOOR} (${command} --version printed ${JSON.stringify(clip(seen.stdout.trim()))})`,
+    );
+  }
+  seatGitVersionOk.add(command);
 }
 
 /** Read common and worktree config, including includes; never echo helper values. */

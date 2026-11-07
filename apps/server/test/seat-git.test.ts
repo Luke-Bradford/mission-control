@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CREW_GIT_ENV } from "@mc/core";
@@ -87,11 +87,37 @@ it("accepts a clean config and disabled fsmonitor", async () => {
 
 it("requires git 2.32 for seat isolation", async () => {
   const command = join(dir, "old-git");
-  writeFileSync(command, "#!/bin/sh\necho 'git version 2.30.0'\n", { mode: 0o755 });
+  writeFileSync(command, "#!/bin/sh\necho 'git version 2.31.0'\n", { mode: 0o755 });
   await expect(assertSeatGitVersion(command)).rejects.toThrow(
-    "git ≥ 2.32 required for seat isolation",
+    `git ≥ 2.32 required for seat isolation (${command} --version printed "git version 2.31.0")`,
   );
   await expect(assertSeatGitVersion()).resolves.toBeUndefined();
+});
+
+it("retries an unparsable version once, and says what git printed when it still fails", async () => {
+  const count = join(dir, "count");
+  const flaky = join(dir, "flaky-git");
+  writeFileSync(
+    flaky,
+    `#!/bin/sh\necho x >> "${count}"\n[ "$(wc -l < "${count}")" -ge 2 ] && echo 'git version 2.54.0'\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  await expect(assertSeatGitVersion(flaky)).resolves.toBeUndefined();
+  expect(readFileSync(count, "utf8").split("\n").length - 1).toBe(2);
+
+  const broken = join(dir, "broken-git");
+  writeFileSync(broken, "#!/bin/sh\necho oops >&2\n", { mode: 0o755 });
+  await expect(assertSeatGitVersion(broken)).rejects.toThrow(
+    `(${broken} --version printed "" and "oops\\n" on stderr)`,
+  );
+});
+
+it("caches the first passing result per command", async () => {
+  const fake = join(dir, "once-git");
+  writeFileSync(fake, "#!/bin/sh\necho 'git version 2.40.0'\n", { mode: 0o755 });
+  await assertSeatGitVersion(fake);
+  writeFileSync(fake, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+  await expect(assertSeatGitVersion(fake)).resolves.toBeUndefined();
 });
 
 it("never includes helper values in the refusal", async () => {
