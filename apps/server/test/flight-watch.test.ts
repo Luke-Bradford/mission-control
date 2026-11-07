@@ -67,6 +67,7 @@ import { tickLogOf } from "../src/engine/ticks.ts";
 import * as retrospective from "../src/flight/retrospective.ts";
 import {
   flightLoopHeartbeat,
+  flightSignalHistory,
   flightWaits,
   markFlightSignalsShown,
   observeFlightChecks,
@@ -5478,6 +5479,101 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
     });
     flightState({ config, store, busy: [], now: T0 + MIN });
     expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
+  });
+
+  describe("an ended wait that FLIGHT has dealt with", () => {
+    const read = (now: number) => flightState({ config, store, busy: [], now });
+    const overs = (now: number) => read(now).signals.filter((x) => x.kind === "wait_over");
+    const decide = (over: Partial<Parameters<Store["addFlightDecision"]>[0]>) =>
+      store.addFlightDecision({
+        at: T0 + 3 * MIN,
+        kind: "note",
+        seatId: null,
+        targetRunId: null,
+        ref: null,
+        questionId: null,
+        about: "a",
+        decision: "d",
+        basis: "b",
+        ...over,
+      });
+    const endedWait = () => {
+      recordFlightWait(store, "mc#7", { on: "its PR", until: T0 + MIN, at: T0 });
+      expect(overs(T0 + 2 * MIN)).toHaveLength(1);
+      markFlightSignalsShown(store, read(T0 + 2 * MIN), T0 + 2 * MIN);
+      // told, but a wait still standing is listed every pass
+      expect(overs(T0 + 2 * MIN)).toHaveLength(1);
+    };
+
+    it("drops out once log_decision names its signal key in about", () => {
+      endedWait();
+      decide({ about: `wait_over:mc#7:${T0 + MIN}` });
+      expect(overs(T0 + 4 * MIN)).toEqual([]);
+      expect(flightWaits(store)).toEqual({});
+    });
+
+    it("drops out once wait_on waits on it again", () => {
+      endedWait();
+      recordFlightWait(store, "mc#7", { on: "its PR", until: T0 + 30 * MIN, at: T0 + 3 * MIN });
+      expect(overs(T0 + 4 * MIN)).toEqual([]);
+      expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
+    });
+
+    it("drops out once an action on the target is recorded after it ended", () => {
+      endedWait();
+      decide({ kind: "merge", ref: "mc#7" });
+      expect(overs(T0 + 4 * MIN)).toEqual([]);
+      expect(flightWaits(store)).toEqual({});
+    });
+
+    it("stays when the decision came before the wait ended or names another target", () => {
+      endedWait();
+      decide({ at: T0 + 30_000, ref: "mc#7", about: `wait_over:mc#7:${T0 + MIN}` });
+      decide({ ref: "mc#8", about: "wait_over:mc#8:1" });
+      expect(overs(T0 + 4 * MIN)).toHaveLength(1);
+    });
+
+    it("never nests: waiting on a wait_over signal keeps the original target, three times over", () => {
+      let at = T0;
+      for (let round = 0; round < 3; round++) {
+        const signal = overs(at + MIN + 1)[0];
+        const target = signal ? `wait_over:${signal.key}` : "PR 1443";
+        recordFlightWait(store, target, { on: "CI", until: at + 2 * MIN, at });
+        at += 2 * MIN;
+        markFlightSignalsShown(store, read(at + 1), at + 1);
+      }
+      const keys = [
+        ...Object.keys(flightWaits(store)),
+        ...read(at + MIN).signals.map((x) => x.key),
+        ...flightSignalHistory(store, "mc", at + MIN).map((x) => x.key),
+      ];
+      expect(keys.length).toBeGreaterThan(0);
+      expect(keys.filter((k) => k.includes("wait_over:"))).toEqual([]);
+      expect(Object.keys(flightWaits(store))).toEqual(["PR 1443"]);
+    });
+
+    it("is cleared in one pass for waits left behind, however many", () => {
+      const waits: Record<string, { on: string; until: number; at: number }> = {};
+      let target = "PR 1443";
+      for (let i = 0; i < 240; i++) {
+        waits[target] = { on: "CI", until: T0 + MIN + i, at: T0 };
+        target = `wait_over:${target}:${T0 + MIN + i}`;
+      }
+      // the ones FLIGHT dealt with, and one it has not
+      waits["mc#1"] = { on: "x", until: T0 + MIN, at: T0 };
+      waits["mc#2"] = { on: "x", until: T0 + MIN, at: T0 };
+      store.setSetting("flight.waits", JSON.stringify(waits));
+      decide({ about: `wait_over:mc#1:${T0 + MIN}` });
+      // 242 dead entries before; what is left is the root wait and the one not dealt with
+      expect(
+        overs(T0 + 2 * MIN)
+          .map((x) => x.key)
+          .sort(),
+      ).toEqual([`PR 1443:${T0 + MIN}`, `mc#2:${T0 + MIN}`]);
+      const settled = JSON.stringify(flightWaits(store));
+      read(T0 + 3 * MIN);
+      expect(JSON.stringify(flightWaits(store))).toBe(settled);
+    });
   });
 });
 
