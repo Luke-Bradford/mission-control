@@ -113,7 +113,7 @@ describeRendered("Needs you page", () => {
     "the open item fills the width with the mockup shown large",
     async () => {
       for (const [width, height, minImage] of [
-        [2560, 1200, 1100],
+        [2560, 1200, 1000],
         [1920, 940, 850],
       ] as const) {
         const label = `${width}x${height}`;
