@@ -304,6 +304,7 @@ import {
   WITHDRAW_NOT_YOURS,
   WITHDRAW_SEAT_QUESTION,
   waitingOperatorPromoteText,
+  waitingOperatorStartText,
   withControllerCheckItem,
   withdrawnText,
   wrongColumnText,
@@ -1332,8 +1333,32 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const { key, missing, basis } = c.args;
     const item = itemByKey(key);
     const at = now();
-    // before anything else: a protected item always reaches the operator
-    if (item !== undefined && protectedDecisionItem(store, item, config, at))
+    // before anything else: a protected item always reaches the operator. A Comms question in its
+    // first minutes is no item yet, so it is judged as the item it will become.
+    const pending = key.startsWith(COMMS_OPEN_PREFIX)
+      ? store.openCommsItems().find((m) => `${COMMS_OPEN_PREFIX}${m.id}` === key)
+      : undefined;
+    const judged: AttentionItem | undefined =
+      item ??
+      (pending === undefined
+        ? undefined
+        : ({
+            key,
+            kind: pending.label === "blocker" ? "blocked" : "question",
+            agentId: pending.from,
+            repoId:
+              config.crew?.sessions.find((s) => s.seats.some((x) => x.id === pending.from))
+                ?.repoId ?? null,
+            text: pending.text,
+            tool: null,
+            at: pending.at,
+            url: null,
+            escalationId: null,
+            ticket: pending.ticket,
+            owner: "operator",
+            acked: false,
+          } as AttentionItem));
+    if (judged !== undefined && protectedDecisionItem(store, judged, config, at))
       return fail(PROTECTED_ITEM_REFUSED);
     const ask = /^ask:([1-9]\d*)$/.exec(key);
     const comms = key.startsWith(COMMS_OPEN_PREFIX) ? key.slice(COMMS_OPEN_PREFIX.length) : null;
@@ -1524,6 +1549,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       !(handoff && (column === "In review" || column === "In progress"))
     )
       return fail(wrongColumnText(ref, column));
+    // the operator set it aside with a question: starting it would undo that
+    if (card.labels.includes(WAITING_OPERATOR_LABEL)) return fail(waitingOperatorStartText(ref));
     // the previous run's PR: a ticket is not started again while one is open on it
     const openPr = store
       .pullRequests(repo.id)

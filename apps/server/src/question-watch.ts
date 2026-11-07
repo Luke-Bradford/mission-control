@@ -13,7 +13,7 @@ import {
 import { protectedDecisionItem, questionAskAt } from "./attention-holds.ts";
 import type { CcConfig } from "./config.ts";
 import { flightSeat, ownReply } from "./flight/state.ts";
-import { attentionItems, NO_LOCK, NOTE_KEY } from "./hud.ts";
+import { attentionItems, NO_LOCK } from "./hud.ts";
 import type { Store } from "./store.ts";
 
 /** One open question the hub can close on a recorded fact: its ticket, PR and run. */
@@ -35,7 +35,15 @@ export interface QuestionSubject {
 
 export interface QuestionFacts {
   ticket: "open" | "closed" | "none";
-  pr: { number: number; state: "open" | "merged" | "closed"; headSha: string | null } | null;
+  /** When the card last changed; a closed ticket settles a question only if this is after the ask. */
+  ticketAt: number;
+  pr: {
+    number: number;
+    state: "open" | "merged" | "closed";
+    headSha: string | null;
+    /** When the PR merged, else last changed. */
+    at: number;
+  } | null;
   run: "live" | "ended" | "none" | `parked:${string}`;
 }
 
@@ -59,7 +67,6 @@ export function openQuestionSubjects(d: {
   const { config, store, now } = d;
   const flightId = flightSeat(config)?.seat.id ?? null;
   const questions = new Map(store.openQuestions().map((q) => [`ask:${q.id}`, q]));
-  const notes = new Map(store.notes().map((n) => [`${NOTE_KEY}${n.key}`, n]));
   const out: QuestionSubject[] = [];
   for (const item of attentionItems(config, store, now, d.lock ?? NO_LOCK)) {
     const asked = questions.get(item.key);
@@ -81,9 +88,8 @@ export function openQuestionSubjects(d: {
       runId = store.commsRun(id)?.id ?? null;
       seatId = message?.from ?? null;
       question = message?.text ?? question;
-    } else {
-      runId = notes.get(item.key)?.runId ?? null;
     }
+    // a note has no asking run: its run may have ended before anyone asked
     const run = runId === null ? null : store.run(runId);
     const pr = /^pr:[^#]+#(\d+):/.exec(item.key);
     out.push({
@@ -116,10 +122,16 @@ export function questionFacts(store: Store, s: QuestionSubject): QuestionFacts {
   const run = s.runId === null ? null : store.run(s.runId);
   return {
     ticket: card === null ? "none" : card.closed ? "closed" : "open",
+    ticketAt: card?.updatedAt ?? 0,
     pr:
       found === undefined
         ? null
-        : { number: found.number, state: found.state, headSha: found.headSha },
+        : {
+            number: found.number,
+            state: found.state,
+            headSha: found.headSha,
+            at: found.mergedAt ?? found.updatedAt,
+          },
     run:
       run === null
         ? "none"
@@ -137,10 +149,13 @@ export function closingFact(
   f: QuestionFacts,
 ): { kind: QuestionClosureKind; reason: string } | null {
   if (f.run === "ended") return { kind: "run-ended", reason: ASKING_RUN_ENDED_REASON };
-  if (f.ticket === "closed" && s.ticket !== null)
+  // only a change after the ask settles it: a ticket already closed when it was asked is the asker's news
+  if (f.ticket === "closed" && s.ticket !== null && f.ticketAt > s.askAt)
     return { kind: "ticket-closed", reason: ticketClosedReason(s.ticket) };
-  if (f.pr?.state === "merged") return { kind: "pr-merged", reason: prMergedReason(f.pr.number) };
-  if (f.pr?.state === "closed") return { kind: "pr-closed", reason: prClosedReason(f.pr.number) };
+  if (f.pr?.state === "merged" && f.pr.at > s.askAt)
+    return { kind: "pr-merged", reason: prMergedReason(f.pr.number) };
+  if (f.pr?.state === "closed" && f.pr.at > s.askAt)
+    return { kind: "pr-closed", reason: prClosedReason(f.pr.number) };
   return null;
 }
 

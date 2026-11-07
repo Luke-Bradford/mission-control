@@ -87,6 +87,7 @@ import {
   seatCallSign,
   seatDef,
   type TestLockState,
+  WAITING_OPERATOR_LABEL,
   wakeKeyPrefix,
 } from "@mc/core";
 import { runAccountId } from "../account-bindings.ts";
@@ -980,6 +981,7 @@ export function flightState(i: {
     .filter(
       (b) =>
         !b.closed &&
+        !b.labels.includes(WAITING_OPERATOR_LABEL) &&
         inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
         FLIGHT_STARTABLE.includes(hudColumnOf(b)) &&
         !active.has(`${b.repoId}#${b.issueNumber}`) &&

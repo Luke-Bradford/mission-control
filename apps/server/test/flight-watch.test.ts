@@ -5547,7 +5547,7 @@ describe("question fact watch (#1532)", () => {
     state: "in progress",
     labels: [],
     priority: null,
-    updatedAt: T0,
+    updatedAt: closed ? T0 + 1 : T0,
     url: "u",
     stage: null,
     owner: null,

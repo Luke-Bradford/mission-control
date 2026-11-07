@@ -134,6 +134,7 @@ import {
   WITHDRAW_NOT_YOURS,
   WITHDRAW_SEAT_QUESTION,
   waitingOperatorPromoteText,
+  waitingOperatorStartText,
   waitsOnText,
   withdrawnText,
   wrongAreaText,
@@ -157,7 +158,12 @@ import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts"
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
-import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
+import {
+  flightBriefView,
+  flightState,
+  flightTriageItems,
+  operatorItems,
+} from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
@@ -10667,6 +10673,31 @@ describe("return_question and withdraw_question (#1532)", () => {
       expect(store.commsSettlement(message.id)).toBeNull();
       expect(messageCalls).toEqual([]);
     });
+
+    it("is refused for a budget blocker in its first minutes, before it is an item", async () => {
+      live("guido-1", "r-budget", {
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "budget", reason: "tokens", ended: false },
+        },
+      });
+      nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+      const message = store.addComms({
+        at: nowMs - 5 * 60_000,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#7",
+        text: "Out of budget",
+        label: "blocker",
+      });
+      if (message === null) throw new Error("message was not stored");
+      expect(await call("return_question", R(`comms-open:${message.id}`))).toEqual(
+        refused(PROTECTED_ITEM_REFUSED),
+      );
+      expect(store.commsSettlement(message.id)).toBeNull();
+      expect(messageCalls).toEqual([]);
+    });
   });
 
   describe("withdraw_question", () => {
@@ -10747,5 +10778,28 @@ describe("return_question and withdraw_question (#1532)", () => {
       );
       expect(store.questionClosures(0, 10)).toEqual([]);
     });
+  });
+});
+
+describe("start_seat and the open-ticket list leave a waiting:operator card alone (#1532)", () => {
+  it("refuses a Backlog card with a plan and the label, and does not list it", async () => {
+    live("flight-1", "r-flight");
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+    board(
+      card(7, {
+        status: "Backlog",
+        labels: ["area:server", WAITING_OPERATOR_LABEL],
+        size: "S",
+      }),
+    );
+    fetchImpl = async (n) =>
+      ticket(n, { body: "Body\n\n## Plan\n\nDo it\n\n## Done when\n\n- x\n" });
+    const r = await call("start_seat", { seat: "guido-1", issue: 7, basis: "b" });
+    expect(r).toEqual(refused(waitingOperatorStartText("mc#7")));
+    expect(startCalls).toEqual([]);
+    expect(
+      flightState({ config: cfg, store, busy: [], now: NOW }).tickets.map((t) => t.ref),
+    ).not.toContain("mc#7");
   });
 });

@@ -1359,7 +1359,8 @@ function buildAttentionItems(
     const list = closures.get(i.key);
     if (list === undefined) return false;
     const at = questionAskAt(i, briefs.get(i.key));
-    return list.some((c) => c.askAt === at);
+    // a closure covers the item as it stood: one raised again after it is a new item
+    return list.some((c) => c.askAt === at && c.at >= i.at);
   };
   const route = (i: OwnedItem): AttentionItem => {
     if (closedAsk(i) && !ownReply(i, flightId)) {

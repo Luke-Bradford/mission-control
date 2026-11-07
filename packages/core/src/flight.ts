@@ -575,6 +575,8 @@ export const questionClosedText = (question: string, reason: string): string =>
   `Your question was closed without an answer. ${reason}\nQuestion: ${question}`;
 export const waitingOperatorPromoteText = (ref: string): string =>
   `Not moved: ${ref} is labelled waiting:operator. It moves when the operator answers its question or moves the card.`;
+export const waitingOperatorStartText = (ref: string): string =>
+  `Not started: ${ref} is labelled waiting:operator. It starts when the operator answers its question or moves the card.`;
 /** Why the hub closed a question on a recorded fact. */
 export const ticketClosedReason = (ticket: string): string => `${ticket} was closed.`;
 export const prMergedReason = (n: number): string => `PR ${n} merged.`;

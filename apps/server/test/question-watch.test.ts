@@ -305,9 +305,97 @@ describe("the hub closes a question on a recorded fact", () => {
     const merged = {
       ...facts,
       ticket: "closed" as const,
-      pr: { number: 9, state: "merged" as const, headSha: "abc" },
+      ticketAt: NOW,
+      pr: { number: 9, state: "merged" as const, headSha: "abc", at: NOW },
     };
     expect(closingFact(subject, merged)?.kind).toBe("ticket-closed");
     expect(closingFact(subject, { ...merged, run: "ended" })?.kind).toBe("run-ended");
+  });
+
+  it("does not close a hub note on a run that ended, or a ticket that closed, before the ask", async () => {
+    store.upsertRun(run({ id: "r1", endedAt: NOW - 3_600_000, status: "ok" }));
+    store.replaceBoard("mc", [card(7, { closed: true, updatedAt: NOW - 3_600_000 })]);
+    store.upsertPullRequests(
+      "mc",
+      [pr(9, { state: "merged", mergedAt: NOW - 3_600_000, updatedAt: NOW - 3_600_000 })],
+      NOW,
+    );
+    store.raiseNote({
+      key: "cleanup:r1",
+      kind: "blocked",
+      runId: "r1",
+      seatId: null,
+      repoId: "mc",
+      text: "Remove the worktree by hand",
+      at: NOW - 1_800_000,
+    });
+    store.addBrief({
+      key: `${NOTE_KEY}cleanup:r1`,
+      for: "operator",
+      by: "flight",
+      ask: "Remove it?",
+      assessment: "a",
+      context: "a",
+      recommendation: "yes",
+      options: [],
+      basis: "b",
+      at: NOW - 60_000,
+    });
+    expect(await closeSettledQuestions({ config: config(), store, now: NOW })).toBe(0);
+    const item = attentionItems(config(), store, NOW).find(
+      (i) => i.key === `${NOTE_KEY}cleanup:r1`,
+    );
+    expect(item?.owner).toBe("operator");
+  });
+
+  it("shows a note raised again under a closed key as a new item", () => {
+    store.raiseNote({
+      key: "blocked:x",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: "mc",
+      text: "First",
+      at: NOW - 3000,
+    });
+    const key = `${NOTE_KEY}blocked:x`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      ask: "Go?",
+      assessment: "a",
+      context: "a",
+      recommendation: "go",
+      options: [],
+      basis: "b",
+      at: NOW - 2000,
+    });
+    store.closeQuestion({
+      key,
+      askAt: NOW - 2000,
+      kind: "withdrawn",
+      reason: "No longer stands.",
+      by: "flight-1",
+      question: "Go?",
+      ticket: null,
+      operator: true,
+      at: NOW - 1000,
+    });
+    expect(attentionItems(config(), store, NOW).find((i) => i.key === key)?.flightTriage).toBe(
+      "handling",
+    );
+    store.clearNote("blocked:x", NOW - 500);
+    store.raiseNote({
+      key: "blocked:x",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: "mc",
+      text: "Second, a new problem",
+      at: NOW,
+    });
+    const again = attentionItems(config(), store, NOW).find((i) => i.key === key);
+    expect(again?.flightTriage).not.toBe("handling");
   });
 });
