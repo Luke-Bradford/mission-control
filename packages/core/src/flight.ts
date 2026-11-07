@@ -1078,6 +1078,11 @@ export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
 export const FLIGHT_SIGNALS_SETTING = "flight.signals";
 export const FLIGHT_LOOPS_SETTING = "flight.loops";
+/**
+ * The handover guard's cooldown, kept in the store so a hub restart does not lose it: when the hub
+ * starts FLIGHT again (`retryAt`) and when it last did (`restartedAt`), each a time or null.
+ */
+export const FLIGHT_GUARD_SETTING = "flight.guard";
 export const FLIGHT_MAIN_SETTING = "flight.main";
 export const FLIGHT_SIGNAL_KINDS = [
   "flaky_test",

@@ -16,6 +16,7 @@ import {
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
   FLIGHT_GUARD_COOLDOWN_MS,
+  FLIGHT_GUARD_SETTING,
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HOUR_MS,
@@ -183,10 +184,27 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** Each run's context at its first turn, so the handover line is growth, not the start's size. */
   const firstContext = new Map<string, number>();
   let rotationRequested = false;
-  /** When the hub starts FLIGHT again after the handover guard stopped it; null when it stays stopped. */
-  let guardRetryAt: number | null = null;
-  /** When the hub started FLIGHT again after the guard; a trip within an hour of it is the second in a row. */
-  let guardRestartedAt: number | null = null;
+  /**
+   * The handover guard's cooldown: when the hub starts FLIGHT again after the guard stopped it
+   * (`retryAt`, null when it stays stopped), and when it last did (a trip within an hour of that
+   * is the second in a row). Stored, so a hub restart keeps both.
+   */
+  const readGuard = (): { retryAt: number | null; restartedAt: number | null } => {
+    try {
+      const v = JSON.parse(store.getSetting(FLIGHT_GUARD_SETTING) || "null") as {
+        retryAt?: unknown;
+        restartedAt?: unknown;
+      } | null;
+      return {
+        retryAt: typeof v?.retryAt === "number" ? v.retryAt : null,
+        restartedAt: typeof v?.restartedAt === "number" ? v.restartedAt : null,
+      };
+    } catch {
+      return { retryAt: null, restartedAt: null };
+    }
+  };
+  const writeGuard = (g: { retryAt: number | null; restartedAt: number | null }): void =>
+    store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
   let lastFailure: string | null = null;
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
@@ -473,10 +491,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       // before any start, which it would refuse
       if (await settleGhost(id, row, alive, t)) return;
       // the handover guard's cooldown is over: FLIGHT starts again, and a trip soon after is the second in a row
-      if (guardRetryAt !== null && t >= guardRetryAt && noteOpen()) {
+      const guard = readGuard();
+      if (guard.retryAt !== null && t >= guard.retryAt && noteOpen()) {
         store.clearNote(FLIGHT_NOTE_KEY, t);
-        guardRetryAt = null;
-        guardRestartedAt = t;
+        writeGuard({ retryAt: null, restartedAt: t });
         rotations = [];
         bus.emit("attention");
       }
@@ -487,9 +505,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (rotating && rotations.length >= FLIGHT_ROTATIONS_MAX) {
         clearDown(t);
         const last = row?.runId ?? null;
-        const again = guardRestartedAt !== null && t - guardRestartedAt < FLIGHT_HOUR_MS;
-        guardRetryAt = again ? null : t + FLIGHT_GUARD_COOLDOWN_MS;
-        guardRestartedAt = null;
+        const tripped = readGuard();
+        const again = tripped.restartedAt !== null && t - tripped.restartedAt < FLIGHT_HOUR_MS;
+        writeGuard({ retryAt: again ? null : t + FLIGHT_GUARD_COOLDOWN_MS, restartedAt: null });
         store.raiseNote({
           key: FLIGHT_NOTE_KEY,
           kind: "blocked",
@@ -518,7 +536,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           text: flightStartFailedText(lastFailure ?? "it stopped 3 times in an hour"),
           at: t,
         });
-        guardRetryAt = null;
+        writeGuard({ ...readGuard(), retryAt: null });
         processGone = false; // said once, in this note
         bus.emit("attention");
         return;

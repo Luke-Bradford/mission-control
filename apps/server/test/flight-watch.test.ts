@@ -2547,9 +2547,34 @@ describe("the FLIGHT watcher", () => {
         expect(notesOpen()).toEqual([]);
       });
 
+      it("keeps the cooldown through a hub restart", async () => {
+        liveCrew();
+        await tripGuard();
+        const started = startCalls.length;
+        makeWatch(); // the hub restarted: a new watch with none of the old one's memory
+        nowMs += FLIGHT_GUARD_COOLDOWN_MS + MIN;
+        await watch.check();
+        expect(startCalls).toHaveLength(started + 1);
+        expect(notesOpen()).toEqual([]);
+      });
+
+      it("counts a trip after a hub restart as the second in a row", async () => {
+        liveCrew();
+        await tripGuard();
+        nowMs += FLIGHT_GUARD_COOLDOWN_MS + MIN;
+        await watch.check(); // the cooldown restart
+        makeWatch(); // the hub restarted between that restart and the next trip
+        await tripGuard();
+        expect(notesOpen()[0]?.text).toContain("twice in a row");
+        const started = startCalls.length;
+        nowMs += 3 * FLIGHT_GUARD_COOLDOWN_MS;
+        await watch.check();
+        expect(startCalls).toHaveLength(started);
+      });
+
       it("stays stopped, and alerts, when it trips a second time in a row", async () => {
         liveCrew();
-        const n = await tripGuard();
+        await tripGuard();
         nowMs += FLIGHT_GUARD_COOLDOWN_MS + MIN;
         await watch.check(); // the cooldown restart
         await tripGuard();
