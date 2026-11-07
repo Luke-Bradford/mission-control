@@ -67,12 +67,16 @@ it("keeps a qualified PR question and its reply in the same repository thread", 
     knownSecrets: async () => [],
     senderKind: "seat" as const,
   };
-  const question = await sendComms({ ...deps, ticket: "repo#42", senderKind: "operator" }, "CAPCOM", {
-    to: "seat",
-    ref: "PR 7",
-    label: "question",
-    text: "What did QA test?",
-  });
+  const question = await sendComms(
+    { ...deps, ticket: "repo#42", senderKind: "operator" },
+    "CAPCOM",
+    {
+      to: "seat",
+      ref: "PR 7",
+      label: "question",
+      text: "What did QA test?",
+    },
+  );
   const reply = await sendComms(deps, "seat", {
     to: "CAPCOM",
     ref: "PR 7",

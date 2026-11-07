@@ -1,7 +1,7 @@
 import { COMMS_CONTROLLER } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CcConfig } from "../src/config.ts";
 import { sendComms } from "../src/comms.ts";
+import type { CcConfig } from "../src/config.ts";
 import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { Store } from "../src/store.ts";
 
@@ -52,7 +52,11 @@ afterEach(() => store.close());
 describe("hub-written messages are the hub's, even with a FLIGHT seat configured", () => {
   it("stores an applied decision default as MC, kind hub", async () => {
     expect(await applyDecisionDefaults({ config, store, now: 10 })).toBe(1);
-    expect(store.commsMessage("comms:1")).toMatchObject({ from: "MC", senderKind: "hub", to: "CAPCOM" });
+    expect(store.commsMessage("comms:1")).toMatchObject({
+      from: "MC",
+      senderKind: "hub",
+      to: "CAPCOM",
+    });
   });
 
   const deps = (senderKind: "hub" | "seat" | "controller" | "flight") => ({

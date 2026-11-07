@@ -289,9 +289,16 @@ export function reactComms(
     throw new Error("You cannot react to that Comms message.");
   const added = store.addCommsReaction(id, actor, reaction, reason, at);
   if (added === null) throw new Error("Unknown Comms message.");
-  if ((operatorLevel || actor === COMMS_CAPCOM || actor === COMMS_CONTROLLER) && reaction === "done") {
+  if (
+    (operatorLevel || actor === COMMS_CAPCOM || actor === COMMS_CONTROLLER) &&
+    reaction === "done"
+  ) {
     const who =
-      actor === COMMS_CAPCOM ? "the operator" : actor === COMMS_CONTROLLER ? "the controller" : "FLIGHT";
+      actor === COMMS_CAPCOM
+        ? "the operator"
+        : actor === COMMS_CONTROLLER
+          ? "the controller"
+          : "FLIGHT";
     store.settleCommsItem(id, actor, `Marked done by ${who}`, at);
     store.addHubEvent(`Comms ${id} marked done by ${who}.`, at);
   }

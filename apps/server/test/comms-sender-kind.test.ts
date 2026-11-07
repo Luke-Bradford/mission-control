@@ -182,7 +182,9 @@ describe("FLIGHT's reactions and pins through the operator tool are FLIGHT's", (
     expect(pin.statusCode).toBe(200);
     expect(store.commsPins().find((p) => p.id === row?.id)).toBeDefined();
     expect(
-      (store as unknown as { db: { prepare: (s: string) => { get: () => { pinned_by: string } } } }).db
+      (
+        store as unknown as { db: { prepare: (s: string) => { get: () => { pinned_by: string } } } }
+      ).db
         .prepare("SELECT pinned_by FROM comms_pins")
         .get().pinned_by,
     ).toBe("flight-1");

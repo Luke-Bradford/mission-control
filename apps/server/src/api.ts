@@ -1931,13 +1931,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (commsMessageNumber(req.params.id) === null)
             return reply.code(400).send({ error: "invalid Comms message id" });
           try {
-            pinComms(
-              store,
-              commsActor(req),
-              req.params.id,
-              pinned,
-              now(),
-            );
+            pinComms(store, commsActor(req), req.params.id, pinned, now());
             bus.emit("agents");
             return { pinned };
           } catch (e) {
