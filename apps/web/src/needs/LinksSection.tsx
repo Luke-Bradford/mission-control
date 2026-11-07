@@ -1,9 +1,9 @@
 import type { AttentionItem, Crew } from "@mc/core";
-import { RESOURCES, useResource } from "../data.ts";
 import { SafeLink } from "../components/SafeLink.tsx";
+import { RESOURCES, useResource } from "../data.ts";
 import { agentPath, followLink } from "../router.ts";
-import { plainTitle } from "./QuestionBand.tsx";
 import { briefLinks } from "./pictures.ts";
+import { plainTitle } from "./QuestionBand.tsx";
 
 /**
  * The ticket and PR the item is about, labelled by their titles. With no title a link says "the
