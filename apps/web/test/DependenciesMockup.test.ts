@@ -237,7 +237,9 @@ describe("Dependencies mockup in jsdom", () => {
 
   it("draws no waiting card when nothing waits", () => {
     const document = render("?view=board&state=empty");
-    expect(text(document.querySelector("#col-Ready"))).not.toMatch(/Depends on|Stacked on|Held for/);
+    expect(text(document.querySelector("#col-Ready"))).not.toMatch(
+      /Depends on|Stacked on|Held for/,
+    );
     expect(text(document.querySelector(".boardnote"))).toContain("Nothing with Depends on");
   });
 
@@ -250,7 +252,8 @@ describe("Dependencies mockup in jsdom", () => {
       const parent = row.getAttribute("data-parent") ?? "";
       const words = text(row.querySelector(".work"));
       expect(words.startsWith(ref), words).toBe(true);
-      if (words.includes("behind in seat queue")) expect(words).toContain("behind in seat queue GUIDO-CX");
+      if (words.includes("behind in seat queue"))
+        expect(words).toContain("behind in seat queue GUIDO-CX");
       else expect(words).toMatch(new RegExp(`(depends on|stacked on|held for) ${parent}`));
     }
     expect(text(document.querySelector("[data-ref='#1139'] .work"))).toBe(
