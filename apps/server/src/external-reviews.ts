@@ -152,10 +152,11 @@ export function createExternalReviews(deps: {
    * A review that reported on a head after its author run ended (or went away) has no crew loop
    * left to post it, so this hub posts it as it does an external one.
    */
-  const orphaned = (row: ReviewRow) =>
-    !isExternalReview(row) &&
-    row.state === "reported" &&
-    (store.run(row.authorRunId)?.endedAt ?? 0) !== null;
+  const orphaned = (row: ReviewRow) => {
+    if (isExternalReview(row) || row.state !== "reported") return false;
+    const author = store.run(row.authorRunId);
+    return author === null || author.endedAt !== null;
+  };
   /** Why this row is not posted now, or null when it is. */
   function notWanted(row: ReviewRow): string | null {
     const repo = deps.config.repos.find((r) => r.id === row.repoId);
@@ -316,7 +317,12 @@ export function createExternalReviews(deps: {
             const holds = (why: string) => {
               const held = store
                 .reviewsOfPr(repo.id, pr.number)
-                .findLast((r) => r.sha === pr.headSha && r.state === "reported");
+                .findLast(
+                  (r) =>
+                    r.sha === pr.headSha &&
+                    r.state === "reported" &&
+                    (isExternalReview(r) || orphaned(r)),
+                );
               if (held) skipped(pr, held, why);
             };
             if (pr.isDraft) {
