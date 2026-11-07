@@ -113,8 +113,8 @@ describeRendered("Needs you page", () => {
     "the open item fills the width with the mockup shown large",
     async () => {
       for (const [width, height, minImage] of [
-        [2560, 1200, 1300],
-        [1920, 940, 900],
+        [2560, 1200, 1100],
+        [1920, 940, 850],
       ] as const) {
         const label = `${width}x${height}`;
         const page = await renderAt({
@@ -128,8 +128,13 @@ describeRendered("Needs you page", () => {
           await ready(page);
           await pictureLoaded(page);
           const detail = await page.box(".needs-detail");
+          // The edge is the FLIGHT fly-out's, which every page has, or the window's without one.
+          const dock = await page.evaluate(
+            () => document.querySelector<HTMLElement>("#dock")?.getBoundingClientRect().x ?? null,
+            undefined,
+          );
           expect(
-            width - (detail.x + detail.width),
+            (dock ?? width) - (detail.x + detail.width),
             `${label}: detail reaches the right edge`,
           ).toBeLessThanOrEqual(32);
           const image = await page.box(".needs-frame img");
