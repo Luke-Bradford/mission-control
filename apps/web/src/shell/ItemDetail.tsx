@@ -555,17 +555,14 @@ export function ItemDetail({
           <Pictures item={item} />
           {item.brief ? (
             <details className="needs-more">
-              <summary>Details and links</summary>
-              <LinksSection item={item} />
+              <summary>Details</summary>
               {briefBlock}
             </details>
           ) : (
             // with no brief, the item's own text is all there is: keep it in view
-            <>
-              <LinksSection item={item} />
-              {briefBlock}
-            </>
+            briefBlock
           )}
+          <LinksSection item={item} />
         </div>
         <div className="needs-side" id="needsSide">
           {discussionBlock}

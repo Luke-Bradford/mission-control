@@ -98,10 +98,11 @@ describe("Needs you page", () => {
     expect(within(list).getAllByRole("link")[0]?.getAttribute("aria-current")).toBe("true");
   });
 
-  it("shows the title, when it was raised, what to decide, and the pinned ticket and PR (#1543)", async () => {
+  it("shows the title, the context, what to decide, and the ticket and PR by title at the bottom (#1583)", async () => {
     routes([
       ask("q1", {
         brief: brief({
+          context: "The loop schema is built and reviewed; it waits only on your go-ahead.",
           ask: "Merge PR 1412 now that review and CI passed?",
           recommendedOptionId: "a",
           options: [
@@ -133,12 +134,22 @@ describe("Needs you page", () => {
     expect(band.querySelector("time")?.textContent).toMatch(
       /^\w{3} \d{1,2} \w{3} \d\d:\d\d · 60 min ago$/,
     );
-    const pins = within(band).getByRole("list", { name: "Ticket and PR" });
-    expect(within(pins).getByRole("link", { name: "Ticket #1400" }).getAttribute("href")).toBe(
-      "https://github.com/o/mission-control/issues/1400",
-    );
-    expect(within(pins).getByRole("link", { name: "PR 1412" })).toBeTruthy();
-    expect(pins.textContent).toContain("Loop schema in core (stage A)");
+    // the context sits between the title and the question; no number chip is in the band
+    const text = band.textContent ?? "";
+    const context = text.indexOf("The loop schema is built and reviewed");
+    expect(context).toBeGreaterThan(text.indexOf("Loop schema in core"));
+    expect(context).toBeLessThan(text.indexOf("What you need to decide"));
+    expect(within(band).queryByRole("list", { name: "Ticket and PR" })).toBeNull();
+    expect(within(band).queryByRole("link")).toBeNull();
+    expect(text).not.toMatch(/Ticket #|PR 1412 {0,}$/);
+    // the ticket and PR are links at the bottom, labelled by title, never by number
+    const links = screen.getByRole("region", { name: "Links" });
+    const ticket = within(links).getByRole("link", { name: "Loop schema in core" });
+    expect(ticket.getAttribute("href")).toBe("https://github.com/o/mission-control/issues/1400");
+    const pr = within(links).getByRole("link", { name: "Loop schema in core (stage A)" });
+    expect(pr.getAttribute("href")).toBe("https://github.com/o/mission-control/pull/1412");
+    expect(links.textContent).not.toMatch(/#1400|1412/);
+    expect(band.compareDocumentPosition(links) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // the list row shows the same title and the raised time
     const list = screen.getByRole("navigation", { name: "Waiting on you" });
     const row = within(list).getAllByRole("link")[0]?.textContent ?? "";
@@ -147,6 +158,30 @@ describe("Needs you page", () => {
     expect(row).toContain("Merge PR 1412 now that review and CI passed?");
     expect(row).toContain("Asked by ");
     expect(band.textContent).toContain("Asked by ");
+  });
+
+  it("labels the ticket and PR 'the ticket' and 'the pull request' when no title is known", async () => {
+    routes([
+      ask("q1", {
+        pinned: {
+          ticket: {
+            ref: "mission-control#1400",
+            url: "https://github.com/o/mission-control/issues/1400",
+          },
+          pr: {
+            ref: "mission-control#1412",
+            number: 1412,
+            title: "",
+            url: "https://github.com/o/mission-control/pull/1412",
+          },
+        },
+      }),
+    ]);
+    render(<Needs item={null} />);
+    const links = await screen.findByRole("region", { name: "Links" });
+    expect(within(links).getByRole("link", { name: "the ticket" })).toBeTruthy();
+    expect(within(links).getByRole("link", { name: "the pull request" })).toBeTruthy();
+    expect(links.textContent).not.toMatch(/1400|1412/);
   });
 
   it("says nobody is waiting with no items", async () => {

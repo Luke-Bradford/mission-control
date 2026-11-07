@@ -1,7 +1,6 @@
 import { ATTENTION_LABEL, type AttentionItem, type CrewRow, needsYouAlert } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
-import { MarkdownInline } from "../components/Markdown.tsx";
-import { SafeLink } from "../components/SafeLink.tsx";
+import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 
@@ -42,42 +41,13 @@ export function Raised({ at }: { at: number }) {
   );
 }
 
-/** A PR titled after its ticket ("#1389 Server enforces …") adds nothing beside the ticket. */
-const sameTitle = (pr: string, ticket: string | null | undefined): boolean =>
-  ticket != null && pr.replace(/^#\d+\s*/, "").trim() === ticket.trim();
-
-/** The ticket and PR the item is about, pinned: number, title and link (#1543). */
-export function PinnedLinks({ item }: { item: AttentionItem }) {
-  const { ticket, pr } = item.pinned ?? {};
-  if (!ticket && !pr) return null;
-  const num = (ref: string) => ref.match(/#\d+$/)?.[0] ?? ref;
-  return (
-    <ul className="needs-pins" aria-label="Ticket and PR">
-      {ticket && (
-        <li>
-          {ticket.url ? (
-            <SafeLink url={ticket.url}>{`Ticket ${num(ticket.ref)}`}</SafeLink>
-          ) : (
-            <span>{`Ticket ${num(ticket.ref)}`}</span>
-          )}
-          {ticket.title && <span className="needs-pin-title">{ticket.title}</span>}
-        </li>
-      )}
-      {pr && (
-        <li>
-          <SafeLink url={pr.url}>{`PR ${pr.number}`}</SafeLink>
-          {!sameTitle(pr.title, ticket?.title) && (
-            <span className="needs-pin-title">{pr.title}</span>
-          )}
-        </li>
-      )}
-    </ul>
-  );
-}
+/** The brief's context paragraph: what the operator needs to know before the question. */
+export const contextOf = (item: AttentionItem): string | null =>
+  item.brief?.assessment?.trim() || item.brief?.context?.trim() || null;
 
 /**
- * The band over the open item: its title, when it was raised and by whom, what the operator must
- * decide, and the ticket and PR it is about. It sits outside the scrolling columns, so the
+ * The band over the open item: its title, when it was raised and by whom, the context, and what
+ * the operator must decide. The ticket and PR it is about are links at the bottom of the item. It sits outside the scrolling columns, so the
  * question stays on screen while the rest scrolls.
  */
 export function QuestionBand({
@@ -92,6 +62,7 @@ export function QuestionBand({
 }) {
   const title = titleOf(item);
   const ask = questionOf(item);
+  const context = contextOf(item);
   const pick = recommendedLabel(item);
   return (
     <section className="needs-band" aria-label="The question">
@@ -104,6 +75,11 @@ export function QuestionBand({
       <h2 className="needs-band-title">
         <MarkdownInline text={title} />
       </h2>
+      {context && (
+        <div className="needs-band-context">
+          <Markdown text={context} />
+        </div>
+      )}
       {ask !== title && (
         <p className="needs-band-question">
           <span className="needs-band-label">What you need to decide: </span>
@@ -115,7 +91,6 @@ export function QuestionBand({
           FLIGHT recommends: <b>{pick}</b>
         </p>
       )}
-      <PinnedLinks item={item} />
     </section>
   );
 }
