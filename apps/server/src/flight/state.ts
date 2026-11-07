@@ -190,10 +190,15 @@ export function flightTriageItems(
           (!x.brief ||
             (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt) ||
             // the entry check refused FLIGHT's operator brief: it is FLIGHT's to rewrite (#1543)
-            (x.returned !== undefined && x.brief.for === "operator")) &&
+            // (a brief with no `for` is an old one written for the operator)
+            (x.returned !== undefined && x.brief.for !== "flight") ||
+            // FLIGHT asked again after briefing its own question: the brief covers the first only
+            (ownReply(x, flightId) && x.brief.at < x.at)) &&
           // FLIGHT's own @CAPCOM question is listed until FLIGHT briefs it for the operator
           // (Needs you takes no raw question, #1543) or dismisses it
-          (!ownReply(x, flightId) || (x.returned !== undefined && !x.brief)) &&
+          (!ownReply(x, flightId) ||
+            x.returned !== undefined ||
+            (x.brief !== undefined && x.brief.at < x.at)) &&
           (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
       )
       .filter((item) => item.kind !== "message" || flightQuestion(item.text))

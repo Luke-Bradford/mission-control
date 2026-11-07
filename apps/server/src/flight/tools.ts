@@ -2685,6 +2685,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (hold && key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
     const assessment = structured.assessment ?? context;
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
+    const named = structured.ticket?.split("#")[0];
+    if (named !== undefined && !config.repos.some((r) => r.id === named))
+      return fail(
+        `Not briefed: ticket ${structured.ticket} names no repo of this hub. Use repo#n with one of: ${config.repos.map((r) => r.id).join(", ")}.`,
+      );
     if (structured.for === "operator" && structured.ask === undefined)
       return fail("Give a non-empty ask when passing an item to the operator.");
     const ids = (options ?? []).flatMap((o) => (o.id ? [o.id] : []));

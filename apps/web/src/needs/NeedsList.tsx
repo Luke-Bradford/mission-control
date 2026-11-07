@@ -1,6 +1,7 @@
-import { ATTENTION_LABEL, type AttentionItem } from "@mc/core";
+import { ATTENTION_LABEL, type AttentionItem, type Crew } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
+import { RESOURCES, useResource } from "../data.ts";
 import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { followLink, needsYouPath, PAGE_PATHS } from "../router.ts";
@@ -20,6 +21,10 @@ function RowAge({ at }: { at: number }) {
 
 function Row({ item, current }: { item: AttentionItem; current: boolean }) {
   const to = needsYouPath(item.key);
+  // the band's name for the asker, so the list and the open item agree
+  const callSign = useResource<Crew>(RESOURCES.crew).data?.rows.find(
+    (r) => r.id === item.agentId,
+  )?.displayCallSign;
   return (
     <a
       className={current ? "needs-row on" : "needs-row"}
@@ -40,7 +45,7 @@ function Row({ item, current }: { item: AttentionItem; current: boolean }) {
           <MarkdownInline text={questionOf(item)} max={120} />
         </span>
       )}
-      <span className="needs-row-who s">{`Asked by ${askerOf(item)}`}</span>
+      <span className="needs-row-who s">{`Asked by ${askerOf(item, callSign)}`}</span>
     </a>
   );
 }

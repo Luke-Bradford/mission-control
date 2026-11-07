@@ -23,10 +23,14 @@ export function needsYouAlert(item: Pick<AttentionItem, "key" | "kind">): boolea
     ALERT_KEYS.has(item.key) ||
     item.key.startsWith(`note:${GUARD_ACK_PREFIX}`) ||
     item.kind === "ratelimit" ||
-    // the operator's own request, such as a queue reorder, with its choices written by the hub
-    item.kind === "approval"
+    // the operator's own queue reorder, with its choices written by the hub
+    // (apps/server/src/queue-reorder.ts; its test pins the prefix)
+    (item.kind === "approval" && item.key.startsWith(QUEUE_REORDER_ITEM_PREFIX))
   );
 }
+
+/** Item key prefix of a queue-reorder approval (`note:` + queue-reorder.ts's key prefix). */
+export const QUEUE_REORDER_ITEM_PREFIX = "note:queue-reorder:";
 
 export const NEEDS_YOU_ASK_MAX = 300;
 
@@ -51,7 +55,8 @@ export function needsYouEntryFaults(
 ): string[] {
   if (needsYouAlert(item)) return [];
   const brief = item.brief;
-  if (brief === undefined || brief.for !== "operator")
+  // a brief with no `for` predates triage routing and was written for the operator
+  if (brief === undefined || brief.for === "flight")
     return ["no brief for the operator: FLIGHT writes one with brief_item, or keeps the item"];
   const faults: string[] = [];
   const ask = brief.ask?.trim() ?? "";

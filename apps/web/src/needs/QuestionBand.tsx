@@ -1,4 +1,4 @@
-import { ATTENTION_LABEL, type AttentionItem, type CrewRow } from "@mc/core";
+import { ATTENTION_LABEL, type AttentionItem, type CrewRow, needsYouAlert } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { SafeLink } from "../components/SafeLink.tsx";
@@ -20,7 +20,9 @@ export const titleOf = (item: AttentionItem): string =>
  * hub (an alert).
  */
 export const askerOf = (item: AttentionItem, callSign?: string | null): string =>
-  callSign ?? item.agentId ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub");
+  needsYouAlert(item)
+    ? "the hub"
+    : (callSign ?? item.agentId ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub"));
 
 /** The recommended option's label, when the brief names one. */
 export function recommendedLabel(item: AttentionItem): string | null {

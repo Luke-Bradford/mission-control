@@ -24,6 +24,7 @@ import {
   needsYouItems,
   type Profile,
   type PullRequestView,
+  QUEUE_REORDER_ITEM_PREFIX,
   RUNAWAY_TRIAGE_DETAIL,
   type Run,
   type RunDigest,
@@ -32,6 +33,7 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CLI_AUTO_NOTE_PREFIX } from "../src/cli-auto.ts";
 import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli-update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
@@ -46,7 +48,9 @@ import {
   NO_LOCK,
   pinned,
 } from "../src/hud.ts";
+import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instruction-notices.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
+import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -2820,6 +2824,16 @@ describe("messages are not Needs you", () => {
     });
     expect(chatter()).toEqual([expect.objectContaining({ key, owner: "operator" })]);
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).not.toContain(key);
+    // a second question keeps the item and its brief; FLIGHT's digest asks it to brief again
+    say(NOW - 2 * MIN, "flight-1", COMMS_CAPCOM, "@CAPCOM and drop #498 after?");
+    expect(chatter()).toEqual([
+      expect.objectContaining({
+        key,
+        owner: "operator",
+        brief: expect.objectContaining({ ask: "Merge #551 now, or wait for #498?" }),
+      }),
+    ]);
+    expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain(key);
   });
 
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {
@@ -3581,8 +3595,10 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(HUB_STOP_KEYS).toEqual([
       `note:${MACHINE_CAPACITY_KEY}`,
       `note:${CLI_NOTE_KEY}`,
-      "note:cli-auto",
+      `note:${CLI_AUTO_NOTE_PREFIX}`,
+      `note:${INSTRUCTION_FOCUS_NOTE_PREFIX}`,
     ]);
+    expect(QUEUE_REORDER_ITEM_PREFIX).toBe(`note:${QUEUE_REORDER_PREFIX}`);
     expect(CLI_UPGRADE_NOTE_KEY.startsWith(`${CLI_NOTE_KEY}:`)).toBe(true);
     for (const [key, kind] of [
       [MACHINE_CAPACITY_KEY, "flag"],
@@ -3652,6 +3668,61 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     const triage = flightTriageItems(c, store, NOW, null, []).map((i) => i.key);
     expect(triage).toContain("note:prot");
     expect(triage).not.toContain("note:plain");
+  });
+
+  it("lists an item with an old brief (no `for`) for FLIGHT to rewrite (#1543)", () => {
+    flight();
+    store.raiseNote({
+      key: "legacy",
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: "shop-app",
+      text: "legacy",
+      at: NOW - MIN,
+    });
+    store.addBrief({
+      key: "note:legacy",
+      context: "c",
+      recommendation: "Go.",
+      options: [{ label: "Go", answer: "Go." }],
+      basis: "b",
+      at: NOW - MIN,
+    });
+    expect(all().find((i) => i.key === "note:legacy")).toMatchObject({
+      owner: "flight",
+      returned: expect.arrayContaining([expect.stringMatching(/^no question/)]),
+    });
+    expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain("note:legacy");
+  });
+
+  it("counts a protected item FLIGHT kept while FLIGHT is down, never hides it (#1543)", () => {
+    flight();
+    store.raiseNote({
+      key: "kept",
+      kind: "flag",
+      runId: null,
+      seatId: null,
+      repoId: "shop-app",
+      text: "kept",
+      at: NOW - MIN,
+    });
+    store.addBrief({
+      key: "note:kept",
+      for: "flight",
+      context: "c",
+      recommendation: "Wait for CI.",
+      options: [],
+      basis: "b",
+      at: NOW - MIN,
+    });
+    expect(all().find((i) => i.key === "note:kept")?.flightTriage).toBe("handling");
+    watchNote(FLIGHT_DOWN_NOTE_KEY, "FLIGHT is down: it is parked.");
+    expect(all().find((i) => i.key === "note:kept")).toMatchObject({
+      owner: "flight",
+      flightTriage: "down",
+    });
+    expect(aggregate()?.notTriaging?.keys).toContain("note:kept");
   });
 
   it("starts FLIGHT's window at the hub's start and at a hold's release, not at once (#1543)", () => {

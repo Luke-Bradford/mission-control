@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { FLIGHT_LEFT_NOTE_KEY, FLIGHT_NOT_TRIAGING_KEY } from "../src/flight.ts";
 import { guardAckKey } from "../src/guard.ts";
-import { NEEDS_YOU_ASK_MAX, needsYouAlert, needsYouEntryFaults } from "../src/needs-you-entry.ts";
+import {
+  NEEDS_YOU_ASK_MAX,
+  needsYouAlert,
+  needsYouEntryFaults,
+  QUEUE_REORDER_ITEM_PREFIX,
+} from "../src/needs-you-entry.ts";
 import type { AttentionBrief, AttentionItem } from "../src/types.ts";
 
 const brief = (over: Partial<AttentionBrief> = {}): AttentionBrief => ({
@@ -51,8 +56,18 @@ describe("needsYouEntryFaults", () => {
       expect(needsYouEntryFaults(item({ key, kind: "blocked", brief: undefined }))).toEqual([]);
     }
     expect(needsYouEntryFaults(item({ kind: "ratelimit", brief: undefined }))).toEqual([]);
-    // the operator's own request (a queue reorder): its choices are the hub's, not FLIGHT's
-    expect(needsYouEntryFaults(item({ kind: "approval", ticket: null, url: null }))).toEqual([]);
+    // the operator's own queue reorder: its choices are the hub's, not FLIGHT's
+    const bare = { kind: "approval" as const, ticket: null, url: null };
+    expect(needsYouEntryFaults(item({ ...bare, key: `${QUEUE_REORDER_ITEM_PREFIX}abc` }))).toEqual(
+      [],
+    );
+    // another approval (a loop's mvp-ready escalation) needs FLIGHT's brief like anything else
+    expect(needsYouAlert({ key: "esc:shop#9", kind: "approval" })).toBe(false);
+  });
+
+  it("treats an old brief with no `for` as the operator's", () => {
+    const { for: _for, ...legacy } = brief();
+    expect(needsYouEntryFaults(item({ brief: legacy }))).toEqual([]);
   });
 
   it("takes the ticket FLIGHT names when the item has none", () => {

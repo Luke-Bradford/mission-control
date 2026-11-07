@@ -5,6 +5,7 @@ import {
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
+  seatCallSign,
 } from "@mc/core";
 import { protectedDecisionItem } from "./attention-holds.ts";
 import type { CcConfig } from "./config.ts";
@@ -27,15 +28,16 @@ export function raiseStalledCommsDecisions(d: {
 }): number {
   const { config, store, now } = d;
   if (flightSeat(config) === null) return 0;
-  const stalled = store
-    .openCommsItems()
-    .filter(
-      (m) =>
-        m.at >= COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT &&
-        m.to !== COMMS_CAPCOM &&
-        now >= m.at + COMMS_FLIGHT_ESCALATION_MS + COMMS_CAPCOM_ESCALATION_MS &&
-        !store.operatorBriefed(`${COMMS_OPEN_PREFIX}${m.id}`),
-    );
+  const stalled = store.openCommsItems().filter(
+    (m) =>
+      m.at >= COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT &&
+      m.to !== COMMS_CAPCOM &&
+      now >= m.at + COMMS_FLIGHT_ESCALATION_MS + COMMS_CAPCOM_ESCALATION_MS &&
+      // a question for the operator names its ticket (Needs you entry rules, #1543); without
+      // one the item stays FLIGHT's, counted under the not-triaging alert
+      m.ticket !== null &&
+      !store.operatorBriefed(`${COMMS_OPEN_PREFIX}${m.id}`),
+  );
   if (stalled.length === 0) return 0;
   const items = attentionItems(config, store, now, NO_LOCK);
   const briefs = store.briefs();
@@ -44,16 +46,13 @@ export function raiseStalledCommsDecisions(d: {
     const key = `${COMMS_OPEN_PREFIX}${message.id}`;
     const item = items.find((i) => i.key === key);
     if (item === undefined || protectedDecisionItem(store, item, config, now)) continue;
-    // a question for the operator names its ticket (Needs you entry rules, #1543); without one
-    // the item stays FLIGHT's, counted under the not-triaging alert
-    if (message.ticket === null) continue;
     const blocker = message.label === "blocker";
     const flight = briefs.get(key);
     const brief: AttentionBrief = {
       for: "operator",
       original: message.text,
       context: `${message.from} sent ${message.to} a ${message.label}${message.ticket === null ? "" : ` on ${message.ticket}`} and nobody has settled it: ${message.text}`,
-      ask: `${message.from} has waited on ${message.to} about ${message.ticket}: let it proceed on its best judgment, or hold?`.slice(
+      ask: `${seatCallSign(message.from)} has waited on ${seatCallSign(message.to)} about ${message.ticket}: let it proceed on its best judgment, or hold?`.slice(
         0,
         ASK_MAX,
       ),

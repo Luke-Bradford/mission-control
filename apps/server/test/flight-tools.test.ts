@@ -5277,6 +5277,9 @@ describe("brief_item", () => {
     const refused = await call("brief_item", B({ key }));
     expect(refused.isError).toBe(true);
     expect(refused.text).toContain("no ticket or PR: name it with ticket in brief_item");
+    const unknown = await call("brief_item", B({ key, ticket: "nope#7" }));
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("ticket nope#7 names no repo of this hub");
     expect((await call("brief_item", B({ key, ticket: "mc#7" }))).isError).toBeUndefined();
     expect(attentionItems(cfg, store, nowMs, lockNow).find((i) => i.key === key)).toMatchObject({
       owner: "operator",
@@ -7491,7 +7494,7 @@ describe("superuser housekeeping", () => {
     expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
       owner: "operator",
       brief: {
-        ask: "flight-1 has waited on guido-1 about mc#909: let it proceed on its best judgment, or hold?",
+        ask: "FLIGHT-1 has waited on GUIDO-1 about mc#909: let it proceed on its best judgment, or hold?",
       },
     });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
@@ -9036,12 +9039,11 @@ describe("brief_item with a hold (#760)", () => {
       expect(needsYou(at)).toHaveLength(1);
       expect(items(at).map((i) => i.key)).toEqual([key]);
       expect(items(at)[0]?.holdReleased).toBeTruthy();
-      // a fresh brief settles it
+      // a fresh, complete brief settles it
       store.addBrief({
         ...brief(),
         original: "",
         context: "x",
-        options: [],
         did: [],
         at: at + 1,
         defaultEligible: false,

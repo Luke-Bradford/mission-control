@@ -857,9 +857,9 @@ interface FlightTriage {
 }
 
 /**
- * The operator's call (#758): FLIGHT may brief it for the operator but never keep it, and it is
- * never folded into the "FLIGHT is not triaging" item. The decision kinds, the held hub Update,
- * and a run parked on its budget or account.
+ * The operator's call (#758): FLIGHT may brief it for the operator but never keep it. Unless it is
+ * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, the
+ * held hub Update, and a run parked on its budget or account, a controller check or acceptance.
  */
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
@@ -873,9 +873,9 @@ export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store:
 }
 
 /**
- * Kinds that, once FLIGHT misses them (or while nobody is triaging), reach the operator as
- * themselves so they notify as they always did: a stuck run, or an error a seat is stuck on, is
- * not news to fold into a count.
+ * Kinds that, once FLIGHT misses them (or while nobody is triaging), `route` keeps the operator's;
+ * unbriefed, the Needs you entry check (#1543) then folds them into the not-triaging count, which
+ * notifies in their place.
  */
 const STUCK_KINDS: readonly AttentionItem["kind"][] = [
   "stalled",
@@ -909,7 +909,8 @@ export function pinned(item: AttentionItem, store: Store, config: CcConfig): Att
             Number(address[2]),
           ]
         : null;
-  const repoId = own?.[0] || ref?.repoId || item.repoId;
+  const repoId = own !== null ? own[0] : (ref?.repoId ?? item.repoId);
+  // a PR address in a repo this hub does not have maps to "": pin no PR rather than a guess
   const prs = repoId ? store.pullRequests(repoId) : [];
   const pr =
     own !== null
@@ -954,13 +955,16 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 
 /**
  * Hub stops that only the operator clears, by note key or key prefix: machine capacity
- * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts) and the CLI
- * auto-rollback (cli-auto.ts). hud.test.ts pins them to those modules' keys.
+ * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
+ * auto-rollback (cli-auto.ts) and a seat's focus import (instruction-notices.ts). hud.test.ts pins
+ * them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
+  // a seat's focus could not be imported: the operator's config to fix (instruction-notices.ts)
+  `${NOTE_KEY}instruction-focus`,
 ] as const;
 
 /** The park kind of the run behind a note item, if any. */
@@ -1191,10 +1195,11 @@ function buildAttentionItems(
       const first = messages[0];
       const last = messages.at(-1);
       if (!first || !last) continue;
-      // Another agent's item is keyed on its first unread line, so a brief stays attached while it
-      // writes again until the thread is read. FLIGHT's own question is the operator's to ack, and
-      // each new one is a new ask.
-      const keyed = own ? last : first;
+      // An item is keyed on its first unread line, so a brief stays attached while its writer
+      // writes again until the thread is read. FLIGHT's own question too (#1543): it reaches Needs
+      // you only through its brief, and a new key would drop the briefed one. FLIGHT's digest lists
+      // it again when FLIGHT writes after briefing it.
+      const keyed = first;
       items.push({
         // routed below: FLIGHT's question stays the operator's; another agent's line is FLIGHT's
         // unless FLIGHT briefs it for the operator
@@ -1507,14 +1512,16 @@ function buildAttentionItems(
     // a default applies only to the operator's item, so a returned one carries none
     const { defaultDueAt: _default, ...rest } = item;
     const back: AttentionItem = { ...rest, owner: OWNER_FLIGHT, returned };
-    // FLIGHT's own line to the operator, or an item FLIGHT kept: FLIGHT already has it
-    if (item.brief?.for === "flight" || ownReply(item, flightId) || flightAsks.has(item.key))
+    // FLIGHT's own line to the operator: FLIGHT wrote it, so it is never work waiting on FLIGHT
+    if (ownReply(item, flightId) || flightAsks.has(item.key))
       return { ...back, flightTriage: "handling" };
     // read, and FLIGHT may have dismissed it (dismiss acks): dealt with unless protected, which
     // FLIGHT cannot dismiss, so the read was the operator's and FLIGHT still owes it a brief
     if (item.acked && !protectedDecisionItem(store, item, config, now))
       return { ...back, flightTriage: "handling" };
+    // nobody triaging: counted under the one alert, even an item FLIGHT kept
     if (!triaging) return { ...back, flightTriage: "down" };
+    if (item.brief?.for === "flight") return { ...back, flightTriage: "handling" };
     // FLIGHT's window starts when it could first see the item as its own: raised, briefed,
     // released from a hold, FLIGHT live, or this hub started (so a rollout is not "late" at once)
     const triageDueAt =
