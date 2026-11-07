@@ -1303,7 +1303,10 @@ every reason it lists is handled, not when some later audit is clean. The audit 
 
 **Wait.** For a reason FLIGHT cannot act on yet: `mcp__mc__wait_on { target, on, until, basis }` records a
 `wait` decision on the target (handled) and wakes FLIGHT again at `until` (at most 7 days) with
-`wait_over`.
+`wait_over`. A `wait_over` signal's id passed back as the target waits on the original target again, so the key
+never nests. An ended wait stays in the digest until FLIGHT deals with it: a decision made after it ended that
+names the signal key (`wait_over:<target>:<until>`) or has the target as its ref or seat, or a new `wait_on` on
+the target. The hub then drops the wait. The same pass clears waits nested before this rule.
 
 **What a free seat or an item wakes.** A free build seat, and the Ready tickets listed with it, wake FLIGHT only when a Ready ticket is in that seat's area (one `area:` label the seat covers, not held by another login). A seat or ticket FLIGHT recorded a `wait_on` for stays out until the wait is due. An item wakes FLIGHT only while it is new to it: once a wake or `flight_state` has shown the item, it wakes FLIGHT again only if its text changes. `GET /api/flight` `wakeHistory.idle` counts the day's wakes with no decision within 4 minutes (`flight_wakes` joined to `flight_decisions`); the target is under 15% of `total`.
 
