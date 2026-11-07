@@ -10,6 +10,8 @@ export const CHECK_EVENT =
 
 /** `who` or `to` of a comms row: the operator. Upper case, so never a seat id. */
 export const COMMS_CAPCOM = "CAPCOM";
+/** `who` of a comms row the controller sent with its own credential. Upper case, so never a seat id. */
+export const COMMS_CONTROLLER = "CONTROLLER";
 /** `who` of a comms row Mission Control's engine sent. */
 export const COMMS_MC = "MC";
 /** Stored Comms content in code points; longer copies append a cut marker. Delivery stays whole. */

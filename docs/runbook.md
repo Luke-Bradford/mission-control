@@ -2734,7 +2734,14 @@ keep their permission checks.
   `comms_repeats` counts it (`store.commsRepeatCount(since)`), kept 90 days.
 - **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
   that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
-  The kind of a message is not stamped yet.
+- **Sender kind.** Each message stores who sent it: `operator`, `controller`, `flight`, `seat` or
+  `hub` (column `sender_kind`; a Comms read returns it as `senderKind`). The hub sets it from how
+  the request was made, never from the text. `operator` is a person using the app (sender
+  `CAPCOM`). The controller sends with its own token (`<data dir>/controller-token`, header
+  `x-mc-controller`, new each boot), as `CONTROLLER`; it passes where the operator token does and
+  grants nothing more, and a `CONTROLLER` line wakes FLIGHT as `CAPCOM` does. FLIGHT's `mc operator`
+  sends are FLIGHT's. The hub's own messages are `hub`, sent as `MC`, never `CAPCOM`. Rows stored
+  before this have no kind (`senderKind` is null) and keep their old sender.
 - **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,
   FLIGHT's `answer` and `pass` decisions, question messages (label `question`) and the replies to
   them keep 365.
