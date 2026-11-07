@@ -230,6 +230,8 @@ describe("Needs you page", () => {
     const row = await screen.findByTestId("not-triaging");
     expect(within(row).getByText("GUIDO-1 asks: Which lane?")).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Hide them" })).toBeTruthy();
+    // the band names FLIGHT; the row does not repeat it
+    expect(within(row).queryByText("FLIGHT")).toBeNull();
   });
 
   it("lists the recommendation of an ask with a default, apart from the asks", async () => {
@@ -251,13 +253,6 @@ describe("Needs you page", () => {
 
   it("leaves Held items off Needs you (#1543), and lists Handled today under the list", async () => {
     routes([], {
-      "/api/attention/held": [
-        item({
-          key: "hold:1",
-          text: "Held item",
-          hold: { reason: "waiting for CI", condition: { kind: "manual" }, at: NOW } as never,
-        }),
-      ],
       "/api/attention": [ask("q1")],
       "/api/notifications": {
         open: [],

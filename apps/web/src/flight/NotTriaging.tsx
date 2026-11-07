@@ -73,8 +73,8 @@ export function NotTriagingRow({
     >
       {lamp && <Lamp {...lamp} />}
       <div className="min0">
-        {/* on Needs you the band above already names it */}
-        {!open && <span className="kind">FLIGHT</span>} <MarkdownInline text={item.text} />
+        {/* no "FLIGHT" kind label: on Needs you the band above already names it */}
+        <MarkdownInline text={item.text} />
         {error && <div className="xs crit-t">{error}</div>}
         {shown && waiting.length > 0 && (
           <ul className="not-triaging-list" aria-label="Waiting on FLIGHT">
