@@ -67,7 +67,7 @@ describeRendered("Audit Tokens tab in a browser", () => {
           expect(m.small, `${colorScheme}: small controls`).toEqual([]);
           expect(m.pokingOut, `${colorScheme}: tables wider than their panel`).toEqual([]);
           expect(m.clipped, `${colorScheme}: clipped boxes`).toEqual([]);
-          for (const fig of m.figs) expect(fig).toMatch(/last 7 days|Turn on audit/);
+          for (const fig of m.figs) expect(fig).toMatch(/last 7 days|audit\.controller_sessions/);
           if (SHOTS)
             await page.screenshot(
               join(SHOTS, `audit-tokens-${width}x${height}-${colorScheme}.png`),
