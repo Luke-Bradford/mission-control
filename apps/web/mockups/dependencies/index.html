@@ -1,0 +1,697 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mission Control · Dependencies mockup</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #070a0e; --surface: #0c1117; --surface-2: #131a23; --line: #1b2430; --line-2: #2a3646;
+        --fg: #e7eaef; --fg-2: #aab2bf; --muted: #808999;
+        --accent: #56d8e6; --accent-ink: #021417; --accent-soft: rgba(86, 216, 230, 0.14);
+        --ok: #45c486; --ok-soft: rgba(69, 196, 134, 0.16);
+        --warn: #f2b53a; --warn-soft: rgba(242, 181, 58, 0.15);
+        --crit: #f1706d; --crit-soft: rgba(240, 107, 104, 0.15);
+        --sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+        --mono: "IBM Plex Mono", "Cascadia Mono", Consolas, ui-monospace, monospace;
+        --display: "Barlow Semi Condensed", "Arial Narrow", "IBM Plex Sans", sans-serif;
+        --vh: 1vh;
+        --row: 32px;
+      }
+      :root[data-theme="light"] {
+        color-scheme: light;
+        --bg: #f3f5f8; --surface: #ffffff; --surface-2: #eef1f5; --line: #dfe3ea; --line-2: #c6cdd8;
+        --fg: #121720; --fg-2: #4a5465; --muted: #646e81;
+        --accent: #0a6b7d; --accent-ink: #ffffff; --accent-soft: rgba(10, 107, 125, 0.1);
+        --ok: #157246; --ok-soft: rgba(23, 128, 78, 0.12);
+        --warn: #8d5b00; --warn-soft: rgba(224, 162, 28, 0.18);
+        --crit: #bb2e2b; --crit-soft: rgba(196, 48, 45, 0.1);
+      }
+      /* From 3300 CSS px the interface scales instead of stretching, as the app does. */
+      @media (min-width: 3300px) {
+        html { zoom: 1.5; }
+        :root { --vh: calc(1vh / 1.5); }
+      }
+      @media (min-width: 2200px) { :root { --row: 40px; } }
+
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/20px var(--sans); }
+      a { color: var(--accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+      a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+      button { font: inherit; color: inherit; }
+
+      .top { height: 52px; padding: 0 24px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 24px; }
+      .brand { font: 700 19px var(--display); letter-spacing: 0.12em; }
+      .nav { display: flex; gap: 4px; }
+      .nav a { padding: 4px 8px; min-height: 24px; color: var(--fg-2); }
+      .nav a.on { color: var(--fg); border-bottom: 2px solid var(--accent); }
+      .conn { margin-left: auto; font: 12px/16px var(--mono); color: var(--fg-2); }
+
+      .banner { margin: 0; min-height: 32px; padding: 4px 24px; background: var(--warn-soft); color: var(--fg); border-bottom: 1px solid var(--line-2); font-size: 12px; line-height: 16px; display: flex; align-items: center; }
+      .banner b { color: var(--warn); margin-right: 8px; font: 600 11px/16px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; }
+
+      .shell { display: grid; grid-template-columns: minmax(0, 1fr); min-height: calc(100 * var(--vh) - 85px); }
+      .shell.rail-open { grid-template-columns: minmax(0, 1fr) 360px; }
+      main { min-width: 0; padding: 12px 24px; display: grid; gap: 12px; height: calc(100 * var(--vh) - 85px); min-height: 640px; }
+      .rail { border-left: 1px solid var(--line); background: var(--surface); padding: 12px 16px; font-size: 13px; }
+      .rail h2 { font: 600 14px/20px var(--sans); margin: 0 0 8px; }
+      .rail p { margin: 0 0 8px; color: var(--fg-2); }
+
+      .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 3px; min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+      .phead { min-height: 48px; padding: 8px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+      .phead h2 { margin: 0; font: 600 14px/20px var(--sans); white-space: nowrap; }
+      .sub { color: var(--muted); font: 11px/16px var(--mono); }
+      .phead .right { margin-left: auto; display: flex; gap: 12px; align-items: center; font: 12px/16px var(--mono); color: var(--fg-2); }
+
+      .stats { display: flex; flex-wrap: wrap; gap: 4px 24px; padding: 4px 16px; min-height: var(--row); align-items: center; border-bottom: 1px solid var(--line); }
+      .stat { display: flex; gap: 8px; align-items: baseline; }
+      .stat .k { font: 11px/16px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+      .stat b { font: 600 16px/20px var(--display); font-variant-numeric: tabular-nums; }
+      .stat .u { font: 11px/16px var(--mono); color: var(--muted); }
+
+      .strip { margin: 0; padding: 4px 16px; min-height: 28px; display: flex; align-items: center; gap: 12px; font-size: 12px; line-height: 16px; border-bottom: 1px solid var(--line); background: var(--warn-soft); }
+      .strip.crit { background: var(--crit-soft); color: var(--crit); }
+      .strip button, .btn { min-height: 24px; min-width: 24px; padding: 4px 12px; border: 1px solid var(--accent); border-radius: 2px; background: transparent; color: var(--accent); cursor: pointer; }
+      .btn.primary { background: var(--accent); color: var(--accent-ink); }
+      .note { padding: 16px; color: var(--fg-2); }
+
+      /* Grid tables: fixed minimum columns, spare width stays on the right. */
+      .tbl { min-width: 0; }
+      .tr { display: grid; align-items: center; column-gap: 12px; padding: 0 16px; min-height: var(--row); border-bottom: 1px solid var(--line); justify-content: start; }
+      .tr.th { min-height: 28px; position: sticky; top: 0; z-index: 1; background: var(--surface); font: 11px/16px var(--mono); letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+      .tr.th .num, .tr .num { text-align: right; font-variant-numeric: tabular-nums; }
+      .tr > * { min-width: 0; }
+      .chains .tr { grid-template-columns: minmax(320px, 640px) 96px minmax(240px, 400px) 160px 88px 88px; }
+      .seats .tr { grid-template-columns: 120px minmax(200px, 320px) 104px minmax(200px, 320px) minmax(200px, 320px) minmax(160px, 240px); }
+      .chains-scroll, .scroll { flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: auto; }
+      .ell { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .work { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+      .work .edge { flex: none; color: var(--muted); font: 11px/16px var(--mono); }
+      .work .ref { flex: none; font: 600 12px/16px var(--mono); }
+      .work .ttl { min-width: 0; color: var(--fg-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .work .also { flex: none; color: var(--warn); font: 11px/16px var(--mono); }
+      .tr.root { background: var(--surface-2); }
+      .tr.root .ref { font-size: 13px; }
+      .state { display: inline-flex; align-items: center; gap: 4px; padding: 0 8px; min-height: 20px; border: 1px solid var(--line-2); border-radius: 99px; font: 12px/16px var(--mono); }
+      .state.stuck { color: var(--crit); border-color: var(--crit); background: var(--crit-soft); }
+      .state.with-you { color: var(--warn); border-color: var(--warn); background: var(--warn-soft); }
+      .state.moving { color: var(--ok); border-color: var(--ok); background: var(--ok-soft); }
+      .state.unknown { color: var(--muted); }
+      .more-row button { background: none; border: 0; color: var(--accent); cursor: pointer; padding: 4px; min-height: 24px; }
+
+      /* Board */
+      .board { grid-template-rows: auto minmax(0, 1fr); }
+      .boardnote { margin: 0; padding: 4px 16px; min-height: 32px; display: flex; align-items: center; gap: 12px; background: var(--accent-soft); border: 1px solid var(--line); border-radius: 3px; font-size: 12px; line-height: 16px; }
+      .colscroll { display: grid; grid-template-rows: minmax(0, 1fr); overflow-x: auto; overflow-y: hidden; min-height: 0; }
+      .cols { display: grid; grid-template-columns: repeat(8, 257px); grid-template-rows: minmax(0, 1fr); gap: 12px; min-height: 0; }
+      .col .phead h2 span { color: var(--muted); font: 12px var(--mono); margin-left: 4px; }
+      .cards { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+      .card { border: 1px solid var(--line-2); border-radius: 3px; background: var(--surface-2); padding: 8px 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+      .card .ctop { display: flex; justify-content: space-between; gap: 8px; font: 12px/16px var(--mono); color: var(--muted); }
+      .card .ctitle { min-height: 24px; font-weight: 600; color: var(--fg); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+      .card .cmeta { font: 12px/16px var(--mono); color: var(--fg-2); }
+      .chip { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 0 4px; padding: 4px 8px; min-height: 24px; border-radius: 3px; font: 12px/16px var(--mono); border: 1px solid var(--line-2); max-width: 100%; overflow-wrap: anywhere; }
+      .chip.waits { border-color: var(--warn); background: var(--warn-soft); }
+      /* Drill-through links meet the 24x24 px control minimum. */
+      .ref, .chip a, .reason a, .frees a, .seats a, .chains .tr a, .card a:not(.ctitle) { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; }
+      .chip.unblocks { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+      .chip.read { color: var(--muted); }
+
+      /* FLIGHT */
+      /* Seats is as tall as its 11 rows when the window allows; Blocked chains keeps at least 360 px and takes the rest.
+         When the window is too short Seats gives way first and scrolls inside itself. Below 734 px the page scrolls. */
+      .flight { grid-template-rows: 48px 36px minmax(0, max-content) minmax(360px, 1fr); gap: 8px; padding-top: 8px; padding-bottom: 8px; height: max(calc(100 * var(--vh) - 85px), 734px); }
+      .fstatus { display: flex; align-items: center; gap: 16px; padding: 0 16px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface); font-size: 13px; }
+      .fstatus .sub { margin-left: auto; }
+      .card .reason { font: 12px/16px var(--mono); color: var(--warn); overflow-wrap: anywhere; }
+      .card .reason a { font-weight: 600; }
+      .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); }
+      .tabs a { padding: 4px 12px; min-height: 36px; display: inline-flex; align-items: center; color: var(--fg-2); }
+      .tabs a.on { color: var(--fg); border-bottom: 2px solid var(--accent); }
+      .tabs .sp { margin-left: auto; align-self: center; }
+      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px; background: var(--ok); }
+      .dot.wait { background: var(--warn); }
+      .dot.free { background: var(--muted); }
+
+      /* QA */
+      .qa { grid-template-columns: 360px minmax(0, 1fr); align-content: start; }
+      .qa .queue .row { display: grid; gap: 4px; padding: 8px 16px; border-bottom: 1px solid var(--line); min-height: 56px; color: var(--fg); }
+      .qa .queue .row.on { background: var(--accent-soft); box-shadow: inset 3px 0 var(--accent); }
+      .qa .queue .row .t { font-weight: 600; overflow-wrap: anywhere; }
+      .qa .queue .row .m { display: flex; justify-content: space-between; gap: 8px; font: 12px/16px var(--mono); color: var(--muted); }
+      .detail { display: grid; gap: 12px; align-content: start; min-width: 0; }
+      .pad { padding: 16px; display: grid; gap: 12px; }
+      .frees { display: grid; gap: 8px; padding: 12px 16px; border: 1px solid var(--accent); border-radius: 3px; background: var(--accent-soft); }
+      .frees h3 { margin: 0; font: 600 14px/20px var(--sans); }
+      .frees ul { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 4px 12px; font: 12px/16px var(--mono); }
+      .frees .more { color: var(--fg-2); font-size: 12px; }
+      .actions { display: flex; gap: 12px; flex-wrap: wrap; }
+      dl.meta { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 0; font-size: 13px; }
+      dl.meta dt { color: var(--muted); font: 11px/20px var(--mono); text-transform: uppercase; }
+      dl.meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script>
+      (() => {
+        const H = 3600e3;
+        const D = 24 * H;
+        const q = new URLSearchParams(location.search);
+        const pick = (value, allowed, fallback) => (allowed.includes(value) ? value : fallback);
+        const view = pick(q.get("view"), ["board", "flight", "qa"], "board");
+        const state = pick(
+          q.get("state"),
+          ["normal", "many", "long", "loading", "empty", "error", "stale", "disconnected"],
+          "normal",
+        );
+        const theme = pick(q.get("theme"), ["light", "dark"], "dark");
+        const rail = q.get("rail") === "open";
+        const qaPr = pick(q.get("pr"), ["1033", "1034", "demo-21", "demo-44"], "1033");
+        document.documentElement.dataset.theme = theme;
+
+        const BANNER =
+          "Proposal mockup. Replay of the 30 October chain. Ages are illustrative. This work has since moved on.";
+        const HEADERS = ["Work", "State", "What holds it", "Next owner", "Waited", "Merge frees"];
+        const EDGE_WORD = {
+          depends: "depends on",
+          stacked: "stacked on",
+          held: "held for",
+          queue: "behind in seat queue",
+        };
+        const STATE_WORD = { stuck: "Stuck", "with-you": "With you", moving: "Moving", unknown: "—" };
+        const STATE_MARK = { stuck: "▲", "with-you": "●", moving: "◆", unknown: "" };
+        const NO_START = "The hub has no start time for this wait.";
+        const CYCLE = "These tickets wait on each other.";
+        const UNTRACKED = ["legacy"];
+        const UNREAD = ["demo PR 40"];
+        const MAX_SHOWN = 5;
+        const SHOWN_WHEN_CAPPED = 4;
+        const STALE_MIN = 7;
+        const LAST_READ = "14:02";
+
+        /** @type {(ref: string, title: string|null, edge: string|null, waitedMs: number|null, alsoWaitsOn?: string[], children?: any[]) => any} */
+        const node = (ref, title, edge, waitedMs, alsoWaitsOn = [], children = []) => ({
+          ref, title, edge, waitedMs, alsoWaitsOn, children,
+        });
+        const chain = (repoId, root, stateName, reason, owner, seatId, frees, stillWaiting) => ({
+          repoId, root, state: stateName, reason, owner, seatId, frees, stillWaiting,
+          longestWaitMs: longest(root),
+        });
+        function longest(n) {
+          const waits = [];
+          const walk = (x) => {
+            if (x.waitedMs !== null) waits.push(x.waitedMs);
+            x.children.forEach(walk);
+          };
+          walk(n);
+          return waits.length ? Math.max(...waits) : null;
+        }
+
+        const LONG = state === "long";
+        const longTitle =
+          "Rework how the hub reads blocked-by links across every tracked repository so the board, the crew table and the QA page agree on one answer";
+        const t = (short) => (LONG ? longTitle : short);
+
+        function normalChains() {
+          return [
+            chain("mission-control",
+              node("PR 1033", t("#1015 Dependency edges in the board read"), null, null, [], [
+                node("#1139", t("Sort Seats by wait"), "depends", 3 * D + 4 * H),
+                node("#1142", t("Chain row for the Seats table"), "depends", 3 * D + 4 * H),
+                node("#1138", t("Keyboard order for chain rows"), "stacked", 2 * D + 9 * H),
+              ]),
+              "with-you", "Waiting for your acceptance", "You", null,
+              ["#1139", "#1142", "#1138"], []),
+            chain("mission-control",
+              node("PR 1189", t("#1188 Queue order for the seat"), null, null, [], [
+                node("#1180", "Rework PR A", "queue", 1 * D + 5 * H),
+                node("#1181", "Rework PR B", "queue", 1 * D + 2 * H),
+              ]),
+              "stuck", "No reviewer assigned", "—", "guido-cx",
+              ["#1180", "#1181"], []),
+            chain("demo",
+              node("demo PR 21", t("Add export button"), null, null, [], [
+                node("demo#31", t("Export tests"), "depends", 6 * H, ["demo PR 22"]),
+                node("demo#32", t("Export docs"), "depends", 4 * H),
+                node("demo#33", t("Export telemetry"), "depends", 2 * H),
+              ]),
+              "moving", "In review, RETRO-1 checking", "RETRO-1", "retro-1",
+              ["demo#32", "demo#33"], ["demo#31"]),
+            chain("demo",
+              node("demo PR 22", t("Rename settings key"), null, null, [], [
+                node("demo#31", t("Export tests"), "held", null, ["demo PR 21"]),
+                node("demo#34", t("Settings migration"), "held", null),
+              ]),
+              "stuck", "Closed without merging", "—", null,
+              ["demo#34"], ["demo#31"]),
+          ];
+        }
+
+        function manyChains() {
+          const out = normalChains();
+          const kids = (prefix, count, base) =>
+            Array.from({ length: count }, (_, i) =>
+              node(`demo#${prefix + i}`, `Follow-up ${prefix + i}`, "depends", base - i * 20 * 60e3),
+            );
+          out.push(
+            chain("demo", node("demo PR 44", "Bulk import", null, null, [], kids(70, 9, 20 * H)),
+              "moving", "In review, RETRO-2 checking", "RETRO-2", "retro-2",
+              kids(70, 9, 0).map((k) => k.ref), []),
+            chain("demo",
+              node("demo#50", "Settings page split", null, null, [], [
+                node("demo#51", "Settings page tabs", "depends", 18 * H, ["demo#50"]),
+              ]),
+              "stuck", CYCLE, "—", null, [], ["demo#51"]),
+            chain("legacy",
+              node("legacy#7", "Old importer", null, null, [], [
+                node("demo#60", "Importer cleanup", "depends", 15 * H),
+              ]),
+              "unknown", "legacy is not a tracked repository", "—", null, [], ["demo#60"]),
+            chain("demo",
+              node("demo PR 40", null, null, null, [], [
+                node("demo#61", "Notifications copy", "depends", 12 * H),
+              ]),
+              "unknown", "PR 40 not read yet", "—", null, [], ["demo#61"]),
+          );
+          for (let i = 0; i < 4; i += 1) {
+            out.push(
+              chain("demo",
+                node(`demo PR ${80 + i}`, `Filler change ${i + 1}`, null, null, [], [
+                  node(`demo#${90 + i}`, `Filler ticket ${i + 1}`, "depends", (8 - i) * H),
+                ]),
+                i % 2 ? "with-you" : "moving", i % 2 ? "Waiting for your acceptance" : "In review",
+                i % 2 ? "You" : "ADA-1", i % 2 ? null : "ada-1", [`demo#${90 + i}`], []),
+            );
+          }
+          return out;
+        }
+
+        const chains =
+          state === "empty" || state === "loading" || state === "error"
+            ? []
+            : state === "many"
+              ? manyChains()
+              : normalChains();
+
+        const sortChains = (list) =>
+          [...list].sort((a, b) => {
+            const aw = a.longestWaitMs ?? -1;
+            const bw = b.longestWaitMs ?? -1;
+            if (aw !== bw) return bw - aw;
+            if ((a.state === "stuck") !== (b.state === "stuck")) return a.state === "stuck" ? -1 : 1;
+            return a.root.ref.localeCompare(b.root.ref);
+          });
+
+        const formatWait = (ms) => {
+          if (ms === null) return "—";
+          const d = Math.floor(ms / D);
+          const h = Math.floor((ms % D) / H);
+          const m = Math.floor((ms % H) / 60e3);
+          if (d) return `${d}d ${h}h`;
+          if (h) return m ? `${h}h ${m}m` : `${h}h`;
+          return `${m}m`;
+        };
+
+        const dependents = (c) => {
+          const seen = new Set();
+          const walk = (n) => n.children.forEach((k) => { seen.add(k.ref); walk(k); });
+          walk(c.root);
+          return seen;
+        };
+
+        /** Stage words are the board's; a real build reads them from the PR and ticket. */
+        const STAGE = {
+          "PR 1033": "Ready for QA", "PR 1189": "In review", "demo PR 21": "In review",
+          "demo PR 22": "Closed", "demo PR 44": "In review", "demo#50": "In progress",
+          "legacy#7": "In progress", "demo PR 40": "In review", "demo#51": "In progress",
+        };
+        const stageOf = (ref) => STAGE[ref] ?? (ref.includes("PR") ? "In review" : "In progress");
+
+        // ---- DOM helpers: every string goes in as text, never as HTML.
+        const h = (tag, attrs, ...kids) => {
+          const el = document.createElement(tag);
+          for (const [k, v] of Object.entries(attrs ?? {})) {
+            if (v === null || v === undefined || v === false) continue;
+            if (k === "class") el.className = v;
+            else el.setAttribute(k, v === true ? "" : String(v));
+          }
+          for (const kid of kids.flat()) {
+            if (kid === null || kid === undefined || kid === false) continue;
+            el.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+          }
+          return el;
+        };
+
+        /** A ref as the app links it: a ticket, a PR on the QA page, plain text if untracked. */
+        function refEl(ref, repoId, extra = {}) {
+          const pr = /^(?:(\S+) )?PR (\d+)$/.exec(ref);
+          const tk = /^(?:(.*[^#\s]))?#(\d+)$/.exec(ref);
+          const repo = pr ? (pr[1] ?? repoId) : tk ? (tk[1] ?? repoId) : repoId;
+          if (UNTRACKED.includes(repo)) return h("span", { class: "ref", ...extra }, ref);
+          const href = pr
+            ? `/qa?repo=${encodeURIComponent(repo)}&pr=${pr[2]}`
+            : tk
+              ? `/tickets/${encodeURIComponent(repo)}/${tk[2]}`
+              : null;
+          if (!href) return h("span", { class: "ref", ...extra }, ref);
+          return h("a", { class: "ref", href, ...extra }, ref);
+        }
+        const seatEl = (id, label) => h("a", { href: `/agent/${encodeURIComponent(id)}` }, label);
+
+        // ---- Shared states
+        function statusStrip() {
+          if (state === "stale") return h("p", { class: "strip", role: "status" }, `Showing the last read, ${STALE_MIN} min old.`);
+          if (state === "disconnected") return h("p", { class: "strip crit", role: "alert" }, `Not connected to the hub. This list is from ${LAST_READ}.`);
+          if (state === "error") {
+            return h("p", { class: "strip crit", role: "alert" },
+              "Blocked chains did not load.",
+              h("button", { type: "button", onclick: "location.search = location.search.replace(/state=[a-z]+/, 'state=normal')" }, "Try again"));
+          }
+          if (state === "loading") return h("p", { class: "strip", role: "status" }, "Reading what waits on what…");
+          return null;
+        }
+
+        // ---- Board chips
+        /** Everything a ticket waits on, once each: the parent it sits under in any chain, plus `alsoWaitsOn`. */
+        function parentsOf(ref) {
+          const parents = [];
+          const add = (p) => { if (!parents.some((x) => x.ref === p.ref)) parents.push(p); };
+          const walk = (n, repoId) => {
+            for (const k of n.children) {
+              if (k.ref === ref) {
+                add({ ref: n.ref, waitedMs: k.waitedMs, repoId });
+                for (const other of k.alsoWaitsOn) add({ ref: other, waitedMs: k.waitedMs, repoId });
+              }
+              walk(k, repoId);
+            }
+          };
+          for (const c of chains) walk(c.root, c.repoId);
+          return parents;
+        }
+
+        function waitsChip(card) {
+          const parents = parentsOf(card.ref);
+          if (!parents.length) return null;
+          const first = parents[0];
+          const extra = parents.length - 1;
+          const parts = ["Waits on ", UNREAD.includes(first.ref)
+            ? h("span", null, `PR ${first.ref.split(" ").pop()} not read yet`)
+            : refEl(first.ref, first.repoId),
+            ` · ${stageOf(first.ref)} · `];
+          parts.push(first.waitedMs === null ? h("span", { title: NO_START }, "—") : formatWait(first.waitedMs));
+          if (extra > 0) parts.push(" ", h("a", { href: "/flight#chainsP" }, `+${extra}`));
+          return h("span", { class: "chip waits", "data-chip": "waits" }, ...parts);
+        }
+        function unblocksChip(card) {
+          const c = chains.find((x) => card.rootOf === x.root.ref);
+          if (!c) return null;
+          const n = c.frees.length;
+          if (!n) return null;
+          return h("a", { class: "chip unblocks", href: "/flight#chainsP", "data-chip": "unblocks" }, `Unblocks ${n}`);
+        }
+
+        // ---- Board
+        const BOARD = [
+          { ref: "#1015", repo: "mission-control", title: "Dependency edges in the board read", col: "Ready for QA", prio: "P1", meta: "PR 1033 · Waiting for your acceptance", rootOf: "PR 1033" },
+          { ref: "#1188", repo: "mission-control", title: "Queue order for the seat", col: "In progress", prio: "P2", meta: "PR 1189 · draft", rootOf: "PR 1189" },
+          { ref: "#1139", repo: "mission-control", title: "Sort Seats by wait", col: "Ready", prio: "P2", meta: "Depends on #1015", dep: true },
+          { ref: "#1142", repo: "mission-control", title: "Chain row for the Seats table", col: "Ready", prio: "P2", meta: "Depends on #1015", dep: true },
+          { ref: "#1138", repo: "mission-control", title: "Keyboard order for chain rows", col: "Ready", prio: "P3", meta: "Stacked on #1015" },
+          { ref: "#1180", repo: "mission-control", title: "Rework PR A", col: "Ready", prio: "P2", meta: "Queued for GUIDO-CX" },
+          { ref: "#1181", repo: "mission-control", title: "Rework PR B", col: "Ready", prio: "P2", meta: "Queued for GUIDO-CX" },
+          { ref: "#1201", repo: "mission-control", title: "Show when a seat is idle", col: "Ready", prio: "P3", meta: "Queued for INCO-2" },
+          { ref: "#1203", repo: "mission-control", title: "Telemetry axis labels", col: "Ready", prio: "P3", meta: "Not queued" },
+          { ref: "#1190", repo: "mission-control", title: "Audit filter by seat", col: "In progress", prio: "P2", meta: "INCO-1 · try 1" },
+          { ref: "#1174", repo: "mission-control", title: "Comms thread keyboard order", col: "Ready for QA", prio: "P3", meta: "PR 1176 · Accepted" },
+          { ref: "#1160", repo: "mission-control", title: "Setup form spacing", col: "Done", prio: "P3", meta: "Merged 2d ago" },
+          { ref: "demo#31", repo: "demo", title: t("Export tests"), col: "Ready", prio: "P3", meta: "Depends on demo PR 21", dep: true },
+          { ref: "demo#32", repo: "demo", title: t("Export docs"), col: "Ready", prio: "P3", meta: "Depends on demo PR 21", dep: true },
+          { ref: "demo#33", repo: "demo", title: t("Export telemetry"), col: "Ready", prio: "P3", meta: "Depends on demo PR 21", dep: true },
+          { ref: "demo#34", repo: "demo", title: t("Settings migration"), col: "Ready", prio: "P3", meta: "Held for demo PR 22" },
+          { ref: "demo#21", repo: "demo", title: t("Add export button"), col: "In review", prio: "P2", meta: "RETRO-1 checking", rootOf: "demo PR 21" },
+          { ref: "#1210", repo: "mission-control", title: "Seat history export", col: "Backlog", prio: "P3", meta: "Not refined" },
+          { ref: "#1211", repo: "mission-control", title: "Idle seat reminder", col: "Refinement", prio: "P3", meta: "Needs a size" },
+        ];
+        if (state === "empty") {
+          // Nothing waits in an empty read: no fixture card may say it does.
+          BOARD.splice(0, BOARD.length, ...BOARD.filter((c) => !c.dep && !/^(Stacked on|Held for)/.test(c.meta)));
+        }
+        if (state === "many") {
+          for (let i = 0; i < 6; i += 1) BOARD.push({ ref: `demo#${70 + i}`, repo: "demo", title: `Follow-up ${70 + i}`, col: "Ready", prio: "P3", meta: "Depends on demo PR 44", dep: true });
+          BOARD.push({ ref: "demo#60", repo: "demo", title: "Importer cleanup", col: "Ready", prio: "P3", meta: "Depends on legacy#7", dep: true });
+          BOARD.push({ ref: "demo#61", repo: "demo", title: "Notifications copy", col: "Ready", prio: "P3", meta: "Depends on demo PR 40", dep: true });
+        }
+        /** The ticket each Blocked card depends on: the block reason, linked. */
+        const REASON = {
+          "#1139": ["depends on", "#1015"], "#1142": ["depends on", "#1015"],
+          "demo#31": ["depends on", "demo#21"], "demo#32": ["depends on", "demo#21"], "demo#33": ["depends on", "demo#21"],
+          "demo#60": ["depends on", "legacy#7"], "demo#61": ["depends on", "demo#40"],
+          ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => [`demo#${70 + i}`, ["depends on", "demo#44"]])),
+        };
+        const COLUMNS = ["Backlog", "Refinement", "Blocked", "Ready", "In progress", "In review", "Ready for QA", "Done"];
+        const GRAPH_KNOWN = !["loading", "error"].includes(state);
+
+        const columnOf = (card) =>
+          GRAPH_KNOWN && card.col === "Ready" && card.dep && parentsOf(card.ref).length ? "Blocked" : card.col;
+
+        function renderBoard() {
+          const cols = new Map(COLUMNS.map((c) => [c, []]));
+          for (const card of BOARD) cols.get(columnOf(card))?.push(card);
+          const wasReady = BOARD.filter((c) => c.col === "Ready").length;
+          const nowReady = cols.get("Ready").length;
+          const moved = wasReady - nowReady;
+          const note = h("p", { class: "boardnote", role: "note" },
+            !GRAPH_KNOWN
+              ? `Ready shows every ticket in that status until the chains load: ${nowReady}.`
+              : moved > 0
+                ? `Ready counts only tickets the engine can deal: ${nowReady}, down from ${wasReady}. ${moved} tickets with Depends on wait in Blocked, as GitHub blocked-by links already do.`
+                : `Ready counts only tickets the engine can deal: ${nowReady}. Nothing with Depends on is waiting.`);
+          const strip = statusStrip();
+          const colEls = COLUMNS.map((name) => {
+            const cards = cols.get(name);
+            const body = h("div", { class: "cards" },
+              cards.map((card) => {
+                const chip = name === "Done" ? null : waitsChip(card);
+                const root = name === "Done" ? null : card.rootOf ? unblocksChip(card) : null;
+                const loadingChip = state === "loading" && card.dep ? h("span", { class: "chip read" }, "Reading what waits on what…") : null;
+                return h("article", { class: "card", "data-ticket": card.ref, "data-ref": card.ref.startsWith("#") ? `${card.repo}${card.ref}` : card.ref },
+                  h("div", { class: "ctop" }, h("a", { href: `/tickets/${card.repo}/${card.ref.replace(/^.*#/, "")}` }, `${card.repo}${card.ref.replace(/^[^#]*/, "")}`), h("span", null, card.prio)),
+                  h("a", { class: "ctitle", href: `/tickets/${card.repo}/${card.ref.replace(/^.*#/, "")}`, title: card.title }, card.title),
+                  chip, root, loadingChip,
+                  name === "Blocked" && REASON[card.ref]
+                    ? h("div", { class: "reason", "data-reason": card.ref }, "Blocked: ", REASON[card.ref][0], " ", refEl(REASON[card.ref][1], card.repo))
+                    : h("div", { class: "cmeta" }, card.meta));
+              }),
+              cards.length ? null : h("p", { class: "note" }, name === "Blocked" ? "Nothing is blocked." : "Nothing here."));
+            return h("section", { class: "panel col", id: `col-${name.replace(/\W+/g, "-")}` },
+              h("div", { class: "phead" }, h("h2", null, name, h("span", { title: name === "Ready" ? "Tickets the engine can deal now." : "" }, String(cards.length)))),
+              body);
+          });
+          return h("main", { class: "board" }, h("div", null, note, strip), h("div", { class: "colscroll" }, h("div", { class: "cols" }, colEls)));
+        }
+
+        // ---- FLIGHT
+        // Workstream, Stage, "Stuck / waiting on", FLIGHT's next action, Last instruction: the live Seats columns.
+        const SEATS = [
+          ["INCO-1", "Waiting", "#1139 Sort Seats by wait", "Blocked", "Waiting on PR 1033 (you)", "Nudge you to accept PR 1033", "Take #1201 meanwhile", "wait"],
+          ["INCO-2", "Working", "#1201 Show when a seat is idle", "In progress", "Nothing stops it", "Watch the next push", "Start #1201", "ok"],
+          ["EECOM-1", "Working", "#1190 Audit filter by seat", "In progress", "Nothing stops it", "Watch the next push", "Start #1190", "ok"],
+          ["EECOM-2", "Free", "—", "—", "No ticket queued", "Deal the next Ready ticket", "—", "free"],
+          ["GUIDO-CX", "Waiting", "#1180 Rework PR A", "Ready", "Behind PR 1189", "Assign a reviewer to PR 1189", "Hold until PR 1189", "wait"],
+          ["GUIDO-2", "Free", "—", "—", "No ticket queued", "Deal the next Ready ticket", "—", "free"],
+          ["RETRO-1", "Working", "demo PR 21 review", "In review", "Checking the head", "Wait for the report", "Review demo PR 21", "ok"],
+          ["RETRO-2", "Working", "demo PR 44 review", "In review", "Checking the head", "Wait for the report", "Review demo PR 44", "ok"],
+          ["FIDO-1", "Waiting", "#1015 acceptance", "Ready for QA", "Waiting for you", "Remind you after 4 h", "Hold for acceptance", "wait"],
+          ["SURGEON-1", "Free", "—", "—", "No ticket queued", "Deal the next Ready ticket", "—", "free"],
+          ["DEMO-1", "Free", "—", "—", "No ticket queued", "Deal the next Ready ticket", "—", "free"],
+        ];
+
+        function renderSeats() {
+          return h("section", { class: "panel seats", id: "wifP" },
+            h("div", { class: "phead" }, h("h2", null, "Seats"), h("span", { class: "sub" }, "LIVE · ticket, stage, what stops each seat and FLIGHT's next action")),
+            h("div", { class: "scroll" },
+            h("div", { class: "tbl", role: "table", "aria-label": "Seats" },
+              h("div", { class: "tr th", role: "row" }, ["Seat", "Workstream", "Stage", "Stuck / waiting on", "FLIGHT's next action", "Last instruction"].map((c) => h("span", { role: "columnheader" }, c))),
+              SEATS.map(([seat, st, work, stage, stuck, next, last, dot]) =>
+                h("div", { class: "tr", role: "row", "data-seat-state": st },
+                  h("span", { role: "cell" }, h("span", { class: `dot ${dot === "ok" ? "" : dot}`, title: st }), seatEl(seat.toLowerCase(), seat)),
+                  h("span", { role: "cell", class: "ell", title: work }, work),
+                  h("span", { role: "cell" }, stage),
+                  h("span", { role: "cell", class: "ell", title: stuck }, stuck),
+                  h("span", { role: "cell", class: "ell", title: next }, next),
+                  h("span", { role: "cell", class: "ell", title: last }, last))))));
+        }
+
+        function chainRows(c, open) {
+          const rows = [];
+          const stateWord = STATE_WORD[c.state];
+          const unread = UNREAD.includes(c.root.ref);
+          const rootName = unread ? `PR ${c.root.ref.split(" ").pop()} not read yet` : null;
+          rows.push(h("div", { class: "tr root", role: "row", "data-ref": c.root.ref },
+            h("div", { role: "cell", class: "work" },
+              refEl(c.root.ref, c.repoId, { "data-ref-link": c.root.ref }),
+              rootName ? h("span", { class: "ttl" }, rootName) : h("span", { class: "ttl", title: c.root.title }, c.root.title)),
+            h("span", { role: "cell" }, h("span", { class: `state ${c.state}` }, STATE_MARK[c.state], STATE_MARK[c.state] ? " " : "", stateWord)),
+            h("span", { role: "cell", class: "ell", title: c.reason }, c.reason),
+            h("span", { role: "cell", class: "ell" }, c.seatId && c.owner !== "You" && c.owner !== "—" ? seatEl(c.seatId, c.owner) : c.owner),
+            h("span", { role: "cell", class: "num" }, c.longestWaitMs === null ? h("span", { title: NO_START }, "—") : formatWait(c.longestWaitMs)),
+            h("span", { role: "cell", class: "num" }, String(c.frees.length))));
+          const flat = [];
+          const walk = (n, depth) => n.children.forEach((k) => { flat.push([k, depth, n]); walk(k, depth + 1); });
+          walk(c.root, 1);
+          const capped = flat.length > MAX_SHOWN;
+          const shown = capped && !open ? flat.slice(0, SHOWN_WHEN_CAPPED) : flat;
+          for (const [k, depth, parent] of shown) {
+            // The dependent leads; the edge word then names what it waits on.
+            const holds = k.edge === "queue" && c.seatId ? seatEl(c.seatId, c.seatId.toUpperCase()) : refEl(parent.ref, c.repoId);
+            rows.push(h("div", { class: "tr", role: "row", "data-ref": k.ref, "data-parent": parent.ref },
+              h("div", { role: "cell", class: "work", style: `padding-left:${depth * 16}px` },
+                refEl(k.ref, c.repoId), " ",
+                h("span", { class: "ttl", title: k.title ?? "" }, k.title ?? ""), " ",
+                h("span", { class: "edge" }, "· ", EDGE_WORD[k.edge], " ", holds),
+                k.alsoWaitsOn.map((o) => h("span", { class: "also" }, " also waits on ", refEl(o, c.repoId)))),
+              h("span", { role: "cell" }), h("span", { role: "cell" }), h("span", { role: "cell" }),
+              h("span", { role: "cell", class: "num" }, k.waitedMs === null ? h("span", { title: NO_START }, "—") : formatWait(k.waitedMs)),
+              h("span", { role: "cell" })));
+          }
+          if (capped && !open) {
+            rows.push(h("div", { class: "tr more-row", role: "row" },
+              h("div", { role: "cell", class: "work", style: "padding-left:16px" },
+                h("button", { type: "button", "data-more": c.root.ref, "aria-expanded": "false" }, `${flat.length - SHOWN_WHEN_CAPPED} more`))));
+          }
+          return rows;
+        }
+
+        function renderChains() {
+          const ordered = sortChains(chains);
+          const roots = ordered.length;
+          const stuck = ordered.filter((c) => c.state === "stuck").length;
+          const waiting = new Set(ordered.flatMap((c) => [...dependents(c)])).size;
+          const wait = ordered.reduce((m, c) => (c.longestWaitMs !== null && c.longestWaitMs > m ? c.longestWaitMs : m), -1);
+          const unknown = state === "loading" || state === "error";
+          const stat = (k, v, u, title) => h("div", { class: "stat", title }, h("span", { class: "k" }, k), h("b", null, unknown ? "—" : v), h("span", { class: "u" }, u));
+          const strip = statusStrip();
+          let body;
+          if (state === "loading") body = h("p", { class: "note", role: "status" }, "Reading what waits on what…");
+          else if (state === "error") body = h("p", { class: "note" }, "Blocked chains did not load.");
+          else if (!ordered.length) body = h("p", { class: "note" }, "Nothing is waiting on other work.");
+          else {
+            const open = new Set();
+            const draw = () => {
+              const scroll = h("div", { class: "tbl", role: "table", "aria-label": "Blocked chains" },
+                h("div", { class: "tr th", role: "row" }, HEADERS.map((c, i) => h("span", { role: "columnheader", class: i >= 4 ? "num" : "", "aria-sort": i === 4 ? "descending" : null }, i === 4 ? `${c} ▼` : c))),
+                ordered.flatMap((c) => chainRows(c, open.has(c.root.ref))));
+              scroll.addEventListener("click", (e) => {
+                const b = e.target.closest("[data-more]");
+                if (!b) return;
+                open.add(b.dataset.more);
+                holder.replaceChildren(draw());
+              });
+              return scroll;
+            };
+            const holder = h("div", { class: "chains-scroll" });
+            holder.append(draw());
+            body = holder;
+          }
+          if (body.className !== "chains-scroll") body = h("div", { class: "chains-scroll" }, body);
+          return h("section", { class: "panel chains", id: "chainsP" },
+            h("div", { class: "phead" },
+              h("h2", null, "Blocked chains"),
+              h("span", { class: "sub" }, "longest wait first · time since the hub first saw each wait"),
+              h("span", { class: "right" }, "Scope: all repos")),
+            h("div", { class: "stats" },
+              stat("Chains", String(roots), "roots", "Chains: distinct roots, a count, now."),
+              stat("Stuck", String(stuck), `of ${roots}`, "Stuck: chains in that state, a count, now."),
+              stat("Waiting", String(waiting), "tickets and PRs", "Waiting: distinct tickets and PRs under a root, a count, now."),
+              stat("Longest wait", wait < 0 ? "—" : formatWait(wait), "since first seen", "Longest wait: the largest time since a wait was first seen, a duration, now.")),
+            strip,
+            body);
+        }
+
+        function renderFlight() {
+          return h("main", { class: "flight" },
+            h("div", { class: "fstatus", role: "status" }, h("b", null, "FLIGHT"), "Running · 3 things need you", h("span", { class: "sub" }, "last action 2 min ago")),
+            h("div", { class: "tabs", role: "tablist" },
+              h("a", { href: "/flight#needs" }, "Needs you"), h("a", { href: "/flight#did" }, "What FLIGHT did"),
+              h("a", { class: "on", href: "/flight#crew", "aria-current": "page" }, "Crew & board"), h("a", { href: "/flight#knows" }, "What FLIGHT knows")),
+            renderSeats(), renderChains());
+        }
+
+        // ---- QA
+        const QA_QUEUE = [
+          { key: "1033", repo: "mission-control", pr: "PR 1033", title: t("Dependency edges in the board read"), age: "3d 4h" },
+          { key: "1034", repo: "mission-control", pr: "PR 1034", title: t("Comms thread keyboard order"), age: "1d 6h" },
+          { key: "demo-21", repo: "demo", pr: "demo PR 21", title: t("Add export button"), age: "9h" },
+          ...(state === "many" ? [{ key: "demo-44", repo: "demo", pr: "demo PR 44", title: "Bulk import", age: "5h" }] : []),
+        ];
+
+        function freesBlock(pr) {
+          const strip = statusStrip();
+          if (state === "loading" || state === "error") return h("div", { class: "frees" }, strip);
+          const c = chains.find((x) => x.root.ref === pr.pr || x.root.ref === pr.pr.replace(/^mission-control /, ""));
+          const wrap = (...k) => h("div", { class: "frees", "data-frees": pr.pr }, strip, ...k);
+          if (!c || (!c.frees.length && !c.stillWaiting.length)) {
+            return wrap(h("p", { class: "frees-none" }, "No recorded work waits on this PR."));
+          }
+          const shown = c.frees.slice(0, 5);
+          return wrap(
+            h("h3", null, `Merging this frees ${c.frees.length}`),
+            h("ul", null, shown.map((r) => h("li", null, refEl(r, c.repoId))), c.frees.length > 5 ? h("li", null, h("a", { href: "/flight#chainsP" }, `+${c.frees.length - 5}`)) : null),
+            c.stillWaiting.length ? h("p", { class: "more" }, `${c.stillWaiting.length} more also wait on other work`) : null);
+        }
+
+        function renderQa() {
+          const selected = QA_QUEUE.find((p) => p.key === qaPr) ?? QA_QUEUE[0];
+          const known = GRAPH_KNOWN;
+          const queue = h("section", { class: "panel queue", id: "queueP" },
+            h("div", { class: "phead" }, h("h2", null, "Waiting for you"), h("span", { class: "sub" }, `${QA_QUEUE.length} PRs`)),
+            h("div", { class: "scroll" }, QA_QUEUE.map((p) => {
+              const n = !known || state === "empty" ? 0 : (chains.find((x) => x.root.ref === p.pr)?.frees.length ?? 0);
+              return h("a", { class: `row${p.key === selected.key ? " on" : ""}`, href: `?view=qa&state=${state}&theme=${theme}&pr=${p.key}${rail ? "&rail=open" : ""}` },
+                h("span", { class: "t" }, p.title),
+                h("span", { class: "m" }, h("span", null, `${p.repo} · ${p.pr}`), h("span", null, n ? `unblocks ${n}` : "", n ? " · " : "", p.age)));
+            })));
+          const detail = h("div", { class: "detail" },
+            h("section", { class: "panel", id: "decisionP" },
+              h("div", { class: "phead" }, h("h2", null, `${selected.repo} · ${selected.pr}`), h("span", { class: "sub" }, "Waiting for your acceptance")),
+              h("div", { class: "pad" },
+                h("dl", { class: "meta" },
+                  h("dt", null, "Title"), h("dd", null, selected.title),
+                  h("dt", null, "Checks"), h("dd", null, "All passed on this head"),
+                  h("dt", null, "Waited"), h("dd", null, selected.age)),
+                freesBlock(selected),
+                h("div", { class: "actions", role: "group", "aria-label": "Decide" },
+                  h("button", { class: "btn primary", type: "button" }, "Accept"),
+                  h("button", { class: "btn", type: "button" }, "Send back")))));
+          return h("main", { class: "qa" }, queue, detail);
+        }
+
+        // ---- Shell
+        const NAV = ["Overview", "FLIGHT", "Board", "Agents", "Map", "Comms", "Telemetry", "Audit"];
+        const ON = { board: "Board", flight: "FLIGHT", qa: null };
+        const app = document.getElementById("app");
+        app.append(
+          h("header", { class: "top" },
+            h("span", { class: "brand" }, "MISSION CONTROL"),
+            h("nav", { class: "nav", "aria-label": "Pages" }, NAV.map((n) => h("a", { href: "#", class: n === ON[view] ? "on" : "", "aria-current": n === ON[view] ? "page" : null }, n))),
+            h("span", { class: "conn" }, view === "qa" ? "QA · PR readiness" : "")),
+          h("p", { class: "banner", role: "note" }, h("b", null, "Mockup"), BANNER),
+          h("div", { class: `shell${rail ? " rail-open" : ""}` },
+            view === "board" ? renderBoard() : view === "flight" ? renderFlight() : renderQa(),
+            rail ? h("aside", { class: "rail", "aria-label": "FLIGHT" }, h("h2", null, "FLIGHT"), h("p", null, "The rail is open: the page gets 360 px less."), h("p", null, "Nothing needs you right now.")) : null),
+        );
+        // Links go nowhere in a mockup.
+        document.addEventListener("click", (e) => {
+          const a = e.target.closest("a[href]");
+          if (a && !a.getAttribute("href").startsWith("?")) e.preventDefault();
+        });
+        document.body.classList.add("view-ready");
+        document.documentElement.classList.add("view-ready");
+        app.dataset.ready = "true";
+      })();
+    </script>
+  </body>
+</html>
