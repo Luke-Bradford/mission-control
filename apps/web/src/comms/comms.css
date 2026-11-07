@@ -789,24 +789,26 @@ a.comms-ref {
   gap: var(--sp-2);
 }
 
-.comms-composer input {
+.comms-composer :is(input, textarea) {
   flex: 1;
   min-width: 0;
 }
 
-.comms-composer input {
+.comms-composer :is(input, textarea) {
   min-height: 40px;
+  resize: vertical;
+  font: inherit;
   border-color: var(--line-2);
   border-radius: 2px;
 }
 
-.comms-composer input:focus {
+.comms-composer :is(input, textarea):focus {
   border-color: var(--accent);
   outline: none;
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
-.comms-composer input + button {
+.comms-composer :is(input, textarea) + button {
   min-height: 40px;
   padding: 0 var(--sp-4);
   border-radius: 2px;

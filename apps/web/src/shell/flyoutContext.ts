@@ -32,3 +32,7 @@ export function flyoutContext(path: string, search = ""): string {
 /** The text sent with a message when the chip stays: a leading line the reader can tell from the message. */
 export const withContext = (context: string | null, body: string): string =>
   context === null ? body : `[Operator is on: ${context}]\n${body}`;
+
+/** A stored message without the context line `withContext` put before it. */
+export const stripContext = (text: string): string =>
+  text.replace(/^\[Operator is on: [^\]\n]*\]\n/, "");

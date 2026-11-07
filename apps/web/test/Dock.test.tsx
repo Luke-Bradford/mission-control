@@ -69,11 +69,11 @@ afterEach(() => {
 });
 
 describe("Dock content", () => {
-  it("keeps waiting asks above an independently scrolling message stream", () => {
+  it("keeps one line to Needs you above an independently scrolling message stream", () => {
     const css = readStyles();
     expect(css).toMatch(/\.panel \{[^}]*display: flex;[^}]*flex-direction: column/);
     expect(css).toMatch(/\.dock \.dh \{[^}]*flex: none/);
-    expect(css).toMatch(/\.dwait \{[^}]*flex: none;[^}]*max-height: 40%;[^}]*overflow: auto/);
+    expect(css).toMatch(/\.dock-summary \{[^}]*flex: none/);
     expect(css).toMatch(/\.dmsgs \{[^}]*flex: 1;[^}]*min-height: 0;[^}]*overflow: auto/);
   });
 
@@ -88,17 +88,24 @@ describe("Dock content", () => {
     expect(container.querySelector("#dockHead .rt")?.textContent).toBe(" · Head agent");
   });
 
-  it("drops its Waiting on you list when the page beside it lists what waits, and keeps the summary", async () => {
-    const { container } = render(<Dock needsBeside />);
-    await waitFor(() =>
-      expect(dockEl(container)?.querySelector(".meta")?.textContent).toBe(FLIGHT_NO_SEAT),
+  it("holds the conversation only: one line opens Needs you, with no waiting list or headline", async () => {
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/attention": [item({ key: "a", brief: brief() }), item({ key: "b", brief: brief() })],
+      },
     );
-    expect(container.querySelector('[aria-label="FLIGHT summary"]')).toBeTruthy();
+    const { container } = render(<Dock />);
+    const line = await screen.findByRole("button", { name: /questions wait/ });
+    expect(line.textContent).toContain("2 questions wait");
+    fireEvent.click(line);
+    expect(window.location.pathname).toBe(NEEDS_YOU_PATH);
     expect(container.querySelector("#dockWaiting")).toBeNull();
-    expect(container.textContent).not.toContain("Waiting on you");
+    expect(container.querySelector('[data-testid="waiting-ask"]')).toBeNull();
+    expect(container.querySelector(".dockbody")?.textContent).not.toContain("Waiting on you");
   });
 
-  it("says no FLIGHT seat is configured, with no conversation and the input switched off", async () => {
+  it("says no FLIGHT seat is configured, with no conversation, and still takes text", async () => {
     const { container } = render(<Dock />);
     const dock = dockEl(container) as HTMLElement;
     expect(dock.querySelector(".meta")?.textContent).toBe("Loading…");
@@ -107,13 +114,30 @@ describe("Dock content", () => {
     expect(dock.querySelector(".dh")?.textContent).toContain("FLIGHT");
     expect(dock.querySelectorAll(".rt")).toHaveLength(1);
     expect(dock.querySelector(".rt")?.textContent).toBe(" · Head agent");
-    expect(container.querySelector("#dockWaiting")?.textContent).toContain("Nothing is waiting");
-    expect(container.querySelector("#dockMsgs")?.children.length).toBe(0);
-    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
-    expect(input.disabled).toBe(true);
-    expect(input.placeholder).toBe("Ask FLIGHT to assign, reprioritise or report…");
-    expect(input.title).toBe(FLIGHT_NO_SEAT);
+    expect(container.querySelectorAll("#dockMsgs .dmsg")).toHaveLength(0);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
+    expect(input.tagName).toBe("TEXTAREA");
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "still typing" } });
+    expect(input.value).toBe("still typing");
+    expect(container.querySelector("#dockState")?.textContent).toContain(FLIGHT_NO_SEAT);
     expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("takes text before FLIGHT's state has loaded, and holds Send until it has", async () => {
+    stubFlight({ seat: flightSeat(), decisions: [] });
+    const { container } = render(<Dock />);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "early words" } });
+    expect(input.value).toBe("early words");
+    expect(container.querySelector("#dockState")?.textContent).toContain("Checking FLIGHT");
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
+    expect(input.value).toBe("early words");
   });
 
   it("carries no P2 badge in its header; the build-status chips show when on", () => {
@@ -146,13 +170,13 @@ describe("Dock on a wide screen", () => {
     stubFlight(
       { seat: flightSeat(), decisions: [] },
       {
-        "POST /api/seats/flight-1/message": () => ({ status: 409, body: { error: "seat busy" } }),
+        "POST /api/comms": () => ({ status: 409, body: { error: "seat busy" } }),
       },
     );
     const { container } = render(<Dock />);
     fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
     expect(document.activeElement?.id).toBe("dockHeading");
-    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
     await waitFor(() => expect(input.disabled).toBe(false));
     fireEvent.change(input, { target: { value: "Keep this decision context" } });
     act(() => openItem("selected-ticket"));
@@ -420,35 +444,6 @@ describe("live FLIGHT", () => {
     );
   });
 
-  it("colours known agents in waiting asks and leaves unknown ids as plain text", async () => {
-    stubFlight(
-      { seat: flightSeat(), decisions: [] },
-      {
-        "/api/crew?shape=summary": { rows: [seatRow({ id: "known", index: 2 })] },
-        "/api/attention": [
-          item({ key: "known", agentId: "known", brief: brief() }),
-          item({ key: "removed", agentId: "removed", brief: brief() }),
-          item({ key: "none", agentId: null, brief: brief() }),
-        ],
-      },
-    );
-    render(<Dock />);
-    await screen.findAllByTestId("waiting-ask");
-    await waitFor(() =>
-      expect(
-        screen.getByText("known").closest<HTMLElement>(".ag")?.style.getPropertyValue("--c"),
-      ).toBe("var(--seat-3)"),
-    );
-    expect(screen.getByText("removed").closest(".ag")).toBeNull();
-    const asks = screen.getAllByTestId("waiting-ask");
-    expect(asks).toHaveLength(3);
-    expect(
-      asks
-        .filter((ask) => within(ask).queryByText("known") === null)
-        .every((ask) => ask.querySelector(".ag") === null),
-    ).toBe(true);
-  });
-
   it("shows the account, model, turns, context and doing line in its meta line", async () => {
     stubFlight(
       { seat: flightSeat({ turns: { n: 4, max: 41 } }), decisions: [] },
@@ -509,7 +504,7 @@ describe("live FLIGHT", () => {
   it("shows its state, the conversation in order, and sends a message", async () => {
     const fn = stubFlight(
       { seat: flightSeat(), decisions: [DECISION as FlightView["decisions"][number]] },
-      { "POST /api/seats/flight-1/message": {} },
+      { "POST /api/comms": {} },
     );
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
@@ -518,31 +513,34 @@ describe("live FLIGHT", () => {
     expect(rows.map((r) => r.className)).toEqual(["dmsg you", "dmsg flight", "dmsg flight"]);
     expect(rows[0]?.querySelector(".txt")?.textContent).toBe("<b>hi</b> FLIGHT");
     expect(rows[0]?.querySelector("b")).toBeNull();
-    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
     expect(input.disabled).toBe(false);
     fireEvent.change(input, { target: { value: "  assign it  " } });
     fireEvent.submit(form(container));
     await waitFor(() => expect(input.value).toBe(""));
-    expect(bodyOf(fn, "/api/seats/flight-1/message")).toEqual({ text: "assign it" });
+    expect(bodyOf(fn, "/api/comms")).toEqual({
+      to: "flight-1",
+      text: "[Operator is on: Overview]\nassign it",
+    });
   });
 
   it("does not send a blank message", async () => {
     const fn = stubFlight({ seat: flightSeat(), decisions: [] });
     const { container } = render(<Dock />);
-    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
     await waitFor(() => expect(input.disabled).toBe(false));
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.submit(form(container));
-    expect(fn.mock.calls.some(([p]) => p === "/api/seats/flight-1/message")).toBe(false);
+    expect(fn.mock.calls.some(([p]) => p === "/api/comms")).toBe(false);
   });
 
   it("shows a failure and keeps the text", async () => {
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      { "POST /api/seats/flight-1/message": () => ({ status: 409, body: { error: "seat busy" } }) },
+      { "POST /api/comms": () => ({ status: 409, body: { error: "seat busy" } }) },
     );
     const { container } = render(<Dock />);
-    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
     await waitFor(() => expect(input.disabled).toBe(false));
     fireEvent.change(input, { target: { value: "go" } });
     fireEvent.submit(form(container));
@@ -558,178 +556,61 @@ describe("live FLIGHT", () => {
   });
 });
 
-describe("Waiting on you", () => {
-  const ask = (over: Parameters<typeof item>[0] = {}) =>
-    item({ kind: "decision", text: "Which?", brief: brief(), ...over });
-
-  it("bounds a fifty-item summary to the highest three and does not open for a new item", async () => {
-    stubWidth(true);
-    let asks = Array.from({ length: 49 }, (_, index) =>
-      ask({ key: `question-${index}`, kind: "question", text: `Question ${index}` }),
-    );
-    asks.push(
-      ask({
-        key: "urgent",
-        kind: "stalled",
-        text: "No output: the current check needs attention.",
-      }),
-    );
-    stubFlight(
-      { seat: flightSeat(), decisions: [] },
-      { "/api/attention": () => ({ status: 200, body: asks }) },
-    );
-    const { container } = render(<Dock />);
-    await waitFor(() => expect(screen.getAllByTestId("waiting-ask")).toHaveLength(3));
-    expect(screen.getAllByTestId("waiting-ask")[0].textContent).toContain("No output");
-    expect(screen.getByRole("button", { name: "View all 50 waiting items" })).toBeTruthy();
-    asks = [...asks, ask({ key: "new", text: "A new decision" })];
-    await act(async () => {
-      hub.refetch("/api/attention");
-    });
-    await screen.findByRole("button", { name: /Expand FLIGHT: 51 waiting on you/ });
-    expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
-  });
-
-  it("names stale and disconnected cached summaries and lets a failed refresh retry", async () => {
-    let failed = false;
-    stubFlight(
-      { seat: flightSeat(), decisions: [] },
-      {
-        "/api/flight/summary": () =>
-          failed
-            ? { status: 503, body: { error: "unavailable" } }
-            : {
-                status: 200,
-                body: flightSummary({
-                  headline: "The reviewed work awaits a decision.",
-                  headlineAgeMin: 95,
-                }),
-              },
-      },
-    );
-    act(() => streamStatus.set({ connected: false, reconnecting: true, lastMessageAt: NOW }));
-    render(<Dock />);
-    await screen.findByText("Stale headline · 95 min old");
-    expect(screen.getByText("Disconnected")).toBeTruthy();
-    failed = true;
-    await act(async () => {
-      hub.refetch("/api/flight/summary");
-    });
-    await screen.findByRole("button", { name: "Retry summary" });
-    expect(screen.getByText("The reviewed work awaits a decision.")).toBeTruthy();
-    failed = false;
-    fireEvent.click(screen.getByRole("button", { name: "Retry summary" }));
-    await waitFor(() => expect(screen.queryByRole("button", { name: "Retry summary" })).toBeNull());
-  });
-
-  it("shows the whole Needs-you set, most urgent first, with Open on each", async () => {
-    function Probe() {
-      return <span data-testid="item">{useItem() ?? "none"}</span>;
-    }
-    stubFlight(
-      { seat: flightSeat(), decisions: [] },
-      {
-        "/api/attention": [
-          ask({ key: "b", at: NOW - HOUR }),
-          ask({ key: "ask:7", brief: undefined, kind: "question", at: NOW - 2 * HOUR }),
-          // unbriefed, and not passed on by FLIGHT: still the operator's, so it waits on them
-          ask({ key: "c", brief: undefined, kind: "stalled", text: "No output" }),
-          ask({ key: "d", owner: "flight" }),
-          ask({ key: "b", at: NOW - HOUR }),
-        ],
-      },
-    );
-    const { container } = render(
-      <>
-        <Probe />
-        <Dock />
-      </>,
-    );
-    const rows = await screen.findAllByTestId("waiting-ask");
-    expect(container.querySelector("#dockWaiting .dwh")?.textContent).toBe("Waiting on you · 3");
-    expect(rows).toHaveLength(3);
-    expect(rows[0]?.textContent).toContain("No output");
-    fireEvent.click(rows[2]?.querySelector("button") as HTMLElement);
-    // an ask is answered on the Needs you page, not in a flyout
-    expect(window.location.pathname).toBe("/needs-you/ask%3A7");
-    expect(screen.getByTestId("item").textContent).toBe("none");
-    expect(rows[1]?.textContent).toContain("Which?");
-  });
-
-  it("labels FLIGHT not triaging as FLIGHT and sends Show them to Needs you's home (#758)", async () => {
-    stubFlight(
-      { seat: flightSeat(), decisions: [] },
-      {
-        "/api/attention": [
-          ask({
-            key: "flight:not-triaging",
-            kind: "blocked",
-            text: "FLIGHT is not triaging: 1 waiting since 12:55.",
-            notTriaging: { cause: "late", keys: [], since: null },
-          }),
-        ],
-      },
-    );
-    render(<Dock />);
-    const [row] = await screen.findAllByTestId("waiting-ask");
-    expect(row?.textContent).toContain("FLIGHT");
-    expect(row?.textContent).not.toContain("Blocked");
-    fireEvent.click(within(row as HTMLElement).getByRole("button", { name: /^Open:/ }));
-    expect(window.location.pathname).toBe(`${NEEDS_YOU_PATH}/flight%3Anot-triaging`);
-  });
-
-  it("shows what waits on you even with no FLIGHT seat", async () => {
-    stubFlight({ seat: null, decisions: [] }, { "/api/attention": [ask({ key: "b" })] });
-    const { container } = render(<Dock />);
-    await screen.findAllByTestId("waiting-ask");
-    expect(container.querySelector("#dockWaiting .dwh")?.textContent).toBe("Waiting on you · 1");
-  });
-
-  it("repins on ask mount and growth, while preserving a reader's scroll position", async () => {
-    sessionStorage.setItem(DOCK_COLLAPSED_KEY, "false");
-    let asks: ReturnType<typeof ask>[] = [];
-    stubFlight(
-      { seat: flightSeat(), decisions: [] },
-      {
-        "/api/attention": () => ({ status: 200, body: asks }),
-      },
-    );
-    const { container } = render(<Dock />);
-    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
-    const log = screen.getByRole("log");
-    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 1000 });
-    Object.defineProperty(log, "clientHeight", { configurable: true, value: 200 });
-    for (let n = 1; n <= 3; n++) {
-      log.scrollTop = n === 3 ? 100 : 800;
-      fireEvent.scroll(log);
-      asks = [...asks, ask({ key: `ask-${n}` })];
-      await act(async () => {
-        hub.refetch("/api/attention");
-      });
-      await waitFor(() => expect(screen.getAllByTestId("waiting-ask")).toHaveLength(n));
-      expect(log.scrollTop).toBe(n === 3 ? 100 : 1000);
-    }
-  });
-
-  it("names the empty waiting set", async () => {
+describe("the line to Needs you", () => {
+  it("says how many questions wait, and that none do", async () => {
     stubFlight({ seat: flightSeat(), decisions: [] });
-    const { container } = render(<Dock />);
-    await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
-    expect(container.querySelector("#dockWaiting")?.textContent).toContain("Nothing is waiting");
+    render(<Dock />);
+    expect((await screen.findByRole("button", { name: /questions? wait/ })).textContent).toContain(
+      "No questions wait",
+    );
+  });
+
+  it("names a single question in the singular and keeps the line with no FLIGHT seat", async () => {
+    stubFlight(
+      { seat: null, decisions: [] },
+      { "/api/attention": [item({ key: "b", brief: brief() })] },
+    );
+    render(<Dock />);
+    expect((await screen.findByRole("button", { name: /question waits/ })).textContent).toContain(
+      "1 question waits",
+    );
+  });
+
+  it("offers a retry when the count cannot load", async () => {
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      { "/api/attention": () => ({ status: 503, body: { error: "down" } }) },
+    );
+    render(<Dock />);
+    expect((await screen.findByText(/Open questions could not load/)).textContent).toContain(
+      "Retry",
+    );
   });
 });
 
 describe("stopped FLIGHT", () => {
-  it("switches the input off and offers Start FLIGHT", async () => {
+  it("still takes text, saves it, and offers Start FLIGHT under the box", async () => {
     const fn = stubFlight(
       { seat: flightSeat({ state: "stopped", live: false }), decisions: [] },
-      { "POST /api/seats/flight-1/start": { runId: "r2" } },
+      { "POST /api/seats/flight-1/start": { runId: "r2" }, "POST /api/comms": {} },
     );
     const { container } = render(<Dock />);
-    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
-    await waitFor(() => expect(input.placeholder).toBe("FLIGHT is stopped"));
-    expect(input.disabled).toBe(true);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
+    await waitFor(() =>
+      expect(container.querySelector("#dockState")?.textContent).toContain("FLIGHT is stopped"),
+    );
+    expect(input.disabled).toBe(false);
     expect(container.querySelector(".meta")?.textContent).toBe("opus · stopped");
+    fireEvent.change(input, { target: { value: "when you are back" } });
+    fireEvent.submit(form(container));
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(bodyOf(fn, "/api/comms")).toEqual({
+      to: "flight-1",
+      text: "[Operator is on: Overview]\nwhen you are back",
+    });
+    expect(container.querySelector("#dockState")?.textContent).toContain(
+      "Waiting: FLIGHT is stopped",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Start FLIGHT" }));
     await waitFor(() => expect(bodyOf(fn, "/api/seats/flight-1/start")).toEqual({}));
   });
@@ -742,6 +623,53 @@ describe("stopped FLIGHT", () => {
     render(<Dock />);
     fireEvent.click(await screen.findByRole("button", { name: "Start FLIGHT" }));
     expect((await screen.findByRole("alert")).textContent).toBe("no slot");
+  });
+});
+
+describe("the box", () => {
+  const typeIn = async (container: HTMLElement) => {
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      ),
+    );
+    await waitFor(() =>
+      expect(container.querySelector("#dockState")?.textContent).toContain("Enter"),
+    );
+    return input;
+  };
+
+  it("sends on Enter, breaks the line on Shift+Enter, and sends on Ctrl or Cmd with Enter", async () => {
+    const fn = stubFlight({ seat: flightSeat(), decisions: [] }, { "POST /api/comms": {} });
+    const { container } = render(<Dock />);
+    const input = await typeIn(container);
+    fireEvent.change(input, { target: { value: "line one\nline two" } });
+    fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+    expect(fn.mock.calls.some(([p]) => p === "/api/comms")).toBe(false);
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(bodyOf(fn, "/api/comms")).toEqual({
+      to: "flight-1",
+      text: "[Operator is on: Overview]\nline one\nline two",
+    });
+    fireEvent.change(input, { target: { value: "again" } });
+    fireEvent.keyDown(input, { key: "Enter", ctrlKey: true });
+    await waitFor(() => expect(input.value).toBe(""));
+  });
+
+  it("sends where the operator is with the message, and not when the chip is removed", async () => {
+    const fn = stubFlight({ seat: flightSeat(), decisions: [] }, { "POST /api/comms": {} });
+    window.history.pushState(null, "", "/tickets/shop-app/12");
+    const { container } = render(<Dock />);
+    const input = await typeIn(container);
+    expect(screen.getByTestId("dock-chip").textContent).toContain("On: Board · shop-app#12");
+    fireEvent.click(screen.getByRole("button", { name: /^Remove/ }));
+    expect(screen.queryByTestId("dock-chip")).toBeNull();
+    fireEvent.change(input, { target: { value: "plain" } });
+    fireEvent.submit(form(container));
+    await waitFor(() => expect(input.value).toBe(""));
+    expect(bodyOf(fn, "/api/comms")).toEqual({ to: "flight-1", text: "plain" });
   });
 });
 
@@ -767,14 +695,14 @@ describe("Esc", () => {
 
 describe("the conversation", () => {
   const sendText = (container: HTMLElement, value: string) => {
-    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value } });
     fireEvent.submit(form(container));
     return input;
   };
 
   it("shows a sent message at once, marked you and pending, and keeps it", async () => {
-    stubFlight({ seat: flightSeat(), decisions: [] }, { "POST /api/seats/flight-1/message": {} });
+    stubFlight({ seat: flightSeat(), decisions: [] }, { "POST /api/comms": {} });
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
     sendText(container, "assign it");
@@ -783,7 +711,7 @@ describe("the conversation", () => {
     expect(mine.classList.contains("pending")).toBe(true);
     expect(mine.querySelector(".who")?.textContent).toContain("pending");
     await waitFor(() =>
-      expect((screen.getByLabelText("Message FLIGHT") as HTMLInputElement).value).toBe(""),
+      expect((screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement).value).toBe(""),
     );
     expect(container.querySelectorAll(".dmsg.you.pending")).toHaveLength(1);
   });
@@ -793,7 +721,7 @@ describe("the conversation", () => {
     stubFlight(
       { seat: flightSeat(), decisions: [] },
       {
-        "POST /api/seats/flight-1/message": {},
+        "POST /api/comms": {},
         "/api/agents/flight-1/stream?limit=20": () => ({
           status: 200,
           body: { ...STREAM, events },
@@ -870,7 +798,7 @@ describe("the conversation", () => {
   it("drops the pending message when the send fails", async () => {
     stubFlight(
       { seat: flightSeat(), decisions: [] },
-      { "POST /api/seats/flight-1/message": () => ({ status: 409, body: { error: "seat busy" } }) },
+      { "POST /api/comms": () => ({ status: 409, body: { error: "seat busy" } }) },
     );
     const { container } = render(<Dock />);
     await waitFor(() => expect(container.querySelectorAll(".dmsg")).toHaveLength(3));
@@ -1046,7 +974,7 @@ describe("the conversation", () => {
     const before = spy.mock.calls.length;
     const mdBefore = md.mock.calls.length;
     expect(mdBefore).toBeGreaterThan(0); // the spy sees renders at all
-    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
     for (const v of ["a", "ab", "abc"]) fireEvent.change(input, { target: { value: v } });
     expect(input.value).toBe("abc");
     expect(spy.mock.calls.length).toBe(before);

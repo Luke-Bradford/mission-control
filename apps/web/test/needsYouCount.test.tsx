@@ -170,7 +170,7 @@ describe("one Needs-you count", () => {
     const counts = () => {
       const header = screen.getByRole("link", { name: /^Needs you: \d+ waiting$/ });
       const chat = screen.getByRole("button", { name: /^FLIGHT chat/ });
-      const dock = container.querySelector("#dockWaiting .dwh")?.textContent;
+      const dock = container.querySelector("#dock .dock-needs")?.textContent;
       const comms = within(
         screen.getByRole("region", { name: "Decisions" }) as HTMLElement,
       ).getByRole("link", { name: /^Needs you/ }).textContent;
@@ -208,7 +208,7 @@ describe("one Needs-you count", () => {
     const expected = {
       header: String(N),
       chat: `FLIGHT chat, ${N} waiting on you`,
-      dock: `Waiting on you · ${N}`,
+      dock: expect.stringContaining(`${N} questions wait`),
       comms: `Needs you ${N}`,
       banner: String(N),
       waiting: expect.stringContaining(`${N} waiting on you`),

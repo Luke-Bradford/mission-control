@@ -18,6 +18,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { isSendKey, SEND_HINT } from "../components/sendKey.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
@@ -488,14 +489,24 @@ function Composer({
       )}
       <label htmlFor="comms-compose">{label}</label>
       <div>
-        <input
+        <textarea
           id="comms-compose"
+          rows={2}
           value={text}
           onChange={(event) => setText(event.target.value)}
+          onKeyDown={(event) => {
+            if (!isSendKey(event)) return;
+            event.preventDefault();
+            send(event);
+          }}
+          aria-describedby="comms-compose-hint"
           placeholder={placeholder}
         />
         <button type="submit">Send</button>
       </div>
+      <p id="comms-compose-hint" className="note s">
+        {SEND_HINT}
+      </p>
       {error && <p role="alert">{error}</p>}
     </form>
   );

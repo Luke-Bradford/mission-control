@@ -69,7 +69,7 @@ describe("App", () => {
     expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
   });
 
-  it("carries the waiting count in the tab title, and has no dock on the Needs you page", async () => {
+  it("carries the waiting count in the tab title, and has the fly-out on the Needs you page", async () => {
     stubFetch({
       "/api/repos": REPOS,
       "/api/config": CONFIG,
@@ -81,7 +81,7 @@ describe("App", () => {
     });
     const { container } = at("/needs-you");
     await waitFor(() => expect(document.title).toBe("(2) Mission Control"));
-    expect(container.querySelector("#dock")).toBeNull();
+    expect(container.querySelector("#dock")).not.toBeNull();
   });
 
   it("skips from the Board link to the board content", async () => {
@@ -158,18 +158,19 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    // Comms owns the full conversation and does not alter the rail choice.
+    // Comms has the same fly-out: the rail choice carries over, and f folds it there too.
     act(() => {
       navigate("/comms");
     });
     await waitFor(() => expect(container.querySelector("#page-comms")).not.toBeNull());
+    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(false);
     act(() => {
       fireEvent.keyDown(document.body, { key: "f" });
       navigate("/");
     });
     await waitFor(() => expect(container.querySelector("#page-overview")).not.toBeNull());
     expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
-      "true",
+      "false",
     );
   });
 
@@ -202,17 +203,28 @@ describe("App", () => {
     sessionStorage.removeItem("mc-dock-collapsed");
   });
 
-  it("hides the dock on the FLIGHT page, which says what it would, and f opens FLIGHT in Comms", async () => {
-    act(() => toggleDock(true));
-    const { container } = at("/flight");
-    await waitFor(() => expect(container.querySelector("#page-flight")).not.toBeNull());
-    expect(container.querySelector(".shell.shell-full")).not.toBeNull();
-    expect(container.querySelector(".dock")).toBeNull();
-    act(() => {
-      fireEvent.keyDown(document.body, { key: "f" });
-    });
-    expect(window.location.pathname).toBe("/comms");
-  });
+  it.each(["/flight", "/needs-you", "/comms"])(
+    "shows the fly-out on %s, and f folds and opens it without leaving the page",
+    async (path) => {
+      act(() => toggleDock(true));
+      const { container } = at(path);
+      await waitFor(() => expect(container.querySelector(".shell")).not.toBeNull());
+      expect(container.querySelector(".shell.shell-full")).toBeNull();
+      const pressed = () =>
+        screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed");
+      expect(container.querySelector("#dock")).not.toBeNull();
+      const before = pressed();
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "f" });
+      });
+      expect(window.location.pathname).toBe(path);
+      expect(pressed()).not.toBe(before);
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "f" });
+      });
+      expect(pressed()).toBe(before);
+    },
+  );
 
   it("i off the agent page toasts", () => {
     at("/");

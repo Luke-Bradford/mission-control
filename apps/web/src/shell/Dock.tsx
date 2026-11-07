@@ -24,7 +24,15 @@ import { Markdown } from "../components/Markdown.tsx";
 import { isSendKey, SEND_HINT } from "../components/sendKey.ts";
 import { contextPct, doingLine } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
-import { chatRows, type DockRow, dockRows, kindLabel } from "../flight/conversation.ts";
+import {
+  chatRows,
+  type DockRow,
+  dockRows,
+  kindLabel,
+  type PendingMsg,
+  sameMessage,
+  withPending,
+} from "../flight/conversation.ts";
 import {
   FLIGHT_NO_SEAT,
   type FlightDecision,
@@ -37,7 +45,7 @@ import { Pill } from "../hud/Pill.tsx";
 import { usePath, useSearch } from "../router.ts";
 import { BuildChips } from "./buildStatus.tsx";
 import { DockSummary } from "./DockSummary.tsx";
-import { flyoutContext, withContext } from "./flyoutContext.ts";
+import { flyoutContext, stripContext, withContext } from "./flyoutContext.ts";
 import { useOlderEvents } from "./olderEvents.ts";
 import {
   setDockCollapsed,
@@ -294,14 +302,25 @@ export function FlightChat({
   const all = useMemo(() => {
     const thread: DockRow[] = (stored?.messages ?? []).map((m) =>
       m.from === COMMS_CAPCOM
-        ? { kind: "you", id: `c:${m.id}`, at: m.at, text: m.text }
+        ? { kind: "you", id: `c:${m.id}`, at: m.at, text: stripContext(m.text) }
         : { kind: "flight", id: `c:${m.id}`, at: m.at, text: m.text },
     );
-    // FLIGHT's turn text is its own words; what the operator sent is in the stored thread.
-    const turns = streamRows.filter((r) => r.kind === "flight");
-    return [...thread, ...turns].sort(byTime);
+    // The stored thread is the record; a stream copy of something stored shows once.
+    const own = streamRows.filter(
+      (r) =>
+        (r.kind === "you" || r.kind === "flight") &&
+        !(r.kind === "you" && thread.some((t) => t.kind === "you" && sameMessage(r.text, t.text))),
+    );
+    return [...thread, ...own].sort(byTime);
   }, [stored, streamRows]);
-  const shown = useMemo(() => chatRows(all), [all]);
+  const [pending, setPending] = useState<PendingMsg[]>([]);
+  const sent = useRef(0);
+  const { rows, open } = useMemo(() => withPending(all, pending), [all, pending]);
+  const shown = useMemo(() => chatRows(rows), [rows]);
+  // Settled messages leave the list, so it does not grow for ever.
+  useEffect(() => {
+    if (open.length !== pending.length) setPending(open);
+  }, [open, pending]);
 
   // The newest operator message: stored (sent), taken up (delivered) or kept for a stopped FLIGHT.
   const lastYou = [...shown].reverse().find((r) => r.kind === "you");
@@ -309,14 +328,14 @@ export function FlightChat({
     lastYou?.at != null &&
     streamRows.some((r) => r.kind === "you" && r.at !== null && r.at >= (lastYou.at as number));
   const [justSent, setJustSent] = useState(false);
-  const last: SendState | null =
-    lastYou === undefined && !justSent
-      ? null
-      : seat?.live !== true
-        ? "waiting"
-        : taken
-          ? "delivered"
-          : "sent";
+  // Only a message sent here gets a state line; older history says nothing about itself.
+  const last: SendState | null = !justSent
+    ? null
+    : seat?.live !== true
+      ? "waiting"
+      : taken
+        ? "delivered"
+        : "sent";
 
   const count = shown.length;
   // biome-ignore lint/correctness/useExhaustiveDependencies: follow new rows and changes to the space available for them
@@ -344,7 +363,10 @@ export function FlightChat({
 
   const send = async (body: string, context: string | null): Promise<boolean> => {
     if (!seat) return false;
+    const id = `p:${sent.current++}`;
+    const seen = all.flatMap((r) => (r.kind === "you" && sameMessage(r.text, body) ? [r.id] : []));
     stick.current = true;
+    setPending((p) => [...p, { id, text: body, at: Date.now(), seen }]);
     setBusy(true);
     setErr(null);
     try {
@@ -353,6 +375,7 @@ export function FlightChat({
       hub.refetchTopic("agents");
       return true;
     } catch (e) {
+      setPending((p) => p.filter((m) => m.id !== id));
       setErr(failNote(e));
       return false;
     } finally {

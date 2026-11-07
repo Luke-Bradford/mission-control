@@ -1,5 +1,5 @@
-import { hub, RESOURCES, streamStatus } from "../data.ts";
 import { openNeedsYou, useNeedsCount } from "../attention.ts";
+import { hub, RESOURCES, streamStatus } from "../data.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { useStore } from "./store.ts";
 

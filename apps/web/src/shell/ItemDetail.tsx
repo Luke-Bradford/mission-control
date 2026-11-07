@@ -25,6 +25,7 @@ import { MentionText } from "../comms/messages.tsx";
 import { Expandable, Toggle } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
+import { isSendKey, SEND_HINT } from "../components/sendKey.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { flightOffText } from "../flight/flightTypes.ts";
 import { dayMonth, rel } from "../fmt.ts";
@@ -475,13 +476,13 @@ export function ItemDetail({
             <textarea
               id={`${p}Input`}
               aria-label="Your answer"
-              placeholder="Type your answer… (Ctrl or ⌘ + Enter sends)"
+              placeholder={`Type your answer… (${SEND_HINT})`}
               rows={3}
               title={!replyOk ? flightTitle : undefined}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) submit(e);
+                if (isSendKey(e)) submit(e);
               }}
               disabled={!replyOk}
             />
