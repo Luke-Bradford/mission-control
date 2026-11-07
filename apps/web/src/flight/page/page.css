@@ -1,9 +1,13 @@
 /* The FLIGHT page (mockups/flight-page): title row, status band, Doing now beside Blockers, then
    Recent decisions in the space left. Rows keep their height and sit at the top; spare height
    shows more rows, never a gap. */
-.fp {
+/* The id is the page's address; the tabbed page's flight.css styles it as a grid, so this outranks it. */
+#page-flight.fp {
   display: flex;
   flex-direction: column;
+  grid-template: none;
+  container: none;
+  overflow: visible;
   gap: var(--sp-3);
   min-height: 0;
   min-width: 0;

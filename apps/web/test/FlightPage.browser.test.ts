@@ -43,6 +43,7 @@ describeRendered("FLIGHT page in a browser", () => {
                     id: p.id,
                     bottom: b.bottom,
                     clipped: p.scrollHeight > p.clientHeight + 1,
+                    scroll: `${p.scrollHeight} of ${p.clientHeight}`,
                     lastBottom: last?.bottom ?? 0,
                   };
                 },
@@ -100,7 +101,10 @@ describeRendered("FLIGHT page in a browser", () => {
             expect(r.pageScroll, `${where}: page scroll`).toBeLessThanOrEqual(0);
             expect(r.sideScroll, `${where}: sideways scroll`).toBeLessThanOrEqual(0);
             for (const p of r.panels) {
-              expect(p.clipped, `${where}: ${p.id} hides content`).toBe(false);
+              expect(
+                p.clipped,
+                `${where}: ${p.id} hides content (scrollHeight of clientHeight: ${p.scroll})`,
+              ).toBe(false);
               expect(p.lastBottom, `${where}: ${p.id} last row inside`).toBeLessThanOrEqual(
                 p.bottom + 1,
               );
