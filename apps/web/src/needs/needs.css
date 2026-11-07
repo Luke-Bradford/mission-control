@@ -108,7 +108,7 @@
 
 .needs-band {
   flex: none;
-  max-height: 136px;
+  max-height: 33vh;
   overflow: auto;
   padding: var(--sp-2) var(--sp-4);
   border-bottom: 1px solid var(--line);
@@ -131,12 +131,68 @@
   color: var(--fg);
 }
 
-.needs-band-question {
+.needs-band-title {
   margin: var(--sp-1) 0 0;
   font-size: var(--fs-title);
   line-height: var(--lh-title);
   font-weight: 600;
   overflow-wrap: anywhere;
+}
+
+.needs-band-question {
+  margin: var(--sp-1) 0 0;
+  overflow-wrap: anywhere;
+}
+
+.needs-band-label {
+  color: var(--fg-2);
+}
+
+.needs-band-pick {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-s);
+  color: var(--fg-2);
+}
+
+.needs-pins {
+  list-style: none;
+  margin: var(--sp-2) 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-s);
+}
+
+.needs-pins li {
+  display: flex;
+  gap: var(--sp-2);
+  min-width: 0;
+  max-width: 100%;
+}
+
+.needs-pin-title {
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.needs-row-ask {
+  min-width: 0;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.needs-row-who {
+  color: var(--fg-2);
+}
+
+.needs-more > summary {
+  cursor: pointer;
+  color: var(--fg-2);
 }
 
 .needs-body {

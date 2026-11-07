@@ -1145,6 +1145,7 @@ describe("FLIGHT's items to brief", () => {
         triageRemainingMs: 15 * MIN,
       },
     ]);
+    // an incomplete brief fails the Needs you entry check: still FLIGHT's to rewrite (#1543)
     store.addBrief({
       key: "note:blocked:r1:0",
       context: "c",
@@ -1152,6 +1153,21 @@ describe("FLIGHT's items to brief", () => {
       options: [],
       basis: "b",
       at: T0,
+    });
+    expect(items().map((i) => i.key)).toEqual(["note:blocked:r1:0"]);
+    // a complete one settles it
+    store.addBrief({
+      key: "note:blocked:r1:0",
+      ask: "Un-park mc#7?",
+      ticket: "mc#7",
+      context: "c",
+      recommendation: "Un-park it.",
+      options: [
+        { label: "Un-park", answer: "Go." },
+        { label: "Leave", answer: "Wait." },
+      ],
+      basis: "b",
+      at: T0 + 1,
     });
     expect(items()).toEqual([]);
   });
