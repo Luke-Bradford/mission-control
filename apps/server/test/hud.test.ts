@@ -41,6 +41,7 @@ import {
   agentViews,
   attentionItems,
   crew,
+  FLIGHT_ASKED_AGAIN,
   flightNotTriagingDueAt,
   HUB_STOP_KEYS,
   isOperatorCall,
@@ -2824,16 +2825,31 @@ describe("messages are not Needs you", () => {
     });
     expect(chatter()).toEqual([expect.objectContaining({ key, owner: "operator" })]);
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).not.toContain(key);
-    // a second question keeps the item and its brief; FLIGHT's digest asks it to brief again
+    // a second question keeps the item and its brief row, but the old ask no longer stands: back
+    // to FLIGHT to brief the newest question, never a stale ask shown to the operator
     say(NOW - 2 * MIN, "flight-1", COMMS_CAPCOM, "@CAPCOM and drop #498 after?");
     expect(chatter()).toEqual([
       expect.objectContaining({
         key,
-        owner: "operator",
+        owner: "flight",
+        flightTriage: "handling",
+        returned: [FLIGHT_ASKED_AGAIN],
         brief: expect.objectContaining({ ask: "Merge #551 now, or wait for #498?" }),
       }),
     ]);
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain(key);
+    // briefed again, past the newest line: the operator's once more
+    store.addBrief({
+      key,
+      for: "operator",
+      ask: "Merge #551 now and drop #498 after?",
+      context: "Both touch the parser.",
+      recommendation: "Yes.",
+      options: TWO_OPTIONS,
+      basis: "the two PRs",
+      at: NOW - MIN,
+    });
+    expect(chatter()).toEqual([expect.objectContaining({ key, owner: "operator" })]);
   });
 
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {

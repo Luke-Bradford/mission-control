@@ -1280,6 +1280,8 @@ export interface AttentionItem {
    * an item that would otherwise have been the operator's.
    */
   returned?: string[];
+  /** Set by `/api/attention` on a hub alert (#1543): the hub raised it, whatever seat it names. */
+  alert?: true;
   /**
    * The ticket and PR the item is about, with their titles, for the operator's page (#1543). Each
    * part is absent when the hub does not know it.

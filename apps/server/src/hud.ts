@@ -939,6 +939,10 @@ export function pinned(item: AttentionItem, store: Store, config: CcConfig): Att
   };
 }
 
+/** Why FLIGHT's own question goes back to it after it wrote again past its brief (#1543). */
+export const FLIGHT_ASKED_AGAIN =
+  "FLIGHT asked again after this brief: brief the newest question with brief_item";
+
 /**
  * Hub alerts the entry check passes that need the store to tell (#1543): the runaway breaker, and
  * a run stopped on a budget or account limit, which only the operator can lift. The rest of the
@@ -1507,7 +1511,14 @@ function buildAttentionItems(
    */
   const entryCheck = (item: AttentionItem): AttentionItem => {
     if (triage === null || item.owner !== OWNER_OPERATOR || hubAlert(item, store)) return item;
-    const returned = needsYouEntryFaults(item);
+    // FLIGHT's own question item spans its unread lines: a brief older than the latest line
+    // answers an earlier question, so the operator would read a stale ask
+    const restated =
+      ownReply(item, flightId) &&
+      item.brief !== undefined &&
+      item.brief.for !== "flight" &&
+      item.brief.at < item.at;
+    const returned = restated ? [FLIGHT_ASKED_AGAIN] : needsYouEntryFaults(item);
     if (returned.length === 0) return item;
     // a default applies only to the operator's item, so a returned one carries none
     const { defaultDueAt: _default, ...rest } = item;

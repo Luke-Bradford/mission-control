@@ -51,7 +51,7 @@ export function raiseStalledCommsDecisions(d: {
     const brief: AttentionBrief = {
       for: "operator",
       original: message.text,
-      context: `${message.from} sent ${message.to} a ${message.label}${message.ticket === null ? "" : ` on ${message.ticket}`} and nobody has settled it: ${message.text}`,
+      context: `${seatCallSign(message.from)} sent ${seatCallSign(message.to)} a ${message.label}${message.ticket === null ? "" : ` on ${message.ticket}`} and nobody has settled it: ${message.text}`,
       ask: `${seatCallSign(message.from)} has waited on ${seatCallSign(message.to)} about ${message.ticket}: let it proceed on its best judgment, or hold?`.slice(
         0,
         ASK_MAX,

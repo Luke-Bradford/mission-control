@@ -195,8 +195,9 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
    - the runaway breaker tripped;
    - a run stopped on a budget or account limit;
    - an account at its rate limit;
-   - a safety stop: new runs paused for the machine, the CLI held, upgraded or rolled back;
-   - the operator's own request, such as a queue reorder, whose choices the hub writes.
+   - a safety stop: new runs paused for the machine, the CLI held, upgraded or rolled back, a
+     seat's focus that could not be imported;
+   - the operator's own queue reorder, whose choices the hub writes.
 2. **FLIGHT's complete question.** FLIGHT's brief for the operator, with all of these:
    - a question: one sentence that asks, ending in `?`, at most 300 characters;
    - no web address, raw signal id, raw timestamp or `[tag]` prefix in the question;

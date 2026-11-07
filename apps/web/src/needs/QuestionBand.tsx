@@ -20,7 +20,7 @@ export const titleOf = (item: AttentionItem): string =>
  * hub (an alert).
  */
 export const askerOf = (item: AttentionItem, callSign?: string | null): string =>
-  needsYouAlert(item)
+  item.alert || needsYouAlert(item)
     ? "the hub"
     : (callSign ?? item.agentId ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub"));
 

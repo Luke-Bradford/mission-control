@@ -99,6 +99,7 @@ import {
   METER_FULL_PCT,
   type MilestonesView,
   NEW_LOOP,
+  needsYouAlert,
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
@@ -298,6 +299,7 @@ import {
   CREW_ERROR_KEY,
   crew,
   forgetViews,
+  hubAlert,
   NO_LOCK,
   NOTE_KEY,
   pinned,
@@ -5593,7 +5595,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       const pinnedFor = (item: AttentionItem): AttentionItem =>
-        isOperatorItem(item) ? pinned(item, store, config) : item;
+        isOperatorItem(item)
+          ? {
+              ...pinned(item, store, config),
+              ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
+            }
+          : item;
       api.get(
         "/attention",
         async (): Promise<AttentionItem[]> =>
