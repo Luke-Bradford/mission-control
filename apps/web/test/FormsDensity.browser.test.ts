@@ -12,6 +12,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { boardItem, CONFIG, CREW_CONFIG, METRICS_VIEW, REPOS } from "./fixtures.ts";
+import { TEMPLATES } from "./templateFixtures.ts";
 
 const { renderAt } = browserSession();
 
@@ -177,6 +178,18 @@ const FORMS = [
       ["css", `${CARD} .repo-seats tbody tr button`],
     ],
   },
+  {
+    id: "F14",
+    form: 'form[aria-label="New template"]',
+    cap: 800,
+    steps: [["click", "New"]],
+  },
+  {
+    id: "F15",
+    form: ".teams-sources",
+    cap: 640,
+    steps: [["field", "Feed name"]],
+  },
 ] as const satisfies readonly {
   id: string;
   form: string;
@@ -184,7 +197,43 @@ const FORMS = [
   steps: readonly Step[];
 }[];
 type Form = (typeof FORMS)[number];
-const pageOf = (form: Form) => (form.id === "F06" ? "F06" : "repos");
+const pageOf = (form: Form) =>
+  form.id === "F06" ? "F06" : form.id === "F14" ? "loops" : form.id === "F15" ? "sources" : "repos";
+
+/** The Setup tab a form lives on, as a path under /setup. */
+const tabOf = (form: Form) =>
+  form.id === "F14" ? "loops" : form.id === "F15" ? "sources" : "repos";
+
+const LONG_FEED = `Work chat ${"with a long name ".repeat(8)}`.trim();
+
+/** What F14 and F15 read besides the config: the templates, and the Teams status and health. */
+function extra(form: Form, kind: World) {
+  if (form.id === "F14")
+    return {
+      [RESOURCES.config.path]: {
+        ...((world(kind) as Record<string, unknown>)[RESOURCES.config.path] as ConfigView),
+        profiles: { source: "built-in", version: "a".repeat(64), error: null, list: TEMPLATES },
+      },
+    };
+  if (form.id !== "F15") return {};
+  const count = kind === "empty" ? 0 : kind === "fifty" ? 50 : 1;
+  const repo = REPOS[0]?.id ?? "shop-app";
+  return {
+    [RESOURCES.teams.path]: {
+      enabled: true,
+      note: "Polls on a timer.",
+      retryAt: null,
+      selected: Array.from({ length: count }, (_, i) => ({
+        kind: "chat",
+        id: `fictional-chat-${i + 1}`,
+        name: kind === "long" ? LONG_FEED : `Work chat ${i + 1}`,
+        repoId: repo,
+        lane: "work",
+      })),
+    },
+    [RESOURCES.health.path]: [],
+  };
+}
 
 /** Runs the steps a person would take, inside the page, waiting for each control to appear. */
 const drive = (page: RenderedPage, steps: readonly Step[]) =>
@@ -250,7 +299,11 @@ async function open(form: Form, o: RenderOpts) {
     height: o.height,
     search: `?${query}`,
     colorScheme: o.colorScheme ?? "light",
-    api: { ...world(o.kind ?? "one"), ...writes(o.checkoutPasses ?? true) },
+    api: {
+      ...world(o.kind ?? "one"),
+      ...writes(o.checkoutPasses ?? true),
+      ...extra(form, o.kind ?? "one"),
+    },
   });
   await page.box("#page-setup, main");
   if (o.state === "loading" || o.state === "error") {
@@ -458,6 +511,8 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
     F10: { steps: [["click", "Add repo"]] },
     F11: { steps: [["click", "Save seat"]] },
     F12: { steps: [["click", "Save seat"]] },
+    F14: { steps: [["click", "Save template"]] },
+    F15: { steps: [["click", "Add feed"]] },
   };
   for (const form of FORMS) {
     it(
@@ -899,4 +954,310 @@ describeRendered("F13 Board view editor, rendered in the Board page", () => {
       );
       expect(captures.length).toBe(4);
     });
+});
+
+// F14 (template editor, 800px) and F15 (Teams sources, 640px) inside the real shell: the rail with
+// FLIGHT folded, and the dock open. Light at the six viewports; dark and the images at the two
+// sizes the plan names. With MC_FORMS_B2_SHOTS set, each image is saved and listed in a manifest.
+const B2 = [FORMS[7], FORMS[8]] as const;
+async function openInShell(
+  form: Form,
+  o: { width: number; height: number; colorScheme?: "light" | "dark"; dock?: "folded" | "open" },
+) {
+  const page = await renderAt({
+    page: "test/agentV2Browser.html",
+    width: o.width,
+    height: o.height,
+    search: `?dock=${o.dock ?? "folded"}&at=/setup/${tabOf(form)}`,
+    colorScheme: o.colorScheme ?? "light",
+    api: { ...world("one"), ...writes(true), ...extra(form, "one") },
+  });
+  await page.box("#page-setup, main");
+  await drive(page, form.steps);
+  await page.box(form.form);
+  return page;
+}
+
+describeRendered("F14 template editor and F15 Teams sources, rendered in the Setup shell", () => {
+  for (const form of B2) {
+    for (const [width, height] of VIEWPORTS) {
+      it(
+        `${form.id} is capped at ${form.cap}px with 32px controls and no clipping at ${width}x${height} light, rail dock`,
+        async () => {
+          const page = await openInShell(form, { width, height });
+          await expectDense(page, form, false);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+    for (const [width, height] of [
+      [1280, 900],
+      [1600, 700],
+    ] as const) {
+      it(
+        `${form.id} holds beside FLIGHT's open dock at ${width}x${height}`,
+        async () => {
+          const page = await openInShell(form, { width, height, dock: "open" });
+          await expectDense(page, form, false);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  const shots = process.env.MC_FORMS_B2_SHOTS;
+  const captures: { file: string; form: string; viewport: string; theme: string }[] = [];
+  for (const form of B2) {
+    for (const [width, height] of [
+      [1920, 1080],
+      [1600, 700],
+    ] as const) {
+      for (const colorScheme of ["light", "dark"] as const) {
+        if (colorScheme === "light" && !shots) continue;
+        it(
+          `${form.id} holds the same at ${width}x${height} ${colorScheme}${shots ? " and is captured" : ""}`,
+          async () => {
+            const page = await openInShell(form, { width, height, colorScheme });
+            await expectDense(page, form, false);
+            if (shots) {
+              await page.evaluate(async () => {
+                await document.fonts.ready;
+              }, null);
+              mkdirSync(shots, { recursive: true });
+              const file = `${form.id.toLowerCase()}-${width}x${height}-${colorScheme}.png`;
+              await page.screenshot(join(shots, file));
+              captures.push({
+                file,
+                form: form.id,
+                viewport: `${width}x${height}`,
+                theme: colorScheme,
+              });
+            }
+            await page.close();
+          },
+          BROWSER_TEST_TIMEOUT_MS,
+        );
+      }
+    }
+  }
+  if (shots)
+    it("F14 and F15 write the capture manifest and QA report", () => {
+      mkdirSync(shots, { recursive: true });
+      const baseline = process.env.MC_FORMS_B2_BASELINE ?? "origin/main";
+      const head = process.env.MC_FORMS_B2_HEAD ?? "HEAD";
+      writeFileSync(
+        join(shots, "manifest.json"),
+        `${JSON.stringify(
+          captures.map((c) => ({ ...c, baseline, head })),
+          null,
+          2,
+        )}\n`,
+      );
+      writeFileSync(
+        join(shots, "qa-report.md"),
+        [
+          "# Template editor (F14) and Teams sources (F15) QA report",
+          "",
+          `Baseline ${baseline}; head ${head}. Fixtures: the seven catalogue templates; one Teams work feed.`,
+          "",
+          "Limits: the images show one fixture per form at two sizes. The six-viewport, dock-open, data-state and Tab checks are measured, not imaged.",
+          "",
+          "| Image | Form | Viewport | Theme |",
+          "| --- | --- | --- | --- |",
+          ...captures.map((c) => `| ${c.file} | ${c.form} | ${c.viewport} | ${c.theme} |`),
+          "",
+        ].join("\n"),
+      );
+      expect(captures.length).toBe(8);
+    });
+});
+
+/** F16 to F18: the crew pause modal (new and edit, with a long audit) and the Away mode modal. */
+const PAUSE_FORMS = [
+  {
+    id: "F16",
+    page: "pause",
+    form: ".crew-pause-panel",
+    cap: 640,
+    open: "Pause crew",
+    edit: false,
+  },
+  {
+    id: "F17",
+    page: "pause",
+    form: ".crew-pause-panel",
+    cap: 640,
+    open: "Edit crew pause",
+    edit: true,
+  },
+  { id: "F18", page: "away", form: ".awayctl", cap: 480, open: null, edit: false },
+] as const;
+type PauseForm = (typeof PAUSE_FORMS)[number];
+
+const PAUSE_EXCEPTIONS = Array.from({ length: 12 }, (_, i) => ({
+  seat: `guido-${i + 1}`,
+  runId: `guido-${i + 1}:20261102-1200${String(i).padStart(2, "0")}`,
+  by: "FLIGHT",
+  at: 1792756800000 + i * 60_000,
+  reason: `Finish the approved fix only ${"and nothing else ".repeat(6)}`,
+}));
+
+async function openPause(form: PauseForm, o: { width: number; height: number; dark?: boolean }) {
+  const crew = CREW_CONFIG.crew;
+  if (!crew) throw new Error("fixture has no crew");
+  const seats = Array.from({ length: 12 }, (_, i) => ({
+    id: `guido-${i + 1}`,
+    role: "GUIDO",
+    accountId: "codex-main",
+    model: "sonnet",
+    area: ["apps/**"],
+    mode: "writer",
+  }));
+  const page = await renderAt({
+    page: "test/formsBrowser.html",
+    width: o.width,
+    height: o.height,
+    search: `?form=${form.page}`,
+    colorScheme: o.dark ? "dark" : "light",
+    // every request the page makes is listed; a write is not, so it is refused (404) with no effect
+    api: {
+      [RESOURCES.config.path]: {
+        ...CREW_CONFIG,
+        crew: {
+          ...crew,
+          sessions: crew.sessions.map((session, i) => (i === 0 ? { ...session, seats } : session)),
+        },
+      },
+      [RESOURCES.crewPause.path]: form.edit
+        ? {
+            seats: "all",
+            reason: "Save tokens",
+            by: "operator",
+            at: 1792756800000,
+            except: PAUSE_EXCEPTIONS,
+          }
+        : null,
+      [RESOURCES.away.path]: {
+        on: false,
+        until: "",
+        may: { pickUp: true, research: true, check: true, status: true, safePr: true },
+      },
+      [RESOURCES.crew.path]: { rows: [], firstRunToday: null },
+      [RESOURCES.attention.path]: [],
+    },
+  });
+  await page.box(form.page === "away" ? ".awaypanel" : "main");
+  if (form.open) {
+    const name = form.open;
+    await page.evaluate(async (label) => {
+      for (let i = 0; i < 120; i++) {
+        const button = [...document.querySelectorAll("button")].find(
+          (b) => b.textContent === label && !b.disabled,
+        );
+        if (button) {
+          button.focus();
+          button.click();
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      throw new Error(`no ${label} button`);
+    }, name);
+  }
+  await page.box(form.form);
+  return page;
+}
+
+async function expectPauseDense(page: RenderedPage, form: PauseForm) {
+  const measured = await page.evaluate(
+    (arg) => {
+      const root = document.querySelector(arg.form);
+      const panel = document.querySelector<HTMLElement>(".crew-pause-panel, .awaypanel");
+      if (!root || !panel) return null;
+      const doc = document.documentElement;
+      const targets = [...panel.querySelectorAll("button, a[href], input, select, textarea")]
+        .filter((el) => el.getClientRects().length > 0)
+        .map((el) => el.getBoundingClientRect());
+      const submit = [...panel.querySelectorAll<HTMLButtonElement>("button[type=submit]")].at(-1);
+      const rect = submit?.getBoundingClientRect();
+      return {
+        width: root.getBoundingClientRect().width,
+        controls: [
+          ...root.querySelectorAll(
+            "input:not([type=checkbox]):not([type=radio]), select, textarea",
+          ),
+        ].map((c) => c.getBoundingClientRect().height),
+        smallTargets: targets.filter((r) => r.width < 23.5 || r.height < 23.5).length,
+        formOverflow: root.scrollWidth - root.clientWidth,
+        pageOverflow: doc.scrollWidth - doc.clientWidth,
+        actionInView:
+          !!rect && rect.top >= 0 && rect.bottom <= window.innerHeight && rect.width > 0,
+      };
+    },
+    { form: form.form },
+  );
+  expect(measured).not.toBeNull();
+  if (!measured) return;
+  expect(measured.width).toBeGreaterThan(0);
+  expect(measured.width).toBeLessThanOrEqual(form.cap + 1);
+  for (const height of measured.controls) expect(Math.abs(height - 32)).toBeLessThan(0.5);
+  expect(measured.smallTargets).toBe(0);
+  expect(measured.formOverflow).toBeLessThanOrEqual(1);
+  expect(measured.pageOverflow).toBeLessThanOrEqual(1);
+  expect(measured.actionInView).toBe(true);
+  expect((await page.unclipped(`${form.form}, ${form.form} .fgroup`)).every(Boolean)).toBe(true);
+  expect(page.errors()).toEqual([]);
+  // no fixture sends a real pause or Away write
+  expect(page.requests().filter((r) => r.method !== "GET")).toEqual([]);
+}
+
+describeRendered("F16 to F18 crew pause and Away mode, rendered", () => {
+  for (const form of PAUSE_FORMS) {
+    for (const [width, height] of VIEWPORTS) {
+      it(
+        `${form.id} is within ${form.cap}px with 32px controls, 24px targets and its final action in view at ${width}x${height} light`,
+        async () => {
+          const page = await openPause(form, { width, height });
+          await expectPauseDense(page, form);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+    for (const [width, height] of [
+      [1920, 1080],
+      [1600, 700],
+    ] as const) {
+      it(
+        `${form.id} holds the same at ${width}x${height} dark`,
+        async () => {
+          const page = await openPause(form, { width, height, dark: true });
+          await expectPauseDense(page, form);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  it(
+    "F16 with an error summary showing still keeps its final action in view at 1600x700",
+    async () => {
+      const form = PAUSE_FORMS[0];
+      const page = await openPause(form, { width: 1600, height: 700 });
+      await page.evaluate(async () => {
+        const submit = document.querySelector<HTMLButtonElement>(
+          ".crew-pause-panel button[type=submit]",
+        );
+        submit?.click();
+        await new Promise((r) => setTimeout(r, 100));
+      }, null);
+      await page.box(".crew-pause-panel .fsum");
+      await expectPauseDense(page, form);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

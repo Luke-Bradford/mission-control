@@ -5,6 +5,7 @@ import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import {
   type CrewMode,
+  DETACHED_HEAD,
   type GuardEvent,
   type GuardVerdict,
   guardDecision,
@@ -62,8 +63,10 @@ export function crewGuardDecision(
             timeout: GIT_TIMEOUT_MS,
             env: gitEnv(process.env),
           }).trim();
-        } catch {
-          return null;
+        } catch (e) {
+          // `symbolic-ref --quiet` exits 1 on a detached HEAD: a readable checkout whose commits
+          // move no branch (FLIGHT merges main into a PR branch from one). Anything else is unreadable.
+          return (e as { status?: unknown }).status === 1 ? DETACHED_HEAD : null;
         }
       },
       flightFileAllowed: ({ tool, input }) => {

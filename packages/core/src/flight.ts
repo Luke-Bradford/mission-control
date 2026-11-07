@@ -345,6 +345,10 @@ export interface FlightMovedPointer extends FlightPointerRef {
 /** A wake's id: its run and its turn (0 is the start brief, k the k-th wake after it). */
 export const flightWakeId = (runId: string, n: number): string => `${runId}:${n}`;
 
+/** Whether a message from FLIGHT is addressed to the controller, not the operator (until #1508's own address). */
+export const isForTheController = (text: string): boolean =>
+  text.trimStart().toLowerCase().startsWith(FOR_THE_CONTROLLER.toLowerCase());
+
 export interface FlightLedgerEntry {
   pointers?: FlightPointer[];
   kind: FlightLedgerKind;
@@ -681,7 +685,7 @@ export const PROMOTE_ENGINE_OFF =
   "Not moved: the loop engine is off on this server, so no card moves.";
 export const PROMOTE_NO_RULES = "Not moved: the repo's rules could not be read.";
 export const promoteOffText = (repoId: string): string =>
-  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.`;
+  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question, then brief the item it raises with mc brief_item.`;
 export const moveNotOnBoardText = (ref: string): string => `Not moved: ${ref} is not on the board.`;
 export const moveWrongColumnText = (ref: string, column: string): string =>
   `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and Ready or Refinement to Backlog.`;
@@ -1162,6 +1166,11 @@ export interface FlightState {
     triageRemainingMs: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
+    /**
+     * Set when the Needs you entry check sent the item back (#1543): what it lacks before it may
+     * reach the operator. Fix the brief with brief_item, or keep the item (brief it for FLIGHT).
+     */
+    returned?: string[];
   }[];
   /**
    * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
@@ -1335,6 +1344,16 @@ export const FLIGHT_COST_DAYS = 14;
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
 export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+/**
+ * ...but only once it has grown this much since the session's first turn. A fresh session that
+ * starts above the line would otherwise hand over on every first turn: on 7 November FLIGHT
+ * started at 157K and handed over 300 times in five hours.
+ */
+export const FLIGHT_CONTEXT_GROWTH_TOKENS = 50_000;
+/** Handovers (rotations) in an hour before the watch stops restarting FLIGHT and says why. */
+export const FLIGHT_ROTATIONS_MAX = 4;
+export const flightRotationLoopText = (n: number, startTokens: number | null): string =>
+  `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start.`;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;

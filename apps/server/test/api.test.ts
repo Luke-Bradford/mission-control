@@ -495,7 +495,30 @@ describe("audit", () => {
       })),
     },
     reviewRounds: { prs: [], late: [] },
+    items: [],
     surgeonProposals: [],
+  });
+
+  it("shows each stored item with its risk tier", async () => {
+    store.recordAuditItem({
+      kind: "cli-update",
+      subject: "claude@2.1.1",
+      state: "done",
+      detail: "d",
+      at: NOW - 1000,
+    });
+    store.recordAuditItem({
+      kind: "never-heard-of",
+      subject: "x",
+      state: "open",
+      detail: "d",
+      at: NOW - 2000,
+    });
+    const items = (await get("/api/audit")).json<AuditView>().items ?? [];
+    expect(items.map((i) => [i.kind, i.tier])).toEqual([
+      ["cli-update", "auto"],
+      ["never-heard-of", "go-ahead"],
+    ]);
   });
 
   it("defaults to 30d and returns the audit response shape", async () => {
@@ -8280,7 +8303,7 @@ describe("the first loop's engine", () => {
       payload: {},
     });
     expect(r.statusCode).toBe(409);
-    expect(r.json().error).toContain("only the controller can merge it");
+    expect(r.json().error).toContain("use second_review or send it for rework");
     await a.close();
   });
 

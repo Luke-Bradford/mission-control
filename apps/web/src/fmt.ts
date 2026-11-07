@@ -56,6 +56,13 @@ export function wkdTime(ms: number, tz: string): string {
   return `${WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()]} ${hhmm(ms, tz)}`;
 }
 
+/** `Fri 6 Nov 17:23`: a moment named in full, such as when an item was raised. */
+export function raisedAt(ms: number, tz: string): string {
+  const { y, m, d } = localDate(ms, tz);
+  const wd = WEEKDAYS[new Date(Date.UTC(y, m - 1, d)).getUTCDay()];
+  return `${wd} ${d} ${MONTHS[m - 1]} ${hhmm(ms, tz)}`;
+}
+
 /** `18 Oct` */
 export function dayMonth(ms: number, tz: string): string {
   const { m, d } = localDate(ms, tz);

@@ -169,9 +169,11 @@ describeRendered("Demo, rendered", () => {
       // One write, from the Away modal.
       await page.click("button[title^='Away mode']");
       await page.click(".awaypanel .sw input");
+      // a change is only a draft: Save sends it, and the demo refuses it in the form's summary
+      await page.click(".awaypanel button[type=submit]");
       await eventually(
         page,
-        async () => (await text(page, "#toast")).includes(DEMO_REFUSED),
+        async () => (await text(page, ".awaypanel .fsum")).includes(DEMO_REFUSED),
         "the refusal on screen",
       );
       // One click on a same-origin /api/ link.

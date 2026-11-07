@@ -190,13 +190,27 @@ export function flightTriageItems(
       .filter(
         (x) =>
           // a released hold returns the item for a fresh brief: the old one predates the wait
-          (!x.brief || (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt)) &&
-          !ownReply(x, flightId) &&
+          (!x.brief ||
+            (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt) ||
+            // the entry check refused FLIGHT's operator brief: it is FLIGHT's to rewrite (#1543)
+            // (a brief with no `for` is an old one written for the operator)
+            (x.returned !== undefined && x.brief.for !== "flight") ||
+            // FLIGHT asked again after briefing its own question: the brief covers the first only
+            (ownReply(x, flightId) && x.brief.at < x.at)) &&
+          // FLIGHT's own @CAPCOM question is listed until FLIGHT briefs it for the operator
+          // (Needs you takes no raw question, #1543) or dismisses it
+          (!ownReply(x, flightId) ||
+            x.returned !== undefined ||
+            (x.brief !== undefined && x.brief.at < x.at)) &&
           (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
       )
       .filter((item) => item.kind !== "message" || flightQuestion(item.text))
-      // dismiss_item acks an item: as it was, it is dealt with
-      .filter((item) => item.acked !== true)
+      // dismiss_item acks an item: as it was, it is dealt with. A returned item the entry check
+      // still holds FLIGHT to (not "handling") is protected: the ack was the operator's read
+      .filter(
+        (item) =>
+          item.acked !== true || (item.returned !== undefined && item.flightTriage !== "handling"),
+      )
   );
 }
 
@@ -228,9 +242,9 @@ export function stalledSeats(
 }
 
 /**
- * A reply or `@CAPCOM` tag FLIGHT itself wrote: the operator's to read (Needs you still shows it),
- * not work for FLIGHT. Listing it in the digest woke FLIGHT with every reply it wrote. Assumes one
- * live FLIGHT seat (`flightSeat`).
+ * A reply or `@CAPCOM` tag FLIGHT itself wrote: not work for FLIGHT, and it reaches Needs you only
+ * with FLIGHT's brief (#1543). Listing every one in the digest woke FLIGHT with every reply it
+ * wrote; only an unbriefed question is listed. Assumes one live FLIGHT seat (`flightSeat`).
  */
 export const ownReply = (
   item: Pick<AttentionItem, "kind" | "agentId">,
@@ -1322,6 +1336,7 @@ export function flightState(i: {
       ageMin: Math.floor((now - x.at) / 60_000),
       triageRemainingMs: Math.max(0, (x.triageDueAt ?? now) - now),
       ...(x.holdReleased === undefined ? {} : { holdReleased: x.holdReleased }),
+      ...(x.returned === undefined ? {} : { returned: x.returned }),
     }));
 
   const planned = flightScheduleView(config, store, now).entries;
@@ -1828,6 +1843,85 @@ export function wakeReasons(
         targets: [...factTargets(category, item), ...itemTickets(category, item, itemRefs)],
       }));
   });
+}
+
+/**
+ * A wake reason in words for the operator, from its fact: a PR, ticket, seat or item named, and the
+ * time where the fact has one. Never the raw `kind:key:epoch` id.
+ */
+export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
+  const at = (ms: number): string => {
+    const day = new Intl.DateTimeFormat("en-GB", {
+      day: "numeric",
+      month: "short",
+      timeZone,
+    }).format(ms);
+    return `${day} ${clockHm(ms, timeZone)}`;
+  };
+  const times = (text: string): string => text.replace(/\d{13}/g, (ms) => at(Number(ms)));
+  const spaced = (text: string): string => text.replace(/[_-]+/g, " ");
+  const split = /^([^:]+):([\s\S]*)$/.exec(reason.id);
+  const category = split?.[1] ?? "";
+  let item: unknown = split?.[2];
+  try {
+    item = JSON.parse(split?.[2] ?? "null");
+  } catch {
+    // a fact id that is not JSON keeps its text
+  }
+  const text = typeof item === "string" ? item : JSON.stringify(item);
+  const [a = "", b = "", c = "", d = "", e = ""] = typeof item === "string" ? item.split(":") : [];
+  const since = (part: string): string =>
+    /^\d{13}$/.test(part) ? ` since ${at(Number(part))}` : "";
+  switch (category) {
+    case "q":
+      return `question ${text}`;
+    case "prFlow": {
+      const [pr = "", what = "", ...rest] = (typeof item === "string" ? item : "").split(":");
+      const when = since(rest.at(-1) ?? "");
+      if (what === "unowned") return `PR #${pr} has had no owner${when}`;
+      if (what === "waiting") return `PR #${pr} has waited on the ${rest[0] ?? "operator"}${when}`;
+      return `PR #${pr} has stood at the ${rest[0] ?? "same"} step${when}`;
+    }
+    case "triage":
+      return b === "missed"
+        ? `FLIGHT missed ${a}`
+        : `${a} waits for FLIGHT's triage (${spaced(b)})`;
+    case "parked":
+      return `${a} is parked on ${b} (${spaced(c)})`;
+    case "stopped":
+      return `${text} is stopped`;
+    case "idle":
+      return `${a} idle ${b}`;
+    case "free":
+      return `seat ${text} is free`;
+    case "t":
+      return `ticket ${text} is ready to start`;
+    case "reviews":
+      return "review seats are idle with a review queued";
+    case "holdsInForce":
+      return `${spaced(text)} hold is in force`;
+    case "breaker":
+      return `the runaway breaker is tripped (${spaced(text)})`;
+    case "prs":
+      return `PR #${b} (${a}) waits on FLIGHT${e ? ` to ${spaced(e)}` : ""}`;
+    case "planned": {
+      const [, dueAt, , target, label] = Array.isArray(item) ? item : [];
+      return `${label ?? "a planned check"} on ${target ?? "its target"}, due ${typeof dueAt === "number" ? at(dueAt) : "now"}`;
+    }
+    case "items": {
+      if (a === "pr") return times(text.replace(/^pr:/, "").replace(/^([^:]+):/, ""));
+      if (a === "comms-open") return `Comms message ${b} waits for an answer`;
+      if (a === "esc") return `issue ${b} waits for an answer`;
+      if (a === "stall") return `${b} stalled${since(e)}`;
+      return `${spaced(a)} ${times([b, c, d, e].filter((x) => x !== "").join(" "))}`.trim();
+    }
+    case "signals": {
+      const target = times(text.slice(a.length + 1));
+      return target === "" ? spaced(a) : `${spaced(a)} on ${target}`;
+    }
+    default:
+      return times(`${category} ${text}`);
+  }
 }
 
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */

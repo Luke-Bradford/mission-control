@@ -20,6 +20,7 @@ import {
   awayBugDecisionAbout,
   type BoardItem,
   BRIEF_CLEARED_DECISION,
+  BRIEF_ENTRY_REFUSED,
   BRIEF_INPUT_MAX,
   BRIEF_ITEM_DESCRIPTION,
   BRIEF_KEY_MAX,
@@ -103,7 +104,6 @@ import {
   FLIGHT_CI_LOG_MAX,
   FLIGHT_CLOSE_DEPENDENT_READ_BATCH,
   FLIGHT_CLOSE_SEARCH_LIMIT,
-  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_DECISION_MAX,
   FLIGHT_FIELD_MAX,
   FLIGHT_GH_PATH_MAX,
@@ -147,7 +147,7 @@ import {
   type FlightPointerKind,
   type FlightPrRead,
   FORGET_DESCRIPTION,
-  flightFloorBlocked,
+  flightClearanceReasons,
   GH_READ_BAD_PATH,
   GH_READ_DESCRIPTION,
   GH_READ_NOT_FOUND,
@@ -205,6 +205,7 @@ import {
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
+  needsYouEntryFaults,
   noOpenQuestionText,
   notAcceptedText,
   notDevRunText,
@@ -321,20 +322,20 @@ import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
-import { type CcConfig, crewSeatDef, SEAT_ID } from "../config.ts";
+import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
-import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
 import { seatFocus } from "../focus.ts";
 import type { Move, MoveResult } from "../github-board.ts";
 import {
   attentionItems,
   CREW_ERROR_KEY,
   crew,
+  hubAlert,
   isOperatorCall,
   NO_CLI_VERSION,
   NO_LOCK,
@@ -377,6 +378,7 @@ import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
 import { HUD_SHOT_REF_PREFIX, type HudShotStore } from "./hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
+import { recordExternalMerge } from "./merged-line.ts";
 import { createPowerTools, type PowerHelpers } from "./powers.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
@@ -434,7 +436,12 @@ export interface FlightToolsDeps {
         Partial<
           Pick<
             Engine,
-            "clearFlight" | "rerunCi" | "holdMerge" | "releaseMergeHold" | "controllerCheck"
+            | "clearFlight"
+            | "adoptPrHead"
+            | "rerunCi"
+            | "holdMerge"
+            | "releaseMergeHold"
+            | "controllerCheck"
           >
         >)
     | null;
@@ -569,6 +576,11 @@ const BriefItemArgs = z
     ...StructuredBriefArgs.shape,
     key: z.string().min(1).max(BRIEF_KEY_MAX),
     for: z.enum(["operator", "flight"]).default("operator"),
+    /** The ticket the question is about, for an item with none of its own (#1543). */
+    ticket: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,100}#[1-9]\d{0,9}$/)
+      .optional(),
     assessment: text(BRIEF_INPUT_MAX).optional(),
     context: text(BRIEF_INPUT_MAX).optional(),
     did: z
@@ -2449,7 +2461,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (held === null || !held.split("\n").some((l) => l.trim() === `- ${a.item.trim()}`))
       return refuse("the edit could not be confirmed on GitHub; read the ticket");
     return {
-      text: `Added to ${CONTROLLER_CHECK_HEADING} on ${ref}: ${cut(a.item, 120)}${edit.removed ? " (moved from Done when)" : ""}. The engine now holds its PR for the controller.`,
+      text: `Added to ${CONTROLLER_CHECK_HEADING} on ${ref}: ${cut(a.item, 120)}${edit.removed ? " (moved from Done when)" : ""}. The engine now holds its PR until you record the check's verdict.`,
     };
   }
 
@@ -2708,6 +2720,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (hold && key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
     const assessment = structured.assessment ?? context;
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
+    const named = structured.ticket?.split("#")[0];
+    if (named !== undefined && !config.repos.some((r) => r.id === named))
+      return fail(
+        `Not briefed: ticket ${structured.ticket} names no repo of this hub. Use repo#n with one of: ${config.repos.map((r) => r.id).join(", ")}.`,
+      );
     if (structured.for === "operator" && structured.ask === undefined)
       return fail("Give a non-empty ask when passing an item to the operator.");
     const ids = (options ?? []).flatMap((o) => (o.id ? [o.id] : []));
@@ -2723,8 +2740,31 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const item = operatorItems(config, store, at, deps.login, undefined, deps.lockState?.()).find(
       (i) => i.key === key,
     );
-    if (item === undefined || ownReply(item, flightSeat(config)?.seat.id ?? null)) {
+    // FLIGHT's own @CAPCOM question reaches the operator only through its brief (#1543)
+    if (
+      item === undefined ||
+      (structured.for !== "operator" && ownReply(item, flightSeat(config)?.seat.id ?? null))
+    ) {
       return fail(briefNoItemText(key));
+    }
+    // the Needs you entry check (#1543), at the source: a brief that would not reach the operator
+    // is refused here, with what it lacks, so FLIGHT fixes it in one try
+    if (structured.for === "operator" && !hubAlert(item, store)) {
+      const faults = needsYouEntryFaults({
+        ...item,
+        brief: {
+          for: "operator",
+          ask: structured.ask ?? "",
+          context: assessment,
+          recommendation,
+          options: options ?? [],
+          basis,
+          at,
+          ...(structured.ticket === undefined ? {} : { ticket: structured.ticket }),
+          ...(structured.person === undefined ? {} : { person: structured.person }),
+        },
+      });
+      if (faults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${faults.join("; ")}.`);
     }
     if (structured.for === "flight") {
       if (isOperatorCall(item, store))
@@ -2882,6 +2922,68 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     } catch {
       return { value: null, stderr: "" };
     }
+  }
+
+  /**
+   * merge_pr on a run that is not awaiting FLIGHT because the PR's head came from outside the run
+   * (a seat's other worktree, a person, a bot): FLIGHT adopts the head as the run's push, so CI and
+   * RETRO check it, instead of leaving the PR with no way out. The ordinary refusal otherwise.
+   */
+  async function adoptOutsideHead(
+    run: Run,
+    a: z.output<typeof PrBasisArgs>,
+    repo: CcConfig["repos"][number],
+    ctx: McToolContext,
+  ): Promise<Result> {
+    const no = () => fail("No awaiting-flight run PR in your lane.");
+    const phase = run.loop?.phase;
+    if (
+      !deps.engine?.adoptPrHead ||
+      (phase !== "review" && phase !== "ci") ||
+      flightPowersOf(config, repo.id) !== "superuser"
+    )
+      return no();
+    const { value } = await ghObject("merge_pr", [
+      "pr",
+      "view",
+      String(a.pr),
+      `--repo=${repo.github}`,
+      "--json=headRefOid,headRefName,isCrossRepository,state",
+    ]);
+    const head = value?.headRefOid;
+    if (
+      value?.state !== "OPEN" ||
+      value.isCrossRepository !== false ||
+      value.headRefName !== run.branch ||
+      typeof head !== "string" ||
+      !/^[a-f0-9]{40}$/.test(head) ||
+      head === store.runPush(run.id)?.sha
+    )
+      return no();
+    const known = await readKnown(deps, "merge_pr");
+    const problem = await textProblem(
+      ctx,
+      "merge_pr",
+      repo.github,
+      a.pr,
+      [{ label: "basis", text: a.basis }],
+      known,
+    );
+    if (problem) return fail(problem);
+    if (held(store.run(run.id) ?? run)) return fail("Run is held.");
+    if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
+    if (!(await deps.engine.adoptPrHead(run.id, head)))
+      return fail("The merge gates changed; refresh the PR.");
+    const text = `PR #${a.pr}'s head ${head.slice(0, 7)} came from outside the run. FLIGHT adopted it; CI and RETRO now check it. Call merge_pr again when it awaits you.`;
+    record(now(), {
+      kind: "sync",
+      about: `PR #${a.pr}`,
+      ref: run.ticket,
+      targetRunId: run.id,
+      decision: text,
+      basis: a.basis,
+    });
+    return { text };
   }
 
   async function readPr(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3328,7 +3430,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ctx: McToolContext,
     ) => Promise<Result>,
     inputSchema: object = z.toJSONSchema(schema),
-    options: { engine?: boolean; records?: boolean } = {},
+    options: { engine?: boolean; records?: boolean; refusals?: boolean } = {},
   ): McTool {
     return {
       name,
@@ -3352,7 +3454,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           // close_ticket records its own decision (ref, title, URL) once a write has landed.
           if (
             kind !== "close" &&
-            options.records !== false &&
+            (options.records !== false || (options.refusals === true && result.isError)) &&
             (kind !== "rerun" || !result.isError)
           )
             record(now(), { kind, about: name, decision: result.text, basis: c.args.basis });
@@ -3533,7 +3635,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.mergePr,
-      "Clear a crew PR for engine merge, or merge an eligible PR with no unfinished crew run without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
+      "Clear a crew PR for engine merge on any path (your own tools, access, CLAUDE.md and .github/** included), or merge an eligible PR with no unfinished crew run without inventing an author run. When the PR's head came from outside the run, it adopts that head so CI and RETRO check it. Exact-head QA, CI, always_ask approvals, acceptance and holds remain required. Each merge that needed your call is logged as a merge decision on the FLIGHT page, with its reasons; the hub sends no message.",
       PrBasisArgs,
       "merge",
       async (a, repo, ctx) => {
@@ -3558,36 +3660,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             fetchTicket: deps.fetchTicket,
           });
           if (!result.isError)
-            record(now(), {
-              kind: "merge",
-              about: `External PR #${a.pr}`,
-              decision: result.text,
-              basis: a.basis,
-              seatId: ctx.seatId,
-            });
+            recordExternalMerge(
+              { record: (d) => record(now(), d) },
+              {
+                pr: a.pr,
+                repoId: repo.id,
+                text: result.text,
+                basis: a.basis,
+                seatId: ctx.seatId,
+                ...(result.paths === undefined ? {} : { paths: result.paths }),
+                ...(result.ticket === undefined ? {} : { ticket: result.ticket }),
+              },
+            );
           return result;
         }
-        if (!run.loop?.awaitingFlight || !deps.engine?.clearFlight)
-          return fail("No awaiting-flight run PR in your lane.");
+        if (!deps.engine?.clearFlight) return fail("No awaiting-flight run PR in your lane.");
+        if (!run.loop?.awaitingFlight) return adoptOutsideHead(run, a, repo, ctx);
         const sha = run.loop.awaitingFlight;
-        const protectsFlight = run.loop.touches?.paths.some((path) =>
-          FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
-        );
-        if (
-          protectsFlight &&
-          !(run.loop.controllerCheck?.sha === sha && run.loop.controllerCheck.pass)
-        )
-          return fail(
-            "An independent controller must record a passing check on this head before FLIGHT clears its runtime or approval rules.",
-          );
-        // CLAUDE.md and .github/** are the repo's rules: only a controller's approval for this head lifts them
-        const approval = flightFloorBlocked(run.loop)
-          ? mergeFloorApproval(store, a.pr, sha, now())
-          : undefined;
-        if (flightFloorBlocked(run.loop) && approval === undefined)
-          return fail(
-            `This PR touches CLAUDE.md or .github/**, which are the repo's rules. A controller approves the merge with POST /api/flight/approvals { rule: "merge-floor", scope: "${mergeFloorScope(a.pr, sha.slice(0, 12))}", until, reason }; then call merge_pr again.`,
-          );
+        const reasons = flightClearanceReasons(run.loop, sha);
         const { value } = await ghObject("merge_pr", [
           "pr",
           "view",
@@ -3628,15 +3718,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         if (!(await deps.engine.clearFlight(run.id, sha)))
           return fail("The merge gates changed; refresh the PR.");
-        if (approval !== undefined) {
-          record(now(), {
-            kind: "approval",
-            about: `merge_pr #${a.pr}`,
-            decision: `Used the controller's approval (${approval.reason}) to clear PR #${a.pr} past the repo rules.`,
-            basis: a.basis,
-            targetRunId: run.id,
-          });
-        }
+        record(now(), {
+          kind: "merge",
+          about: `PR #${a.pr}`,
+          ref: run.ticket,
+          targetRunId: run.id,
+          decision: `Cleared PR #${a.pr} at ${sha.slice(0, 7)}${reasons.length > 0 ? `: ${reasons.join("; ")}` : ""}`,
+          basis: a.basis,
+        });
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         const posted = await deps.gh(
           [
@@ -3653,10 +3742,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           text: `Cleared PR #${a.pr}; the engine handles the merge.${posted.code !== 0 ? " Could not post the clearance basis." : ""}`,
         };
       },
+      z.toJSONSchema(PrBasisArgs),
+      // a landed merge logs its own decision with the run and ticket; a refusal is logged as any other
+      { records: false, refusals: true },
     ),
     superTool(
       MC_TOOL_NAMES.settlePark,
-      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds.`,
+      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds. Accept is refused when the last review failed the design check: only the operator accepts that.`,
       SettleArgs,
       "settle",
       async (a) => {
@@ -3668,7 +3760,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (!run.loop?.parked) return fail("Run is not parked.");
         const kinds =
           a.action === "lift"
-            ? ["stuck"]
+            ? ["stuck", "gate"]
             : a.action === "rereview"
               ? ["review", "review-ruling", "review-failed"]
               : ["review", "review-ruling"];
@@ -3709,6 +3801,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             text: `Settled ${run.id}: second_review requested; the first review held (${said}). A fresh review on the most capable model, on another reviewer account, decides.`,
           };
         }
+        if (a.action === "accept")
+          record(now(), {
+            kind: "settle",
+            about: run.id,
+            ref: run.ticket,
+            targetRunId: run.id,
+            decision: `Accepted the review findings on PR #${run.loop.prNumber ?? "?"}`,
+            basis: a.basis,
+          });
         return { text: `Settled ${run.id}: ${a.action}.` };
       },
     ),
@@ -4319,7 +4420,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.addControllerCheck,
-      `Add one item under a ticket's ${CONTROLLER_CHECK_HEADING} so the engine holds its PR for the controller (creating the section when missing); an identical Done when line moves there. Only that section and line change. Refuses a closed ticket. It can only add a hold.`,
+      `Add one item under a ticket's ${CONTROLLER_CHECK_HEADING} so the engine holds its PR until a verdict is recorded (creating the section when missing); an identical Done when line moves there. Only that section and line change. Refuses a closed ticket. It can only add a hold.`,
       AddControllerCheckArgs,
       "card",
       addControllerCheck,

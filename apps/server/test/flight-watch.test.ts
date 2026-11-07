@@ -8,6 +8,7 @@ import {
   CREW_PAUSE_SETTING,
   carriedFrom,
   FLIGHT_BATCH_MS,
+  FLIGHT_CONTEXT_GROWTH_TOKENS,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
   FLIGHT_DOWN_NOTE_KEY,
@@ -32,6 +33,7 @@ import {
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_REWAKE_MS,
+  FLIGHT_ROTATIONS_MAX,
   FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_RUNAWAY_SETTING,
   FLIGHT_SIGNAL_KEEP_MS,
@@ -1145,6 +1147,7 @@ describe("FLIGHT's items to brief", () => {
         triageRemainingMs: 15 * MIN,
       },
     ]);
+    // an incomplete brief fails the Needs you entry check: still FLIGHT's to rewrite (#1543)
     store.addBrief({
       key: "note:blocked:r1:0",
       context: "c",
@@ -1152,6 +1155,21 @@ describe("FLIGHT's items to brief", () => {
       options: [],
       basis: "b",
       at: T0,
+    });
+    expect(items().map((i) => i.key)).toEqual(["note:blocked:r1:0"]);
+    // a complete one settles it
+    store.addBrief({
+      key: "note:blocked:r1:0",
+      ask: "Un-park mc#7?",
+      ticket: "mc#7",
+      context: "c",
+      recommendation: "Un-park it.",
+      options: [
+        { label: "Un-park", answer: "Go." },
+        { label: "Leave", answer: "Wait." },
+      ],
+      basis: "b",
+      at: T0 + 1,
     });
     expect(items()).toEqual([]);
   });
@@ -2353,6 +2371,9 @@ describe("the FLIGHT watcher", () => {
     it("sends one handover wake just past the limit, then rotates once that turn ends", async () => {
       liveCrew();
       watch.start();
+      // the session's first turn, well under the line; then it grows past it
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS);
+      await watch.check();
       context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
       await watch.check();
       expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
@@ -2380,8 +2401,50 @@ describe("the FLIGHT watcher", () => {
       expect(endCalls).toEqual([]);
     });
 
+    it("never hands over a fresh session that starts above the line (#7 November loop)", async () => {
+      liveCrew();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 7000);
+      await watch.check();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 7000 + FLIGHT_CONTEXT_GROWTH_TOKENS - 1);
+      await watch.check();
+      expect(sendCalls).toEqual([]);
+      expect(endCalls).toEqual([]);
+      // grown by the full margin since its first turn: now it hands over
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS + 7000 + FLIGHT_CONTEXT_GROWTH_TOKENS);
+      await watch.check();
+      expect(sendCalls.map((c) => c.text)).toEqual([FLIGHT_HANDOVER_ASK]);
+    });
+
+    it("stops restarting FLIGHT after FLIGHT_ROTATIONS_MAX handovers in an hour, and says why", async () => {
+      liveCrew();
+      let runId = "r-flight";
+      for (let i = 1; i <= FLIGHT_ROTATIONS_MAX + 1; i++) {
+        facts = { inTurn: false, resumedAt: null, rateLimitedUntil: null };
+        context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS, runId);
+        await watch.check();
+        context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000, runId);
+        store.claimLine(handoverKey(runId), {
+          runId,
+          seatId: "flight-1",
+          origin: "engine",
+          text: FLIGHT_HANDOVER_ASK,
+          at: T0,
+        });
+        await watch.check(); // rotates
+        await watch.check(); // starts the fresh session, unless the cap holds it
+        nowMs += MIN;
+        runId = `r-flight-${i}`;
+      }
+      expect(startCalls).toHaveLength(FLIGHT_ROTATIONS_MAX);
+      expect(notesOpen().map((n) => n.text)).toEqual([
+        expect.stringContaining(`FLIGHT handed over ${FLIGHT_ROTATIONS_MAX} times in an hour`),
+      ]);
+    });
+
     it("rotates at once when the handover for this run was already sent", async () => {
       liveCrew();
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS);
+      await watch.check();
       context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
       store.claimLine(handoverKey("r-flight"), {
         runId: "r-flight",
@@ -2407,6 +2470,8 @@ describe("the FLIGHT watcher", () => {
         author: "flight",
         updatedAt: T0,
       });
+      context(FLIGHT_CONTEXT_ROTATE_TOKENS - FLIGHT_CONTEXT_GROWTH_TOKENS);
+      await watch.check();
       context(FLIGHT_CONTEXT_ROTATE_TOKENS + 1000);
       store.claimLine(handoverKey("r-flight"), {
         runId: "r-flight",
@@ -4268,7 +4333,7 @@ describe("every wake ends with each reason handled", () => {
     nowMs += FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
     await watch.check();
-    expect(leftNotes()[0]?.text).toContain("q 1");
+    expect(leftNotes()[0]?.text).toContain("question 1");
     // the re-wake for the second question ends clean, but question 1 is still open
     flightIdle();
     decide({ questionId: q2 });
@@ -4292,7 +4357,7 @@ describe("every wake ends with each reason handled", () => {
     await watch.check();
     expect(leftNotes()).toHaveLength(1);
     expect(leftNotes()[0]).toMatchObject({ kind: "blocked", seatId: "flight-1" });
-    expect(leftNotes()[0]?.text).toContain("q 1");
+    expect(leftNotes()[0]?.text).toContain("question 1");
     // the operator sees it as itself, not as an item FLIGHT triages
     const item = attentionItems(config, store, nowMs).find((i) =>
       i.key.endsWith(FLIGHT_LEFT_NOTE_KEY),
