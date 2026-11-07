@@ -575,6 +575,16 @@ describe("wait_on", () => {
     });
   });
 
+  it("waits on the original target when given a wait_over signal's id", async () => {
+    const r = await call("wait_on", waitArgs({ target: `wait_over:wait_over:mc#7:${NOW}:${NOW}` }));
+    expect(r.isError).toBeUndefined();
+    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
+    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
+      ref: "mc#7",
+      about: "mc#7: waiting on its PR merging",
+    });
+  });
+
   it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
     expect(
       (await call("wait_on", waitArgs({ until: new Date(NOW - 1000).toISOString() }))).isError,

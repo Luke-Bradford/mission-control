@@ -375,7 +375,7 @@ import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
 import { createPowerTools, type PowerHelpers } from "./powers.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
-import { markFlightSignalsShown, recordFlightWait } from "./signals.ts";
+import { markFlightSignalsShown, recordFlightWait, waitTargetOf } from "./signals.ts";
 import {
   flightArrivalSource,
   flightSeat,
@@ -1173,7 +1173,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function waitOn(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, WaitOnArgs, args);
     if (!c.ok) return c.result;
-    const { target, on, until, basis } = c.args;
+    const { on, until, basis } = c.args;
+    const target = waitTargetOf(c.args.target);
     const at = now();
     const untilMs = Date.parse(until);
     if (untilMs <= at) return fail("Not recorded: until is already past.");
