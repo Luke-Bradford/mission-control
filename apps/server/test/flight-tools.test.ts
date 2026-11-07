@@ -100,6 +100,7 @@ import {
   needsYouItems,
   OPERATOR_HEADER,
   openPrText,
+  PACE_SETTING,
   PROFILE_PAIR_TEXT,
   PROTECTED_ITEM_REFUSED,
   type PullRequestView,
@@ -1816,6 +1817,27 @@ describe("start_seat", () => {
   beforeEach(() => {
     board(sc(7));
     fetchImpl = async (n) => ticket(n, { body: DONE });
+  });
+
+  it("holds a start for the slow pace, naming it, and starts a ticket it names", async () => {
+    store.setSetting(
+      PACE_SETTING,
+      JSON.stringify({
+        on: true,
+        until: NOW + 3_600_000,
+        since: NOW - 1,
+        labels: ["bug"],
+        maxStarts: 2,
+        note: "weekend",
+      }),
+    );
+    const held = await start();
+    expect(held.isError).toBe(true);
+    expect(held.text).toMatch(/Slow pace \(weekend\)/);
+    expect(startCalls).toEqual([]);
+    board(sc(7, { labels: ["area:server", "bug"] }));
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
   });
 
   it("reassigns an ended author's ticket through the existing start checks and logs the handoff", async () => {

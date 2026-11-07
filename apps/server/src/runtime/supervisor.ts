@@ -163,6 +163,7 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
@@ -571,6 +572,8 @@ export interface StartRunOptions {
   override?: ProfileOverride;
   flight?: boolean;
   operator?: boolean;
+  /** The slow pace holds this start even though `operator` is set (FLIGHT calling the operator route). */
+  holdPace?: boolean;
   /** Internal synchronous hook after the actual run exists, immediately before its pause gate. */
   beforeLaunch?: (run: Run) => void;
 }
@@ -3450,6 +3453,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         throw new SupervisorError(profiles instanceof Error ? 502 : 422, chosen.refusal);
       }
       const away = activeAway(store, now(), config.operator.timezone);
+      const pace = paceStartCheck(store, config, now());
       if (
         away &&
         !opts?.operator &&
@@ -3464,6 +3468,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ...(away && !opts?.operator
           ? { away: { pickUp: away.may.pickUp, flight: opts?.flight === true } }
           : {}),
+        ...((!opts?.operator || opts.holdPace === true) && pace ? { pace } : {}),
         repoId: info.repo.id,
         issue,
         card: {

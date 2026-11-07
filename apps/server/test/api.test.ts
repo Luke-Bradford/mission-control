@@ -106,7 +106,7 @@ import { DesignPreviews } from "../src/design-previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
-import { operatorCall } from "../src/flight/operator-call.ts";
+import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operator-call.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
@@ -1769,8 +1769,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/settings/crew-pause", { seats: null }],
   ["GET", "/api/settings/away"],
   ["GET", "/api/away/digest"],
+  ["GET", "/api/settings/pace"],
   ["GET", "/api/repos/shop-app/prs/titles?numbers=4"],
   ["POST", "/api/settings/away", DEFAULT_AWAY],
+  ["POST", "/api/settings/pace", { on: false, until: 0, labels: [], maxStarts: 0, note: "" }],
   [
     "POST",
     "/api/guard/check",
@@ -4034,6 +4036,40 @@ describe("crew and attention", () => {
       keys: [...Array.from({ length: 49 }, (_, i) => `k${i}`), "x".repeat(200)],
     });
     expect(ok.json()).toEqual({ acked: 50 });
+  });
+});
+
+describe("pace settings", () => {
+  const input = {
+    on: true,
+    until: NOW + 3_600_000,
+    labels: ["bug"],
+    maxStarts: 2,
+    note: "weekend",
+  };
+
+  it("is normal until saved, then shows on the Overview until the end time", async () => {
+    expect((await get("/api/overview")).json().pace).toBeNull();
+    const r = await postBody("/api/settings/pace", input);
+    expect(r.statusCode).toBe(200);
+    expect(r.json()).toEqual({ ...input, since: clock });
+    expect((await get("/api/settings/pace")).json()).toEqual({ ...input, since: clock });
+    expect((await get("/api/overview")).json().pace).toEqual({
+      note: "weekend",
+      until: input.until,
+      labels: ["bug"],
+      maxStarts: 2,
+      startsLeft: 2,
+    });
+    clock = input.until;
+    expect((await get("/api/overview")).json().pace).toBeNull();
+  });
+
+  it("refuses an end time in the past and unknown fields (400)", async () => {
+    expect((await postBody("/api/settings/pace", { ...input, until: NOW - 1 })).statusCode).toBe(
+      400,
+    );
+    expect((await postBody("/api/settings/pace", { ...input, extra: 1 })).statusCode).toBe(400);
   });
 });
 
@@ -6696,6 +6732,31 @@ describe("crew routes", () => {
   beforeEach(withCrew);
   const post5 = (action: string, body: unknown = {}) =>
     postBody(`/api/seats/guido-1/${action}`, body);
+
+  it("tells the supervisor to hold the slow pace for a start FLIGHT makes through the operator route", async () => {
+    config.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+    store.upsertRun(run({ id: "fl-run", agentId: "flight-1", endedAt: null }));
+    const r = await app.inject({
+      method: "POST",
+      url: "/api/seats/guido-1/start",
+      headers: {
+        ...json,
+        [FLIGHT_OPERATOR_ACTOR_HEADER]: JSON.stringify({ seatId: "flight-1", runId: "fl-run" }),
+      },
+      payload: { issue: 5 },
+    });
+    expect(r.statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true, holdPace: true }]]);
+    supervisorCalls.length = 0;
+    expect((await post5("start", { issue: 5 })).statusCode).toBe(200);
+    expect(supervisorCalls).toEqual([["start", "guido-1", 5, { operator: true }]]);
+  });
 
   it("identifies an operator start while away", async () => {
     store.setSetting("away", JSON.stringify({ ...DEFAULT_AWAY, on: true }));
