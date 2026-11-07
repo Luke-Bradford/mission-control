@@ -4549,6 +4549,18 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
   });
 
+  it("says in words why the map snapshot is unavailable, without git's command text", async () => {
+    withCrew();
+    const session = config.crew?.sessions[0];
+    if (!session) throw Error("fixture session missing");
+    session.checkout = dir;
+    const response = await get("/api/repos/shop-app/map");
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toEqual({
+      error: "map snapshot unavailable: git could not read the checkout",
+    });
+  });
+
   it("serves a light map with an indexed graph only on demand, excluding observed loops", async () => {
     withCrew();
     const session = config.crew?.sessions[0];
