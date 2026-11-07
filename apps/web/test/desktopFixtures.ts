@@ -84,23 +84,34 @@ export function desktopFixture(scenario: DesktopScenario = "default") {
             : "Two decisions need your attention. The crew is checking the current work.",
       headlineAgeMin: scenario === "stale" ? 95 : 2,
     }),
-    "/api/agents/flight-1/stream?limit=20": {
-      events:
-        scenario === "many"
-          ? Array.from({ length: 20 }, (_, index) => ({
-              id: `fixture:${index}`,
-              at: NOW - (20 - index) * 10000,
-              kind: "msg",
-              text: `Recorded fixture message ${index + 1}: the next step is recorded with its evidence and owner.`,
-            }))
-          : [
-              {
-                id: "fixture:0",
-                at: NOW - 10000,
-                kind: "msg",
-                text: "The next step is recorded with the current work. Review its evidence before deciding.",
-              },
-            ],
+    "/api/agents/flight-1/stream?limit=20": { events: [], hasMore: false },
+    // The fly-out's conversation is the stored FLIGHT thread, the one Comms shows.
+    "/api/comms/flight": {
+      messages: (scenario === "many"
+        ? Array.from({ length: 20 }, (_, index) => ({
+            at: NOW - (20 - index) * 10000,
+            text: `Recorded fixture message ${index + 1}: the next step is recorded with its evidence and owner.`,
+          }))
+        : [
+            {
+              at: NOW - 10000,
+              text: "The next step is recorded with the current work. Review its evidence before deciding.",
+            },
+          ]
+      ).map((m, index) => ({
+        id: `comms:${index + 1}`,
+        at: m.at,
+        from: "flight-1",
+        to: "CAPCOM",
+        text: m.text,
+        ticket: null,
+        label: null,
+        ref: null,
+        replyTo: null,
+        mentions: [],
+        reactions: [],
+        operator: false,
+      })),
       hasMore: false,
     },
     "/api/activity": [],
