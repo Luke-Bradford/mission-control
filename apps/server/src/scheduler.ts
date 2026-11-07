@@ -31,6 +31,7 @@ import {
 import { codexProfile } from "./account-bindings.ts";
 import { evaluateHolds } from "./attention-holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
+import { syncBudgetBrake } from "./budget-brake.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
   AUTO_CLI_TOOLS,
@@ -1144,6 +1145,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const acct of config.accounts) {
         await guarded(usageCollector(acct.id), () => usageFor(acct));
       }
+      if (syncBudgetBrake(config, store, now())) emit("attention");
       emit("limits", "health");
     },
     maintenance: async () => {
@@ -1323,6 +1325,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         } else {
           store.clearNote(MACHINE_CAPACITY_KEY, at);
         }
+        // The week's reset lifts the brake without a new reading
+        syncBudgetBrake(deps.config, store, at);
         emit("attention");
       }
     },

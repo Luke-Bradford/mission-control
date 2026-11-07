@@ -3986,6 +3986,51 @@ describe("the engine runs reviews", () => {
       expect(reviewerOf(config, "guido-1", undefined, { store, now: clock })?.id).toBe("retro-cx");
     });
 
+    /** Weekly readings that project past 100% by the reset a day on. */
+    const brakeAccount = (accountId: string): void => {
+      for (const [at, pct] of [
+        [clock - 6 * 60 * MIN, 40],
+        [clock, 60],
+      ] as const)
+        store.addUsage({
+          accountId,
+          window: "7d",
+          at,
+          pct,
+          resetAt: clock + 24 * 60 * MIN,
+          source: "test",
+        });
+    };
+    const liftBrake = (accountId: string): void =>
+      store.addUsage({
+        accountId,
+        window: "7d",
+        at: clock + 1,
+        pct: 10,
+        resetAt: clock + 24 * 60 * MIN,
+        source: "test",
+      });
+
+    it("reviewerOf gives the next reviewer while the first one's account has the budget brake on", () => {
+      addCodexReviewer();
+      const at = { store, now: clock };
+      brakeAccount("codex-main");
+      expect(reviewerOf(config, "guido-1", undefined, at)?.id).toBe(RETRO);
+      liftBrake("codex-main");
+      expect(reviewerOf(config, "guido-1", undefined, at)?.id).toBe("retro-cx");
+    });
+
+    it("a queued review waits while its reviewer's account has the budget brake on, then starts", async () => {
+      brakeAccount("claude-main");
+      await toReview();
+      await h.engine.tick();
+      expect(first()).toMatchObject({ state: "queued", seatId: RETRO });
+      expect(h.starts).toEqual([]);
+      liftBrake("claude-main");
+      await h.engine.tick();
+      await vi.waitFor(() => expect(h.starts).toEqual([{ seat: RETRO, id: expect.any(Number) }]));
+    });
+
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
       addCodexReviewer();
       h.busyList = [{ seatId: "retro-cx", state: "running" }];

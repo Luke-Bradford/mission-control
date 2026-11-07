@@ -1516,6 +1516,38 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
+    it("raises one budget-brake alert on the minute tick and lifts it when the week resets", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      const resetAt = minute + 24 * 3600e3;
+      for (const [at, pct] of [
+        [minute - 6 * 3600e3, 40],
+        [minute, 60],
+      ] as const)
+        store.addUsage({ accountId: "claude-main", window: "7d", at, resetAt, pct, source: "t" });
+      let t = minute + 1000;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({ at }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      expect(store.notes().filter((n) => n.key === "budget-brake")).toHaveLength(1);
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().filter((n) => n.key === "budget-brake")).toHaveLength(1);
+      t = resetAt + 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "budget-brake")).toBeUndefined();
+    });
+
     it.each([
       ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
       [
