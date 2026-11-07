@@ -145,7 +145,11 @@ function passedQuestion(): { id: number; key: string } {
     assessment: "Two lanes fit.",
     context: "Two lanes fit.",
     recommendation: "Lane 2.",
-    options: [],
+    options: [
+      { id: "a", label: "A", answer: "Do A." },
+      { id: "b", label: "B", answer: "Do B." },
+    ],
+    ticket: "mc#7",
     basis: "read the ticket",
     at: NOW - 5 * 60_000,
   });
@@ -239,7 +243,11 @@ describe("the hub closes a question on a recorded fact", () => {
       assessment: "a",
       context: "a",
       recommendation: "main",
-      options: [],
+      options: [
+        { id: "a", label: "A", answer: "Do A." },
+        { id: "b", label: "B", answer: "Do B." },
+      ],
+      ticket: "mc#7",
       basis: "b",
       at: NOW + 6,
     });
@@ -283,7 +291,11 @@ describe("the hub closes a question on a recorded fact", () => {
       assessment: "a",
       context: "a",
       recommendation: "go",
-      options: [],
+      options: [
+        { id: "a", label: "A", answer: "Do A." },
+        { id: "b", label: "B", answer: "Do B." },
+      ],
+      ticket: "mc#7",
       basis: "b",
       at: NOW,
     });
@@ -337,7 +349,11 @@ describe("the hub closes a question on a recorded fact", () => {
       assessment: "a",
       context: "a",
       recommendation: "yes",
-      options: [],
+      options: [
+        { id: "a", label: "A", answer: "Do A." },
+        { id: "b", label: "B", answer: "Do B." },
+      ],
+      ticket: "mc#7",
       basis: "b",
       at: NOW - 60_000,
     });
@@ -367,7 +383,11 @@ describe("the hub closes a question on a recorded fact", () => {
       assessment: "a",
       context: "a",
       recommendation: "go",
-      options: [],
+      options: [
+        { id: "a", label: "A", answer: "Do A." },
+        { id: "b", label: "B", answer: "Do B." },
+      ],
+      ticket: "mc#7",
       basis: "b",
       at: NOW - 2000,
     });

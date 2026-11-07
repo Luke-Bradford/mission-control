@@ -55,6 +55,7 @@ import {
   lockBlockedText,
   loopText,
   modeOfSeat,
+  needsYouEntryFaults,
   OPERATOR_CALL_KINDS,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
@@ -861,26 +862,25 @@ interface FlightTriage {
 }
 
 /**
- * The operator's call (#758): FLIGHT may brief it for the operator but never keep it, and it is
- * never folded into the "FLIGHT is not triaging" item. The decision kinds, the held hub Update,
- * and a run parked on its budget or account.
+ * The operator's call (#758): FLIGHT may brief it for the operator but never keep it. Unless it is
+ * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, the
+ * held hub Update, and a run parked on its budget or account, a controller check or acceptance.
  */
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
   if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
-  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
-  const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+  const park = noteParkOf(item, store);
   return (
     park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
   );
 }
 
 /**
- * Kinds that, once FLIGHT misses them (or while nobody is triaging), reach the operator as
- * themselves so they notify as they always did: a stuck run, or an error a seat is stuck on, is
- * not news to fold into a count.
+ * Kinds that, once FLIGHT misses them (or while nobody is triaging), `route` keeps the operator's;
+ * unbriefed, the Needs you entry check (#1543) then folds them into the not-triaging count, which
+ * notifies in their place.
  */
 const STUCK_KINDS: readonly AttentionItem["kind"][] = [
   "stalled",
@@ -889,6 +889,98 @@ const STUCK_KINDS: readonly AttentionItem["kind"][] = [
   "lock",
   "error",
 ];
+
+/**
+ * The ticket and PR an item is about, with titles, from stored board and PR reads only
+ * (#1543): the page pins them so a number never stands alone. The PR is the item's own (a PR item
+ * or a PR address), else the open PR for its ticket.
+ */
+export function pinned(item: AttentionItem, store: Store, config: CcConfig): AttentionItem {
+  // the item's own ticket, else the one FLIGHT named in its brief
+  const ticket = item.ticket ?? item.brief?.ticket ?? null;
+  const ref = ticket === null ? null : parseTicket(ticket);
+  const card =
+    ref === null ? undefined : store.board(ref.repoId).find((b) => b.issueNumber === ref.number);
+  const key = /^pr:([^#]+)#(\d+):/.exec(item.key);
+  const address = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(item.url ?? "");
+  // a PR address names the GitHub repo, which maps to a configured repo id
+  const own: [string, number] | null =
+    key !== null
+      ? [key[1] as string, Number(key[2])]
+      : address !== null
+        ? [
+            config.repos.find((r) => r.github.toLowerCase() === address[1]?.toLowerCase())?.id ??
+              "",
+            Number(address[2]),
+          ]
+        : null;
+  const repoId = own !== null ? own[0] : (ref?.repoId ?? item.repoId);
+  // a PR address in a repo this hub does not have maps to "": pin no PR rather than a guess
+  const prs = repoId ? store.pullRequests(repoId) : [];
+  const pr =
+    own !== null
+      ? prs.find((p) => p.number === own[1])
+      : ticket === null
+        ? undefined
+        : prs.find((p) => p.ticket === ticket && p.state === "open");
+  if (ticket === null && pr === undefined) return item;
+  return {
+    ...item,
+    pinned: {
+      ...(ticket === null
+        ? {}
+        : { ticket: { ref: ticket, title: card?.title ?? null, url: card?.url ?? null } }),
+      ...(pr === undefined
+        ? {}
+        : {
+            pr: {
+              ref: `${pr.repoId}#${pr.number}`,
+              number: pr.number,
+              title: pr.title,
+              url: pr.url,
+            },
+          }),
+    },
+  };
+}
+
+/** Why FLIGHT's own question goes back to it after it wrote again past its brief (#1543). */
+export const FLIGHT_ASKED_AGAIN =
+  "FLIGHT asked again after this brief: brief_item one question that covers every question still open here, the earlier brief's ask included unless the operator answered it";
+
+/**
+ * Hub alerts the entry check passes that need the store to tell (#1543): the runaway breaker, and
+ * a run stopped on a budget or account limit, which only the operator can lift. The rest of the
+ * alert list is in core (`needsYouAlert`).
+ */
+export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
+  if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
+  // hub stops only the operator clears: new runs paused for the machine, the CLI held
+  if (HUB_STOP_KEYS.some((k) => item.key === k || item.key.startsWith(`${k}:`))) return true;
+  if (item.kind !== "blocked") return false;
+  const park = noteParkOf(item, store);
+  return park === "budget" || park === "account";
+}
+
+/**
+ * Hub stops that only the operator clears, by note key or key prefix: machine capacity
+ * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
+ * auto-rollback (cli-auto.ts) and a seat's focus import (instruction-notices.ts). hud.test.ts pins
+ * them to those modules' keys.
+ */
+export const HUB_STOP_KEYS = [
+  `${NOTE_KEY}machine-capacity`,
+  `${NOTE_KEY}cli:claude`,
+  `${NOTE_KEY}cli-auto`,
+  // a seat's focus could not be imported: the operator's config to fix (instruction-notices.ts)
+  `${NOTE_KEY}instruction-focus`,
+] as const;
+
+/** The park kind of the run behind a note item, if any. */
+function noteParkOf(item: Pick<AttentionItem, "key">, store: Store): string | undefined {
+  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
+  return note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+}
 
 /** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
 const keptRaw = (item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean =>
@@ -1112,10 +1204,11 @@ function buildAttentionItems(
       const first = messages[0];
       const last = messages.at(-1);
       if (!first || !last) continue;
-      // Another agent's item is keyed on its first unread line, so a brief stays attached while it
-      // writes again until the thread is read. FLIGHT's own question is the operator's to ack, and
-      // each new one is a new ask.
-      const keyed = own ? last : first;
+      // An item is keyed on its first unread line, so a brief stays attached while its writer
+      // writes again until the thread is read. FLIGHT's own question too (#1543): it reaches Needs
+      // you only through its brief, and a new key would drop the briefed one. FLIGHT's digest lists
+      // it again when FLIGHT writes after briefing it.
+      const keyed = first;
       items.push({
         // routed below: FLIGHT's question stays the operator's; another agent's line is FLIGHT's
         // unless FLIGHT briefs it for the operator
@@ -1434,13 +1527,68 @@ function buildAttentionItems(
       ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
       : missed(item, triageDueAt);
   };
+  /**
+   * The Needs you entry check (#1543): with a FLIGHT seat, an operator item that is neither a hub
+   * alert nor FLIGHT's complete question goes back to FLIGHT with the reasons. Protected items
+   * included: they reach the operator through FLIGHT's brief, or, while FLIGHT is not triaging,
+   * counted under the one not-triaging alert.
+   */
+  const entryCheck = (item: AttentionItem): AttentionItem => {
+    if (triage === null || item.owner !== OWNER_OPERATOR || hubAlert(item, store)) return item;
+    // FLIGHT's own question item spans its unread lines: a brief older than the latest line
+    // answers an earlier question, so the operator would read a stale ask
+    const restated =
+      ownReply(item, flightId) &&
+      item.brief !== undefined &&
+      item.brief.for !== "flight" &&
+      item.brief.at < item.at;
+    const returned = restated ? [FLIGHT_ASKED_AGAIN] : needsYouEntryFaults(item);
+    if (returned.length === 0) return item;
+    // a default applies only to the operator's item, so a returned one carries none
+    const { defaultDueAt: _default, ...rest } = item;
+    const back: AttentionItem = { ...rest, owner: OWNER_FLIGHT, returned };
+    // restated: FLIGHT owes a new brief on a question the operator was already shown, so a
+    // missed rebrief counts under the not-triaging alert rather than going quiet
+    if (restated) {
+      // acked at or after the newest line: FLIGHT's dismiss withdraws its own question, briefed ask
+      // included, as the spec lets FLIGHT withdraw a question it wrote that is not protected
+      if (item.acked) return { ...back, flightTriage: "handling" };
+      if (!triaging) return { ...back, flightTriage: "down" };
+      // a fresh window after FLIGHT restarts or the hub updates, as for any returned item
+      const triageDueAt =
+        Math.max(item.at, item.holdReleasedAt ?? 0, triage.liveSince, hubStartedAt ?? 0) +
+        FLIGHT_TRIAGE_WAIT_MS;
+      return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
+    }
+    // FLIGHT's own line to the operator: FLIGHT wrote it, so it is never work waiting on FLIGHT
+    if (ownReply(item, flightId) || flightAsks.has(item.key))
+      return { ...back, flightTriage: "handling" };
+    // read, and FLIGHT may have dismissed it (dismiss acks): dealt with unless protected, which
+    // FLIGHT cannot dismiss, so the read was the operator's and FLIGHT still owes it a brief
+    if (item.acked && !protectedDecisionItem(store, item, config, now))
+      return { ...back, flightTriage: "handling" };
+    // nobody triaging: counted under the one alert, even an item FLIGHT kept
+    if (!triaging) return { ...back, flightTriage: "down" };
+    if (item.brief?.for === "flight") return { ...back, flightTriage: "handling" };
+    // FLIGHT's window starts when it could first see the item as its own: raised, briefed,
+    // released from a hold, FLIGHT live, or this hub started (so a rollout is not "late" at once)
+    const triageDueAt =
+      Math.max(
+        item.at,
+        item.brief?.at ?? 0,
+        item.holdReleasedAt ?? 0,
+        triage.liveSince,
+        hubStartedAt ?? 0,
+      ) + FLIGHT_TRIAGE_WAIT_MS;
+    return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
+  };
   const result: AttentionItem[] = items
     // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
     .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
     // FLIGHT withdrew its own question to the operator, or the hub closed it: it has left
     .filter((i) => !(i.kind === "tag" && ownReply(i, flightId) && closedAsk(i)))
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
-    .map((i) => {
+    .map((i): AttentionItem => {
       const item = route(i);
       // Another agent's tag or direct-line question stays FLIGHT's, even untriaged, until FLIGHT
       // briefs it for the operator (ownReply keeps FLIGHT's own question tag the operator's).
@@ -1460,10 +1608,12 @@ function buildAttentionItems(
     }),
     acks,
   );
+  // last, after a released hold has handed an item back to the operator
+  const checked = partition.items.map(entryCheck);
   const shown =
     triage === null
-      ? partition.items
-      : withNotTriaging(partition.items, triage, acks, now, config.operator.timezone);
+      ? checked
+      : withNotTriaging(checked, triage, acks, now, config.operator.timezone);
   return includeHeld ? [...shown, ...partition.held] : shown;
 }
 
@@ -1662,8 +1812,8 @@ function crewItems(
   }
 
   for (const q of store.openQuestions()) {
-    out.push(
-      item({
+    out.push({
+      ...item({
         key: `ask:${q.id}`,
         kind: "question",
         agentId: q.agentId,
@@ -1671,7 +1821,9 @@ function crewItems(
         text: questionText(seatCallSign(q.agentId), q.text),
         at: q.at,
       }),
-    );
+      // the asking run's ticket: what the question is about (#1543)
+      ticket: store.run(q.runId)?.ticket ?? null,
+    });
   }
 
   // The engine's notes: blocked, ready for review, check before merging, rate-limited. Each

@@ -293,7 +293,7 @@ export const COMMS_QUESTION_TO_FLIGHT =
   "Not sent: a seat's question goes to FLIGHT, not straight to CAPCOM. Ask it with mc ask_flight; FLIGHT answers, or takes it to the operator with its brief.";
 /** ask_flight from FLIGHT itself: it takes decisions to the operator with a brief, never a bare question. */
 export const ASK_FLIGHT_SELF =
-  'Not asked: you are FLIGHT. Take a decision to the operator with mc brief_item { for: "operator" } on its Needs-you item, or an @CAPCOM question in your reply.';
+  'Not asked: you are FLIGHT. Take a decision to the operator with mc brief_item { for: "operator" } on its Needs-you item; for one with no item, ask an @CAPCOM question, then brief the item it raises.';
 
 /** The hub's address: loopback only. The guard hook sends its token nowhere else. */
 export const LOOPBACK_HOST = "127.0.0.1";

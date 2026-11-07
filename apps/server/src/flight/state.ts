@@ -195,13 +195,27 @@ export function flightTriageItems(
       .filter(
         (x) =>
           // a released hold returns the item for a fresh brief: the old one predates the wait
-          (!x.brief || (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt)) &&
-          !ownReply(x, flightId) &&
+          (!x.brief ||
+            (x.holdReleasedAt !== undefined && x.brief.at < x.holdReleasedAt) ||
+            // the entry check refused FLIGHT's operator brief: it is FLIGHT's to rewrite (#1543)
+            // (a brief with no `for` is an old one written for the operator)
+            (x.returned !== undefined && x.brief.for !== "flight") ||
+            // FLIGHT asked again after briefing its own question: the brief covers the first only
+            (ownReply(x, flightId) && x.brief.at < x.at)) &&
+          // FLIGHT's own @CAPCOM question is listed until FLIGHT briefs it for the operator
+          // (Needs you takes no raw question, #1543) or dismisses it
+          (!ownReply(x, flightId) ||
+            x.returned !== undefined ||
+            (x.brief !== undefined && x.brief.at < x.at)) &&
           (!x.key.startsWith("ask:") || questionKeys.has(x.key)),
       )
       .filter((item) => item.kind !== "message" || flightQuestion(item.text))
-      // dismiss_item acks an item: as it was, it is dealt with
-      .filter((item) => item.acked !== true)
+      // dismiss_item acks an item: as it was, it is dealt with. A returned item the entry check
+      // still holds FLIGHT to (not "handling") is protected: the ack was the operator's read
+      .filter(
+        (item) =>
+          item.acked !== true || (item.returned !== undefined && item.flightTriage !== "handling"),
+      )
   );
 }
 
@@ -233,9 +247,9 @@ export function stalledSeats(
 }
 
 /**
- * A reply or `@CAPCOM` tag FLIGHT itself wrote: the operator's to read (Needs you still shows it),
- * not work for FLIGHT. Listing it in the digest woke FLIGHT with every reply it wrote. Assumes one
- * live FLIGHT seat (`flightSeat`).
+ * A reply or `@CAPCOM` tag FLIGHT itself wrote: not work for FLIGHT, and it reaches Needs you only
+ * with FLIGHT's brief (#1543). Listing every one in the digest woke FLIGHT with every reply it
+ * wrote; only an unbriefed question is listed. Assumes one live FLIGHT seat (`flightSeat`).
  */
 export const ownReply = (
   item: Pick<AttentionItem, "kind" | "agentId">,
@@ -1305,6 +1319,7 @@ export function flightState(i: {
       ageMin: Math.floor((now - x.at) / 60_000),
       triageRemainingMs: Math.max(0, (x.triageDueAt ?? now) - now),
       ...(x.holdReleased === undefined ? {} : { holdReleased: x.holdReleased }),
+      ...(x.returned === undefined ? {} : { returned: x.returned }),
     }));
 
   const planned = flightScheduleView(config, store, now).entries;
