@@ -4,6 +4,7 @@ import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 import type { FlightPowers } from "./guard-model.ts";
 import type { RunHandoff } from "./handoff.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud-model.ts";
+import type { PaceView } from "./pace.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles-model.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow-model.ts";
@@ -1532,6 +1533,8 @@ export interface OverviewSummary {
     needsYou: { count: number; overHour: number; series?: number[] };
   };
   pipeline: PipelineStage[];
+  /** The operator's slow pace while it is on, else null (normal). */
+  pace?: PaceView | null;
   /** Missing minute samples are null, rather than zero utilization. */
   machine: {
     cpu: (number | null)[];

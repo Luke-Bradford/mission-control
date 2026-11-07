@@ -54,6 +54,7 @@ import {
   NEW_LOOP,
   notOnBoardText,
   otherLaneText,
+  PACE_SETTING,
   PNPM_STORE_ENV,
   type Profile,
   pathGrantProblem,
@@ -219,6 +220,31 @@ describe("startRun eligibility", () => {
     );
     const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
     sup.start();
+    const started = await sup.startRun("guido-1", 42, { operator: true });
+    expect(started.runId).toBeTruthy();
+  });
+
+  it("holds a start for the slow pace unless the operator makes it, and holds FLIGHT's operator route", async () => {
+    const at = Date.now();
+    store.setSetting(
+      PACE_SETTING,
+      JSON.stringify({
+        on: true,
+        until: at + 3_600_000,
+        since: at - 1,
+        labels: ["bug"],
+        maxStarts: 2,
+        note: "weekend",
+      }),
+    );
+    await refused(
+      422,
+      "Slow pace (weekend) is on and starts only tickets labelled bug: mc#42 waits.",
+    );
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42, { operator: true, holdPace: true }));
+    expect(e.message).toMatch(/^Slow pace/);
     const started = await sup.startRun("guido-1", 42, { operator: true });
     expect(started.runId).toBeTruthy();
   });

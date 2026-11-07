@@ -38,6 +38,7 @@ import {
 } from "./flight.ts";
 import type { FlightPowers } from "./guard-model.ts";
 import { hudColumnOf } from "./hud.ts";
+import { type PaceCheck, paceRefusal } from "./pace.ts";
 import { pathInArea } from "./runtime.ts";
 import type { LoopKind } from "./runtime-model.ts";
 import type { BoardItem } from "./types.ts";
@@ -164,6 +165,8 @@ export function inLane(
 export interface StartCheck {
   /** Present only while away; FLIGHT may explicitly start work that must stay draft. */
   away?: { pickUp: boolean; flight: boolean };
+  /** Present only while the operator's slow pace is on; it holds FLIGHT's starts too. */
+  pace?: PaceCheck;
   repoId: string;
   issue: number;
   card: Pick<
@@ -226,6 +229,10 @@ export function eligibleToStart(c: StartCheck): string | null {
     (!c.away.pickUp || awayTicketType(card, rules.templates) === null)
   ) {
     return AWAY_START_REFUSED;
+  }
+  if (c.pace) {
+    const held = paceRefusal(c.pace, ref, card.labels);
+    if (held !== null) return held;
   }
   if (body === null) return null;
   if (build || seat.loop === "plan") {

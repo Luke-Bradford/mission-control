@@ -103,6 +103,8 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  PACE_SETTING,
+  type PaceSettings,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
   type PrUatView,
@@ -338,6 +340,7 @@ import {
 import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
@@ -4301,7 +4304,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const seatAction = <B>(
         path: string,
         schema: z.ZodType<B>,
-        act: (sup: Supervisor, id: string, body: B) => Promise<unknown>,
+        act: (sup: Supervisor, id: string, body: B, req: FastifyRequest) => Promise<unknown>,
         options: { bodyLimit?: number } = {},
       ) =>
         api.post<{ Params: { id: string } }>(path, options, async (req, reply) => {
@@ -4310,7 +4313,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const body = schema.safeParse(req.body);
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           try {
-            const out = await act(supervisor, id, body.data);
+            const out = await act(supervisor, id, body.data, req);
             bus.emit("agents");
             return out;
           } catch (e) {
@@ -4319,7 +4322,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       // A writer's run is looped whenever the engine is on, in a draft repo too (its card is
       // never moved there); a read-only seat's run has no loop.
-      seatAction("/seats/:id/start", StartBody, async (sup, id, b) => {
+      seatAction("/seats/:id/start", StartBody, async (sup, id, b, req) => {
         const pause = pausedSeat(store, id, null);
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         const at = now();
@@ -4341,9 +4344,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           started = await sup.startWatch(id);
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
+          // FLIGHT calling this route is not the operator: the slow pace still holds its starts
+          const holdPace = flightActor(req) === null ? {} : { holdPace: true };
           started = await (deps.engine?.status().on === true && loop === "build"
-            ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
-            : startUnpausedRun(store, sup, id, b.issue, { operator: true }));
+            ? startUnpausedRun(store, sup, id, b.issue, {
+                loop: NEW_LOOP,
+                operator: true,
+                ...holdPace,
+              })
+            : startUnpausedRun(store, sup, id, b.issue, { operator: true, ...holdPace }));
         }
         if (capacity.blocked && b.force === true) {
           const repoId = configuredAgents(config).find(
@@ -5665,12 +5674,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const scope = viewScope(req.query.session);
         if (scope === null) return reply.code(404).send({ error: "unknown session" });
         const at = now();
-        return overviewSummary(store, at, {
-          repoIds: scope.repoIds,
-          pipelineRepoIds: scope.pipelineRepoIds,
-          timezone: config.operator.timezone,
-          attention: sharedAttention(),
-        });
+        return {
+          ...overviewSummary(store, at, {
+            repoIds: scope.repoIds,
+            pipelineRepoIds: scope.pipelineRepoIds,
+            timezone: config.operator.timezone,
+            attention: sharedAttention(),
+          }),
+          pace: paceView(store, config, at),
+        };
       });
 
       // The Update button. Its texts are fixed. The commands' output goes to update.log, which GET
@@ -6057,6 +6069,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
+
+      // Reader: docs/runbook.md#slow-pace (the Overview reads the same view from GET /api/overview)
+      api.get("/settings/pace", async (): Promise<PaceSettings> => readPaceSettings(store));
+
+      // Reader: docs/runbook.md#slow-pace (set by the operator or FLIGHT; the Overview shows it)
+      api.post("/settings/pace", async (req, reply) => {
+        const body = PaceInput.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const at = now();
+        if (body.data.on && body.data.until <= at)
+          return reply.code(400).send({ error: "until must be a time in the future" });
+        // Counting starts from the moment it was switched on; saving it again keeps that moment.
+        const since = activePace(store, at)?.since ?? at;
+        const saved: PaceSettings = { ...body.data, since };
+        store.setSetting(PACE_SETTING, JSON.stringify(saved));
+        bus.emit("settings");
+        return saved;
+      });
 
       // Reader: apps/web/src/shell/AwayDigest.tsx
       api.get<{ Querystring: { meta?: unknown } }>("/away/digest", async (req, reply) => {

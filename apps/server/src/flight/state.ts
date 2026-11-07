@@ -82,6 +82,8 @@ import {
   OWNER_FLIGHT,
   OWNER_OPERATOR,
   orderLedger,
+  type PaceCheck,
+  paceRefusal,
   priorityRank,
   READY_LABEL,
   RULING_PARK,
@@ -114,6 +116,7 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "../machine-capacity.ts";
+import { paceStartCheck, paceView } from "../pace.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr-flow.ts";
 import {
   closingFact,
@@ -703,6 +706,8 @@ function withCovered(inputs: FlightWakeInputs, covered: FlightMovedPointer[]): F
 }
 
 function wakeInputs(i: {
+  /** The slow pace's check while it is on: tickets it refuses are not startable, so wake no one. */
+  pace?: PaceCheck | undefined;
   store: Store;
   seats: FlightSeatState[];
   tickets: FlightState["tickets"];
@@ -725,7 +730,13 @@ function wakeInputs(i: {
       !claimedByOther(t, i.hubLogin)
     );
   };
-  const ready = i.tickets.filter((t) => t.ready && !waitingOn(waits, t.ref, i.now));
+  const pace = i.pace;
+  const ready = i.tickets.filter(
+    (t) =>
+      t.ready &&
+      !waitingOn(waits, t.ref, i.now) &&
+      (pace === undefined || paceRefusal(pace, t.ref, t.labels) === null),
+  );
   const fit: Record<string, string[]> = {};
   for (const seat of i.seats) {
     if (seat.loop !== "build" || waitingOn(waits, seat.id, i.now)) continue;
@@ -740,7 +751,8 @@ function wakeInputs(i: {
     i.flightId === null
       ? []
       : i.store.unreadCommsFrom(COMMS_CAPCOM, i.flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS);
-  const idle = idleSeats(i, waits, rules, fit);
+  // a seat left idle by the slow pace is the operator's wish, not a fault to wake FLIGHT about
+  const idle = i.pace ? undefined : idleSeats(i, waits, rules, fit);
   return idle === undefined
     ? { fit, fresh, operator, reviewsWaited }
     : { fit, fresh, operator, reviewsWaited, idle };
@@ -1371,6 +1383,7 @@ export function flightState(i: {
     }));
 
   const planned = flightScheduleView(config, store, now).entries;
+  const pace = paceView(store, config, now);
   // a PR the digest lists already shows a change to its state or head; the pointer is read with the wake, not repeated
   const listedPrs = new Set(prs.map((p) => `${session.repoId}#${p.pr}`));
   const covered = movedAll.filter(
@@ -1404,6 +1417,7 @@ export function flightState(i: {
       }),
       now,
     }),
+    ...(pace ? { pace } : {}),
     instructionRevision: store.instructions.revision(),
     memory: store.flightMemoryTitles(session.repoId),
     retrospective: pendingRetrospective(store, session.repoId, now, tz),
@@ -1411,6 +1425,7 @@ export function flightState(i: {
     discussions,
     wake: withCovered(
       wakeInputs({
+        pace: paceStartCheck(store, config, now),
         store,
         seats,
         tickets,

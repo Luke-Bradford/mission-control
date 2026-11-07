@@ -6,3 +6,7 @@ it("mc operator may POST a review request for an external PR, and nothing near i
   expect(flightOperatorAllowed("POST", "/api/prs/mc/7/uat")).toBe(false);
   expect(flightOperatorAllowed("POST", "/api/prs/mc/7/review-request/x")).toBe(false);
 });
+
+it("mc operator may not write the slow pace, so only the operator can slow the crew", () => {
+  expect(flightOperatorAllowed("POST", "/api/settings/pace")).toBe(false);
+});

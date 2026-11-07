@@ -12,7 +12,9 @@ import {
   freezeRules,
   type MachineSample,
   NEW_LOOP,
+  PACE_SETTING,
   type PullRequestView,
+  paceRefusal,
   pauseWithout,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
@@ -78,6 +80,8 @@ let rules: RepoRules | RepoRulesError;
 let started: { seatId: string; issue: number; loop: unknown }[];
 /** The error a start of this issue throws, if any. */
 let startFails: (issue: number) => Error | null;
+/** Runs inside a start, before it is recorded (a real start writes its run row late). */
+let onStart: ((seatId: string, issue: number) => Promise<void>) | null = null;
 let noteCalls: number;
 let enabled: boolean;
 let logs: string[];
@@ -189,7 +193,7 @@ const refill = (
     login: ME,
     fetchTicket,
     ...(profiles === undefined ? {} : { profiles }),
-    now: () => NOW,
+    now: () => takeNow,
     onNotes: () => void noteCalls++,
   });
 const refillWith = (profiles: NonNullable<QueueDeps["profiles"]>) =>
@@ -226,6 +230,7 @@ const takeDeps = (): TakeDeps => ({
     async startRun(seatId, issue, opts) {
       const fail = startFails(issue);
       if (fail !== null) throw fail;
+      await onStart?.(seatId, issue);
       started.push({ seatId, issue, loop: opts?.loop });
       return { runId: `${seatId}:1`, branch: "b" };
     },
@@ -284,6 +289,7 @@ beforeEach(() => {
   rules = RULES;
   started = [];
   startFails = () => null;
+  onStart = null;
   noteCalls = 0;
   enabled = true;
   logs = [];
@@ -325,6 +331,63 @@ describe("refillQueues", () => {
       expect(started.map((r) => r.issue)).toEqual([1]);
     },
   );
+
+  const setPace = (over: object = {}) =>
+    store.setSetting(
+      PACE_SETTING,
+      JSON.stringify({
+        on: true,
+        until: NOW + DAY,
+        since: NOW - 1,
+        labels: ["bug"],
+        maxStarts: 2,
+        note: "weekend",
+        ...over,
+      }),
+    );
+
+  it("a slow pace starts only the tickets it names, and normal resumes at the end time", async () => {
+    store.replaceBoard(REPO, [card(1, { labels: ["area:server", "bug"] }), card(2)]);
+    setPace();
+    await refill();
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+    expect(issues(SERVER)).toEqual([]);
+    takeNow = NOW + DAY;
+    await refill();
+    expect(issues(SERVER)).toContain(2);
+  });
+
+  it("a start refused by the pace after the check is retried without a ticket failure", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    await refill();
+    startFails = () =>
+      new SupervisorError(
+        422,
+        paceRefusal({ labels: [], startsLeft: 0, note: "weekend" }, "mc#1", []) ?? "",
+      );
+    await take();
+    expect(started).toEqual([]);
+    expect(store.notes()).toEqual([]);
+    expect(issues(SERVER)).toEqual([1]);
+  });
+
+  it("seats starting at once do not go past the pace's starts", async () => {
+    store.replaceBoard(REPO, [
+      card(1, { labels: ["area:server", "bug"] }),
+      card(2, { labels: ["area:web", "bug"] }),
+    ]);
+    setPace({ maxStarts: 1 });
+    await refill();
+    onStart = async (seatId, issue) => {
+      await new Promise((r) => setTimeout(r, 5));
+      store.upsertRun(
+        run({ id: `${seatId}:1`, agentId: seatId, ticket: `${REPO}#${issue}`, startedAt: NOW + 1 }),
+      );
+    };
+    await Promise.all([take(SERVER), take(WEB)]);
+    expect(started).toHaveLength(1);
+  });
 
   it("a start refused after away changes is retried without a permanent ticket failure", async () => {
     store.replaceBoard(REPO, [card(1)]);

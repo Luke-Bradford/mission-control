@@ -2647,6 +2647,26 @@ export class Store {
     return latest?.loop?.mergeHold ?? null;
   }
 
+  /**
+   * Distinct tickets that a run by one of `seatIds` first started on since `since`. Review runs,
+   * observed loops' runs and tickets already started before `since` (then handed on) do not count.
+   */
+  ticketsStartedSince(since: number, seatIds: readonly string[]): number {
+    if (seatIds.length === 0) return 0;
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(DISTINCT r.ticket) AS n FROM runs r
+         WHERE r.started_at >= ? AND r.ticket IS NOT NULL AND r.review_id IS NULL
+           AND r.agent_id IN (SELECT value FROM json_each(?))
+           AND NOT EXISTS (
+             SELECT 1 FROM runs p
+             WHERE p.ticket = r.ticket AND p.review_id IS NULL AND p.started_at < ?
+           )`,
+      )
+      .get(since, JSON.stringify(seatIds), since) as { n: number };
+    return row.n;
+  }
+
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
     const rows = this.db

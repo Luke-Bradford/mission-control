@@ -376,6 +376,7 @@ import {
   seatPlace,
   text,
 } from "../mcp/tools.ts";
+import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
 import { handoffTarget } from "../run-handoffs.ts";
@@ -1623,8 +1624,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if ("refusal" in chosen) return fail(chosen.refusal);
     const board = store.board(repo.id);
     const away = activeAway(store, now(), config.operator.timezone);
+    const pace = paceStartCheck(store, config, now());
     const refusal = eligibleToStart({
       ...(away ? { away: { pickUp: away.may.pickUp, flight: true } } : {}),
+      ...(pace ? { pace } : {}),
       repoId: repo.id,
       issue,
       card,

@@ -51,6 +51,7 @@ import {
   GITHUB_RATE_SETTING,
   handoverKey,
   NEW_LOOP,
+  PACE_SETTING,
   type PullRequestView,
   RULING_PARK,
   type Run,
@@ -5636,6 +5637,28 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
     expect(idleFact(T0 + GAP)).toEqual(["guido-1:0"]);
     expect(idleFact(T0 + GAP + FLIGHT_IDLE_SEAT_WAKE_MS - 1)).toEqual(["guido-1:0"]);
     expect(idleFact(T0 + GAP + FLIGHT_IDLE_SEAT_WAKE_MS)).toEqual(["guido-1:1"]);
+  });
+
+  it("under a slow pace a seat the pace holds is no fit and wakes no one; a ticket it names is", () => {
+    store.setSetting(
+      PACE_SETTING,
+      JSON.stringify({
+        on: true,
+        until: T0 + 10 * GAP,
+        since: T0 - 1,
+        labels: ["bug"],
+        maxStarts: 2,
+        note: "weekend",
+      }),
+    );
+    store.replaceBoard("mc", [card(4, "Ready")]);
+    tick(T0);
+    const held = read(T0 + GAP);
+    expect(held.pace).toMatchObject({ note: "weekend", startsLeft: 2 });
+    expect(held.wake?.fit["guido-1"]).toEqual([]);
+    expect(held.wake?.idle).toBeUndefined();
+    store.replaceBoard("mc", [card(4, "Ready"), card(5, "Ready", ["area:server", "bug"])]);
+    expect(read(T0 + GAP).wake?.fit["guido-1"]).toEqual(["mc#5"]);
   });
 
   it("counts a ticket with no board status as work to triage, and says so", () => {
