@@ -34,6 +34,14 @@ it("'Held · operator' stays when the PR flow says the operator holds it", () =>
   expect(chip.label).toBe("Held · operator");
 });
 
+it("a clearance on an ended run still names who holds it", () => {
+  const ended = row({ stage: "clearance", ownerKind: "nobody" });
+  expect(flowChip({ kind: "held", by: "CAPCOM" }, ended).label).toBe("Held · operator");
+  expect(flowChip({ kind: "held", by: "operator" }, ended).label).toBe("Held · operator");
+  expect(flowChip({ kind: "held", by: "FLIGHT" }, ended).label).toBe("Held · FLIGHT");
+  expect(flowChip({ kind: "ready" }, ended).label).toBe("Held · FLIGHT");
+});
+
 it("'Ready to merge' only when the flow's next step is the merge", () => {
   const ready = { kind: "ready" } as const;
   expect(flowChip(ready, row({ stage: "merge", ownerKind: "hub" })).label).toBe("Ready to merge");

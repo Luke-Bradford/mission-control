@@ -11,6 +11,13 @@ export function flowByPr(view: FlightPrFlowView | undefined): ReadonlyMap<string
 
 export const flowKey = (repoId: string, pr: number): string => `${repoId}#${pr}`;
 
+/** The flow's owner when it names the operator or FLIGHT; an ended run has none, so the review state's. */
+function clearanceOwner(check: ReviewCheckState, row: FlightPrFlowRow): string {
+  if (row.ownerKind === "operator" || row.ownerKind === "FLIGHT") return row.ownerKind;
+  if (check.kind !== "held") return "FLIGHT";
+  return check.by === "CAPCOM" || check.by === "operator" ? "operator" : check.by;
+}
+
 /**
  * The Board chip for a reviewed PR. Whether it can merge, and who moves it, is the PR flow's
  * stage and owner (the FLIGHT page's), not the review row's guess: "Ready to merge" only when the
@@ -31,7 +38,7 @@ export function flowChip(
       return { label: "Held · controller check", tone: "warn", reason };
     case "clearance":
       return {
-        label: `Held · ${row.ownerKind === "operator" ? "operator" : "FLIGHT"}`,
+        label: `Held · ${clearanceOwner(check, row)}`,
         tone: "warn",
         reason,
       };
