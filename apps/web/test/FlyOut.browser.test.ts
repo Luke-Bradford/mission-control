@@ -207,16 +207,37 @@ describeRendered("The FLIGHT fly-out in the production App", () => {
     "on an agent's Comms view at %i with the fly-out open, the conversation and its box keep their room",
     async (width, height) => {
       const page = await openStopped("/comms/agents/inco-1", width, height);
-      await page.box(".comms-messages");
-      const facts = await page.evaluate(
-        () => ({
-          messages: document.querySelector(".comms-messages")?.getBoundingClientRect().width ?? 0,
-          box: document.querySelector("#comms-compose")?.getBoundingClientRect().width ?? 0,
-        }),
+      await eventually(
+        page,
+        () => page.evaluate(() => document.querySelector(".comms-messages") !== null, null),
+        "the agent's conversation",
+      );
+      // A frame to settle, then what the layout gave each part (reported whole if it is wrong).
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
         null,
       );
-      expect(facts.messages).toBeGreaterThanOrEqual(360);
-      expect(facts.box).toBeGreaterThanOrEqual(240);
+      const facts = await page.evaluate(() => {
+        const size = (selector: string) => {
+          const r = document.querySelector(selector)?.getBoundingClientRect();
+          return r ? { w: Math.round(r.width), h: Math.round(r.height) } : null;
+        };
+        return {
+          page: size(".comms-page"),
+          grid: size(".comms-grid"),
+          agent: size(".comms-agent"),
+          chat: size("#chatP"),
+          messages: size(".comms-messages"),
+          box: size("#comms-compose"),
+        };
+      }, null);
+      const note = JSON.stringify(facts);
+      expect(facts.messages?.w ?? 0, note).toBeGreaterThanOrEqual(360);
+      expect(facts.messages?.h ?? 0, note).toBeGreaterThan(100);
+      expect(facts.box?.w ?? 0, note).toBeGreaterThanOrEqual(240);
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
