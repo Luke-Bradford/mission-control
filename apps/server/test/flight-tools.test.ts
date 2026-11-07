@@ -3892,7 +3892,7 @@ describe("flight_state", () => {
         queued: 0,
         running: 0,
         waitMin: 0,
-        seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
+        seats: [{ seat: "retro-1", queued: 0, running: 0, waitMin: 0, idle: true }],
       },
       mergeQueue: [{ pr: 9, waitsOn: ["review"] }],
       flowHolds: [],
