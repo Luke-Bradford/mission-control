@@ -1187,6 +1187,7 @@ describe("ask_flight", () => {
         text: "Lanes per customer, or one global list?",
         at: NOW,
         passedAt: null,
+        asideAt: null,
       },
     ]);
     expect(emitted).toContain("attention");

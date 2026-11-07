@@ -763,6 +763,11 @@ export interface SeatQuestion {
   at: number;
   /** When FLIGHT passed it to the operator, else null. */
   passedAt: number | null;
+  /**
+   * When the operator set it aside with Not now (#1534), else null. It stays open and answerable
+   * on the Ticket page, but it is not in Needs you and the end of its run does not close it.
+   */
+  asideAt: number | null;
 }
 
 /** An mc tool failure the operator is told of. */
@@ -1280,6 +1285,7 @@ const toQuestion = (r: Row): SeatQuestion => ({
   text: r.text as string,
   at: r.at as number,
   passedAt: r.passed_at as number | null,
+  asideAt: (r.aside_at as number | null | undefined) ?? null,
 });
 
 const seatRow = (r: Row): SeatSessionRow => ({
@@ -1942,6 +1948,8 @@ export class Store {
     this.addColumn("board_items", "project_id", "TEXT");
     // When FLIGHT passed the question to the operator (it stays open until they answer).
     this.addColumn("seat_questions", "passed_at", "INTEGER");
+    // When the operator set the question aside with Not now; it stays open, out of Needs you.
+    this.addColumn("seat_questions", "aside_at", "INTEGER");
     // When the operator dismissed the note from Needs you; a re-raised note is shown again.
     this.addColumn("attention_notes", "dismissed_at", "INTEGER");
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
@@ -7938,7 +7946,7 @@ export class Store {
   }
 
   /** Records a seat's question; returns its id. */
-  addQuestion(q: Omit<SeatQuestion, "id" | "passedAt">): number {
+  addQuestion(q: Omit<SeatQuestion, "id" | "passedAt" | "asideAt">): number {
     const r = this.db
       .prepare("INSERT INTO seat_questions (agent_id, run_id, text, at) VALUES (?, ?, ?, ?)")
       .run(q.agentId, q.runId, q.text, q.at);
@@ -7979,10 +7987,12 @@ export class Store {
     }));
   }
 
-  /** Questions not yet answered, oldest first. */
+  /** Questions not yet answered and not set aside, oldest first: the ones that wait in Needs you. */
   openQuestions(): SeatQuestion[] {
     const rows = this.db
-      .prepare("SELECT * FROM seat_questions WHERE answered_at IS NULL ORDER BY id ASC")
+      .prepare(
+        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NULL ORDER BY id ASC",
+      )
       .all() as Row[];
     return rows.map(toQuestion);
   }
@@ -8008,6 +8018,26 @@ export class Store {
       | Row
       | undefined;
     return r ? { ...toQuestion(r), answeredAt: r.answered_at as number | null } : null;
+  }
+
+  /** Sets an open question aside (Not now); true only when it was open and not yet set aside. */
+  setQuestionAside(id: number, at: number): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE seat_questions SET aside_at = ? WHERE id = ? AND answered_at IS NULL AND aside_at IS NULL",
+      )
+      .run(at, id);
+    return Number(r.changes) > 0;
+  }
+
+  /** Puts a set-aside question back in Needs you, for a Not now whose GitHub writes failed. */
+  clearQuestionAside(id: number): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE seat_questions SET aside_at = NULL WHERE id = ? AND answered_at IS NULL AND aside_at IS NOT NULL",
+      )
+      .run(id);
+    return Number(r.changes) > 0;
   }
 
   /** Marks an open question passed to the operator; true only when it was open and not yet passed. */
@@ -8156,7 +8186,10 @@ export class Store {
   private endQuestions(where: "run_id" | "agent_id", id: string, at: number): void {
     this.transaction(() => {
       const rows = this.db
-        .prepare(`SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL`)
+        // a question the operator set aside outlives its run: it is answered on the Ticket page
+        .prepare(
+          `SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL AND aside_at IS NULL`,
+        )
         .all(id) as Row[];
       for (const r of rows) {
         const q = toQuestion(r);
