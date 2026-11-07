@@ -1,4 +1,5 @@
 import type {
+  AttentionBrief,
   AttentionHold,
   AttentionHoldCondition,
   AttentionItem,
@@ -252,7 +253,25 @@ export function protectedDecisionItem(
   return note === undefined || note.runId === null || parked === "budget" || parked === "account";
 }
 
-/** A recommended reversible decision and the stored point at which it may apply. */
+/**
+ * When the ask on an item began, the identity of one question: a seat's question is its `at`, a
+ * briefed ask its `askAt` (else the brief's `at`), anything else the item's own `at`. A closure
+ * stands for that ask only: a new or changed ask is open again.
+ */
+export function questionAskAt(
+  item: Pick<AttentionItem, "key" | "at">,
+  brief: AttentionBrief | undefined,
+): number {
+  if (item.key.startsWith("ask:")) return item.at;
+  if (brief !== undefined && brief.for !== "flight") return brief.askAt ?? brief.at;
+  return item.at;
+}
+
+/**
+ * A recommended reversible decision and the stored point at which it may apply. Only a brief for
+ * FLIGHT can carry one: a question to the operator has no timed default (#1532), so a `defaultAt`
+ * stored on an older operator brief never applies.
+ */
 export function decisionDefault(
   store: Store,
   item: AttentionItem,
@@ -263,7 +282,7 @@ export function decisionDefault(
   if (
     item.owner !== "operator" ||
     !brief ||
-    brief.for === "flight" ||
+    brief.for !== "flight" ||
     brief.defaultAt === undefined ||
     protectedDecisionItem(store, item, config, at)
   )

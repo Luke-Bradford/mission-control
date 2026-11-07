@@ -1216,6 +1216,30 @@ export interface BriefOption {
 }
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
+/** How a question left Needs you without an answer. */
+export type QuestionClosureKind =
+  | "returned"
+  | "withdrawn"
+  | "ticket-closed"
+  | "pr-merged"
+  | "pr-closed"
+  | "run-ended";
+/** A question closed without an answer, with the reason; shown under Answered. */
+export interface QuestionClosure {
+  key: string;
+  /** When the ask began: the question's `at`, a brief's `askAt ?? at`, or the item's `at`. */
+  askAt: number;
+  kind: QuestionClosureKind;
+  reason: string;
+  /** A seat id, or "hub". */
+  by: string;
+  question: string;
+  ticket: string | null;
+  /** Whether the operator had it in Needs you. */
+  operator: boolean;
+  at: number;
+}
+
 export interface AttentionBrief {
   /** Missing on briefs written before triage routing was introduced. */
   for?: "operator" | "flight";
@@ -1225,7 +1249,9 @@ export interface AttentionBrief {
   ask?: string;
   /** When this ask was first briefed, on a rebrief with the same ask; absent: it began at `at`. */
   askAt?: number;
-  /** Stored at briefing time; its absence means this brief predates decision defaults. */
+  /** Who wrote this brief: FLIGHT's brief_item, or the hub's own raising. */
+  by?: "flight" | "hub";
+  /** Stored by briefs before operator questions lost their timed default; never written now. */
   defaultAt?: number;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];

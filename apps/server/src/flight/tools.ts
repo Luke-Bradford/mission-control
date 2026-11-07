@@ -43,6 +43,7 @@ import {
   CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMENTED_DECISION,
   COMMS_MESSAGE_MAX,
+  COMMS_OPEN_PREFIX,
   CONTROLLER_CHECK_HEADING,
   CREATE_NO_REPO,
   CREW_LANES,
@@ -223,6 +224,7 @@ import {
   PROMOTE_ENGINE_OFF,
   PROMOTE_NO_GITHUB,
   PROMOTE_NO_RULES,
+  PROTECTED_ITEM_REFUSED,
   type Profile,
   type ProfileOverride,
   parkNotYoursText,
@@ -234,6 +236,8 @@ import {
   planUnclosedText,
   promoteDraftText,
   promoteOffText,
+  QUESTION_REASON_MAX,
+  questionClosedText,
   READ_CI_LOG_DESCRIPTION,
   READ_NO_GITHUB,
   READ_NO_ISSUE,
@@ -244,6 +248,7 @@ import {
   READY_LABEL,
   RECALL_DESCRIPTION,
   REMEMBER_DESCRIPTION,
+  RETURN_NOT_SEAT_QUESTION,
   type RepoId,
   type RepoRules,
   RUN_ID_NEEDS_UNPARK,
@@ -252,6 +257,8 @@ import {
   rerunStartedDecision,
   rerunStartedText,
   retiredBriefText,
+  returnedQuestionText,
+  returnedText,
   rulingAcceptedDecision,
   rulingAcceptedText,
   rulingRefusedDecision,
@@ -292,8 +299,13 @@ import {
   undeclaredPrDependency,
   unknownLabelText,
   untrackedText,
+  WAITING_OPERATOR_LABEL,
   WAITS_ON_ONLY_BACKLOG,
+  WITHDRAW_NOT_YOURS,
+  WITHDRAW_SEAT_QUESTION,
+  waitingOperatorPromoteText,
   withControllerCheckItem,
+  withdrawnText,
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
@@ -305,6 +317,7 @@ import {
   holdCycle,
   holdItem,
   protectedDecisionItem,
+  questionAskAt,
   releaseHold,
 } from "../attention-holds.ts";
 import { activeAway } from "../away.ts";
@@ -710,6 +723,16 @@ const AnswerArgs = z.strictObject({
   basis: basisArg,
 });
 /** The old pass shape, refused with the brief_item call that replaces it (#758). */
+const ReturnQuestionArgs = z.strictObject({
+  key: z.string().min(1).max(BRIEF_KEY_MAX),
+  missing: text(QUESTION_REASON_MAX),
+  basis: basisArg,
+});
+const WithdrawQuestionArgs = z.strictObject({
+  key: z.string().min(1).max(BRIEF_KEY_MAX),
+  reason: text(QUESTION_REASON_MAX),
+  basis: basisArg,
+});
 const PassArgs = z.looseObject({
   question_id: z.number().int().min(1),
   pass_to_operator: z.literal(true),
@@ -1291,6 +1314,155 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     bus.emit("flight");
     return { text: answeredText(call) };
+  }
+
+  /** The attention item with this key, held or not; undefined when it has left Needs you. */
+  const itemByKey = (key: string): AttentionItem | undefined => {
+    const lock = deps.lockState?.() ?? NO_LOCK;
+    const rows = crew(config, store, now(), lock, NO_CLI_VERSION).rows;
+    return attentionItems(config, store, now(), lock, rows, deps.login, true).find(
+      (i) => i.key === key,
+    );
+  };
+
+  /** Sends a seat's question back to its asking run, with what is missing. */
+  async function returnQuestion(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, ReturnQuestionArgs, args);
+    if (!c.ok) return c.result;
+    const { key, missing, basis } = c.args;
+    const item = itemByKey(key);
+    const at = now();
+    // before anything else: a protected item always reaches the operator
+    if (item !== undefined && protectedDecisionItem(store, item, config, at))
+      return fail(PROTECTED_ITEM_REFUSED);
+    const ask = /^ask:([1-9]\d*)$/.exec(key);
+    const comms = key.startsWith(COMMS_OPEN_PREFIX) ? key.slice(COMMS_OPEN_PREFIX.length) : null;
+    if (ask === null && comms === null) return fail(RETURN_NOT_SEAT_QUESTION);
+    let seatId: string;
+    let runId: string | null;
+    let question: string;
+    let askAt: number;
+    let ticket: string | null;
+    if (ask !== null) {
+      const id = Number(ask[1]);
+      const q = store.question(id);
+      if (q === null || q.answeredAt !== null || seatCfg(q.agentId) === undefined)
+        return fail(noOpenQuestionText(id));
+      if (q.agentId === ctx.seatId) return fail(RETURN_NOT_SEAT_QUESTION);
+      seatId = q.agentId;
+      runId = q.runId;
+      question = q.text;
+      askAt = q.at;
+      ticket = store.run(q.runId)?.ticket ?? null;
+      if (unendedRun(seatId)?.id !== runId) return fail(askerRunEndedText(seatCallSign(seatId)));
+    } else {
+      const message = store.openCommsItems().find((m) => `${m.id}` === comms);
+      if (message === undefined || seatCfg(message.from) === undefined)
+        return fail(RETURN_NOT_SEAT_QUESTION);
+      if (message.from === ctx.seatId) return fail(RETURN_NOT_SEAT_QUESTION);
+      seatId = message.from;
+      runId = unendedRun(seatId)?.id ?? null;
+      if (runId === null) return fail(askerRunEndedText(seatCallSign(seatId)));
+      question = message.text;
+      askAt = item === undefined ? message.at : questionAskAt(item, item.brief);
+      ticket = message.ticket;
+    }
+    const call = seatCallSign(seatId);
+    try {
+      await deps.supervisor.message(seatId, returnedQuestionText(missing), {
+        interrupt: false,
+        questions: "none",
+      });
+    } catch (e) {
+      return fail(notSentText(e instanceof Error ? e.message : String(e)));
+    }
+    store.closeQuestion({
+      key,
+      askAt,
+      kind: "returned",
+      reason: missing,
+      by: ctx.seatId,
+      question,
+      ticket,
+      operator: item?.owner === OWNER_OPERATOR,
+      at,
+    });
+    if (comms !== null) store.settleCommsItem(comms, ctx.seatId, missing, at);
+    bus.emit("attention");
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      to: seatId,
+      ticket,
+      text: returnedQuestionText(missing),
+    });
+    bus.emit("agents");
+    record(at, {
+      kind: "return",
+      seatId,
+      questionId: ask === null ? null : Number(ask[1]),
+      about: `${call}: ${question}`,
+      decision: missing,
+      basis,
+    });
+    bus.emit("flight");
+    return { text: returnedText(call) };
+  }
+
+  /** Takes a question FLIGHT wrote for the operator off Needs you, with a one-line reason. */
+  async function withdrawQuestion(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, WithdrawQuestionArgs, args);
+    if (!c.ok) return c.result;
+    const { key, reason, basis } = c.args;
+    const item = itemByKey(key);
+    const at = now();
+    if (item !== undefined && protectedDecisionItem(store, item, config, at))
+      return fail(PROTECTED_ITEM_REFUSED);
+    if (key.startsWith("ask:")) return fail(WITHDRAW_SEAT_QUESTION);
+    if (item === undefined) return fail("Not withdrawn: that question is no longer open.");
+    const wrote =
+      (item.brief?.for === "operator" && item.brief.by === "flight") ||
+      (item.kind === "tag" && ownReply(item, flightSeat(config)?.seat.id ?? null));
+    if (!wrote) return fail(WITHDRAW_NOT_YOURS);
+    const question = item.brief?.ask || item.text;
+    store.closeQuestion({
+      key,
+      askAt: questionAskAt(item, item.brief),
+      kind: "withdrawn",
+      reason,
+      by: ctx.seatId,
+      question,
+      ticket: item.ticket,
+      operator: item.owner === OWNER_OPERATOR,
+      at,
+    });
+    const comms = key.startsWith(COMMS_OPEN_PREFIX) ? key.slice(COMMS_OPEN_PREFIX.length) : null;
+    const message = comms === null ? undefined : store.commsMessage(comms);
+    if (comms !== null) store.settleCommsItem(comms, ctx.seatId, reason, at);
+    // the seat whose live run is on the item is told
+    const noteRun = store.notes().find((n) => `${NOTE_KEY}${n.key}` === key)?.runId ?? null;
+    const seatId =
+      message?.from ?? (noteRun === null ? null : (store.run(noteRun)?.agentId ?? null));
+    if (seatId !== null && seatId !== ctx.seatId && unendedRun(seatId) !== null) {
+      const told = questionClosedText(question, reason);
+      try {
+        await deps.supervisor.message(seatId, told, { interrupt: false, questions: "none" });
+        store.addComms({ at, from: ctx.seatId, to: seatId, ticket: item.ticket, text: told });
+      } catch {
+        // the closure stands; the seat is not told
+      }
+    }
+    bus.emit("attention");
+    record(at, {
+      kind: "withdraw",
+      ...(seatId === null ? {} : { seatId }),
+      ref: item.ticket,
+      about: question,
+      decision: reason,
+      basis,
+    });
+    bus.emit("flight");
+    return { text: withdrawnText(key) };
   }
 
   async function startSeat(
@@ -1911,6 +2083,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         ? column === "Ready" || column === "Refinement"
         : column === "Backlog" || (column === "Refinement" && to === "Ready");
     if (!allowed) return fail(moveWrongColumnText(ref, column));
+    // the operator set it aside with a question: it moves when they answer or move the card
+    if (to !== "Backlog" && card.labels.includes(WAITING_OPERATOR_LABEL))
+      return fail(waitingOperatorPromoteText(ref));
     if (store.activeTickets().has(ref)) return fail(moveHasRunText(ref));
     if (waitsOn !== undefined) {
       const waited = store.pullRequests(repo.id).find((p) => p.number === waitsOn);
@@ -2695,6 +2870,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (item === undefined || ownReply(item, flightSeat(config)?.seat.id ?? null)) {
       return fail(briefNoItemText(key));
     }
+    // a protected item always reaches the operator: it is briefed, never held back
+    if (hold && protectedDecisionItem(store, item, config, at)) return fail(PROTECTED_ITEM_REFUSED);
     if (structured.for === "flight") {
       if (isOperatorCall(item, store))
         return fail(
@@ -2735,7 +2912,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         options: options ?? [],
         basis,
         at,
-        defaultEligible: !protectedDecisionItem(store, item, config, at),
+        by: "flight",
       });
     } catch {
       return fail("Source changed; refresh the item before drafting.");
@@ -3912,6 +4089,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.login,
         ).find((i) => i.key === a.key);
         if (waiting === undefined) return fail("Item is no longer waiting.");
+        if (protectedDecisionItem(store, waiting, config, now()))
+          return fail(PROTECTED_ITEM_REFUSED);
         if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
           return fail(HOLD_CYCLE_REFUSED);
         bus.emit("attention");
@@ -4088,6 +4267,22 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: answerQuestion,
+    },
+    {
+      name: MC_TOOL_NAMES.returnQuestion,
+      description: `Send a seat's question back to the run that asked it, with what is missing, when you cannot explain it to the operator or answer it yourself. missing is 1-${QUESTION_REASON_MAX} characters. A protected item (an approval, flag, rate limit, or a hold on the operator's rules) cannot be returned.`,
+      inputSchema: z.toJSONSchema(ReturnQuestionArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: returnQuestion,
+    },
+    {
+      name: MC_TOOL_NAMES.withdrawQuestion,
+      description: `Take a question you wrote for the operator off Needs you when it no longer stands, with a one-line reason of at most ${QUESTION_REASON_MAX} characters. Only a question you wrote yourself, and never a protected item; a seat's question is answered or returned instead.`,
+      inputSchema: z.toJSONSchema(WithdrawQuestionArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: withdrawQuestion,
     },
     {
       name: MC_TOOL_NAMES.startSeat,
@@ -4489,6 +4684,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.recall,
     MC_TOOL_NAMES.holdItem,
     MC_TOOL_NAMES.releaseHold,
+    MC_TOOL_NAMES.returnQuestion,
+    MC_TOOL_NAMES.withdrawQuestion,
   ]);
   return flightTools.map((tool) => ({
     ...tool,

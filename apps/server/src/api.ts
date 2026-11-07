@@ -720,6 +720,9 @@ const QA_DAYS_ERROR = `days must be an integer 1..${QA_RETENTION_DAYS}`;
 /** `GET /api/agents/:id/files/diff?path=`: one path, as the file list gives it. */
 const DiffPath = z.string().min(1).max(4096);
 
+/** `GET /api/attention/answered`: the questions closed without an answer, over the last week. */
+const ANSWERED_WINDOW_MS = 7 * 24 * 60 * 60_000;
+const ANSWERED_LIMIT = 50;
 /** `POST /api/attention/ack`. */
 const AckBody = z.strictObject({
   keys: z.array(z.string().min(1).max(200)).min(1).max(ACK_BATCH_MAX),
@@ -5598,6 +5601,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? { ...item, text: `${item.text.slice(0, 169)}…` }
               : item,
           ),
+      );
+      // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-flight-s-side-flight-is-the-gate (the Answered group; the web side is a follow-up ticket)
+      api.get("/attention/answered", async () =>
+        store.questionClosures(now() - ANSWERED_WINDOW_MS, ANSWERED_LIMIT),
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (whole tag message on open)
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {

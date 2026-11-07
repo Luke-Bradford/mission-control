@@ -84,7 +84,12 @@ import {
   UAT_PARK,
 } from "@mc/core";
 import { runAccountId } from "./account-bindings.ts";
-import { decisionDefault, partitionAttention, protectedDecisionItem } from "./attention-holds.ts";
+import {
+  decisionDefault,
+  partitionAttention,
+  protectedDecisionItem,
+  questionAskAt,
+} from "./attention-holds.ts";
 import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
 import { claudeVersion } from "./cli-version.ts";
 import { cloneData } from "./clone.ts";
@@ -1348,7 +1353,25 @@ function buildAttentionItems(
     flightTriage: "missed",
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
+  const closures = store.closedItemKeys();
+  /** The item's ask was closed without an answer: FLIGHT's own tag leaves, the rest is FLIGHT's. */
+  const closedAsk = (i: OwnedItem): boolean => {
+    const list = closures.get(i.key);
+    if (list === undefined) return false;
+    const at = questionAskAt(i, briefs.get(i.key));
+    return list.some((c) => c.askAt === at);
+  };
   const route = (i: OwnedItem): AttentionItem => {
+    if (closedAsk(i) && !ownReply(i, flightId)) {
+      const { brief: _closed, ...rest } = {
+        ...i,
+        acked: (acks.get(i.key) ?? -1) >= i.at,
+      } as AttentionItem;
+      if (triage === null) return rest;
+      return triaging
+        ? { ...rest, owner: OWNER_FLIGHT, flightTriage: "handling" }
+        : { ...rest, owner: OWNER_FLIGHT, flightTriage: "down" };
+    }
     const saved = briefs.get(i.key);
     // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
     const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
@@ -1413,6 +1436,8 @@ function buildAttentionItems(
   const result: AttentionItem[] = items
     // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
     .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
+    // FLIGHT withdrew its own question to the operator, or the hub closed it: it has left
+    .filter((i) => !(i.kind === "tag" && ownReply(i, flightId) && closedAsk(i)))
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
     .map((i) => {
       const item = route(i);

@@ -16,9 +16,8 @@ const ASK_MAX = 300;
 
 /**
  * Raises one CAPCOM decision for each labelled question or blocker that has waited 15 minutes for
- * its addressee and a further 30 for FLIGHT. The brief's recommended option becomes the item's
- * default, which only the decision-default sweep applies, and not on an item it excludes.
- * Returns how many were raised.
+ * its addressee and a further 30 for FLIGHT. The brief carries no timed default: the operator
+ * answers it. Returns how many were raised.
  */
 export function raiseStalledCommsDecisions(d: {
   config: CcConfig;
@@ -58,13 +57,13 @@ export function raiseStalledCommsDecisions(d: {
             ? "Let the seat work around the blocker where it safely can."
             : "Let the seat proceed on its best judgment with the most reversible choice.",
       basis: `Comms ${message.id}, unsettled since ${new Date(message.at).toISOString()}.`,
+      by: "hub",
       at: now,
       recommendedOptionId: "proceed",
       options: [
         {
           id: "proceed",
           label: "Proceed",
-          description: "Applies on its own if you do not answer in time.",
           answer: blocker
             ? "No one cleared this blocker in time. Work around it where you safely can, keep any change reversible, and say what you assumed. If you cannot, stay parked and say what you need."
             : "No one answered in time. Proceed on your best judgment with the most reversible choice, and say what you assumed.",

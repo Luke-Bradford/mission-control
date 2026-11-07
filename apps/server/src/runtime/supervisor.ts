@@ -1485,8 +1485,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         .map((x) => x.path);
       store.clearStrays(info.session.id, mine);
       // only this run's questions: another run of the seat, set aside, may still wait on the operator
-      if (runId === null) store.answerQuestions(seatId, now());
-      else store.answerRunQuestions(runId, now());
+      if (runId === null) store.endSeatQuestions(seatId, now());
+      else store.endRunQuestions(runId, now());
       bus.emit("attention");
     } catch (e) {
       log(`${info.seat.id}: could not close the run's questions and strays: ${errText(e)}`);
@@ -4347,7 +4347,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     transcripts.delete(run.transcriptPath);
     digests.delete(run.id);
     // a run set aside on the operator's question leaves no one to answer it
-    store.answerRunQuestions(run.id, at);
+    store.endRunQuestions(run.id, at);
     bus.emit("attention");
     emit({ kind: "run-ended", seatId: run.agentId, runId: run.id, endedBy });
     await dropScratch(info, run.id, run.seq, worktree);
@@ -4527,7 +4527,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         store.upsertRun({ ...run, endedAt: at, status: "failed" });
         recordEnded(runId, at, "failed", "exit");
         removeRunFiles(runId);
-        store.answerRunQuestions(runId, at);
+        store.endRunQuestions(runId, at);
         bus.emit("attention");
         emit({ kind: "run-ended", seatId, runId, endedBy: "exit" });
         throw new SupervisorError(500, reason, { cause });

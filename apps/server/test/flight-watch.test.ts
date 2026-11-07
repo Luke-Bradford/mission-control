@@ -94,6 +94,7 @@ import {
   flightToolsDigest,
 } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud.ts";
+import { closeSettledQuestions } from "../src/question-watch.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
@@ -5534,5 +5535,105 @@ describe("a free seat with open tickets and an empty Ready (#1451)", () => {
       expect(later).toHaveLength(2);
       expect(later[1]).toContain("61 min");
     });
+  });
+});
+
+describe("question fact watch (#1532)", () => {
+  const card = (closed = false): BoardItem => ({
+    repoId: "mc",
+    issueNumber: 7,
+    title: "Ticket 7",
+    status: "In progress",
+    state: "in progress",
+    labels: [],
+    priority: null,
+    updatedAt: T0,
+    url: "u",
+    stage: null,
+    owner: null,
+    parent: null,
+    subIssues: null,
+    blockedBy: [],
+    milestone: null,
+    size: null,
+    closed,
+    prioritySource: null,
+    createdAt: T0 - 7,
+    itemId: "I7",
+    projectId: "P1",
+  });
+  const pr9 = (headSha: string, at: number): PullRequestView => ({
+    repoId: "mc",
+    number: 9,
+    title: "PR 9",
+    url: "u",
+    branch: "mc/7",
+    ticket: "mc#7",
+    state: "open",
+    isDraft: false,
+    review: null,
+    ci: "passing",
+    createdAt: T0,
+    updatedAt: at,
+    mergedAt: null,
+    headSha,
+    mergeable: "MERGEABLE",
+  });
+  const changed = () =>
+    flightState({ config, store, busy: [], now: nowMs }).signals.filter(
+      (s) => s.kind === "question_changed",
+    );
+
+  it("wakes FLIGHT once per change, never without one", async () => {
+    live("flight-1", "r-flight");
+    store.upsertRun(
+      run("r-guido", "guido-1", { ticket: "mc#7", loop: { ...NEW_LOOP, prNumber: 9 } }),
+    );
+    store.setSeatSession(row("guido-1", "r-guido"));
+    store.replaceBoard("mc", [card()]);
+    store.upsertPullRequests("mc", [pr9("a", T0)], T0);
+    const id = ask("guido-1", "r-guido", T0);
+    store.addBrief({
+      key: `ask:${id}`,
+      for: "operator",
+      by: "flight",
+      ask: "Which lane?",
+      assessment: "a",
+      context: "a",
+      recommendation: "Lane 2",
+      options: [],
+      basis: "b",
+      at: T0 + 1,
+    });
+    store.passQuestion(id, T0 + 1);
+    // first sight records, then nothing changes: no reason, however often it is read
+    nowMs = T0 + MIN;
+    expect(changed()).toEqual([]);
+    nowMs = T0 + 2 * MIN;
+    expect(changed()).toEqual([]);
+    // a new head is one change: exactly one untold reason, and it stays one
+    store.upsertPullRequests("mc", [pr9("b", nowMs)], nowMs);
+    nowMs += MIN;
+    const first = changed();
+    expect(first).toHaveLength(1);
+    expect(first[0]).toMatchObject({
+      told: false,
+      key: `ask:${id}@${T0}:ticket=open;pr=open:b;run=live`,
+      evidence: `ask:${id}: ticket=open;pr=open:a;run=live → ticket=open;pr=open:b;run=live`,
+    });
+    nowMs += MIN;
+    expect(changed()).toHaveLength(1);
+    // the ticket closes: a change that closes the question raises nothing until the hub closes it
+    const before = changed().length;
+    store.replaceBoard("mc", [card(true)]);
+    nowMs += MIN;
+    expect(changed()).toHaveLength(before);
+    expect(await closeSettledQuestions({ config, store, now: nowMs })).toBe(1);
+    nowMs += MIN;
+    const after = changed();
+    expect(after).toHaveLength(before + 1);
+    expect(after.filter((s) => s.key.endsWith(":closed"))).toHaveLength(1);
+    nowMs += MIN;
+    expect(changed()).toHaveLength(before + 1);
   });
 });
