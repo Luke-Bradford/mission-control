@@ -274,6 +274,11 @@ were captured. Web changes require the configured screenshot gate before queuein
 isolated previews and copied data; it never reconstructs a historical approval. A reviewer run is
 recorded, but no developer run is invented for the PR.
 
+A crew review that reports after its author's run has ended (or is gone from this hub) is posted the
+same way, and the head is not reviewed a second time. When the hub holds a reported result it does
+not post (a draft PR, a branch still owned, a PR it was never asked to review), it logs one line
+saying why, once per review.
+
 These PRs do not enter the crew's merge or board-completion path. Their controller still applies CI,
 review, acceptance and repository merge rules. A failed review remains failed rather than repeatedly
 starting paid retries. A new push creates a new review opportunity.

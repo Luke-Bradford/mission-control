@@ -592,6 +592,75 @@ describe("external PR review subjects", () => {
     },
   );
 
+  it("posts the reported state of a crew review whose author run ended before it reported", async () => {
+    store.upsertPullRequests("sample", [pr({ ticket: "sample#1" })], 2);
+    buildRun({ endedAt: 2 });
+    const id = store.requestReview({
+      authorRunId: "builder:old",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 3,
+    })!;
+    store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    expect(
+      store.recordFindings(id, "retro:review", {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "Checked the change.",
+        findings: [],
+        checked: [{ check: "spec", result: "pass" }],
+        tests: [],
+        at: 102,
+      }),
+    ).toBe(true);
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    await service.sync();
+    // no second review of a head that already has its report
+    expect(store.reviewsOfRun(externalReviewKey("sample", 7))).toEqual([]);
+    expect(h.comments).toHaveLength(1);
+    expect(h.comments[0]?.body).toContain(SHA);
+    expect(h.writes.filter((w) => w.path.includes("/statuses/"))).toHaveLength(1);
+    expect(h.writes.at(-1)?.body).toMatchObject({ state: "success", context: "mc/review" });
+  });
+
+  it("says why when it leaves a reported review unposted", async () => {
+    const id = store.requestReview({
+      authorRunId: "gone:run",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 3,
+    })!;
+    store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    store.recordFindings(id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked.",
+      findings: [],
+      checked: [{ check: "spec", result: "pass" }],
+      tests: [],
+      at: 102,
+    });
+    const h = harness();
+    // the PR went back to draft: the report is left unposted, on purpose
+    store.upsertPullRequests("sample", [pr({ isDraft: true })], 3);
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    await service.sync();
+    expect(h.writes).toEqual([]);
+    expect(h.deps.log).toHaveBeenCalledTimes(1);
+    expect(h.deps.log).toHaveBeenCalledWith(expect.stringContaining("sample#7"));
+  });
+
   it("recovers an uncertain comment POST without duplicating the report", async () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
