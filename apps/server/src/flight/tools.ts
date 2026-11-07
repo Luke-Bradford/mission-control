@@ -257,7 +257,6 @@ import {
   RECALL_DESCRIPTION,
   REMEMBER_DESCRIPTION,
   RETURN_NOT_SEAT_QUESTION,
-  type RepoId,
   type RepoRules,
   RUN_ID_NEEDS_UNPARK,
   type Run,
