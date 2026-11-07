@@ -32,6 +32,14 @@ describeRendered("FLIGHT page mockup in a browser", () => {
               const doc = document.documentElement;
               const visible = (el: Element) => el.getClientRects().length > 0;
               const text = (sel: string) => document.querySelector(sel)?.textContent ?? "";
+              // Hidden rows stay in the DOM, so only visible rows count as shown.
+              const decRows = [...document.querySelectorAll<HTMLElement>("#decisions li")].filter(
+                visible,
+              );
+              const decList = (
+                document.getElementById("decisions") as HTMLElement
+              ).getBoundingClientRect();
+              const lastDec = decRows.at(-1)?.getBoundingClientRect();
               const panels = [...document.querySelectorAll<HTMLElement>("main .panel")].map((p) => {
                 const b = p.getBoundingClientRect();
                 const last = p.lastElementChild?.getBoundingClientRect();
@@ -81,7 +89,11 @@ describeRendered("FLIGHT page mockup in a browser", () => {
                 cells,
                 rows,
                 doing: document.querySelectorAll("#doing li").length,
-                decisions: document.querySelectorAll("#decisions li").length,
+                decisions: decRows.length,
+                decTotal: document.querySelectorAll("#decisions li").length,
+                decSub: text("#decSub"),
+                decGap: decList.bottom - (lastDec?.bottom ?? decList.bottom),
+                decRowH: lastDec?.height ?? 0,
                 status: text("#status"),
                 startVisible: [...document.querySelectorAll("button")].some(
                   (b) => visible(b) && b.textContent === "Start FLIGHT",
@@ -129,6 +141,12 @@ describeRendered("FLIGHT page mockup in a browser", () => {
             expect(r.doing, `${where}: Doing now has 1 to 5 lines`).toBeGreaterThan(0);
             expect(r.doing).toBeLessThanOrEqual(5);
             expect(r.decisions).toBeGreaterThanOrEqual(width >= 2560 ? 12 : 8);
+            expect(r.decSub, `${where}: the heading counts the shown decisions`).toBe(
+              `last ${r.decisions} · newest first`,
+            );
+            if (r.decisions < r.decTotal) {
+              expect(r.decGap, `${where}: blank under decisions`).toBeLessThan(r.decRowH);
+            }
             expect(r.startVisible, `${where}: Start FLIGHT only when stopped`).toBe(
               state === "stopped",
             );
