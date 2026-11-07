@@ -51,7 +51,7 @@ describe("reviewCheckOf", () => {
         ...base,
         controllerCheck: { sha: "a", from: "review", pass: false },
       }),
-    ).toEqual({ kind: "held", by: "operator" });
+    ).toEqual({ kind: "held", by: "FLIGHT" });
     expect(
       reviewCheckOf([row()], 0, {
         ...base,

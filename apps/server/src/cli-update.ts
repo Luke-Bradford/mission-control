@@ -21,6 +21,8 @@ export const CLI_NOTE_KEY = "cli:claude";
 export const CLI_UPGRADE_FAILED = "brew upgrade failed";
 export const CLI_UPGRADE_NOTE_KEY = "cli:claude:upgrade";
 /** While new runs are held, the check is repeated this often (a limit or a network blip passes). */
+/** The owner of the brew smoke-test path's hold; `autoUpdateCli` holds under its own owner. */
+export const CLI_HOLD_OWNER = "cli:claude";
 export const CLI_RETRY_MS = 15 * 60_000;
 export const CLI_UPDATE_INTERVAL_MS = 6 * 60 * 60_000;
 export const BREW_COMMAND = "brew";
@@ -35,7 +37,7 @@ const SMOKE_ANSWER = "OK";
 const SMOKE_PASS = /^\W*ok\W*$/i;
 const MAX_LINE = 200;
 /** `.../Caskroom/claude-code/<version>/claude`: where Homebrew keeps the cask's files. */
-const CASK_PATH = /[\\/]Caskroom[\\/]claude-code[\\/]/;
+export const CASK_PATH = /[\\/]Caskroom[\\/]claude-code[\\/]/;
 
 export interface ExecResult {
   /** Null when the command could not start or was killed (its timeout). */
@@ -48,7 +50,7 @@ export interface ExecResult {
 export type ExecFn = (
   file: string,
   args: readonly string[],
-  opts: { timeoutMs: number; env?: NodeJS.ProcessEnv },
+  opts: { timeoutMs: number; env?: NodeJS.ProcessEnv; cwd?: string },
 ) => Promise<ExecResult>;
 
 export const realExec: ExecFn = (file, args, opts) =>
@@ -62,6 +64,7 @@ export const realExec: ExecFn = (file, args, opts) =>
         killSignal: "SIGKILL",
         maxBuffer: 4 * 1024 * 1024,
         ...(opts.env === undefined ? {} : { env: opts.env }),
+        ...(opts.cwd === undefined ? {} : { cwd: opts.cwd }),
       },
       (err, stdout, stderr) => {
         if (!err) return resolve({ code: 0, stdout, stderr });
@@ -178,25 +181,31 @@ export async function checkCli(deps: {
  * lets them go when a later check passes; a run already going is never touched.
  */
 export class CliHold {
-  private why: string | null = null;
+  /** Why starts are held, by who holds them: each update path releases only its own. */
+  private readonly holds = new Map<string, string>();
   private readonly released = new Set<() => void>();
 
-  /** Why starts are held, else null. */
+  /** Why starts are held (the first hold's reason), else null. */
   get reason(): string | null {
-    return this.why;
+    return this.holds.values().next().value ?? null;
   }
 
-  hold(reason: string): void {
-    this.why = reason;
+  /** Whether `owner` holds starts. */
+  heldBy(owner: string): boolean {
+    return this.holds.has(owner);
   }
 
-  release(): void {
-    if (this.why === null) return;
-    this.why = null;
+  hold(reason: string, owner = CLI_HOLD_OWNER): void {
+    this.holds.set(owner, reason);
+  }
+
+  /** Ends `owner`'s hold; listeners are called when that leaves nothing held. */
+  release(owner = CLI_HOLD_OWNER): void {
+    if (!this.holds.delete(owner) || this.holds.size > 0) return;
     for (const fn of [...this.released]) fn();
   }
 
-  /** Calls `fn` each time a hold is released; returns the unsubscribe. */
+  /** Calls `fn` each time the last hold is released; returns the unsubscribe. */
   onRelease(fn: () => void): () => void {
     this.released.add(fn);
     return () => this.released.delete(fn);

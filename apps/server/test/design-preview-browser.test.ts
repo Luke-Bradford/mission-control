@@ -74,6 +74,7 @@ describe("design previews in a real browser", () => {
       root: join(dir, "real-store"),
       port,
       hubPort: 7420,
+      repoId: "shop-app",
       prOf: () => null,
     });
     await previews.publish(input(1, worktree));
@@ -173,6 +174,7 @@ Promise.allSettled(tries.map((t, i) => limit(t()).then((v) => note("try" + i, "o
       root: join(dir, "hostile-store"),
       port,
       hubPort,
+      repoId: "shop-app",
       prOf: () => null,
     });
     await previews.publish(input(2, worktree));

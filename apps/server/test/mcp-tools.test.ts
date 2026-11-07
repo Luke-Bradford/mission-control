@@ -478,6 +478,7 @@ describe("publish_preview", () => {
       if (refuse !== undefined) throw new PreviewRefused(refuse);
       published.push(input);
       return {
+        repoId: "mc",
         ticket: input.ticket,
         branch: input.branch,
         sha: input.sha,

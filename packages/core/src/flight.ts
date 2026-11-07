@@ -54,6 +54,8 @@ export const watchOrPlanToolText = (t: string): string => `${t} is only for a wa
 export const FLIGHT_DECISION_KINDS = [
   "answer",
   "pass",
+  "return",
+  "withdraw",
   "start",
   "message",
   "unpark",
@@ -282,6 +284,10 @@ export const FLIGHT_HEADLINE_MAX = 140;
 export const FLIGHT_HEADLINE_TITLE = "Headline";
 export const FLIGHT_NOTE_SECTIONS = ["project", "crew", "operator", "lessons"] as const;
 export const FOR_THE_CONTROLLER = "For the controller:";
+
+/** Whether a message from FLIGHT is addressed to the controller, not the operator (until #1508's own address). */
+export const isForTheController = (text: string): boolean =>
+  text.trimStart().toLowerCase().startsWith(FOR_THE_CONTROLLER.toLowerCase());
 
 export interface FlightLedgerEntry {
   kind: FlightLedgerKind;
@@ -554,6 +560,33 @@ export const answerMessageText = (answer: string): string => `FLIGHT answers: ${
 export const notSentText = (why: string): string => `Not sent: ${why}`;
 export const answeredText = (call: string): string => `Answered ${call}.`;
 
+/** The label on a ticket the operator set aside from Needs you; FLIGHT does not promote it. */
+export const WAITING_OPERATOR_LABEL = "waiting:operator";
+export const PROTECTED_ITEM_REFUSED =
+  "Refused: this item is protected and always reaches the operator. Add a brief; you cannot hold, return or withdraw it.";
+export const RETURN_NOT_SEAT_QUESTION = "Refused: only a seat's question can be returned.";
+export const WITHDRAW_NOT_YOURS =
+  "Refused: you can withdraw only a question you wrote for the operator.";
+export const WITHDRAW_SEAT_QUESTION =
+  "Refused: this is a seat's question. Answer it with mc answer_question, or send it back with mc return_question.";
+/** The longest `missing` of return_question and `reason` of withdraw_question. */
+export const QUESTION_REASON_MAX = 300;
+export const returnedQuestionText = (missing: string): string =>
+  `FLIGHT sent your question back: ${missing}\nAsk again with mc ask_flight once you can add it, or decide as FLIGHT says.`;
+export const returnedText = (call: string): string => `Returned to ${call}.`;
+export const withdrawnText = (key: string): string => `Withdrew ${key}.`;
+export const questionClosedText = (question: string, reason: string): string =>
+  `Your question was closed without an answer. ${reason}\nQuestion: ${question}`;
+export const waitingOperatorPromoteText = (ref: string): string =>
+  `Not moved: ${ref} is labelled waiting:operator. It moves when the operator answers its question or moves the card.`;
+export const waitingOperatorStartText = (ref: string): string =>
+  `Not started: ${ref} is labelled waiting:operator. It starts when the operator answers its question or moves the card.`;
+/** Why the hub closed a question on a recorded fact. */
+export const ticketClosedReason = (ticket: string): string => `${ticket} was closed.`;
+export const prMergedReason = (n: number): string => `PR ${n} merged.`;
+export const prClosedReason = (n: number): string => `PR ${n} was closed without merging.`;
+export const ASKING_RUN_ENDED_REASON = "The asking run ended.";
+
 export const notStartableSeatText = (call: string): string =>
   `Not started: ${call} is not a developer or planner seat.`;
 export const planAlreadyText = (ref: string): string =>
@@ -618,7 +651,7 @@ export const PROMOTE_ENGINE_OFF =
   "Not moved: the loop engine is off on this server, so no card moves.";
 export const PROMOTE_NO_RULES = "Not moved: the repo's rules could not be read.";
 export const promoteOffText = (repoId: string): string =>
-  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.`;
+  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question, then brief the item it raises with mc brief_item.`;
 export const moveNotOnBoardText = (ref: string): string => `Not moved: ${ref} is not on the board.`;
 export const moveWrongColumnText = (ref: string, column: string): string =>
   `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and Ready or Refinement to Backlog.`;
@@ -999,6 +1032,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "controller_unanswered",
   "wait_over",
   "seat_call",
+  "question_changed",
 ] as const;
 export interface FlightSignal {
   checks?: string[];
@@ -1099,6 +1133,11 @@ export interface FlightState {
     triageRemainingMs: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
+    /**
+     * Set when the Needs you entry check sent the item back (#1543): what it lacks before it may
+     * reach the operator. Fix the brief with brief_item, or keep the item (brief it for FLIGHT).
+     */
+    returned?: string[];
   }[];
   /**
    * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
@@ -1120,7 +1159,15 @@ export interface FlightState {
     running: number;
     /** Minutes the oldest queued review has waited; 0 with none queued. */
     waitMin?: number;
-    seats: { seat: string; queued: number; running: number; idle: boolean }[];
+    seats: {
+      seat: string;
+      queued: number;
+      running: number;
+      /** Minutes this seat's oldest queued review has waited. */
+      waitMin?: number;
+      /** Free to start a review: not paused, stopped, busy or at its quota stop. */
+      idle: boolean;
+    }[];
   };
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
   mergeQueue?: { pr: number; waitsOn: string[] }[];
@@ -1159,6 +1206,8 @@ export interface FlightWakeInputs {
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
+  /** FLIGHT has a live `wait_on` for the idle-reviewers fault. */
+  reviewsWaited?: boolean;
   /**
    * Free build seats with open tickets near their area and no FLIGHT wait on them, and how long
    * that has stood. Absent when no seat is in that state.
@@ -1268,6 +1317,16 @@ export const FLIGHT_COST_DAYS = 14;
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
 export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+/**
+ * ...but only once it has grown this much since the session's first turn. A fresh session that
+ * starts above the line would otherwise hand over on every first turn: on 7 November FLIGHT
+ * started at 157K and handed over 300 times in five hours.
+ */
+export const FLIGHT_CONTEXT_GROWTH_TOKENS = 50_000;
+/** Handovers (rotations) in an hour before the watch stops restarting FLIGHT and says why. */
+export const FLIGHT_ROTATIONS_MAX = 4;
+export const flightRotationLoopText = (n: number, startTokens: number | null): string =>
+  `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start.`;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
@@ -1396,6 +1455,21 @@ export function wakeSummary(s: FlightState): string {
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }
 
+/**
+ * Whether queued reviews stand still while a review seat could take work. Two cases, each past
+ * FLIGHT_IDLE_MS: an idle seat's own queued review (the engine only moves a review off a seat that
+ * is busy or at its stop, not off a free one that has not started it), or a review queued on a seat
+ * that is neither idle nor running a review (unavailable or paused) while another review seat is
+ * idle. A review waiting behind a seat that is running one is routine.
+ */
+export function reviewFaultStands(q: FlightState["reviewQueue"]): boolean {
+  const seats = (q?.seats ?? []).filter(
+    (x) => x.queued > 0 && (x.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS,
+  );
+  const anyIdle = q?.seats.some((x) => x.idle) === true;
+  return seats.some((x) => x.idle || (anyIdle && x.running === 0));
+}
+
 export function wakeLine(
   s: FlightState,
   digest: FlightWake | FlightState = s,
@@ -1405,10 +1479,9 @@ export function wakeLine(
   const productPass = s.prs.some((p) => p.state === "merged")
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
-  const idleReviewFault =
-    (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
-      ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
-      : "";
+  const idleReviewFault = reviewFaultStands(s.reviewQueue)
+    ? " Queued reviews with idle review seats are a fault (wait_on target `idle-reviewers`): name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
+    : "";
   const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";
   return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }

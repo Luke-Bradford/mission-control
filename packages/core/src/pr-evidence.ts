@@ -72,17 +72,40 @@ const PAGE_DIRS: Record<string, EvidencePage> = {
   qa: "qa",
 };
 
+/** `pages/` files shown at another page's address, so that page's screenshots cover them. */
+const PAGE_ALIASES: Record<string, EvidencePage> = {
+  qareadiness: "qa",
+  "qa-readiness": "qa",
+  qahotspots: "hotspots",
+  "qa-hotspots": "hotspots",
+  legacyaudit: "audit",
+};
+
+/** `pages/` files with no fixed address, so no screenshot can show them. */
+export const UNPHOTOGRAPHED_PAGES: Readonly<Record<string, string>> = {
+  ticket: "a ticket's page has no fixed address",
+  commschart: "a live, animated chart; not photographed until the capture probe shows it settles",
+};
+
+/** Files whose change adds or removes a page's evidence address. */
+const CATALOGUE_FILES = ["packages/core/src/pr-evidence.ts", "packages/core/src/flight.ts"];
+
+/** A `pages/` file's page key: its name, lower case, without the extension or a `Page` suffix. */
+const pageKey = (file: string): string =>
+  file
+    .replace(/\.[^.]+$/, "")
+    .toLowerCase()
+    .replace(/page$/, "");
+
 /** The page a file in `apps/web` affects, or null when it affects the whole app. */
 function pageOf(path: string): EvidencePage | null {
   const rest = path.slice(WEB_PREFIX.length).replace(/^src\//, "");
   const dir = rest.split("/")[0] ?? "";
   if (rest.includes("/") && dir !== "pages") return PAGE_DIRS[dir] ?? null;
   if (dir === "pages") {
-    const stem = (rest.split("/")[1] ?? "").replace(/\.[^.]+$/, "").toLowerCase();
-    const key = stem.replace(/page$/, "");
-    if (key === "qareadiness" || key === "qa-readiness") return "qa";
-    if (key === "qahotspots") return "hotspots";
-    return key in HUD_PAGE_PATHS ? (key as EvidencePage) : null;
+    const key = pageKey(rest.split("/")[1] ?? "");
+    if (Object.hasOwn(PAGE_ALIASES, key)) return PAGE_ALIASES[key] ?? null;
+    return Object.hasOwn(EVIDENCE_PAGE_PATHS, key) ? (key as EvidencePage) : null;
   }
   return null;
 }
@@ -106,6 +129,36 @@ export function prEvidenceAffectedPages(paths: readonly string[]): EvidencePage[
     if (page === "setup") for (const p of EVIDENCE_PAGES) if (p.startsWith("setup_")) hit.add(p);
   }
   return EVIDENCE_PAGES.filter((p) => hit.has(p));
+}
+
+/**
+ * Page files in `apps/web/src/pages` that no screenshot can show: a page with no evidence address,
+ * alias or stated reason. Such a change would otherwise count as "every known page" and never
+ * photograph itself (PR 1465, the Needs you page, #1529). Empty when the PR also changes the
+ * catalogue: the hub photographs from main's catalogue, so a page and its address in one PR could
+ * never leave draft. That PR's page is then the reviewer's to render (a design verdict needs a
+ * render or images of the head).
+ */
+export function prEvidenceUncatalogued(paths: readonly string[]): string[] {
+  if (paths.some((path) => CATALOGUE_FILES.includes(path))) return [];
+  const out = new Set<string>();
+  for (const path of paths) {
+    if (!/^apps\/web\/src\/pages\/[^/]+\.tsx$/.test(path) || TEST_FILE.test(path)) continue;
+    const key = pageKey(path.split("/").at(-1) ?? "");
+    if (
+      Object.hasOwn(EVIDENCE_PAGE_PATHS, key) ||
+      Object.hasOwn(PAGE_ALIASES, key) ||
+      Object.hasOwn(UNPHOTOGRAPHED_PAGES, key)
+    )
+      continue;
+    out.add(path.slice("apps/web/src/".length));
+  }
+  return [...out].sort();
+}
+
+/** Why a web PR stays in draft: a page no screenshot can show. */
+export function evidenceUncataloguedText(files: readonly string[]): string {
+  return `kept in draft: ${files.join(", ")} has no screenshot address, so its evidence cannot show it. Add the page to EVIDENCE_PAGE_PATHS in packages/core/src/pr-evidence.ts (or HUD_PAGE_PATHS in packages/core/src/flight.ts when it is in the nav), in this PR or one before it; a page removed by this PR leaves draft the same way`;
 }
 
 export interface EvidenceGap {

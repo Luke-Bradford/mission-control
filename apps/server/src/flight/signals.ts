@@ -35,10 +35,12 @@ import {
   parkedEventText,
   STUCK_PARK,
   seatDef,
+  WAITING_OPERATOR_LABEL,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
+import { ownsCard } from "../ownership.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -59,6 +61,8 @@ interface RecordState {
     }
   >;
   flakes: Record<string, { key: string; at: number; evidence: string }>;
+  /** The facts last seen about each open question (`key@askAt`), to tell a change from none. */
+  questions: Record<string, { facts: string }>;
 }
 export interface MainCi {
   sha: string;
@@ -102,6 +106,7 @@ function read(store: Store, repo: string, now: number): RecordState {
     triage: {},
     checks: {},
     flakes: {},
+    questions: {},
     ...stored<Partial<RecordState>>(store, `${FLIGHT_SIGNALS_SETTING}:${repo}`, {}),
   } as RecordState;
   const cutoff = now - FLIGHT_SIGNAL_KEEP_MS;
@@ -314,6 +319,8 @@ export function flightSignals(i: {
   triageItems?: { key: string; kind: string; at: number; text: string }[];
   /** Open PRs whose run reported them ready to merge, with when it did. */
   readyPrs?: { ref: string; pr: number; at: number }[];
+  /** Each open question with the facts about its ticket, PR and run, and whether they close it. */
+  questions?: { id: string; facts: string; closing: boolean }[];
   now: number;
 }): Pick<FlightState, "signals" | "triage"> {
   const { config, store, session, seats, now } = i;
@@ -353,6 +360,8 @@ export function flightSignals(i: {
       continue;
     const ref = `${repo}#${card.issueNumber}`;
     const column = hudColumnOf(card);
+    // the operator set it aside with a question: it moves when they answer, not when FLIGHT looks
+    if (card.labels.includes(WAITING_OPERATOR_LABEL)) continue;
     if (column === "Backlog" || column === "Refinement") {
       triage(ref, "new", now, `${ref} arrived in ${column}: ${card.title}`);
     }
@@ -363,6 +372,7 @@ export function flightSignals(i: {
   for (const line of releasedLines(
     record.released.filter((r) => onBoard.has(r.ref)),
     verb,
+    (ref) => ownsCard(store, repo, Number(ref.slice(ref.lastIndexOf("#") + 1))),
   )) {
     triage(line.ref, "dependency", line.at, line.text);
   }
@@ -739,6 +749,32 @@ export function flightSignals(i: {
   for (const [id, signal] of Object.entries(state.signals)) {
     if (signal.kind === "wait_over" && signal.toldAt === null && !active.has(id)) {
       delete state.signals[id];
+    }
+  }
+  if (i.questions !== undefined) {
+    const seen = new Set<string>();
+    for (const q of i.questions) {
+      seen.add(q.id);
+      const before = state.questions[q.id];
+      state.questions[q.id] = { facts: q.facts };
+      // the first sight records and raises nothing; unchanged facts raise nothing
+      if (before === undefined || before.facts === q.facts) continue;
+      // a change that closes the question is the sweep's, told once it has closed it
+      if (!q.closing)
+        raise(
+          "question_changed",
+          `${q.id}:${q.facts}`,
+          now,
+          `${q.id.slice(0, q.id.lastIndexOf("@"))}: ${before.facts} → ${q.facts}`,
+        );
+    }
+    for (const id of Object.keys(state.questions)) {
+      if (seen.has(id)) continue;
+      delete state.questions[id];
+      const at = id.lastIndexOf("@");
+      const closure = store.questionClosure(id.slice(0, at), Number(id.slice(at + 1)));
+      if (closure?.by === "hub")
+        raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
   }
   const loops = heartbeats(store).loops;

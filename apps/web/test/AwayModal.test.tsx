@@ -1,7 +1,8 @@
 import { type AwaySettings, DEFAULT_AWAY } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { AWAY_WAITING, AwayModal } from "../src/shell/AwayModal.tsx";
+import { hub, RESOURCES } from "../src/data.ts";
+import { AWAY_BAD_DATE, AWAY_WAITING, AwayModal } from "../src/shell/AwayModal.tsx";
 import { installKeys } from "../src/shell/keys.ts";
 import { openAway } from "../src/shell/overlays.ts";
 import { Toast } from "../src/shell/Toast.tsx";
@@ -44,6 +45,8 @@ function setup(
 const toast = () => document.getElementById("toast")?.textContent;
 const pressed = (name: string) =>
   screen.getByRole("button", { name }).getAttribute("aria-pressed") === "true";
+const save = () => fireEvent.click(screen.getByRole("button", { name: "Save away mode" }));
+const summary = () => screen.getByRole("region", { name: "Away mode was not saved" });
 const checkbox = (name: RegExp) => screen.getByRole("checkbox", { name }) as HTMLInputElement;
 
 let off: () => void;
@@ -118,6 +121,8 @@ describe("AwayModal", () => {
     const posts = setup();
     await waitFor(() => expect(pressed("Off")).toBe(true));
     fireEvent.click(screen.getByRole("button", { name: "On" }));
+    expect(posts).toHaveLength(0); // a change alone saves nothing
+    save();
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({ ...DEFAULT_AWAY, on: true, until: "2026-10-27" });
     await waitFor(() =>
@@ -131,6 +136,7 @@ describe("AwayModal", () => {
     const posts = setup({ ...DEFAULT_AWAY, until: "2026-10-28" });
     await waitFor(() => expect(pressed("Off")).toBe(true));
     fireEvent.click(screen.getByRole("button", { name: "On" }));
+    save();
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]?.until).toBe("2026-10-28");
     await waitFor(() => expect(toast()).toContain("Away mode on until Wed 28 Oct."));
@@ -141,6 +147,7 @@ describe("AwayModal", () => {
     await waitFor(() => expect(pressed("On")).toBe(true));
     expect(screen.getByText("Away mode is on until Wed 28 Oct.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Off" }));
+    save();
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({ ...DEFAULT_AWAY, on: false, until: "2026-10-28" });
     await waitFor(() =>
@@ -152,6 +159,7 @@ describe("AwayModal", () => {
     const posts = setup({ ...DEFAULT_AWAY, on: true, until: "2026-10-28" });
     await waitFor(() => expect(pressed("On")).toBe(true));
     fireEvent.change(screen.getByLabelText("Until"), { target: { value: "" } });
+    save();
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]?.until).toBe("");
     await waitFor(() =>
@@ -163,6 +171,7 @@ describe("AwayModal", () => {
     const posts = setup({ ...DEFAULT_AWAY, on: true, until: "2026-10-28" });
     await waitFor(() => expect(pressed("On")).toBe(true));
     fireEvent.change(screen.getByLabelText("Until"), { target: { value: "2026-11-01" } });
+    save();
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({ ...DEFAULT_AWAY, on: true, until: "2026-11-01" });
     await waitFor(() => expect(toast()).toContain("until Sun 1 Nov"));
@@ -172,35 +181,213 @@ describe("AwayModal", () => {
     const posts = setup();
     await screen.findByRole("checkbox", { name: /Pick up safe tickets/ });
     fireEvent.click(checkbox(/Pick up safe tickets/));
+    save();
     await waitFor(() => expect(posts).toHaveLength(1));
     expect(posts[0]).toEqual({ ...DEFAULT_AWAY, may: { ...DEFAULT_AWAY.may, pickUp: false } });
     await waitFor(() => expect(toast()).toBe(SAVED));
     await waitFor(() => expect(checkbox(/Pick up safe tickets/).checked).toBe(false));
   });
 
-  it("a failed save toasts the error and goes back", async () => {
-    setup(DEFAULT_AWAY, { status: 400, body: { error: "until: must be a date" } });
+  it("a refused save keeps the draft and says why in a named summary", async () => {
+    const posts = setup(DEFAULT_AWAY, { status: 400, body: { error: "until: must be a date" } });
     await waitFor(() => expect(pressed("Off")).toBe(true));
     fireEvent.click(screen.getByRole("button", { name: "On" }));
-    await waitFor(() => expect(toast()).toBe("Could not save away mode: until: must be a date"));
-    await waitFor(() => expect(pressed("Off")).toBe(true));
-    expect(screen.getByText("Off: everything waits for you as usual.")).toBeTruthy();
+    save();
+    const failed = await waitFor(summary);
+    await waitFor(() => expect(document.activeElement).toBe(failed));
+    expect(failed.textContent).toContain("until: must be a date");
+    expect(failed.textContent).not.toContain("result is unknown");
+    expect(pressed("On")).toBe(true);
+    expect((screen.getByLabelText("Until") as HTMLInputElement).value).toBe("2026-10-27");
+    expect(posts).toHaveLength(0);
   });
 
-  it("a failed checkbox goes back to ticked", async () => {
+  it("a refused checkbox change stays unticked in the draft", async () => {
     setup(DEFAULT_AWAY, { status: 500, body: { error: "disk full" } });
     await screen.findByRole("checkbox", { name: /Research new tickets/ });
     fireEvent.click(checkbox(/Research new tickets/));
-    await waitFor(() => expect(toast()).toBe("Could not save away mode: disk full"));
-    await waitFor(() => expect(checkbox(/Research new tickets/).checked).toBe(true));
+    save();
+    const failed = await waitFor(summary);
+    expect(failed.textContent).toContain("disk full");
+    expect(failed.textContent).toContain("The result is unknown");
+    expect(checkbox(/Research new tickets/).checked).toBe(false);
   });
 
-  it("keeps Tab inside: the last control wraps to Close, and Shift+Tab on Close to the last", async () => {
+  it("a lost connection keeps the draft and says the result is unknown", async () => {
+    stubFetch({ "/api/config": CONFIG, "/api/settings/away": DEFAULT_AWAY });
+    const base = (globalThis.fetch as unknown as (...a: unknown[]) => Promise<Response>).bind(
+      globalThis,
+    );
+    vi.stubGlobal("fetch", (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") return Promise.reject(new TypeError("Failed to fetch"));
+      return base(input, init);
+    });
+    render(<AwayModal />);
+    act(() => openAway());
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "On" }));
+    fireEvent.click(checkbox(/Pick up safe tickets/));
+    save();
+    const failed = await waitFor(summary);
+    expect(failed.textContent).toContain("Failed to fetch");
+    expect(failed.textContent).toContain("The result is unknown");
+    expect(pressed("On")).toBe(true);
+    expect(checkbox(/Pick up safe tickets/).checked).toBe(false);
+  });
+
+  it("a background refetch does not overwrite an edited draft", async () => {
+    setup();
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    fireEvent.click(checkbox(/Pick up safe tickets/));
+    act(() => hub.refetch(RESOURCES.away.path));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(checkbox(/Pick up safe tickets/).checked).toBe(false);
+    expect(screen.getByText(/Unsaved changes\./)).toBeTruthy();
+  });
+
+  it("an unreadable date gets a field error, a focused summary and no request", async () => {
+    const posts = setup();
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    const until = screen.getByLabelText("Until") as HTMLInputElement;
+    // a half-typed date: the browser reports it as bad input and gives back an empty value
+    Object.defineProperty(until, "validity", { value: { badInput: true }, configurable: true });
+    fireEvent.change(until, { target: { value: "" } });
+    save();
+    const failed = summary();
+    expect(document.activeElement).toBe(failed);
+    expect(until.getAttribute("aria-invalid")).toBe("true");
+    fireEvent.click(within(failed).getByRole("link", { name: AWAY_BAD_DATE }));
+    expect(document.activeElement).toBe(until);
+    expect(screen.getAllByText(AWAY_BAD_DATE).length).toBeGreaterThan(0);
+    expect(posts).toHaveLength(0);
+  });
+
+  it("a double submit posts once", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const posts: unknown[] = [];
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        posts.push(init.body);
+        await held;
+        return new Response(JSON.stringify(DEFAULT_AWAY), { status: 200 });
+      }
+      return new Response(JSON.stringify(input === "/api/config" ? CONFIG : DEFAULT_AWAY), {
+        status: 200,
+      });
+    });
+    render(
+      <>
+        <AwayModal />
+        <Toast />
+      </>,
+    );
+    act(() => openAway());
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    const form = screen.getByRole("dialog") as HTMLFormElement;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    save();
+    release();
+    await waitFor(() => expect(toast()).toContain(SAVED));
+    expect(posts).toHaveLength(1);
+  });
+
+  it("Esc, Close and Cancel keep the modal open while a save is out; a later open shows the server's copy", async () => {
+    let release: () => void = () => {};
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let stored: AwaySettings = DEFAULT_AWAY;
+    stubFetch({
+      "/api/config": CONFIG,
+      "/api/settings/away": () => ({ status: 200, body: stored }),
+    });
+    const base = globalThis.fetch as unknown as (...a: unknown[]) => Promise<Response>;
+    vi.stubGlobal("fetch", async (input: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        await held;
+        stored = JSON.parse(String(init.body));
+        return new Response(JSON.stringify(stored), { status: 200 });
+      }
+      return base(input, init);
+    });
+    render(
+      <>
+        <AwayModal />
+        <Toast />
+      </>,
+    );
+    act(() => openAway());
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    fireEvent.click(checkbox(/Pick up safe tickets/));
+    save();
+    for (let i = 0; i < 2; i++)
+      act(() => {
+        fireEvent.keyDown(document.body, { key: "Escape" });
+      });
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Cancel" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Close" }).hasAttribute("disabled")).toBe(true);
+    release();
+    await waitFor(() => expect(toast()).toContain(SAVED));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    stored = DEFAULT_AWAY; // the hub's record changes while the modal is closed
+    act(() => hub.refetch(RESOURCES.away.path));
+    await new Promise((r) => setTimeout(r, 20));
+    act(() => openAway());
+    await waitFor(() => expect(checkbox(/Pick up safe tickets/).checked).toBe(true));
+    expect(screen.queryByText(/Unsaved changes\./)).toBeNull();
+  });
+
+  it("while Off, a half-typed date is left alone and flagged, then a full date clears the error", async () => {
+    setup();
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    const until = screen.getByLabelText("Until") as HTMLInputElement;
+    expect(until.value).toBe("2026-10-27");
+    Object.defineProperty(until, "validity", { value: { badInput: true }, configurable: true });
+    fireEvent.change(until, { target: { value: "" } });
+    save();
+    expect(until.value).toBe("");
+    expect(until.getAttribute("aria-invalid")).toBe("true");
+    Object.defineProperty(until, "validity", { value: { badInput: false }, configurable: true });
+    fireEvent.change(until, { target: { value: "2026-11-01" } });
+    expect(until.value).toBe("2026-11-01");
+    expect(until.getAttribute("aria-invalid")).toBeNull();
+  });
+
+  it("Cancel discards the draft and sends nothing", async () => {
+    const posts = setup();
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    fireEvent.click(checkbox(/Pick up safe tickets/));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    act(() => openAway());
+    await waitFor(() => expect(checkbox(/Pick up safe tickets/).checked).toBe(true));
+    expect(posts).toHaveLength(0);
+  });
+
+  it("Save and Cancel sit together after the last field", async () => {
+    setup();
+    await waitFor(() => expect(pressed("Off")).toBe(true));
+    const boxes = screen.getAllByRole("checkbox");
+    const last = boxes[boxes.length - 1] as HTMLElement;
+    const saveButton = screen.getByRole("button", { name: "Save away mode" });
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    expect(
+      last.compareDocumentPosition(saveButton) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(saveButton.nextElementSibling).toBe(cancel);
+  });
+
+  it("keeps Tab inside: Cancel wraps to Close, and Shift+Tab on Close goes to Cancel", async () => {
     setup();
     await waitFor(() => expect(checkbox(/Pick up safe tickets/)).toBeTruthy());
     const close = screen.getByRole("button", { name: "Close" });
-    const boxes = screen.getAllByRole("checkbox");
-    const last = boxes[boxes.length - 1] as HTMLElement;
+    const last = screen.getByRole("button", { name: "Cancel" });
     last.focus();
     expect(fireEvent.keyDown(last, { key: "Tab" })).toBe(false);
     expect(document.activeElement).toBe(close);
@@ -213,14 +400,14 @@ describe("AwayModal", () => {
     await waitFor(() => expect(checkbox(/Pick up safe tickets/)).toBeTruthy());
     const root = screen.getByRole("dialog").closest(".modal") as HTMLElement;
     expect(root.getAttribute("tabindex")).toBe("-1");
-    const boxes = screen.getAllByRole("checkbox");
+    const last = screen.getByRole("button", { name: "Cancel" });
     root.focus();
     expect(document.activeElement).toBe(root);
     expect(fireEvent.keyDown(root, { key: "Tab" })).toBe(false);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close" }));
     root.focus();
     expect(fireEvent.keyDown(root, { key: "Tab", shiftKey: true })).toBe(false);
-    expect(document.activeElement).toBe(boxes[boxes.length - 1]);
+    expect(document.activeElement).toBe(last);
   });
 
   it("gives focus back to what had it when it closes", async () => {
