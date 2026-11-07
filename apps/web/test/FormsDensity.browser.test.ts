@@ -1207,7 +1207,7 @@ async function expectPauseDense(page: RenderedPage, form: PauseForm) {
   expect(measured.formOverflow).toBeLessThanOrEqual(1);
   expect(measured.pageOverflow).toBeLessThanOrEqual(1);
   expect(measured.actionInView).toBe(true);
-  expect((await page.unclipped(`${form.form} .fgroup`)).every(Boolean)).toBe(true);
+  expect((await page.unclipped(`${form.form}, ${form.form} .fgroup`)).every(Boolean)).toBe(true);
   expect(page.errors()).toEqual([]);
   // no fixture sends a real pause or Away write
   expect(page.requests().filter((r) => r.method !== "GET")).toEqual([]);
