@@ -125,6 +125,7 @@ import {
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
+import { auditEndedRuns } from "./token-audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
@@ -276,6 +277,8 @@ export interface Collectors {
     spawn: boolean,
   ) => Promise<MachineResult>;
   transcripts?: typeof maintainTranscripts;
+  /** Reads ended runs' transcripts for the token audit; runs before the transcripts are gzipped or deleted. */
+  tokenAudit?: typeof auditEndedRuns;
 }
 
 export interface SchedulerDeps {
@@ -391,6 +394,7 @@ export function realCollectors(config: CcConfig): Collectors {
     machine: (prevCpus, prev, now, testCommand, spawn) =>
       sampleMachine({ ...realMachineDeps(), prevCpus, prev, now, testCommand, spawn }),
     transcripts: maintainTranscripts,
+    tokenAudit: auditEndedRuns,
   };
 }
 
@@ -1225,6 +1229,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         );
       }),
     transcripts: async () => {
+      try {
+        const a = await (c.tokenAudit ?? auditEndedRuns)({ store, config, now: now() });
+        if (a.audited || a.controllerSessions)
+          deps.log?.(`token audit: ${a.audited} runs, ${a.controllerSessions} controller sessions`);
+      } catch (e) {
+        deps.log?.(`token audit failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
       const r = await (c.transcripts ?? maintainTranscripts)({
         store,
         now: now(),

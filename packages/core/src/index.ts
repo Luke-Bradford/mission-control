@@ -40,6 +40,7 @@ export * from "./runs.ts";
 export * from "./runtime.ts";
 export * from "./standing-instructions.ts";
 export * from "./summary.ts";
+export * from "./token-audit.ts";
 export * from "./tool-trim.ts";
 export * from "./topics.ts";
 export type * from "./types.ts";

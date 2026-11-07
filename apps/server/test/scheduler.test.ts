@@ -212,6 +212,40 @@ describe("scheduler", () => {
     expect(log).toHaveBeenCalledWith("transcripts: 1 gzipped, 0 deleted, 0 failed");
   });
 
+  it("runs the token audit before transcript maintenance, and maintenance runs if the audit throws", async () => {
+    const order: string[] = [];
+    const tokenAudit = vi.fn(async () => {
+      order.push("tokenAudit");
+      return { audited: 2, empty: 0, controllerSessions: 0 };
+    });
+    const transcripts = vi.fn(async () => {
+      order.push("transcripts");
+      return { gzipped: 0, deleted: 0, skippedLive: 0, failed: [] };
+    });
+    const log = vi.fn();
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts, tokenAudit }),
+      log,
+    });
+    await s.tick("transcripts");
+    expect(order).toEqual(["tokenAudit", "transcripts"]);
+    expect(tokenAudit).toHaveBeenCalledWith({ store, config, now: NOW });
+    expect(log).toHaveBeenCalledWith("token audit: 2 runs, 0 controller sessions");
+
+    order.length = 0;
+    tokenAudit.mockImplementationOnce(async () => {
+      order.push("tokenAudit");
+      throw new Error("disk gone");
+    });
+    await s.tick("transcripts");
+    expect(order).toEqual(["tokenAudit", "transcripts"]);
+    expect(log).toHaveBeenCalledWith("token audit failed: disk gone");
+  });
+
   it("starts transcript maintenance after one minute, then every six hours", async () => {
     vi.useFakeTimers();
     config.crew = {
