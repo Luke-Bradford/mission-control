@@ -26,3 +26,12 @@ export function needsGroups(
     waiting: others.filter((i) => (i.owner ?? "operator") !== "flight"),
   };
 }
+
+/**
+ * The key of the item the Needs you page opens when its address names none: the first of the asks, then
+ * the defaulted ones, as the page lists them. The page and the fly-out's chip both use this.
+ */
+export function openNeedsKey(attention: readonly AttentionItem[] | undefined): string | null {
+  const { asks, defaulted } = needsGroups(attention);
+  return [...asks, ...defaulted][0]?.key ?? null;
+}

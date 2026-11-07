@@ -1,4 +1,5 @@
 import type { AttentionItem } from "@mc/core";
+import { openNeedsKey } from "../flight/needsGroups.ts";
 import { itemParam, type Page, route, tabOf } from "../router.ts";
 
 /** Each page's name as the header shows it, for the context chip. */
@@ -24,7 +25,7 @@ const PAGE_NAME: Record<Page, string> = {
 export function flyoutContext(
   path: string,
   search = "",
-  items: readonly Pick<AttentionItem, "key" | "ticket">[] = [],
+  items: readonly AttentionItem[] = [],
 ): string {
   const r = route(path, search);
   if (r === null) return PAGE_NAME.overview;
@@ -39,7 +40,11 @@ export function flyoutContext(
     if (v.kind === "ticket") return `${page} · ${v.ref}`;
   }
   // An open question or item panel: its ticket when it has one, else its key.
-  const key = (r.page === "needs" || r.page === "comms" ? r.item : null) ?? itemParam(search);
+  // The Needs you page opens its first question when its address names none.
+  const key =
+    (r.page === "needs" || r.page === "comms" ? r.item : null) ??
+    itemParam(search) ??
+    (r.page === "needs" ? openNeedsKey(items) : null);
   if (key !== null) {
     const item = items.find((i) => i.key === key);
     return `${page} · ${item?.ticket ?? key}`;

@@ -77,6 +77,11 @@ describeRendered("The FLIGHT fly-out in the production App", () => {
       decisions: [],
     },
     "/api/comms/flight": { messages: [] },
+    "/api/comms/crew": { messages: [] },
+    "/api/comms/mentions": { mentions: [] },
+    "/api/comms/pins": { messages: [] },
+    "/api/comms/agents/inco-1": { messages: [], inbox: [], contacts: [], unread: 0 },
+    "/api/comms/agents/inco-1?summary=1": { messages: [], inbox: [], contacts: [], unread: 0 },
   };
   const openStopped = async (path: string, width: number, height = 900) => {
     const page = await renderAt({
@@ -166,6 +171,41 @@ describeRendered("The FLIGHT fly-out in the production App", () => {
       }, null);
       expect(facts.chatW).toBeGreaterThanOrEqual(420);
       expect(facts.fits || facts.ellipsis).toBe(true);
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it.each([
+    [1440, 900],
+    [1600, 900],
+  ])(
+    "on an agent's Comms view at %i with the fly-out open, the conversation and its box keep their room",
+    async (width, height) => {
+      const page = await openStopped("/comms/agents/inco-1", width, height);
+      await page.box(".comms-messages");
+      const facts = await page.evaluate(
+        () => ({
+          messages: document.querySelector(".comms-messages")?.getBoundingClientRect().width ?? 0,
+          box: document.querySelector("#comms-compose")?.getBoundingClientRect().width ?? 0,
+        }),
+        null,
+      );
+      expect(facts.messages).toBeGreaterThanOrEqual(360);
+      expect(facts.box).toBeGreaterThanOrEqual(240);
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "on Comms at 1280 with the fly-out open, the conversation keeps a useful height",
+    async () => {
+      const page = await openStopped(PAGE_PATHS.comms, 1280, 900);
+      await page.box(".comms-messages");
+      const height = await page.evaluate(
+        () => document.querySelector(".comms-messages")?.getBoundingClientRect().height ?? 0,
+        null,
+      );
+      expect(height).toBeGreaterThanOrEqual(400);
     },
     BROWSER_TEST_TIMEOUT_MS,
   );

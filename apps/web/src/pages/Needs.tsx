@@ -1,7 +1,7 @@
 import type { AttentionItem, Crew } from "@mc/core";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { isNotTriaging, NotTriagingRow } from "../flight/NotTriaging.tsx";
-import { needsGroups } from "../flight/needsGroups.ts";
+import { needsGroups, openNeedsKey } from "../flight/needsGroups.ts";
 import { Pending } from "../flight/Pending.tsx";
 import { HoldItem } from "../needs/HoldItem.tsx";
 import { NeedsList } from "../needs/NeedsList.tsx";
@@ -56,7 +56,7 @@ export function Needs({ item }: { item: string | null }) {
   const connection = useStore(streamStatus);
   const { asks, defaulted } = needsGroups(attention);
   const list = [...asks, ...defaulted];
-  const first = list[0]?.key ?? null;
+  const first = openNeedsKey(attention);
   const open = item === null ? first : item;
   const current = attention === undefined ? undefined : list.find((i) => i.key === open);
   // the first item opens without changing the URL; a named key that has gone does not jump

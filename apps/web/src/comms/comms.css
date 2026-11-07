@@ -862,10 +862,19 @@ a.comms-ref {
   margin: 0 0 var(--sp-1);
 }
 
-/* 1016px of page is a 1100px window with the fly-out folded to its 48px rail (its default); open, the same page width is a 1440px window. */
+/*
+ * The layout answers to the width the page gets, which the FLIGHT fly-out takes 380px of. Narrow means
+ * the conversation keeps its width and a row's height and the graph and traffic scroll below it:
+ *  - 1016px of page is a 1100px window with the fly-out folded to its 48px rail (its default);
+ *  - an agent, inbox or contact view carries its own 220px column of contacts, so it needs
+ *    280 + 220 + 420 for the conversation + a 300px graph column, about 1340px of page, before it
+ *    may use three columns.
+ */
 @container (max-width: 1016px) {
   .comms-grid {
     grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-rows: max(420px, calc(62 * var(--vh))) auto;
+    overflow-y: auto;
   }
   .comms-right {
     grid-column: 1 / -1;
@@ -873,6 +882,22 @@ a.comms-ref {
     grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
   }
   .comms-graph-panel {
+    min-height: 380px;
+  }
+}
+
+@container (max-width: 1340px) {
+  .comms-grid:has(.comms-agent) {
+    grid-template-columns: 240px minmax(0, 1fr);
+    grid-template-rows: max(420px, calc(62 * var(--vh))) auto;
+    overflow-y: auto;
+  }
+  .comms-grid:has(.comms-agent) .comms-right {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr);
+  }
+  .comms-grid:has(.comms-agent) .comms-graph-panel {
     min-height: 380px;
   }
 }
@@ -893,6 +918,12 @@ a.comms-ref {
   .comms-grid,
   .comms-agent {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* One column on a phone-width page: rows follow their content, and the page scrolls as a whole. */
+  .comms-grid,
+  .comms-grid:has(.comms-agent) {
+    grid-template-rows: none;
+    overflow-y: visible;
   }
   .comms-right-reserved {
     display: none;

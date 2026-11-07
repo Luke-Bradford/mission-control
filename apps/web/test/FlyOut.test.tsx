@@ -10,7 +10,7 @@ import { Dock } from "../src/shell/Dock.tsx";
 import { flyoutContext, stripContext, withContext } from "../src/shell/flyoutContext.ts";
 import { resetOverlays } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, NOW } from "./fixtures.ts";
+import { CONFIG, item, NOW } from "./fixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
 
 const key = (over: Partial<Parameters<typeof isSendKey>[0]>) => ({
@@ -45,13 +45,16 @@ describe("where the operator is", () => {
 
   it("names the open question, the Comms conversation and the item panel", () => {
     const items = [
-      { key: "esc:shop-app#1", ticket: "shop-app#1" },
-      { key: "ask:3", ticket: null },
+      item({ key: "esc:shop-app#1", ticket: "shop-app#1", kind: "decision" }),
+      item({ key: "ask:3", ticket: null, kind: "question" }),
     ];
     expect(flyoutContext("/needs-you/esc%3Ashop-app%231", "", items)).toBe(
       "Needs you · shop-app#1",
     );
     expect(flyoutContext("/needs-you/ask%3A3", "", items)).toBe("Needs you · ask:3");
+    // The page opens its first question when the address names none, and the chip names that one.
+    expect(flyoutContext("/needs-you", "", items)).toBe("Needs you · shop-app#1");
+    expect(flyoutContext("/needs-you", "", [])).toBe("Needs you");
     expect(flyoutContext("/comms/agents/inco-1")).toBe("Comms · inco-1");
     expect(flyoutContext("/", "?item=esc%3Ashop-app%231", items)).toBe("Overview · shop-app#1");
   });
