@@ -154,28 +154,9 @@
   color: var(--fg-2);
 }
 
-.needs-pins {
-  list-style: none;
+.needs-band-context {
   margin: var(--sp-2) 0 0;
-  padding: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--sp-2) var(--sp-4);
-  font-size: var(--fs-s);
-}
-
-.needs-pins li {
-  display: flex;
-  gap: var(--sp-2);
-  min-width: 0;
-  max-width: 100%;
-}
-
-.needs-pin-title {
-  color: var(--fg-2);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .needs-row-ask {

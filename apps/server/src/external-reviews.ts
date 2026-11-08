@@ -148,23 +148,45 @@ export function createExternalReviews(deps: {
   const mine = (repoId: string, pr: Pick<PullRequestView, "number" | "branch" | "headSha">) =>
     ownsPr(store, repoId, pr) ||
     (pr.headSha != null && externalReviewAsked(store, repoId, pr.number, pr.headSha, true));
-  function wanted(row: ReviewRow): boolean {
+  /**
+   * A review that reported on a head after its author run ended (or went away) has no crew loop
+   * left to post it, so this hub posts it as it does an external one.
+   */
+  const orphaned = (row: ReviewRow) => {
+    if (isExternalReview(row) || row.state !== "reported") return false;
+    const author = store.run(row.authorRunId);
+    return author === null || author.endedAt !== null;
+  };
+  /** Why this row is not posted now, or null when it is. */
+  function notWanted(row: ReviewRow): string | null {
     const repo = deps.config.repos.find((r) => r.id === row.repoId);
     const pr = store.pullRequests(row.repoId).find((p) => p.number === row.prNumber);
-    return (
-      isExternalReview(row) &&
-      (deps.enabled?.() ?? true) &&
-      repo?.autonomy === "merge" &&
-      pr?.state === "open" &&
-      !pr.isDraft &&
-      pr.headSha === row.sha &&
-      !branchOwned(deps.config, store, row.repoId, pr.branch, pr.ticket) &&
-      mine(row.repoId, pr)
-    );
+    if (!isExternalReview(row) && !orphaned(row)) return "a crew run still owns the review";
+    if (!(deps.enabled?.() ?? true)) return "the engine is off";
+    if (repo?.autonomy !== "merge") return "the repo is not on merge autonomy";
+    if (pr?.state !== "open") return "the PR is not open";
+    if (pr.isDraft) return "the PR is a draft";
+    if (pr.headSha !== row.sha) return "the PR head has moved";
+    if (branchOwned(deps.config, store, row.repoId, pr.branch, pr.ticket))
+      return "a crew run or claim still owns the branch";
+    if (!mine(row.repoId, pr)) return "this hub neither ran the branch nor was asked to review it";
+    return null;
+  }
+  const wanted = (row: ReviewRow): boolean => notWanted(row) === null;
+  /** One line per row and reason: a final result left unposted on purpose says so, once. */
+  const said = new Set<string>();
+  function skipped(pr: PullRequestView, row: ReviewRow, why: string): void {
+    if (row.state !== "reported" && row.state !== "failed") return;
+    const key = `${row.id}:${why}`;
+    if (said.has(key)) return;
+    said.add(key);
+    deps.log(`External QA for ${row.repoId}#${pr.number} is not posted to GitHub: ${why}.`);
   }
 
   async function publish(pr: PullRequestView, row: ReviewRow): Promise<void> {
-    if (!wanted(row) || row.state === "superseded") return;
+    if (row.state === "superseded") return;
+    const why = notWanted(row);
+    if (why !== null) return skipped(pr, row, why);
     const repo = deps.config.repos.find((r) => r.id === row.repoId);
     if (!repo) return;
     const state =
@@ -290,10 +312,32 @@ export function createExternalReviews(deps: {
         for (const repo of deps.config.repos) {
           if (repo.autonomy !== "merge") continue;
           for (const pr of store.pullRequests(repo.id)) {
-            if (pr.state !== "open" || pr.isDraft || !pr.headSha) continue;
-            if (branchOwned(deps.config, store, repo.id, pr.branch, pr.ticket)) continue;
+            if (pr.state !== "open" || !pr.headSha) continue;
+            // a result this hub holds for the head that these filters leave unposted says why
+            const holds = (why: string) => {
+              const held = store
+                .reviewsOfPr(repo.id, pr.number)
+                .findLast(
+                  (r) =>
+                    r.sha === pr.headSha &&
+                    r.state === "reported" &&
+                    (isExternalReview(r) || orphaned(r)),
+                );
+              if (held) skipped(pr, held, why);
+            };
+            if (pr.isDraft) {
+              holds("the PR is a draft");
+              continue;
+            }
+            if (branchOwned(deps.config, store, repo.id, pr.branch, pr.ticket)) {
+              holds("a crew run or claim still owns the branch");
+              continue;
+            }
             // a review is this hub's work: a run here made the branch, or someone asked for this head
-            if (!mine(repo.id, pr)) continue;
+            if (!mine(repo.id, pr)) {
+              holds("this hub neither ran the branch nor was asked to review it");
+              continue;
+            }
             try {
               const identity = externalReviewKey(repo.id, pr.number);
               const reviews = store.reviewsOfRun(identity);
@@ -312,6 +356,17 @@ export function createExternalReviews(deps: {
                   .map((review) => review.seatId),
               );
               const retry = row?.state === "failed" && failedSeats.has(row.seatId);
+              if (row === undefined) {
+                // a crew review of this head reported after its author's run ended: post it, and
+                // do not review the head again
+                const crew = store
+                  .reviewsOfPr(repo.id, pr.number)
+                  .findLast((r) => r.sha === pr.headSha && orphaned(r));
+                if (crew) {
+                  await publish(pr, crew);
+                  continue;
+                }
+              }
               if ((row === undefined || retry) && pr.ci === "passing") {
                 if (
                   reviews.length === 0 &&

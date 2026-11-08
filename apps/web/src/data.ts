@@ -168,6 +168,11 @@ export const RESOURCES = {
     path: `/api/code-health/recommendations?repo=${enc(repo)}&cursor=${enc(cursor)}`,
     topic: ["agents", "flight"],
   }),
+  /** Where each run's tokens went; read on opening and on Refresh, not on every crew event. */
+  tokenAudit: (days: number): ResourceRef => ({
+    path: `/api/audit/tokens?days=${days}`,
+    topic: null,
+  }),
   audit: (range: string): ResourceRef => ({
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",

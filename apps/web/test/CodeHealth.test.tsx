@@ -186,7 +186,8 @@ it("loads Test health on demand and pages explicit exact-head attempts through a
   await screen.findByRole("tab", { name: "Test health" });
   await screen.findByText("Inspect planning and corrections before extending the same work.");
   expect(fetch.mock.calls.some(([url]) => url.includes("tab=test"))).toBe(false);
-  fireEvent.keyDown(screen.getByRole("tab", { name: "Overview" }), { key: "End" });
+  // Test health is the tab after Code risk; Tokens now ends the row.
+  fireEvent.keyDown(screen.getByRole("tab", { name: "Code risk" }), { key: "ArrowRight" });
   await screen.findByRole("region", { name: "Ranked test disruption" });
   fireEvent.click(screen.getByRole("button", { name: "7 days" }));
   await waitFor(() =>
