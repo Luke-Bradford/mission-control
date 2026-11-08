@@ -143,7 +143,8 @@ it("a reply to a seat whose run ended goes to the seat now on that ticket, else 
   expect(toFlight.json()).toMatchObject({ redirectedTo: "flight-1" });
   expect(toFlight.json().message.to).toBe("flight-1");
   expect(toFlight.json().message.mentions).not.toContain("guido-1");
-  expect(woken).toEqual(["flight-1"]);
+  // FLIGHT is woken by the hub itself, and guido-1 is not told at all
+  expect(woken).toEqual([]);
   expect(commsInboxContext(store, "guido-1", "r5").messageIds).toEqual([]);
   // another seat now works the ticket
   store.upsertRun(run({ id: "r9", agentId: "inco-1", seq: 1 }));
@@ -198,6 +199,15 @@ it("a choice made through FLIGHT's operator tool is stored and worded as FLIGHT'
   const { store, app, woken } = setup();
   store.upsertRun(run({ id: "r1" }));
   store.upsertRun(run({ id: "fr", agentId: "flight-1", seq: 1, ticket: null }));
+  store.setSeatSession({
+    seatId: "guido-1",
+    runId: "r1",
+    cliSessionId: null,
+    state: "running",
+    reason: null,
+    worktree: null,
+    updatedAt: 1,
+  });
   const q = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "Ship the plan?", at: 2 });
   store.passQuestion(q, 3);
   store.addBrief({

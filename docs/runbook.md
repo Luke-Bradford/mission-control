@@ -2743,6 +2743,11 @@ keep their permission checks.
   operator's reply to a seat's message goes. If the run that wrote it has ended, it goes to the seat
   now on that ticket, else to FLIGHT, and `POST /api/comms` reports `redirectedTo`. The redirected reply keeps the ticket but is not linked to the ended run's message and does not mention or wake its seat. Replies only:
   an answer to a question never takes this route.
+- **Waking and closing.** A seat is not woken for a Comms message while it is mid-turn (it takes
+  its inbox at the next turn), and FLIGHT is never woken by these routes (the hub wakes it). A
+  plain message through `POST /api/seats/:id/message` closes no question; a reply that names a
+  question (`question`) closes that one only. A failed wake leaves the message stored and marks it,
+  so an identical retry wakes the seat again.
 - **Choosing an option.** `POST /api/attention/:key/choose` with `{ optionId, briefAt }` is the one
   way a choice acts; chat text never picks an option. `briefAt` must equal the open brief's time and
   `optionId` must be one of its options. A brief the hub wrote (`by: "hub"`, such as a queue change) is refused with 409: it acts through its own buttons. The brief is claimed before anything is sent, so two picks at once deliver once. The answer goes to the run that asked and wakes it; if
@@ -2752,7 +2757,9 @@ keep their permission checks.
   `question_choices` (kept 365 days) and shows in the ticket's timeline as a `choice` decision;
   nothing is written to GitHub. The route returns a receipt (what was chosen, where it went, when
   delivered); choosing the same brief again returns the first receipt. `GET /api/attention/:key/choice`
-  reads it later with the current delivery time.
+  reads it later. A non-question item (a note, a crew error, an open Comms item) is closed at its
+  source, then acked. `store.isChoiceAnswer(id)` tells a reader the message is a hub-built answer,
+  not something the operator owes a reply to with the current delivery time.
 - **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
   that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
 - **Sender kind.** Each message stores who sent it: `operator`, `controller`, `flight`, `seat` or

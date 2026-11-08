@@ -1357,6 +1357,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
    * operator tool, the controller's credential, or a person using the app.
    */
   /** Who reacts or pins: FLIGHT through its operator tool, the controller, or the operator. */
+  /**
+   * Wakes a seat to take its Comms inbox. Not while the seat is mid-turn (it takes the inbox at its
+   * next turn, and an empty wake burns tokens), and never FLIGHT: the hub wakes FLIGHT itself.
+   */
+  const wakeSeat = (seatId: string, text: string, from: string): void => {
+    if (seatId === flightSeat(config)?.seat.id) return;
+    if (deps.supervisor?.busy?.().some((b) => b.seatId === seatId && b.state === "running")) return;
+    deps.deliverComms?.(seatId, text, from);
+  };
   const commsActor = (req: FastifyRequest): string => commsSender(req).from;
   const commsSender = (req: FastifyRequest): { from: string; kind: CommsSenderKind } => {
     const actor = flightActor(req);
@@ -1903,7 +1912,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               // redirected away from the ended run: its seat is not told of the reply
               ...(redirectedTo === undefined ? {} : { replyAuthorMention: false }),
               ...(prThread === undefined ? {} : { ticket: prThread }),
-              notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
+              notify: (seatId, text, from) => wakeSeat(seatId, text, from),
             },
             sender.from,
             input,
@@ -4506,6 +4515,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
             let delivered = false;
+            let wakeFailed = false;
             const sent = await sendComms(
               {
                 store,
@@ -4517,11 +4527,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 wakeUnlabelled: true,
                 notify: async (seatId, text) => {
                   try {
-                    await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                    // the text answers no question by itself: only the one it names closes, below
+                    await sup.message(seatId, text, {
+                      interrupt: b.interrupt === true,
+                      questions: "none",
+                    });
                     delivered = true;
                   } catch (e) {
                     // a plain message stays stored for the seat's next turn; only an interrupt must land
                     if (b.interrupt === true) throw e;
+                    wakeFailed = true;
                   }
                 },
               },
@@ -4535,6 +4550,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
             if (delivered) store.markCommsInboxRead(id, [sent.id], now());
+            // a retry of the same text wakes the seat again
+            if (wakeFailed) store.markCommsWakeFailed(sent.id, now());
+            // the reply names its question: that one closes, and no other
+            if (named !== null) {
+              store.answerQuestion(named.id, now());
+              bus.emit("attention");
+            }
             return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
@@ -6007,7 +6029,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               crew: commsCrew,
               knownSecrets: deps.knownSecrets ?? (async () => []),
               sender: commsSender(req),
-              wake: (seatId) => deps.deliverComms?.(seatId, "", commsSender(req).from),
+              wake: (seatId) => wakeSeat(seatId, "", commsSender(req).from),
               ...(deps.engine?.reconcileRun === undefined
                 ? {}
                 : {

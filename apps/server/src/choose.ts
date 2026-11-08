@@ -2,12 +2,15 @@ import {
   type AttentionItem,
   type ChoiceReceipt,
   type ChoiceTargetKind,
+  COMMS_CAPCOM,
   COMMS_MC,
+  COMMS_OPEN_PREFIX,
   type CommsSenderKind,
 } from "@mc/core";
 import { sendComms } from "./comms.ts";
 import type { CcConfig } from "./config.ts";
 import { flightSeat } from "./flight/seat.ts";
+import { CREW_ERROR_KEY, NOTE_KEY } from "./hud.ts";
 import type { QuestionChoiceRow, Store } from "./store.ts";
 
 /** What a choice route sends back when it refuses: the status and one plain line. */
@@ -120,7 +123,7 @@ export async function chooseOption(
   const lead = `Re: ${key} · ${chooser} chose "${option.label}"`;
   const text =
     targetKind === "flight-for-next-run"
-      ? `${lead}\n\n${option.answer}\n\nThe run that asked has ended. Pass this on to the next run on ${ticket ?? "that ticket"}.`
+      ? `${lead}\n\n${option.answer}\n\n${question?.agentId ?? "The seat"}'s run that asked has ended. Pass this on to the next run on ${ticket ?? "that ticket"}.`
       : `${lead}\n\n${option.answer}`;
 
   // Claim the brief before anything is sent, with no wait in between: a second pick at the same
@@ -151,7 +154,10 @@ export async function chooseOption(
         seatSender: false,
         senderKind: d.sender.kind,
         wakeUnlabelled: true,
-        notify: (seatId) => d.wake(seatId),
+        // a run set aside is woken by the engine below, not through the run on its seat
+        notify: (seatId) => {
+          if (runId === undefined || store.seatSession(seatId)?.runId === runId) d.wake(seatId);
+        },
       },
       d.sender.from,
       {
@@ -162,18 +168,23 @@ export async function chooseOption(
       },
     );
     store.setChoiceMessage(key, input.briefAt, sent.id);
-    // a run set aside is not the run on its seat: the engine wakes it
-    if (runId !== undefined && store.seatSession(to)?.runId !== runId)
-      await d.reconcileRun?.(runId);
   } catch (e) {
-    // nothing was delivered: let the operator choose again
+    // nothing was stored or delivered: let the operator choose again
     store.releaseChoice(key, input.briefAt);
     throw new ChoiceRefused(400, e instanceof Error ? e.message : "The answer could not be sent.");
+  }
+  // The answer is stored, so the choice stands even if waking the run fails (its next turn takes it).
+  if (runId !== undefined && store.seatSession(to)?.runId !== runId) {
+    try {
+      await d.reconcileRun?.(runId);
+    } catch {
+      // the answer waits in the run's inbox
+    }
   }
 
   // close the question; the ticket's history reads the stored choice
   if (question !== null) store.answerQuestion(question.id, now);
-  else store.ack([key], now);
+  else closeItem(store, key, now);
 
   // FLIGHT hears of a seat's answer in one line at its next wake; this wakes no one
   if (targetKind === "seat" && flightId !== null && flightId !== to && flightId !== d.sender.from)
@@ -186,4 +197,20 @@ export async function chooseOption(
       text: `${chooser[0]?.toUpperCase()}${chooser.slice(1)} chose "${option.label}" for ${to}'s question${ticket === null ? "" : ` on ${ticket}`}; it is delivered to the run.`,
     });
   return receipt(store, claimed.row, false);
+}
+
+/** Takes a non-question item out of Needs you the way its own source does, then acks it. */
+function closeItem(store: Store, key: string, at: number): void {
+  if (key.startsWith(NOTE_KEY)) store.dismissNote(key.slice(NOTE_KEY.length), at);
+  else if (key.startsWith(CREW_ERROR_KEY)) {
+    const id = Number(key.slice(CREW_ERROR_KEY.length));
+    if (Number.isSafeInteger(id) && id > 0) store.ackCrewError(id);
+  } else if (key.startsWith(COMMS_OPEN_PREFIX))
+    store.settleCommsItem(
+      key.slice(COMMS_OPEN_PREFIX.length),
+      COMMS_CAPCOM,
+      "Chosen in Needs you",
+      at,
+    );
+  store.ack([key], at);
 }

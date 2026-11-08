@@ -6963,8 +6963,8 @@ describe("crew routes", () => {
     expect(i.json()).toEqual({ ok: true });
     expect(e.json()).toEqual({ ok: true });
     expect(supervisorCalls).toEqual([
-      ["message", "guido-1", "hi", { interrupt: false }],
-      ["message", "guido-1", "now", { interrupt: true }],
+      ["message", "guido-1", "hi", { interrupt: false, questions: "none" }],
+      ["message", "guido-1", "now", { interrupt: true, questions: "none" }],
       ["interrupt", "guido-1"],
       ["end", "guido-1", { hold: undefined }],
     ]);
@@ -7146,7 +7146,9 @@ describe("crew routes", () => {
       const text = char.repeat(COMMS_MESSAGE_MAX);
       const r = await post5("message", { text });
       expect(r.statusCode).toBe(200);
-      expect(supervisorCalls).toEqual([["message", "guido-1", text, { interrupt: false }]]);
+      expect(supervisorCalls).toEqual([
+        ["message", "guido-1", text, { interrupt: false, questions: "none" }],
+      ]);
       expect(store.comms(0).map((m) => m.text)).toEqual([text]);
     },
   );
@@ -7163,7 +7165,9 @@ describe("crew routes", () => {
 
   it("stores message text as typed, indentation included", async () => {
     expect((await post5("message", { text: "  - item\n" })).statusCode).toBe(200);
-    expect(supervisorCalls).toEqual([["message", "guido-1", "  - item\n", { interrupt: false }]]);
+    expect(supervisorCalls).toEqual([
+      ["message", "guido-1", "  - item\n", { interrupt: false, questions: "none" }],
+    ]);
   });
 
   describe("the watch seat", () => {
@@ -8377,6 +8381,48 @@ describe("the first loop's engine", () => {
         await a.close();
       },
     );
+
+    it("a plain message closes no question, and a reply that names one closes only that one", async () => {
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q1 = store.addQuestion({ agentId: "guido-1", runId: "next", text: "One?", at: NOW });
+      const q2 = store.addQuestion({ agentId: "guido-1", runId: "next", text: "Two?", at: NOW });
+      const { a } = appOnSeat();
+      // the stub does what the real supervisor does with the option the route passes
+      const sup = stubSupervisor();
+      sup.seat = () => ({
+        seatId: "guido-1",
+        runId: "next",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      sup.message = async (_seat, _text, opts) => {
+        if (opts.questions !== "none")
+          store.answerRunQuestions("next", NOW, opts.questions === "unpassed");
+      };
+      await a.close();
+      const b = buildApp({ config, store, bus, supervisor: sup });
+      try {
+        const plain = await b.inject({
+          method: "POST",
+          url: "/api/seats/guido-1/message",
+          payload: { text: "unrelated note" },
+        });
+        expect(plain.statusCode).toBe(200);
+        expect(store.openQuestions().map((x) => x.id)).toEqual([q1, q2]);
+        const named = await b.inject({
+          method: "POST",
+          url: "/api/seats/guido-1/message",
+          payload: { text: "the answer to one", question: q1 },
+        });
+        expect(named.statusCode).toBe(200);
+        expect(store.openQuestions().map((x) => x.id)).toEqual([q2]);
+      } finally {
+        await b.close();
+      }
+    });
 
     it("sends a message that names no question to the run on the seat when none waits", async () => {
       store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));

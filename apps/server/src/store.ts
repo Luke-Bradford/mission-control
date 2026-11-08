@@ -6320,6 +6320,18 @@ export class Store {
         .run(n, key, briefAt);
   }
 
+  /**
+   * Whether a Comms message is the hub-built answer to a choice. A reader that counts messages the
+   * operator owes a reply to leaves these out: they answer, they do not ask.
+   */
+  isChoiceAnswer(messageId: string): boolean {
+    const n = commsMessageNumber(messageId);
+    return (
+      n !== null &&
+      this.db.prepare("SELECT 1 FROM question_choices WHERE message_id = ?").get(n) !== undefined
+    );
+  }
+
   /** Drops a claim whose answer could not be sent. */
   releaseChoice(key: string, briefAt: number): void {
     this.db

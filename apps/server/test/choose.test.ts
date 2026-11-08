@@ -2,6 +2,7 @@ import type { AttentionBrief, AttentionItem, Run } from "@mc/core";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "../src/choose.ts";
 import type { CcConfig } from "../src/config.ts";
+import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
 import { ticketHistory } from "../src/ticket-history.ts";
 
@@ -138,6 +139,8 @@ it("delivers a seat's answer to the run that asked, wakes it and tells FLIGHT in
   expect(msg?.text).toContain("Go ahead and ship.");
   const sentId = store.latestChoice(`ask:${q}`)?.messageId ?? "";
   expect(store.commsRun(sentId)?.id).toBe("r1");
+  expect(store.isChoiceAnswer(sentId)).toBe(true);
+  expect(store.isChoiceAnswer("comms:999")).toBe(false);
   expect(wake).toHaveBeenCalledWith("guido-1");
   expect(store.question(q)?.answeredAt).toBe(10_000);
   // FLIGHT is told, but not woken
@@ -212,6 +215,8 @@ it("wakes a set-aside run through the engine, not the run on its seat", async ()
   const q = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "Ship?", at: 2 });
   await chooseOption(deps(), item(`ask:${q}`), `ask:${q}`, { optionId: "yes", briefAt: BRIEF_AT });
   expect(reconcile).toHaveBeenCalledWith("r1");
+  // the engine wakes a set-aside run; nothing wakes the run now on the seat
+  expect(wake).not.toHaveBeenCalled();
   expect(store.comms(0).find((m) => m.to === "guido-1")).toBeDefined();
 });
 
@@ -279,4 +284,50 @@ it("refuses a brief the hub wrote, which acts through its own buttons, and chang
   expect(store.comms(0)).toHaveLength(0);
   expect(store.choice(key, BRIEF_AT)).toBeNull();
   expect(wake).not.toHaveBeenCalled();
+});
+
+it("names the asking seat when the run that asked has ended", async () => {
+  store.upsertRun(run({ id: "r1", endedAt: 3_000, status: "ok" }));
+  const q = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "Ship?", at: 2 });
+  await chooseOption(deps(), item(`ask:${q}`), `ask:${q}`, { optionId: "yes", briefAt: BRIEF_AT });
+  expect(store.comms(0).find((m) => m.to === "flight-1")?.text).toContain(
+    "guido-1's run that asked",
+  );
+});
+
+it("keeps the choice when waking a set-aside run fails, and releases it only when nothing was sent", async () => {
+  store.upsertRun(run({ id: "r1" }));
+  store.upsertRun(run({ id: "r2", seq: 2 }));
+  seatSession("guido-1", "r2");
+  const q = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "Ship?", at: 2 });
+  const key = `ask:${q}`;
+  reconcile.mockRejectedValueOnce(new Error("engine busy"));
+  const receipt = await chooseOption(deps(), item(key), key, {
+    optionId: "yes",
+    briefAt: BRIEF_AT,
+  });
+  expect(receipt.alreadyChosen).toBe(false);
+  expect(store.choice(key, BRIEF_AT)).not.toBeNull();
+  expect(store.comms(0).filter((m) => m.to === "guido-1")).toHaveLength(1);
+});
+
+it("takes a chosen note out of Needs you at its source", async () => {
+  store.raiseNote({
+    key: "blocked:demo",
+    kind: "blocked",
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "Choose",
+    at: 1,
+  });
+  const key = "note:blocked:demo";
+  const before = attentionItems(config, store, nowMs, NO_LOCK);
+  expect(before.some((i) => i.key === key)).toBe(true);
+  await chooseOption(deps(), item(key, { agentId: "flight-1", kind: "blocked" }), key, {
+    optionId: "yes",
+    briefAt: BRIEF_AT,
+  });
+  const after = attentionItems(config, store, nowMs, NO_LOCK);
+  expect(after.some((i) => i.key === key)).toBe(false);
 });
