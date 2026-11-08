@@ -116,8 +116,8 @@ const named = (xs: readonly string[]) =>
     : xs.join(", ");
 export const hubCodeHeldText = (held: HeldRange): string =>
   held.unsafePaths !== undefined && held.unsafePaths.length > 0
-    ? `Update waits for you: main adds a symlink or submodule (${named(held.unsafePaths)}), which auto-Update never applies: run Update after checking it. Commits: ${named(held.commits)}.`
-    : `Update waits for you: main changes more than the page and docs. Auto-Update leaves that to a person: run Update. Commits: ${named(held.commits)}. Paths: ${named(held.paths)}.`;
+    ? `Update waits for you: main adds a symlink or submodule (${named(held.unsafePaths)}), which auto-Update never applies: run Update after checking it, or FLIGHT may run it through mc operator once the crew is idle. Commits: ${named(held.commits)}.`
+    : `Update waits for you: main changes more than the page and docs. Auto-Update leaves that to a person: run Update, or FLIGHT may run it through mc operator once the crew is idle. Commits: ${named(held.commits)}. Paths: ${named(held.paths)}.`;
 /** Auto-Update's refusal when the checkout's HEAD is not on origin/main's history. */
 export const HUB_HEAD_OFF_MAIN =
   "the checkout's HEAD is not on origin/main's history; a person runs this Update";

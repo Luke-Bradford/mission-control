@@ -39,6 +39,7 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OPERATOR_UNREAD_MS,
+  FLIGHT_OWED_MS,
   FLIGHT_PR_ENTRY_CHANGES,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
@@ -763,9 +764,7 @@ function wakeInputs(i: {
     flightId === null
       ? []
       : [COMMS_CAPCOM, COMMS_CONTROLLER]
-          .flatMap((from) =>
-            i.store.owedCommsFrom(from, flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS),
-          )
+          .flatMap((from) => i.store.owedCommsFrom(from, flightId, i.now - FLIGHT_OWED_MS))
           .sort((a, b) => Number(a) - Number(b));
   // a seat left idle by the slow pace is the operator's wish, not a fault to wake FLIGHT about
   const idle = i.pace ? undefined : idleSeats(i, waits, rules, fit);

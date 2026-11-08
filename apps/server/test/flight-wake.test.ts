@@ -12,6 +12,7 @@ import {
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
+  FLIGHT_OWED_MS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REWAKE_MS,
   FLIGHT_TICKETS_LISTED,
@@ -749,6 +750,20 @@ describe("operator messages FLIGHT owes an answer", () => {
       mentions: [],
     });
     expect(store.owedCommsFrom("CAPCOM", seat, 0)).toEqual([second.id.slice(6)]);
+    store.close();
+  });
+
+  it("keeps a message owed past the six hours an unread one wakes for, and drops a settled one", () => {
+    const store = new Store(":memory:");
+    const kept = send(store, 1, 1000);
+    const settled = send(store, 2, 1000);
+    if (kept === null || settled === null) throw new Error("not stored");
+    store.markCommsInboxRead(seat, [kept.id, settled.id]);
+    store.settleCommsItem(settled.id, "CAPCOM", "handled", 1500);
+    const sevenHours = 1000 + 7 * 60 * 60_000;
+    expect(store.owedCommsFrom("CAPCOM", seat, sevenHours - FLIGHT_OWED_MS)).toEqual([
+      kept.id.slice(6),
+    ]);
     store.close();
   });
 

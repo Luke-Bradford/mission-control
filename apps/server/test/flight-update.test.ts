@@ -138,6 +138,22 @@ it("refuses FLIGHT's Update on a standard repo", async () => {
   expect(calls).toEqual([]);
 });
 
+it("refuses FLIGHT's Update when none is held for a person", async () => {
+  build("superuser");
+  store.clearNote(HUB_UPDATE_HELD_KEY, NOW);
+  const r = await update(asFlight);
+  expect(r.statusCode).toBe(409);
+  expect(calls).toEqual([]);
+  // the operator's own Update does not need a hold
+  expect((await update(headers)).statusCode).toBe(200);
+});
+
+it("records an Update FLIGHT ran as FLIGHT's", async () => {
+  build("superuser");
+  await update(asFlight);
+  expect(store.hubEvents(0).map((e: { text: string }) => e.text)).toContain("Updated by FLIGHT");
+});
+
 it("leaves the operator's own Update alone while seats are busy", async () => {
   build("standard");
   busy = [...busy, { seatId: "guido-1", state: "running" }];

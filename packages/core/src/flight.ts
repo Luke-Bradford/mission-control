@@ -1388,6 +1388,8 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 export const FLIGHT_BATCH_MS = 15 * 60_000;
 /** An operator message to FLIGHT unread this long after it was sent no longer wakes it. */
 export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
+/** An operator message FLIGHT read and has not answered stays owed this long. */
+export const FLIGHT_OWED_MS = 7 * 24 * 60 * 60_000;
 /** How many days back the cost and wait telemetry looks. */
 export const FLIGHT_COST_DAYS = 14;
 /** Wakes of one FLIGHT run before it gets a fresh session. */

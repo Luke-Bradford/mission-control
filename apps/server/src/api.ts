@@ -406,7 +406,7 @@ import { overviewTimeline } from "./timeline.ts";
 import { tokenAuditView } from "./token-audit-view.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 import { transcriptFootprint } from "./transcript-lifecycle.ts";
-import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
+import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
 
@@ -5766,7 +5766,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE, logged: false });
-        // FLIGHT runs the Update a person would, on its own superuser repo, once no other seat is working
+        // FLIGHT runs a held Update on its own superuser repo, once no other seat is working
         const actor = flightActor(req);
         if (actor !== null) {
           const repoId = configuredAgents(config).find((a) => a.id === actor.seatId)?.repoId;
@@ -5774,6 +5774,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(403)
               .send({ error: "Only FLIGHT on a superuser repo runs Update.", logged: false });
+          // FLIGHT runs the Update the hub held for a person, not any Update
+          if (!store.notes().some((n) => n.key === HUB_UPDATE_HELD_KEY))
+            return reply
+              .code(409)
+              .send({ error: "No Update is held for a person.", logged: false });
           const working = (supervisor?.busy() ?? []).find((b) => b.seatId !== actor.seatId);
           if (working !== undefined)
             return reply.code(409).send({
@@ -5784,7 +5789,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           const out = await updater.update();
           if ("restarting" in out) updater.restart();
-          if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
+          if (!("upToDate" in out))
+            store.addHubEvent(actor === null ? "Updated manually" : "Updated by FLIGHT", now());
           return "restarting" in out ? reply.code(202).send(out) : out;
         } catch (e) {
           captureError(reply, e);
@@ -5922,6 +5928,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const item = currentDiscussionItem(req.params.key);
         if (!item || item.version !== body.data.version)
           return reply.code(409).send({ error: "Item changed or ended; refresh before sending." });
+        // no FLIGHT seat is configured: nothing would ever pick the reply up
+        const flight = flightSeat(config);
+        if (!flight) return reply.code(409).send({ error: "This hub has no FLIGHT seat." });
         const thread = openDiscussion({ ...item, version: body.data.version });
         const { messageId, text } = body.data;
         try {
@@ -5933,9 +5942,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return store.discussion(item.key, thread.id);
         // The reply is stored whether or not FLIGHT is running: an unsent one is in FLIGHT's wake
         // (pendingDiscussions) when it starts, so nothing here answers "FLIGHT is unavailable".
-        const flight = flightSeat(config);
         const flightOn = supervisor?.status().enabled === true;
-        if (!flight || !supervisor || !flightOn) return store.discussion(item.key, thread.id);
+        if (!supervisor || !flightOn) return store.discussion(item.key, thread.id);
         const sendKey = `${thread.id}:${messageId}`;
         if (discussionSends.has(sendKey))
           return reply.code(409).send({ error: "Message is being sent." });

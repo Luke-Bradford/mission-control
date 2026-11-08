@@ -76,7 +76,7 @@ it("keeps a reply FLIGHT could not take, retries it, and does not resend a deliv
   const first = (await app.inject(url)).json();
   const payload = { version: first.version, messageId: "ask", text: "Why?" };
   const send = () => app.inject({ method: "POST", url, payload });
-  // FLIGHT is down for the first send: the reply is stored and waits for FLIGHT's wake
+  // the first push to FLIGHT fails: the reply is stored and waits for FLIGHT's wake
   expect((await send()).statusCode).toBe(200);
   expect(store.pendingDiscussions()).toHaveLength(1);
   expect(store.discussionSent(first.id, "ask")).toBe(false);
