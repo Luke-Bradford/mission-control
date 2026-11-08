@@ -925,4 +925,18 @@ describe("account edits", () => {
     );
     expect(changed.config.accounts[1]).toMatchObject({ alertAt: 60, reviewTokenBudget: 250000 });
   });
+
+  it("keeps an account's brake: false through an edit", async () => {
+    writeFileSync(
+      path,
+      readFileSync(path, "utf8").replace("stop_at: 80", "stop_at: 80\n    brake: false"),
+    );
+    const changed = await setAccount(
+      path,
+      "codex-main",
+      { provider: "codex", alertAt: 60, stopAt: 90 },
+      NOW,
+    );
+    expect(changed.config.accounts[1]).toMatchObject({ alertAt: 60, brake: false });
+  });
 });
