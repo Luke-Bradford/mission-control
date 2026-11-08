@@ -1,0 +1,44 @@
+import { dayMonth, hhmm, isoDay } from "../../fmt.ts";
+import type { FlightDecision } from "../flightTypes.ts";
+
+/** An ISO time (`2026-11-08T11:45:00.000Z`), the hub's compact form (`20261106T170333Z`) or epoch ms. */
+const ISO = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?Z\b/g;
+const COMPACT = /\b(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z\b/g;
+const EPOCH_MS = /\b1\d{12}\b/g;
+
+/** `11:45` today, `8 Nov 11:45` on another day, in the operator's time zone. */
+export function whenLabel(ms: number, now: number, tz: string): string {
+  return isoDay(ms, tz) === isoDay(now, tz) ? hhmm(ms, tz) : `${dayMonth(ms, tz)} ${hhmm(ms, tz)}`;
+}
+
+/** Text with every machine time in it written as the operator reads it. */
+export function readableTimes(text: string, now: number, tz: string): string {
+  const at = (ms: number, raw: string) => (Number.isFinite(ms) ? whenLabel(ms, now, tz) : raw);
+  return text
+    .replace(ISO, (raw) => at(Date.parse(raw), raw))
+    .replace(COMPACT, (raw, y, mo, d, h, mi, s) => at(Date.UTC(+y, +mo - 1, +d, +h, +mi, +s), raw))
+    .replace(EPOCH_MS, (raw) => at(Number(raw), raw));
+}
+
+const WAIT_ABOUT = /^[\s\S]*?: waiting on ([\s\S]*)$/;
+const WAIT_UNTIL = /^waiting until (\S+)/;
+
+/**
+ * One decision as a lead and the rest of its line. A wait is written by the hub as
+ * `<target key>: waiting on <what>` and `waiting until <ISO time>`: the key and the ISO time mean
+ * nothing to the operator, so the lead is the ticket (or "Wait") and the time is a clock time.
+ */
+export function decisionLine(
+  d: FlightDecision,
+  now: number,
+  tz: string,
+): { lead: string; rest: string } {
+  if (d.kind === "wait") {
+    const on = WAIT_ABOUT.exec(d.about)?.[1] ?? d.about;
+    const until = WAIT_UNTIL.exec(d.decision)?.[1];
+    const ms = until === undefined ? Number.NaN : Date.parse(until);
+    const when = Number.isFinite(ms) ? ` · Waits until ${whenLabel(ms, now, tz)}` : "";
+    return { lead: d.ref ?? "Wait", rest: `waiting on ${readableTimes(on, now, tz)}${when}` };
+  }
+  return { lead: readableTimes(d.about, now, tz), rest: readableTimes(d.decision, now, tz) };
+}

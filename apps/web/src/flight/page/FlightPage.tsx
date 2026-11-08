@@ -1,8 +1,8 @@
 import type { AttentionItem, CrewPause, FlightSummaryView } from "@mc/core";
-import { useCallback, useState } from "react";
-import { apiPost } from "../../api.ts";
+import { useCallback, useRef, useState } from "react";
+import { apiPost, errorNote } from "../../api.ts";
 import { useNow } from "../../clock.ts";
-import { ACTIONS, RESOURCES, useResource } from "../../data.ts";
+import { ACTIONS, hub, RESOURCES, useResource } from "../../data.ts";
 import { followLink, PAGE_PATHS } from "../../router.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flightTypes.ts";
 import { Pending } from "../Pending.tsx";
@@ -28,6 +28,9 @@ export function FlightPage() {
   const now = useNow();
   const [shown, setShown] = useState<number | null>(null);
   const [startError, setStartError] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
+  // A second click lands before React has re-rendered the disabled button, so a ref holds the lock.
+  const startLock = useRef(false);
   const onShown = useCallback((n: number) => setShown(n), []);
   const view = flight.data;
   const run = flightRun(view, pause);
@@ -35,12 +38,19 @@ export function FlightPage() {
   const decisions = newestFirst(view?.decisions ?? []);
   const board = PAGE_PATHS.board;
   const start = async () => {
-    if (!view?.seat) return;
+    if (!view?.seat || startLock.current) return;
+    startLock.current = true;
+    setStarting(true);
     setStartError(null);
     try {
       await apiPost(ACTIONS.seatStart(view.seat.id), {});
+      hub.refetch(RESOURCES.flight.path);
     } catch (e) {
-      setStartError(e instanceof Error ? e.message : String(e));
+      const err = e instanceof Error ? e : new Error(String(e));
+      setStartError(errorNote(err) ?? err.message);
+    } finally {
+      startLock.current = false;
+      setStarting(false);
     }
   };
   return (
@@ -60,9 +70,9 @@ export function FlightPage() {
           </span>
         )}
       </div>
-      <StatusBand run={run} view={view} now={now} onStart={start} />
+      <StatusBand run={run} view={view} now={now} onStart={start} starting={starting} />
       <div className="fp-mid">
-        <section className="fp-panel" id="doingP" aria-labelledby="doingH">
+        <section className="fp-panel fp-self-start" id="doingP" aria-labelledby="doingH">
           <h2 className="fp-head" id="doingH">
             Doing now
           </h2>

@@ -136,4 +136,67 @@ describeRendered("FLIGHT page in a browser", () => {
       }
     }
   }
+
+  // Sixteen blockers with long text: the first screen still answers what blocks FLIGHT.
+  for (const [width, height] of SIZES) {
+    for (const theme of ["dark", "light"] as const) {
+      const where = `${width}x${height}, busy, ${theme}`;
+      it(
+        `shows several blockers and says how many are below with 16 of them at ${where}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: flightPageApi("busy"),
+          });
+          await page.box("#blockers .fp-brow");
+          const r = await page.evaluate(() => {
+            const doc = document.documentElement;
+            const scroller = document.querySelector<HTMLElement>(".fp-brows");
+            const edge = scroller?.getBoundingClientRect() ?? new DOMRect();
+            const rows = [...document.querySelectorAll<HTMLElement>("#blockers .fp-brow")];
+            const whole = rows.filter((row) => {
+              const b = row.getBoundingClientRect();
+              return b.top >= edge.top - 1 && b.bottom <= edge.bottom + 1;
+            });
+            return {
+              pageScroll: doc.scrollHeight - doc.clientHeight,
+              sideScroll: doc.scrollWidth - doc.clientWidth,
+              total: rows.length,
+              whole: whole.length,
+              rowHeight: whole[0]?.getBoundingClientRect().height ?? 0,
+              more: document.querySelector(".fp-more")?.textContent ?? "",
+              decisions: document.querySelectorAll("#decisions li").length,
+              panels: [...document.querySelectorAll<HTMLElement>("main .fp-panel")].map((p) => ({
+                id: p.id,
+                clipped: p.scrollHeight > p.clientHeight + 1,
+              })),
+            };
+          }, null);
+          const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(join(shots, `flight-page-${width}x${height}-busy-${theme}.png`));
+          }
+          expect(r.pageScroll, `${where}: page scroll`).toBeLessThanOrEqual(0);
+          expect(r.sideScroll, `${where}: sideways scroll`).toBeLessThanOrEqual(0);
+          expect(r.total).toBe(16);
+          expect(r.whole, `${where}: blocker rows wholly in view`).toBeGreaterThanOrEqual(6);
+          expect(r.rowHeight, `${where}: compact rows`).toBeLessThanOrEqual(64);
+          expect(r.more, `${where}: the hidden count`).toMatch(
+            new RegExp(`^${r.total - r.whole} more below`),
+          );
+          expect(r.decisions, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(
+            3,
+          );
+          for (const p of r.panels)
+            expect(p.clipped, `${where}: ${p.id} hides content`).toBe(false);
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
 });

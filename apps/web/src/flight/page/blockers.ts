@@ -52,9 +52,9 @@ function ticketOwner(b: FlightBlocked): { owner: string; tone: OwnerTone } {
 }
 
 /**
- * The blockers, longest wait first: asks that others own (the operator's above all), tickets
- * waiting on unmerged work, and FLIGHT itself being stopped or held. A wait the hub does not
- * date sorts last.
+ * The blockers, longest wait first: asks that others own (the operator's above all) and tickets
+ * waiting on unmerged work; a wait the hub does not date sorts last. FLIGHT itself being stopped or
+ * held comes first, since the hub does not date it and it explains the rest.
  */
 export function buildBlockers(
   attention: readonly AttentionItem[] | undefined,
@@ -63,8 +63,9 @@ export function buildBlockers(
   now: number,
 ): Blocker[] {
   const rows: Blocker[] = [];
+  let own: Blocker | null = null;
   if (run.kind === "down" || run.kind === "held") {
-    rows.push({
+    own = {
       key: "flight-run",
       what: run.kind === "down" ? "FLIGHT is stopped" : "FLIGHT is held",
       detail: run.why,
@@ -75,7 +76,7 @@ export function buildBlockers(
         run.kind === "down"
           ? "Nothing runs until FLIGHT is started; seats keep working on their tickets."
           : "Waiting for the hold to lift; seats keep working on their tickets.",
-    });
+    };
   }
   for (const item of attention ?? []) {
     if ((item.owner ?? "operator") === "flight") continue;
@@ -102,7 +103,7 @@ export function buildBlockers(
       doing: b.waitsOn[0] ? `Watching. It moves once ${b.waitsOn[0]} clears.` : "Watching.",
     });
   }
-  return rows.sort(
-    (a, b) => (b.waitedMs ?? -1) - (a.waitedMs ?? -1) || a.what.localeCompare(b.what),
-  );
+  rows.sort((a, b) => (b.waitedMs ?? -1) - (a.waitedMs ?? -1) || a.what.localeCompare(b.what));
+  // FLIGHT being stopped or held explains why nothing else moves, so it leads whatever waited longer.
+  return own ? [own, ...rows] : rows;
 }

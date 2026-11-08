@@ -1,8 +1,11 @@
 import type { AttentionItem, FlightBlocked, FlightDecision, FlightView } from "@mc/core";
-import { CONFIG, HOUR, item, METRICS_VIEW, MIN, NOW } from "./fixtures.ts";
+import { brief, CONFIG, HOUR, item, METRICS_VIEW, MIN, NOW } from "./fixtures.ts";
 import { flightSummary, ledgerEntry, summaryItem } from "./flightSummaryFixture.ts";
 
-export type PageState = "stopped" | "running" | "blocked";
+export type PageState = "stopped" | "running" | "blocked" | "busy";
+
+const LONG =
+  "Open the ticket inline with bound Accept and Decline actions, then check the answer against the Done when list and the review findings before anything merges. ";
 
 const decision = (id: number): FlightDecision => ({
   id,
@@ -30,16 +33,27 @@ const ticket = (n: number, waitsOn: string[], waitedMin: number): FlightBlocked 
 export function flightPageApi(state: PageState, over: Record<string, unknown> = {}) {
   const live = state !== "stopped";
   const attention: AttentionItem[] =
-    state === "blocked"
-      ? [
+    state === "busy"
+      ? Array.from({ length: 12 }, (_, i) =>
           item({
-            key: "q:1",
+            key: `q:${i}`,
             kind: "question",
-            text: "Which wording for away mode?",
-            at: NOW - 3 * HOUR,
+            text: `${LONG}(${i})`,
+            ticket: `shop-app#${300 + i}`,
+            at: NOW - (i + 1) * 17 * MIN,
+            brief: brief({ assessment: `${LONG}${LONG}${LONG}` }),
           }),
-        ]
-      : [];
+        )
+      : state === "blocked"
+        ? [
+            item({
+              key: "q:1",
+              kind: "question",
+              text: "Which wording for away mode?",
+              at: NOW - 3 * HOUR,
+            }),
+          ]
+        : [];
   const view: FlightView = {
     seat: {
       id: "flight-1",
@@ -54,7 +68,11 @@ export function flightPageApi(state: PageState, over: Record<string, unknown> = 
     blocked:
       state === "blocked"
         ? [ticket(9, ["shop-app#7 (PR 12 in CI)"], 42), ticket(8, ["shop-app#6"], 18)]
-        : [],
+        : state === "busy"
+          ? Array.from({ length: 4 }, (_, i) =>
+              ticket(20 + i, [`shop-app#${10 + i} (PR ${50 + i} in CI)`], 25 + i * 9),
+            )
+          : [],
   };
   const now = [1, 2, 3, 4].map((n) =>
     summaryItem(

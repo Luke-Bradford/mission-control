@@ -163,16 +163,21 @@
   padding: var(--sp-4);
   color: var(--fg-2);
 }
+/* The middle row is as tall as its busiest list needs. When the blockers are many it gives way
+   to Recent decisions, which keeps room for its heading and three rows; the blockers then scroll. */
 .fp-mid {
   flex: 0 1 auto;
   min-height: 0;
-  max-height: 50%;
   display: grid;
   grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--sp-3);
 }
+.fp-self-start {
+  align-self: start;
+}
 .fp-dec {
-  flex: 1 1 0;
+  flex: 1 0 calc(var(--sp-7) * 3);
 }
 
 .fp-lines {
@@ -206,10 +211,45 @@
   overflow: hidden;
 }
 .fp-decisions li {
+  display: block;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+.fp-drow {
+  width: 100%;
   height: var(--sp-6);
-  min-height: var(--sp-6);
-  padding-top: 0;
-  padding-bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fp-decisions li:last-child .fp-drow {
+  border-bottom: 0;
+}
+.fp-drow:hover,
+.fp-brow:hover {
+  background: var(--surface-2);
+}
+.fp-detail {
+  padding: var(--sp-2) var(--sp-4) var(--sp-3);
+  padding-left: calc(var(--sp-7) + var(--sp-4) + var(--sp-3));
+  color: var(--fg-2);
+}
+.fp-detail p + p {
+  margin-top: var(--sp-1);
+}
+.fp-decisions[data-open] {
+  overflow: auto;
 }
 .fp-t {
   flex: none;
@@ -247,40 +287,28 @@
 }
 .fp-bhead,
 .fp-brow {
-  display: grid;
-  grid-template-columns: minmax(0, 5fr) 128px 80px minmax(0, 6fr);
-  column-gap: var(--sp-4);
-  padding: 0 var(--sp-4);
-  align-items: center;
-}
-.fp-bhead {
-  flex: none;
-  height: var(--sp-6);
-  border-bottom: 1px solid var(--line);
-  font: var(--fs-micro) / var(--lh-micro) var(--mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-.fp-r,
-.fp-wait {
-  text-align: right;
-}
-.fp-brow {
-  min-height: 72px;
+  width: 100%;
+  min-height: calc(var(--sp-6) + var(--sp-5));
   padding-top: var(--sp-2);
   padding-bottom: var(--sp-2);
+  border: 0;
   border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 .fp-brow:last-child {
   border-bottom: 0;
 }
 .fp-what b,
 .fp-what span {
+  display: block;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .fp-what b {
   font-weight: 600;
@@ -293,7 +321,28 @@
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
+}
+/* Opened: the whole text, wrapped. */
+.fp-brow.open {
+  align-items: start;
+}
+.fp-brow.open .fp-what b,
+.fp-brow.open .fp-what span {
+  white-space: normal;
+}
+.fp-brow.open .fp-act {
+  display: block;
+}
+.fp-more {
+  flex: none;
+  height: var(--sp-6);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-4);
+  border-top: 1px solid var(--line);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--fg-2);
 }
 .fp-owner {
   justify-self: start;

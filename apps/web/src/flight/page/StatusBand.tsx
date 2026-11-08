@@ -57,11 +57,14 @@ export function StatusBand({
   view,
   now,
   onStart,
+  starting = false,
 }: {
   run: FlightRun;
   view: FlightView | undefined;
   now: number;
   onStart?: () => void;
+  /** The start request is in flight: the button waits for it. */
+  starting?: boolean;
 }) {
   const tz = useTz();
   const ctx = contextReading(view);
@@ -84,8 +87,8 @@ export function StatusBand({
       >
         {state ?? <span className="fp-muted">…</span>}
         {run.kind === "down" && view?.seat && onStart && (
-          <button type="button" className="fp-start" onClick={onStart}>
-            Start FLIGHT
+          <button type="button" className="fp-start" onClick={onStart} disabled={starting}>
+            {starting ? "Starting…" : "Start FLIGHT"}
           </button>
         )}
       </Stat>
