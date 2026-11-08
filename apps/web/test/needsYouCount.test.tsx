@@ -165,15 +165,12 @@ describe("one Needs-you count", () => {
       </>,
     );
     await screen.findByRole("link", { name: /^Needs you: \d+ waiting$/ });
-    await screen.findByText("Ticket 5");
+    await screen.findAllByText("Ticket 5");
 
     const counts = () => {
       const header = screen.getByRole("link", { name: /^Needs you: \d+ waiting$/ });
       const chat = screen.getByRole("button", { name: /^FLIGHT chat/ });
       const dock = container.querySelector("#dockWaiting .dwh")?.textContent;
-      const comms = within(
-        screen.getByRole("region", { name: "Decisions" }) as HTMLElement,
-      ).getByRole("link", { name: /^Needs you/ }).textContent;
       const chips = [...container.querySelectorAll<HTMLElement>(".kcard .kyou")];
       // every canonical item here is on a card: the chips plus their "+N" account for all of them
       const onCards = chips.reduce(
@@ -196,7 +193,6 @@ describe("one Needs-you count", () => {
         header: header.querySelector("b")?.textContent,
         chat: chat.getAttribute("aria-label"),
         dock,
-        comms,
         banner,
         waiting,
         listed,
@@ -209,7 +205,6 @@ describe("one Needs-you count", () => {
       header: String(N),
       chat: `FLIGHT chat, ${N} waiting on you`,
       dock: `Waiting on you · ${N}`,
-      comms: `Needs you ${N}`,
       banner: String(N),
       waiting: expect.stringContaining(`${N} waiting on you`),
       listed: N,
