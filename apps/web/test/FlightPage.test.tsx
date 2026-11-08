@@ -1,3 +1,4 @@
+import type { FlightView } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
@@ -47,12 +48,11 @@ describe("buildBlockers", () => {
   it("ages a stopped FLIGHT from its last wake and keeps every row in longest-wait order", () => {
     const down = { kind: "down", why: "FLIGHT is stopped." } as const;
     const asks = [item({ key: "q:1", at: NOW - HOUR })];
-    const wakeAt = (lastWakeAt: number | null) =>
-      ({
-        seat: null,
-        decisions: [],
-        wake: { lastWakeAt, wokeOn: null, nextWakeAt: null },
-      }) as const;
+    const wakeAt = (lastWakeAt: number | null): FlightView => ({
+      seat: null,
+      decisions: [],
+      wake: { lastWakeAt, wokeOn: null, nextWakeAt: null },
+    });
     const older = buildBlockers(asks, wakeAt(NOW - 2 * HOUR), down, NOW);
     expect(older.map((r) => r.what)).toEqual([
       "FLIGHT is stopped",
