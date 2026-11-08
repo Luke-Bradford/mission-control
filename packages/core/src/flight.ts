@@ -1315,6 +1315,9 @@ export const idleLong = (idle: FlightIdleSeats | undefined): FlightIdleSeats["se
   idle?.seats.filter((x) => idlePeriod(x.ms) !== null) ?? [];
 
 /** The sentence FLIGHT is told when seats idle with tickets open: act, never wait on a person. */
+/** What the wake says on every wake while the operator's messages are owed an answer. */
+export const owedAsk = (ids: readonly string[]): string =>
+  `You owe the operator an answer to Comms message ${ids.join(", ")}: reply with mc comms_send { replyTo: "comms:<id>" }, or react to it with mc comms_react when it needs no answer. It stays owed until you do.`;
 export const IDLE_SEAT_ASK =
   "A free seat has stood idle while tickets are open. Do not report that you are waiting. Promote a ticket to Ready and start it, triage the tickets with no board status, or log with wait_on why none can start. A wait on a person is never the answer: go round it, take other work, or decide it yourself. Only money, direction, irreversible actions and security exceptions go to the operator, and those are parked with a brief while the seat takes the next ticket.";
 
@@ -1576,7 +1579,8 @@ export function wakeLine(
     ? " Queued reviews with idle review seats are a fault (wait_on target `idle-reviewers`): name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
     : "";
   const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
+  const owed = s.wake?.owed?.length ? ` ${owedAsk(s.wake.owed)}` : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${owed}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

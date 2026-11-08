@@ -5316,6 +5316,18 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls).toHaveLength(3);
     expect(sendCalls[2]?.text).toContain("owed (1)");
     expect(sendCalls[2]?.text).toContain('"owed":["1"]');
+    // every later wake says what clears it, not only the one where it first appeared
+    nowMs += FLIGHT_REWAKE_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(4);
+    expect(sendCalls[3]?.text).toContain("replyTo");
+    expect(sendCalls[3]?.text).toContain("Comms message 1");
+    // FLIGHT reacts to it: nothing is owed, so no later wake mentions it (the free seats still re-wake hourly)
+    store.addCommsReaction("comms:1", "flight-1", "seen", undefined, nowMs);
+    nowMs += FLIGHT_REWAKE_MS + 1;
+    await watch.check();
+    expect(sendCalls[4]?.text).not.toContain("replyTo");
+    expect(sendCalls[4]?.text).toContain('"owed":[]');
   });
 
   it("answering a question does not wake FLIGHT again for a seat that stays free", async () => {
