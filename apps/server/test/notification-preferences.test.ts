@@ -361,9 +361,9 @@ it("notifies FLIGHT's @CAPCOM question only once briefed for the operator, never
     store.addBrief({
       key: `tag:demo-seat:${id}`,
       for: "operator",
-      ask: "Review PR 7 now, or after the release?",
+      ask: "Review the change now, or after the release?",
       ticket: "demo#7",
-      context: "PR 7 is ready.",
+      context: "The change is ready to review.",
       recommendation: "Review now.",
       options: [
         { label: "Now", answer: "Review PR 7 now." },
@@ -531,7 +531,7 @@ it("notifies a briefed ask and FLIGHT going down, not stalls, PRs, blocked runs 
   // FLIGHT's own triage (a brief for FLIGHT) is not an ask of the operator
   store.addBrief({
     key: "note:raw",
-    context: "c",
+    context: "The crew asked a question and waits for your answer.",
     recommendation: "r",
     options: [],
     basis: "b",
