@@ -31,7 +31,7 @@ import {
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
 import { CommandPalette } from "./shell/CommandPalette.tsx";
-import { Dock, useNeedsBeside, useOverviewDockOverlay } from "./shell/Dock.tsx";
+import { Dock, useOverviewDockOverlay } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
 import { Header } from "./shell/Header.tsx";
 import { HelpModal } from "./shell/HelpModal.tsx";
@@ -152,7 +152,6 @@ function Shell({
   const dock = useDock();
   const overview = shown.page === "overview";
   const overviewOverlay = useOverviewDockOverlay(overview, dock);
-  const needsBeside = useNeedsBeside(overview);
   // The approved rail is site-wide. Comms already has the conversation; the full FLIGHT view
   // keeps its own workspace instead of duplicating it beside the page.
   const showDock = tabOf(shown) !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
@@ -234,7 +233,7 @@ function Shell({
             </Suspense>
           </AwayDigest>
         </main>
-        {showDock && <Dock coversPage={overviewOverlay} needsBeside={needsBeside} />}
+        {showDock && <Dock coversPage={overviewOverlay} />}
       </div>
       <Footer />
       <Toast />

@@ -211,7 +211,7 @@ describe("Overview panels", () => {
     const { container } = render(<Overview />);
     expect(container.querySelector(".overview-primary > #agentsP")).toBeTruthy();
     expect(container.querySelector(".overview-primary > #pipelineP")).toBeTruthy();
-    expect(container.querySelector(".overview-secondary > #overviewNextP")).toBeTruthy();
+    expect(container.querySelector("#overviewNextP")).toBeNull();
     expect(container.querySelector(".overview-secondary > #macP")).toBeTruthy();
     expect(container.querySelector(".overview-secondary > #tokensP")).toBeTruthy();
     expect(container.querySelector(".overview-secondary > #actP")).toBeTruthy();
@@ -225,7 +225,7 @@ describe("Overview panels", () => {
     ).toEqual(["agentsP", "pipelineP"]);
     expect(
       [...(container.querySelector(".overview-secondary")?.children ?? [])].map((c) => c.id),
-    ).toEqual(["overviewNextP", "macP", "tokensP", "actP"]);
+    ).toEqual(["macP", "tokensP", "actP"]);
     await screen.findByText("No events yet.");
     expect(container.querySelector("#nbanner")).toBeNull();
   });

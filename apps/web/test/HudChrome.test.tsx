@@ -368,9 +368,7 @@ describe("HUD chrome", () => {
         "Checking <b>the lock</b>",
       ),
     );
-    const asks = await screen.findAllByTestId("waiting-ask");
-    expect(asks.map((a) => a.querySelector(".ag")?.textContent)).toEqual(["guido-1", "inco-1"]);
-    expect(asks[1]?.textContent).toContain("Use <img src=x> here?");
+    expect(screen.queryAllByTestId("waiting-ask")).toHaveLength(0);
     expect(container.querySelector("#dockHead .meta b, .dask img")).toBeNull();
   });
 });

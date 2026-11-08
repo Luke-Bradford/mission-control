@@ -82,7 +82,7 @@ describeRendered("Overview composition", () => {
       expect(Math.abs(m.primaryBottom - m.secondaryBottom)).toBeLessThanOrEqual(1);
       expect(m.crewShare).toBeGreaterThan(0.6);
       expect(m.crewShare).toBeLessThan(0.8);
-      expect(m.order).toEqual(["overviewNextP", "macP", "tokensP", "actP"]);
+      expect(m.order).toEqual(["macP", "tokensP", "actP"]);
       expect(m.spill).toBe(0);
       expect(m.heads).toEqual(m.cells);
     },
@@ -176,7 +176,7 @@ describeRendered("Overview composition", () => {
       // The width reaches the layout through a media query change and a React update: wait for it to hold.
       const read = () => {
         const crew = document.querySelector("#agentsP")?.getBoundingClientRect();
-        const side = document.querySelector("#overviewNextP")?.getBoundingClientRect();
+        const side = document.querySelector("#macP")?.getBoundingClientRect();
         return crew && side ? { crew, side } : null;
       };
       const key = () => {
@@ -228,12 +228,7 @@ describeRendered("Overview composition", () => {
     const page = await open("mixed", 1920, 940);
     await settled(page);
     expect(page.errors()).toEqual([]);
-    for (const selector of [
-      "#agentsList .rowlink",
-      "#agentsList button",
-      ".board-card",
-      ".next-row",
-    ])
+    for (const selector of ["#agentsList .rowlink", "#agentsList button", ".board-card"])
       expect((await page.reachable(selector, ".overview-grid")).every(Boolean), selector).toBe(
         true,
       );
@@ -244,33 +239,6 @@ describeRendered("Overview composition", () => {
         .filter((box) => box.height < 24).length;
     }, undefined);
     expect(small).toBe(0);
-  }, 60_000);
-
-  it("opens a Needs-you item from the keyboard", async () => {
-    const page = await open("mixed", 1920, 940);
-    await settled(page);
-    await page.evaluate(() => document.querySelector<HTMLElement>(".next-row")?.focus(), undefined);
-    await page.press("Enter");
-    await page.evaluate(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 300));
-    }, undefined);
-    const opened = await page.evaluate(
-      () => ({
-        search: location.search,
-        hash: location.hash,
-        path: location.pathname,
-        flyout: !!document.querySelector(".flyout"),
-      }),
-      undefined,
-    );
-    // an ask opens on the Needs you page; any other item still opens the flyout
-    expect(
-      opened.flyout ||
-        opened.search.includes("item") ||
-        opened.hash !== "" ||
-        opened.path.startsWith("/needs-you"),
-    ).toBe(true);
-    expect(page.errors()).toEqual([]);
   }, 60_000);
 
   it("FLIGHT covers the side column at 1920 and the page behind stays usable", async () => {

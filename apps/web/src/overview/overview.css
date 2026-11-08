@@ -2445,50 +2445,6 @@ button.quota-details {
   }
 }
 
-/* Needs you: a row per item. */
-.next-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.next-row {
-  display: grid;
-  width: 100%;
-  min-height: var(--sp-5);
-  grid-template-columns: 64px minmax(0, 1fr) auto;
-  gap: var(--sp-2);
-  align-items: baseline;
-  padding: var(--sp-1) var(--sp-3);
-  border: 0;
-  border-top: 1px solid var(--line);
-  border-radius: 0;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-}
-.next-row:hover {
-  background: var(--surface-2);
-}
-.next-kind {
-  font: 500 var(--fs-micro) / var(--lh) var(--mono);
-  color: var(--warn);
-}
-.next-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.next-age {
-  font-size: var(--fs-s);
-  color: var(--muted);
-}
-.next-more {
-  margin: 0;
-  padding: var(--sp-1) var(--sp-3);
-  border-top: 1px solid var(--line);
-}
-
 /* Mac: one row, because the question is only whether it is coping. */
 .mac-row {
   display: flex;
@@ -2739,11 +2695,6 @@ button.quota-details {
 .token-head a,
 .mac-row h2 a,
 #page-overview .ph h2 a {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--sp-5);
-}
-.next-more a {
   display: inline-flex;
   align-items: center;
   min-height: var(--sp-5);

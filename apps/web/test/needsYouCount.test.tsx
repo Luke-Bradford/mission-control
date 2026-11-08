@@ -1,11 +1,11 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
-import { NextActionsPanel } from "../src/overview/NextActionsPanel.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
+import { Overview } from "../src/pages/Overview.tsx";
 import { Dock } from "../src/shell/Dock.tsx";
 import { Header } from "../src/shell/Header.tsx";
 import { resetSession, setSession } from "../src/shell/session.ts";
@@ -149,6 +149,34 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("Needs you shows once", () => {
+  it("only the header tab lists or counts Needs-you items on the Overview, the dock and the chat button", async () => {
+    stub();
+    const { container } = render(
+      <>
+        <Header page="overview" />
+        <Overview />
+        <Dock />
+      </>,
+    );
+    await screen.findByRole("link", { name: `Needs you: ${N} waiting` });
+    await screen.findByRole("button", { name: "FLIGHT chat" });
+    await waitFor(() => expect(container.querySelector("#page-overview")).toBeTruthy());
+    const page = container.querySelector("#page-overview") as HTMLElement;
+    const dock = container.querySelector("#dock") as HTMLElement;
+    for (const area of [page, dock]) {
+      expect(area.querySelector("#overviewNextP, #dockWaiting, .dask, .next-row")).toBeNull();
+      expect(within(area).queryAllByTestId("waiting-ask")).toHaveLength(0);
+      expect(within(area).queryByRole("link", { name: /^Needs you/ })).toBeNull();
+      expect(area.textContent).not.toMatch(/waiting on you|need you/i);
+    }
+    // the bell is not the Needs-you count either
+    expect(
+      screen.getByRole("button", { name: "FLIGHT chat" }).querySelector(".dock-unread"),
+    ).toBeNull();
+  });
+});
+
 describe("one Needs-you count", () => {
   it("header, dock, Comms, Board and FLIGHT all count the same set, whatever the session filter", async () => {
     stub();
@@ -156,7 +184,6 @@ describe("one Needs-you count", () => {
       <>
         <Header page="board" />
         <NeedsBanner />
-        <NextActionsPanel />
         <Dock />
         <Comms item={null} view={{ kind: "flight" }} />
         <BoardPage repoId={null} ticket={null} />
@@ -170,7 +197,7 @@ describe("one Needs-you count", () => {
     const counts = () => {
       const header = screen.getByRole("link", { name: /^Needs you: \d+ waiting$/ });
       const chat = screen.getByRole("button", { name: /^FLIGHT chat/ });
-      const dock = container.querySelector("#dockWaiting .dwh")?.textContent;
+      const dock = container.querySelector("#dockWaiting, #dock .dwh")?.textContent;
       const comms = within(
         screen.getByRole("region", { name: "Decisions" }) as HTMLElement,
       ).getByRole("link", { name: /^Needs you/ }).textContent;
@@ -182,12 +209,6 @@ describe("one Needs-you count", () => {
         0,
       );
       const banner = container.querySelector("#nbanner .num")?.textContent;
-      // the Overview's Needs you panel: its figure, and the rows it lists plus the ones behind "more"
-      const panel = container.querySelector("#overviewNextP");
-      const waiting = panel?.querySelector(".ph")?.textContent;
-      const listed =
-        (panel?.querySelectorAll(".next-row").length ?? 0) +
-        Number(panel?.querySelector(".next-more")?.textContent?.replace(/\D/g, "") || 0);
       const pulse = screen
         .getByRole("button", { name: /^Needs you: \d+$/ })
         .querySelector("b")?.textContent;
@@ -198,8 +219,6 @@ describe("one Needs-you count", () => {
         dock,
         comms,
         banner,
-        waiting,
-        listed,
         onCards,
         pulse,
         asks: asks.length,
@@ -207,12 +226,11 @@ describe("one Needs-you count", () => {
     };
     const expected = {
       header: String(N),
-      chat: `FLIGHT chat, ${N} waiting on you`,
-      dock: `Waiting on you · ${N}`,
+      // the chat button is not a Needs-you count, and the dock lists nothing
+      chat: "FLIGHT chat",
+      dock: undefined,
       comms: `Needs you ${N}`,
       banner: String(N),
-      waiting: expect.stringContaining(`${N} waiting on you`),
-      listed: N,
       onCards: N,
       pulse: String(N),
       asks: N,

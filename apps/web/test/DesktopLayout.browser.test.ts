@@ -54,7 +54,6 @@ async function shellMetrics(page: RenderedPage) {
       smallControls,
       selected: document.activeElement?.id,
       collapsed: dock?.classList.contains("collapsed"),
-      summaryItems: document.querySelectorAll(".dock-summary-item").length,
       panelHead: document.querySelector(".ph h2")
         ? getComputedStyle(document.querySelector(".ph h2") as Element).fontSize
         : null,
@@ -104,13 +103,10 @@ describeRendered("Approved compact desktop shell", () => {
             expect(initial.rows.every((height) => height >= 40)).toBe(true);
             await capture(page, `desktop-${width}x${height}-${scheme}-default-after`);
             if (width < 2200) await page.click(".dockrail button");
-            // Beside the Overview's Needs you panel (from 2200 px) the dock leaves its waiting list out.
-            if (width < 2200) await page.boxes(".dock-summary-item");
             const expanded = await shellMetrics(page);
             expect(expanded.dockWidth).toBe(
               width < 1500 ? 380 : width < 1700 ? 540 : width < 2200 ? 620 : 380,
             );
-            expect(expanded.summaryItems).toBe(width < 2200 ? 3 : 0);
             expect(expanded.smallControls).toEqual([]);
             if (width < 2200) expect(expanded.selected).toBe("dockHeading");
             expect(
@@ -122,20 +118,6 @@ describeRendered("Approved compact desktop shell", () => {
             ).toBe(true);
             expect(page.errors()).toEqual([]);
             await capture(page, `desktop-${width}x${height}-${scheme}-expanded-after`);
-            if (height === 700) {
-              const scroll = await page.evaluate(() => {
-                const summary = document.querySelector<HTMLElement>(".dock-summary");
-                const next = document.querySelector<HTMLButtonElement>(".dock-next button");
-                next?.focus();
-                return {
-                  overflow: summary ? getComputedStyle(summary).overflowY : null,
-                  scrollable: summary ? summary.scrollHeight > summary.clientHeight : false,
-                  moved: (summary?.scrollTop ?? 0) > 0,
-                };
-              }, undefined);
-              expect(scroll).toEqual({ overflow: "auto", scrollable: true, moved: true });
-              await capture(page, `desktop-${width}x${height}-${scheme}-focused-scroll-after`);
-            }
             receipts.push({
               viewport: [width, height],
               scheme,
@@ -289,7 +271,6 @@ describeRendered("Approved compact desktop shell", () => {
                 ),
               ).toBeGreaterThan(140);
             }
-            expect((await shellMetrics(page)).summaryItems).toBeLessThanOrEqual(3);
             expect((await shellMetrics(page)).smallControls).toEqual([]);
             expect(page.errors()).toEqual([]);
             await capture(page, `desktop-state-${scenario}-1600x700-${scheme}-after`);
