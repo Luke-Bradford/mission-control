@@ -1,10 +1,12 @@
 import {
+  ANSWER_REFUSED,
   ASKING_RUN_ENDED_REASON,
   type AttentionItem,
   COMMS_MC,
   COMMS_OPEN_PREFIX,
   DROP_REFUSED,
   dropComment,
+  hudColumnOf,
   NEEDS_YOU_OFFERS,
   type NeedsYouOffer,
   NOT_NOW_REFUSED,
@@ -19,6 +21,7 @@ import {
 import { protectedDecisionItem, questionAskAt } from "./attention-holds.ts";
 import type { ChangeBus } from "./bus.ts";
 import type { Gql } from "./collectors/github.ts";
+import { validateCommsText } from "./comms.ts";
 import type { CcConfig } from "./config.ts";
 import type { RepoRulesError } from "./engine/rules.ts";
 import { flightSeat } from "./flight/seat.ts";
@@ -418,4 +421,151 @@ async function dropOnce(c: NeedsYouContext, key: string): Promise<ActionResult> 
   c.bus.emit("boards");
   c.bus.emit("agents");
   return { ok: true };
+}
+
+/** A set-aside question as the Ticket page shows it. */
+export interface SetAsideQuestion {
+  id: number;
+  /** What the seat asked. */
+  text: string;
+  /** FLIGHT's briefed ask for the operator, when it wrote one. */
+  ask: string | null;
+  options: { id: string; label: string; answer: string }[];
+  asideAt: number;
+  runId: string;
+}
+
+/** The ticket's set-aside questions nobody has answered, oldest first. */
+export function setAsideQuestions(store: Store, repoId: string, issue: number): SetAsideQuestion[] {
+  const ref = `${repoId}#${issue}`;
+  const briefs = store.briefs();
+  return store
+    .asideQuestions()
+    .filter((q) => store.run(q.runId)?.ticket === ref && q.asideAt !== null)
+    .map((q) => {
+      const brief = briefs.get(`ask:${q.id}`);
+      return {
+        id: q.id,
+        text: q.text,
+        ask: brief?.ask || null,
+        options: (brief?.options ?? []).map((o) => ({
+          id: o.id ?? o.label,
+          label: o.label,
+          answer: o.answer,
+        })),
+        asideAt: q.asideAt as number,
+        runId: q.runId,
+      };
+    });
+}
+
+/**
+ * The operator answers a set-aside question from its ticket: the text goes to the asking seat as a
+ * Comms line on the ticket, `waiting:operator` comes off the issue, the card leaves the Backlog for
+ * Ready (the next start of the ticket picks up the run's stored handoff), and the question closes
+ * as answered. Each GitHub step is safe to repeat, so a 502 can be retried.
+ */
+export const answerSetAside = (
+  c: NeedsYouContext,
+  repoId: string,
+  issue: number,
+  id: number,
+  text: string,
+  tell: (seatId: string, ticket: string, text: string) => Promise<void>,
+): Promise<ActionResult> =>
+  once(`aside:${id}`, async () => {
+    const refused = (status: number, why: string) => refuse(status, ANSWER_REFUSED, why);
+    const ref = `${repoId}#${issue}`;
+    const question = c.store.question(id);
+    if (question === null || c.store.run(question.runId)?.ticket !== ref)
+      return refused(404, "that question is not on this ticket");
+    if (question.answeredAt !== null || question.asideAt === null)
+      return refused(409, "that question is not set aside");
+    const repo = c.config.repos.find((r) => r.id === repoId);
+    if (repo === undefined) return refused(404, "unknown repo");
+    try {
+      await validateCommsText(c.knownSecrets, text);
+    } catch (e) {
+      return refused(
+        400,
+        e instanceof Error ? e.message.replace(/\.$/, "") : "the text is refused",
+      );
+    }
+    const fail = (why: string) => refuse(502, ANSWER_REFUSED, why);
+    const card = c.store.board(repoId).find((b) => b.issueNumber === issue);
+    try {
+      const unlabelled = await c.gh(
+        [
+          "issue",
+          "edit",
+          String(issue),
+          `--repo=${repo.github}`,
+          `--remove-label=${WAITING_OPERATOR_LABEL}`,
+        ],
+        { cwd: crewDir(c.dbPath) },
+      );
+      if (unlabelled.code !== 0) {
+        c.log?.(`answer ${ref}: gh issue edit failed (${String(unlabelled.code)})`);
+        return fail("GitHub refused to remove the label");
+      }
+      // a card another hand moved, or a ticket a run now works, is left where it is
+      if (
+        card !== undefined &&
+        !card.closed &&
+        hudColumnOf(card) === "Backlog" &&
+        !otherLiveRun(c.store, repoId, ref, null)
+      ) {
+        const moved = await c.board.move({ runId: question.runId, repoId, issue, column: "Ready" });
+        if (!moved.ok) {
+          c.log?.(`answer ${ref}: the card did not move: ${moved.reason}`);
+          return fail("the card could not be moved to Ready");
+        }
+      }
+      await tell(question.agentId, ref, text);
+    } catch (e) {
+      c.log?.(`answer ${ref}: ${e instanceof Error ? e.message : "failed"}`);
+      return fail("the answer could not be delivered; try again");
+    }
+    c.store.answerQuestion(id, c.now());
+    c.bus.emit("attention");
+    c.bus.emit("boards");
+    c.bus.emit("agents");
+    return { ok: true };
+  });
+
+/**
+ * Takes `waiting:operator` off every open card that is outside the Backlog: someone moved it, so the
+ * question no longer holds it. Returns how many labels it removed. It does nothing while a Not now
+ * runs, which adds the label before it moves the card.
+ */
+export async function releaseWaitingOperator(
+  c: Pick<NeedsYouContext, "config" | "store" | "gh" | "dbPath" | "log">,
+): Promise<number> {
+  if (inFlight.size > 0) return 0;
+  let released = 0;
+  for (const repo of c.config.repos) {
+    for (const card of c.store.board(repo.id)) {
+      if (card.closed || hudColumnOf(card) === "Backlog") continue;
+      if (!card.labels.includes(WAITING_OPERATOR_LABEL)) continue;
+      try {
+        const r = await c.gh(
+          [
+            "issue",
+            "edit",
+            String(card.issueNumber),
+            `--repo=${repo.github}`,
+            `--remove-label=${WAITING_OPERATOR_LABEL}`,
+          ],
+          { cwd: crewDir(c.dbPath) },
+        );
+        if (r.code === 0) released++;
+        else c.log?.(`release ${repo.id}#${card.issueNumber}: gh issue edit failed (${r.code})`);
+      } catch (e) {
+        c.log?.(
+          `release ${repo.id}#${card.issueNumber}: ${e instanceof Error ? e.message : "failed"}`,
+        );
+      }
+    }
+  }
+  return released;
 }

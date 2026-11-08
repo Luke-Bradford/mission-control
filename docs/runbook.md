@@ -1397,7 +1397,7 @@ Anything else answers 409 and writes nothing. Both are the operator's own click 
   instead, and ends the sender's run only when it is a crew seat's own run on that ticket; FLIGHT's own question is
   never offered. If the comment alone fails once the run has ended, the question stays aside and the route answers
   502. A second request for the same key while one is running answers 409. A set-aside question closes when its
-  ticket closes. Nothing serves or answers a set-aside question yet; that is a follow-up.
+  ticket closes. It is read and answered from its ticket, see [Answering a set-aside question](#answering-a-set-aside-question).
 - `POST /api/attention/:key/drop` closes the ticket as not planned with one comment, after the same refusals as
   FLIGHT's `close_ticket` (`closeBlocker` in `apps/server/src/flight/ticket-close.ts`: an open PR, open dependants,
   blocked-by cards, open sub-issues). The run that waits on the question ends with the close; it is the only
@@ -1405,6 +1405,21 @@ Anything else answers 409 and writes nothing. Both are the operator's own click 
 
 The comment goes through the same text scan as `comment_ticket` (no secret, no mention, no other item's number);
 a question whose text fails it answers 422 and nothing is written.
+
+### Answering a set-aside question
+
+- `GET /api/tickets/:repoId/:number/set-aside` lists the ticket's set-aside, unanswered seat questions, oldest first:
+  `id`, `text`, `ask` (FLIGHT's briefed ask, or null), `options` (`id`, `label`, `answer`), `asideAt` and `runId`.
+- `POST /api/tickets/:repoId/:number/set-aside/:id/answer` with `{ "text": "..." }` (operator token). It scans the text like
+  any Comms message (400 on a secret), removes `waiting:operator` from the issue, moves the card from Backlog to Ready
+  (left alone when another hand already moved it or a run works the ticket now), sends the text to the asking seat as
+  a Comms line on the ticket, and closes the question as answered. The run's handoff stays open, so the next start of
+  the ticket picks it up. A GitHub step that fails answers 502 and changes nothing a retry cannot repeat. An unknown
+  question or one on another ticket answers 404; one that is not set aside, or already answered, answers 409.
+- `POST /api/seats/:id/message` with a `question` that is set aside, whose run has ended, answers 409 and sends nothing:
+  without the refusal the text would reach whatever run holds the seat now.
+- After each board poll the hub removes `waiting:operator` from any open card outside the Backlog (someone moved it),
+  skipping while a Not now is running. A preview (`MC_NO_LOOP_WRITES`/no board writes) never does.
 
 ### FLIGHT's controller powers
 
