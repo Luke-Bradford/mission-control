@@ -301,7 +301,24 @@ describeRendered("Overview Board at the real sizes", () => {
             const cell = link.closest<HTMLElement>(".work-cell");
             const box = link.getBoundingClientRect();
             const room = cell?.getBoundingClientRect();
+            // A part is visible when it has width and sits inside the cell, so no clip hides it.
+            const shown = (part: Element | null | undefined) => {
+              const rect = part?.getBoundingClientRect();
+              return (
+                !!rect &&
+                !!room &&
+                rect.width > 0 &&
+                rect.left >= room.left &&
+                rect.right <= room.right + 0.5
+              );
+            };
+            const parts = [...(line?.children ?? [])];
+            const pauseLabel = parts.find((part) => part.textContent?.trim() === "Paused by");
+            const last = parts.find((part) => part.textContent?.includes("last #"));
             return {
+              labelShown: shown(pauseLabel),
+              lastShown: shown(last),
+              lastText: last?.textContent ?? "",
               width: box.width,
               height: box.height,
               startsInside: !!room && box.left >= room.left && box.left < room.right,
@@ -320,6 +337,10 @@ describeRendered("Overview Board at the real sizes", () => {
           expect(found?.startsInside, label).toBe(true);
           expect(found?.target, label).toBe("_blank");
           expect(found?.cell, label).toContain("Paused by");
+          // The long reference shortens by itself; "Paused by" and "· last #N" stay whole.
+          expect(found?.labelShown, label).toBe(true);
+          expect(found?.lastShown, label).toBe(true);
+          expect(found?.lastText, label).toMatch(/last #\d+/);
           // When the line is cut with an ellipsis, the tooltip still holds the whole reference.
           if (found?.clipped) expect(found.title, label).toContain(by);
           if (decision) expect(found?.cell, label).toContain("Decision for");
