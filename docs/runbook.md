@@ -1382,6 +1382,30 @@ wake lists the freed tickets ("mc#1015 merged: mc#1139, mc#1142 unblocked"), and
 it has waited. A chain that has stood still for 30 minutes raises a `chain_stalled` signal, which wakes FLIGHT once. FLIGHT's `create_ticket` refuses a body that is cut from or builds on an open PR without a
 `Depends on` line for that PR's ticket (or `After PR N`). The controller's own filing rule (`roles/FLIGHT.md`) is updated separately to ask for the same line.
 
+### Not now and Drop on Needs you
+
+Two operator-only routes act on a question in Needs you. `GET /api/attention` puts `offers: ["not-now", "drop"]`
+on an item that is an unprotected `ask:` or Comms question, owned by the operator, whose ticket is on the
+board of the repo FLIGHT's session works (an `autonomy: merge` repo, not closed, not `always_ask`, not of another lane).
+Anything else answers 409 and writes nothing. Both are the operator's own click (operator token); FLIGHT has no tool for either.
+
+- `POST /api/attention/:key/not-now` sets a seat question aside (`seat_questions.aside_at`: it stays open,
+  leaves Needs you, and the end of its run does not close it). It then creates the `waiting:operator` label once per
+  repo, adds it to the issue and moves the card to Backlog; a failure up to here puts the question back in Needs you.
+  It then ends the run that waits on it (`recordRunHandoff` and `endRun`, or `endAsideRun` for a run set aside in
+  review) and posts one comment holding the question, its options and the date. A Comms question is settled
+  instead, and ends the sender's run only when it is a crew seat's own run on that ticket; FLIGHT's own question is
+  never offered. If the comment alone fails once the run has ended, the question stays aside and the route answers
+  502. A second request for the same key while one is running answers 409. A set-aside question closes when its
+  ticket closes. Nothing serves or answers a set-aside question yet; that is a follow-up.
+- `POST /api/attention/:key/drop` closes the ticket as not planned with one comment, after the same refusals as
+  FLIGHT's `close_ticket` (`closeBlocker` in `apps/server/src/flight/ticket-close.ts`: an open PR, open dependants,
+  blocked-by cards, open sub-issues). The run that waits on the question ends with the close; it is the only
+  live run allowed. The close is confirmed by reading the issue back.
+
+The comment goes through the same text scan as `comment_ticket` (no secret, no mention, no other item's number);
+a question whose text fails it answers 422 and nothing is written.
+
 ### FLIGHT's controller powers
 
 FLIGHT runs the crew with every power the controller has on it. It asks the operator only for money,
@@ -2548,6 +2572,9 @@ FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKEN
 - **Over the limit.** At its next idle point the watch sends one handover wake (not counted as a wake): FLIGHT writes what it is in the middle of, promised and waits on with `track` and `remember` (topic `handover`), then ends its turn. The turn after that ends the run and the next start is a fresh session, not counted against the hourly start cap.
 - **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
+- **The guard cools down.** After the handover cap trips (4 handovers in an hour) the hub stops restarting FLIGHT, says so in Needs you, and starts FLIGHT again by itself 30 minutes later (`FLIGHT_GUARD_COOLDOWN_MS`). A trip within an hour of that restart stays stopped until the operator starts FLIGHT. Messages sent while FLIGHT is down are kept and reach it when it starts.
+- **Owed answers.** An operator message FLIGHT has read and not answered (no FLIGHT message with `replyTo` naming it) is the `owed` wake fact: it wakes FLIGHT and stays in the wake until FLIGHT replies, for up to 7 days (reacting to it or settling it also clears it). An item reply sent while FLIGHT is down is stored and arrives in the wake when FLIGHT starts; the discussion route no longer answers 503.
+- **FLIGHT runs Update.** On a `flight_powers: superuser` repo FLIGHT may call `POST /api/update` through `mc operator` only for an Update the hub holds for a person (the held-Update item is open; otherwise 409), and only once no other crew seat is working (409 names the seat). It is logged as "Updated by FLIGHT". On any other repo it answers 403. The operator's own call is unchanged.
 - **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 150K" (null with no turn yet).
 
 ## Repeating a suspected flaky test

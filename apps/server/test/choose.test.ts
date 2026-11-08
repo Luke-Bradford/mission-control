@@ -141,6 +141,9 @@ it("delivers a seat's answer to the run that asked, wakes it and tells FLIGHT in
   expect(store.commsRun(sentId)?.id).toBe("r1");
   expect(store.isChoiceAnswer(sentId)).toBe(true);
   expect(store.isChoiceAnswer("comms:999")).toBe(false);
+  // a hub-built answer is not a message the seat owes a reply to
+  store.markCommsInboxRead("guido-1", [sentId], 12_000);
+  expect(store.owedCommsFrom("CAPCOM", "guido-1", 0)).toEqual([]);
   expect(wake).toHaveBeenCalledWith("guido-1");
   expect(store.question(q)?.answeredAt).toBe(10_000);
   // FLIGHT is told, but not woken

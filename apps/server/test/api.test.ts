@@ -1743,6 +1743,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/attention/held"],
   ["POST", "/api/attention/example/hold", { reason: "Waiting", condition: { kind: "manual" } }],
   ["POST", "/api/attention/example/hold/release", {}],
+  ["POST", "/api/attention/example/not-now", {}],
+  ["POST", "/api/attention/example/drop", {}],
   ["GET", "/api/attention/unknown"],
   ["GET", "/api/attention/example/discussion"],
   ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
@@ -2687,6 +2689,11 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
+      if (url === "/api/attention/example/not-now" || url === "/api/attention/example/drop") {
+        // this fixture has no board or rules to write through (needs-you-actions.test.ts covers both)
+        expect(r.statusCode).toBe(409);
+        continue;
+      }
       if (url.startsWith("/api/qa/uat/")) {
         // the placeholder PR is not in this fixture
         expect(r.statusCode).toBe(404);
@@ -2967,6 +2974,7 @@ describe("local access", () => {
               "/prs/:repoId/:number/$1",
             )
             .replace(/\/attention\/[^/]+\/hold(\/release)?$/, "/attention/:key/hold$1")
+            .replace(/\/attention\/[^/]+\/(not-now|drop)$/, "/attention/:key/$1")
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
