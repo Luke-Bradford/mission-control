@@ -1,5 +1,5 @@
 import type { AttentionBrief, AttentionItem, Run } from "@mc/core";
-import { beforeEach, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "../src/choose.ts";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
@@ -330,4 +330,62 @@ it("takes a chosen note out of Needs you at its source", async () => {
   });
   const after = attentionItems(config, store, nowMs, NO_LOCK);
   expect(after.some((i) => i.key === key)).toBe(false);
+});
+
+it("closes the question before it asks the engine to wake a set-aside run", async () => {
+  store.upsertRun(run({ id: "r1" }));
+  store.upsertRun(run({ id: "r2", seq: 2 }));
+  seatSession("guido-1", "r2");
+  const q = store.addQuestion({ agentId: "guido-1", runId: "r1", text: "Ship?", at: 2 });
+  store.passQuestion(q, 3);
+  let seen: number | null | undefined;
+  reconcile = vi.fn(async () => {
+    seen = store.question(q)?.answeredAt;
+  });
+  await chooseOption(deps(), item(`ask:${q}`), `ask:${q}`, { optionId: "yes", briefAt: BRIEF_AT });
+  expect(seen).toBe(10_000);
+});
+
+describe("a seat's question that reached Needs you as an open Comms item", () => {
+  const asked = (runId: string) => {
+    const m = store.addComms({
+      at: 2,
+      from: "guido-1",
+      to: "CAPCOM",
+      ticket: "mc#7",
+      text: "Which way?",
+      label: "question",
+      fromRunId: runId,
+    });
+    if (m === null) throw new Error("not stored");
+    return `comms-open:${m.id}`;
+  };
+
+  it("goes to the seat's live run, which is woken", async () => {
+    store.upsertRun(run({ id: "r1" }));
+    seatSession("guido-1", "r1");
+    const key = asked("r1");
+    const receipt = await chooseOption(deps(), item(key, { kind: "message" }), key, {
+      optionId: "yes",
+      briefAt: BRIEF_AT,
+    });
+    expect(receipt).toMatchObject({ to: "guido-1", target: "seat" });
+    expect(wake).toHaveBeenCalledWith("guido-1");
+    expect(store.commsRun(store.latestChoice(key)?.messageId ?? "")?.id).toBe("r1");
+    expect(store.comms(0).filter((m) => m.to === "flight-1")).toHaveLength(1);
+  });
+
+  it("goes to FLIGHT to pass on when that run has ended, naming the seat", async () => {
+    store.upsertRun(run({ id: "r1", endedAt: 3_000, status: "ok" }));
+    const key = asked("r1");
+    const receipt = await chooseOption(deps(), item(key, { kind: "message" }), key, {
+      optionId: "yes",
+      briefAt: BRIEF_AT,
+    });
+    expect(receipt).toMatchObject({ to: "flight-1", target: "flight-for-next-run" });
+    const toFlight = store.comms(0).filter((m) => m.to === "flight-1");
+    expect(toFlight[0]?.text).toContain("Pass this on");
+    expect(toFlight[0]?.text).toContain("guido-1");
+    expect(store.comms(0).filter((m) => m.to === "guido-1")).toHaveLength(0);
+  });
 });

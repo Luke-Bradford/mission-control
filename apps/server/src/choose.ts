@@ -103,19 +103,31 @@ export async function chooseOption(
   if (ask !== null && (question === null || question.answeredAt !== null))
     throw new ChoiceRefused(409, "That question is already closed.");
 
+  // who asked: the seat behind an ask: question, or behind a seat's open Comms item; a seat's
+  // other items name the seat but not the run, so their answer goes through FLIGHT
+  let asker: { agentId: string; runId: string | null } | null = null;
+  if (question !== null) asker = { agentId: question.agentId, runId: question.runId };
+  else if (key.startsWith(COMMS_OPEN_PREFIX)) {
+    const messageId = key.slice(COMMS_OPEN_PREFIX.length);
+    const author = store.commsMessage(messageId)?.from;
+    if (author !== undefined && author !== flightId && d.crew().includes(author))
+      asker = { agentId: author, runId: store.commsStamp(messageId).runId };
+  } else if (item.agentId !== null && item.agentId !== flightId && d.crew().includes(item.agentId))
+    asker = { agentId: item.agentId, runId: null };
+
   // where the answer goes: the run that asked while it lives, FLIGHT otherwise, never another run
   let to: string;
   let targetKind: ChoiceTargetKind;
   let runId: string | undefined;
-  if (question !== null && store.run(question.runId)?.endedAt === null) {
-    to = question.agentId;
+  if (asker?.runId != null && store.run(asker.runId)?.endedAt === null) {
+    to = asker.agentId;
     targetKind = "seat";
-    runId = question.runId;
+    runId = asker.runId;
   } else {
     if (flightId === null)
       throw new ChoiceRefused(409, "There is no FLIGHT seat to take this answer.");
     to = flightId;
-    targetKind = question === null ? "flight" : "flight-for-next-run";
+    targetKind = asker === null ? "flight" : "flight-for-next-run";
   }
   const ticket = item.ticket ?? brief.ticket ?? null;
   const asked = brief.ask || item.text;
@@ -123,7 +135,7 @@ export async function chooseOption(
   const lead = `Re: ${key} · ${chooser} chose "${option.label}"`;
   const text =
     targetKind === "flight-for-next-run"
-      ? `${lead}\n\n${option.answer}\n\n${question?.agentId ?? "The seat"}'s run that asked has ended. Pass this on to the next run on ${ticket ?? "that ticket"}.`
+      ? `${lead}\n\n${option.answer}\n\n${asker?.agentId ?? "The seat"}'s run that asked has ended. Pass this on to the next run on ${ticket ?? "that ticket"}.`
       : `${lead}\n\n${option.answer}`;
 
   // Claim the brief before anything is sent, with no wait in between: a second pick at the same
@@ -173,6 +185,11 @@ export async function chooseOption(
     store.releaseChoice(key, input.briefAt);
     throw new ChoiceRefused(400, e instanceof Error ? e.message : "The answer could not be sent.");
   }
+  // Close the question before waking a set-aside run: the engine holds a run while its question is open.
+  // close the question; the ticket's history reads the stored choice
+  if (question !== null) store.answerQuestion(question.id, now);
+  else closeItem(store, key, now);
+
   // The answer is stored, so the choice stands even if waking the run fails (its next turn takes it).
   if (runId !== undefined && store.seatSession(to)?.runId !== runId) {
     try {
@@ -181,10 +198,6 @@ export async function chooseOption(
       // the answer waits in the run's inbox
     }
   }
-
-  // close the question; the ticket's history reads the stored choice
-  if (question !== null) store.answerQuestion(question.id, now);
-  else closeItem(store, key, now);
 
   // FLIGHT hears of a seat's answer in one line at its next wake; this wakes no one
   if (targetKind === "seat" && flightId !== null && flightId !== to && flightId !== d.sender.from)
