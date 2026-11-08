@@ -186,6 +186,7 @@ import {
 } from "./away.ts";
 import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
+import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
@@ -213,12 +214,14 @@ import {
   COMMS_FEED_MAX,
   COMMS_OPEN_TEXT_MAX,
   COMMS_SNAPSHOT_LIMIT,
+  commsSendState,
   pinComms,
   reactComms,
   sendComms,
   threadMessages,
   validateCommsText,
 } from "./comms.ts";
+import { replyRoute } from "./comms-reply.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -1364,6 +1367,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
    * operator tool, the controller's credential, or a person using the app.
    */
   /** Who reacts or pins: FLIGHT through its operator tool, the controller, or the operator. */
+  /**
+   * Wakes a seat to take its Comms inbox. Not while the seat is mid-turn (it takes the inbox at its
+   * next turn, and an empty wake burns tokens), and never FLIGHT: the hub wakes FLIGHT itself.
+   */
+  const wakeSeat = (seatId: string, text: string, from: string): void => {
+    if (seatId === flightSeat(config)?.seat.id) return;
+    if (deps.supervisor?.busy?.().some((b) => b.seatId === seatId && b.state === "running")) return;
+    deps.deliverComms?.(seatId, text, from);
+  };
   const commsActor = (req: FastifyRequest): string => commsSender(req).from;
   const commsSender = (req: FastifyRequest): { from: string; kind: CommsSenderKind } => {
     const actor = flightActor(req);
@@ -1880,6 +1892,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           prThread = store.pullRequest(repo.id, Number(number))?.ticket ?? `${repo.id}#${number}`;
         }
         const sender = commsSender(req);
+        // a reply to a seat whose run ended goes to the seat now on that ticket, or to FLIGHT
+        let input = body.data;
+        let redirectedTo: string | undefined;
+        if (input.replyTo !== undefined) {
+          const route = replyRoute({ config, store, crew: commsCrew }, input.replyTo);
+          if (route?.redirected === true && route.to !== input.to) {
+            const original = store.commsMessage(input.replyTo);
+            if (original !== null && original.from === input.to) {
+              redirectedTo = route.to;
+              // the reply is no longer read as an answer to the ended run's seat: it keeps the
+              // ticket but not the link to that seat's message
+              prThread ??= original.ticket ?? undefined;
+              const { replyTo: _dropped, ...rest } = input;
+              input = { ...rest, to: route.to };
+            }
+          }
+        }
         try {
           const message = await sendComms(
             {
@@ -1889,20 +1918,36 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               now,
               seatSender: false,
               senderKind: sender.kind,
+              wakeUnlabelled: true,
+              // redirected away from the ended run: its seat is not told of the reply
+              ...(redirectedTo === undefined ? {} : { replyAuthorMention: false }),
               ...(prThread === undefined ? {} : { ticket: prThread }),
-              notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
+              notify: (seatId, text, from) => wakeSeat(seatId, text, from),
             },
             sender.from,
-            body.data,
+            input,
           );
           bus.emit("agents");
           bus.emit("attention");
-          return { message };
+          const state = commsSendState(store, message.id, message.repeat === true, redirectedTo);
+          return { message: { ...message, deliveredAt: state.deliveredAt }, ...state };
         } catch (e) {
           return reply
             .code(400)
             .send({ error: e instanceof Error ? e.message : "Comms message refused." });
         }
+      });
+      // Reader: apps/web/src/App.tsx#App (the note before a reply to a seat whose run ended)
+      api.get<{ Params: { id: string } }>("/comms/:id/reply-route", async (req, reply) => {
+        const route = replyRoute({ config, store, crew: commsCrew }, req.params.id);
+        return route ?? reply.code(404).send({ error: "Unknown Comms message." });
+      });
+      // Reader: apps/web/src/App.tsx#App (a message's stored or delivered line)
+      api.get<{ Params: { id: string } }>("/comms/:id/state", async (req, reply) => {
+        const message = store.commsMessage(req.params.id);
+        return message === null
+          ? reply.code(404).send({ error: "Unknown Comms message." })
+          : commsSendState(store, message.id, false);
       });
       // Reader: apps/web/src/App.tsx#App (operator reactions)
       api.post<{ Params: { id: string } }>("/comms/:id/reactions", async (req, reply) => {
@@ -4480,6 +4525,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
             let delivered = false;
+            let wakeFailed = false;
             const sent = await sendComms(
               {
                 store,
@@ -4488,9 +4534,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 now,
                 seatSender: false,
                 senderKind: sender.kind,
+                wakeUnlabelled: true,
                 notify: async (seatId, text) => {
-                  await sup.message(seatId, text, { interrupt: b.interrupt === true });
-                  delivered = true;
+                  try {
+                    // the text answers no question by itself: only the one it names closes, below
+                    await sup.message(seatId, text, {
+                      interrupt: b.interrupt === true,
+                      questions: "none",
+                    });
+                    delivered = true;
+                  } catch (e) {
+                    // a plain message stays stored for the seat's next turn; only an interrupt must land
+                    if (b.interrupt === true) throw e;
+                    wakeFailed = true;
+                  }
                 },
               },
               sender.from,
@@ -4502,7 +4559,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               },
             );
             // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
-            if (delivered) store.markCommsInboxRead(id, [sent.id]);
+            if (delivered) store.markCommsInboxRead(id, [sent.id], now());
+            // a retry of the same text wakes the seat again
+            if (wakeFailed) store.markCommsWakeFailed(sent.id, now());
+            // the reply names its question: that one closes, and no other
+            if (named !== null) {
+              store.answerQuestion(named.id, now());
+              bus.emit("attention");
+            }
+            return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
@@ -4510,7 +4575,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               e instanceof Error ? e.message : "Comms message refused.",
             );
           }
-          return { ok: true };
         },
         // Bound the encoded request before parsing; accepted messages stay whole.
         { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
@@ -5887,7 +5951,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           true,
         ).filter((i) => i.hold && !nothingForOperator(i)),
       );
-      // Reader: apps/web/src/comms/Decisions.tsx
+      // Reader: apps/web/src/needs/HoldItem.tsx
       api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
         const body = AttentionHoldInput.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
@@ -6023,6 +6087,50 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } finally {
           discussionSends.delete(sendKey);
         }
+      });
+
+      const ChooseBody = z.strictObject({
+        optionId: z.string().min(1).max(100),
+        briefAt: z.number().int().nonnegative(),
+      });
+      // Reader: apps/web/src/comms/answer.ts#sendAnswer (the page's choice of an option)
+      api.post<{ Params: { key: string } }>("/attention/:key/choose", async (req, reply) => {
+        const body = ChooseBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const { key } = req.params;
+        try {
+          const receipt = await chooseOption(
+            {
+              config,
+              store,
+              now,
+              crew: commsCrew,
+              knownSecrets: deps.knownSecrets ?? (async () => []),
+              sender: commsSender(req),
+              wake: (seatId) => wakeSeat(seatId, "", commsSender(req).from),
+              ...(deps.engine?.reconcileRun === undefined
+                ? {}
+                : {
+                    reconcileRun: (runId: string) =>
+                      deps.engine?.reconcileRun?.(runId) ?? Promise.resolve(),
+                  }),
+            },
+            currentDiscussionItem(key),
+            key,
+            body.data,
+          );
+          bus.emit("attention");
+          bus.emit("agents");
+          return receipt;
+        } catch (e) {
+          if (e instanceof ChoiceRefused) return reply.code(e.status).send({ error: e.message });
+          throw e;
+        }
+      });
+      // Reader: apps/web/src/comms/answer.ts#sendAnswer (the receipt after a choice)
+      api.get<{ Params: { key: string } }>("/attention/:key/choice", async (req, reply) => {
+        const receipt = choiceReceipt(store, req.params.key);
+        return receipt ?? reply.code(404).send({ error: "No choice was made on that question." });
       });
 
       api.post("/attention/ack", async (req, reply) => {

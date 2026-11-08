@@ -12,6 +12,7 @@ import {
   type CommsReactionKind,
   type CommsSenderKind,
   type CommsSendInput,
+  type CommsSendState,
   type CommsThreadMessage,
   commsCutMarker,
   commsTooLongText,
@@ -41,6 +42,10 @@ export interface CommsServiceDeps {
   /** Labelled direct or tagged delivery wakes a worker; reactions never use it. */
   notify?: (to: string, text: string, from: string) => void | Promise<void>;
   seatSender?: boolean;
+  /** Wake the recipient for an unlabelled message too (the operator's own message or answer). */
+  wakeUnlabelled?: boolean;
+  /** False: a reply does not mention (or wake) the author of the message it answers. */
+  replyAuthorMention?: boolean;
   /** Who is sending, set by the hub from how the request was made, never from the text. */
   senderKind: CommsSenderKind;
   /** The sender's run ticket in `repo#n` form: the ticket of a message that names none. */
@@ -119,7 +124,7 @@ export async function sendComms(
   for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
     if (members.has(found[2])) mentions.add(found[2]);
   }
-  if (replyFrom !== undefined) mentions.add(replyFrom);
+  if (replyFrom !== undefined && deps.replyAuthorMention !== false) mentions.add(replyFrom);
   const notify = new Set<string>();
   if (crew.includes(input.to)) notify.add(input.to);
   for (const to of mentions) if (crew.includes(to)) notify.add(to);
@@ -163,8 +168,9 @@ export async function sendComms(
   // An exact repeat was stored once already. It wakes no one a second time, unless the first wake
   // failed: then the retry wakes them now.
   if (stored.repeat && !deps.store.commsWakeFailed(sent.id)) return { ...sent, repeat: true };
-  // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat.
-  if (sent.label !== null) {
+  // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat, and
+  // what the operator sends does too.
+  if (sent.label !== null || deps.wakeUnlabelled === true) {
     try {
       for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
     } catch (e) {
@@ -542,4 +548,20 @@ export function flightQuestion(text: string): boolean {
   return /\?|\b(please confirm|let me know|should I|which (one|option)|need (your|a) (decision|approval)|waiting (on|for) you)\b/i.test(
     prose,
   );
+}
+
+/** The state line of a stored message: kept by the hub, or taken by its recipient. */
+export function commsSendState(
+  store: Store,
+  id: string,
+  alreadySent: boolean,
+  redirectedTo?: string,
+): CommsSendState {
+  const deliveredAt = store.commsMessage(id)?.deliveredAt ?? null;
+  return {
+    state: deliveredAt === null ? "stored" : "delivered",
+    deliveredAt,
+    alreadySent,
+    ...(redirectedTo === undefined ? {} : { redirectedTo }),
+  };
 }

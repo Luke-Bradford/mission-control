@@ -23,6 +23,7 @@ import { spawn } from "node:child_process";
 import { access, appendFile, chmod, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  counted,
   errorText as errText,
   globMatches,
   PNPM_STORE_ENV,
@@ -109,15 +110,14 @@ export const HUB_CODE_NEEDS_PERSON =
 /** Update refuses rather than letting pnpm remove the running hub's modules directory. */
 export const HUB_INSTALL_NEEDS_PERSON =
   "Update waits for you: pnpm needs to rebuild node_modules. The running hub will not purge its modules; stop the hub and run pnpm install --frozen-lockfile from an interactive shell, then start it again.";
-const HELD_NAMED = 5;
-const named = (xs: readonly string[]) =>
-  xs.length > HELD_NAMED
-    ? `${xs.slice(0, HELD_NAMED).join(", ")} and ${xs.length - HELD_NAMED} more`
-    : xs.join(", ");
-export const hubCodeHeldText = (held: HeldRange): string =>
-  held.unsafePaths !== undefined && held.unsafePaths.length > 0
-    ? `Update waits for you: main adds a symlink or submodule (${named(held.unsafePaths)}), which auto-Update never applies: run Update after checking it, or FLIGHT may run it through mc operator once the crew is idle. Commits: ${named(held.commits)}.`
-    : `Update waits for you: main changes more than the page and docs. Auto-Update leaves that to a person: run Update, or FLIGHT may run it through mc operator once the crew is idle. Commits: ${named(held.commits)}. Paths: ${named(held.paths)}.`;
+/** The held-Update alert in plain words: how much main changed, never the commits or paths. */
+export const hubCodeHeldText = (held: HeldRange): string => {
+  const beyond = heldPaths(held).length;
+  const size = `${counted(held.commits.length, "change", "changes")} touching ${counted(held.paths.length, "file", "files")}, ${beyond} of them beyond the page and docs`;
+  return held.unsafePaths !== undefined && held.unsafePaths.length > 0
+    ? `A new version of Mission Control is waiting for you: ${size}. One of the changes adds a shortcut to another file or folder, which automatic updating never applies. Check it, then run Update, or FLIGHT may run it for you once the crew is idle; nothing changes until you do.`
+    : `A new version of Mission Control is waiting for you: ${size}. Automatic updating leaves changes beyond the page and docs to you. Run Update when you are ready, or FLIGHT may run it for you once the crew is idle; nothing changes until you do.`;
+};
 /** Auto-Update's refusal when the checkout's HEAD is not on origin/main's history. */
 export const HUB_HEAD_OFF_MAIN =
   "the checkout's HEAD is not on origin/main's history; a person runs this Update";
