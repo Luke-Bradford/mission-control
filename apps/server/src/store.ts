@@ -6921,6 +6921,26 @@ export class Store {
       .all(from, to, since, to) as { id: number }[];
     return rows.map((r) => String(r.id));
   }
+  /**
+   * Ids of messages `from` sent `to` at or after `since` that `to` has read and not answered (no
+   * message from `to` carries `replyTo` naming it, `to` has not reacted to it, and it is not
+   * settled: the same closes an open Comms item), oldest first.
+   */
+  owedCommsFrom(from: string, to: string, since: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT c.id FROM comms c WHERE c.from_id = ? AND c.to_id = ? AND c.at >= ?
+           AND c.id IN (SELECT message_id FROM comms_inbox_reads WHERE seat_id = ?)
+           AND NOT EXISTS (SELECT 1 FROM comms r WHERE r.from_id = ? AND r.reply_to = c.id)
+           AND NOT EXISTS (
+             SELECT 1 FROM comms_reactions x WHERE x.message_id = c.id AND x.actor_id = c.to_id
+           )
+           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
+         ORDER BY c.id`,
+      )
+      .all(from, to, since, to, to) as { id: number }[];
+    return rows.map((r) => String(r.id));
+  }
   markCommsInboxRead(seatId: string, messageIds: readonly string[]): void {
     const insert = this.db.prepare(
       "INSERT OR IGNORE INTO comms_inbox_reads(seat_id,message_id) VALUES (?,?)",
