@@ -166,3 +166,22 @@
   align-self: center;
   flex: none;
 }
+
+.dock-messages {
+  display: grid;
+  gap: var(--sp-1);
+  justify-items: start;
+}
+.dock-message {
+  display: flex;
+  max-width: 100%;
+  min-height: 24px;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-s);
+}
+.dock-message span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

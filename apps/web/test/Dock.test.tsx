@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as markdown from "../src/components/Markdown.tsx";
 import { hub, streamStatus } from "../src/data.ts";
@@ -100,6 +100,38 @@ describe("Dock content", () => {
     expect(screen.queryAllByTestId("waiting-ask")).toHaveLength(0);
     expect(container.textContent).not.toMatch(/waiting on you/i);
     expect(screen.getByRole("button", { name: "Expand FLIGHT" })).toBeTruthy();
+  });
+
+  it("lists the unread messages to the operator, opens one and marks it read", async () => {
+    const mention = (id: string, seen: boolean) => ({
+      seen,
+      message: { id, from: "inco-1", to: "CAPCOM", text: `Question ${id}`, at: NOW },
+    });
+    let mentions = [mention("comms:1", false), mention("comms:2", false), mention("comms:3", true)];
+    const fn = stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/comms/mentions": () => ({ status: 200, body: { mentions } }),
+        "POST /api/comms/mentions/seen": () => {
+          mentions = mentions.map((m) => ({ ...m, seen: true }));
+          return { status: 200, body: {} };
+        },
+      },
+    );
+    const { container } = render(<Dock />);
+    const box = await waitFor(() => {
+      const el = container.querySelector("#dockMessages");
+      expect(el).toBeTruthy();
+      return el as HTMLElement;
+    });
+    expect(box.textContent).toContain("Messages to you · 2");
+    expect(box.textContent).not.toContain("Question comms:3");
+    fireEvent.click(within(box).getByText("Question comms:1"));
+    await waitFor(() =>
+      expect(bodyOf(fn, "/api/comms/mentions/seen")).toEqual({ ids: ["comms:1"] }),
+    );
+    expect(window.location.pathname).toBe("/comms/agents/inco-1");
+    await waitFor(() => expect(container.querySelector("#dockMessages")).toBeNull());
   });
 
   it("says no FLIGHT seat is configured, with no conversation and the input switched off", async () => {

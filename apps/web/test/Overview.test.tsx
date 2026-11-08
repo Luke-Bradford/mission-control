@@ -1998,58 +1998,27 @@ describe("Activity panel", () => {
     expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
   });
 
-  it("refreshes attention text in place while reading without new entries", async () => {
-    let current: [AttentionItem] = [item({ key: "attention-1", text: "Original decision" })];
-    const fallback = stub();
-    vi.stubGlobal("fetch", (input: string, init?: RequestInit) =>
-      input === "/api/attention"
-        ? Promise.resolve(new Response(JSON.stringify(current)))
-        : fallback(input, init),
-    );
-    const { container } = render(<Overview />);
-    fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
-    const list = container.querySelector("#actList") as HTMLElement;
-    await within(list).findByText("Original decision");
-    const node = list.querySelector(".arow");
-    list.scrollTop = 80;
-    fireEvent.scroll(list);
-    current = [{ ...current[0], text: "Updated decision" }];
-    act(() => hub.refetchAll());
-    await within(list).findByText("Updated decision");
-    expect(list.querySelector(".arow")).toBe(node);
-    expect(list.scrollTop).toBe(80);
-  });
-
-  it("Needs you lists the header's set: one row per item, whatever the session", async () => {
+  it("the Live log has no Needs you filter and never lists the waiting items", async () => {
     stub({
-      config: SESSION_CONFIG,
       items: [
-        // an escalation and a PR on the same ticket are two things to do, so two rows
-        item({ key: "esc:site-builder#2", repoId: "site-builder", text: "Pick a layout" }),
+        item({ key: "esc:shop-app#2", text: "Pick a layout" }),
         item({
           key: "pr:site-builder#9:1",
           kind: "pr",
-          repoId: "site-builder",
           text: "PR #9 · You: review",
           escalationId: null,
           ticket: "site-builder#2",
           agentId: null,
         }),
-        item({ key: "esc:site-builder#2", repoId: "site-builder", text: "Pick a layout" }),
-        item({ key: "flight", text: "FLIGHT's to settle", owner: "flight" }),
       ],
     });
     const { container } = render(<Overview />);
-    fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
     const activity = container.querySelector("#actP") as HTMLElement;
-    await within(activity).findByText("Pick a layout");
-    // a session on another repo hides nothing waiting on the operator
-    act(() => setSession("shop-app-session"));
-    const rows = () => container.querySelectorAll("#actList .arow");
-    await waitFor(() => expect(rows()).toHaveLength(2));
-    expect(within(activity).getByText("PR #9 · You: review")).toBeTruthy();
-    expect(within(activity).queryByText("FLIGHT's to settle")).toBeNull();
-    act(() => setSession(SESSION_ALL));
+    expect(within(activity).queryByRole("button", { name: "Needs you" })).toBeNull();
+    fireEvent.click(within(activity).getByRole("button", { name: "All" }));
+    await screen.findByText("No events yet.");
+    expect(activity.textContent).not.toContain("Pick a layout");
+    expect(activity.textContent).not.toContain("PR #9 · You: review");
   });
 
   it("holds new rows while scrolled down and shows N new without moving the reader", async () => {

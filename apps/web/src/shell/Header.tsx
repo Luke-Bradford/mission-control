@@ -1,6 +1,5 @@
 import {
   type AwaySettings,
-  type CommsMention,
   type ConfigView,
   type Crew,
   type LimitRow,
@@ -20,6 +19,7 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
+import { useOperatorUnread } from "./operatorMessages.ts";
 import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
@@ -40,7 +40,7 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
 export function Header({ page }: { page: Page }) {
-  const unread = useOperatorUnread();
+  const unread = useOperatorUnread().length;
   const demo = useDemo();
   return (
     <header className="top">
@@ -392,12 +392,6 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
       )}
     </svg>
   );
-}
-
-/** Unread messages addressed to the operator: the Comms mentions of CAPCOM not yet seen. */
-function useOperatorUnread(): number {
-  const mentions = useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions).data;
-  return mentions?.mentions.filter((m) => !m.seen).length ?? 0;
 }
 
 /**

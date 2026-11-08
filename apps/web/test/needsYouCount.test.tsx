@@ -177,6 +177,33 @@ describe("Needs you shows once", () => {
   });
 });
 
+describe("Needs you shows once on the FLIGHT and Board pages", () => {
+  it("the FLIGHT page's status strip has no Needs you counter", async () => {
+    stub();
+    render(
+      <>
+        <Header page="flight" />
+        <Flight />
+      </>,
+    );
+    await screen.findByRole("link", { name: `Needs you: ${N} waiting` });
+    await screen.findByText(/FLIGHT handling/);
+    expect(screen.queryByRole("button", { name: /^Needs you: \d+$/ })).toBeNull();
+  });
+
+  it("the Board page lists no Needs you counter either", async () => {
+    stub();
+    render(
+      <>
+        <Header page="board" />
+        <BoardPage repoId={null} ticket={null} />
+      </>,
+    );
+    await screen.findByText("Ticket 5");
+    expect(screen.queryByRole("button", { name: /^Needs you: \d+$/ })).toBeNull();
+  });
+});
+
 describe("one Needs-you count", () => {
   it("header, dock, Comms, Board and FLIGHT all count the same set, whatever the session filter", async () => {
     stub();
@@ -209,9 +236,6 @@ describe("one Needs-you count", () => {
         0,
       );
       const banner = container.querySelector("#nbanner .num")?.textContent;
-      const pulse = screen
-        .getByRole("button", { name: /^Needs you: \d+$/ })
-        .querySelector("b")?.textContent;
       const asks = container.querySelectorAll("#page-needs .needs-list .needs-row");
       return {
         header: header.querySelector("b")?.textContent,
@@ -220,7 +244,6 @@ describe("one Needs-you count", () => {
         comms,
         banner,
         onCards,
-        pulse,
         asks: asks.length,
       };
     };
@@ -232,7 +255,6 @@ describe("one Needs-you count", () => {
       comms: `Needs you ${N}`,
       banner: String(N),
       onCards: N,
-      pulse: String(N),
       asks: N,
     };
     await waitFor(() => expect(counts()).toEqual(expected));

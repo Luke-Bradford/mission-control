@@ -1,6 +1,8 @@
 import type { FlightSummaryView } from "@mc/core";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { Pill } from "../hud/Pill.tsx";
+import { followLink } from "../router.ts";
+import { markMentionsSeen, mentionPath, useOperatorUnread } from "./operatorMessages.ts";
 import { useStore } from "./store.ts";
 
 /** The existing attention order and read-only headline; no second queue or decision store. */
@@ -9,6 +11,7 @@ export function DockSummary({ canMessage }: { canMessage: boolean }) {
   const connection = useStore(streamStatus);
   const stale = (summary.data?.headlineAgeMin ?? 0) >= 60;
   const headline = summary.data?.headline;
+  const unread = useOperatorUnread();
   return (
     <section className="dock-summary scroll" aria-label="FLIGHT summary">
       <div className="dock-summary-state s" aria-live="polite">
@@ -52,6 +55,31 @@ export function DockSummary({ canMessage }: { canMessage: boolean }) {
               ? "No FLIGHT seat is configured."
               : "FLIGHT has not recorded a headline."}
         </p>
+      )}
+      {unread.length > 0 && (
+        <div className="dock-messages" id="dockMessages">
+          <h3>Messages to you · {unread.length}</h3>
+          {unread.slice(0, 3).map((m) => (
+            <a
+              key={m.message.id}
+              href={mentionPath(m)}
+              className="dock-message"
+              onClick={(e) => {
+                void markMentionsSeen([m.message.id]);
+                followLink(e, mentionPath(m));
+              }}
+            >
+              <b>{m.message.from}</b> <span title={m.message.text}>{m.message.text}</span>
+            </a>
+          ))}
+          <button
+            type="button"
+            className="sm"
+            onClick={() => void markMentionsSeen(unread.map((m) => m.message.id))}
+          >
+            Mark all read
+          </button>
+        </div>
       )}
       <div className="dock-next">
         <p className="note">
