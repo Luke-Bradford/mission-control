@@ -208,7 +208,12 @@ async function notNowOnce(c: NeedsYouContext, key: string): Promise<ActionResult
   const fail = (why: string) => refuse(502, NOT_NOW_REFUSED, why);
   let commentFailed = false;
   const at = c.now();
-  const comment = notNowComment(item.brief?.ask || question.text, item.brief?.options ?? [], at);
+  const comment = notNowComment(
+    item.brief?.ask || question.text,
+    item.brief?.options ?? [],
+    at,
+    WAITING_OPERATOR_LABEL,
+  );
   const unfit = prTextProblem(comment, {
     repo: repo.github,
     issue,
