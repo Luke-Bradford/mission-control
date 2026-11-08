@@ -110,23 +110,48 @@ function pageOf(path: string): EvidencePage | null {
   return null;
 }
 
+/** The page a `pages/` file is, or null when it has no screenshot address; for the import graph. */
+export function evidencePageOfPageFile(path: string): EvidencePage | null {
+  const rest = path.slice(WEB_PREFIX.length).replace(/^src\//, "");
+  return rest.startsWith("pages/") ? pageOf(path) : null;
+}
+
+/**
+ * The pages that reach each file under `apps/web/src` through static imports, keyed by repo path.
+ * Read from the PR head's checkout; a file the shell reaches lists every page.
+ */
+export type WebPageGraph = Readonly<Record<string, readonly EvidencePage[]>>;
+
 /**
  * The HUD pages a change to these paths can alter, in nav order. A page's own directory or
  * `pages/` file affects that page; the stylesheet, the shell, shared components and any file that
- * cannot be placed affect them all; test files and paths outside `apps/web` affect none.
+ * cannot be placed affect them all; test files and paths outside `apps/web` affect none. With a
+ * `graph`, a file it lists affects the pages that import it (the shell's files, every page); a file
+ * it does not list, or no graph, keeps that folder rule.
  */
-export function prEvidenceAffectedPages(paths: readonly string[]): EvidencePage[] {
+export function prEvidenceAffectedPages(
+  paths: readonly string[],
+  graph?: WebPageGraph,
+): EvidencePage[] {
   const hit = new Set<EvidencePage>();
-  for (const path of paths) {
-    if (!path.startsWith(WEB_PREFIX) || TEST_FILE.test(path)) continue;
-    const page = pageOf(path);
-    if (page === null) return [...EVIDENCE_PAGES];
+  const add = (page: EvidencePage) => {
     hit.add(page);
     if (page === "audit") {
       hit.add("readiness");
       hit.add("hotspots");
     }
     if (page === "setup") for (const p of EVIDENCE_PAGES) if (p.startsWith("setup_")) hit.add(p);
+  };
+  for (const path of paths) {
+    if (!path.startsWith(WEB_PREFIX) || TEST_FILE.test(path)) continue;
+    const reached = graph !== undefined && Object.hasOwn(graph, path) ? graph[path] : undefined;
+    if (reached !== undefined && reached.length > 0) {
+      for (const page of reached) add(page);
+      continue;
+    }
+    const page = pageOf(path);
+    if (page === null) return [...EVIDENCE_PAGES];
+    add(page);
   }
   return EVIDENCE_PAGES.filter((p) => hit.has(p));
 }

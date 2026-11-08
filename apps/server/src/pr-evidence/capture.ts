@@ -18,6 +18,7 @@ import {
   evidenceUncataloguedText,
   prEvidenceAffectedPages,
   prEvidenceUncatalogued,
+  type WebPageGraph,
 } from "@mc/core";
 import { decodePng, diffImages } from "./png.ts";
 import type { EvidenceImage, PrEvidenceStore } from "./store.ts";
@@ -55,6 +56,11 @@ export interface PrEvidenceDeps {
     scheme: EvidenceScheme,
     signal: AbortSignal,
   ): Promise<Buffer>;
+  /**
+   * The static import graph of `sha`'s web source, so a change is photographed on the pages that
+   * reach it. A rejection (or no dep) keeps the folder rule.
+   */
+  webGraph?(sha: string, signal: AbortSignal): Promise<WebPageGraph>;
   retryMs?: number;
   /** The deadline of one capture; default EVIDENCE_CAPTURE_MS. */
   captureMs?: number;
@@ -119,6 +125,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   /** Heads whose PR-body section is written. */
   const posted = new Set<string>();
   const controllers = new Set<AbortController>();
+  /** The pages each head's change reaches, once its import graph is read (or failed to read). */
+  const pagesOf = new Map<string, EvidencePage[]>();
   let stopped = false;
   /** Captures run one at a time: each builds two hubs. */
   let queue: Promise<void> = Promise.resolve();
@@ -230,6 +238,28 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     }
   }
 
+  /** The pages `t` affects: by the head's import graph, else by folder. */
+  async function pagesFor(t: EvidenceTarget): Promise<EvidencePage[]> {
+    const key = keyOf(t);
+    const known = pagesOf.get(key);
+    if (known) return known;
+    const byFolder = prEvidenceAffectedPages(t.paths);
+    if (byFolder.length === 0 || deps.webGraph === undefined) return byFolder;
+    let pages = byFolder;
+    try {
+      pages = prEvidenceAffectedPages(
+        t.paths,
+        await deps.webGraph(t.sha, AbortSignal.timeout(2 * 60_000)),
+      );
+    } catch (e) {
+      log(
+        `#${t.pr}: import graph not read, photographing by folder: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
+    pagesOf.set(key, pages);
+    return pages;
+  }
+
   async function post(t: EvidenceTarget): Promise<void> {
     const manifest = deps.store.manifest(deps.repoId, t.pr, t.sha);
     if (manifest === null || posted.has(keyOf(t)) || t.onStored === undefined) return;
@@ -245,7 +275,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     baseUrl: deps.baseUrl,
     async ensure(t) {
       if (stopped || t.repoId !== deps.repoId) return;
-      const pages = prEvidenceAffectedPages(t.paths);
+      const pages = await pagesFor(t);
       if (pages.length === 0) return;
       const key = keyOf(t);
       const have = manifest(t);
@@ -290,7 +320,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (t.repoId !== deps.repoId) return null;
       const uncatalogued = prEvidenceUncatalogued(t.paths);
       if (uncatalogued.length > 0) return evidenceUncataloguedText(uncatalogued);
-      const pages = prEvidenceAffectedPages(t.paths);
+      const pages = pagesOf.get(keyOf(t)) ?? prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
       const missing = evidenceMissing(manifest(t), t.sha, pages);
       if (missing.length === 0)

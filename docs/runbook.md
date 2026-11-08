@@ -271,7 +271,10 @@ review data includes its PR, head and waiting reason even when the reviewer cann
 The hub posts `mc/review` and a report comment containing the SHA, findings and recorded checks and
 tests. It links the available before/after screenshot manifest for that head, or states that no pairs
 were captured. Web changes require the configured screenshot gate before queueing. Evidence uses
-isolated previews and copied data; it never reconstructs a historical approval. A reviewer run is
+isolated previews and copied data; it never reconstructs a historical approval. Which pages a web change is photographed on comes from the static imports of the PR head's
+`apps/web/src`: each file in `pages/` is a page (a lazy `import()` of it is the boundary), what
+`main.tsx` and `App.tsx` reach counts for every page, and CSS belongs to the file that imports it.
+A file the graph does not list, or a graph that cannot be read, falls back to the folder rule. A reviewer run is
 recorded, but no developer run is invented for the PR.
 
 A crew review that reports after its author's run has ended (or is gone from this hub) is posted the

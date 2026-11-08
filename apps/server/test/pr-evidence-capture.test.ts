@@ -95,6 +95,37 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
 const WEB = ["apps/web/src/board/Card.tsx"];
 
 describe("PrEvidence capture", () => {
+  it("photographs the pages the head's import graph names, not the folder's", async () => {
+    const seen: string[] = [];
+    const t = setup({
+      webGraph: async (sha) => {
+        seen.push(sha);
+        return { "apps/web/src/comms/ItemBrief.tsx": ["needs", "comms"] };
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: ["apps/web/src/comms/ItemBrief.tsx"] });
+    expect(seen).toEqual([HEAD]);
+    expect([...new Set(t.rendered.map((r) => r.path))]).toEqual(["/needs-you", "/comms"]);
+    expect(
+      t.evidence.gate({
+        repoId: "mc",
+        pr: 7,
+        sha: HEAD,
+        paths: ["apps/web/src/comms/ItemBrief.tsx"],
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps the folder rule when the import graph cannot be read", async () => {
+    const t = setup({
+      webGraph: async () => {
+        throw new Error("no checkout");
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: ["apps/web/src/comms/ItemBrief.tsx"] });
+    expect([...new Set(t.rendered.map((r) => r.path))]).toEqual(["/comms"]);
+  });
+
   it("renders each affected page in light and dark on main and head from one snapshot", async () => {
     const t = setup();
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
