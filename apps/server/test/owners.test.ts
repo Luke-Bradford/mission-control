@@ -182,7 +182,7 @@ describe("Needs-you owners", () => {
     store.upsertRun(run({ id: "c1", ticket: "shop-app#1" }));
     store.addBrief({
       key,
-      context: "c",
+      context: "The crew asked a question and waits for an answer.",
       ask: "Q?",
       recommendation: "r",
       options: [

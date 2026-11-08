@@ -1199,7 +1199,7 @@ describe("FLIGHT's items to brief", () => {
     // an incomplete brief fails the Needs you entry check: still FLIGHT's to rewrite (#1543)
     store.addBrief({
       key: "note:blocked:r1:0",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "r",
       options: [],
       basis: "b",
@@ -1209,9 +1209,9 @@ describe("FLIGHT's items to brief", () => {
     // a complete one settles it
     store.addBrief({
       key: "note:blocked:r1:0",
-      ask: "Un-park mc#7?",
+      ask: "Un-park the seat?",
       ticket: "mc#7",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Un-park it.",
       options: [
         { label: "Un-park", answer: "Go." },
@@ -1741,7 +1741,12 @@ describe("the FLIGHT watcher", () => {
     await watch.check();
     expect(startCalls).toHaveLength(3);
     expect(notesOpen()).toMatchObject([
-      { kind: "blocked", seatId: "flight-1", repoId: "mc", text: flightStartFailedText("boom") },
+      {
+        kind: "blocked",
+        seatId: "flight-1",
+        repoId: "mc",
+        text: flightStartFailedText("it would not start; the server log has the error"),
+      },
     ]);
     // the open note holds past the hour, after the start count has expired
     nowMs += 61 * MIN;
@@ -1857,7 +1862,7 @@ describe("the FLIGHT watcher", () => {
           kind: "blocked",
           seatId: "flight-1",
           text: flightStartFailedText(
-            "its process is gone, and a restart failed: could not start the CLI",
+            "its process is gone and it would not restart; the server log has the error",
           ),
         },
       ]);
@@ -1871,7 +1876,7 @@ describe("the FLIGHT watcher", () => {
       alive = null;
       for (let i = 0; i < 4; i++) await watch.check();
       expect(notesOpen()).toMatchObject([
-        { text: flightStartFailedText("could not start the CLI") },
+        { text: flightStartFailedText("it would not start; the server log has the error") },
       ]);
     });
 
@@ -1973,7 +1978,7 @@ describe("the FLIGHT watcher", () => {
       });
       await watch.check();
       expect(down().map((n) => n.text)).toEqual([
-        flightDownText("claude-main is at its stop line"),
+        flightDownText("account claude-main is at its usage stop line"),
       ]);
     });
 
@@ -4570,7 +4575,7 @@ describe("every wake ends with each reason handled", () => {
     nowMs += FLIGHT_MIN_WAKE_GAP_MS;
     await watch.check();
     await watch.check();
-    expect(leftNotes()[0]?.text).toContain("question 1");
+    expect(leftNotes()[0]?.text).toContain("1 question waiting for an answer");
     // the re-wake for the second question ends clean, but question 1 is still open
     flightIdle();
     decide({ questionId: q2 });
@@ -4594,7 +4599,7 @@ describe("every wake ends with each reason handled", () => {
     await watch.check();
     expect(leftNotes()).toHaveLength(1);
     expect(leftNotes()[0]).toMatchObject({ kind: "blocked", seatId: "flight-1" });
-    expect(leftNotes()[0]?.text).toContain("question 1");
+    expect(leftNotes()[0]?.text).toContain("1 question waiting for an answer");
     // the operator sees it as itself, not as an item FLIGHT triages
     const item = attentionItems(config, store, nowMs).find((i) =>
       i.key.endsWith(FLIGHT_LEFT_NOTE_KEY),
@@ -6235,7 +6240,7 @@ describe("question fact watch (#1532)", () => {
       by: "flight",
       ask: "Which lane?",
       assessment: "a",
-      context: "a",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Lane 2",
       options: [],
       basis: "b",
