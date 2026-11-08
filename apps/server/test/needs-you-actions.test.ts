@@ -7,6 +7,7 @@ import {
   DEFAULT_REPO_RULES,
   OPERATOR_HEADER,
   type PullRequestView,
+  type RepoRules,
   type Run,
   type TicketView,
   WAITING_OPERATOR_LABEL,
@@ -177,6 +178,50 @@ function passedQuestion(ticket = "mc#7"): { id: number; key: string } {
   return { id, key };
 }
 
+/** A Comms question to CAPCOM from `from` about `ticket`, briefed for the operator with two options. */
+function commsQuestion(from: string, ticket: string, runTicket = "mc#7"): string {
+  const runId = `r-${from}`;
+  store.upsertRun(
+    run({ id: runId, agentId: from, ticket: runTicket, startedAt: NOW - 2 * 3_600_000 }),
+  );
+  store.setSeatSession({
+    seatId: from,
+    runId,
+    cliSessionId: "cli",
+    state: "idle",
+    reason: null,
+    worktree: null,
+    updatedAt: NOW,
+  });
+  const message = store.addComms({
+    at: NOW - 3_600_000,
+    from,
+    to: "CAPCOM",
+    ticket,
+    text: "Which lane?",
+    label: "question",
+  });
+  if (message === null) throw new Error("message was not stored");
+  const key = `comms-open:${message.id}`;
+  store.addBrief({
+    key,
+    for: "operator",
+    by: "flight",
+    ask: "Which lane should this ship in?",
+    assessment: "Two lanes fit.",
+    context: "Two lanes fit.",
+    recommendation: "Lane 2.",
+    options: [
+      { id: "a", label: "A", answer: "Do A." },
+      { id: "b", label: "B", answer: "Do B." },
+    ],
+    ticket,
+    basis: "read the ticket",
+    at: NOW - 20_000,
+  });
+  return key;
+}
+
 const gh: GhRunner = async (args) => {
   ghCalls.push(args);
   // GitHub reads the issue closed once a close has run
@@ -208,7 +253,7 @@ const supervisor = {
   endAsideRun: async () => {},
 } as unknown as Supervisor;
 
-const app = () =>
+const app = (rules: RepoRules = DEFAULT_REPO_RULES) =>
   buildApp({
     config: config(),
     store,
@@ -226,7 +271,7 @@ const app = () =>
           return { ok: true, changed: true };
         },
       },
-      rules: async () => DEFAULT_REPO_RULES,
+      rules: async () => rules,
       fetchTicket: async (_repo, n) => ticketView(n),
     },
   });
@@ -355,23 +400,104 @@ describe("Not now and Drop on Needs you", () => {
     }
   });
 
+  describe("a Comms question", () => {
+    it("Not now settles it, comments once and ends the seat's own run on that ticket", async () => {
+      const key = commsQuestion("guido-1", "mc#7");
+      const a = app();
+      try {
+        expect((await items(a)).find((i) => i.key === key)?.offers).toEqual(["not-now", "drop"]);
+        expect((await post(a, key, "not-now")).statusCode).toBe(200);
+        expect(ended).toEqual(["r-guido-1"]);
+        expect(ghCalls.filter((c) => c[0] === "issue" && c[1] === "comment")).toHaveLength(1);
+        expect(moves).toHaveLength(1);
+        expect((await items(a)).some((i) => i.key === key)).toBe(false);
+      } finally {
+        await a.close();
+      }
+    });
+
+    it("Not now never ends FLIGHT's run", async () => {
+      const key = commsQuestion("flight-1", "mc#7");
+      const a = app();
+      try {
+        const res = await post(a, key, "not-now");
+        expect([200, 409]).toContain(res.statusCode);
+        expect(ended).toEqual([]);
+      } finally {
+        await a.close();
+      }
+    });
+
+    it("Not now and Drop leave a run on other work alone", async () => {
+      store.replaceBoard("mc", [card(7), card(8)]);
+      for (const action of ["not-now", "drop"] as const) {
+        const key = commsQuestion("guido-1", "mc#8", "mc#7");
+        const a = app();
+        try {
+          const res = await post(a, key, action);
+          // Drop refuses only if something else blocks it; the run on mc#7 is never ended
+          expect([200, 409]).toContain(res.statusCode);
+          expect(ended).toEqual([]);
+        } finally {
+          await a.close();
+        }
+        ghCalls = [];
+        moves = [];
+      }
+    });
+
+    it("Drop closes the ticket once and settles it", async () => {
+      const key = commsQuestion("guido-1", "mc#7");
+      const a = app();
+      try {
+        expect((await post(a, key, "drop")).statusCode).toBe(200);
+        expect(ghCalls.filter((c) => c[0] === "issue" && c[1] === "close")).toHaveLength(1);
+        expect(ended).toEqual(["r-guido-1"]);
+        expect((await items(a)).some((i) => i.key === key)).toBe(false);
+      } finally {
+        await a.close();
+      }
+    });
+  });
+
   describe.each(["not-now", "drop"] as const)("%s", (action) => {
     it("refuses a protected item", async () => {
-      store.raiseNote({
-        key: "blocked:p",
-        kind: "blocked",
-        runId: null,
-        seatId: null,
-        repoId: "mc",
-        text: "Choose",
-        at: NOW - 1000,
+      // a Comms question whose sender's seat is stopped is held, so it is protected
+      const key = commsQuestion("guido-1", "mc#7");
+      store.setSeatSession({
+        seatId: "guido-1",
+        runId: "r-guido-1",
+        cliSessionId: "cli",
+        state: "stopped",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
       });
       const a = app();
       try {
-        const res = await post(a, "note:blocked:p", action);
+        expect((await items(a)).find((i) => i.key === key)?.offers).toBeUndefined();
+        const res = await post(a, key, action);
         expect(res.statusCode).toBe(409);
+        expect(res.json().error).toMatch(/protected/);
         expect(ghCalls).toEqual([]);
         expect(moves).toEqual([]);
+        expect(ended).toEqual([]);
+      } finally {
+        await a.close();
+      }
+    });
+
+    it("refuses an always_ask card", async () => {
+      const { key } = passedQuestion();
+      store.replaceBoard("mc", [card(7, { labels: ["security"] })]);
+      const a = app({ ...DEFAULT_REPO_RULES, alwaysAsk: ["security"] });
+      try {
+        const res = await post(a, key, action);
+        expect(res.statusCode).toBe(409);
+        expect(res.json().error).toMatch(/always_ask/);
+        expect(ghCalls).toEqual([]);
+        expect(moves).toEqual([]);
+        expect(ended).toEqual([]);
       } finally {
         await a.close();
       }

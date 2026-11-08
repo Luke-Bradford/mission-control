@@ -63,6 +63,7 @@ const refuse = (status: number, prefix: string, why: string): ActionResult => ({
 /** The question behind an item the operator can set aside or drop: only a seat's or a Comms one. */
 function questionOf(
   store: Store,
+  config: CcConfig,
   item: AttentionItem,
 ): { text: string; runId: string | null; seatQuestion: number | null } | null {
   if (item.key.startsWith("ask:")) {
@@ -75,9 +76,16 @@ function questionOf(
   if (item.key.startsWith(COMMS_OPEN_PREFIX)) {
     const id = item.key.slice(COMMS_OPEN_PREFIX.length);
     const message = store.commsMessage(id);
-    return message === null
-      ? null
-      : { text: message.text, runId: store.commsRun(id)?.id ?? null, seatQuestion: null };
+    if (message === null) return null;
+    // a run waits on the question only when it is a crew seat's own run on this ticket: the
+    // sender's run at send time may be FLIGHT's or on other work, and ending it would be wrong
+    const run = store.commsRun(id);
+    const waiting =
+      run !== null &&
+      run.ticket === item.ticket &&
+      run.agentId !== flightSeat(config)?.seat.id &&
+      run.reviewId == null;
+    return { text: message.text, runId: waiting ? run.id : null, seatQuestion: null };
   }
   return null;
 }
@@ -89,7 +97,8 @@ export function offerProblem(
 ): string | null {
   if (item.kind !== "question" || item.owner !== OWNER_OPERATOR)
     return "only a question that waits for you can be set aside or dropped";
-  if (questionOf(c.store, item) === null) return "it is not a question a run or a seat asked";
+  if (questionOf(c.store, c.config, item) === null)
+    return "it is not a question a run or a seat asked";
   if (protectedDecisionItem(c.store, item, c.config, c.now()))
     return "it is protected and always reaches you";
   const ref = item.ticket === null ? null : parseTicket(item.ticket);
@@ -133,7 +142,7 @@ async function targetOf(c: NeedsYouContext, key: string, prefix: string): Promis
   if (problem !== null) return stop(409, problem);
   const ref = parseTicket(item.ticket ?? "");
   const repo = c.config.repos.find((r) => r.id === ref?.repoId);
-  const question = questionOf(c.store, item);
+  const question = questionOf(c.store, c.config, item);
   if (ref === null || repo === undefined || question === null)
     return stop(409, "the question is no longer waiting");
   const card = c.store.board(repo.id).find((b) => b.issueNumber === ref.number);
