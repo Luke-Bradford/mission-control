@@ -181,18 +181,27 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
         const next = rows[i + 1];
         if (next) expect(row.y + row.height).toBeLessThanOrEqual(next.y + 1);
       });
-      // The Decisions panel does not give up its room to the list: its empty-state line shows whole.
-      const decisions = await page.evaluate(() => {
-        const panel = document.querySelector(".comms-decisions")?.getBoundingClientRect();
-        const line = [...document.querySelectorAll(".comms-decisions *")]
-          .filter((el) => el.children.length === 0 && el.textContent?.includes("No decisions"))
-          .map((el) => el.getBoundingClientRect())[0];
-        return panel && line
-          ? { panelBottom: panel.bottom, lineTop: line.top, lineBottom: line.bottom }
+      // The Tickets panel keeps its room: its search box shows whole inside it, below the nav.
+      const tickets = await page.evaluate(() => {
+        const panel = document.querySelector(".comms-tickets")?.getBoundingClientRect();
+        const box = document.querySelector(".comms-ticket-search")?.getBoundingClientRect();
+        const nav = document.querySelector(".comms-nav")?.getBoundingClientRect();
+        return panel && box && nav
+          ? {
+              panelTop: panel.top,
+              panelBottom: panel.bottom,
+              boxTop: box.top,
+              boxBottom: box.bottom,
+              navBottom: nav.bottom,
+              boxWidth: box.width,
+            }
           : null;
       }, undefined);
-      expect(decisions).not.toBeNull();
-      expect(decisions?.lineBottom).toBeLessThanOrEqual((decisions?.panelBottom ?? 0) + 0.5);
+      expect(tickets).not.toBeNull();
+      expect(tickets?.boxTop).toBeGreaterThanOrEqual((tickets?.panelTop ?? 0) - 0.5);
+      expect(tickets?.boxBottom).toBeLessThanOrEqual((tickets?.panelBottom ?? 0) + 0.5);
+      expect(tickets?.panelTop).toBeGreaterThanOrEqual((tickets?.navBottom ?? 0) - 0.5);
+      expect(tickets?.boxWidth).toBeGreaterThan(120);
       await page.screenshot(join(SHOTS, `comms-flight-${width}.png`));
       await page.close();
     },
