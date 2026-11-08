@@ -407,6 +407,12 @@ files in `~/Library/Logs/mission-control/` are preserved; routine hub logging no
 `server.log` there. If you installed the older newsyslog entry that sends this hub SIGTERM, remove
 that entry: the built-in rotation replaces it and does not need a service restart.
 
+When a reported review is held back from GitHub, the hub logs one warning line saying why:
+`External QA for <repo>#<pr> is not posted to GitHub: <reason>.` Search `<data dir>/logs/server.log`
+for `is not posted` (the launchd files under `~/Library/Logs/mission-control/` do not have it). The reason covers
+GitHub's own read of the PR too: closed, draft, labelled skip-review, another head, or a base that
+is not the default branch.
+
 ### Budget brake
 
 When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
