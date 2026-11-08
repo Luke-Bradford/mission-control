@@ -110,7 +110,7 @@ import { reviewerOf } from "./engine/engine.ts";
 import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
-import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
+import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopPause } from "./loop-pause.ts";
 import { loopTries } from "./loophistory.ts";
 import { reviewCheckFor } from "./review-check.ts";
@@ -1145,7 +1145,7 @@ export function flightNotTriagingDueAt(config: CcConfig, store: Store, now: numb
 }
 
 /** "14:05" today, "27 Oct 14:05" before today, in the operator's timezone. */
-function sinceText(at: number, now: number, timeZone: string): string {
+export function sinceText(at: number, now: number, timeZone: string): string {
   const hm = clockHm(at, timeZone);
   if (at >= startOfLocalDay(now, timeZone)) return hm;
   const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone }).format(
@@ -1584,7 +1584,9 @@ function buildAttentionItems(
       item.brief !== undefined &&
       item.brief.for !== "flight" &&
       item.brief.at < item.at;
-    const returned = restated ? [FLIGHT_ASKED_AGAIN] : needsYouEntryFaults(item);
+    const returned = restated
+      ? [FLIGHT_ASKED_AGAIN]
+      : needsYouEntryFaults(item, crewSeatIds(config));
     if (returned.length === 0) return item;
     // a default applies only to the operator's item, so a returned one carries none
     const { defaultDueAt: _default, ...rest } = item;

@@ -250,5 +250,25 @@ export async function closeSettledQuestions(d: {
       }
     }
   }
+  // a question set aside with Not now ends with its ticket
+  for (const q of store.asideQuestions()) {
+    const ticket = store.run(q.runId)?.ticket ?? null;
+    const ref = ticket === null ? null : /^(.+)#(\d+)$/.exec(ticket);
+    if (ticket === null || ref === null) continue;
+    const card = store.board(ref[1] as string).find((b) => b.issueNumber === Number(ref[2]));
+    if (card?.closed !== true) continue;
+    const stored = store.closeQuestion({
+      key: `ask:${q.id}`,
+      askAt: q.at,
+      kind: "ticket-closed",
+      reason: ticketClosedReason(ticket),
+      by: "hub",
+      question: q.text,
+      ticket,
+      operator: true,
+      at: now,
+    });
+    if (stored) closed++;
+  }
   return closed;
 }

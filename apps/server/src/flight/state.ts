@@ -39,6 +39,7 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OPERATOR_UNREAD_MS,
+  FLIGHT_OWED_MS,
   FLIGHT_PR_ENTRY_CHANGES,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
@@ -135,7 +136,7 @@ import { flightWakeCost, flightWakeWaits } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
-import { flightSeat } from "./seat.ts";
+import { crewSeatIds, flightSeat } from "./seat.ts";
 import { flightSignals, flightWaits } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
 
@@ -242,7 +243,7 @@ export function flightHeadline(
   };
 }
 
-export { flightSeat };
+export { crewSeatIds, flightSeat };
 
 /** The seats whose run the HUD shows as stalled. */
 export function stalledSeats(
@@ -758,11 +759,18 @@ function wakeInputs(i: {
             i.store.unreadCommsFrom(from, flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS),
           )
           .sort((a, b) => Number(a) - Number(b));
+  // read by FLIGHT and still unanswered after its turn: owed until it replies
+  const owed =
+    flightId === null
+      ? []
+      : [COMMS_CAPCOM, COMMS_CONTROLLER]
+          .flatMap((from) => i.store.owedCommsFrom(from, flightId, i.now - FLIGHT_OWED_MS))
+          .sort((a, b) => Number(a) - Number(b));
   // a seat left idle by the slow pace is the operator's wish, not a fault to wake FLIGHT about
   const idle = i.pace ? undefined : idleSeats(i, waits, rules, fit);
   return idle === undefined
-    ? { fit, fresh, operator, reviewsWaited }
-    : { fit, fresh, operator, reviewsWaited, idle };
+    ? { fit, fresh, operator, owed, reviewsWaited }
+    : { fit, fresh, operator, owed, reviewsWaited, idle };
 }
 
 /** The setting that keeps when each seat's idle spell began (the hub's own record). */
@@ -1709,6 +1717,8 @@ export function wakeFacts(
       .sort(),
     // an unread plain message from the operator: never routine
     operator: s.wake?.operator ?? [],
+    // read and not answered: owed until FLIGHT replies to it
+    owed: s.wake?.owed ?? [],
     items: (s.wake?.fresh ?? wakeItems(s).map(itemFactId)).slice().sort(),
     release: releasable(s),
     breaker: s.breaker.tripped ? [s.breaker.reason ?? "tripped"] : [],
@@ -1780,6 +1790,7 @@ export function pending(
     stoppedSeats(s).length > 0 ||
     startableFor(s).free.length > 0 ||
     idleFacts(s.wake?.idle).length > 0 ||
+    (s.wake?.owed?.length ?? 0) > 0 ||
     s.seats.some((x) => x.parked !== null && flightParkKind(x.parked.kind)) ||
     s.aside.some((x) => x.parked !== null && flightParkKind(x.parked.kind))
   );
@@ -1854,6 +1865,8 @@ const wordsOf = (text: string): Set<string> =>
 const accountable = (category: string, item: unknown): boolean => {
   // Guidance changes wake FLIGHT but do not demand a fabricated decision when nothing changes.
   if (category === "t" || category === "instructions" || category === "operator") return false;
+  // an owed reply is answered with a Comms reply, not a logged decision
+  if (category === "owed") return false;
   if (category === "prs") {
     const [, , ready, state, awaiting, away] = String(item).split(":");
     return (ready === "true" && state === "open") || !!awaiting || !!away;
@@ -1961,6 +1974,8 @@ export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
       return "review seats are idle with a review queued";
     case "holdsInForce":
       return `${spaced(text)} hold is in force`;
+    case "owed":
+      return `you owe the operator an answer to Comms message ${text}`;
     case "breaker":
       return `the runaway breaker is tripped (${spaced(text)})`;
     case "prs":
@@ -1983,6 +1998,52 @@ export function wakeReasonWords(reason: WakeReason, timeZone: string): string {
     default:
       return times(`${category} ${text}`);
   }
+}
+
+/** The plain noun phrase a wake reason counts under in the wake-left alert. */
+function leftWakeGroup(reason: WakeReason): readonly [string, string] {
+  const { category, item } = ((): { category: string; item: string } => {
+    const split = /^([^:]+):([\s\S]*)$/.exec(reason.id);
+    return { category: split?.[1] ?? "", item: split?.[2] ?? "" };
+  })();
+  if (category === "prFlow" || category === "prs" || item.startsWith('"pr:'))
+    return ["pull request waiting for a next step", "pull requests waiting for a next step"];
+  if (category === "q" || item.startsWith('"comms-open:') || item.startsWith('"esc:'))
+    return ["question waiting for an answer", "questions waiting for an answer"];
+  if (category === "free") return ["free seat", "free seats"];
+  if (category === "t") return ["ticket ready to start", "tickets ready to start"];
+  if (category === "parked" || category === "stopped" || category === "idle")
+    return ["seat that needs a look", "seats that need a look"];
+  if (category === "triage") return ["item waiting for FLIGHT", "items waiting for FLIGHT"];
+  if (category === "reviews" || category === "release")
+    return ["review or release step waiting", "review or release steps waiting"];
+  if (category === "breaker" || category === "holdsInForce")
+    return ["safety stop or hold in force", "safety stops or holds in force"];
+  if (category === "planned") return ["planned check that is due", "planned checks that are due"];
+  if (category === "signals") return ["signal from the crew", "signals from the crew"];
+  if (item.startsWith('"stall:')) return ["seat that needs a look", "seats that need a look"];
+  return ["other thing to look at", "other things to look at"];
+}
+
+/**
+ * The wake-left alert in plain words: how many things FLIGHT was woken about and left undecided,
+ * when it was woken, and a count by kind. Never a PR, ticket or seat id, or a raw key.
+ */
+export function leftWakeText(
+  left: readonly WakeReason[],
+  wokeAt: number,
+  timeZone: string,
+): string {
+  const groups = new Map<string, { one: string; many: string; n: number }>();
+  for (const r of left) {
+    const [one, many] = leftWakeGroup(r);
+    const g = groups.get(one) ?? { one, many, n: 0 };
+    g.n += 1;
+    groups.set(one, g);
+  }
+  const parts = [...groups.values()].map((g) => `${g.n} ${g.n === 1 ? g.one : g.many}`);
+  const things = left.length === 1 ? "1 thing" : `${left.length} things`;
+  return `FLIGHT was woken at ${clockHm(wokeAt, timeZone)} about ${things} and left ${left.length === 1 ? "it" : "them"} undecided after two tries: ${parts.join(", ")}.`;
 }
 
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */

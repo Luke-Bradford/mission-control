@@ -15,6 +15,8 @@ import {
   FLIGHT_DOWN_NOTE_KEY,
   FLIGHT_DOWN_STALL_MS,
   FLIGHT_GHOST_MS,
+  FLIGHT_GUARD_COOLDOWN_MS,
+  FLIGHT_GUARD_SETTING,
   FLIGHT_HANDOVER_ASK,
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HOUR_MS,
@@ -64,6 +66,7 @@ import {
   flightWake,
   flightWakes,
   idleSeatLine,
+  leftWakeText,
   markItemsShown,
   markPointersShown,
   markPrsShown,
@@ -81,7 +84,6 @@ import {
   type WakeReason,
   wakeFacts,
   wakeReasons,
-  wakeReasonWords,
 } from "./state.ts";
 
 export interface FlightWatchDeps {
@@ -182,7 +184,29 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** Each run's context at its first turn, so the handover line is growth, not the start's size. */
   const firstContext = new Map<string, number>();
   let rotationRequested = false;
-  let lastFailure: string | null = null;
+  /** The failure in plain words for the operator's alert; the raw error stays in the hub log. */
+  let lastReason: string | null = null;
+  /**
+   * The handover guard's cooldown: when the hub starts FLIGHT again after the guard stopped it
+   * (`retryAt`, null when it stays stopped), and when it last did (a trip within an hour of that
+   * is the second in a row). Stored, so a hub restart keeps both.
+   */
+  const readGuard = (): { retryAt: number | null; restartedAt: number | null } => {
+    try {
+      const v = JSON.parse(store.getSetting(FLIGHT_GUARD_SETTING) || "null") as {
+        retryAt?: unknown;
+        restartedAt?: unknown;
+      } | null;
+      return {
+        retryAt: typeof v?.retryAt === "number" ? v.retryAt : null,
+        restartedAt: typeof v?.restartedAt === "number" ? v.restartedAt : null,
+      };
+    } catch {
+      return { retryAt: null, restartedAt: null };
+    }
+  };
+  const writeGuard = (g: { retryAt: number | null; restartedAt: number | null }): void =>
+    store.setSetting(FLIGHT_GUARD_SETTING, JSON.stringify(g));
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
   let processGone = false;
   const announced = new Set<string>();
@@ -275,10 +299,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       runId: null,
       seatId,
       repoId,
-      text: `FLIGHT left ${left.length} wake reason${left.length === 1 ? "" : "s"} without a decision after two wakes: ${left.map((r) => wakeReasonWords(r, config.operator.timezone)).join("; ")}`.slice(
-        0,
-        600,
-      ),
+      text: leftWakeText(left, wokeAt, config.operator.timezone),
       at: t,
     });
     bus.emit("attention");
@@ -461,12 +482,20 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (row?.state === "parked" && !noteOpen())
         raiseDown(id, found.session.repoId, "it is parked", t);
       else if (atStop && row?.state !== "stopped" && !noteOpen())
-        raiseDown(id, found.session.repoId, `${accountId} is at its stop line`, t);
+        raiseDown(id, found.session.repoId, `account ${accountId} is at its usage stop line`, t);
       else clearDown(t);
       if (row?.state === "stopped" || row?.state === "parked" || atStop) return;
       // parked or at the stop line, FLIGHT waits for that first; a run left with no session goes
       // before any start, which it would refuse
       if (await settleGhost(id, row, alive, t)) return;
+      // the handover guard's cooldown is over: FLIGHT starts again, and a trip soon after is the second in a row
+      const guard = readGuard();
+      if (guard.retryAt !== null && t >= guard.retryAt && noteOpen()) {
+        store.clearNote(FLIGHT_NOTE_KEY, t);
+        writeGuard({ retryAt: null, restartedAt: t });
+        rotations = [];
+        bus.emit("attention");
+      }
       if (noteOpen()) return;
       starts = starts.filter((s) => s > t - FLIGHT_HOUR_MS);
       rotations = rotations.filter((s) => s > t - FLIGHT_HOUR_MS);
@@ -474,6 +503,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (rotating && rotations.length >= FLIGHT_ROTATIONS_MAX) {
         clearDown(t);
         const last = row?.runId ?? null;
+        const tripped = readGuard();
+        const again = tripped.restartedAt !== null && t - tripped.restartedAt < FLIGHT_HOUR_MS;
+        writeGuard({ retryAt: again ? null : t + FLIGHT_GUARD_COOLDOWN_MS, restartedAt: null });
         store.raiseNote({
           key: FLIGHT_NOTE_KEY,
           kind: "blocked",
@@ -483,6 +515,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           text: flightRotationLoopText(
             rotations.length,
             last === null ? null : (firstContext.get(last) ?? null),
+            again,
           ),
           at: t,
         });
@@ -498,9 +531,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           runId: null,
           seatId: id,
           repoId: found.session.repoId,
-          text: flightStartFailedText(lastFailure ?? "it stopped 3 times in an hour"),
+          text: flightStartFailedText(lastReason ?? "it stopped 3 times in an hour"),
           at: t,
         });
+        writeGuard({ ...readGuard(), retryAt: null });
         processGone = false; // said once, in this note
         bus.emit("attention");
         return;
@@ -567,8 +601,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
-        lastFailure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
-        log(`flight watch: start failed: ${lastFailure}`);
+        const failure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
+        lastReason = processGone
+          ? "its process is gone and it would not restart; the server log has the error"
+          : "it would not start; the server log has the error";
+        log(`flight watch: start failed: ${failure}`);
       }
       return;
     }

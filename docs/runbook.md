@@ -407,6 +407,12 @@ files in `~/Library/Logs/mission-control/` are preserved; routine hub logging no
 `server.log` there. If you installed the older newsyslog entry that sends this hub SIGTERM, remove
 that entry: the built-in rotation replaces it and does not need a service restart.
 
+When a reported review is held back from GitHub, the hub logs one warning line saying why:
+`External QA for <repo>#<pr> is not posted to GitHub: <reason>.` Search `<data dir>/logs/server.log`
+for `is not posted` (the launchd files under `~/Library/Logs/mission-control/` do not have it). The reason covers
+GitHub's own read of the PR too: closed, draft, labelled skip-review, another head, or a base that
+is not the default branch.
+
 ### Budget brake
 
 When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
@@ -1381,6 +1387,30 @@ wake lists the freed tickets ("mc#1015 merged: mc#1139, mc#1142 unblocked"), and
 `GET /api/flight` carry `blocked`: each waiting ticket with its waits, its chain to the root and the minutes
 it has waited. A chain that has stood still for 30 minutes raises a `chain_stalled` signal, which wakes FLIGHT once. FLIGHT's `create_ticket` refuses a body that is cut from or builds on an open PR without a
 `Depends on` line for that PR's ticket (or `After PR N`). The controller's own filing rule (`roles/FLIGHT.md`) is updated separately to ask for the same line.
+
+### Not now and Drop on Needs you
+
+Two operator-only routes act on a question in Needs you. `GET /api/attention` puts `offers: ["not-now", "drop"]`
+on an item that is an unprotected `ask:` or Comms question, owned by the operator, whose ticket is on the
+board of the repo FLIGHT's session works (an `autonomy: merge` repo, not closed, not `always_ask`, not of another lane).
+Anything else answers 409 and writes nothing. Both are the operator's own click (operator token); FLIGHT has no tool for either.
+
+- `POST /api/attention/:key/not-now` sets a seat question aside (`seat_questions.aside_at`: it stays open,
+  leaves Needs you, and the end of its run does not close it). It then creates the `waiting:operator` label once per
+  repo, adds it to the issue and moves the card to Backlog; a failure up to here puts the question back in Needs you.
+  It then ends the run that waits on it (`recordRunHandoff` and `endRun`, or `endAsideRun` for a run set aside in
+  review) and posts one comment holding the question, its options and the date. A Comms question is settled
+  instead, and ends the sender's run only when it is a crew seat's own run on that ticket; FLIGHT's own question is
+  never offered. If the comment alone fails once the run has ended, the question stays aside and the route answers
+  502. A second request for the same key while one is running answers 409. A set-aside question closes when its
+  ticket closes. Nothing serves or answers a set-aside question yet; that is a follow-up.
+- `POST /api/attention/:key/drop` closes the ticket as not planned with one comment, after the same refusals as
+  FLIGHT's `close_ticket` (`closeBlocker` in `apps/server/src/flight/ticket-close.ts`: an open PR, open dependants,
+  blocked-by cards, open sub-issues). The run that waits on the question ends with the close; it is the only
+  live run allowed. The close is confirmed by reading the issue back.
+
+The comment goes through the same text scan as `comment_ticket` (no secret, no mention, no other item's number);
+a question whose text fails it answers 422 and nothing is written.
 
 ### FLIGHT's controller powers
 
@@ -2548,6 +2578,9 @@ FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKEN
 - **Over the limit.** At its next idle point the watch sends one handover wake (not counted as a wake): FLIGHT writes what it is in the middle of, promised and waits on with `track` and `remember` (topic `handover`), then ends its turn. The turn after that ends the run and the next start is a fresh session, not counted against the hourly start cap.
 - **The fresh session** reads `flight_state`, its tracked items, plans, memory and the latest `handover` note first; the start brief says so and carries the note. The note stays in memory until FLIGHT replaces it.
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
+- **The guard cools down.** After the handover cap trips (4 handovers in an hour) the hub stops restarting FLIGHT, says so in Needs you, and starts FLIGHT again by itself 30 minutes later (`FLIGHT_GUARD_COOLDOWN_MS`). A trip within an hour of that restart stays stopped until the operator starts FLIGHT. Messages sent while FLIGHT is down are kept and reach it when it starts.
+- **Owed answers.** An operator message FLIGHT has read and not answered (no FLIGHT message with `replyTo` naming it) is the `owed` wake fact: it wakes FLIGHT and stays in the wake until FLIGHT replies, for up to 7 days (reacting to it or settling it also clears it). An item reply sent while FLIGHT is down is stored and arrives in the wake when FLIGHT starts; the discussion route no longer answers 503.
+- **FLIGHT runs Update.** On a `flight_powers: superuser` repo FLIGHT may call `POST /api/update` through `mc operator` only for an Update the hub holds for a person (the held-Update item is open; otherwise 409), and only once no other crew seat is working (409 names the seat). It is logged as "Updated by FLIGHT". On any other repo it answers 403. The operator's own call is unchanged.
 - **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 150K" (null with no turn yet).
 
 ## Repeating a suspected flaky test
@@ -2736,7 +2769,35 @@ keep their permission checks.
   answer), one line each, ten at most, under "Already decided on this ticket".
 - **Exact repeats.** From any sender, the same sender, recipient, text, ticket and label within 60 seconds is stored
   once. The sender is told "Already sent comms:N." (a success), nobody is woken again, and a row in
-  `comms_repeats` counts it (`store.commsRepeatCount(since)`), kept 90 days.
+  `comms_repeats` counts it (`store.commsRepeatCount(since)`), kept 90 days. The operator's routes
+  (`POST /api/comms`, `POST /api/seats/:id/message`) answer such a send with 200 and
+  `alreadySent: true`, with the first copy's state. Both also return `state` and `deliveredAt`.
+- **Stored, then delivered.** Every message has `deliveredAt`, null while only stored. It is set the
+  first time the recipient seat takes the message (its inbox is attached to a turn). An operator
+  message (either route) wakes the seat it is sent to; a plain message to a seat with no live session stays stored; a working seat takes it at its next turn. `POST /api/comms`
+  returns `{ state: "stored" | "delivered", deliveredAt, alreadySent }`; `GET /api/comms/:id/state`
+  reads it later.
+- **A reply to an ended run.** `GET /api/comms/:id/reply-route` says before sending where the
+  operator's reply to a seat's message goes. If the run that wrote it has ended, it goes to the seat
+  now on that ticket, else to FLIGHT, and `POST /api/comms` reports `redirectedTo`. The redirected reply keeps the ticket but is not linked to the ended run's message and does not mention or wake its seat. Replies only:
+  an answer to a question never takes this route.
+- **Waking and closing.** A seat is not woken for a Comms message while it is mid-turn (it takes
+  its inbox at the next turn), and FLIGHT is never woken by these routes (the hub wakes it). A
+  plain message through `POST /api/seats/:id/message` closes no question; a reply that names a
+  question (`question`) closes that one only. A failed wake leaves the message stored and marks it,
+  so an identical retry wakes the seat again.
+- **Choosing an option.** `POST /api/attention/:key/choose` with `{ optionId, briefAt }` is the one
+  way a choice acts; chat text never picks an option. `briefAt` must equal the open brief's time and
+  `optionId` must be one of its options. A brief the hub wrote (`by: "hub"`, such as a queue change) is refused with 409: it acts through its own buttons. The brief is claimed before anything is sent, so two picks at once deliver once. The answer goes to the run that asked and wakes it; if
+  the answer is worded and stored as the chooser's (the operator, FLIGHT through its operator tool, or the controller; `question_choices.chosen_by`), never as the operator's when FLIGHT or the controller chose. If that run has ended it goes to FLIGHT, to pass to the ticket's next run, never to another run
+  directly. FLIGHT's own question goes to FLIGHT, woken. When a seat asked, FLIGHT gets one
+  unlabelled line at its next wake (no wake). The question closes, the choice is stored in
+  `question_choices` (kept 365 days) and shows in the ticket's timeline as a `choice` decision;
+  nothing is written to GitHub. The route returns a receipt (what was chosen, where it went, when
+  delivered); choosing the same brief again returns the first receipt. `GET /api/attention/:key/choice`
+  reads it later. A non-question item (a note, a crew error, an open Comms item) is closed at its
+  source, then acked. `store.isChoiceAnswer(id)` tells a reader the message is a hub-built answer,
+  not something the operator owes a reply to with the current delivery time.
 - **Stamped by the hub.** A seat's message also stores the run that sent it (`from_run_id`) and
   that run's newest open PR (`pr`); an agent types neither. `comms_read { id }` shows both.
 - **Sender kind.** Each message stores who sent it: `operator`, `controller`, `flight`, `seat` or

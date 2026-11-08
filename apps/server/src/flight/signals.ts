@@ -749,6 +749,14 @@ export function flightSignals(i: {
       continue;
     }
     if (wait.until > now) continue;
+    // FLIGHT has been told it ended, and nothing is left to look at again
+    if (
+      state.signals[`wait_over:${target}:${wait.until}`]?.toldAt != null &&
+      (now - wait.until > FLIGHT_WAIT_OVER_KEEP_MS || waitSubjectDone(store, repo, target))
+    ) {
+      delete waits[target];
+      continue;
+    }
     // FLIGHT dealt with it since it ended: a decision on the target, or naming the signal's key
     const signalKey = `${target}:${wait.until}`;
     if (
@@ -910,6 +918,22 @@ function waitResolved(store: Store, repo: string, target: string): boolean {
     return run === null || run.endedAt !== null || run.loop?.phase !== "parked";
   }
   return false;
+}
+
+/** A told wait that ended this long ago leaves the signal list, whatever it waited on. */
+export const FLIGHT_WAIT_OVER_KEEP_MS = 48 * FLIGHT_HOUR_MS;
+
+/**
+ * Whether a told wait's subject needs nothing more, however FLIGHT wrote the target (`PR 1294`,
+ * `#1294`, `1401`, `mc#7`): its PR is merged or closed, its ticket is closed, or its run has ended.
+ */
+function waitSubjectDone(store: Store, repo: string, target: string): boolean {
+  if (waitResolved(store, repo, target)) return true;
+  const run = store.run(target);
+  if (run !== null && run !== undefined) return run.endedAt !== null;
+  const n = /^(?:(?:PR|pull|ticket|issue)\s*)?#?(\d+)$/i.exec(target.trim())?.[1];
+  if (n === undefined) return false;
+  return waitResolved(store, repo, `${repo}#${n}`);
 }
 
 /** The waits FLIGHT recorded with `wait_on`, by target. */
