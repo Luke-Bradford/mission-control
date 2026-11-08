@@ -58,7 +58,7 @@ describe("Tickets list", () => {
   it("opens the Ticket page from the number and filters the chat from a separate control", async () => {
     render(<TicketsList />);
     await screen.findByText("Quote cache");
-    const open = screen.getByRole("link", { name: "Open shop-app#3349" });
+    const open = screen.getByRole("link", { name: "Open shop-app#3349: Quote cache" });
     expect(open.getAttribute("href")).toBe("/tickets/shop-app/3349");
     await act(async () => {
       fireEvent.click(
@@ -68,5 +68,51 @@ describe("Tickets list", () => {
     await waitFor(() =>
       expect(navigate).toHaveBeenCalledWith("/comms/tickets/%233349?ticket=shop-app%233349"),
     );
+  });
+
+  it("names a ticket's link with its title, and puts the full title in a tooltip", async () => {
+    render(<TicketsList />);
+    await screen.findByText("Quote cache");
+    const open = screen.getByRole("link", { name: "Open shop-app#3349: Quote cache" });
+    expect(open.querySelector(".comms-ticket-title")?.getAttribute("title")).toBe("Quote cache");
+  });
+
+  it("says loading, not 'No tickets yet.', until the boards have answered", async () => {
+    hub.clear();
+    const answers: Record<string, unknown> = {
+      "/api/repos": REPOS,
+      "/api/boards/site-builder": [boardItem({ repoId: "site-builder", issueNumber: 12 })],
+    };
+    // shop-app's board never answers
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((path: string) =>
+        path in answers
+          ? Promise.resolve(new Response(JSON.stringify(answers[path]), { status: 200 }))
+          : new Promise<Response>(() => {}),
+      ),
+    );
+    render(<TicketsList />);
+    expect(await screen.findByText("Loading tickets…")).toBeTruthy();
+    expect(screen.queryByText("No tickets yet.")).toBeNull();
+    expect(screen.queryByText(/of \d+$/)).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search tickets" }), {
+      target: { value: "zzz" },
+    });
+    expect(screen.queryByText(/No ticket matches/)).toBeNull();
+  });
+
+  it("names a board that could not be read and keeps the rows that loaded", async () => {
+    hub.clear();
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/boards/shop-app": () => ({ status: 500, body: { error: "boom" } }),
+      "/api/boards/site-builder": [
+        boardItem({ repoId: "site-builder", issueNumber: 12, title: "Header banner" }),
+      ],
+    });
+    render(<TicketsList />);
+    expect(await screen.findByText("Header banner")).toBeTruthy();
+    expect(await screen.findByText("Could not read the board for shop-app.")).toBeTruthy();
   });
 });

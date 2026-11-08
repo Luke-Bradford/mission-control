@@ -19,16 +19,21 @@ export function ticketMatches(item: BoardItem, query: string): boolean {
  * page; the small button beside it narrows the chat to that ticket's messages.
  */
 export function TicketsList() {
-  const repos = useResource<RepoView[]>(RESOURCES.repos).data ?? NO_REPOS;
+  const reposRes = useResource<RepoView[]>(RESOURCES.repos);
+  const repos = reposRes.data ?? NO_REPOS;
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const [query, setQuery] = useState("");
   const all = boards.flatMap((b) => b.data ?? []).sort((a, b) => b.updatedAt - a.updatedAt);
   const found = all.filter((item) => ticketMatches(item, query));
+  // nothing is counted or called empty until every board has answered, one way or the other
+  const waiting =
+    reposRes.data === undefined ? !reposRes.error : boards.some((b) => !b.data && !b.error);
+  const failed = repos.filter((_, i) => boards[i]?.error && !boards[i]?.data);
   return (
     <section className="comms-tickets" aria-label="Tickets">
       <div className="comms-section-head">
         <h2>Tickets</h2>
-        <span>{`${found.length} of ${all.length}`}</span>
+        {!waiting && <span>{`${found.length} of ${all.length}`}</span>}
       </div>
       <input
         type="search"
@@ -38,7 +43,16 @@ export function TicketsList() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
-      {found.length === 0 ? (
+      {failed.map((repo) => (
+        <p
+          key={repo.id}
+          className="note crit-t"
+          role="alert"
+        >{`Could not read the board for ${repo.id}.`}</p>
+      ))}
+      {waiting ? (
+        <p className="note">Loading tickets…</p>
+      ) : found.length === 0 ? (
         <p className="note">
           {query.trim() === "" ? "No tickets yet." : `No ticket matches “${query.trim()}”.`}
         </p>
@@ -52,11 +66,13 @@ export function TicketsList() {
                 <a
                   className="comms-ticket-open"
                   href={href}
-                  aria-label={`Open ${ref}`}
+                  aria-label={`Open ${ref}: ${item.title}`}
                   onClick={(e) => followLink(e, href)}
                 >
                   <b className="mono">{`#${item.issueNumber}`}</b>
-                  <span className="comms-ticket-title">{item.title}</span>
+                  <span className="comms-ticket-title" title={item.title}>
+                    {item.title}
+                  </span>
                   <small>{item.status}</small>
                 </a>
                 <button

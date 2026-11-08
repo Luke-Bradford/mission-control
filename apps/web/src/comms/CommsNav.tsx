@@ -44,7 +44,7 @@ export function AgentNavRow({
           className={total === 0 ? "zero" : undefined}
           title={`${plural(total, "message")} with its contacts. A message count, not unread.`}
         >
-          {total}
+          {`${total} msgs`}
         </small>
         <CountBadges direct={direct} />
       </span>

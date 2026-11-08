@@ -729,7 +729,7 @@ describe("Comms routes", () => {
     render(<Comms item={null} view={{ kind: "crew" }} />);
     const nav = await screen.findByRole("navigation", { name: "Comms" });
     expect((await within(nav).findByTitle(/^7 messages with its contacts\./)).textContent).toBe(
-      "7",
+      "7 msgs",
     );
   });
 

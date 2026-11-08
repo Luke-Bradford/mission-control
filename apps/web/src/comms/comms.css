@@ -942,7 +942,8 @@ a.comms-ref {
   padding: 0 var(--sp-1);
   border: 1px solid var(--line);
   border-radius: var(--r-s, 3px);
-  color: var(--text);
+  color: var(--fg);
+  font-family: var(--mono);
   font-size: var(--fs-micro);
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -979,7 +980,9 @@ a.comms-ref {
 }
 
 .comms-ticket-search {
-  width: 100%;
+  align-self: stretch;
+  box-sizing: border-box;
+  width: auto;
   min-height: 28px;
 }
 
@@ -1002,12 +1005,12 @@ a.comms-ref {
 
 .comms-ticket-open {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: var(--sp-2);
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0 var(--sp-2);
   align-items: baseline;
   min-height: 28px;
   padding: 0 var(--sp-1);
-  color: var(--text);
+  color: var(--fg);
   text-decoration: none;
 }
 
@@ -1018,6 +1021,7 @@ a.comms-ref {
 }
 
 .comms-ticket-open small {
+  grid-column: 2;
   color: var(--muted);
 }
 
