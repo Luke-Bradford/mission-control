@@ -2880,9 +2880,14 @@ button.quota-details {
   min-width: 0;
   overflow: hidden;
 }
-/* a block, not the inline-flex link of .rref: an ellipsis needs a block box to cut */
+/* the link stays the 24 px inline-flex of .rref, so its text sits level with the words beside it;
+   the text inside is the block that an ellipsis can cut */
 #agentsList .pause-line > .rref > a {
+  max-width: 100%;
+}
+#agentsList .pause-line .pause-ref {
   display: block;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
