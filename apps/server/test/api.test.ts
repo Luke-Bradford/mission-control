@@ -10851,3 +10851,85 @@ describe("design preview routes", () => {
     }
   });
 });
+
+describe("GET /api/comms/flight", () => {
+  beforeEach(() => {
+    withCrew();
+    config.crew?.sessions[0]?.seats.push({
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    });
+  });
+
+  it("joins operator messages with FLIGHT's turns in time order, each with its state", async () => {
+    const send = (at: number, text: string, from = "CAPCOM") =>
+      store.addComms({ at, from, to: "flight-1", ticket: null, text, senderKind: "operator" });
+    const stored = send(NOW - 1000, "stored one");
+    const delivered = send(NOW - 5000, "delivered one");
+    const answered = send(NOW - 9000, "answered one");
+    const choice = send(NOW - 8000, "Re: ask:1 · the operator chose Yes");
+    const other = send(NOW - 7000, "from a seat", "guido-1");
+    if (!stored || !delivered || !answered || !choice || !other) throw new Error("not stored");
+    store.markCommsDelivered(answered.id, NOW - 8500);
+    store.markCommsDelivered(choice.id, NOW - 7900);
+    store.markCommsDelivered(delivered.id, NOW - 4900);
+    store.claimChoice({
+      key: "ask:1",
+      briefAt: 1,
+      optionId: "yes",
+      label: "Yes",
+      answer: "Yes",
+      question: "Go?",
+      ticket: null,
+      target: "flight-1",
+      targetKind: "flight",
+      messageId: choice.id,
+      chosenAt: NOW - 8000,
+      chosenBy: "the operator",
+    });
+    const p = join(dir, "flight-conv.jsonl");
+    writeFileSync(p, line("turn after answered", NOW - 8300) + line("turn mid", NOW - 6000));
+    store.upsertRun(run({ id: "fl", agentId: "flight-1", transcriptPath: p }));
+
+    const r = await get("/api/comms/flight?conversation=1");
+    expect(r.statusCode).toBe(200);
+    expect(
+      r
+        .json()
+        .messages.map((m: { kind: string; text: string; state?: string }) => [
+          m.kind,
+          m.text,
+          m.state,
+        ]),
+    ).toEqual([
+      ["operator", "answered one", "answered"],
+      ["flight", "turn after answered", undefined],
+      ["operator", "Re: ask:1 · the operator chose Yes", "answered"],
+      ["flight", "turn mid", undefined],
+      ["operator", "delivered one", "delivered"],
+      ["operator", "stored one", "stored"],
+    ]);
+    const ops = r.json().messages.filter((m: { kind: string }) => m.kind === "operator");
+    expect(ops.map((m: { deliveredAt: number | null }) => m.deliveredAt)).toEqual([
+      NOW - 8500,
+      NOW - 7900,
+      NOW - 4900,
+      null,
+    ]);
+    expect(ops.map((m: { choiceAnswer: boolean }) => m.choiceAnswer)).toEqual([
+      false,
+      true,
+      false,
+      false,
+    ]);
+  });
+
+  it("answers an empty list with no FLIGHT seat, and refuses a bad flag", async () => {
+    config.crew = undefined;
+    expect((await get("/api/comms/flight?conversation=1")).json()).toEqual({ messages: [] });
+    expect((await get("/api/comms/flight?conversation=0")).statusCode).toBe(400);
+  });
+});

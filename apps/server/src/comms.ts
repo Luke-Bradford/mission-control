@@ -565,3 +565,53 @@ export function commsSendState(
     ...(redirectedTo === undefined ? {} : { redirectedTo }),
   };
 }
+
+/** One line of the operator's conversation with FLIGHT. */
+export type FlightConversationMessage =
+  | {
+      kind: "operator";
+      id: string;
+      at: number | null;
+      text: string;
+      /** stored: kept by the hub; delivered: FLIGHT took it; answered: FLIGHT has spoken since. */
+      state: "stored" | "delivered" | "answered";
+      deliveredAt: number | null;
+      /** The hub built this from a pick in Needs you; the operator did not type it. */
+      choiceAnswer: boolean;
+    }
+  | { kind: "flight"; id: string; at: number | null; text: string };
+
+/**
+ * What the operator sent FLIGHT and what FLIGHT said, in time order. An operator message is
+ * answered once FLIGHT has a turn at or after the time it took the message.
+ */
+export function flightConversation(store: Store, flightId: string): FlightConversationMessage[] {
+  const lines = threadMessages(store, flightId, true);
+  const turnTimes = lines
+    .filter((m) => m.from === flightId && m.id.startsWith("stream:") && m.at !== null)
+    .map((m) => m.at as number);
+  const out: FlightConversationMessage[] = [];
+  for (const m of lines) {
+    if (m.id.startsWith("stream:")) {
+      if (m.from === flightId) out.push({ kind: "flight", id: m.id, at: m.at, text: m.text });
+      continue;
+    }
+    if (m.from !== COMMS_CAPCOM || m.to !== flightId) continue;
+    const deliveredAt = store.commsMessage(m.id)?.deliveredAt ?? null;
+    out.push({
+      kind: "operator",
+      id: m.id,
+      at: m.at,
+      text: m.text,
+      state:
+        deliveredAt === null
+          ? "stored"
+          : turnTimes.some((t) => t >= deliveredAt)
+            ? "answered"
+            : "delivered",
+      deliveredAt,
+      choiceAnswer: store.isChoiceAnswer(m.id),
+    });
+  }
+  return out;
+}

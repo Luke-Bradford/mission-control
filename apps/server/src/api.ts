@@ -215,6 +215,7 @@ import {
   COMMS_OPEN_TEXT_MAX,
   COMMS_SNAPSHOT_LIMIT,
   commsSendState,
+  flightConversation,
   pinComms,
   reactComms,
   sendComms,
@@ -2115,11 +2116,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
         },
       );
-      // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+      // Reader: apps/web/src/App.tsx#App (FLIGHT Comms; `?conversation=1` is the page to talk to FLIGHT, not built yet)
+      api.get<{ Querystring: { limit?: unknown; before?: unknown; conversation?: unknown } }>(
         "/comms/flight",
         (req, reply) => {
-          const paging = commsPaging(req.query);
+          const { conversation, ...rest } = req.query;
+          if (conversation !== undefined) {
+            if (conversation !== "1")
+              return reply.code(400).send({ error: "conversation must be 1 when supplied" });
+            const id = flightSeat(config)?.seat.id;
+            return { messages: id === undefined ? [] : flightConversation(store, id) };
+          }
+          const paging = commsPaging(rest);
           if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
           const flight = flightSeat(config)?.seat.id;
           if (flight === undefined)
