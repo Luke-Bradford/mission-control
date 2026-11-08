@@ -775,6 +775,7 @@ describe("move_review", () => {
     });
 
     expect(result.isError).toBeUndefined();
+    expect(result.text).toBe("Moved queued review 1 to RETRO-CX.");
     expect(store.review(id)).toMatchObject({
       seatId: "retro-cx",
       sha: SHA,
