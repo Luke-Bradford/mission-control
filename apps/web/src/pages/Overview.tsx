@@ -2,7 +2,6 @@ import { ActivityPanel } from "../overview/ActivityPanel.tsx";
 import { AgentsPanel } from "../overview/AgentsPanel.tsx";
 import { MacRow } from "../overview/MacRow.tsx";
 import { NeedsBanner } from "../overview/NeedsBanner.tsx";
-import { NextActionsPanel } from "../overview/NextActionsPanel.tsx";
 import { OverviewHeader } from "../overview/OverviewHeader.tsx";
 import { PipelinePanel } from "../overview/PipelinePanel.tsx";
 import { TokensPanel } from "../overview/TokensPanel.tsx";
@@ -24,7 +23,6 @@ export function Overview() {
           <PipelinePanel />
         </div>
         <div className="overview-secondary">
-          <NextActionsPanel />
           <MacRow />
           <TokensPanel />
           <ActivityPanel />
