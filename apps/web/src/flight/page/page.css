@@ -366,6 +366,10 @@
 }
 .fp-owner {
   justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font: var(--fs-s) / var(--lh-s) var(--mono);
   padding: 0 var(--sp-2);
   border-radius: 3px;
@@ -379,6 +383,10 @@
 .fp-owner.ci {
   color: var(--crit);
   background: color-mix(in srgb, var(--crit) 14%, transparent);
+}
+.fp-brow.open .fp-owner {
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .fp-wait {
   font: 600 var(--fs) / var(--lh) var(--mono);

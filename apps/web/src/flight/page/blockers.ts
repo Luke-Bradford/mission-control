@@ -1,10 +1,4 @@
-import {
-  type AttentionItem,
-  type AttentionOwner,
-  type FlightBlocked,
-  type FlightView,
-  isOperatorItem,
-} from "@mc/core";
+import { type AttentionItem, type AttentionOwner, type FlightView, isOperatorItem } from "@mc/core";
 import { needText } from "../../comms/needText.ts";
 import type { FlightRun } from "../Situation.tsx";
 
@@ -45,16 +39,28 @@ function itemDoing(item: AttentionItem): string {
     : "Watching. It clears when the owner acts.";
 }
 
-/** A ticket waiting on other work is owned by CI when the wait names CI, else by the ticket it waits on. */
-function ticketOwner(b: FlightBlocked): { owner: string; tone: OwnerTone } {
-  if (b.waitsOn.some((w) => /\bCI\b/.test(w))) return { owner: "CI", tone: "ci" };
-  return { owner: "Other ticket", tone: "plain" };
+/**
+ * Who has to act on a ticket's first open wait, read from the words the hub wrote for it
+ * (`prStageText` and the wait reader in core): CI for a PR in or failing CI, its reviewer for one in
+ * review, the merge step for one ready to merge, its author for a draft, the operator for work that
+ * closed unmerged, the hub for a PR it has not read. A wait that is only a ticket reference names
+ * no owner, so the reference itself is shown, not a guess at a person.
+ */
+export function waitOwner(wait: string | undefined): { owner: string; tone: OwnerTone } {
+  if (wait === undefined) return { owner: "Not recorded", tone: "plain" };
+  if (/failing CI|in CI\b/.test(wait)) return { owner: "CI", tone: "ci" };
+  if (/in review/.test(wait)) return { owner: "Reviewer", tone: "plain" };
+  if (/ready to merge/.test(wait)) return { owner: "Merge step", tone: "plain" };
+  if (/is a draft/.test(wait)) return { owner: "PR author", tone: "plain" };
+  if (/closed without merging/.test(wait)) return { owner: "Operator", tone: "operator" };
+  if (/not read yet/.test(wait)) return { owner: "Hub", tone: "plain" };
+  return { owner: wait, tone: "plain" };
 }
 
 /**
- * The blockers, longest wait first: asks that others own (the operator's above all) and tickets
- * waiting on unmerged work; a wait the hub does not date sorts last. FLIGHT itself being stopped or
- * held comes first, since the hub does not date it and it explains the rest.
+ * The blockers, longest wait first: asks that others own (the operator's above all), tickets
+ * waiting on unmerged work, and FLIGHT itself when stopped or held (aged from its last wake; with
+ * none recorded, its wait is unknown and it sorts after every dated wait).
  */
 export function buildBlockers(
   attention: readonly AttentionItem[] | undefined,
@@ -63,20 +69,21 @@ export function buildBlockers(
   now: number,
 ): Blocker[] {
   const rows: Blocker[] = [];
-  let own: Blocker | null = null;
   if (run.kind === "down" || run.kind === "held") {
-    own = {
+    // The hub does not say when FLIGHT stopped; the time since its last wake is the nearest real age.
+    const lastWake = flight?.wake?.lastWakeAt ?? null;
+    rows.push({
       key: "flight-run",
       what: run.kind === "down" ? "FLIGHT is stopped" : "FLIGHT is held",
-      detail: run.why,
+      detail: lastWake === null ? run.why : `${run.why} · counted from its last wake`,
       owner: "Operator",
       tone: "operator",
-      waitedMs: null,
+      waitedMs: lastWake === null ? null : Math.max(0, now - lastWake),
       doing:
         run.kind === "down"
           ? "Nothing runs until FLIGHT is started; seats keep working on their tickets."
           : "Waiting for the hold to lift; seats keep working on their tickets.",
-    };
+    });
   }
   for (const item of attention ?? []) {
     if ((item.owner ?? "operator") === "flight") continue;
@@ -92,7 +99,7 @@ export function buildBlockers(
     });
   }
   for (const b of flight?.blocked ?? []) {
-    const { owner, tone } = ticketOwner(b);
+    const { owner, tone } = waitOwner(b.waitsOn[0]);
     rows.push({
       key: `ticket:${b.ref}`,
       what: `${b.ref} ${b.title}`,
@@ -103,7 +110,7 @@ export function buildBlockers(
       doing: b.waitsOn[0] ? `Watching. It moves once ${b.waitsOn[0]} clears.` : "Watching.",
     });
   }
-  rows.sort((a, b) => (b.waitedMs ?? -1) - (a.waitedMs ?? -1) || a.what.localeCompare(b.what));
-  // FLIGHT being stopped or held explains why nothing else moves, so it leads whatever waited longer.
-  return own ? [own, ...rows] : rows;
+  return rows.sort(
+    (a, b) => (b.waitedMs ?? -1) - (a.waitedMs ?? -1) || a.what.localeCompare(b.what),
+  );
 }

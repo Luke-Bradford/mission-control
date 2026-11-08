@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
-import { buildBlockers } from "../src/flight/page/blockers.ts";
+import { buildBlockers, waitOwner } from "../src/flight/page/blockers.ts";
 import { decisionLine, readableTimes } from "../src/flight/page/decisionText.ts";
 import { NOT_RECORDED } from "../src/flight/page/StatusBand.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
@@ -38,25 +38,58 @@ describe("buildBlockers", () => {
       NOW,
     );
     expect(rows.map((r) => r.waitedMs)).toEqual([3 * HOUR, 42 * MIN, 18 * MIN, 5 * MIN]);
-    expect(rows.map((r) => r.owner)).toEqual(["Operator", "CI", "Other ticket", "Operator"]);
+    expect(rows.map((r) => r.owner)).toEqual(["Operator", "CI", "shop-app#6", "Operator"]);
     for (const r of rows) expect(r.doing.length).toBeGreaterThan(8);
   });
   it("leaves out what FLIGHT owns itself", () => {
     expect(buildBlockers([item({ owner: "flight" })], undefined, run, NOW)).toEqual([]);
   });
-  it("lists a stopped FLIGHT first, as the operator's, even though the hub dates no wait for it", () => {
-    const rows = buildBlockers(
-      [item({ key: "q:1", at: NOW - HOUR })],
-      undefined,
-      { kind: "down", why: "FLIGHT is stopped." },
-      NOW,
-    );
-    expect(rows.map((r) => r.what)).toEqual([
+  it("ages a stopped FLIGHT from its last wake and keeps every row in longest-wait order", () => {
+    const down = { kind: "down", why: "FLIGHT is stopped." } as const;
+    const asks = [item({ key: "q:1", at: NOW - HOUR })];
+    const wakeAt = (lastWakeAt: number | null) =>
+      ({
+        seat: null,
+        decisions: [],
+        wake: { lastWakeAt, wokeOn: null, nextWakeAt: null },
+      }) as const;
+    const older = buildBlockers(asks, wakeAt(NOW - 2 * HOUR), down, NOW);
+    expect(older.map((r) => r.what)).toEqual([
       "FLIGHT is stopped",
       "Choose a cache eviction policy",
     ]);
-    expect(rows[0]?.owner).toBe("Operator");
-    expect(rows[0]?.waitedMs).toBeNull();
+    expect(older.map((r) => r.waitedMs)).toEqual([2 * HOUR, HOUR]);
+    // woke more recently than the ask arrived: the one-hour ask waited longer, so it comes first
+    const newer = buildBlockers(asks, wakeAt(NOW - 5 * MIN), down, NOW);
+    expect(newer.map((r) => r.what)).toEqual([
+      "Choose a cache eviction policy",
+      "FLIGHT is stopped",
+    ]);
+    // no last wake recorded: the wait is unknown and the undated row follows every dated one
+    const unknown = buildBlockers(asks, wakeAt(null), down, NOW);
+    expect(unknown.map((r) => r.what)).toEqual([
+      "Choose a cache eviction policy",
+      "FLIGHT is stopped",
+    ]);
+    expect(unknown[1]?.waitedMs).toBeNull();
+    expect(unknown[1]?.owner).toBe("Operator");
+  });
+
+  it("names the owner of a ticket's wait from the wait the hub wrote, never a guess", () => {
+    const wait = (text: string) => waitOwner(text);
+    expect(wait("shop-app#7 (PR 12 in CI)")).toEqual({ owner: "CI", tone: "ci" });
+    expect(wait("PR 9 failing CI")).toEqual({ owner: "CI", tone: "ci" });
+    expect(wait("shop-app#7 (PR 12 in review)").owner).toBe("Reviewer");
+    expect(wait("PR 9 ready to merge").owner).toBe("Merge step");
+    expect(wait("shop-app#7 (PR 12 is a draft)").owner).toBe("PR author");
+    expect(wait("shop-app#7 (closed without merging)")).toEqual({
+      owner: "Operator",
+      tone: "operator",
+    });
+    expect(wait("PR 9 (not read yet)").owner).toBe("Hub");
+    // only a reference: the reference itself, not "Other ticket" or an invented person
+    expect(wait("mission-control#1390")).toEqual({ owner: "mission-control#1390", tone: "plain" });
+    expect(waitOwner(undefined).owner).toBe("Not recorded");
   });
 });
 
@@ -95,7 +128,7 @@ describe("the FLIGHT page", () => {
     expect(rows.map((r) => r.querySelector(".fp-owner")?.textContent)).toEqual([
       "Operator",
       "CI",
-      "Other ticket",
+      "shop-app#6",
     ]);
     for (const r of rows)
       expect(r.querySelector(".fp-act")?.textContent?.length).toBeGreaterThan(8);
