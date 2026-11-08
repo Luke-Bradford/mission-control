@@ -102,6 +102,16 @@ describe("Tickets list", () => {
     expect(screen.queryByText(/No ticket matches/)).toBeNull();
   });
 
+  it("says the repositories could not be read, and not that there are no tickets", async () => {
+    hub.clear();
+    stubFetch({ "/api/repos": () => ({ status: 500, body: { error: "boom" } }) });
+    render(<TicketsList />);
+    expect(await screen.findByText("Could not read repositories.")).toBeTruthy();
+    expect(screen.queryByText("No tickets yet.")).toBeNull();
+    expect(screen.queryByText("Loading tickets…")).toBeNull();
+    expect(screen.queryByText(/\d+ of \d+/)).toBeNull();
+  });
+
   it("names a board that could not be read and keeps the rows that loaded", async () => {
     hub.clear();
     stubFetch({

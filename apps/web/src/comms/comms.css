@@ -1014,10 +1014,20 @@ a.comms-ref {
   text-decoration: none;
 }
 
+/* Two lines at most; the whole title opens on focus or hover, so a keyboard reader gets it too. */
 .comms-ticket-title {
+  display: -webkit-box;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow-wrap: anywhere;
+}
+
+.comms-ticket-open:focus-visible .comms-ticket-title,
+.comms-ticket-open:hover .comms-ticket-title {
+  display: block;
+  overflow: visible;
 }
 
 .comms-ticket-open small {

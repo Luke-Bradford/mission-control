@@ -190,6 +190,10 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
           ? {
               panelTop: panel.top,
               panelBottom: panel.bottom,
+              panelLeft: panel.left,
+              panelRight: panel.right,
+              boxLeft: box.left,
+              boxRight: box.right,
               boxTop: box.top,
               boxBottom: box.bottom,
               navBottom: nav.bottom,
@@ -202,6 +206,9 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
       expect(tickets?.boxBottom).toBeLessThanOrEqual((tickets?.panelBottom ?? 0) + 0.5);
       expect(tickets?.panelTop).toBeGreaterThanOrEqual((tickets?.navBottom ?? 0) - 0.5);
       expect(tickets?.boxWidth).toBeGreaterThan(120);
+      // the box ends inside the panel on both sides, so its border and focus ring are not clipped
+      expect(tickets?.boxRight).toBeLessThanOrEqual((tickets?.panelRight ?? 0) - 0.5);
+      expect(tickets?.boxLeft).toBeGreaterThanOrEqual((tickets?.panelLeft ?? 0) + 0.5);
       await page.screenshot(join(SHOTS, `comms-flight-${width}.png`));
       await page.close();
     },
