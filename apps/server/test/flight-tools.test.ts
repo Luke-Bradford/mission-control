@@ -782,6 +782,7 @@ describe("move_review", () => {
       attempt: 2,
       round: 2,
     });
+    expect(store.reviewMoved(id)).toBe(true);
     expect(store.flightDecisions(0, 10)).toEqual([
       expect.objectContaining({
         about: "move_review",
