@@ -33,14 +33,18 @@ export function weeklyProjection(store: Store, accountId: string): WeeklyProject
   };
 }
 
-/** The account's brake, or null: its weekly projection passes 100% and the week has not reset. */
+/**
+ * The account's brake, or null: its weekly projection passes 100% and the week has not reset.
+ * An account set `brake: false` never brakes; its stop_at is then the only limit on new runs.
+ */
 export function budgetBrake(
   config: CcConfig,
   store: Store,
   accountId: string,
   at: number,
 ): BudgetBrakeReading | null {
-  if (!config.accounts.some((a) => a.id === accountId)) return null;
+  const account = config.accounts.find((a) => a.id === accountId);
+  if (account === undefined || account.brake === false) return null;
   const week = weeklyProjection(store, accountId);
   if (week === null || week.projected === null) return null;
   if (week.resetAt <= at || week.projected <= BUDGET_BRAKE_PCT) return null;
