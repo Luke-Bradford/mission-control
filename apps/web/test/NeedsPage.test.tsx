@@ -651,6 +651,21 @@ describe("actions on the page", () => {
     expect(bodies(fn, "/api/attention/q1/not-now")).toEqual([{}]);
   });
 
+  it("shows a Drop refusal without removing the question", async () => {
+    routes([ask("q1", { offers: ["drop"] })], {
+      "POST /api/attention/q1/drop": () => ({
+        status: 422,
+        body: { error: "This question still needs a decision." },
+      }),
+    });
+    render(<Needs item="q1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Drop" }));
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "This question still needs a decision.",
+    );
+    expect(screen.getByRole("button", { name: "Drop" })).toBeTruthy();
+  });
+
   it("Ctrl or Cmd+Enter sends the answer; plain Enter does not", async () => {
     const fn = routes([ask("q1", { agentId: "flight-1" })], {
       "/api/flight": LIVE_FLIGHT,
