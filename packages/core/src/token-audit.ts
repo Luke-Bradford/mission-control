@@ -91,7 +91,10 @@ export type TokenAuditFigure<T> =
   | { recorded: true; days: number; unit: string; value: T }
   | { recorded: false; reason: string };
 
-/** A role's context budget: no role has its own yet, so each gets this many tokens per call. */
+/**
+ * The context budget per model call, 150,000 tokens, for every role. A placeholder chosen here:
+ * config carries no budget yet, so the figure is this constant until it does.
+ */
 export const TOKEN_CONTEXT_BUDGET = 150_000;
 /** The most runs listed over the budget. */
 export const TOKEN_AUDIT_OVER_BUDGET_RUNS = 10;

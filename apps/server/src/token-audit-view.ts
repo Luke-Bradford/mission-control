@@ -351,13 +351,13 @@ function figures(
     contextByRole,
     overBudget,
     longPassingCommands: missing(
-      "The hub does not keep whether a command passed, or how long its output was.",
+      "The hub does not keep whether a command passed or how long its output was. It would need to store each Bash result's exit status and output length.",
     ),
     repeatedPrompt: missing(
-      "The hub keeps each prompt section's size, not its text, so it cannot tell what was sent again.",
+      "The hub keeps each prompt section's size, not its text. It would need to store a hash of each section per wake to tell what was sent again.",
     ),
     rewriteWait: missing(
-      "Stored model calls carry no time, so the pause before a cache rewrite is not known.",
+      "Stored model calls carry no time. The hub would need to store each call's timestamp to know the pause before a cache rewrite.",
     ),
     reviewRunsPerTicket,
     flight: flightFigure,
