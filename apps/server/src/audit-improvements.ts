@@ -3,7 +3,6 @@ import {
   AUDIT_MEASURED_TOOLS,
   AUDIT_THRESHOLD_DEFAULTS,
   AUDIT_TICKET_TEXT_FLOOR,
-  AUDIT_TOOL_WINDOW_MS,
   type AuditImprovement,
   type AuditThresholds,
   COMMS_CONTROLLER,
