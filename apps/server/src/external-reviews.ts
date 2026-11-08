@@ -356,13 +356,18 @@ export function createExternalReviews(deps: {
                   .map((review) => review.seatId),
               );
               const retry = row?.state === "failed" && failedSeats.has(row.seatId);
-              if (row === undefined) {
+              if (row === undefined || row.state === "queued" || row.state === "running") {
                 // a crew review of this head reported after its author's run ended: post it, and
-                // do not review the head again
+                // do not review the head again. An external review of the head still under way
+                // gives way to it, or its pending status would hold the PR for good.
                 const crew = store
                   .reviewsOfPr(repo.id, pr.number)
                   .findLast((r) => r.sha === pr.headSha && orphaned(r));
                 if (crew) {
+                  if (row !== undefined)
+                    store.setReviewState(row.id, ["queued", "running"], "superseded", {
+                      at: deps.now(),
+                    });
                   await publish(pr, crew);
                   continue;
                 }

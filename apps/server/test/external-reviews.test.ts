@@ -629,6 +629,50 @@ describe("external PR review subjects", () => {
     expect(h.writes.at(-1)?.body).toMatchObject({ state: "success", context: "mc/review" });
   });
 
+  it("posts a reported crew review over an earlier pending external row on the same head", async () => {
+    store.upsertPullRequests("sample", [pr({ ticket: "sample#1" })], 2);
+    buildRun({ endedAt: 2 });
+    const external = store.requestReview({
+      authorRunId: externalReviewKey("sample", 7),
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 3,
+    })!;
+    store.setReviewState(external, ["queued"], "running", { at: 4, runId: "retro:ext" });
+    const h = harness();
+    const service = createExternalReviews(h.deps);
+    await service.sync();
+    expect(h.writes.at(-1)?.body).toMatchObject({ state: "pending", context: "mc/review" });
+    const id = store.requestReview({
+      authorRunId: "builder:old",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 3,
+      at: 5,
+    })!;
+    store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    store.recordFindings(id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked the change.",
+      findings: [],
+      checked: [{ check: "spec", result: "pass" }],
+      tests: [],
+      at: 102,
+    });
+    await service.sync();
+    expect(h.writes.at(-1)?.body).toMatchObject({ state: "success", context: "mc/review" });
+    expect(store.review(external)?.state).toBe("superseded");
+  });
+
   it("does not treat a crew review as orphaned while its author run is live", async () => {
     buildRun({
       endedAt: null,
