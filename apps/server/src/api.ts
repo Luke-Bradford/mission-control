@@ -5951,7 +5951,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           true,
         ).filter((i) => i.hold && !nothingForOperator(i)),
       );
-      // Reader: apps/web/src/comms/Decisions.tsx
+      // Reader: apps/web/src/needs/HoldItem.tsx
       api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
         const body = AttentionHoldInput.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
