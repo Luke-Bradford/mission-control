@@ -143,7 +143,7 @@ function passedQuestion(): { id: number; key: string } {
     by: "flight",
     ask: "Which lane should this ship in?",
     assessment: "Two lanes fit.",
-    context: "Two lanes fit.",
+    context: "The crew asked a question and waits for your answer.",
     recommendation: "Lane 2.",
     options: [
       { id: "a", label: "A", answer: "Do A." },
@@ -247,7 +247,7 @@ describe("the hub closes a question on a recorded fact", () => {
       by: "flight",
       ask: "Branch?",
       assessment: "a",
-      context: "a",
+      context: "The crew asked a question and waits for an answer.",
       recommendation: "main",
       options: [
         { id: "a", label: "A", answer: "Do A." },
@@ -295,7 +295,7 @@ describe("the hub closes a question on a recorded fact", () => {
       by: "flight",
       ask: "Go?",
       assessment: "a",
-      context: "a",
+      context: "The crew asked a question and waits for an answer.",
       recommendation: "go",
       options: [
         { id: "a", label: "A", answer: "Do A." },
@@ -352,7 +352,7 @@ describe("the hub closes a question on a recorded fact", () => {
       by: "flight",
       ask: "Remove it?",
       assessment: "a",
-      context: "a",
+      context: "The crew asked a question and waits for an answer.",
       recommendation: "yes",
       options: [
         { id: "a", label: "A", answer: "Do A." },
@@ -386,7 +386,7 @@ describe("the hub closes a question on a recorded fact", () => {
       by: "flight",
       ask: "Go?",
       assessment: "a",
-      context: "a",
+      context: "The crew asked a question and waits for an answer.",
       recommendation: "go",
       options: [
         { id: "a", label: "A", answer: "Do A." },

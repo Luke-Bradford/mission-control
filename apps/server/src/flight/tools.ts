@@ -398,6 +398,7 @@ import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown, recordFlightWait, waitTargetOf } from "./signals.ts";
 import {
+  crewSeatIds,
   flightArrivalSource,
   flightSeat,
   flightState,
@@ -2896,20 +2897,23 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // the Needs you entry check (#1543), at the source: a brief that would not reach the operator
     // is refused here, with what it lacks, so FLIGHT fixes it in one try
     if (structured.for === "operator" && !hubAlert(item, store)) {
-      const faults = needsYouEntryFaults({
-        ...item,
-        brief: {
-          for: "operator",
-          ask: structured.ask ?? "",
-          context: assessment,
-          recommendation,
-          options: options ?? [],
-          basis,
-          at,
-          ...(structured.ticket === undefined ? {} : { ticket: structured.ticket }),
-          ...(structured.person === undefined ? {} : { person: structured.person }),
+      const faults = needsYouEntryFaults(
+        {
+          ...item,
+          brief: {
+            for: "operator",
+            ask: structured.ask ?? "",
+            context: assessment,
+            recommendation,
+            options: options ?? [],
+            basis,
+            at,
+            ...(structured.ticket === undefined ? {} : { ticket: structured.ticket }),
+            ...(structured.person === undefined ? {} : { person: structured.person }),
+          },
         },
-      });
+        crewSeatIds(config),
+      );
       if (faults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${faults.join("; ")}.`);
     }
     if (structured.for === "flight") {

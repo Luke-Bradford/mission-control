@@ -166,7 +166,7 @@ function passedQuestion(ticket = "mc#7"): { id: number; key: string } {
     by: "flight",
     ask: "Which lane should this ship in?",
     assessment: "Two lanes fit.",
-    context: "Two lanes fit.",
+    context: "Two lanes fit the work, so the crew needs you to pick one.",
     recommendation: "Lane 2.",
     options: [
       { id: "a", label: "A", answer: "Do A." },
@@ -211,7 +211,7 @@ function commsQuestion(from: string, ticket: string, runTicket = "mc#7"): string
     by: "flight",
     ask: "Which lane should this ship in?",
     assessment: "Two lanes fit.",
-    context: "Two lanes fit.",
+    context: "Two lanes fit the work, so the crew needs you to pick one.",
     recommendation: "Lane 2.",
     options: [
       { id: "a", label: "A", answer: "Do A." },

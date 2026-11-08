@@ -190,8 +190,8 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
 
 1. **A hub alert the operator alone can act on.** Hub code writes its words. The alerts:
    - FLIGHT is not triaging;
-   - FLIGHT left a wake undecided twice;
-   - an Update only a person can run;
+   - FLIGHT left a wake undecided twice (the alert counts the things by kind and gives the time);
+   - an Update only a person can run (the alert says how much changed, not which commits or paths);
    - the runaway breaker tripped;
    - a run stopped on a budget or account limit;
    - an account at its rate limit;
@@ -201,6 +201,10 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
 2. **FLIGHT's complete question.** FLIGHT's brief for the operator, with all of these:
    - a question: one sentence that asks, ending in `?`, at most 300 characters;
    - no web address, raw signal id, raw timestamp or `[tag]` prefix in the question;
+   - no ticket or PR number (`#123`, `PR 123`), commit code (7 to 40 hex characters), file path,
+     seat id (`guido-1`), `@CAPCOM` tag or `mc` tool name in the question or the context (#1582):
+     the ticket and PR are links, and the question makes sense without them;
+   - a context of at least one sentence, saying what this is and why it comes up now;
    - 2 to 4 options, each with a label and what happens if chosen; a person's message may offer
      suggested replies instead;
    - a recommendation;
