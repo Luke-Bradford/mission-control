@@ -10,6 +10,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 
 export const WORKER_RPC_TIMEOUT = '[vitest-worker]: Timeout calling "onTaskUpdate"';
 
@@ -17,7 +18,12 @@ export interface VitestReportTotals {
   numFailedTests: number;
   numFailedTestSuites: number;
   numTotalTestSuites: number;
+  /** Tests whose final result never reached the report (status other than passed, skipped or todo). */
+  numUnfinishedTests: number;
 }
+
+// Statuses that are a final result; "pending" is a test whose result the main process never heard.
+const FINAL_STATUSES = new Set(["passed", "skipped", "todo", "disabled"]);
 
 /** The exit code CI should use, given vitest's own exit code, its JSON totals and its console output. */
 export function vitestVerdict(
@@ -28,10 +34,13 @@ export function vitestVerdict(
   if (exitCode === 0) return 0;
   if (!report || report.numTotalTestSuites === 0) return 1;
   if (report.numFailedTests > 0 || report.numFailedTestSuites > 0) return 1;
-  const caught = /Vitest caught (\d+) unhandled errors?/.exec(output);
+  if (report.numUnfinishedTests > 0) return 1;
+  // CI colours vitest's output (tinyrainbow turns colour on whenever CI is set); match plain text.
+  const text = stripVTControlCharacters(output);
+  const caught = /Vitest caught (\d+) unhandled errors?/.exec(text);
   if (!caught) return 1;
   const count = Number(caught[1]);
-  const blocks = output.split(/^.*Unhandled Error ⎯+$/m).slice(1);
+  const blocks = text.split(/^.*Unhandled Error ⎯+$/m).slice(1);
   const timeouts = blocks.filter(
     (b) => b.trim().split("\n")[0]?.trim() === `Error: ${WORKER_RPC_TIMEOUT}`,
   );
@@ -41,7 +50,12 @@ export function vitestVerdict(
 function readTotals(file: string): VitestReportTotals | undefined {
   try {
     const j = JSON.parse(readFileSync(file, "utf8"));
+    const unfinished = (j.testResults ?? []).flatMap(
+      (f: { assertionResults?: { status?: string }[] }) =>
+        (f.assertionResults ?? []).filter((a) => !FINAL_STATUSES.has(String(a.status))),
+    );
     return {
+      numUnfinishedTests: unfinished.length,
       numFailedTests: Number(j.numFailedTests),
       numFailedTestSuites: Number(j.numFailedTestSuites),
       numTotalTestSuites: Number(j.numTotalTestSuites),

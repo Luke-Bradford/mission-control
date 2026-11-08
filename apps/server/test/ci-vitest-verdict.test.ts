@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest";
 import { vitestVerdict, WORKER_RPC_TIMEOUT } from "../src/ci-vitest.ts";
 
 const RPC = `Error: ${WORKER_RPC_TIMEOUT}`;
-const passed = { numFailedTests: 0, numFailedTestSuites: 0, numTotalTestSuites: 100 };
+const passed = {
+  numFailedTests: 0,
+  numFailedTestSuites: 0,
+  numTotalTestSuites: 100,
+  numUnfinishedTests: 0,
+};
 const output = (...errors: string[]) =>
   [
     " Test Files  100 passed (100)",
@@ -31,6 +36,20 @@ describe("vitestVerdict", () => {
   it("fails on any other unhandled error, alone or beside the timeout", () => {
     expect(vitestVerdict(1, passed, output("Error: boom"))).toBe(1);
     expect(vitestVerdict(1, passed, output(RPC, "Error: boom"))).toBe(1);
+  });
+
+  it("forgives the timeout in vitest's CI colours", () => {
+    const red = (s: string) => `\x1b[31m${s}\x1b[39m`;
+    const coloured = [
+      "Vitest caught 1 unhandled error during the test run.",
+      `${red("⎯⎯⎯⎯⎯⎯")}\x1b[1m\x1b[41m Unhandled Error \x1b[49m\x1b[22m${red("⎯⎯⎯⎯⎯⎯⎯")}`,
+      `\x1b[31m\x1b[1mError\x1b[22m: ${WORKER_RPC_TIMEOUT}\x1b[39m`,
+    ].join("\n");
+    expect(vitestVerdict(1, passed, coloured)).toBe(0);
+  });
+
+  it("fails when a test's result was lost to the timeout", () => {
+    expect(vitestVerdict(1, { ...passed, numUnfinishedTests: 1 }, output(RPC))).toBe(1);
   });
 
   it("matches only the onTaskUpdate timeout, not other worker RPC timeouts", () => {
