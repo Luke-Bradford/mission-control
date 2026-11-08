@@ -2864,3 +2864,25 @@ button.quota-details {
   justify-content: center;
   align-items: flex-start;
 }
+
+/* The pause line: "Paused by" and "· last #N" stay whole; only the issue reference shortens. */
+#agentsList .ticket-cell > .pause-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+#agentsList .pause-line > .pause-label,
+#agentsList .pause-line > .pause-last {
+  flex: none;
+}
+#agentsList .pause-line > .rref {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+/* a block, not the inline-flex link of .rref: an ellipsis needs a block box to cut */
+#agentsList .pause-line > .rref > a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
