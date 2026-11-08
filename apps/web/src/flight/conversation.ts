@@ -1,8 +1,15 @@
-import { type AgentStream, FOR_THE_CONTROLLER, startOfLocalDay } from "@mc/core";
+import {
+  type AgentStream,
+  type CommsMessage,
+  type CommsSendState,
+  commsStateLine,
+  FOR_THE_CONTROLLER,
+  startOfLocalDay,
+} from "@mc/core";
 import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
 export type DockRow =
-  | { kind: "you"; id: string; at: number | null; text: string; pending?: true }
+  | { kind: "you"; id: string; at: number | null; text: string; pending?: true; line?: string }
   | { kind: "flight"; id: string; at: number | null; text: string }
   | { kind: "hub"; id: string; at: number | null; text: string }
   | { kind: "decision"; id: string; at: number; d: FlightDecision };
@@ -68,6 +75,8 @@ export interface PendingMsg {
   text: string;
   at: number;
   seen: readonly string[];
+  /** What the hub said of it once stored: "Stored", "Delivered 10:42"; absent while the send is out. */
+  line?: string;
 }
 
 /** The stream's copy of a sent message: the hub cuts long text to end in "…", so a cut copy matches too. */
@@ -86,7 +95,14 @@ export function withPending(
     rows: [
       ...rows,
       ...open.map(
-        (p): DockRow => ({ kind: "you", id: p.id, at: p.at, text: p.text, pending: true }),
+        (p): DockRow => ({
+          kind: "you",
+          id: p.id,
+          at: p.at,
+          text: p.text,
+          pending: true,
+          ...(p.line === undefined ? {} : { line: p.line }),
+        }),
       ),
     ],
     open,
@@ -137,4 +153,21 @@ export function dockRows(
   }
   out.push(...pending.slice(next));
   return out;
+}
+
+/** The state line under an operator message: "Answered" once a reply links to it, else stored or delivered. */
+export function messageStateLine(
+  message: Pick<CommsMessage, "id" | "deliveredAt">,
+  all: readonly Pick<CommsMessage, "replyTo">[],
+  timeZone: string,
+): string {
+  if (all.some((m) => m.replyTo === message.id)) return "Answered";
+  const at = message.deliveredAt ?? null;
+  return commsStateLine(at === null ? "stored" : "delivered", at, timeZone);
+}
+
+/** The line for a send's answer: the state, and a note when the same words went a moment ago. */
+export function sendStateLine(s: CommsSendState, timeZone: string): string {
+  const line = commsStateLine(s.state, s.deliveredAt, timeZone);
+  return s.alreadySent ? `${line} · Already sent in the last minute` : line;
 }

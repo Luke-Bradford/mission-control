@@ -2,6 +2,8 @@ import {
   type AgentStream,
   ATTENTION_LABEL,
   type AttentionItem,
+  type CommsMessagesResponse,
+  type CommsSendState,
   type Crew,
   flightTurnText,
 } from "@mc/core";
@@ -12,16 +14,19 @@ import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { contextPct, doingLine } from "../crew.ts";
-import { ACTIONS, RESOURCES, useResource, useReviewPrs } from "../data.ts";
+import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import {
   chatRows,
   type DockRow,
   dockRows,
   kindLabel,
+  messageStateLine,
   type PendingMsg,
   sameMessage,
+  sendStateLine,
   withPending,
 } from "../flight/conversation.ts";
+import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import {
   FLIGHT_NO_SEAT,
   type FlightDecision,
@@ -74,7 +79,9 @@ const flightMarkdown = (text: string): string => text.split(CAPCOM).join(`**${CA
 
 const Msg = memo(function Msg({ row, tz }: { row: DockRow; tz: string | null }) {
   const at = row.at !== null && tz !== null ? hhmm(row.at, tz) : null;
-  const pending = row.kind === "you" && row.pending === true;
+  const line = row.kind === "you" ? row.line : undefined;
+  // A message still on its way says so until the hub answers; after that its state line takes over.
+  const pending = row.kind === "you" && row.pending === true && line === undefined;
   const sender =
     row.kind === "you"
       ? "You"
@@ -102,6 +109,11 @@ const Msg = memo(function Msg({ row, tz }: { row: DockRow; tz: string | null }) 
           {row.kind === "decision" ? `${row.d.about} → ${row.d.decision}` : row.text}
         </div>
       )}
+      {line !== undefined && (
+        <div className="note" data-testid="message-state">
+          {line}
+        </div>
+      )}
     </div>
   );
 });
@@ -117,7 +129,8 @@ function Composer({
   onPrefillConsumed,
 }: {
   where: ChatPlace;
-  seat: FlightSeat | null;
+  /** FLIGHT's seat: undefined while it loads, null when none is configured. */
+  seat: FlightSeat | null | undefined;
   busy: boolean;
   err: string | null;
   onSend: (body: string) => Promise<boolean>;
@@ -127,11 +140,12 @@ function Composer({
   const [text, setText] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const used = useRef<number | null>(null);
-  const live = seat?.live === true;
+  // FLIGHT being stopped never blocks the operator: the hub keeps the message for its next start.
+  const canSend = Boolean(seat);
   const send = async (ev: FormEvent) => {
     ev.preventDefault();
     const body = text.trim();
-    if (!live || body === "") return;
+    if (!canSend || body === "") return;
     if (await onSend(body)) setText("");
   };
   useEffect(() => {
@@ -148,22 +162,21 @@ function Composer({
         ref={input}
         autoComplete="off"
         aria-label="Message FLIGHT"
-        placeholder={
-          !seat || live ? "Ask FLIGHT to assign, reprioritise or report…" : "FLIGHT is stopped"
-        }
-        title={live ? undefined : flightOffText(seat)}
+        placeholder="Ask FLIGHT to assign, reprioritise or report…"
+        title={canSend ? undefined : flightOffText(seat ?? null)}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        disabled={!live}
+        disabled={!canSend}
       />
       <button
         type="submit"
         className="primary"
-        title={live ? undefined : flightOffText(seat)}
-        disabled={!live || busy}
+        title={canSend ? undefined : flightOffText(seat ?? null)}
+        disabled={!canSend || busy}
       >
         Send
       </button>
+      <FlightStoppedNote seat={seat} />
       {err !== null && (
         <p className="note err" role="alert">
           {err}
@@ -221,7 +234,16 @@ export function FlightChat({
   const sent = useRef(0);
   const stick = useRef(true);
   const { rows, open } = useMemo(() => withPending(all, pending), [all, pending]);
-  const shown = useMemo(() => chatRows(rows), [rows]);
+  const flightComms = useResource<CommsMessagesResponse>(RESOURCES.commsFlight).data?.messages;
+  const shown = useMemo(() => {
+    const operator = flightComms?.filter((m) => m.operator) ?? [];
+    return chatRows(rows).map((r): DockRow => {
+      if (r.kind !== "you" || r.line !== undefined || tz === null) return r;
+      // the newest message of the operator's with these words is the one this row shows
+      const sent = operator.findLast((m) => sameMessage(r.text, m.text));
+      return sent ? { ...r, line: messageStateLine(sent, flightComms ?? [], tz) } : r;
+    });
+  }, [rows, flightComms, tz]);
   // Settled messages leave the list, so it does not grow for ever.
   useEffect(() => {
     if (open.length !== pending.length) setPending(open);
@@ -252,7 +274,7 @@ export function FlightChat({
   };
 
   const send = async (body: string): Promise<boolean> => {
-    if (!seat?.live) return false;
+    if (!seat) return false;
     const id = `p:${sent.current++}`;
     const seen = all.flatMap((r) => (r.kind === "you" && sameMessage(r.text, body) ? [r.id] : []));
     stick.current = true;
@@ -260,7 +282,14 @@ export function FlightChat({
     setBusy(true);
     setErr(null);
     try {
-      await apiPost(ACTIONS.seatMessage(seat.id), { text: body });
+      const result = await apiPost<CommsSendState | undefined>(ACTIONS.seatMessage(seat.id), {
+        text: body,
+      });
+      if (result?.state !== undefined && tz !== null) {
+        const line = sendStateLine(result, tz);
+        setPending((p) => p.map((m) => (m.id === id ? { ...m, line } : m)));
+      }
+      hub.refetch(RESOURCES.commsFlight.path);
       return true;
     } catch (e) {
       setPending((p) => p.filter((m) => m.id !== id));
@@ -278,7 +307,7 @@ export function FlightChat({
           asks={asks}
           attention={attentionResource}
           crew={crew}
-          canMessage={seat?.live === true}
+          canMessage={seat !== null}
           hideWaiting={needsBeside}
         />
       )}
@@ -335,7 +364,7 @@ export function FlightChat({
       </div>
       <Composer
         where={where}
-        seat={seat}
+        seat={flight === undefined ? undefined : seat}
         busy={busy}
         err={err}
         onSend={send}
@@ -447,8 +476,6 @@ export function Dock({
   const seat = flight?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
   // The reply last seen with the dock shown; undefined until the stream first loads, so history is not "new".
   const replyIds = useMemo(
@@ -480,20 +507,6 @@ export function Dock({
     return () => setFlightUnread(0);
   }, [unread]);
 
-  const start = async () => {
-    if (!seat) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await apiPost(ACTIONS.seatStart(seat.id), {});
-    } catch (e) {
-      setErr(failNote(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const live = seat?.live === true;
   return (
     <>
       {drawer && (
@@ -535,16 +548,6 @@ export function Dock({
             </h2>
             <BuildChips panel="dock" />
             <span className="spacer" />
-            {seat && !live && (
-              <button
-                type="button"
-                className="primary sm"
-                disabled={busy}
-                onClick={() => void start()}
-              >
-                Start FLIGHT
-              </button>
-            )}
             {collapsed && waiting > 0 && <Pill tone="warn">{`Waiting on you · ${waiting}`}</Pill>}
             {wide && !collapsed && (
               <button
@@ -569,11 +572,6 @@ export function Dock({
             </button>
             <DockMeta flight={flight} />
           </div>
-          {err !== null && (
-            <p className="note err" role="alert">
-              {err}
-            </p>
-          )}
           <div className="dockbody" id="dockBody">
             <FlightChat where="dock" active={looking} needsBeside={needsBeside} />
           </div>

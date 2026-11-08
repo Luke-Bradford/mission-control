@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as markdown from "../src/components/Markdown.tsx";
 import { hub, streamStatus } from "../src/data.ts";
 import * as conversation from "../src/flight/conversation.ts";
-import { FLIGHT_NO_SEAT, type FlightView } from "../src/flight/flightTypes.ts";
+import {
+  FLIGHT_NO_SEAT,
+  FLIGHT_STOPPED_NOTICE,
+  type FlightView,
+} from "../src/flight/flightTypes.ts";
 import { NEEDS_YOU_PATH } from "../src/router.ts";
 import { Dock } from "../src/shell/Dock.tsx";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
@@ -720,15 +724,18 @@ describe("Waiting on you", () => {
 });
 
 describe("stopped FLIGHT", () => {
-  it("switches the input off and offers Start FLIGHT", async () => {
+  it("keeps the input open, says FLIGHT is stopped and offers Start FLIGHT", async () => {
     const fn = stubFlight(
       { seat: flightSeat({ state: "stopped", live: false }), decisions: [] },
       { "POST /api/seats/flight-1/start": { runId: "r2" } },
     );
     const { container } = render(<Dock />);
     const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
-    await waitFor(() => expect(input.placeholder).toBe("FLIGHT is stopped"));
-    expect(input.disabled).toBe(true);
+    await screen.findByText(FLIGHT_STOPPED_NOTICE);
+    expect(input.disabled).toBe(false);
+    expect(
+      (container.querySelector("#dockForm button[type=submit]") as HTMLButtonElement).disabled,
+    ).toBe(false);
     expect(container.querySelector(".meta")?.textContent).toBe("opus · stopped");
     fireEvent.click(screen.getByRole("button", { name: "Start FLIGHT" }));
     await waitFor(() => expect(bodyOf(fn, "/api/seats/flight-1/start")).toEqual({}));
@@ -742,6 +749,115 @@ describe("stopped FLIGHT", () => {
     render(<Dock />);
     fireEvent.click(await screen.findByRole("button", { name: "Start FLIGHT" }));
     expect((await screen.findByRole("alert")).textContent).toBe("no slot");
+  });
+
+  it("sends a message to a stopped FLIGHT and says it is stored", async () => {
+    const fn = stubFlight(
+      { seat: flightSeat({ state: "stopped", live: false }), decisions: [] },
+      {
+        "POST /api/seats/flight-1/message": {
+          state: "stored",
+          deliveredAt: null,
+          alreadySent: false,
+        },
+      },
+    );
+    const { container } = render(<Dock />);
+    await screen.findByText(FLIGHT_STOPPED_NOTICE);
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "start when you can" } });
+    fireEvent.submit(form(container));
+    await waitFor(() =>
+      expect(bodyOf(fn, "/api/seats/flight-1/message")).toEqual({ text: "start when you can" }),
+    );
+    await waitFor(() => expect(input.value).toBe(""));
+    const mine = [...container.querySelectorAll(".dmsg.you")].at(-1) as HTMLElement;
+    expect(mine.querySelector("[data-testid=message-state]")?.textContent).toBe("Stored");
+  });
+});
+
+describe("each message shows what became of it", () => {
+  const send = async (reply: unknown) => {
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      { "POST /api/seats/flight-1/message": reply },
+    );
+    render(<Dock />);
+    await screen.findByLabelText("Message FLIGHT");
+    const input = screen.getByLabelText("Message FLIGHT") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "assign it" } });
+    fireEvent.submit(form(document.body));
+    await waitFor(() => expect(input.value).toBe(""));
+    return [...document.querySelectorAll(".dmsg.you")].at(-1) as HTMLElement;
+  };
+
+  it("delivered, with the time", async () => {
+    const mine = await send({
+      state: "delivered",
+      deliveredAt: Date.UTC(2026, 10, 7, 15, 34),
+      alreadySent: false,
+    });
+    await waitFor(() =>
+      expect(mine.querySelector("[data-testid=message-state]")?.textContent).toMatch(
+        /^Delivered \d\d:\d\d$/,
+      ),
+    );
+  });
+
+  it("an exact repeat within a minute says so", async () => {
+    const mine = await send({ state: "stored", deliveredAt: null, alreadySent: true });
+    await waitFor(() =>
+      expect(mine.querySelector("[data-testid=message-state]")?.textContent).toBe(
+        "Stored · Already sent in the last minute",
+      ),
+    );
+  });
+
+  it("answered, once a reply links to the message", async () => {
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/comms/flight": {
+          messages: [
+            {
+              id: "m1",
+              from: "operator",
+              to: "flight-1",
+              text: "Which first?",
+              at: NOW,
+              operator: true,
+              deliveredAt: NOW,
+              reactions: [],
+              mentions: [],
+              label: null,
+              ref: null,
+              replyTo: null,
+            },
+            {
+              id: "m2",
+              from: "flight-1",
+              to: "operator",
+              text: "Reply",
+              at: NOW,
+              operator: false,
+              reactions: [],
+              mentions: [],
+              label: null,
+              ref: null,
+              replyTo: "m1",
+            },
+          ],
+        },
+        "/api/agents/flight-1/stream?limit=20": {
+          ...STREAM,
+          events: [{ id: "7:0", at: NOW, kind: "op", text: "Which first?" }],
+        },
+      },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() =>
+      expect(container.querySelector("[data-testid=message-state]")?.textContent).toBe("Answered"),
+    );
   });
 });
 

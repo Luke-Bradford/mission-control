@@ -3,6 +3,8 @@ import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from
 import { Expandable } from "../components/Expandable.tsx";
 import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
+import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
+import type { FlightSeat } from "../flight/flightTypes.ts";
 import { askFlight } from "./answer.ts";
 import { clearDraft, getDraft, setDraft } from "./drafts.ts";
 import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
@@ -11,8 +13,10 @@ type Receipt = { id: string; text: string; note?: string };
 
 type ItemDiscussionProps = {
   itemKey: string;
+  /** Whether FLIGHT is running; undefined while that loads. The box takes focus only when it is. */
   live: boolean | undefined;
-  title?: string;
+  /** FLIGHT's seat: undefined while it loads, null when none is configured. */
+  seat?: FlightSeat | null;
   receipt?: Receipt;
   focus?: boolean;
   collapsed?: boolean;
@@ -52,14 +56,14 @@ function Conversation(p: ItemDiscussionProps) {
 function DiscussionBody({
   itemKey,
   live,
-  title,
+  seat,
   receipt,
   focus = false,
   layout = "panel",
 }: {
   itemKey: string;
   live: boolean | undefined;
-  title?: string;
+  seat?: FlightSeat | null;
   receipt?: Receipt;
   focus?: boolean;
   layout?: "panel" | "page";
@@ -105,7 +109,7 @@ function DiscussionBody({
   const [retry, setRetry] = useState<{ text: string; version: string; id: string } | null>(null);
   const send = async () => {
     const body = text.trim();
-    if (!body || !discussion || !live || pending) return;
+    if (!body || !discussion || pending) return;
     const message =
       retry?.text === body && retry.version === discussion.version
         ? retry
@@ -219,8 +223,7 @@ function DiscussionBody({
             rows={3}
             maxLength={DISCUSSION_TEXT_MAX}
             value={text}
-            disabled={!live || pending}
-            title={title}
+            disabled={pending}
             onKeyDown={onKey}
             onChange={(ev) => setText(ev.target.value)}
           />
@@ -232,19 +235,14 @@ function DiscussionBody({
             autoComplete="off"
             maxLength={DISCUSSION_TEXT_MAX}
             value={text}
-            disabled={!live || pending}
-            title={title}
+            disabled={pending}
             onChange={(ev) => setText(ev.target.value)}
           />
         )}
-        <button
-          type="submit"
-          className="primary"
-          disabled={!live || !discussion || pending || !text.trim()}
-          title={title}
-        >
+        <button type="submit" className="primary" disabled={!discussion || pending || !text.trim()}>
           Ask FLIGHT
         </button>
+        <FlightStoppedNote seat={seat} />
         {pending && (
           <span className="note" role="status">
             Sending…

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { hub, RESOURCES } from "../src/data.ts";
-import { FLIGHT_NO_SEAT, FLIGHT_STOPPED } from "../src/flight/flightTypes.ts";
+import { FLIGHT_NO_SEAT, FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
 import type { PersonThreadView } from "../src/notifications.ts";
 import { navigate } from "../src/router.ts";
 import { Dock } from "../src/shell/Dock.tsx";
@@ -130,18 +130,16 @@ describe("ItemPanel, Ask FLIGHT", () => {
     return fn;
   };
 
-  it("is switched off with no live seat", async () => {
+  it("stays usable with no live seat, and says there is no seat", async () => {
     withFlight({ seat: null, decisions: [] });
     await screen.findByText("Which eviction policy should the quote cache use?");
-    expect((screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement).disabled).toBe(
-      true,
-    );
-    expect(screen.getByRole("button", { name: "Ask FLIGHT" }).getAttribute("title")).toBe(
-      FLIGHT_NO_SEAT,
-    );
+    const input = screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "why?" } });
     expect((screen.getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement).disabled).toBe(
-      true,
+      false,
     );
+    expect(screen.getByText(FLIGHT_NO_SEAT)).toBeTruthy();
   });
 
   it("posts the text to the item discussion with its version and message id", async () => {
@@ -291,13 +289,12 @@ describe("ItemPanel, an escalation with a question", () => {
     expect(a.rel).toBe("noopener noreferrer");
   });
 
-  it("has the chat switched off", async () => {
+  it("keeps the chat open while FLIGHT's state is unknown", async () => {
     open([item()]);
     await screen.findByText(QUESTION.question);
     const input = screen.getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
-    expect(input.disabled).toBe(true);
+    expect(input.disabled).toBe(false);
     expect(input.placeholder).toBe("Ask FLIGHT about this…");
-    expect(input.title).toBe(FLIGHT_NO_SEAT);
   });
 });
 
@@ -398,7 +395,7 @@ describe("ItemPanel, acting on an item", () => {
 
   const STOPPED = { "/api/flight": { seat: { ...FLIGHT_SEAT, live: false }, decisions: [] } };
 
-  it("with FLIGHT stopped, a seat's item still replies and Ask FLIGHT is disabled", async () => {
+  it("with FLIGHT stopped, a seat's item still replies and Ask FLIGHT is enabled with a Start button", async () => {
     const fn = acting([SEAT_Q], STOPPED);
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
@@ -406,20 +403,115 @@ describe("ItemPanel, acting on an item", () => {
         { text: "Use port 5174.", question: 7 },
       ]),
     );
+    const input = within(panel()).getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "why?" } });
     const ask = within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement;
-    expect(ask.disabled).toBe(true);
-    expect(ask.title).toBe(FLIGHT_STOPPED);
+    expect(ask.disabled).toBe(false);
+    expect(within(panel()).getByText(FLIGHT_STOPPED_NOTICE)).toBeTruthy();
+    expect(within(panel()).getByRole("button", { name: "Start FLIGHT" })).toBeTruthy();
   });
 
-  it("with FLIGHT stopped, an answer for FLIGHT cannot be sent", async () => {
-    acting([{ ...SEAT_Q, agentId: "flight-1" }], STOPPED);
-    const opt = (await within(panel()).findByRole("button", { name: "5174" })) as HTMLButtonElement;
-    await waitFor(() => expect(opt.title).toBe(FLIGHT_STOPPED));
-    expect(opt.disabled).toBe(true);
-    openConversation();
-    expect(
-      (within(panel()).getByRole("button", { name: "Ask FLIGHT" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+  it("with FLIGHT stopped, an answer for FLIGHT is still sent, with the stopped notice beside it", async () => {
+    const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }], STOPPED);
+    const opt = (await enabled("5174")) as HTMLButtonElement;
+    expect(opt.disabled).toBe(false);
+    expect(within(panel()).getAllByText(FLIGHT_STOPPED_NOTICE).length).toBeGreaterThan(0);
+    fireEvent.click(opt);
+    await waitFor(() =>
+      expect(posts(fn, discussionPath(SEAT_Q.key))).toEqual([
+        { version: "v1", messageId: expect.any(String), text: "Use port 5174." },
+      ]),
+    );
+  });
+
+  it("with FLIGHT stopped, the Reply box takes text and sends it to FLIGHT", async () => {
+    const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }], {
+      ...STOPPED,
+      "POST /api/seats/flight-1/message": {
+        state: "stored",
+        deliveredAt: null,
+        alreadySent: false,
+      },
+    });
+    const input = (await within(panel()).findByLabelText("Your answer")) as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "Go with 5174" } });
+    fireEvent.click(await enabled("Reply"));
+    await waitFor(() => expect(posts(fn, "/api/seats/flight-1/message")).toHaveLength(1));
+  });
+
+  it("Start FLIGHT beside the box posts the seat start route", async () => {
+    const fn = acting([{ ...SEAT_Q, agentId: "flight-1" }], {
+      ...STOPPED,
+      "POST /api/seats/flight-1/start": { runId: "r2" },
+    });
+    fireEvent.click((await within(panel()).findAllByRole("button", { name: "Start FLIGHT" }))[0]);
+    await waitFor(() => expect(posts(fn, "/api/seats/flight-1/start")).toEqual([{}]));
+  });
+
+  describe("an option with an id", () => {
+    const CHOOSE = "/api/attention/ask%3A7/choose";
+    const CHOICE = "/api/attention/ask%3A7/choice";
+    const withIds = {
+      ...SEAT_Q,
+      brief: brief({
+        for: "operator",
+        options: [
+          { id: "a", label: "5174", answer: "Use port 5174." },
+          { id: "b", label: "5180", answer: "Use port 5180." },
+        ],
+      }),
+    };
+    const receipt = (over: object = {}) => ({
+      key: "ask:7",
+      optionId: "a",
+      label: "5174",
+      to: "mc-dev-1",
+      target: "seat",
+      chosenAt: NOW + 1,
+      deliveredAt: null,
+      alreadyChosen: false,
+      ...over,
+    });
+
+    it("posts the choose route with the option id and the brief's time, and shows it recorded", async () => {
+      const fn = acting([withIds], { [`POST ${CHOOSE}`]: receipt() });
+      fireEvent.click(await enabled("5174"));
+      await waitFor(() =>
+        expect(posts(fn, CHOOSE)).toEqual([{ optionId: "a", briefAt: withIds.brief.at }]),
+      );
+      expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([]);
+      expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(
+        "Recorded. Stored for mc-dev-1.",
+      );
+    });
+
+    it("shows the recorded choice after a reload", async () => {
+      acting([withIds], { [CHOICE]: receipt({ deliveredAt: NOW + 60_000 }) });
+      expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(
+        "Recorded. mc-dev-1 took it at",
+      );
+      expect(within(panel()).getByText("You chose:").textContent).toContain("5174");
+      const pick = (await within(panel()).findByRole("button", {
+        name: "5174",
+      })) as HTMLButtonElement;
+      expect(pick.disabled).toBe(true);
+    });
+
+    it("shows the server's refusal and records nothing", async () => {
+      acting([withIds], {
+        [`POST ${CHOOSE}`]: () => ({
+          status: 409,
+          body: { error: "The question changed since you opened it. Reload and choose again." },
+        }),
+      });
+      fireEvent.click(await enabled("5174"));
+      expect((await within(panel()).findByRole("alert")).textContent).toContain(
+        "The question changed",
+      );
+      expect(within(panel()).queryByTestId("choice-line")).toBeNull();
+    });
   });
 
   it("Dismiss posts the dismiss route, refreshes the list and closes the panel", async () => {
@@ -658,9 +750,9 @@ describe("ItemPanel closing", () => {
     open([item()]);
     await screen.findByRole("button", { name: "Close" });
     const panel = document.querySelector("#discuss") as HTMLElement;
-    const stops = [...panel.querySelectorAll<HTMLElement>("button, a[href]")].filter(
-      (el) => !el.hasAttribute("disabled"),
-    );
+    const stops = [
+      ...panel.querySelectorAll<HTMLElement>("button, a[href], input, textarea"),
+    ].filter((el) => !el.hasAttribute("disabled"));
     const last = stops.at(-1) as HTMLElement;
     const first = stops[0] as HTMLElement;
     expect(last).not.toBe(first);
@@ -1653,7 +1745,7 @@ it("shows a recommendation once when ask and options are empty", async () => {
 });
 
 it.each(["flight", "github"] as const)(
-  "explains disabled approval options for a %s target",
+  "explains approval options for a %s target",
   async (target) => {
     const approval = {
       ...SEAT_Q,
@@ -1668,14 +1760,16 @@ it.each(["flight", "github"] as const)(
     });
     render(<ItemPanel />);
     act(() => openItem(approval.key));
-    const reason = target === "flight" ? FLIGHT_STOPPED : "Reply on GitHub to answer this item.";
-    await screen.findByText(reason);
+    const reason =
+      target === "flight" ? FLIGHT_STOPPED_NOTICE : "Reply on GitHub to answer this item.";
+    await screen.findAllByText(reason);
     const group = screen.getByRole("group", { name: "Your call:" });
-    expect(within(group).getByText(reason)).toBeTruthy();
+    // GitHub-bound options are answered on GitHub; FLIGHT-bound ones stay open while it is stopped
+    if (target === "github") expect(within(group).getByText(reason)).toBeTruthy();
     for (const label of ["5174", "5180"])
       expect(
         (within(group).getByRole("button", { name: label }) as HTMLButtonElement).disabled,
-      ).toBe(true);
+      ).toBe(target === "github");
     expect(within(group).getByText("Use port 5174.")).toBeTruthy();
     expect(within(group).getByText("Use port 5180.")).toBeTruthy();
     expect(screen.getByText("Use 5174.").closest(".recommendation")).toBeTruthy();

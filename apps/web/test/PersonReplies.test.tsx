@@ -184,8 +184,8 @@ it("shows an empty reply state and keeps keyboard focus in the panel", async () 
   const first = screen.getByRole("link", { name: "Open in GitHub ↗" });
   first.focus();
   fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
-  // With FLIGHT unavailable, history can still be refreshed.
-  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Refresh discussion" }));
+  // The question box stays open with FLIGHT unavailable, so it is the last stop.
+  expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this"));
   expect(last.hasAttribute("disabled")).toBe(true);
 });
 it.each(["loading", "failed", "empty"])("shows a %s person source response", async (state) => {
