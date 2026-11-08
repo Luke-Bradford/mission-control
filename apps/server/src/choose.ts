@@ -11,7 +11,7 @@ import { sendComms } from "./comms.ts";
 import type { CcConfig } from "./config.ts";
 import { flightSeat } from "./flight/seat.ts";
 import { CREW_ERROR_KEY, NOTE_KEY } from "./hud.ts";
-import type { QuestionChoiceRow, Store } from "./store.ts";
+import { commsPosition, type QuestionChoiceRow, type Store } from "./store.ts";
 
 /** What a choice route sends back when it refuses: the status and one plain line. */
 export class ChoiceRefused extends Error {
@@ -112,8 +112,21 @@ export async function chooseOption(
     const author = store.commsMessage(messageId)?.from;
     if (author !== undefined && author !== flightId && d.crew().includes(author))
       asker = { agentId: author, runId: store.commsStamp(messageId).runId };
-  } else if (item.agentId !== null && item.agentId !== flightId && d.crew().includes(item.agentId))
-    asker = { agentId: item.agentId, runId: null };
+  } else if (
+    (item.kind === "tag" || item.kind === "message") &&
+    item.agentId !== null &&
+    item.agentId !== flightId &&
+    d.crew().includes(item.agentId)
+  ) {
+    // built as `${kind}:${seat}:${message id}`: the seat wrote it, and its run is in the id
+    const messageId = key.slice(`${item.kind}:${item.agentId}:`.length);
+    const source = commsPosition(messageId)?.source ?? "";
+    const runId = source.startsWith("stream:")
+      ? source.slice("stream:".length)
+      : store.commsStamp(messageId).runId;
+    asker = { agentId: item.agentId, runId };
+  }
+  // any other item (a crew error, a stall, a lock, a note) is FLIGHT's to decide, not a seat's question
 
   // where the answer goes: the run that asked while it lives, FLIGHT otherwise, never another run
   let to: string;
@@ -135,7 +148,11 @@ export async function chooseOption(
   const lead = `Re: ${key} · ${chooser} chose "${option.label}"`;
   const text =
     targetKind === "flight-for-next-run"
-      ? `${lead}\n\n${option.answer}\n\n${asker?.agentId ?? "The seat"}'s run that asked has ended. Pass this on to the next run on ${ticket ?? "that ticket"}.`
+      ? `${lead}\n\n${option.answer}\n\n${
+          asker?.runId == null
+            ? `The run that asked is not known; pass this on to ${asker?.agentId ?? "the seat"}'s run on ${ticket ?? "that ticket"}.`
+            : `${asker.agentId}'s run that asked has ended. Pass this on to the next run on ${ticket ?? "that ticket"}.`
+        }`
       : `${lead}\n\n${option.answer}`;
 
   // Claim the brief before anything is sent, with no wait in between: a second pick at the same

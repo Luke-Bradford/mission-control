@@ -389,3 +389,69 @@ describe("a seat's question that reached Needs you as an open Comms item", () =>
     expect(store.comms(0).filter((m) => m.to === "guido-1")).toHaveLength(0);
   });
 });
+
+it("sends an item that is not a seat's question (a crew error) to FLIGHT as its own", async () => {
+  store.upsertRun(run({ id: "r1" }));
+  seatSession("guido-1", "r1");
+  const key = "crew-error:1";
+  const r = await chooseOption(deps(), item(key, { kind: "error" }), key, {
+    optionId: "yes",
+    briefAt: BRIEF_AT,
+  });
+  expect(r).toMatchObject({ to: "flight-1", target: "flight" });
+  const text = store.comms(0).find((m) => m.to === "flight-1")?.text ?? "";
+  expect(text).not.toContain("Pass this on");
+  expect(store.comms(0).filter((m) => m.to === "guido-1")).toHaveLength(0);
+});
+
+describe("a seat's tag or message item", () => {
+  const written = (runId: string) => {
+    const m = store.addComms({
+      at: 2,
+      from: "guido-1",
+      to: "CAPCOM",
+      ticket: "mc#7",
+      text: "@CAPCOM which way?",
+      fromRunId: runId,
+    });
+    if (m === null) throw new Error("not stored");
+    return `tag:guido-1:${m.id}`;
+  };
+
+  it("goes to the seat's live run, read from the key", async () => {
+    store.upsertRun(run({ id: "r1" }));
+    seatSession("guido-1", "r1");
+    const key = written("r1");
+    const r = await chooseOption(deps(), item(key, { kind: "tag" }), key, {
+      optionId: "yes",
+      briefAt: BRIEF_AT,
+    });
+    expect(r).toMatchObject({ to: "guido-1", target: "seat" });
+    expect(wake).toHaveBeenCalledWith("guido-1");
+    expect(store.commsRun(store.latestChoice(key)?.messageId ?? "")?.id).toBe("r1");
+  });
+
+  it("goes to FLIGHT to pass on, naming the seat, when that run has ended", async () => {
+    store.upsertRun(run({ id: "r1", endedAt: 3_000, status: "ok" }));
+    const key = written("r1");
+    const r = await chooseOption(deps(), item(key, { kind: "tag" }), key, {
+      optionId: "yes",
+      briefAt: BRIEF_AT,
+    });
+    expect(r).toMatchObject({ to: "flight-1", target: "flight-for-next-run" });
+    const text = store.comms(0).find((m) => m.to === "flight-1")?.text ?? "";
+    expect(text).toContain("Pass this on");
+    expect(text).toContain("guido-1");
+  });
+
+  it("does not say the run has ended when the run is not known", async () => {
+    const key = "message:guido-1:comms:999";
+    await chooseOption(deps(), item(key, { kind: "message" }), key, {
+      optionId: "yes",
+      briefAt: BRIEF_AT,
+    });
+    const text = store.comms(0).find((m) => m.to === "flight-1")?.text ?? "";
+    expect(text).toContain("not known");
+    expect(text).not.toContain("has ended");
+  });
+});
