@@ -19,6 +19,7 @@ import type { Gql } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
 import type { Move } from "../src/github-board.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import { closeSettledQuestions } from "../src/question-watch.ts";
 import type { Supervisor } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 
@@ -351,7 +352,7 @@ describe("Not now and Drop on Needs you", () => {
     }
   });
 
-  it("Not now writes nothing to GitHub and keeps the question in Needs you when the move fails", async () => {
+  it("Not now puts the question back in Needs you, ends no run and comments nothing when the move fails", async () => {
     const { key } = passedQuestion();
     const a = buildApp({
       config: config(),
@@ -372,6 +373,7 @@ describe("Not now and Drop on Needs you", () => {
     try {
       expect((await post(a, key, "not-now")).statusCode).toBe(502);
       expect(ghCalls.some((c) => c[1] === "comment")).toBe(false);
+      expect(ended).toEqual([]);
       expect((await items(a)).some((i) => i.key === key)).toBe(true);
     } finally {
       await a.close();
@@ -398,6 +400,76 @@ describe("Not now and Drop on Needs you", () => {
     } finally {
       await a.close();
     }
+  });
+
+  it("Not now keeps the question aside when only the comment fails after the run ended", async () => {
+    const { id, key } = passedQuestion();
+    const failing: GhRunner = async (args) => {
+      ghCalls.push(args);
+      return { code: args[1] === "comment" ? 1 : 0, stdout: "", stderr: "" };
+    };
+    const a = buildApp({
+      config: config(),
+      store,
+      bus: new ChangeBus(),
+      operatorToken: "test-token",
+      gh: failing,
+      supervisor,
+      githubGql: async () => gql,
+      knownSecrets: async () => [],
+      now: () => NOW,
+      needsYou: {
+        board: { move: async () => ({ ok: true, changed: true }) },
+        rules: async () => DEFAULT_REPO_RULES,
+        fetchTicket: async (_repo, n) => ticketView(n),
+      },
+    });
+    try {
+      expect((await post(a, key, "not-now")).statusCode).toBe(502);
+      expect(ended).toEqual(["r-guido"]);
+      expect(store.question(id)?.asideAt).toBe(NOW);
+      expect((await items(a)).some((i) => i.key === key)).toBe(false);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it("a double submit posts one comment", async () => {
+    const { key } = passedQuestion();
+    const a = app();
+    try {
+      const [one, two] = await Promise.all([post(a, key, "not-now"), post(a, key, "not-now")]);
+      expect(one.statusCode).toBe(200);
+      // refused whether the first is still running (409) or has finished (404)
+      expect([404, 409]).toContain(two.statusCode);
+      expect(ghCalls.filter((c) => c[1] === "comment")).toHaveLength(1);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it("refuses FLIGHT's own question and ends no run", async () => {
+    const key = commsQuestion("flight-1", "mc#7");
+    const a = app();
+    try {
+      expect((await items(a)).find((i) => i.key === key)?.offers).toBeUndefined();
+      for (const action of ["not-now", "drop"] as const) {
+        expect((await post(a, key, action)).statusCode).toBe(409);
+      }
+      expect(ended).toEqual([]);
+      expect(ghCalls).toEqual([]);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it("closes a set-aside question when its ticket closes", async () => {
+    const { id } = passedQuestion();
+    store.setQuestionAside(id, NOW);
+    expect(await closeSettledQuestions({ config: config(), store, now: NOW + 1 })).toBe(0);
+    store.replaceBoard("mc", [card(7, { closed: true })]);
+    expect(await closeSettledQuestions({ config: config(), store, now: NOW + 2 })).toBe(1);
+    expect(store.question(id)?.answeredAt).not.toBeNull();
   });
 
   describe("a Comms question", () => {

@@ -1,3 +1,5 @@
+import { WAITING_OPERATOR_LABEL } from "./flight.ts";
+
 /** What the operator can do with a question on Needs you besides pick an option or hold it. */
 export const NEEDS_YOU_OFFERS = ["not-now", "drop"] as const;
 export type NeedsYouOffer = (typeof NEEDS_YOU_OFFERS)[number];
@@ -24,7 +26,7 @@ export function notNowComment(
   }
   lines.push(
     "",
-    "The question stays open on the Ticket page. The ticket moves back when it is answered or the card is moved. (Mission Control)",
+    `The ${WAITING_OPERATOR_LABEL} label keeps FLIGHT from promoting this ticket. Remove it and move the card when you are ready. (Mission Control)`,
   );
   return lines.join("\n");
 }

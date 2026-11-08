@@ -1,4 +1,5 @@
 import {
+  ASKING_RUN_ENDED_REASON,
   type AttentionItem,
   COMMS_MC,
   COMMS_OPEN_PREFIX,
@@ -21,6 +22,7 @@ import type { Gql } from "./collectors/github.ts";
 import type { CcConfig } from "./config.ts";
 import type { RepoRulesError } from "./engine/rules.ts";
 import { flightSeat } from "./flight/seat.ts";
+import { cardProblem, closeBlocker } from "./flight/ticket-close.ts";
 import type { Move, MoveResult } from "./github-board.ts";
 import { ensureLabels } from "./github-setup.ts";
 import type { GhRunner } from "./mcp/gh.ts";
@@ -29,7 +31,6 @@ import { recordRunHandoff } from "./run-handoffs.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { parseTicket } from "./runview.ts";
 import { crewDir, type Store } from "./store.ts";
-import { cardProblem, closeBlocker } from "./ticket-close.ts";
 
 /** What the routes need from the hub besides the store: the board, the repo rules and GitHub. */
 export interface NeedsYouDeps {
@@ -97,6 +98,9 @@ export function offerProblem(
 ): string | null {
   if (item.kind !== "question" || item.owner !== OWNER_OPERATOR)
     return "only a question that waits for you can be set aside or dropped";
+  // FLIGHT's own question is the operator's to answer; setting it aside would end FLIGHT
+  if (item.agentId !== null && item.agentId === flightSeat(c.config)?.seat.id)
+    return "it is FLIGHT's own question";
   if (questionOf(c.store, c.config, item) === null)
     return "it is not a question a run or a seat asked";
   if (protectedDecisionItem(c.store, item, c.config, c.now()))
@@ -162,6 +166,18 @@ async function targetOf(c: NeedsYouContext, key: string, prefix: string): Promis
   };
 }
 
+/** Keys with an action in flight: a double click must not post a second comment. */
+const inFlight = new Set<string>();
+async function once(key: string, act: () => Promise<ActionResult>): Promise<ActionResult> {
+  if (inFlight.has(key)) return refuse(409, "Not done:", "that question is already being handled");
+  inFlight.add(key);
+  try {
+    return await act();
+  } finally {
+    inFlight.delete(key);
+  }
+}
+
 /** Ends the run that waits on the question (if it is live) and records its handoff. */
 async function endWaitingRun(c: NeedsYouContext, runId: string): Promise<void> {
   const run = c.store.run(runId);
@@ -182,11 +198,15 @@ async function endWaitingRun(c: NeedsYouContext, runId: string): Promise<void> {
  * the Backlog with `waiting:operator` and one comment. The question stays answerable on the
  * Ticket page.
  */
-export async function notNow(c: NeedsYouContext, key: string): Promise<ActionResult> {
+export const notNow = (c: NeedsYouContext, key: string): Promise<ActionResult> =>
+  once(key, () => notNowOnce(c, key));
+
+async function notNowOnce(c: NeedsYouContext, key: string): Promise<ActionResult> {
   const t = await targetOf(c, key, NOT_NOW_REFUSED);
   if (!t.ok) return t.result;
   const { repo, issue, ref, question, item } = t;
   const fail = (why: string) => refuse(502, NOT_NOW_REFUSED, why);
+  let commentFailed = false;
   const at = c.now();
   const comment = notNowComment(item.brief?.ask || question.text, item.brief?.options ?? [], at);
   const unfit = prTextProblem(comment, {
@@ -204,18 +224,11 @@ export async function notNow(c: NeedsYouContext, key: string): Promise<ActionRes
     if (question.seatQuestion !== null) c.store.clearQuestionAside(question.seatQuestion);
     c.bus.emit("attention");
   };
-  try {
-    if (question.runId !== null) await endWaitingRun(c, question.runId);
-  } catch (e) {
-    c.log?.(`not now ${ref}: could not end the run: ${e instanceof Error ? e.message : "failed"}`);
-    putBack();
-    return fail("the waiting run could not be ended");
-  }
+  // the card first: a failure here changes nothing the operator cannot retry
   try {
     await ensureLabels(await c.gql(), repo.github, [
       { name: WAITING_OPERATOR_LABEL, color: WAITING_OPERATOR_COLOR },
     ]);
-    const cwd = crewDir(c.dbPath);
     const labelled = await c.gh(
       [
         "issue",
@@ -224,7 +237,7 @@ export async function notNow(c: NeedsYouContext, key: string): Promise<ActionRes
         `--repo=${repo.github}`,
         `--add-label=${WAITING_OPERATOR_LABEL}`,
       ],
-      { cwd },
+      { cwd: crewDir(c.dbPath) },
     );
     if (labelled.code !== 0) {
       c.log?.(`not now ${ref}: gh issue edit failed (${String(labelled.code)})`);
@@ -242,19 +255,31 @@ export async function notNow(c: NeedsYouContext, key: string): Promise<ActionRes
       putBack();
       return fail("the card could not be moved to the Backlog");
     }
-    const commented = await c.gh(
-      ["issue", "comment", String(issue), `--repo=${repo.github}`, `--body=${comment}`],
-      { cwd },
-    );
-    if (commented.code !== 0) {
-      c.log?.(`not now ${ref}: gh issue comment failed (${String(commented.code)})`);
-      putBack();
-      return fail("GitHub refused the comment");
-    }
   } catch (e) {
     c.log?.(`not now ${ref}: ${e instanceof Error ? e.message : "failed"}`);
     putBack();
     return fail("GitHub could not be reached");
+  }
+  try {
+    if (question.runId !== null) await endWaitingRun(c, question.runId);
+  } catch (e) {
+    c.log?.(`not now ${ref}: could not end the run: ${e instanceof Error ? e.message : "failed"}`);
+    putBack();
+    return fail("the waiting run could not be ended");
+  }
+  // the run has ended: whatever follows, the question stays aside (its run cannot be asked again)
+  try {
+    const commented = await c.gh(
+      ["issue", "comment", String(issue), `--repo=${repo.github}`, `--body=${comment}`],
+      { cwd: crewDir(c.dbPath) },
+    );
+    if (commented.code !== 0) {
+      c.log?.(`not now ${ref}: gh issue comment failed (${String(commented.code)})`);
+      commentFailed = true;
+    }
+  } catch (e) {
+    c.log?.(`not now ${ref}: ${e instanceof Error ? e.message : "failed"}`);
+    commentFailed = true;
   }
   if (question.seatQuestion === null && key.startsWith(COMMS_OPEN_PREFIX))
     c.store.settleCommsItem(
@@ -266,11 +291,16 @@ export async function notNow(c: NeedsYouContext, key: string): Promise<ActionRes
   c.bus.emit("attention");
   c.bus.emit("boards");
   c.bus.emit("agents");
+  if (commentFailed)
+    return fail("the card moved and the run ended, but GitHub refused the comment; add it by hand");
   return { ok: true };
 }
 
 /** Drop: the ticket closes as not planned with one comment, under the refusals of close_ticket. */
-export async function drop(c: NeedsYouContext, key: string): Promise<ActionResult> {
+export const drop = (c: NeedsYouContext, key: string): Promise<ActionResult> =>
+  once(key, () => dropOnce(c, key));
+
+async function dropOnce(c: NeedsYouContext, key: string): Promise<ActionResult> {
   const t = await targetOf(c, key, DROP_REFUSED);
   if (!t.ok) return t.result;
   const { repo, issue, ref } = t;
@@ -299,6 +329,23 @@ export async function drop(c: NeedsYouContext, key: string): Promise<ActionResul
     if (question.seatQuestion !== null) c.store.clearQuestionAside(question.seatQuestion);
     c.bus.emit("attention");
   };
+  /** The run has ended, so the question closes as run-ended (as when any run ends) and stays gone. */
+  const closeRunEnded = () => {
+    if (question.seatQuestion !== null)
+      c.store.closeQuestion({
+        key,
+        askAt: questionAskAt(t.item, t.item.brief),
+        kind: "run-ended",
+        reason: ASKING_RUN_ENDED_REASON,
+        by: "hub",
+        question: question.text,
+        ticket: ref,
+        operator: true,
+        at,
+      });
+    c.bus.emit("attention");
+  };
+  const stop = () => (question.runId === null ? putBack() : closeRunEnded());
   try {
     if (question.runId !== null) await endWaitingRun(c, question.runId);
   } catch (e) {
@@ -319,7 +366,7 @@ export async function drop(c: NeedsYouContext, key: string): Promise<ActionResul
   );
   if (closed.code !== 0) {
     c.log?.(`drop ${ref}: gh issue close failed (${String(closed.code)})`);
-    putBack();
+    stop();
     return refuse(502, DROP_REFUSED, "GitHub refused the close");
   }
   // exit 0 is not proof: only the live issue, closed at or after the call began, counts
@@ -330,7 +377,7 @@ export async function drop(c: NeedsYouContext, key: string): Promise<ActionResul
     after = null;
   }
   if (after?.state !== "closed" || (after.closedAt ?? 0) < at - 1000) {
-    putBack();
+    stop();
     return refuse(502, DROP_REFUSED, "GitHub did not confirm the close; read the ticket");
   }
   // the question is over with its ticket

@@ -7997,6 +7997,16 @@ export class Store {
     return rows.map(toQuestion);
   }
 
+  /** Questions the operator set aside with Not now and nobody has answered, oldest first. */
+  asideQuestions(): SeatQuestion[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NOT NULL ORDER BY id ASC",
+      )
+      .all() as Row[];
+    return rows.map(toQuestion);
+  }
+
   /** The seat's questions open at any time in [from, to), oldest first. */
   questionsOverlapping(
     agentId: AgentId,

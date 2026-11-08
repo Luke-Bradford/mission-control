@@ -384,7 +384,6 @@ import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { InstructionInput } from "../standing-instructions.ts";
 import { crewDir, type Store } from "../store.ts";
-import { cardProblem as cardProblemOf, closeBlocker } from "../ticket-close.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
@@ -409,6 +408,7 @@ import {
   ownReply,
   stalledSeats,
 } from "./state.ts";
+import { cardProblem as cardProblemOf, closeBlocker } from "./ticket-close.ts";
 import type { CrewTidy } from "./tidy.ts";
 
 export interface FlightToolsDeps {
