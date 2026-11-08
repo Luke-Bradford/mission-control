@@ -66,6 +66,10 @@ it("a hub message is a notice; notices are never unread and ?notices=hide leaves
     const shown = await get("/api/comms/agents/guido-1?notices=hide");
     expect(shown.messages.map((m) => m.text)).toEqual(["a finding"]);
     expect(shown.unread).toBe(1);
+    // the hub's conversation holds only notices: it leaves the contact list too
+    const contacts = (page: unknown) => (page as { contacts: { id: string }[] }).contacts;
+    expect(contacts(all).map((c) => c.id)).toContain("MC");
+    expect(contacts(shown).map((c) => c.id)).not.toContain("MC");
     expect((await app.inject({ url: "/api/comms/agents/guido-1?notices=no" })).statusCode).toBe(
       400,
     );

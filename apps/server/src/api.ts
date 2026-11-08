@@ -2156,17 +2156,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 paging.hideNotices,
               );
         // The conversation list: one line per contact, from counts, never their histories.
-        const contacts = commsContacts(id).map((contact) => {
-          const scope: CommsReadScope = { pair: [id, contact] };
-          const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
-          const last = store.commsPage(scope, 1).rows[0];
-          return {
-            id: contact,
-            lastMessage: last === undefined ? null : storedCommsMessage(last),
-            count: counts.count,
-            unread: counts.unread,
-          };
-        });
+        const contacts = commsContacts(id)
+          .map((contact) => {
+            const scope: CommsReadScope = { pair: [id, contact] };
+            const counts = store.commsCounts(
+              scope,
+              store.commsScopeCursor(pairScope(id, contact)),
+              undefined,
+              paging.hideNotices,
+            );
+            const last = store.commsPage(scope, 1, undefined, undefined, paging.hideNotices)
+              .rows[0];
+            return {
+              id: contact,
+              lastMessage: last === undefined ? null : storedCommsMessage(last),
+              count: counts.count,
+              unread: counts.unread,
+            };
+          })
+          // with notices hidden, a contact that only sent notices has nothing to show
+          .filter((contact) => !paging.hideNotices || contact.count > 0);
         return {
           ...all,
           inbox: storedCommsMessages(inbox.rows),
