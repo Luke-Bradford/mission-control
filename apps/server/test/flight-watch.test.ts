@@ -5704,6 +5704,73 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
       read(T0 + 3 * MIN);
       expect(JSON.stringify(flightWaits(store))).toBe(settled);
     });
+
+    describe("a told wait whose subject no longer needs anything", () => {
+      const WAIT_END = T0 + MIN;
+      const waitOn = (target: string, until = WAIT_END) =>
+        recordFlightWait(store, target, { on: "it", until, at: T0 });
+      /** Ends the wait, tells FLIGHT, and returns the signal keys of the next digest. */
+      const told = (now: number) => {
+        markFlightSignalsShown(store, read(now), now);
+        return overs(now + MIN).map((x) => x.key);
+      };
+
+      it("drops when the target PR is merged, however FLIGHT wrote the target", () => {
+        store.upsertPullRequests("mc", [stored(1294)], T0);
+        waitOn("PR 1294");
+        expect(told(T0 + 2 * MIN)).toEqual([`PR 1294:${WAIT_END}`]);
+        store.upsertPullRequests("mc", [stored(1294, { state: "merged", mergedAt: T0 })], T0 + MIN);
+        expect(overs(T0 + 4 * MIN)).toEqual([]);
+      });
+
+      it("drops when the target PR is closed", () => {
+        store.upsertPullRequests("mc", [stored(1295)], T0);
+        waitOn("#1295");
+        expect(told(T0 + 2 * MIN)).toHaveLength(1);
+        store.upsertPullRequests("mc", [stored(1295, { state: "closed" })], T0 + MIN);
+        expect(overs(T0 + 4 * MIN)).toEqual([]);
+      });
+
+      it("drops when the target ticket is closed", () => {
+        store.replaceBoard("mc", [card(1401, [])]);
+        waitOn("1401");
+        expect(told(T0 + 2 * MIN)).toEqual([`1401:${WAIT_END}`]);
+        store.replaceBoard("mc", [{ ...card(1401, []), closed: true }]);
+        expect(overs(T0 + 4 * MIN)).toEqual([]);
+      });
+
+      it("drops when the target run has ended", () => {
+        store.upsertRun(run("run-9", "guido-1"));
+        waitOn("run-9");
+        expect(told(T0 + 2 * MIN)).toEqual([`run-9:${WAIT_END}`]);
+        store.upsertRun(run("run-9", "guido-1", { endedAt: T0 + 3 * MIN, status: "ok" }));
+        expect(overs(T0 + 4 * MIN)).toEqual([]);
+      });
+
+      it("drops once 48 hours past its end, and stays at 47", () => {
+        waitOn("some-seat");
+        expect(told(T0 + 2 * MIN)).toHaveLength(1);
+        expect(overs(WAIT_END + 47 * 60 * MIN)).toHaveLength(1);
+        expect(overs(WAIT_END + 48 * 60 * MIN + 1)).toEqual([]);
+        expect(flightWaits(store)).toEqual({});
+      });
+
+      it("stays when it was never told, even past 48 hours or with its PR merged", () => {
+        store.upsertPullRequests("mc", [stored(1296, { state: "merged", mergedAt: T0 })], T0);
+        waitOn("PR 1296");
+        waitOn("some-seat");
+        expect(overs(WAIT_END + 72 * 60 * MIN).map((x) => x.key)).toHaveLength(2);
+      });
+
+      it("stays while its subject is open and it ended under 48 hours ago", () => {
+        store.upsertPullRequests("mc", [stored(1297)], T0);
+        store.replaceBoard("mc", [card(1402, [])]);
+        waitOn("PR 1297");
+        waitOn("1402");
+        expect(told(T0 + 2 * MIN)).toHaveLength(2);
+        expect(overs(T0 + 3 * 60 * MIN)).toHaveLength(2);
+      });
+    });
   });
 });
 
