@@ -341,6 +341,14 @@ import {
   seatPlace,
 } from "./mcp/tools.ts";
 import { metricsView } from "./metrics.ts";
+import {
+  type ActionResult,
+  drop as dropQuestion,
+  type NeedsYouContext,
+  type NeedsYouDeps,
+  notNow as notNowQuestion,
+  offersFor,
+} from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
@@ -581,6 +589,8 @@ export interface AppDeps {
   checks?: CheckRecorder;
   /** The hub's own `gh` login, for telling another login's draft PRs from its own; default: unknown. */
   hubLogin?: () => string | null;
+  /** The board, rules and ticket reads Not now and Drop write through; absent: neither is offered. */
+  needsYou?: NeedsYouDeps;
 }
 
 /**
@@ -5813,13 +5823,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      const pinnedFor = (item: AttentionItem): AttentionItem =>
-        isOperatorItem(item)
+      const needsYou: NeedsYouContext | null =
+        deps.needsYou === undefined
+          ? null
+          : {
+              ...deps.needsYou,
+              config,
+              store,
+              bus,
+              gh: deps.gh ?? createGh(),
+              gql: githubGql,
+              dbPath: store.path,
+              knownSecrets:
+                deps.knownSecrets ??
+                (async () => {
+                  throw new Error("secret scan unavailable");
+                }),
+              ...(deps.supervisor === undefined ? {} : { supervisor: deps.supervisor }),
+              items: () => sharedAttention(),
+              now,
+              log: (line) => app.log.warn(line),
+            };
+      const pinnedFor = (item: AttentionItem): AttentionItem => {
+        const offers = needsYou === null ? undefined : offersFor(needsYou, item);
+        return isOperatorItem(item)
           ? {
               ...pinned(item, store, config),
               ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
+              ...(offers === undefined ? {} : { offers }),
             }
           : item;
+      };
       api.get(
         "/attention",
         async (): Promise<AttentionItem[]> =>
@@ -5867,6 +5901,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             .send({ error: "That item waits on this one, so neither would ever release." });
         bus.emit("attention");
         return { ok: true };
+      });
+      const answerAction = (
+        reply: { code: (n: number) => { send: (b: unknown) => unknown } },
+        r: ActionResult,
+      ) => (r.ok ? { ok: true } : reply.code(r.status).send({ error: r.error }));
+      // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-the-operator-s-side (the Not now button; the web side is a follow-up ticket)
+      api.post<{ Params: { key: string } }>("/attention/:key/not-now", async (req, reply) => {
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Expected an empty object." });
+        if (needsYou === null) return reply.code(409).send({ error: "Not now is not available." });
+        return answerAction(reply, await notNowQuestion(needsYou, req.params.key));
+      });
+      // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-the-operator-s-side (the Drop button; the web side is a follow-up ticket)
+      api.post<{ Params: { key: string } }>("/attention/:key/drop", async (req, reply) => {
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Expected an empty object." });
+        if (needsYou === null) return reply.code(409).send({ error: "Drop is not available." });
+        return answerAction(reply, await dropQuestion(needsYou, req.params.key));
       });
       // Reader: apps/web/src/flight/HeldNeeds.tsx (the release button)
       api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {

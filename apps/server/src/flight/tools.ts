@@ -104,8 +104,6 @@ import {
   FLIGHT_BRIEF_TITLES,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
-  FLIGHT_CLOSE_DEPENDENT_READ_BATCH,
-  FLIGHT_CLOSE_SEARCH_LIMIT,
   FLIGHT_DECISION_MAX,
   FLIGHT_FIELD_MAX,
   FLIGHT_GH_PATH_MAX,
@@ -259,7 +257,6 @@ import {
   RECALL_DESCRIPTION,
   REMEMBER_DESCRIPTION,
   RETURN_NOT_SEAT_QUESTION,
-  type RepoId,
   type RepoRules,
   RUN_ID_NEEDS_UNPARK,
   type Run,
@@ -411,6 +408,7 @@ import {
   ownReply,
   stalledSeats,
 } from "./state.ts";
+import { cardProblem as cardProblemOf, closeBlocker } from "./ticket-close.ts";
 import type { CrewTidy } from "./tidy.ts";
 
 export interface FlightToolsDeps {
@@ -2608,13 +2606,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
 
   /** The always_ask and lane refusals of edit_card, for any card a tool names. */
   function cardProblem(card: BoardItem, rules: RepoRules): string | null {
-    const lane = config.crew?.lane;
-    if (rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true))))
-      return "this is an always_ask ticket";
-    const lanes = card.labels.filter((l) => l.startsWith(LANE_LABEL_PREFIX));
-    if (lanes.length > 1 || (lane && lanes.length === 1 && lanes[0] !== `lane:${lane}`))
-      return "this ticket belongs to another lane or has conflicting lanes";
-    return null;
+    return cardProblemOf(config, card, rules);
   }
 
   /** add_controller_check's act (see superTool): the powers, Away and engine checks are made. */
@@ -2731,89 +2723,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return refuse("the replacement must be an open ticket on this repo's board");
     const nextProblem = unfit(next);
     if (nextProblem !== null) return refuse(`the replacement: ${nextProblem}`);
-    if (store.activeTickets().has(ref)) return refuse("the ticket has a live run");
-    if (
-      store
-        .pullRequests(repo.id)
-        .some(
-          (p) =>
-            p.state === "open" && (p.ticket === ref || p.closingIssues?.includes(a.issue) === true),
-        )
-    )
-      return refuse("the ticket has an open PR");
-    const blocked = cards.filter(
-      (c) => !c.closed && c.blockedBy.some((b) => !b.closed && b.ref === ref),
+    const closable = await closeBlocker(
+      { store, gh: deps.gh, dbPath: deps.dbPath, fetchTicket: deps.fetchTicket, log: deps.log },
+      "close_ticket",
+      repo,
+      card,
     );
-    if (blocked.length > 0)
-      return refuse(
-        `open tickets are blocked by it (${blocked.map((c) => `${repo.id}#${c.issueNumber}`).join(", ")}); closing it would unblock them`,
-      );
-    if (card.subIssues && card.subIssues.done < card.subIssues.total)
-      return refuse("the ticket has open sub-issues");
-    // "Depends on #N" in a waiting ticket's body also holds it back; an unreadable body fails closed
-    const waiting = cards.filter(
-      (c) =>
-        !c.closed &&
-        c.issueNumber !== a.issue &&
-        (["Backlog", "Ready", "Refinement", "Blocked"] as string[]).includes(hudColumnOf(c)),
-    );
-    // one search for the tickets that mention the number; only those are read
-    const searched = await ghRead("close_ticket", [
-      "search",
-      "issues",
-      String(a.issue),
-      `--repo=${repo.github}`,
-      "--state=open",
-      "--match=body",
-      "--json=number",
-      `--limit=${String(FLIGHT_CLOSE_SEARCH_LIMIT)}`,
-    ]);
-    let mentioning: Set<number> | null = null;
-    if (searched.ok) {
-      try {
-        const found: unknown = JSON.parse(searched.stdout);
-        if (Array.isArray(found) && found.length < FLIGHT_CLOSE_SEARCH_LIMIT)
-          mentioning = new Set(found.map((f) => asNum(asRecord(f).number)));
-      } catch {
-        // unreadable: fails closed below
-      }
-    }
-    if (mentioning === null) return refuse("could not search the open tickets for dependents");
-    const candidates = waiting.filter((c) => mentioning.has(c.issueNumber));
-    const bodies: (TicketView | null)[] = [];
-    for (let i = 0; i < candidates.length; i += FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
-      bodies.push(
-        ...(await Promise.all(
-          candidates
-            .slice(i, i + FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
-            .map((c) => read(c.issueNumber)),
-        )),
-      );
-    const dependents: string[] = [];
-    for (const [i, t] of bodies.entries()) {
-      if (t === null || t.bodyTruncated) return refuse("a waiting ticket's body could not be read");
-      if (dependsOn(t.body).includes(a.issue))
-        dependents.push(`${repo.id}#${candidates[i]?.issueNumber}`);
-    }
-    if (dependents.length > 0)
-      return refuse(
-        `open tickets depend on it (${dependents.join(", ")}); closing it would unblock them`,
-      );
-    let target: TicketView | null;
+    if ("refusal" in closable) return refuse(closable.refusal);
+    const target = closable.target;
     let replacementTicket: TicketView | null;
     try {
-      [target, replacementTicket] = await Promise.all([
-        deps.fetchTicket(repo, a.issue),
-        deps.fetchTicket(repo, replacement),
-      ]);
+      replacementTicket = await deps.fetchTicket(repo, replacement);
     } catch {
       return refuse("GitHub is unreachable");
     }
-    if (target?.state !== "open") return refuse("the ticket is not open");
-    if (target.pullRequests.some((pr) => pr.state === "open"))
-      return refuse("the ticket has an open PR");
-    if (target.subIssues.some((sub) => sub.state === "open"))
-      return refuse("the ticket has open sub-issues");
     if (replacementTicket?.state !== "open") return refuse("the replacement is not an open issue");
     // gh posts the comment, then closes: the two are not atomic. The card's move to Done is #50.
     const startedAt = now();

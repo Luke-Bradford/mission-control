@@ -1005,6 +1005,11 @@ export async function main(): Promise<void> {
       browserStreamCount = count;
     },
     hubLogin: () => hubLogin,
+    needsYou: {
+      board: engineBoard,
+      rules: engineRules,
+      fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
+    },
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath: writableConfigPath,

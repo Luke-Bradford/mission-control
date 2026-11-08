@@ -4,6 +4,7 @@ import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 import type { FlightPowers } from "./guard-model.ts";
 import type { RunHandoff } from "./handoff.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud-model.ts";
+import type { NeedsYouOffer } from "./needs-you-actions.ts";
 import type { PaceView } from "./pace.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles-model.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
@@ -1312,6 +1313,11 @@ export interface AttentionItem {
   owner?: AttentionOwner;
   /** FLIGHT's brief, once it has written one. */
   brief?: AttentionBrief;
+  /**
+   * What else the operator can do with this question (#1534): set it aside (`not-now`) or close
+   * its ticket (`drop`). Present only on an unprotected question with a crew ticket.
+   */
+  offers?: NeedsYouOffer[];
   flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
   /**
