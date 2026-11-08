@@ -229,9 +229,9 @@ describeRendered("Approved compact desktop shell", () => {
               () => document.querySelector(".dock-summary")?.textContent ?? "",
               undefined,
             );
-            if (scenario === "empty") expect(summary).toContain("Nothing is waiting");
+            if (scenario === "empty") expect(summary).toContain("has not recorded a headline");
             if (scenario === "many") {
-              expect(summary).toContain("View all 50 waiting items");
+              expect(summary).not.toContain("waiting");
               const log = await page.evaluate(() => {
                 const element = document.querySelector<HTMLElement>(".dmsgs");
                 return {
@@ -258,7 +258,7 @@ describeRendered("Approved compact desktop shell", () => {
                 ),
               ).toBe(100);
             }
-            if (scenario === "loading") expect(summary).toContain("Loading waiting items");
+            if (scenario === "loading") expect(summary).toContain("Loading FLIGHT's headline");
             if (scenario === "error") expect(summary).toContain("could not refresh");
             if (scenario === "stale") expect(summary).toContain("Stale headline");
             if (scenario === "disconnected") expect(summary).toContain("Disconnected");

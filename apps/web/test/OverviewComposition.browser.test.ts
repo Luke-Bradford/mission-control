@@ -115,7 +115,7 @@ describeRendered("Overview composition", () => {
   );
 
   it("a short window scrolls the grid, never the page, and reaches the log", async () => {
-    const page = await open("mixed", 1600, 700);
+    const page = await open("mixed", 1600, 520);
     await settled(page);
     const m = await measure(page);
     expect(m.pageScrollX).toBeLessThanOrEqual(0);
