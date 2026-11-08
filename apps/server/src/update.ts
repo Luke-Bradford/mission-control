@@ -23,6 +23,7 @@ import { spawn } from "node:child_process";
 import { access, appendFile, chmod, open, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
+  counted,
   errorText as errText,
   globMatches,
   PNPM_STORE_ENV,
@@ -109,13 +110,13 @@ export const HUB_CODE_NEEDS_PERSON =
 /** Update refuses rather than letting pnpm remove the running hub's modules directory. */
 export const HUB_INSTALL_NEEDS_PERSON =
   "Update waits for you: pnpm needs to rebuild node_modules. The running hub will not purge its modules; stop the hub and run pnpm install --frozen-lockfile from an interactive shell, then start it again.";
-const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 /** The held-Update alert in plain words: how much main changed, never the commits or paths. */
 export const hubCodeHeldText = (held: HeldRange): string => {
-  const size = `${counted(held.commits.length, "change", "changes")} touching ${counted(held.paths.length, "file", "files")}`;
+  const beyond = heldPaths(held).length;
+  const size = `${counted(held.commits.length, "change", "changes")} touching ${counted(held.paths.length, "file", "files")}, ${beyond} of them beyond the page and docs`;
   return held.unsafePaths !== undefined && held.unsafePaths.length > 0
-    ? `A new version of Mission Control is waiting for you (${size}). It adds a link to another file or folder, which automatic updating never applies. Check it, then run Update; nothing changes until you do.`
-    : `A new version of Mission Control is waiting for you (${size}). It changes more than the page and docs, so automatic updating leaves it to you. Run Update when you are ready; nothing changes until you do.`;
+    ? `A new version of Mission Control is waiting for you: ${size}. One of the changes adds a shortcut to another file or folder, which automatic updating never applies. Check it, then run Update; nothing changes until you do.`
+    : `A new version of Mission Control is waiting for you: ${size}. Automatic updating leaves changes beyond the page and docs to you. Run Update when you are ready; nothing changes until you do.`;
 };
 /** Auto-Update's refusal when the checkout's HEAD is not on origin/main's history. */
 export const HUB_HEAD_OFF_MAIN =

@@ -1563,7 +1563,7 @@ describe("auto update", () => {
       expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
       const held = a.held.mock.calls.at(-1)?.[0];
       expect(held?.unsafePaths).toEqual(["docs/linked"]);
-      expect(hubCodeHeldText(held)).toContain("link to another file or folder");
+      expect(hubCodeHeldText(held)).toContain("shortcut to another file or folder");
       await expect(a.u.update({ auto: true })).rejects.toMatchObject({
         status: 409,
         message: HUB_CODE_NEEDS_PERSON,

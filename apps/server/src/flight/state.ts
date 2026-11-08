@@ -134,7 +134,7 @@ import { flightWakeCost, flightWakeWaits } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
-import { flightSeat } from "./seat.ts";
+import { crewSeatIds, flightSeat } from "./seat.ts";
 import { flightSignals, flightWaits } from "./signals.ts";
 import { cut, seatFree } from "./tools.ts";
 
@@ -241,7 +241,7 @@ export function flightHeadline(
   };
 }
 
-export { flightSeat };
+export { crewSeatIds, flightSeat };
 
 /** The seats whose run the HUD shows as stalled. */
 export function stalledSeats(
@@ -1993,6 +1993,13 @@ function leftWakeGroup(reason: WakeReason): readonly [string, string] {
   if (category === "parked" || category === "stopped" || category === "idle")
     return ["seat that needs a look", "seats that need a look"];
   if (category === "triage") return ["item waiting for FLIGHT", "items waiting for FLIGHT"];
+  if (category === "reviews" || category === "release")
+    return ["review or release step waiting", "review or release steps waiting"];
+  if (category === "breaker" || category === "holdsInForce")
+    return ["safety stop or hold in force", "safety stops or holds in force"];
+  if (category === "planned") return ["planned check that is due", "planned checks that are due"];
+  if (category === "signals") return ["signal from the crew", "signals from the crew"];
+  if (item.startsWith('"stall:')) return ["seat that needs a look", "seats that need a look"];
   return ["other thing to look at", "other things to look at"];
 }
 

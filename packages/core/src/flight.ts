@@ -1497,7 +1497,9 @@ export const flightStartFailedText = (reason: string): string =>
 export const WAKE_ASK =
   "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary for the operator.";
 
-const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+/** "1 change", "2 changes". */
+export const counted = (n: number, one: string, many: string): string =>
+  `${n} ${n === 1 ? one : many}`;
 
 /** "2 questions · 1 free seat · 1 parked · 1 PR in review", with singulars; "nothing new" when all are 0. */
 export function wakeSummary(s: FlightState): string {

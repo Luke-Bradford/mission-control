@@ -129,6 +129,33 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     expect(got?.brief?.ask?.length).toBeLessThan(300);
   });
 
+  it("rewrites a hub brief the entry check returned, once, and leaves FLIGHT's own brief alone", () => {
+    const { id } = send();
+    const stale = {
+      key: keyOf(id),
+      for: "operator" as const,
+      by: "hub" as const,
+      ask: "GUIDO-1 has waited on FLIGHT-1 about repo#906: proceed, or hold?",
+      context: "GUIDO-1 sent FLIGHT-1 a question on repo#906 and nobody has settled it.",
+      recommendation: "Proceed.",
+      options: [
+        { id: "proceed", label: "Proceed", answer: "Go on." },
+        { id: "hold", label: "Hold", answer: "Wait." },
+      ],
+      basis: "b",
+      at: STALLED - 1,
+    };
+    store.addBrief(stale);
+    expect(find(id, STALLED)).toMatchObject({ owner: "flight" });
+    expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED })).toBe(1);
+    expect(find(id, STALLED)).toMatchObject({ owner: "operator" });
+    expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED + 1 })).toBe(0);
+    // a brief FLIGHT wrote for the operator is never overwritten, even if it fails the check
+    const other = send();
+    store.addBrief({ ...stale, key: keyOf(other.id), by: "flight" });
+    expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED })).toBe(0);
+  });
+
   it("carries FLIGHT's recommendation when it has briefed the item for itself", () => {
     const { id } = send("blocker");
     store.addBrief({

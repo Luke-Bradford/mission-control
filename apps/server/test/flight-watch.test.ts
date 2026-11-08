@@ -1743,7 +1743,7 @@ describe("the FLIGHT watcher", () => {
         kind: "blocked",
         seatId: "flight-1",
         repoId: "mc",
-        text: flightStartFailedText("it would not start; the hub log has the error"),
+        text: flightStartFailedText("it would not start; the server log has the error"),
       },
     ]);
     // the open note holds past the hour, after the start count has expired
@@ -1860,7 +1860,7 @@ describe("the FLIGHT watcher", () => {
           kind: "blocked",
           seatId: "flight-1",
           text: flightStartFailedText(
-            "its process is gone and it would not restart; the hub log has the error",
+            "its process is gone and it would not restart; the server log has the error",
           ),
         },
       ]);
@@ -1874,7 +1874,7 @@ describe("the FLIGHT watcher", () => {
       alive = null;
       for (let i = 0; i < 4; i++) await watch.check();
       expect(notesOpen()).toMatchObject([
-        { text: flightStartFailedText("it would not start; the hub log has the error") },
+        { text: flightStartFailedText("it would not start; the server log has the error") },
       ]);
     });
 
@@ -1976,7 +1976,7 @@ describe("the FLIGHT watcher", () => {
       });
       await watch.check();
       expect(down().map((n) => n.text)).toEqual([
-        flightDownText("its account is at its usage stop line"),
+        flightDownText("account claude-main is at its usage stop line"),
       ]);
     });
 

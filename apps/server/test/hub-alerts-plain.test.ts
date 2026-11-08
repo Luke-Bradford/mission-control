@@ -1,6 +1,7 @@
 import { flightDownText, flightNotTriagingText, flightStartFailedText } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { leftWakeText } from "../src/flight/state.ts";
+import { sinceText } from "../src/hud.ts";
 import { hubCodeHeldText } from "../src/update.ts";
 
 // Hub alerts are read by a person who has never seen the project (#1582): no raw key, no 10+ digit
@@ -32,8 +33,24 @@ describe("the wake-left alert", () => {
       "Europe/London",
     );
     expect(text).toBe(
-      "FLIGHT was woken at 14:30 about 6 things and left them undecided after two tries: 3 pull requests waiting for a next step, 1 free seat, 1 question waiting for an answer, 1 other thing to look at.",
+      "FLIGHT was woken at 14:30 about 6 things and left them undecided after two tries: 3 pull requests waiting for a next step, 1 free seat, 1 question waiting for an answer, 1 signal from the crew.",
     );
+    expectPlain(text);
+  });
+
+  it("names every other kind of reason in words", () => {
+    const text = leftWakeText(
+      [
+        reason("reviews", "idle"),
+        reason("breaker", "tripped"),
+        reason("planned", ["p1", AT, "check", "repo#12", "look again"]),
+        reason("signals", "seat_call:GUIDO-1"),
+        reason("items", "stall:GUIDO-1:x:y:1"),
+      ],
+      AT,
+      "Europe/London",
+    );
+    expect(text).not.toMatch(/other thing/);
     expectPlain(text);
   });
 
@@ -74,7 +91,7 @@ describe("the not-triaging alert", () => {
         "start-failed",
         3,
         "14:30",
-        flightStartFailedText("it would not start; the hub log has the error"),
+        flightStartFailedText("it would not start; the server log has the error"),
       ),
     );
     expectPlain(
@@ -82,9 +99,15 @@ describe("the not-triaging alert", () => {
         "down",
         3,
         "14:30",
-        flightDownText("its account is at its usage stop line"),
+        flightDownText("account claude-main is at its usage stop line"),
       ),
     );
-    expect(flightNotTriagingText("late", 3, "14:30", null)).toContain("3 waiting since 14:30");
+    // the time the hub really puts in the text, today and before today
+    const now = Date.UTC(2026, 10, 7, 16, 0);
+    const today = sinceText(AT, now, "Europe/London");
+    const before = sinceText(AT - 3 * 86_400_000, now, "Europe/London");
+    expect(flightNotTriagingText("late", 3, today, null)).toContain("3 waiting since 14:30");
+    for (const since of [today, before]) expectPlain(flightNotTriagingText("late", 3, since, null));
+    expect(before).toBe("4 Nov 14:30");
   });
 });

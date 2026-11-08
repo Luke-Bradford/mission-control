@@ -182,7 +182,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /** Each run's context at its first turn, so the handover line is growth, not the start's size. */
   const firstContext = new Map<string, number>();
   let rotationRequested = false;
-  let lastFailure: string | null = null;
   /** The failure in plain words for the operator's alert; the raw error stays in the hub log. */
   let lastReason: string | null = null;
   /** The watch ended a run whose process was gone, and FLIGHT has not started since. */
@@ -460,7 +459,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       if (row?.state === "parked" && !noteOpen())
         raiseDown(id, found.session.repoId, "it is parked", t);
       else if (atStop && row?.state !== "stopped" && !noteOpen())
-        raiseDown(id, found.session.repoId, "its account is at its usage stop line", t);
+        raiseDown(id, found.session.repoId, `account ${accountId} is at its usage stop line`, t);
       else clearDown(t);
       if (row?.state === "stopped" || row?.state === "parked" || atStop) return;
       // parked or at the stop line, FLIGHT waits for that first; a run left with no session goes
@@ -566,11 +565,11 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
-        lastFailure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
+        const failure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
         lastReason = processGone
-          ? "its process is gone and it would not restart; the hub log has the error"
-          : "it would not start; the hub log has the error";
-        log(`flight watch: start failed: ${lastFailure}`);
+          ? "its process is gone and it would not restart; the server log has the error"
+          : "it would not start; the server log has the error";
+        log(`flight watch: start failed: ${failure}`);
       }
       return;
     }

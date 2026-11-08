@@ -6,16 +6,19 @@ import {
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
   hasUnreadableId,
+  needsYouEntryFaults,
 } from "@mc/core";
 import { protectedDecisionItem } from "./attention-holds.ts";
 import type { CcConfig } from "./config.ts";
-import { flightSeat } from "./flight/state.ts";
+import { crewSeatIds, flightSeat } from "./flight/state.ts";
 import { attentionItems, NO_LOCK } from "./hud.ts";
 import { parseTicket } from "./runview.ts";
 import type { Store } from "./store.ts";
 
 const ASK_MAX = 300;
 const TITLE_MAX = 120;
+/** The wait the escalation constants add up to, in whole minutes, for the question's words. */
+const WAIT_MINUTES = Math.round((COMMS_FLIGHT_ESCALATION_MS + COMMS_CAPCOM_ESCALATION_MS) / 60_000);
 
 /**
  * Raises one CAPCOM decision for each labelled question or blocker that has waited 15 minutes for
@@ -37,7 +40,9 @@ export function raiseStalledCommsDecisions(d: {
       // a question for the operator names its ticket (Needs you entry rules, #1543); without
       // one the item stays FLIGHT's, counted under the not-triaging alert
       m.ticket !== null &&
-      !store.operatorBriefed(`${COMMS_OPEN_PREFIX}${m.id}`),
+      // a brief the hub wrote itself and the entry check returned is rewritten, not final
+      (!store.operatorBriefed(`${COMMS_OPEN_PREFIX}${m.id}`) ||
+        store.briefs().get(`${COMMS_OPEN_PREFIX}${m.id}`)?.by === "hub"),
   );
   if (stalled.length === 0) return 0;
   const items = attentionItems(config, store, now, NO_LOCK);
@@ -47,21 +52,24 @@ export function raiseStalledCommsDecisions(d: {
     const key = `${COMMS_OPEN_PREFIX}${message.id}`;
     const item = items.find((i) => i.key === key);
     if (item === undefined || protectedDecisionItem(store, item, config, now)) continue;
-    const about = (ticket: string | null): string => {
-      const t = ticket === null ? null : parseTicket(ticket);
-      const title = t === null ? null : store.boardItem(t.repoId, t.number)?.title;
-      if (!title) return "a ticket";
-      const short = title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX).trimEnd()}…` : title;
-      // a title with an id would make the whole question fail the entry check; the link names it
-      return hasUnreadableId(short) ? "a ticket" : `"${short}"`;
-    };
+    const seatIds = crewSeatIds(config);
+    // an operator brief stands, unless the hub wrote it and the entry check returned it
+    const returnedHubBrief =
+      briefs.get(key)?.by === "hub" && needsYouEntryFaults(item, seatIds).length > 0;
+    if (store.operatorBriefed(key) && !returnedHubBrief) continue;
+    const t = parseTicket(message.ticket ?? "");
+    const title = t === null ? undefined : store.boardItem(t.repoId, t.number)?.title;
+    const short =
+      title && title.length > TITLE_MAX ? `${title.slice(0, TITLE_MAX).trimEnd()}…` : title;
+    // a title with an id would make the whole question fail the entry check; the link names it
+    const about = short && !hasUnreadableId(short, seatIds) ? `"${short}"` : "a ticket";
     const blocker = message.label === "blocker";
     const flight = briefs.get(key);
     const brief: AttentionBrief = {
       for: "operator",
       original: message.text,
-      context: `One crew member sent another a ${message.label} about ${about(message.ticket)} and nobody has settled it in 45 minutes. The crew member is held up until someone decides. If you do not decide, it stays held up.`,
-      ask: `A crew member has waited 45 minutes for another's answer about ${about(message.ticket)}: should it go ahead on its best judgment, or hold?`.slice(
+      context: `One crew member sent another a ${message.label} about ${about} and nobody has settled it in ${WAIT_MINUTES} minutes. Their message is shown below. The crew member is held up until someone decides. If you do not decide, it stays held up.`,
+      ask: `A crew member has waited ${WAIT_MINUTES} minutes for another's answer about ${about}: should it go ahead on its best judgment, or hold?`.slice(
         0,
         ASK_MAX,
       ),
@@ -90,6 +98,8 @@ export function raiseStalledCommsDecisions(d: {
         },
       ],
     };
+    // never store a brief the entry check would return again: it would be rewritten every pass
+    if (needsYouEntryFaults({ ...item, brief }, seatIds).length > 0) continue;
     store.addBrief({ key, ...brief });
     raised++;
   }

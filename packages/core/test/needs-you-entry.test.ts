@@ -119,8 +119,9 @@ describe("needsYouEntryFaults", () => {
     expect(needsYouEntryFaults(item({ brief: brief({ ask }) })).join("; ")).toMatch(fault);
   });
 
-  const asking = (ask: string) => needsYouEntryFaults(item({ brief: brief({ ask }) }));
-  const context = (c: string) => needsYouEntryFaults(item({ brief: brief({ context: c }) }));
+  const SEATS = ["guido-1", "inco-2", "guido-cx"];
+  const asking = (ask: string) => needsYouEntryFaults(item({ brief: brief({ ask }) }), SEATS);
+  const context = (c: string) => needsYouEntryFaults(item({ brief: brief({ context: c }) }), SEATS);
 
   it.each([
     ["Merge PR 1412 now?", "a ticket or PR number"],
@@ -133,7 +134,11 @@ describe("needsYouEntryFaults", () => {
     ["Is /etc/hosts.conf right?", "a file path"],
     ["Should guido-1 carry on?", "a seat id"],
     ["Should INCO-2 carry on?", "a seat id"],
+    ["Should GUIDO-CX carry on?", "a seat id"],
     ["Should @CAPCOM decide?", "the CAPCOM tag"],
+    ["Run mcp__mc__brief_item first?", "a tool name"],
+    ["Run mc brief_item first?", "a tool name"],
+    ["Run mc ask_flight first?", "a tool name"],
     ["Run mc flight_state first?", "a tool name"],
   ])("refuses an id in the question, naming it: %s", (ask, what) => {
     expect(asking(ask)).toEqual([`the question has ${what}: say it in words`]);
@@ -163,13 +168,23 @@ describe("needsYouEntryFaults", () => {
   it("lets plain words through, including words that look a little like ids", () => {
     expect(asking("Approve the new dependencies view and/or hold it until Friday?")).toEqual([]);
     expect(asking("Is a decade of data enough, or 24/7 coverage?")).toEqual([]);
+    expect(asking("Should we switch to UTF-8 and SHA-256, or keep the top-3 list?")).toEqual([]);
   });
 
   it("wants a context of at least one sentence", () => {
     const missing =
       "no context: write two or three sentences saying what this is and why it comes up now";
+    const notFull = "the context is not a full sentence: say what this is and why it comes up now";
     expect(context("")).toEqual([missing]);
-    expect(context("Away mode.")).toEqual([missing]);
+    expect(context("Away mode.")).toEqual([notFull]);
+    // an id is still named when the context is not a full sentence
+    expect(context("See PR 1412")).toEqual([
+      notFull,
+      "the context has a ticket or PR number: say it in words",
+    ]);
+    // markdown after the full stop is fine
+    expect(context("The crew changed **away mode** and review passed.*")).toEqual([]);
+    expect(context("The crew changed away mode and review passed._")).toEqual([]);
     expect(context("The crew changed away mode and review passed.")).toEqual([]);
   });
 
