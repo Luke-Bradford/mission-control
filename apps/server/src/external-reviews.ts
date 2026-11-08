@@ -173,6 +173,8 @@ export function createExternalReviews(deps: {
     return null;
   }
   const wanted = (row: ReviewRow): boolean => notWanted(row) === null;
+  const GITHUB_HOLD =
+    "GitHub shows the PR closed, draft, labelled skip-review, on another head, or not based on the default branch";
   /** One line per row and reason: a final result left unposted on purpose says so, once. */
   const said = new Set<string>();
   function skipped(pr: PullRequestView, row: ReviewRow, why: string): void {
@@ -212,9 +214,10 @@ export function createExternalReviews(deps: {
     const commentKey = `external-review-comment:${row.id}`;
     const needsComment = row.state === "reported" && store.getSetting(commentKey) === null;
     if (store.getSetting(statusKey) === fingerprint && !needsComment) return;
-    if (!(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha))) return;
+    if (!(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)))
+      return skipped(pr, row, GITHUB_HOLD);
     // A crew run may have claimed the branch during the read.
-    if (!wanted(row)) return;
+    if (!wanted(row)) return skipped(pr, row, notWanted(row) ?? "it is no longer wanted");
     if (needsComment) {
       const marker = `<!-- mission-control-review:${row.id}:${row.sha} -->`;
       const findings = store.findingsOf(row.id);
@@ -267,11 +270,9 @@ export function createExternalReviews(deps: {
             comment.body.includes(marker),
         )
       ) {
-        if (
-          !(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)) ||
-          !wanted(row)
-        )
-          return;
+        if (!(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)))
+          return skipped(pr, row, GITHUB_HOLD);
+        if (!wanted(row)) return skipped(pr, row, notWanted(row) ?? "it is no longer wanted");
         const posted = await deps.gh(["api", "--method", "POST", endpoint, "--input", "-"], {
           cwd: deps.cwd,
           input: JSON.stringify({ body }),
@@ -281,11 +282,9 @@ export function createExternalReviews(deps: {
       store.setSetting(commentKey, "posted");
     }
     if (store.getSetting(statusKey) !== fingerprint) {
-      if (
-        !(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)) ||
-        !wanted(row)
-      )
-        return;
+      if (!(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)))
+        return skipped(pr, row, GITHUB_HOLD);
+      if (!wanted(row)) return skipped(pr, row, notWanted(row) ?? "it is no longer wanted");
       const posted = await deps.gh(
         ["api", "--method", "POST", `repos/${repo.github}/statuses/${row.sha}`, "--input", "-"],
         {

@@ -673,6 +673,39 @@ describe("external PR review subjects", () => {
     expect(store.review(external)?.state).toBe("superseded");
   });
 
+  it.each([
+    { labels: [{ name: "skip-review" }] },
+    { base: { ref: "other", repo: { full_name: "example/sample", default_branch: "main" } } },
+  ])("says why GitHub's own read holds a reported crew review: %j", async (patch) => {
+    store.upsertPullRequests("sample", [pr({ ticket: "sample#1" })], 2);
+    buildRun({ endedAt: 2 });
+    const id = store.requestReview({
+      authorRunId: "builder:old",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 3,
+    })!;
+    store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    store.recordFindings(id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked.",
+      findings: [],
+      checked: [{ check: "spec", result: "pass" }],
+      tests: [],
+      at: 102,
+    });
+    const h = harness();
+    h.current(patch);
+    await createExternalReviews(h.deps).sync();
+    expect(h.writes).toEqual([]);
+    expect(h.deps.log).toHaveBeenCalledWith(expect.stringContaining("is not posted to GitHub"));
+  });
+
   it("does not treat a crew review as orphaned while its author run is live", async () => {
     buildRun({
       endedAt: null,
