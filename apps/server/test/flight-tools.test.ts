@@ -797,7 +797,7 @@ describe("move_review", () => {
     ]);
   });
 
-  it("refuses a target review seat whose account is at its usage stop", async () => {
+  it("refuses and records a target review seat whose account is at its usage stop", async () => {
     const id = queuedReview();
     store.addUsage({
       accountId: "codex-main",
