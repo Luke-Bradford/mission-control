@@ -8721,6 +8721,36 @@ export class Store {
   }
 
   /** Records one of FLIGHT's decisions; returns its id. */
+  /**
+   * Records the operator's answer to a set-aside question where every later run on its ticket reads
+   * it (`answeredQuestionsOn`). A repeat for the same question replaces the earlier text.
+   */
+  recordSetAsideAnswer(d: {
+    at: number;
+    seatId: AgentId;
+    questionId: number;
+    ref: string;
+    about: string;
+    decision: string;
+  }): void {
+    this.transaction(() => {
+      this.db
+        .prepare("DELETE FROM flight_decisions WHERE question_id = ? AND kind = 'answer'")
+        .run(d.questionId);
+      this.addFlightDecision({
+        at: d.at,
+        kind: "answer",
+        seatId: d.seatId,
+        targetRunId: null,
+        ref: d.ref,
+        questionId: d.questionId,
+        about: d.about,
+        decision: d.decision,
+        basis: "Operator answered the set-aside question from its ticket.",
+      });
+    });
+  }
+
   addFlightDecision(d: Omit<FlightDecision, "id">): number {
     const r = this.db
       .prepare(

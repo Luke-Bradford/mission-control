@@ -471,7 +471,8 @@ export const answerSetAside = (
   issue: number,
   id: number,
   text: string,
-  tell: (seatId: string, ticket: string, text: string) => Promise<void>,
+  /** Leaves the answer in the Comms line on the ticket, for the ended run only. */
+  tell: (seatId: string, ticket: string, runId: string, text: string) => Promise<void>,
 ): Promise<ActionResult> =>
   once(`aside:${id}`, async () => {
     const refused = (status: number, why: string) => refuse(status, ANSWER_REFUSED, why);
@@ -493,6 +494,16 @@ export const answerSetAside = (
     }
     const fail = (why: string) => refuse(502, ANSWER_REFUSED, why);
     const card = c.store.board(repoId).find((b) => b.issueNumber === issue);
+    // the answer is stored first, where the ticket's next run reads it, so a failure below never
+    // leaves the card in Ready with no answer; a retry replaces it
+    c.store.recordSetAsideAnswer({
+      at: c.now(),
+      seatId: question.agentId,
+      questionId: id,
+      ref,
+      about: question.text,
+      decision: text,
+    });
     try {
       const unlabelled = await c.gh(
         [
@@ -521,7 +532,7 @@ export const answerSetAside = (
           return fail("the card could not be moved to Ready");
         }
       }
-      await tell(question.agentId, ref, text);
+      await tell(question.agentId, ref, question.runId, text);
     } catch (e) {
       c.log?.(`answer ${ref}: ${e instanceof Error ? e.message : "failed"}`);
       return fail("the answer could not be delivered; try again");
@@ -544,6 +555,8 @@ export async function releaseWaitingOperator(
   if (inFlight.size > 0) return 0;
   let released = 0;
   for (const repo of c.config.repos) {
+    // only the repo whose board the hub writes, the one Not now acts on
+    if (repo.autonomy !== "merge" || repo.id !== flightSeat(c.config)?.session.repoId) continue;
     for (const card of c.store.board(repo.id)) {
       if (card.closed || hudColumnOf(card) === "Backlog") continue;
       if (!card.labels.includes(WAITING_OPERATOR_LABEL)) continue;

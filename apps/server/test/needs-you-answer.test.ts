@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { Gql } from "../src/collectors/github.ts";
+import { commsInboxContext } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
 import type { Move } from "../src/github-board.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
@@ -247,6 +248,57 @@ describe("a question set aside with Not now", () => {
     }
   });
 
+  it("reaches the ticket's next run, not the run the asking seat has on other work", async () => {
+    const id = asideQuestion();
+    store.upsertRun(
+      run({ id: "r-nine", ticket: "mc#9", endedAt: null, status: "running", seq: 2 }),
+    );
+    const a = app();
+    try {
+      expect((await answer(a, 7, id, "Use lane 2.")).statusCode).toBe(200);
+      expect(commsInboxContext(store, "guido-1", "r-nine").text).not.toContain("Use lane 2.");
+      expect(store.answeredQuestionsOn("mc#7", 10)).toEqual([
+        expect.objectContaining({ id, answer: "Use lane 2." }),
+      ]);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it("keeps the answer stored once, where the ticket reads it, when the card move fails and is retried", async () => {
+    const id = asideQuestion();
+    let fail = true;
+    const a = buildApp({
+      config: config(),
+      store,
+      bus: new ChangeBus(),
+      operatorToken: "test-token",
+      gh,
+      supervisor,
+      githubGql: async () => ({}) as unknown as Gql,
+      knownSecrets: async () => [],
+      now: () => NOW,
+      needsYou: {
+        board: {
+          move: async () => (fail ? { ok: false, reason: "no" } : { ok: true, changed: true }),
+        },
+        rules: async () => DEFAULT_REPO_RULES,
+        fetchTicket: async (_repo, n) => ({ number: n }) as unknown as TicketView,
+      },
+    });
+    try {
+      expect((await answer(a, 7, id, "Use lane 2.")).statusCode).toBe(502);
+      expect(store.question(id)?.answeredAt).toBeNull();
+      fail = false;
+      expect((await answer(a, 7, id, "Use lane 3.")).statusCode).toBe(200);
+      expect(store.answeredQuestionsOn("mc#7", 10)).toEqual([
+        expect.objectContaining({ id, answer: "Use lane 3." }),
+      ]);
+    } finally {
+      await a.close();
+    }
+  });
+
   it("refuses an answer for a question that is unknown, not set aside, on another ticket or carries a secret", async () => {
     const id = asideQuestion();
     const open = store.addQuestion({
@@ -321,5 +373,18 @@ describe("releasing waiting:operator", () => {
     expect(ghCalls[0]).toEqual(
       expect.arrayContaining(["issue", "edit", "7", `--remove-label=${WAITING_OPERATOR_LABEL}`]),
     );
+  });
+});
+
+describe("releasing waiting:operator on a repo the hub does not write", () => {
+  it("leaves a draft repo's card alone", async () => {
+    store.replaceBoard("mc", [card(7, { status: "In progress", state: "in progress" })]);
+    const draft = config();
+    const repo = draft.repos[0];
+    if (repo === undefined) throw new Error("no repo");
+    repo.autonomy = "draft";
+    const released = await releaseWaitingOperator({ config: draft, store, gh, dbPath: store.path });
+    expect(released).toBe(0);
+    expect(ghCalls).toEqual([]);
   });
 });

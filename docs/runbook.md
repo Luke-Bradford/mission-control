@@ -1413,13 +1413,15 @@ a question whose text fails it answers 422 and nothing is written.
 - `POST /api/tickets/:repoId/:number/set-aside/:id/answer` with `{ "text": "..." }` (operator token). It scans the text like
   any Comms message (400 on a secret), removes `waiting:operator` from the issue, moves the card from Backlog to Ready
   (left alone when another hand already moved it or a run works the ticket now), sends the text to the asking seat as
-  a Comms line on the ticket, and closes the question as answered. The run's handoff stays open, so the next start of
-  the ticket picks it up. A GitHub step that fails answers 502 and changes nothing a retry cannot repeat. An unknown
+  a Comms line to the ended run only (another run of that seat never reads it), and closes the question as answered. The
+  answer is stored first as an `answer` decision, so every later run on the ticket starts with it in its brief
+  (`answeredQuestionsOn`); a retry after a 502 replaces it. The run's handoff stays open, so the next start of the
+  ticket picks it up. A GitHub step that fails answers 502 and changes nothing a retry cannot repeat. An unknown
   question or one on another ticket answers 404; one that is not set aside, or already answered, answers 409.
 - `POST /api/seats/:id/message` with a `question` that is set aside, whose run has ended, answers 409 and sends nothing:
   without the refusal the text would reach whatever run holds the seat now.
 - After each board poll the hub removes `waiting:operator` from any open card outside the Backlog (someone moved it),
-  skipping while a Not now is running. A preview (`MC_NO_LOOP_WRITES`/no board writes) never does.
+  skipping while a Not now is running and any repo but the one Not now acts on (`autonomy: merge`, FLIGHT's session repo). A preview (`MC_NO_LOOP_WRITES`/no board writes) never does.
 
 ### FLIGHT's controller powers
 

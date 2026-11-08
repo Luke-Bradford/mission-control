@@ -6027,7 +6027,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               t.n,
               id,
               body.data.text,
-              async (seat, ticket, text) => {
+              async (seat, ticket, runId, text) => {
                 await sendComms(
                   {
                     store,
@@ -6037,7 +6037,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                     senderKind: sender.kind,
                   },
                   sender.from,
-                  { to: seat, text, ref: ticket },
+                  { to: seat, text, ref: ticket, targetRunId: runId },
                 );
               },
             ),
