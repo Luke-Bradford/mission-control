@@ -9,6 +9,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { type DesktopScenario, desktopFixture, desktopQaFixture } from "./desktopFixtures.ts";
+import { NOW } from "./fixtures.ts";
 import { qaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
@@ -277,6 +278,68 @@ describeRendered("Approved compact desktop shell", () => {
           } finally {
             await page.close();
           }
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps a very long message to the operator inside the dock, cut with an ellipsis",
+    async () => {
+      for (const scheme of ["light", "dark"] as const) {
+        const api = {
+          ...desktopFixture("one").api,
+          "/api/comms/mentions": {
+            mentions: [
+              {
+                seen: false,
+                message: {
+                  id: "comms:1",
+                  from: "flight-1",
+                  to: "CAPCOM",
+                  text: "x".repeat(300),
+                  at: NOW,
+                },
+              },
+            ],
+          },
+        };
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width: 1600,
+          height: 700,
+          colorScheme: scheme,
+          search: "?state=one",
+          api,
+        });
+        try {
+          await ready(page);
+          await page.click(".dockrail button");
+          await page.boxes(".dock-message");
+          const m = await page.evaluate(() => {
+            const summary = document.querySelector(".dock-summary") as HTMLElement;
+            const edge = summary.getBoundingClientRect().right;
+            const link = document.querySelector(".dock-message") as HTMLElement;
+            const name = link.querySelector("b") as HTMLElement;
+            const text = link.querySelector("span") as HTMLElement;
+            const headline = document.querySelector(".dock-headline-text, .dock-headline");
+            return {
+              linkRight: link.getBoundingClientRect().right,
+              edge,
+              cut: text.scrollWidth > text.clientWidth,
+              nameHeight: name.getBoundingClientRect().height,
+              nameLine: parseFloat(getComputedStyle(name).lineHeight),
+              headlineRight: headline?.getBoundingClientRect().right ?? 0,
+            };
+          }, undefined);
+          expect(m.linkRight).toBeLessThanOrEqual(m.edge + 0.5);
+          expect(m.cut, "the long text is cut, not spilled").toBe(true);
+          expect(m.nameHeight).toBeLessThanOrEqual(m.nameLine + 1);
+          expect(m.headlineRight).toBeLessThanOrEqual(m.edge + 0.5);
+          expect(page.errors()).toEqual([]);
+        } finally {
+          await page.close();
         }
       }
     },

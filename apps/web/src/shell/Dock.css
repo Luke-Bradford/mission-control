@@ -44,6 +44,7 @@
   padding: var(--sp-4);
   border-bottom: 1px solid var(--line);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -170,17 +171,25 @@
 .dock-messages {
   display: grid;
   gap: var(--sp-1);
-  justify-items: start;
+  min-width: 0;
+  justify-items: stretch;
 }
 .dock-message {
   display: flex;
+  min-width: 0;
   max-width: 100%;
   min-height: 24px;
   align-items: center;
   gap: var(--sp-2);
   font-size: var(--fs-s);
 }
+.dock-message b {
+  flex: none;
+  white-space: nowrap;
+}
 .dock-message span {
+  flex: 1 1 auto;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
