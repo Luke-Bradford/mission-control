@@ -91,6 +91,12 @@ function questionOf(
   return null;
 }
 
+/** Whether a live run other than the one waiting on the question works the ticket. */
+const otherLiveRun = (store: Store, repoId: string, ref: string, waiting: string | null): boolean =>
+  store
+    .runsOnTicket(repoId, ref)
+    .some((r) => r.endedAt === null && r.reviewId == null && r.id !== waiting);
+
 /** Why Not now and Drop are not offered on `item`, in words; null when they are. */
 export function offerProblem(
   c: Pick<NeedsYouContext, "config" | "store" | "now">,
@@ -101,8 +107,8 @@ export function offerProblem(
   // FLIGHT's own question is the operator's to answer; setting it aside would end FLIGHT
   if (item.agentId !== null && item.agentId === flightSeat(c.config)?.seat.id)
     return "it is FLIGHT's own question";
-  if (questionOf(c.store, c.config, item) === null)
-    return "it is not a question a run or a seat asked";
+  const asked = questionOf(c.store, c.config, item);
+  if (asked === null) return "it is not a question a run or a seat asked";
   if (protectedDecisionItem(c.store, item, c.config, c.now()))
     return "it is protected and always reaches you";
   const ref = item.ticket === null ? null : parseTicket(item.ticket);
@@ -113,6 +119,9 @@ export function offerProblem(
   if (repo.autonomy !== "merge") return "this repo's board is not written by the hub";
   if (!c.store.board(repo.id).some((b) => b.issueNumber === ref.number && !b.closed))
     return "its ticket is not on this repo's board";
+  // a card parked under another run's feet would leave that run working it
+  if (otherLiveRun(c.store, repo.id, `${repo.id}#${ref.number}`, asked.runId))
+    return "the ticket has a live run";
   return null;
 }
 

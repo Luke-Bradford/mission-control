@@ -52,6 +52,7 @@ const config = (): CcConfig => ({
         checkout: "/tmp/co",
         seats: [
           { id: "guido-1", role: "GUIDO", accountId: "a", model: "x", area: [] },
+          { id: "guido-2", role: "GUIDO", accountId: "a", model: "x", area: [] },
           { id: "flight-1", role: "FLIGHT", accountId: "a", model: "x", area: [] },
         ],
       },
@@ -470,6 +471,35 @@ describe("Not now and Drop on Needs you", () => {
     store.replaceBoard("mc", [card(7, { closed: true })]);
     expect(await closeSettledQuestions({ config: config(), store, now: NOW + 2 })).toBe(1);
     expect(store.question(id)?.answeredAt).not.toBeNull();
+  });
+
+  it("refuses Not now and Drop while another seat's run works the ticket", async () => {
+    store.replaceBoard("mc", [card(7), card(8)]);
+    store.upsertRun(run({ id: "r-g1", agentId: "guido-1", ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: "r-g1",
+      cliSessionId: "cli",
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    const key = commsQuestion("guido-2", "mc#7", "mc#8");
+    const a = app();
+    try {
+      expect((await items(a)).find((i) => i.key === key)?.offers).toBeUndefined();
+      for (const action of ["not-now", "drop"] as const) {
+        const res = await post(a, key, action);
+        expect(res.statusCode).toBe(409);
+        expect(res.json().error).toMatch(/live run/);
+      }
+      expect(moves).toEqual([]);
+      expect(ghCalls).toEqual([]);
+      expect(ended).toEqual([]);
+    } finally {
+      await a.close();
+    }
   });
 
   describe("a Comms question", () => {
