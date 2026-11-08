@@ -3,6 +3,9 @@
    shows more rows, never a gap. */
 /* The id is the page's address; the tabbed page's flight.css styles it as a grid, so this outranks it. */
 #page-flight.fp {
+  /* A panel heading and a list line are 40 px; the Waited column is 80 px. */
+  --fp-row: calc(var(--sp-5) + var(--sp-4));
+  --fp-wait: calc(var(--sp-7) + var(--sp-6));
   display: flex;
   flex-direction: column;
   grid-template: none;
@@ -50,7 +53,7 @@
   grid-template-columns: 1.3fr 1fr 1fr 1fr;
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r);
 }
 .fp-stat {
   padding: var(--sp-3) var(--sp-4);
@@ -96,8 +99,8 @@
 }
 .fp-state::before {
   content: "";
-  width: 10px;
-  height: 10px;
+  width: calc(var(--sp-2) + var(--r-s));
+  height: calc(var(--sp-2) + var(--r-s));
   border-radius: 50%;
   background: currentColor;
   align-self: center;
@@ -113,18 +116,18 @@
 }
 .fp-state.stopped::before {
   background: none;
-  border: 2px solid currentColor;
-  border-radius: 2px;
+  border: var(--r-s) solid currentColor;
+  border-radius: var(--r-s);
 }
 .fp-start {
   border-color: var(--crit);
   color: var(--crit);
   font-weight: 600;
-  min-height: 28px;
+  min-height: calc(var(--sp-5) + var(--sp-1));
 }
 .fp-meter {
-  height: 4px;
-  border-radius: 2px;
+  height: var(--sp-1);
+  border-radius: var(--r-s);
   background: var(--line);
   overflow: hidden;
 }
@@ -137,7 +140,7 @@
 .fp-panel {
   background: var(--surface);
   border: 1px solid var(--line);
-  border-radius: 3px;
+  border-radius: var(--r);
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -146,7 +149,7 @@
 }
 .fp-head {
   flex: none;
-  height: 40px;
+  height: var(--fp-row);
   padding: 0 var(--sp-4);
   display: flex;
   align-items: center;
@@ -192,7 +195,7 @@
 }
 .fp-lines li {
   flex: 0 0 auto;
-  min-height: 40px;
+  min-height: var(--fp-row);
   display: flex;
   align-items: center;
   gap: var(--sp-3);
@@ -288,7 +291,7 @@
 .fp-bhead,
 .fp-brow {
   display: grid;
-  grid-template-columns: minmax(0, 5fr) calc(var(--sp-7) * 4) 80px minmax(0, 6fr);
+  grid-template-columns: minmax(0, 5fr) calc(var(--sp-7) * 4) var(--fp-wait) minmax(0, 6fr);
   column-gap: var(--sp-4);
   padding: 0 var(--sp-4);
   align-items: center;
@@ -338,6 +341,9 @@
   color: var(--fg-2);
 }
 .fp-act {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
   overflow: hidden;
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -372,7 +378,7 @@
   white-space: nowrap;
   font: var(--fs-s) / var(--lh-s) var(--mono);
   padding: 0 var(--sp-2);
-  border-radius: 3px;
+  border-radius: var(--r);
   color: var(--fg-2);
   background: color-mix(in srgb, var(--fg-2) 14%, transparent);
 }

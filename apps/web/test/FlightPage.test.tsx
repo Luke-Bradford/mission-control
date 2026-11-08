@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { buildBlockers, waitOwner } from "../src/flight/page/blockers.ts";
-import { decisionLine, readableTimes } from "../src/flight/page/decisionText.ts";
+import { decisionLine, readableText } from "../src/flight/page/decisionText.ts";
 import { NOT_RECORDED } from "../src/flight/page/StatusBand.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -244,13 +244,37 @@ describe("the FLIGHT page", () => {
     });
 
     it("writes machine times inside any text as clock times", () => {
-      const text = readableTimes(
+      const text = readableText(
         "report 20261106T170333Z and 2026-11-08T11:45:00.000Z and 1794072257157",
         NOW,
         "Europe/London",
       );
       expect(text).not.toMatch(/T\d{6}Z|T11:45|\d{13}/);
       expect(text).toContain("11:45");
+    });
+
+    it("names an internal message id in words, in the line and in the opened basis", async () => {
+      const withId = {
+        ...wait,
+        id: 8,
+        about: "report:inco-1: waiting on un-parked 15:41, comms:2799",
+        basis: "Answered in comms:2799.",
+      };
+      const api = flightPageApi("running");
+      api["/api/flight"] = { ...api["/api/flight"], decisions: [withId] };
+      stubFetch(api);
+      render(<Flight />);
+      const row = await waitFor(() => {
+        const r = document.querySelector<HTMLButtonElement>("#decisions .fp-drow");
+        expect(r).not.toBeNull();
+        return r as HTMLButtonElement;
+      });
+      fireEvent.click(row);
+      const text = document.querySelector("#decisions")?.textContent ?? "";
+      expect(text).toContain("the related message");
+      expect(text).toContain("Basis");
+      expect(text).not.toMatch(/comms:\d+/);
+      expect(decisionLine(withId, NOW, "Europe/London").rest).not.toMatch(/comms:\d+/);
     });
 
     it("renders on the page without the key or the epoch digits", async () => {

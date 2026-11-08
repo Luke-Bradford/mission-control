@@ -4,6 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
+import { REPOS } from "./fixtures.ts";
 import { flightPageApi, type PageState } from "./flightPageFixtures.ts";
 
 const { renderAt } = browserSession();
@@ -169,6 +170,14 @@ describeRendered("FLIGHT page in a browser", () => {
               whole: whole.length,
               rowHeight: whole[0]?.getBoundingClientRect().height ?? 0,
               more: document.querySelector(".fp-more")?.textContent ?? "",
+              act: (() => {
+                const a = document.querySelector<HTMLElement>("#blockers .fp-brow .fp-act");
+                return {
+                  wrap: a ? getComputedStyle(a).whiteSpace : "",
+                  height: a?.clientHeight ?? 0,
+                  hidden: a ? a.scrollHeight - a.clientHeight : 0,
+                };
+              })(),
               owners: [...document.querySelectorAll<HTMLElement>("#blockers .fp-owner")].map(
                 (o) => ({ text: o.textContent ?? "", cut: o.scrollWidth - o.clientWidth }),
               ),
@@ -192,6 +201,29 @@ describeRendered("FLIGHT page in a browser", () => {
           expect(r.more, `${where}: the hidden count`).toMatch(
             new RegExp(`^${r.total - r.whole} more below`),
           );
+          // The longest action wraps to two lines and is cut with an ellipsis, not run off one line.
+          expect(r.act.wrap, `${where}: the action wraps`).toBe("normal");
+          expect(r.act.height, `${where}: closed action is two lines`).toBeGreaterThan(30);
+          expect(r.act.height, `${where}: closed action is two lines`).toBeLessThanOrEqual(44);
+          expect(r.act.hidden, `${where}: the long action is truncated`).toBeGreaterThan(0);
+          // Opening the first row from the keyboard shows the whole text.
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#blockers .fp-brow")?.focus(),
+            null,
+          );
+          await page.press("Enter");
+          const open = await page.evaluate(() => {
+            const row = document.querySelector<HTMLElement>("#blockers .fp-brow");
+            const a = row?.querySelector<HTMLElement>(".fp-act");
+            return {
+              expanded: row?.getAttribute("aria-expanded"),
+              height: a?.clientHeight ?? 0,
+              hidden: a ? a.scrollHeight - a.clientHeight : 1,
+            };
+          }, null);
+          expect(open.expanded, `${where}: Enter opens the row`).toBe("true");
+          expect(open.hidden, `${where}: the opened action is whole`).toBeLessThanOrEqual(1);
+          expect(open.height, `${where}: the opened action is taller`).toBeGreaterThan(44);
           expect(r.owners.length).toBe(16);
           for (const o of r.owners) {
             expect(o.cut, `${where}: the owner tag "${o.text}" is cut`).toBeLessThanOrEqual(0);
@@ -202,6 +234,123 @@ describeRendered("FLIGHT page in a browser", () => {
           );
           for (const p of r.panels)
             expect(p.clipped, `${where}: ${p.id} hides content`).toBe(false);
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  // The real application shell: header, footer, and the page where an operator reaches it. The
+  // FLIGHT page is a full-width page, so no FLIGHT rail sits beside it; this is the widths and
+  // heights the checklist names, with 16 long blockers.
+  const SHELL_SIZES = [
+    [1280, 800],
+    [1600, 1000],
+    [1600, 700],
+    [1920, 940],
+    [2560, 1200],
+  ] as const;
+  for (const [width, height] of SHELL_SIZES) {
+    for (const theme of ["dark", "light"] as const) {
+      const where = `${width}x${height}, busy, ${theme}, real shell`;
+      it(
+        `keeps the hierarchy, readable columns and reachable lists in the app shell at ${where}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/agentV2Browser.html",
+            width,
+            height,
+            search: `?dock=folded&at=${encodeURIComponent("/flight")}`,
+            colorScheme: theme,
+            api: {
+              ...flightPageApi("busy"),
+              "/api/repos": REPOS,
+              "/api/crew?shape=summary": { rows: [], firstRunToday: null },
+              "/api/prs/flow": { generatedAt: 0, repos: [] },
+              "/api/notifications": { open: [], handledToday: [] },
+              "/api/attention/held": [],
+            },
+          });
+          await page.box("#page-flight #blockers .fp-brow");
+          const r = await page.evaluate(() => {
+            const doc = document.documentElement;
+            const box = (sel: string) =>
+              document.querySelector<HTMLElement>(sel)?.getBoundingClientRect();
+            const scroller = document.querySelector<HTMLElement>(".fp-brows");
+            const edge = scroller?.getBoundingClientRect() ?? new DOMRect();
+            const rows = [...document.querySelectorAll<HTMLElement>("#blockers .fp-brow")];
+            const whole = rows.filter((row) => {
+              const b = row.getBoundingClientRect();
+              return b.top >= edge.top - 1 && b.bottom <= edge.bottom + 1;
+            });
+            const first = rows[0];
+            return {
+              pageScroll: doc.scrollHeight - doc.clientHeight,
+              sideScroll: doc.scrollWidth - doc.clientWidth,
+              dock: document.querySelectorAll(".dock").length,
+              bandBottom: box(".fp-band")?.bottom ?? 0,
+              midTop: box(".fp-mid")?.top ?? 0,
+              decTop: box("#decisionsP")?.top ?? 0,
+              whole: whole.length,
+              total: rows.length,
+              more: document.querySelector(".fp-more")?.textContent ?? "",
+              columns: ["fp-what", "fp-act"].map(
+                (c) =>
+                  first?.querySelector<HTMLElement>(`.${c}`)?.getBoundingClientRect().width ?? 0,
+              ),
+              owners: [...document.querySelectorAll<HTMLElement>("#blockers .fp-owner")].map(
+                (o) => o.scrollWidth - o.clientWidth,
+              ),
+              decisions: document.querySelectorAll("#decisions li").length,
+              panels: [...document.querySelectorAll<HTMLElement>("main .fp-panel")].map(
+                (p) => p.scrollHeight > p.clientHeight + 1,
+              ),
+            };
+          }, null);
+          const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(
+              join(shots, `flight-page-shell-${width}x${height}-busy-${theme}.png`),
+            );
+          }
+          expect(r.dock, `${where}: no rail beside the page`).toBe(0);
+          expect(r.pageScroll, `${where}: page scroll`).toBeLessThanOrEqual(0);
+          expect(r.sideScroll, `${where}: sideways scroll`).toBeLessThanOrEqual(0);
+          // Hierarchy: status band, then Doing now and Blockers, then Recent decisions, in that order.
+          expect(
+            r.midTop,
+            `${where}: Doing now and Blockers sit under the status band`,
+          ).toBeGreaterThanOrEqual(r.bandBottom);
+          expect(r.decTop, `${where}: Recent decisions sits under them`).toBeGreaterThan(r.midTop);
+          // Blockers: some rows wholly in view, the rest counted, columns wide enough to read.
+          expect(r.total).toBe(16);
+          expect(r.whole, `${where}: blocker rows in view`).toBeGreaterThanOrEqual(2);
+          expect(r.more, `${where}: the hidden count`).toMatch(
+            new RegExp(`^${r.total - r.whole} more below`),
+          );
+          for (const w of r.columns)
+            expect(w, `${where}: blocker and action columns are readable`).toBeGreaterThanOrEqual(
+              120,
+            );
+          for (const cut of r.owners)
+            expect(cut, `${where}: an owner tag is cut`).toBeLessThanOrEqual(0);
+          expect(r.decisions, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(
+            3,
+          );
+          for (const clipped of r.panels)
+            expect(clipped, `${where}: a panel hides content`).toBe(false);
+          // Reach: Tab reaches the first row, and the keyboard opens it to the whole action.
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>("#blockers .fp-brow")?.focus(),
+            null,
+          );
+          await page.press("Enter");
+          const open = await page.evaluate(() => {
+            const a = document.querySelector<HTMLElement>("#blockers .fp-brow .fp-act");
+            return a ? a.scrollHeight - a.clientHeight : 1;
+          }, null);
+          expect(open, `${where}: the opened action is whole`).toBeLessThanOrEqual(1);
         },
         BROWSER_TEST_TIMEOUT_MS,
       );

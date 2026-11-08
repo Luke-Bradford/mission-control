@@ -11,13 +11,17 @@ export function whenLabel(ms: number, now: number, tz: string): string {
   return isoDay(ms, tz) === isoDay(now, tz) ? hhmm(ms, tz) : `${dayMonth(ms, tz)} ${hhmm(ms, tz)}`;
 }
 
-/** Text with every machine time in it written as the operator reads it. */
-export function readableTimes(text: string, now: number, tz: string): string {
+/** An internal message id (`comms:2799`): it has no page the operator can open. */
+const COMMS_ID = /\bcomms:\d+\b/g;
+
+/** Text with every machine time written as the operator reads it, and internal message ids named in words. */
+export function readableText(text: string, now: number, tz: string): string {
   const at = (ms: number, raw: string) => (Number.isFinite(ms) ? whenLabel(ms, now, tz) : raw);
   return text
     .replace(ISO, (raw) => at(Date.parse(raw), raw))
     .replace(COMPACT, (raw, y, mo, d, h, mi, s) => at(Date.UTC(+y, +mo - 1, +d, +h, +mi, +s), raw))
-    .replace(EPOCH_MS, (raw) => at(Number(raw), raw));
+    .replace(EPOCH_MS, (raw) => at(Number(raw), raw))
+    .replace(COMMS_ID, "the related message");
 }
 
 const WAIT_ABOUT = /^[\s\S]*?: waiting on ([\s\S]*)$/;
@@ -38,7 +42,7 @@ export function decisionLine(
     const until = WAIT_UNTIL.exec(d.decision)?.[1];
     const ms = until === undefined ? Number.NaN : Date.parse(until);
     const when = Number.isFinite(ms) ? ` · Waits until ${whenLabel(ms, now, tz)}` : "";
-    return { lead: d.ref ?? "Wait", rest: `waiting on ${readableTimes(on, now, tz)}${when}` };
+    return { lead: d.ref ?? "Wait", rest: `waiting on ${readableText(on, now, tz)}${when}` };
   }
-  return { lead: readableTimes(d.about, now, tz), rest: readableTimes(d.decision, now, tz) };
+  return { lead: readableText(d.about, now, tz), rest: readableText(d.decision, now, tz) };
 }

@@ -3,7 +3,7 @@ import { useNow, useTz } from "../../clock.ts";
 import { hhmm } from "../../fmt.ts";
 import { decisionAnchor } from "../conversation.ts";
 import type { FlightDecision } from "../flightTypes.ts";
-import { decisionLine, readableTimes } from "./decisionText.ts";
+import { decisionLine, readableText } from "./decisionText.ts";
 
 /** At least this many decisions show, however short the panel. */
 const MIN_SHOWN = 3;
@@ -79,7 +79,7 @@ export function DecisionRows({
                 {d.basis && (
                   <p>
                     <span className="fp-muted">Basis</span>{" "}
-                    {tz === null ? d.basis : readableTimes(d.basis, now, tz)}
+                    {tz === null ? d.basis : readableText(d.basis, now, tz)}
                   </p>
                 )}
               </div>
