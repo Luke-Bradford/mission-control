@@ -1586,6 +1586,10 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/comms/read", { scope: "crew", messageId: "comms:1" }],
   ["POST", "/api/comms", { to: "guido-1", text: "hello" }],
   ["POST", "/api/comms/comms:1/reactions", { reaction: "seen" }],
+  ["GET", "/api/comms/comms:1/reply-route"],
+  ["GET", "/api/comms/comms:1/state"],
+  ["POST", "/api/attention/unknown/choose", { optionId: "yes", briefAt: 1 }],
+  ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
   ["DELETE", "/api/comms/comms:1/pin", {}],
   ["GET", "/api/agents/shop-app-ta/files"],
@@ -2521,6 +2525,7 @@ describe("local access", () => {
       if (url.startsWith("/api/design-previews")) continue; // the design preview tests below cover them
       if (url.startsWith("/api/previews")) continue; // previews need an open PR and a child manager
       if (url === "/api/comms/read") continue; // needs a stored Comms message; Comms tests cover it
+      if (/^\/api\/attention\/unknown\/choo?[si]/.test(url)) continue; // needs an open question; choose.test.ts covers it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
       if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
@@ -2680,7 +2685,7 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
-      if (url === "/api/attention/unknown") {
+      if (url === "/api/attention/unknown" || /^\/api\/attention\/unknown\/choo?[si]/.test(url)) {
         expect(r.statusCode).toBe(404);
         continue;
       }
@@ -2973,6 +2978,7 @@ describe("local access", () => {
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
+            .replace(/\/attention\/[^/]+\/(choose|choice)$/, "/attention/:key/$1")
             .replace(
               /\/attention\/[^/]+\/replies\/[^/]+\/post$/,
               "/attention/:key/replies/:replyId/post",
@@ -6913,8 +6919,9 @@ describe("crew routes", () => {
   it("marks an interrupting message read, as its text reached the seat", async () => {
     expect((await post5("message", { text: "now", interrupt: true })).statusCode).toBe(200);
     expect(store.unreadCommsFrom("CAPCOM", "guido-1", 0)).toEqual([]);
+    // a plain operator message reaches the seat too (spec: Comms, rule 7)
     expect((await post5("message", { text: "fyi" })).statusCode).toBe(200);
-    expect(store.unreadCommsFrom("CAPCOM", "guido-1", 0)).toHaveLength(1);
+    expect(store.unreadCommsFrom("CAPCOM", "guido-1", 0)).toEqual([]);
   });
 
   it("stores two identical operator messages within a minute once, wakes the seat once and answers ok both times", async () => {
@@ -6923,6 +6930,21 @@ describe("crew routes", () => {
     expect([first.statusCode, again.statusCode]).toEqual([200, 200]);
     expect(store.comms(0).filter((c) => c.text === "stop now")).toHaveLength(1);
     expect(supervisorCalls.filter((c) => c[0] === "message")).toHaveLength(1);
+  });
+
+  it("answers an exact repeat of a plain message with alreadySent and the first copy's state", async () => {
+    const first = await post5("message", { text: "same words" });
+    expect(first.json()).toMatchObject({ ok: true, state: "delivered", alreadySent: false });
+    const again = await post5("message", { text: "same words" });
+    expect(again.statusCode).toBe(200);
+    expect(again.json()).toMatchObject({
+      ok: true,
+      alreadySent: true,
+      state: "delivered",
+      deliveredAt: first.json().deliveredAt,
+    });
+    expect(store.comms(0).filter((c) => c.text === "same words")).toHaveLength(1);
+    expect(store.commsRepeatCount(0)).toBe(1);
   });
 
   it("wakes the seat on a retry when the first wake failed, storing the message once", async () => {
@@ -6937,19 +6959,20 @@ describe("crew routes", () => {
     expect(supervisorCalls.filter((c) => c[0] === "message")).toHaveLength(2);
   });
 
-  it("stores FYI messages without waking the seat, while interrupt and end still emit agents", async () => {
+  it("delivers plain messages to the seat and returns their state, while interrupt and end still emit agents", async () => {
     const seen: string[] = [];
     bus.subscribe((t) => seen.push(t));
     const m = await post5("message", { text: "hi" });
     const mi = await post5("message", { text: "now", interrupt: true });
     const i = await post5("interrupt");
     const e = await post5("end");
-    for (const r of [m, mi, i, e]) {
-      expect(r.statusCode).toBe(200);
-      expect(r.json()).toEqual({ ok: true });
-    }
+    for (const r of [m, mi, i, e]) expect(r.statusCode).toBe(200);
+    for (const r of [m, mi]) expect(r.json()).toMatchObject({ ok: true, state: "delivered" });
+    expect(i.json()).toEqual({ ok: true });
+    expect(e.json()).toEqual({ ok: true });
     expect(supervisorCalls).toEqual([
-      ["message", "guido-1", "now", { interrupt: true }],
+      ["message", "guido-1", "hi", { interrupt: false, questions: "none" }],
+      ["message", "guido-1", "now", { interrupt: true, questions: "none" }],
       ["interrupt", "guido-1"],
       ["end", "guido-1", { hold: undefined }],
     ]);
@@ -7125,13 +7148,18 @@ describe("crew routes", () => {
     expect(r.json<{ error: string }>().error).toBe("text: must not be blank");
   });
 
-  it.each(["x", "\u0001"])("stores an FYI at the cap whole without waking (%j)", async (char) => {
-    const text = char.repeat(COMMS_MESSAGE_MAX);
-    const r = await post5("message", { text });
-    expect(r.statusCode).toBe(200);
-    expect(supervisorCalls).toEqual([]);
-    expect(store.comms(0).map((m) => m.text)).toEqual([text]);
-  });
+  it.each(["x", "\u0001"])(
+    "stores a message at the cap whole and delivers it (%j)",
+    async (char) => {
+      const text = char.repeat(COMMS_MESSAGE_MAX);
+      const r = await post5("message", { text });
+      expect(r.statusCode).toBe(200);
+      expect(supervisorCalls).toEqual([
+        ["message", "guido-1", text, { interrupt: false, questions: "none" }],
+      ]);
+      expect(store.comms(0).map((m) => m.text)).toEqual([text]);
+    },
+  );
 
   it.each([
     [COMMS_MESSAGE_MAX + 1, 400],
@@ -7143,9 +7171,11 @@ describe("crew routes", () => {
     expect(store.comms(0)).toEqual([]);
   });
 
-  it("stores FYI message text as typed, indentation included", async () => {
+  it("stores message text as typed, indentation included", async () => {
     expect((await post5("message", { text: "  - item\n" })).statusCode).toBe(200);
-    expect(supervisorCalls).toEqual([]);
+    expect(supervisorCalls).toEqual([
+      ["message", "guido-1", "  - item\n", { interrupt: false, questions: "none" }],
+    ]);
   });
 
   describe("the watch seat", () => {
@@ -8351,16 +8381,56 @@ describe("the first loop's engine", () => {
         const { a, reconciled } = appOnSeat();
         const r = await post(a, payload);
         expect(r.statusCode).toBe(200);
-        // an interrupt is a labelled handoff and wakes the seat; a plain message waits in its inbox
-        expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(
-          "interrupt" in payload ? 1 : 0,
-        );
+        // an operator message, plain or interrupting, is delivered to the seat (spec rule 7)
+        expect(supervisorCalls.filter(([name]) => name === "message")).toHaveLength(1);
         expect(store.comms(0, "next").map((m) => m.text)).toEqual([payload.text]);
         expect(store.openQuestions().map((x) => x.id)).toEqual([q]);
         expect(reconciled).toEqual([]);
         await a.close();
       },
     );
+
+    it("a plain message closes no question, and a reply that names one closes only that one", async () => {
+      store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
+      const q1 = store.addQuestion({ agentId: "guido-1", runId: "next", text: "One?", at: NOW });
+      const q2 = store.addQuestion({ agentId: "guido-1", runId: "next", text: "Two?", at: NOW });
+      const { a } = appOnSeat();
+      // the stub does what the real supervisor does with the option the route passes
+      const sup = stubSupervisor();
+      sup.seat = () => ({
+        seatId: "guido-1",
+        runId: "next",
+        cliSessionId: null,
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      sup.message = async (_seat, _text, opts) => {
+        if (opts.questions !== "none")
+          store.answerRunQuestions("next", NOW, opts.questions === "unpassed");
+      };
+      await a.close();
+      const b = buildApp({ config, store, bus, supervisor: sup });
+      try {
+        const plain = await b.inject({
+          method: "POST",
+          url: "/api/seats/guido-1/message",
+          payload: { text: "unrelated note" },
+        });
+        expect(plain.statusCode).toBe(200);
+        expect(store.openQuestions().map((x) => x.id)).toEqual([q1, q2]);
+        const named = await b.inject({
+          method: "POST",
+          url: "/api/seats/guido-1/message",
+          payload: { text: "the answer to one", question: q1 },
+        });
+        expect(named.statusCode).toBe(200);
+        expect(store.openQuestions().map((x) => x.id)).toEqual([q2]);
+      } finally {
+        await b.close();
+      }
+    });
 
     it("sends a message that names no question to the run on the seat when none waits", async () => {
       store.upsertRun(run({ id: "next", agentId: "guido-1", ticket: "shop-app#10" }));
