@@ -21,13 +21,15 @@ Write so the message makes sense by itself.
 4. **Facts, not feelings.** No "I think", "it seems", "unfortunately", "great news". No
    exclamation marks. No "just", "simply", "easy", "quick". Apologise once, only for your own
    mistake.
-5. **A question works on its own.** Name the thing, the choice, and what happens with no answer:
+5. **A question works on its own.** Name the thing and the choice. To the operator, the context
+   says what happens with no answer; between agents, a default may say it:
    "The new FLIGHT page passed review and its checks. Merge it now, or wait for the mockup?"
    A default is allowed only between agents, for a choice within the writer's own authority. A
    question to the operator has no default.
-6. **An error says what failed and what to do.** "Push of 73f0d3d refused: `pnpm -s test` was
-   not run on this commit. Commit or delete any changed files, run it, then push again." Not the
-   log, not the rule text.
+6. **An error says what failed and what to do.** To a seat or FLIGHT: "Push of 73f0d3d refused:
+   `pnpm -s test` was not run on this commit. Commit or delete any changed files, run it, then
+   push again." To the operator, without the code or the command: "A developer's push was
+   refused because the tests were not run." Not the log, not the rule text.
 
 ## One message, one shape
 
@@ -36,15 +38,15 @@ Write so the message makes sense by itself.
   point at it. The hub allows 1,200 characters (#995); aim for 600.
 - **Question to the operator.** Only FLIGHT writes these, as a brief (`brief_item`). It must make
   sense to someone new to the project, from the question alone, with nothing to look up:
-  - **title:** what the decision is about, in words: "Approve the new dependencies view on the
+  - **title (the item's heading):** what the decision is about, in words: "Approve the new dependencies view on the
     Board", not "PR · You: review";
   - **context:** two or three sentences: what this is, why it comes up now, and what happens if
     nothing is decided;
-  - **the question:** one sentence ending in "?";
+  - **the question (`ask`):** one sentence ending in "?", at most 300 characters;
   - **options:** two to four, each a plain action and its consequence: "Approve: the crew builds
     it next; you can change it later.";
   - **recommendation:** which option, and why, in plain words;
-  - **references:** the ticket and PR go in the item's ticket and refs fields, never in the text.
+  - **references:** the ticket goes in `ticket`, never in the text.
   No ticket or PR numbers, commit codes, paths, links, seat ids or tool names in the title,
   context, question, options or recommendation. No default.
 - **Ticket.** Sections, in order:
@@ -77,13 +79,15 @@ Seats do not post comments on GitHub and do not message the operator; both go th
 | Monday 3 November, 14:00 UK | tomorrow, currently, later |
 
 More rules for words:
-- Say "you" to the reader. Name yourself by your seat name ("GUIDO-1"), not "I".
+- Say "you" to the reader. To the operator, name yourself by role ("the planner", "a
+  developer"), not "I". Between agents, use your seat name ("GUIDO-1").
 - Use one name for one thing. The roles say "seat" and "developer"; do not add "builder".
 - No hub state names in text for the operator ("parked", "aside", "controller check").
   Say what the state means: "waiting for a review".
 - No @mentions. No links to other repositories.
 - Present tense for state: "Review done", not "Review has been completed".
-- Say who did what: "RETRO-CX found two problems", not "two problems were found".
+- Say who did what: "the reviewer found two problems", not "two problems were found". Between
+  agents, name the seat.
 - A list for options or steps; prose for one idea.
 
 ## Between agents
