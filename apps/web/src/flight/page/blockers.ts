@@ -11,6 +11,8 @@ export interface Blocker {
   detail: string;
   /** Who has to act, in words ("Operator", "CI", "Hub", a seat or ticket). */
   owner: string;
+  /** The owner's full value when the tag is a short form of it (`#1572` for `repo#1572`). */
+  ownerTitle?: string;
   tone: OwnerTone;
   /** How long it has waited in ms; null when the hub does not say. */
   waitedMs: number | null;
@@ -46,7 +48,11 @@ function itemDoing(item: AttentionItem): string {
  * closed unmerged, the hub for a PR it has not read. A wait that is only a ticket reference names
  * no owner, so the reference itself is shown, not a guess at a person.
  */
-export function waitOwner(wait: string | undefined): { owner: string; tone: OwnerTone } {
+export function waitOwner(
+  wait: string | undefined,
+  /** The blocked ticket (`repo#n`): a wait in its own repo drops the repo from the owner tag. */
+  ticket?: string,
+): { owner: string; tone: OwnerTone } {
   if (wait === undefined) return { owner: "Not recorded", tone: "plain" };
   if (/failing CI|in CI\b/.test(wait)) return { owner: "CI", tone: "ci" };
   if (/in review/.test(wait)) return { owner: "Reviewer", tone: "plain" };
@@ -54,7 +60,9 @@ export function waitOwner(wait: string | undefined): { owner: string; tone: Owne
   if (/is a draft/.test(wait)) return { owner: "PR author", tone: "plain" };
   if (/closed without merging/.test(wait)) return { owner: "Operator", tone: "operator" };
   if (/not read yet/.test(wait)) return { owner: "Hub", tone: "plain" };
-  return { owner: wait, tone: "plain" };
+  const repo = ticket?.split("#")[0];
+  const own = repo !== undefined && repo !== "" && wait.startsWith(`${repo}#`);
+  return { owner: own ? wait.slice(repo.length) : wait, tone: "plain" };
 }
 
 /**
@@ -99,9 +107,12 @@ export function buildBlockers(
     });
   }
   for (const b of flight?.blocked ?? []) {
-    const { owner, tone } = waitOwner(b.waitsOn[0]);
+    const { owner, tone } = waitOwner(b.waitsOn[0], b.ref);
     rows.push({
       key: `ticket:${b.ref}`,
+      ...(owner !== b.waitsOn[0] && /^[^\s(]+$/.test(b.waitsOn[0] ?? "")
+        ? { ownerTitle: b.waitsOn[0] }
+        : {}),
       what: `${b.ref} ${b.title}`,
       detail: `Waits on ${b.waitsOn.join(", ")}`,
       owner,

@@ -70,7 +70,9 @@ export function BlockersList({ rows }: { rows: Blocker[] }) {
                 <b>{b.what}</b>
                 {b.detail && <span>{b.detail}</span>}
               </span>
-              <span className={`fp-owner ${b.tone}`}>{b.owner}</span>
+              <span className={`fp-owner ${b.tone}`} title={b.ownerTitle}>
+                {b.owner}
+              </span>
               <span className="fp-wait">{b.waitedMs === null ? "—" : dur(b.waitedMs)}</span>
               <span className="fp-act">{b.doing}</span>
             </button>

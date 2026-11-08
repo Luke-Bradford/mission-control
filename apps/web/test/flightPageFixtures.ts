@@ -69,9 +69,12 @@ export function flightPageApi(state: PageState, over: Record<string, unknown> = 
       state === "blocked"
         ? [ticket(9, ["shop-app#7 (PR 12 in CI)"], 42), ticket(8, ["shop-app#6"], 18)]
         : state === "busy"
-          ? Array.from({ length: 4 }, (_, i) =>
-              ticket(20 + i, [`shop-app#${10 + i} (PR ${50 + i} in CI)`], 25 + i * 9),
-            )
+          ? [
+              ticket(20, ["shop-app#10 (PR 50 in CI)"], 25),
+              ticket(21, ["shop-app#1572"], 34),
+              ticket(22, ["site-builder#1572"], 43),
+              ticket(23, ["shop-app#11 (PR 53 in review)"], 52),
+            ]
           : [],
   };
   const now = [1, 2, 3, 4].map((n) =>

@@ -169,6 +169,9 @@ describeRendered("FLIGHT page in a browser", () => {
               whole: whole.length,
               rowHeight: whole[0]?.getBoundingClientRect().height ?? 0,
               more: document.querySelector(".fp-more")?.textContent ?? "",
+              owners: [...document.querySelectorAll<HTMLElement>("#blockers .fp-owner")].map(
+                (o) => ({ text: o.textContent ?? "", cut: o.scrollWidth - o.clientWidth }),
+              ),
               decisions: document.querySelectorAll("#decisions li").length,
               panels: [...document.querySelectorAll<HTMLElement>("main .fp-panel")].map((p) => ({
                 id: p.id,
@@ -189,6 +192,11 @@ describeRendered("FLIGHT page in a browser", () => {
           expect(r.more, `${where}: the hidden count`).toMatch(
             new RegExp(`^${r.total - r.whole} more below`),
           );
+          expect(r.owners.length).toBe(16);
+          for (const o of r.owners) {
+            expect(o.cut, `${where}: the owner tag "${o.text}" is cut`).toBeLessThanOrEqual(0);
+          }
+          expect(r.owners.map((o) => o.text)).toContain("#1572");
           expect(r.decisions, `${where}: Recent decisions keeps its rows`).toBeGreaterThanOrEqual(
             3,
           );

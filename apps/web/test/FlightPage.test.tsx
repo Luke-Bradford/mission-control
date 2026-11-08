@@ -39,7 +39,7 @@ describe("buildBlockers", () => {
       NOW,
     );
     expect(rows.map((r) => r.waitedMs)).toEqual([3 * HOUR, 42 * MIN, 18 * MIN, 5 * MIN]);
-    expect(rows.map((r) => r.owner)).toEqual(["Operator", "CI", "shop-app#6", "Operator"]);
+    expect(rows.map((r) => r.owner)).toEqual(["Operator", "CI", "#6", "Operator"]);
     for (const r of rows) expect(r.doing.length).toBeGreaterThan(8);
   });
   it("leaves out what FLIGHT owns itself", () => {
@@ -89,6 +89,9 @@ describe("buildBlockers", () => {
     expect(wait("PR 9 (not read yet)").owner).toBe("Hub");
     // only a reference: the reference itself, not "Other ticket" or an invented person
     expect(wait("mission-control#1390")).toEqual({ owner: "mission-control#1390", tone: "plain" });
+    // in the blocked ticket's own repo the repo is dropped; across repos the full reference stays
+    expect(waitOwner("mission-control#1572", "mission-control#1573").owner).toBe("#1572");
+    expect(waitOwner("other-repo#9", "mission-control#1573").owner).toBe("other-repo#9");
     expect(waitOwner(undefined).owner).toBe("Not recorded");
   });
 });
@@ -128,7 +131,7 @@ describe("the FLIGHT page", () => {
     expect(rows.map((r) => r.querySelector(".fp-owner")?.textContent)).toEqual([
       "Operator",
       "CI",
-      "shop-app#6",
+      "#6",
     ]);
     for (const r of rows)
       expect(r.querySelector(".fp-act")?.textContent?.length).toBeGreaterThan(8);
@@ -317,5 +320,56 @@ describe("the FLIGHT page", () => {
         (screen.getByRole("button", { name: "Start FLIGHT" }) as HTMLButtonElement).disabled,
       ).toBe(false);
     });
+  });
+});
+
+describe("a ticket waiting on a ticket", () => {
+  const blocked = (ref: string, waitsOn: string[]) => ({
+    ref,
+    title: "Waits",
+    column: "In progress" as const,
+    waitsOn,
+    chain: [ref],
+    waitedMin: 30,
+  });
+  const view = (b: ReturnType<typeof blocked>): FlightView => ({
+    seat: null,
+    decisions: [],
+    blocked: [b],
+  });
+  const run = { kind: "running", why: "working" } as const;
+
+  it("shows the short form for the same repo and keeps the full reference as the tag's title", () => {
+    const rows = buildBlockers(
+      [],
+      view(blocked("mission-control#1573", ["mission-control#1572"])),
+      run,
+      NOW,
+    );
+    expect(rows[0]?.owner).toBe("#1572");
+    expect(rows[0]?.ownerTitle).toBe("mission-control#1572");
+  });
+
+  it("keeps the repo across repos", () => {
+    const rows = buildBlockers([], view(blocked("mission-control#1573", ["site#9"])), run, NOW);
+    expect(rows[0]?.owner).toBe("site#9");
+    expect(rows[0]?.ownerTitle).toBeUndefined();
+  });
+
+  it("renders the short form in the Owner column", async () => {
+    const api = flightPageApi("blocked");
+    api["/api/flight"] = {
+      ...api["/api/flight"],
+      blocked: [blocked("shop-app#8", ["shop-app#1572"])],
+    };
+    stubFetch(api);
+    render(<Flight />);
+    const tag = await waitFor(() => {
+      const owners = [...document.querySelectorAll<HTMLElement>("#blockers .fp-owner")];
+      const hit = owners.find((o) => o.textContent === "#1572");
+      expect(hit).toBeDefined();
+      return hit as HTMLElement;
+    });
+    expect(tag.title).toBe("shop-app#1572");
   });
 });
