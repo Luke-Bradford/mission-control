@@ -47,6 +47,7 @@ function api(n = 6, optionCount = 2, extraAsks = 0) {
       agentId: "guido-1",
       escalationId: null,
       ticket: "shop-app#1453",
+      offers: ["not-now", "drop"],
       text: "Which layout should the Needs you page use?",
       at: NOW - 2 * HOUR,
       brief: brief({
@@ -79,6 +80,7 @@ function api(n = 6, optionCount = 2, extraAsks = 0) {
   return {
     ...base,
     "/api/attention": asks,
+    "/api/attention/answered": [],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
     [discussionPath(KEY)]: discussion,
@@ -109,6 +111,39 @@ async function pictureLoaded(page: RenderedPage) {
 }
 
 describeRendered("Needs you page", () => {
+  it(
+    "the Needs you composition is clear at the requested light and dark evidence sizes",
+    async () => {
+      for (const [width, height] of [
+        [1280, 900],
+        [1600, 1000],
+      ] as const) {
+        for (const colorScheme of ["light", "dark"] as const) {
+          const page = await renderAt({
+            page: "test/needsBrowser.html",
+            width,
+            height,
+            colorScheme,
+            api: api(),
+            assets: ASSETS,
+          });
+          try {
+            await ready(page);
+            expect(await page.reachable(".needs-band")).toEqual([true]);
+            expect(await page.reachable(".needs-actions")).toEqual([true]);
+            if (SHOTS) {
+              mkdirSync(SHOTS, { recursive: true });
+              await page.screenshot(join(SHOTS, `needs-${width}x${height}-${colorScheme}.png`));
+            }
+          } finally {
+            await page.close();
+          }
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
   it(
     "the open item fills the width with the mockup shown large",
     async () => {
@@ -253,7 +288,7 @@ describeRendered("Needs you page", () => {
   );
 
   it(
-    "the conversation composer fills its column and Hold keeps the question in view",
+    "the conversation composer fills its column and offered actions keep the question in view",
     async () => {
       for (const [width, height] of [
         [2560, 1440],
@@ -279,10 +314,8 @@ describeRendered("Needs you page", () => {
           expect(answer.length, `${label}: the answer composer is there`).toBeGreaterThan(0);
           if (SHOTS) {
             mkdirSync(SHOTS, { recursive: true });
-            await page.screenshot(join(SHOTS, `needs-${width}x${height}-hold-closed.png`));
+            await page.screenshot(join(SHOTS, `needs-${width}x${height}-actions.png`));
           }
-          await page.click(".needs-hold button");
-          await page.boxes(".needs-hold .hold-form");
           const open = await page.evaluate(() => {
             const band = document.querySelector(".needs-band") as HTMLElement;
             const q = document.querySelector(".needs-band-title") as HTMLElement;
@@ -297,9 +330,9 @@ describeRendered("Needs you page", () => {
               fullLines: Math.round(
                 q.scrollHeight / Number.parseFloat(getComputedStyle(q).lineHeight),
               ),
-              formInside:
+              actionsInside:
                 (
-                  document.querySelector(".needs-hold .hold-form") as HTMLElement
+                  document.querySelector(".needs-actions") as HTMLElement
                 ).getBoundingClientRect().bottom <=
                 b.bottom + 1,
               bottom: b.bottom,
@@ -308,9 +341,9 @@ describeRendered("Needs you page", () => {
           expect(open.bandClips, `${label}: nothing in the band is cut off`).toBe(false);
           expect(open.questionInside, `${label}: the question sits inside the band`).toBe(true);
           expect(open.questionLines, `${label}: the whole question shows`).toBe(open.fullLines);
-          expect(open.formInside, `${label}: the Hold form sits inside the band`).toBe(true);
+          expect(open.actionsInside, `${label}: actions sit inside the band`).toBe(true);
           expect(open.bottom, `${label}: the open band leaves room below`).toBeLessThan(height / 2);
-          if (SHOTS) await page.screenshot(join(SHOTS, `needs-${width}x${height}-hold-open.png`));
+          if (SHOTS) await page.screenshot(join(SHOTS, `needs-${width}x${height}-actions-open.png`));
         } finally {
           await page.close();
         }

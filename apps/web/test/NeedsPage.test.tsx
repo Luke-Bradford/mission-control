@@ -1,4 +1,4 @@
-import { type AttentionItem, DEFAULT_AWAY } from "@mc/core";
+import { type AttentionItem, DEFAULT_AWAY, type QuestionClosure } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Decisions } from "../src/comms/Decisions.tsx";
@@ -9,6 +9,7 @@ import { openableHref } from "../src/links.ts";
 import { briefLinks, briefPictures, pictureRoute } from "../src/needs/pictures.ts";
 import { Comms } from "../src/pages/Comms.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
+import { HoldItem } from "../src/needs/HoldItem.tsx";
 import { navigate } from "../src/router.ts";
 import { Header } from "../src/shell/Header.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -32,6 +33,7 @@ function routes(
     "/api/config": CONFIG,
     "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
     "/api/attention": items,
+    "/api/attention/answered": [],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
     "/api/flight": { seat: null, decisions: [] },
@@ -217,6 +219,41 @@ describe("Needs you page", () => {
     routes([]);
     render(<Needs item={null} />);
     expect(await screen.findByText("Nobody is waiting on you.")).toBeTruthy();
+  });
+
+  it("keeps closed and withdrawn questions folded under Answered with their reasons", async () => {
+    const answered: QuestionClosure[] = [
+      {
+        key: "ask:closed",
+        askAt: NOW - HOUR,
+        kind: "ticket-closed",
+        reason: "The replacement ticket was merged.",
+        by: "hub",
+        question: "Should the old ticket stay open?",
+        ticket: "mission-control#1",
+        operator: true,
+        at: NOW - MIN,
+      },
+      {
+        key: "ask:withdrawn",
+        askAt: NOW - HOUR,
+        kind: "withdrawn",
+        reason: "FLIGHT withdrew this question.",
+        by: "flight-1",
+        question: "Which cache should we use?",
+        ticket: "mission-control#2",
+        operator: true,
+        at: NOW - 2 * MIN,
+      },
+    ];
+    routes([], { "/api/attention/answered": answered });
+    render(<Needs item={null} />);
+    const answeredGroup = await screen.findByRole("group", { name: "Answered · 2" });
+    expect(answeredGroup.querySelector("details")?.open).toBe(false);
+    fireEvent.click(within(answeredGroup).getByText("Answered · 2"));
+    expect(within(answeredGroup).getByText("Should the old ticket stay open?")).toBeTruthy();
+    expect(within(answeredGroup).getByText("The replacement ticket was merged.")).toBeTruthy();
+    expect(within(answeredGroup).getByText("FLIGHT withdrew this question.")).toBeTruthy();
   });
 
   it("says a named item is no longer open, and links to the next one without jumping", async () => {
@@ -580,17 +617,41 @@ const bodies = (fn: ReturnType<typeof stubFetch>, path: string) =>
     .map(([, init]) => JSON.parse(String(init?.body)));
 
 describe("actions on the page", () => {
-  it("Hold posts the reason and the release condition for the open item", async () => {
-    const fn = routes([ask("q1")], { "POST /api/attention/q1/hold": { ok: true } });
-    render(<Needs item="q1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Hold" }));
-    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Waiting for review" } });
-    fireEvent.click(screen.getByRole("button", { name: "Hold item" }));
-    await waitFor(() =>
-      expect(bodies(fn, "/api/attention/q1/hold")).toEqual([
-        { reason: "Waiting for review", condition: { kind: "manual" } },
-      ]),
+  it("shows only offered Not now and Drop actions, and posts their matching routes", async () => {
+    const fn = routes(
+      [ask("q1", { offers: ["not-now", "drop"] }), ask("q2")],
+      {
+        "POST /api/attention/q1/not-now": { ok: true },
+        "POST /api/attention/q1/drop": { ok: true },
+      },
     );
+    const view = render(<Needs item="q1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
+    await waitFor(() =>
+      expect(bodies(fn, "/api/attention/q1/not-now")).toEqual([{}]),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Drop" }));
+    await waitFor(() => expect(bodies(fn, "/api/attention/q1/drop")).toEqual([{}]));
+    view.unmount();
+    render(<HoldItem item={ask("q2")} />);
+    expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
+    expect(bodies(fn, "/api/attention/q1/drop")).toEqual([{}]);
+  });
+
+  it("shows a refused action's reason and keeps the item in place", async () => {
+    const fn = routes([ask("q1", { offers: ["not-now"] })], {
+      "POST /api/attention/q1/not-now": () => ({
+        status: 409,
+        body: { error: "The ticket has new work." },
+      }),
+    });
+    render(<Needs item="q1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("The ticket has new work.");
+    expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
+    expect(within(screen.getByRole("navigation", { name: "Waiting on you" })).getByText("Question q1")).toBeTruthy();
+    expect(bodies(fn, "/api/attention/q1/not-now")).toEqual([{}]);
   });
 
   it("Ctrl or Cmd+Enter sends the answer; plain Enter does not", async () => {

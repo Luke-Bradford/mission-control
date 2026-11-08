@@ -1,4 +1,4 @@
-import { ATTENTION_LABEL, type AttentionItem, type Crew } from "@mc/core";
+import { ATTENTION_LABEL, type AttentionItem, type Crew, type QuestionClosure } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, useResource } from "../data.ts";
@@ -60,6 +60,24 @@ function Group({ title, n, children }: { title: string; n: number; children: Rea
   );
 }
 
+function Answered({ items }: { items: readonly QuestionClosure[] }) {
+  if (items.length === 0) return null;
+  const title = `Answered · ${items.length}`;
+  return (
+    <section className="needs-group" aria-label={title} role="group">
+      <details>
+        <summary className="needs-group-title">{title}</summary>
+        {items.map((item) => (
+          <div className="needs-answered" key={`${item.key}:${item.askAt}`}>
+            <MarkdownInline text={item.question} max={160} />
+            <p className="s note">{item.reason}</p>
+          </div>
+        ))}
+      </details>
+    </section>
+  );
+}
+
 /**
  * The left column: what waits on you, and what FLIGHT will do unless you object. Held items are not
  * here (#1543): a held item waits on a condition, not on the operator; FLIGHT's page lists them.
@@ -68,11 +86,13 @@ function Group({ title, n, children }: { title: string; n: number; children: Rea
 export function NeedsList({
   asks,
   defaulted,
+  answered,
   selected,
   footer,
 }: {
   asks: readonly AttentionItem[];
   defaulted: readonly AttentionItem[];
+  answered: readonly QuestionClosure[];
   selected: string | null;
   /** Under the groups: what was handled today. */
   footer?: React.ReactNode;
@@ -89,6 +109,7 @@ export function NeedsList({
           <Row key={i.key} item={i} current={i.key === selected} />
         ))}
       </Group>
+      <Answered items={answered} />
       {footer}
     </nav>
   );

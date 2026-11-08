@@ -32,10 +32,10 @@ export function holdConditionText(
 }
 
 /**
- * Held (the Needs-you items put on hold): each with its reason, what releases it and a Release
- * button, so a held item is never invisible until its condition fires.
+ * Watch list: the Needs-you items on hold, each with its reason, release condition and release
+ * control, so FLIGHT's waits are never invisible until their condition fires.
  */
-export function HeldNeeds() {
+export function WatchList() {
   const held = useResource<AttentionItem[]>(RESOURCES.heldAttention).data;
   const now = useSecond();
   const tz = useTz();
@@ -56,8 +56,8 @@ export function HeldNeeds() {
     }
   };
   return (
-    <section aria-label="Held" data-testid="held-needs">
-      <h3 className="pb">{`Held · ${held.length}`}</h3>
+    <section aria-label="Watch list" data-testid="held-needs">
+      <h3 className="pb">{`Watch list · ${held.length}`}</h3>
       {error && <p className="pb crit-t s">{error}</p>}
       {held.map((i) => (
         <div className="drow" key={i.key} data-testid="held-row">
