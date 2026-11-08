@@ -13,7 +13,6 @@ import {
   TOKEN_SOURCE_UNATTRIBUTED,
   type TokenCall,
   type TokenCounts,
-  type ToolUse,
 } from "@mc/core";
 import { type CcConfig, findHubRoot } from "./config.ts";
 import { crewDirPath, type Store } from "./store.ts";
@@ -81,7 +80,6 @@ export class TranscriptAuditor {
   private incoming: Incoming[] = [];
   private ownChars = 0;
   private reportCall: number | null = null;
-  private tools: Record<string, ToolUse> = {};
   private resultOutput: number | null = null;
 
   push(line: string): void {
@@ -137,12 +135,7 @@ export class TranscriptAuditor {
       if (b.type === "tool_use") {
         const name = typeof b.name === "string" ? b.name : "(unnamed)";
         const input = isObj(b.input) ? b.input : {};
-        const written = JSON.stringify(input).length;
-        this.ownChars += written;
-        const used = this.tools[name] ?? { calls: 0, written: 0, returned: 0 };
-        used.calls += 1;
-        used.written += written;
-        this.tools[name] = used;
+        this.ownChars += JSON.stringify(input).length;
         const useId = typeof b.id === "string" ? b.id : null;
         if (useId !== null) {
           const command =
@@ -187,8 +180,6 @@ export class TranscriptAuditor {
                   0,
                 )
               : 0;
-        const used = use === undefined ? undefined : this.tools[use.name];
-        if (used !== undefined) used.returned += chars;
         this.incoming.push({
           source: (use?.name ?? "(unknown tool)").replace("mcp__mc__", "mc "),
           command: use?.command ?? null,
@@ -271,7 +262,6 @@ export class TranscriptAuditor {
         readAfterReport,
         bySource,
         byCommand,
-        byTool: this.tools,
       },
     };
   }

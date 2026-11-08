@@ -497,12 +497,12 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
-    improvements: AUDIT_MEASURED_TOOLS.map((t) => ({
+    improvements: AUDIT_MEASURED_TOOLS.map((name) => ({
       kind: "tool-usage" as const,
-      subject: t.name,
+      subject: name,
       ticket: null,
       pr: null,
-      detail: `${t.name}: 0 calls in the last 24 hours, 0 characters written and 0 returned.`,
+      detail: `${name}: 0 calls and 0 characters in the last 24 hours.`,
       at: NOW,
       calls: 0,
       chars: 0,

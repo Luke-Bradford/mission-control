@@ -1,4 +1,4 @@
-import { MC_TOOLS } from "./mcp.ts";
+import { MC_TOOL_NAMES } from "./mcp.ts";
 import type { FindingCategory } from "./review.ts";
 import type { LoopKind } from "./runtime-model.ts";
 
@@ -84,12 +84,12 @@ export const AUDIT_THRESHOLD_DEFAULTS: Readonly<AuditThresholds> = Object.freeze
 export const AUDIT_TICKET_TEXT_FLOOR = 5_000;
 /** The tool rows cover this long before the end of the range. */
 export const AUDIT_TOOL_WINDOW_MS = 86_400_000;
-/** The tools the design measured, by their short name and the name in a transcript. */
+/** The tools the design measured, by the name the hub's `/mcp` endpoint serves. */
 export const AUDIT_MEASURED_TOOLS = [
-  { name: "report_findings", transcript: MC_TOOLS.reportFindings },
-  { name: "report_evidence", transcript: MC_TOOLS.reportEvidence },
-  { name: "read_ticket", transcript: MC_TOOLS.readTicket },
-  { name: "preview_browser", transcript: MC_TOOLS.previewBrowser },
+  MC_TOOL_NAMES.reportFindings,
+  MC_TOOL_NAMES.reportEvidence,
+  MC_TOOL_NAMES.readTicket,
+  MC_TOOL_NAMES.previewBrowser,
 ] as const;
 
 /** What a row in Audit's list of things to improve is about. */

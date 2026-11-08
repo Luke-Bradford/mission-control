@@ -18,7 +18,6 @@ import type {
   TokenCall,
   TokenCounts,
   TokenSourceAdd,
-  ToolUse,
 } from "@mc/core";
 import {
   type AccountId,
@@ -326,6 +325,12 @@ CREATE TABLE IF NOT EXISTS run_token_audit (
   output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
   read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL
 );
+-- Each finished mc tool call: when, which, and the characters sent and returned (Audit's tool rows).
+CREATE TABLE IF NOT EXISTS mcp_tool_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, run_id TEXT NOT NULL,
+  tool TEXT NOT NULL, written INTEGER NOT NULL, returned INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mcp_tool_calls_at ON mcp_tool_calls(at);
 CREATE TABLE IF NOT EXISTS run_token_calls (
   run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
   cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL,
@@ -2061,7 +2066,6 @@ export class Store {
     );
     this.addColumn("comms", "ref", "TEXT");
     this.addColumn("comms", "reply_to", "INTEGER");
-    this.addColumn("run_token_audit", "by_tool", "TEXT");
     this.addColumn("comms", "target_run_id", "TEXT");
     // The hub stamps a seat's message with the run that sent it and that run's newest open PR.
     this.addColumn("comms", "from_run_id", "TEXT");
@@ -2307,6 +2311,35 @@ export class Store {
     for (const s of sections) insert.run(runId, wake, s.section, s.bytes, s.tokens, at);
   }
 
+  /** Records one finished mc tool call. */
+  recordToolCall(c: {
+    at: number;
+    runId: string;
+    tool: string;
+    written: number;
+    returned: number;
+  }): void {
+    this.db
+      .prepare(
+        "INSERT INTO mcp_tool_calls (at, run_id, tool, written, returned) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(c.at, c.runId, c.tool, c.written, c.returned);
+  }
+
+  /** Calls and characters (sent plus returned) per mc tool, for calls made in `[from, to]`. */
+  toolUsage(from: number, to: number): Map<string, { calls: number; chars: number }> {
+    return new Map(
+      (
+        this.db
+          .prepare(
+            `SELECT tool, COUNT(*) AS calls, SUM(written + returned) AS chars FROM mcp_tool_calls
+             WHERE at >= ? AND at <= ? GROUP BY tool`,
+          )
+          .all(from, to) as { tool: string; calls: number; chars: number }[]
+      ).map((r) => [r.tool, { calls: r.calls, chars: r.chars }]),
+    );
+  }
+
   /** Stores a run's token audit and its calls; a run audited twice keeps the later read. */
   saveRunTokenAudit(
     runId: string,
@@ -2320,7 +2353,7 @@ export class Store {
         .prepare(
           `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
              cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command, by_tool) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             by_source, by_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           runId,
@@ -2336,7 +2369,6 @@ export class Store {
           audit.readAfterReport,
           JSON.stringify(audit.bySource),
           JSON.stringify(audit.byCommand),
-          JSON.stringify(audit.byTool ?? {}),
         );
       const insert = this.db.prepare(
         `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added)
@@ -2391,8 +2423,7 @@ export class Store {
         `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
            a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
            a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
-           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command,
-           a.by_tool AS a_by_tool
+           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command
          FROM run_token_audit a JOIN runs r ON r.id = a.run_id
          WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
       )
@@ -2411,9 +2442,6 @@ export class Store {
         readAfterReport: r.a_after as number | null,
         bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
         byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
-        ...(r.a_by_tool == null
-          ? {}
-          : { byTool: JSON.parse(r.a_by_tool as string) as Record<string, ToolUse> }),
       },
     }));
   }
@@ -3341,6 +3369,7 @@ export class Store {
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", AUDIT_RETENTION_DAYS],
       ["flight_decisions", `at < ? AND kind IN (${DECISION_KINDS_KEPT_SQL})`, AUDIT_RETENTION_DAYS],
       ["comms_repeats", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["mcp_tool_calls", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["question_choices", "chosen_at < ?", AUDIT_RETENTION_DAYS],
       // a question message and the replies to it outlive the 90-day message log
       ["comms", `at < ? AND (${COMMS_QUESTION_THREAD_SQL})`, AUDIT_RETENTION_DAYS],
@@ -4260,13 +4289,7 @@ export class Store {
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
       improvements: [
-        ...toolImprovements(
-          this.runTokenAudits(until - AUDIT_TOOL_WINDOW_MS).map((r) => ({
-            startedAt: r.run.startedAt,
-            audit: r.audit,
-          })),
-          until,
-        ),
+        ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
         ...messageImprovements(
           this.db,
           since,

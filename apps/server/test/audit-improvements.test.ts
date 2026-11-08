@@ -1,4 +1,4 @@
-import type { AuditImprovementKind, Run, RunTokenAudit } from "@mc/core";
+import type { AuditImprovementKind, Run } from "@mc/core";
 import { COMMS_CAPCOM, COMMS_CONTROLLER, COMMS_MC } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Store } from "../src/store.ts";
@@ -242,44 +242,75 @@ describe("ticket-message-volume", () => {
 });
 
 describe("tool-usage", () => {
-  const audit = (byTool: RunTokenAudit["byTool"]): RunTokenAudit => ({
-    calls: 1,
-    peakContext: 1,
-    medianContext: 1,
-    cacheRead: 0,
-    cacheWrite: 0,
-    output: 0,
-    rewrites: 0,
-    rewriteTokens: 0,
-    readAfterReport: null,
-    bySource: {},
-    byCommand: {},
-    byTool,
-  });
+  const call = (at: number, tool: string, written: number, returned: number) =>
+    store.recordToolCall({ at, runId: "r1", tool, written, returned });
   it("shows calls and characters of the four tools for the last 24 hours", () => {
-    store.upsertRun(run({ id: "new", startedAt: NOW - 2 * HOUR, seq: 1 }));
-    store.upsertRun(run({ id: "old", startedAt: NOW - 30 * HOUR, seq: 2 }));
-    store.saveRunTokenAudit(
-      "new",
-      NOW,
-      audit({
-        mcp__mc__report_findings: { calls: 2, written: 100, returned: 20 },
-        mcp__mc__read_ticket: { calls: 1, written: 5, returned: 400 },
-      }),
-      [],
-    );
-    store.saveRunTokenAudit(
-      "old",
-      NOW,
-      audit({ mcp__mc__report_findings: { calls: 9, written: 999, returned: 999 } }),
-      [],
-    );
-    const tools = rows("tool-usage");
-    expect(tools.map((r) => [r.subject, r.calls, r.chars])).toEqual([
-      ["report_findings", 2, 120],
+    call(NOW - 2 * HOUR, "report_findings", 100, 20);
+    call(NOW - HOUR, "report_findings", 10, 0);
+    call(NOW - 30 * HOUR, "report_findings", 999, 999);
+    call(NOW - 23 * HOUR, "read_ticket", 5, 400);
+    call(NOW - HOUR, "comms_send", 5, 5);
+    expect(rows("tool-usage").map((r) => [r.subject, r.calls, r.chars])).toEqual([
+      ["report_findings", 2, 130],
       ["report_evidence", 0, 0],
       ["read_ticket", 1, 405],
       ["preview_browser", 0, 0],
     ]);
+  });
+  it("counts a call by when it was made, not when its run began, and a run still open", () => {
+    store.upsertRun(run({ id: "r1", startedAt: NOW - 30 * HOUR, endedAt: null }));
+    call(NOW - HOUR, "preview_browser", 1, 9);
+    expect(rows("tool-usage").find((r) => r.subject === "preview_browser")).toMatchObject({
+      calls: 1,
+      chars: 10,
+    });
+  });
+});
+
+describe("range boundaries and links", () => {
+  it("counts a seat question that began before the range and was answered in it", () => {
+    store.upsertRun(run({ id: "r1", startedAt: SINCE - 10 * HOUR }));
+    raw(
+      "INSERT INTO seat_questions (agent_id, run_id, text, at, answered_at) VALUES ('guido-1','r1','q?',?,?)",
+      SINCE - HOUR,
+      SINCE + 2 * HOUR,
+    );
+    expect(rows("question-waited")).toMatchObject([{ ticket: "repo#7", at: SINCE + 2 * HOUR }]);
+  });
+  it("counts a controller request from before the range, closed in it, and one still open", () => {
+    msg({ at: SINCE - 3 * HOUR, to: COMMS_CONTROLLER });
+    msg({
+      at: SINCE + 2 * HOUR,
+      from: COMMS_CONTROLLER,
+      to: "guido-1",
+      senderKind: "controller",
+      replyTo: "comms:1",
+    });
+    msg({ at: SINCE - 2 * HOUR, to: COMMS_CONTROLLER, ticket: "repo#8" });
+    expect(rows("controller-request-waited").map((r) => [r.subject, r.ticket])).toEqual([
+      ["comms:1", "repo#7"],
+      ["comms:3", "repo#8"],
+    ]);
+  });
+  it("links an exact repeat through its run's ticket, and leaves out one with no link", () => {
+    store.upsertRun(run({ id: "r1" }));
+    const repeat = (over: object) => {
+      const row = {
+        at: NOW - HOUR,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: null,
+        text: "hello",
+        senderKind: "seat" as const,
+        ...over,
+      };
+      store.addComms(row, undefined, NOW - 2 * HOUR);
+      store.addComms({ ...row, at: NOW - HOUR + 1 }, undefined, NOW - 2 * HOUR);
+    };
+    repeat({ fromRunId: "r1", text: "linked" });
+    repeat({ text: "unlinked" });
+    expect(rows("repeat-message")).toMatchObject([{ subject: "comms:1", ticket: "repo#7" }]);
+    for (const r of store.audit(SINCE, NOW).improvements ?? [])
+      if (r.kind !== "tool-usage") expect(r.ticket !== null || r.pr !== null).toBe(true);
   });
 });

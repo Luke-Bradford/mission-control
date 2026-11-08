@@ -1420,6 +1420,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       seatMode: deps.seatMode ?? (() => "read-only"),
       ...(deps.seatGrants === undefined ? {} : { seatGrants: deps.seatGrants }),
       ...(deps.runGrants === undefined ? {} : { runGrants: deps.runGrants }),
+      onToolCall: (c) => store.recordToolCall({ ...c, at: now() }),
     });
   }
 

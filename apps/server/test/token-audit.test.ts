@@ -134,23 +134,6 @@ describe("auditTranscript", () => {
   });
 });
 
-describe("byTool", () => {
-  it("counts each tool's calls, characters written and characters returned", () => {
-    const input = { a: "x".repeat(20) };
-    const lines = [
-      assistant("m1", { input: 10, cw: 100, out: 1 }, [
-        toolUse("t1", "mcp__mc__read_ticket", input),
-        toolUse("t2", "mcp__mc__read_ticket", input),
-      ]),
-      toolResult("t1", "y".repeat(300)),
-      toolResult("t2", "z".repeat(100)),
-    ];
-    expect(auditTranscript(lines).audit.byTool).toEqual({
-      mcp__mc__read_ticket: { calls: 2, written: 2 * JSON.stringify(input).length, returned: 400 },
-    });
-  });
-});
-
 describe("commandClass", () => {
   it("is the first word, or pnpm and its script", () => {
     expect(commandClass("cd /x && git status")).toBe("git");
