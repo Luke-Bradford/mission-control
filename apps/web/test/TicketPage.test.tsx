@@ -350,3 +350,30 @@ it("a closed ticket exposes QA for a live closing PR before it reaches the local
     (await screen.findByRole("link", { name: "Open QA report · aaaaaaaa" })).getAttribute("href"),
   ).toBe(r.permalink);
 });
+
+describe("what was said about the ticket", () => {
+  const said = (id: string, from: string, label: string | null): TicketEvent => ({
+    key: `c-${id}`,
+    at: 9_000,
+    kind: "comms",
+    id,
+    from,
+    to: "flight-1",
+    label,
+    text: `text ${id}`,
+  });
+  it.each([
+    ["question", "inco-1", "question", "Question"],
+    ["handoff", "inco-1", "handoff", "Handoff"],
+    ["notice", "MC", null, "Notice"],
+    ["plain", "flight-1", null, "Message"],
+  ])("names a %s in the timeline", async (id, from, label, word) => {
+    stubFetch({
+      "/api/config": CONFIG,
+      [PATH]: { ...history(), timeline: [said(id, from, label)], prs: [], nextBefore: null },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const tl = await screen.findByRole("region", { name: "Timeline" });
+    expect(within(tl).getByText(word, { selector: ".pill" })).toBeTruthy();
+  });
+});

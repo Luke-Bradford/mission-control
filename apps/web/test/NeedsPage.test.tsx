@@ -1,7 +1,6 @@
 import { type AttentionItem, DEFAULT_AWAY } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Decisions } from "../src/comms/Decisions.tsx";
 import { Markdown, OpenLinks } from "../src/components/Markdown.tsx";
 import { hub } from "../src/data.ts";
 import { NeedsYouTab } from "../src/flight/NeedsYouTab.tsx";
@@ -527,24 +526,6 @@ function withBriefItem(original: string): AttentionItem {
 }
 
 describe("other surfaces", () => {
-  it("Comms decisions keep who, ticket, question and timing, and link to the page", () => {
-    render(
-      <Decisions
-        items={[
-          ask("decision:1", { kind: "decision", text: "Which cache?", defaultDueAt: NOW + 90_000 }),
-        ]}
-        rows={[crewRow()]}
-      />,
-    );
-    const region = screen.getByRole("region", { name: "Decisions" });
-    expect(within(region).getByText("Which cache?")).toBeTruthy();
-    expect(within(region).getByText("default in 1:30")).toBeTruthy();
-    expect(within(region).queryByRole("button")).toBeNull();
-    expect(
-      within(region).getByRole("link", { name: "Open in Needs you" }).getAttribute("href"),
-    ).toBe("/needs-you/decision%3A1");
-  });
-
   it("FLIGHT's Handling tab leads to Needs you", async () => {
     routes([]);
     render(<NeedsYouTab />);

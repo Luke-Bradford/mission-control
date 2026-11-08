@@ -4,7 +4,7 @@ import { isOperatorItem } from "../attention.ts";
 import { CommsGraph } from "../comms/CommsGraph.tsx";
 import { CommsNav } from "../comms/CommsNav.tsx";
 import { CommsConversation } from "../comms/Conversation.tsx";
-import { Decisions } from "../comms/Decisions.tsx";
+import { TicketsList } from "../comms/TicketsList.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
 import {
@@ -55,8 +55,8 @@ export function Comms({ item, view }: { item: string | null; view: CommsView }) 
       <h1 className="sr-only">Comms</h1>
       <div className="comms-grid">
         <div className="comms-left">
-          <Decisions items={items} rows={rows} />
           <CommsNav rows={rows} flightId={flightId} view={view} onNavigate={navigate} />
+          <TicketsList />
         </div>
         <CommsConversation
           view={view}

@@ -953,3 +953,80 @@ a.comms-ref {
     grid-template-columns: 280px minmax(0, 1fr) 420px;
   }
 }
+
+/* Who sent a message: a tag, so a person and a machine never read alike. */
+.comms-sender-tag {
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s, 3px);
+  color: var(--text);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.comms-sender-tag[data-kind="operator"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.comms-sender-tag[data-kind="controller"],
+.comms-sender-tag[data-kind="hub"] {
+  color: var(--muted);
+}
+
+/* Tickets list: a search over one row per ticket; the number opens it, "Chat" filters the chat. */
+.comms-tickets {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-height: 0;
+}
+
+.comms-ticket-search {
+  width: 100%;
+  min-height: 28px;
+}
+
+.comms-ticket-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.comms-ticket-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.comms-ticket-open {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--sp-2);
+  align-items: baseline;
+  min-height: 28px;
+  padding: 0 var(--sp-1);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.comms-ticket-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.comms-ticket-open small {
+  color: var(--muted);
+}
+
+.comms-ticket-filter {
+  min-height: 24px;
+}

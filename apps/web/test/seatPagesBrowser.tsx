@@ -52,7 +52,7 @@ createRoot(root).render(
           </section>
           <section className="panel" data-surface="comms">
             <h2>Comms</h2>
-            <AgentNavRow row={row} view={{ kind: "crew" }} mentions={0} onNavigate={() => {}} />
+            <AgentNavRow row={row} view={{ kind: "crew" }} onNavigate={() => {}} />
           </section>
           <section id="page-map" className="map-page" data-surface="map" style={{ height: 560 }}>
             <CrewMapView snapshot={snapshot} indices={{ "GUIDO-1": index }} names={{}} work={{}} />

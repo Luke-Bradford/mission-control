@@ -40,6 +40,7 @@ import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
 import { type CommsView, ticketForRef } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
+import { SenderTag } from "./SenderTag.tsx";
 
 const NO_MESSAGES: CommsMessage[] = [];
 
@@ -373,6 +374,7 @@ function MessagePane({
             >
               <div className="comms-message-meta">
                 <span>{time(message.at)}</span>
+                <SenderTag message={message} />
                 <CommsEnd id={message.from} />
                 {message.label && (
                   <Pill tone={message.label === "blocker" ? "crit" : "neutral"}>

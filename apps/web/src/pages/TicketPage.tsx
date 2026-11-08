@@ -14,7 +14,7 @@ import {
   eventLine,
   findingsOf,
   findingWord,
-  KIND_WORD,
+  kindWord,
   mergeEvents,
   type PageEvent,
   prEvents,
@@ -37,7 +37,7 @@ function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null
   return (
     <li className="tk-event" data-kind={e.kind}>
       <span className="tk-when">{tz ? `${dayMonth(e.at, tz)} ${hhmm(e.at, tz)}` : dash}</span>
-      <Pill tone="plain">{KIND_WORD[e.kind]}</Pill>
+      <Pill tone="plain">{kindWord(e)}</Pill>
       <span className="tk-line">{eventLine(e)}</span>
       {(e.kind === "comms" || e.kind === "decision") && (
         <details className="tk-more">

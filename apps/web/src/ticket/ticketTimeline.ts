@@ -1,4 +1,4 @@
-import type { RunStatus, TicketEvent, TicketHistory } from "@mc/core";
+import { COMMS_MC, type RunStatus, type TicketEvent, type TicketHistory } from "@mc/core";
 import { shortSha } from "../fmt.ts";
 
 /** A PR opening or merging: the response has the PRs' times, the timeline has no entry for them. */
@@ -84,4 +84,13 @@ export function findingsOf(t: TicketHistory, reviewId: number) {
 export function findingWord(f: { resolution: string | null; state: "open" | "logged" }): string {
   if (f.resolution) return f.resolution.replace(/-/g, " ");
   return f.state === "logged" ? "logged in the PR" : "open";
+}
+
+/** The word an entry is shown under: a message is a question, a handoff or a hub notice when it is one. */
+export function kindWord(e: PageEvent): string {
+  if (e.kind !== "comms") return KIND_WORD[e.kind];
+  if (e.label === "question") return "Question";
+  if (e.label === "handoff") return "Handoff";
+  if (e.from === COMMS_MC) return "Notice";
+  return "Message";
 }
