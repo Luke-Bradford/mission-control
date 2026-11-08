@@ -2408,6 +2408,68 @@ export class Store {
     }));
   }
 
+  /** Context size of every stored model call of runs that started since `since`. */
+  runCallContexts(since: number): { runId: string; context: number }[] {
+    return this.db
+      .prepare(
+        `SELECT c.run_id AS runId, c.context AS context FROM run_token_calls c
+         JOIN runs r ON r.id = c.run_id WHERE r.started_at >= ?`,
+      )
+      .all(since) as { runId: string; context: number }[];
+  }
+
+  /** Review runs that started since `since` on a ticket, oldest first. */
+  reviewRunsSince(since: number): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM runs WHERE review_id IS NOT NULL AND ticket IS NOT NULL AND started_at >= ?
+           ORDER BY started_at, seq`,
+        )
+        .all(since) as Row[]
+    ).map(toRun);
+  }
+
+  /** PRs merged in `[from, to]`, and every run on a ticket one of them closed. */
+  mergedTicketRuns(from: number, to: number): { mergedPrs: number; runs: Run[] } {
+    const merged = this.db
+      .prepare("SELECT COUNT(*) AS n FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
+      .get(from, to) as { n: number };
+    const runs = (
+      this.db
+        .prepare(
+          `WITH merged_tickets AS (
+             SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
+             WHERE merged_at >= ? AND merged_at <= ?
+           ) SELECT r.* FROM runs r JOIN merged_tickets t ON r.repo_id = t.repo_id AND r.ticket = t.ticket
+           ORDER BY r.started_at, r.seq`,
+        )
+        .all(from, to) as Row[]
+    ).map(toRun);
+    return { mergedPrs: merged.n, runs };
+  }
+
+  /** For each prompt section recorded since `since`, the run that sent the most of it. */
+  promptSectionTopRuns(since: number): {
+    section: PromptSection;
+    runId: string;
+    agentId: string;
+    ticket: string | null;
+    tokens: number;
+  }[] {
+    return this.db
+      .prepare(
+        `SELECT section, runId, agentId, ticket, tokens FROM (
+           SELECT p.section AS section, p.run_id AS runId, r.agent_id AS agentId, r.ticket AS ticket,
+             SUM(p.tokens) AS tokens,
+             ROW_NUMBER() OVER (PARTITION BY p.section ORDER BY SUM(p.tokens) DESC, p.run_id) AS n
+           FROM prompt_sections p JOIN runs r ON r.id = p.run_id WHERE p.at >= ?
+           GROUP BY p.section, p.run_id)
+         WHERE n = 1`,
+      )
+      .all(since) as never;
+  }
+
   /** Prompt-section tokens by section for prompts recorded since `since`. */
   promptSectionTotals(since: number): { section: PromptSection; tokens: number }[] {
     return this.db
