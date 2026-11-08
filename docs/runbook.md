@@ -606,7 +606,8 @@ What each seat's process starts with:
   24-hour range.
 - **Hub notices.** Every message the hub writes itself is stored with sender kind `hub` and kind
   `notice`. A notice is never unread, and `?notices=hide` on `GET /api/comms/crew`,
-  `/api/comms/flight` and `/api/comms/agents/:id` leaves notices out of the page and its counts.
+  `/api/comms/flight` and `/api/comms/agents/:id` leaves notices out of the page, its counts and, on the agent route, the contact list (a contact
+  that only sent notices is dropped).
   The Comms copy of a CI failure is one line with a link, such as "CI failed on 341f108 in job
   web-core. https://github.com/o/mc/commit/<sha>/checks"; the seat still gets the whole log
   excerpt, with the failing test and its error.
