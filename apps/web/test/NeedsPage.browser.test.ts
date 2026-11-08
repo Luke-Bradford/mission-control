@@ -331,9 +331,8 @@ describeRendered("Needs you page", () => {
                 q.scrollHeight / Number.parseFloat(getComputedStyle(q).lineHeight),
               ),
               actionsInside:
-                (
-                  document.querySelector(".needs-actions") as HTMLElement
-                ).getBoundingClientRect().bottom <=
+                (document.querySelector(".needs-actions") as HTMLElement).getBoundingClientRect()
+                  .bottom <=
                 b.bottom + 1,
               bottom: b.bottom,
             };
@@ -343,7 +342,8 @@ describeRendered("Needs you page", () => {
           expect(open.questionLines, `${label}: the whole question shows`).toBe(open.fullLines);
           expect(open.actionsInside, `${label}: actions sit inside the band`).toBe(true);
           expect(open.bottom, `${label}: the open band leaves room below`).toBeLessThan(height / 2);
-          if (SHOTS) await page.screenshot(join(SHOTS, `needs-${width}x${height}-actions-open.png`));
+          if (SHOTS)
+            await page.screenshot(join(SHOTS, `needs-${width}x${height}-actions-open.png`));
         } finally {
           await page.close();
         }

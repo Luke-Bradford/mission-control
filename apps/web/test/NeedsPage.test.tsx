@@ -6,10 +6,10 @@ import { Markdown, OpenLinks } from "../src/components/Markdown.tsx";
 import { hub } from "../src/data.ts";
 import { NeedsYouTab } from "../src/flight/NeedsYouTab.tsx";
 import { openableHref } from "../src/links.ts";
+import { HoldItem } from "../src/needs/HoldItem.tsx";
 import { briefLinks, briefPictures, pictureRoute } from "../src/needs/pictures.ts";
 import { Comms } from "../src/pages/Comms.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
-import { HoldItem } from "../src/needs/HoldItem.tsx";
 import { navigate } from "../src/router.ts";
 import { Header } from "../src/shell/Header.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -248,7 +248,7 @@ describe("Needs you page", () => {
     ];
     routes([], { "/api/attention/answered": answered });
     render(<Needs item={null} />);
-    const answeredGroup = await screen.findByRole("group", { name: "Answered · 2" });
+    const answeredGroup = await screen.findByRole("region", { name: "Answered · 2" });
     expect(answeredGroup.querySelector("details")?.open).toBe(false);
     fireEvent.click(within(answeredGroup).getByText("Answered · 2"));
     expect(within(answeredGroup).getByText("Should the old ticket stay open?")).toBeTruthy();
@@ -618,18 +618,13 @@ const bodies = (fn: ReturnType<typeof stubFetch>, path: string) =>
 
 describe("actions on the page", () => {
   it("shows only offered Not now and Drop actions, and posts their matching routes", async () => {
-    const fn = routes(
-      [ask("q1", { offers: ["not-now", "drop"] }), ask("q2")],
-      {
-        "POST /api/attention/q1/not-now": { ok: true },
-        "POST /api/attention/q1/drop": { ok: true },
-      },
-    );
+    const fn = routes([ask("q1", { offers: ["not-now", "drop"] }), ask("q2")], {
+      "POST /api/attention/q1/not-now": { ok: true },
+      "POST /api/attention/q1/drop": { ok: true },
+    });
     const view = render(<Needs item="q1" />);
     fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
-    await waitFor(() =>
-      expect(bodies(fn, "/api/attention/q1/not-now")).toEqual([{}]),
-    );
+    await waitFor(() => expect(bodies(fn, "/api/attention/q1/not-now")).toEqual([{}]));
     fireEvent.click(screen.getByRole("button", { name: "Drop" }));
     await waitFor(() => expect(bodies(fn, "/api/attention/q1/drop")).toEqual([{}]));
     view.unmount();
@@ -650,7 +645,9 @@ describe("actions on the page", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
     expect((await screen.findByRole("alert")).textContent).toContain("The ticket has new work.");
     expect(screen.getByRole("button", { name: "Not now" })).toBeTruthy();
-    expect(within(screen.getByRole("navigation", { name: "Waiting on you" })).getByText("Question q1")).toBeTruthy();
+    expect(
+      within(screen.getByRole("navigation", { name: "Waiting on you" })).getByText("Question q1"),
+    ).toBeTruthy();
     expect(bodies(fn, "/api/attention/q1/not-now")).toEqual([{}]);
   });
 

@@ -64,7 +64,7 @@ function Answered({ items }: { items: readonly QuestionClosure[] }) {
   if (items.length === 0) return null;
   const title = `Answered · ${items.length}`;
   return (
-    <section className="needs-group" aria-label={title} role="group">
+    <section className="needs-group" aria-label={title}>
       <details>
         <summary className="needs-group-title">{title}</summary>
         {items.map((item) => (
