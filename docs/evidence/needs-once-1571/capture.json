@@ -1,0 +1,46 @@
+{
+  "head": "db30404915b088f013f732675c1f02115b8d070e",
+  "capturedAt": "2026-11-08T18:11:12.435Z",
+  "evidence": [
+    {
+      "route": "overview",
+      "colorScheme": "light",
+      "path": "/tmp/mc-evidence-1604/overview-light-1920x940.png",
+      "width": 1920,
+      "height": 940,
+      "scrollWidth": 1920,
+      "main": "Overview\nConnecting\nLast read 18:11\nCrew\n0 of 9 agents working\nCrew off\n· 9 seats\n· attention first ↓\nWORKING\nCHECKS\nLOCK WAIT\nREVIEW\nPause crew\nAdd agent\nState\nSeat\nWork\nStep\n−60m\n−30m\nnow\nTok 1h\nCtx\nOut\nHeld\n1h 30m\nFLIGHT\nhead agent · opus\nFree for work\n—\n0\n21%\n1h 30m\nWatching\n11m\nguido-1\nbackend dev · sonnet\n#1515 · PR #1613\n· Audit lists message problems and the costly report tools, each linked to its ticket\nCI on cf2fce3\nverify\n537\n20%\n14m\nReview\n47m\ninco-1\nfrontend dev · sonnet\n#1580 · PR #1615\n· The operator can always talk to FLIGHT (web): inputs never disable, each message shows sent, read and answered\nFindings sent · developer fixing · PR #1615 · #1580 The operator can always talk ",
+      "errors": []
+    },
+    {
+      "route": "board",
+      "colorScheme": "light",
+      "path": "/tmp/mc-evidence-1604/board-light-1920x940.png",
+      "width": 1920,
+      "height": 940,
+      "scrollWidth": 1920,
+      "main": "Board\nAll repos\nAll mine\nmission-control\nrepo:Luke-Bradford/mission-control is:issue\nCopy\nPriority\nAny\nP0\nP1\nP2\nBoard view\nHas an agent\nNeeds me\nDone 7d\nDone 14d\nDone 30d\nStandup brief\nWork board\nBacklog 20\nmission-control #1625\nP0\nS\nClear on every Needs-you item: one click removes it\narea:web\ntype:feature\nlane:home\nmission-control #1624\nP0\nM\nNeeds you shows the same FLIGHT thread beside each question\narea:web\ntype:feature\nlane:home\nmission-control #1621\nP0\nM\nOne FLIGHT thread on Comms and in the fly-out on every page, the same messages and words in both\narea:web\ntype:feature\nlane:home\nmission-control #1509\nP1\nL\nNeeds you counts only open questions, alerts get their own chip, and the list fi",
+      "errors": []
+    },
+    {
+      "route": "overview",
+      "colorScheme": "dark",
+      "path": "/tmp/mc-evidence-1604/overview-dark-1920x940.png",
+      "width": 1920,
+      "height": 940,
+      "scrollWidth": 1920,
+      "main": "Overview\nConnecting\nLast read 18:11\nCrew\n0 of 9 agents working\nCrew off\n· 9 seats\n· attention first ↓\nWORKING\nCHECKS\nLOCK WAIT\nREVIEW\nPause crew\nAdd agent\nState\nSeat\nWork\nStep\n−60m\n−30m\nnow\nTok 1h\nCtx\nOut\nHeld\n1h 30m\nFLIGHT\nhead agent · opus\nFree for work\n—\n0\n21%\n1h 30m\nWatching\n11m\nguido-1\nbackend dev · sonnet\n#1515 · PR #1613\n· Audit lists message problems and the costly report tools, each linked to its ticket\nCI on cf2fce3\nverify\n537\n20%\n14m\nReview\n47m\ninco-1\nfrontend dev · sonnet\n#1580 · PR #1615\n· The operator can always talk to FLIGHT (web): inputs never disable, each message shows sent, read and answered\nFindings sent · developer fixing · PR #1615 · #1580 The operator can always talk ",
+      "errors": []
+    },
+    {
+      "route": "board",
+      "colorScheme": "dark",
+      "path": "/tmp/mc-evidence-1604/board-dark-1920x940.png",
+      "width": 1920,
+      "height": 940,
+      "scrollWidth": 1920,
+      "main": "Board\nAll repos\nAll mine\nmission-control\nrepo:Luke-Bradford/mission-control is:issue\nCopy\nPriority\nAny\nP0\nP1\nP2\nBoard view\nHas an agent\nNeeds me\nDone 7d\nDone 14d\nDone 30d\nStandup brief\nWork board\nBacklog 20\nmission-control #1625\nP0\nS\nClear on every Needs-you item: one click removes it\narea:web\ntype:feature\nlane:home\nmission-control #1624\nP0\nM\nNeeds you shows the same FLIGHT thread beside each question\narea:web\ntype:feature\nlane:home\nmission-control #1621\nP0\nM\nOne FLIGHT thread on Comms and in the fly-out on every page, the same messages and words in both\narea:web\ntype:feature\nlane:home\nmission-control #1509\nP1\nL\nNeeds you counts only open questions, alerts get their own chip, and the list fi",
+      "errors": []
+    }
+  ]
+}
