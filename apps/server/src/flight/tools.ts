@@ -3648,8 +3648,35 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   const ResumeSeatArgs = z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg });
+  const MoveReviewArgs = z.strictObject({
+    reviewId: z.number().int().positive(),
+    seat: z.string().regex(SEAT_ID),
+    basis: basisArg,
+  });
+  const P0_TICKET_BASIS = /(?:\bP0\b.*\b[^\s#]+#[1-9]\d*\b|\b[^\s#]+#[1-9]\d*\b.*\bP0\b)/;
 
   const superTools = [
+    superTool(
+      MC_TOOL_NAMES.moveReview,
+      "Move one queued review to a named review seat. The target account must not be at its usage stop. A budget-brake pass needs a basis that names a P0 ticket; the basis is recorded. The queued review keeps its head, round and review model rule.",
+      MoveReviewArgs,
+      "status",
+      async (a) => {
+        const review = store.review(a.reviewId);
+        if (review === null) return fail("Queued review not found.");
+        if (review.state !== "queued") return fail("Review is no longer queued.");
+        const target = seatCfg(a.seat);
+        if (target === undefined) return fail(notInSessionText(a.seat));
+        if (seatDef(target).loop !== "review") return fail(`${seatCallSign(a.seat)} is not a review seat.`);
+        const at = now();
+        if (accountAtStop(config, store, target.accountId, at))
+          return fail(accountStoppedText(seatCallSign(a.seat), target.accountId));
+        if (budgetBrake(config, store, target.accountId, at) !== null && !P0_TICKET_BASIS.test(a.basis))
+          return fail("The target account's budget brake needs a basis that names a P0 ticket.");
+        if (!store.moveQueuedReview(review.id, target.id, at)) return fail("Review is no longer queued.");
+        return { text: `Moved queued review ${review.id} to ${seatCallSign(target.id)}.` };
+      },
+    ),
     superTool(
       MC_TOOL_NAMES.resumeSeat,
       "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). A stop can be lifted; a crew-pause exception applies only to this unfinished run, including a live session that is paused. The original pause keeps covering other work. A failed resume removes its own exception and restores the stop unless the operator changed it. Refuses budget, account, Away-quota, machine-capacity and held runs.",

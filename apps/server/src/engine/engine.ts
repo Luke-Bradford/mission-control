@@ -2607,7 +2607,7 @@ export function createEngine(deps: EngineDeps): Engine {
     // next pass requests it again for the current one
     for (const row of store.reviewsIn(["queued"])) {
       const author = store.run(row.authorRunId);
-      if (author === null || row.seatId === reviewerFor(author)?.id) continue;
+      if (author === null || store.reviewMoved(row.id) || row.seatId === reviewerFor(author)?.id) continue;
       const at = now();
       if (store.setReviewState(row.id, ["queued"], "superseded", { at })) {
         store.addLoopEvent(

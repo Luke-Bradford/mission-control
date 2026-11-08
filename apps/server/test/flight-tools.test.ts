@@ -743,6 +743,110 @@ const named = (name: string): McTool => {
 };
 const call = (name: string, a: Record<string, unknown>, c = ctx()) => named(name).call(c, a);
 
+describe("move_review", () => {
+  const queuedReview = () => {
+    engineOn = true;
+    cfg.accounts.push({ id: "codex-main", vendor: "codex", alertAt: 80, stopAt: 95 });
+    need(cfg.crew?.sessions[0]).seats.push(
+      seat("retro-cx", "RETRO", { accountId: "codex-main", mode: "scratch" }),
+    );
+    const id = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 3,
+      attempt: 2,
+      round: 2,
+      at: NOW,
+    });
+    if (id === null) throw new Error("review was not queued");
+    return id;
+  };
+
+  it("moves one queued review to the named review seat and records its basis", async () => {
+    const id = queuedReview();
+
+    const result = await call("move_review", {
+      reviewId: id,
+      seat: "retro-cx",
+      basis: "mc#7 P0 must not wait for the stopped reviewer",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(store.review(id)).toMatchObject({
+      seatId: "retro-cx",
+      sha: SHA,
+      epoch: 3,
+      attempt: 2,
+      round: 2,
+    });
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        about: "move_review",
+        basis: "mc#7 P0 must not wait for the stopped reviewer",
+      }),
+    ]);
+  });
+
+  it("refuses a target review seat whose account is at its usage stop", async () => {
+    const id = queuedReview();
+    store.addUsage({
+      accountId: "codex-main",
+      window: "7d",
+      at: NOW,
+      pct: 100,
+      resetAt: NOW + 60_000,
+      source: "test",
+    });
+
+    const result = await call("move_review", {
+      reviewId: id,
+      seat: "retro-cx",
+      basis: "mc#7 P0 must not wait for the stopped reviewer",
+    });
+
+    expect(result).toEqual({
+      text: "Not started: RETRO-CX's account codex-main is at its usage stop.",
+      isError: true,
+    });
+    expect(store.review(id)?.seatId).toBe("retro-1");
+  });
+
+  it("passes a target budget brake only with a basis that names a P0 ticket", async () => {
+    const id = queuedReview();
+    for (const [at, pct] of [
+      [NOW - 6 * 60 * 60_000, 40],
+      [NOW, 60],
+    ] as const)
+      store.addUsage({
+        accountId: "codex-main",
+        window: "7d",
+        at,
+        pct,
+        resetAt: NOW + 24 * 60 * 60_000,
+        source: "test",
+      });
+
+    expect(
+      (await call("move_review", {
+        reviewId: id,
+        seat: "retro-cx",
+        basis: "priority work needs a reviewer",
+      })).isError,
+    ).toBe(true);
+    expect(
+      (await call("move_review", {
+        reviewId: id,
+        seat: "retro-cx",
+        basis: "mc#7 P0 must not wait for the stopped reviewer",
+      })).isError,
+    ).toBeUndefined();
+    expect(store.review(id)?.seatId).toBe("retro-cx");
+  });
+});
+
 describe("resume_seat", () => {
   it("does not report a stopped seat's held run as resumed when resumeRun is a no-op", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
