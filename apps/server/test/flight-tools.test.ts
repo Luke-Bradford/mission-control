@@ -11,6 +11,7 @@ import {
   askerRunEndedText,
   type BoardItem,
   BRIEF_CLEARED_DECISION,
+  BRIEF_ENTRY_REFUSED,
   BRIEF_INPUT_MAX,
   BRIEFED_TEXT,
   blockedNoteKey,
@@ -5235,6 +5236,19 @@ describe("brief_item", () => {
     });
     expect(seen).toEqual(["attention", "flight"]);
     expect(decisions()).toEqual([]);
+  });
+
+  it("refuses a question that names a configured seat", async () => {
+    const got = await call(
+      "brief_item",
+      B({
+        ask: "Should guido-1 carry on with the sweep?",
+        context: "The seat is parked and waits.",
+      }),
+    );
+    expect(got.isError).toBe(true);
+    expect(got.text.startsWith(BRIEF_ENTRY_REFUSED)).toBe(true);
+    expect(got.text).toContain("the question has a seat id");
   });
 
   it("stores structured evidence and recommends an option by stable identity", async () => {

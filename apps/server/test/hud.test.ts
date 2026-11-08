@@ -2226,6 +2226,61 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     });
   });
 
+  it("passes the configured seat ids to the Needs you entry check", () => {
+    const base = withCrew();
+    const session = base.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const c: CcConfig = {
+      ...base,
+      crew: {
+        ...base.crew,
+        worktrees: join(dir, "crew-wt"),
+        maxSeats: 4,
+        sessions: [
+          {
+            ...session,
+            seats: [
+              ...session.seats,
+              { id: "FLIGHT-1", role: "FLIGHT", accountId: "claude-main", model: "opus", area: [] },
+            ],
+          },
+        ],
+      },
+    };
+    store.upsertRun(run({ id: "f1", agentId: "FLIGHT-1", repoId: "shop-app" }));
+    store.upsertRun(
+      run({ id: "c1", agentId: "GUIDO-1", repoId: "shop-app", ticket: "shop-app#5" }),
+    );
+    store.setSeatSession({
+      seatId: "FLIGHT-1",
+      runId: "f1",
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    const id = store.addQuestion({
+      agentId: "GUIDO-1",
+      runId: "c1",
+      text: "Lanes?",
+      at: NOW - 5 * MIN,
+    });
+    store.addBrief({
+      key: `ask:${id}`,
+      context: "A seat needs a product call from you before it can carry on.",
+      ask: "Should GUIDO-1 carry on?",
+      recommendation: "Yes.",
+      options: TWO_OPTIONS,
+      basis: "product direction",
+      at: NOW,
+      for: "operator",
+    });
+    const item = attentionItems(c, store, NOW).find((i) => i.key === `ask:${id}`);
+    expect(item?.owner).toBe("flight");
+    expect(item?.returned).toContain("the question has a seat id: say it in words");
+  });
+
   it("FLIGHT triages questions from every session", () => {
     const base = withCrew();
     const session = base.crew?.sessions[0];
