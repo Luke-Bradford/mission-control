@@ -18,6 +18,7 @@ import type {
   TokenCall,
   TokenCounts,
   TokenSourceAdd,
+  ToolUse,
 } from "@mc/core";
 import {
   type AccountId,
@@ -30,12 +31,14 @@ import {
   AUDIT_PR_OUTLIER_LINES,
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
+  AUDIT_TOOL_WINDOW_MS,
   type AuditChange,
   type AuditItem,
   type AuditMetrics,
   type AuditOveruseFacts,
   type AuditPrSize,
   type AuditRunKind,
+  type AuditThresholds,
   type AuditTokenOveruse,
   type AuditView,
   auditTier,
@@ -160,6 +163,7 @@ import {
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
+import { auditThresholds, messageImprovements, toolImprovements } from "./audit-improvements.ts";
 import { CodeHealthReadError } from "./code-health/error.ts";
 import {
   failGitFileSource,
@@ -2057,6 +2061,7 @@ export class Store {
     );
     this.addColumn("comms", "ref", "TEXT");
     this.addColumn("comms", "reply_to", "INTEGER");
+    this.addColumn("run_token_audit", "by_tool", "TEXT");
     this.addColumn("comms", "target_run_id", "TEXT");
     // The hub stamps a seat's message with the run that sent it and that run's newest open PR.
     this.addColumn("comms", "from_run_id", "TEXT");
@@ -2315,7 +2320,7 @@ export class Store {
         .prepare(
           `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
              cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             by_source, by_command, by_tool) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           runId,
@@ -2331,6 +2336,7 @@ export class Store {
           audit.readAfterReport,
           JSON.stringify(audit.bySource),
           JSON.stringify(audit.byCommand),
+          JSON.stringify(audit.byTool ?? {}),
         );
       const insert = this.db.prepare(
         `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added)
@@ -2385,7 +2391,8 @@ export class Store {
         `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
            a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
            a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
-           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command
+           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command,
+           a.by_tool AS a_by_tool
          FROM run_token_audit a JOIN runs r ON r.id = a.run_id
          WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
       )
@@ -2404,6 +2411,9 @@ export class Store {
         readAfterReport: r.a_after as number | null,
         bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
         byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
+        ...(r.a_by_tool == null
+          ? {}
+          : { byTool: JSON.parse(r.a_by_tool as string) as Record<string, ToolUse> }),
       },
     }));
   }
@@ -4118,6 +4128,7 @@ export class Store {
     since: number,
     until: number,
     kinds: ReadonlyMap<string, AuditRunKind> = new Map(),
+    thresholds?: Partial<AuditThresholds>,
   ): AuditView {
     const rows = (sql: string, ...args: SQLInputValue[]) =>
       this.db.prepare(sql).all(...args) as Row[];
@@ -4248,6 +4259,22 @@ export class Store {
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
+      improvements: [
+        ...toolImprovements(
+          this.runTokenAudits(until - AUDIT_TOOL_WINDOW_MS).map((r) => ({
+            startedAt: r.run.startedAt,
+            audit: r.audit,
+          })),
+          until,
+        ),
+        ...messageImprovements(
+          this.db,
+          since,
+          until,
+          auditThresholds(thresholds),
+          this.commsChatter(since, until),
+        ),
+      ],
       surgeonProposals: [],
     };
   }

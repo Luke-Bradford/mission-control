@@ -3939,7 +3939,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             a.kind === "loop" ? "observed" : seatDef(a.seat).loop,
           ]),
         );
-        return capAudit(store.audit(until - Number(match[1]) * 86_400_000, until, kinds));
+        return capAudit(
+          store.audit(
+            until - Number(match[1]) * 86_400_000,
+            until,
+            kinds,
+            config.audit?.thresholds,
+          ),
+        );
       });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
       api.get<{ Querystring: { days?: string } }>("/audit/tokens", async (req, reply) => {

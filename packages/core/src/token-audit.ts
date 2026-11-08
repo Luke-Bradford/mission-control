@@ -56,6 +56,15 @@ export interface RunTokenAudit {
   readAfterReport: number | null;
   bySource: Record<string, TokenCounts>;
   byCommand: Record<string, TokenCounts>;
+  /** Per tool (transcript name): calls, characters written (input) and returned (result). Absent on audits stored before it. */
+  byTool?: Record<string, ToolUse>;
+}
+
+/** One tool's use in a run: calls, and the characters sent to it and returned by it. */
+export interface ToolUse {
+  calls: number;
+  written: number;
+  returned: number;
 }
 
 export interface TokenAuditRole {

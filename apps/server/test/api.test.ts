@@ -1,4 +1,4 @@
-import { FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
+import { AUDIT_MEASURED_TOOLS, FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -497,6 +497,16 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
+    improvements: AUDIT_MEASURED_TOOLS.map((t) => ({
+      kind: "tool-usage" as const,
+      subject: t.name,
+      ticket: null,
+      pr: null,
+      detail: `${t.name}: 0 calls in the last 24 hours, 0 characters written and 0 returned.`,
+      at: NOW,
+      calls: 0,
+      chars: 0,
+    })),
     surgeonProposals: [],
   });
 
