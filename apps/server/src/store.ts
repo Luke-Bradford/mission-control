@@ -5434,8 +5434,9 @@ export class Store {
     let moved = false;
     this.transaction(() => {
       moved =
-        this.db.prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'").run(seatId, id)
-          .changes === 1;
+        this.db
+          .prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'")
+          .run(seatId, id).changes === 1;
       if (moved)
         this.db
           .prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)")

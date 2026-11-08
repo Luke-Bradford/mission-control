@@ -830,18 +830,22 @@ describe("move_review", () => {
       });
 
     expect(
-      (await call("move_review", {
-        reviewId: id,
-        seat: "retro-cx",
-        basis: "priority work needs a reviewer",
-      })).isError,
+      (
+        await call("move_review", {
+          reviewId: id,
+          seat: "retro-cx",
+          basis: "priority work needs a reviewer",
+        })
+      ).isError,
     ).toBe(true);
     expect(
-      (await call("move_review", {
-        reviewId: id,
-        seat: "retro-cx",
-        basis: "mc#7 P0 must not wait for the stopped reviewer",
-      })).isError,
+      (
+        await call("move_review", {
+          reviewId: id,
+          seat: "retro-cx",
+          basis: "mc#7 P0 must not wait for the stopped reviewer",
+        })
+      ).isError,
     ).toBeUndefined();
     expect(store.review(id)?.seatId).toBe("retro-cx");
   });
