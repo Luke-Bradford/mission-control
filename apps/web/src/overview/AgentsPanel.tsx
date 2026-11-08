@@ -112,7 +112,7 @@ const OPEN_RUN_LINE = "Run open, not in a turn";
 function PausedBy({ by, url }: { by: string; url: string | null }) {
   return (
     <>
-      Paused by{" "}
+      <span className="pause-label">Paused by</span>{" "}
       <span className="rref">
         {url ? (
           <ExternalLink url={url} label={`${by} on GitHub`}>
@@ -189,11 +189,11 @@ function WorkCell({
       <span role="cell" className="ellip s ticket-cell work-cell muted">
         {row?.pausedBy ? (
           <span
-            className="ellip"
+            className="ellip pause-line"
             title={`Paused by ${row.pausedBy}${refs ? ` · last ${refs}` : ""}`}
           >
             <PausedBy by={row.pausedBy} url={row.pausedByUrl ?? null} />
-            {refs && ` · last ${refs}`}
+            {refs && <span className="pause-last">{` · last ${refs}`}</span>}
           </span>
         ) : (
           refs && <span className="ellip">last {refs}</span>
