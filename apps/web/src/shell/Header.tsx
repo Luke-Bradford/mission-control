@@ -303,7 +303,7 @@ function NeedsTab({ on }: { on: boolean }) {
       ) : (
         <Lamp kind="off" label="nothing needs you" title={false} />
       )}
-      Needs you <b>{shown}</b>
+      Needs you <b data-metric="needsYou">{shown}</b>
     </a>
   );
 }
