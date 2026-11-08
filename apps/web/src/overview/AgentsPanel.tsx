@@ -116,10 +116,10 @@ function PausedBy({ by, url }: { by: string; url: string | null }) {
       <span className="rref">
         {url ? (
           <ExternalLink url={url} label={`${by} on GitHub`}>
-            <span className="pause-ref">{by}</span>
+            {by}
           </ExternalLink>
         ) : (
-          <span className="pause-ref">{by}</span>
+          by
         )}
       </span>
     </>

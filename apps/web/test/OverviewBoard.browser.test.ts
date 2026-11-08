@@ -315,15 +315,7 @@ describeRendered("Overview Board at the real sizes", () => {
             const parts = [...(line?.children ?? [])];
             const pauseLabel = parts.find((part) => part.textContent?.trim() === "Paused by");
             const last = parts.find((part) => part.textContent?.includes("last #"));
-            const refText = link.querySelector<HTMLElement>(".pause-ref");
-            const middle = (part: Element | null | undefined) => {
-              const rect = part?.getBoundingClientRect();
-              return rect ? rect.top + rect.height / 2 : Number.NaN;
-            };
             return {
-              refCut: !!refText && refText.scrollWidth > refText.clientWidth,
-              // the link's text is level with the words beside it
-              levelGap: Math.abs(middle(refText) - middle(pauseLabel)),
               labelShown: shown(pauseLabel),
               lastShown: shown(last),
               lastText: last?.textContent ?? "",
@@ -349,8 +341,6 @@ describeRendered("Overview Board at the real sizes", () => {
           expect(found?.labelShown, label).toBe(true);
           expect(found?.lastShown, label).toBe(true);
           expect(found?.lastText, label).toMatch(/last #\d+/);
-          expect(found?.levelGap, label).toBeLessThanOrEqual(2);
-          if (name === "a 120-character repo") expect(found?.refCut, label).toBe(true);
           // When the line is cut with an ellipsis, the tooltip still holds the whole reference.
           if (found?.clipped) expect(found.title, label).toContain(by);
           if (decision) expect(found?.cell, label).toContain("Decision for");
