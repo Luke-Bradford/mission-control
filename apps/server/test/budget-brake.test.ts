@@ -57,6 +57,25 @@ describe("budgetBrake", () => {
     );
   });
 
+  it("never brakes an account set brake: false, whatever its projection", () => {
+    week(ACCOUNT, 40, 60);
+    const off = {
+      ...config,
+      accounts: config.accounts.map((a) => (a.id === ACCOUNT ? { ...a, brake: false } : a)),
+    } as CcConfig;
+    week("claude-quiet", 40, 60);
+    expect(syncBudgetBrake(config, store, NOW)).toBe(true);
+    expect(store.notes().some((n) => n.key === BUDGET_BRAKE_KEY)).toBe(true);
+    expect(budgetBrake(off, store, ACCOUNT, NOW)).toBeNull();
+    expect(budgetBrake(off, store, "claude-quiet", NOW)).not.toBeNull();
+    const allOff = {
+      ...config,
+      accounts: config.accounts.map((a) => ({ ...a, brake: false })),
+    } as CcConfig;
+    expect(syncBudgetBrake(allOff, store, NOW)).toBe(true);
+    expect(store.notes().some((n) => n.key === BUDGET_BRAKE_KEY)).toBe(false);
+  });
+
   it("lifts when the projection falls back under 100%", () => {
     week(ACCOUNT, 40, 60);
     expect(budgetBrake(config, store, ACCOUNT, NOW)).not.toBeNull();

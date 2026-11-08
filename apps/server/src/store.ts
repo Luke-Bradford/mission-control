@@ -48,12 +48,14 @@ import {
   COMMS_CAPCOM,
   COMMS_CHATTER_ROUNDS,
   COMMS_CHATTER_WINDOW_MS,
+  COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
   COMMS_TEXT_MAX,
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
+  type CommsSenderKind,
   classifyOveruse,
   commsCutMarker,
   type DefectRefs,
@@ -761,6 +763,11 @@ export interface SeatQuestion {
   at: number;
   /** When FLIGHT passed it to the operator, else null. */
   passedAt: number | null;
+  /**
+   * When the operator set it aside with Not now (#1534), else null. It stays open and answerable
+   * on the Ticket page, but it is not in Needs you and the end of its run does not close it.
+   */
+  asideAt: number | null;
 }
 
 /** An mc tool failure the operator is told of. */
@@ -950,6 +957,7 @@ export interface CommsRow {
   ref: string | null;
   replyTo: string | null;
   mentions: string[];
+  senderKind: CommsSenderKind | null;
 }
 /** A slice of stored Comms: the crew channel, one pair, everything a seat sent or got, or its inbox. */
 export type CommsReadScope =
@@ -972,6 +980,11 @@ export interface NewCommsRow {
   /** The number of the sender's newest open PR, stamped by the hub. */
   pr?: number | null;
   mentions?: readonly string[];
+  /**
+   * Who sent it. The hub sets it from how the request was made, never from the text. Every send in
+   * apps/server/src names it (comms-sender-kind.test.ts scans for that); only fixtures omit it.
+   */
+  senderKind?: CommsSenderKind;
 }
 
 /** A FLIGHT settlement of a stale Comms question or blocker. */
@@ -1272,6 +1285,7 @@ const toQuestion = (r: Row): SeatQuestion => ({
   text: r.text as string,
   at: r.at as number,
   passedAt: r.passed_at as number | null,
+  asideAt: (r.aside_at as number | null | undefined) ?? null,
 });
 
 const seatRow = (r: Row): SeatSessionRow => ({
@@ -1466,7 +1480,8 @@ export class Store {
           this.insertComms(
             {
               at,
-              from: COMMS_CAPCOM,
+              from: COMMS_MC,
+              senderKind: "hub",
               to: flightId,
               ticket: null,
               text: `Accepted code-health recommendation ${id} in ${repoId}. Read code_health with tab overview and recommendation ${id}, then use the existing authorised create_ticket path with recommendationId. Owner ${request.change.owner}; metric review ${new Date(request.change.reviewAt).toISOString()}. No code or rule change is approved by this action.`,
@@ -1933,6 +1948,8 @@ export class Store {
     this.addColumn("board_items", "project_id", "TEXT");
     // When FLIGHT passed the question to the operator (it stays open until they answer).
     this.addColumn("seat_questions", "passed_at", "INTEGER");
+    // When the operator set the question aside with Not now; it stays open, out of Needs you.
+    this.addColumn("seat_questions", "aside_at", "INTEGER");
     // When the operator dismissed the note from Needs you; a re-raised note is shown again.
     this.addColumn("attention_notes", "dismissed_at", "INTEGER");
     // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
@@ -2018,6 +2035,8 @@ export class Store {
     this.addColumn("comms", "pr", "INTEGER");
     // Set when waking the recipient failed, so an identical retry wakes them instead of being skipped.
     this.addColumn("comms", "wake_failed_at", "INTEGER");
+    // Who sent it, set by the hub; NULL on rows stored before this column.
+    this.addColumn("comms", "sender_kind", "TEXT");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
@@ -6156,6 +6175,7 @@ export class Store {
       row.from === COMMS_CAPCOM ||
       row.from === COMMS_CREW ||
       row.from === COMMS_MC ||
+      row.from === COMMS_CONTROLLER ||
       row.from === row.to
     )
       return;
@@ -6176,9 +6196,14 @@ export class Store {
   }
 
   private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
+    // The sender's name must match its kind: CAPCOM is only ever the operator, and the hub is MC.
+    if (row.from === COMMS_CAPCOM && row.senderKind !== undefined && row.senderKind !== "operator")
+      throw new Error("Only the operator sends as CAPCOM.");
+    if (row.senderKind === "hub" && row.from !== COMMS_MC)
+      throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -6192,6 +6217,7 @@ export class Store {
         row.targetRunId ?? null,
         row.fromRunId ?? null,
         row.pr ?? null,
+        row.senderKind ?? null,
       );
     const id = Number(inserted.lastInsertRowid);
     const mention = this.db.prepare(
@@ -6218,6 +6244,7 @@ export class Store {
       ref: r.ref as string | null,
       replyTo: r.reply_to == null ? null : `comms:${r.reply_to}`,
       mentions,
+      senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
     };
   }
 
@@ -6848,10 +6875,10 @@ export class Store {
     sinceId: number,
     limit: number,
     textMax: number,
-  ): Pick<CommsRow, "id" | "at" | "from" | "to" | "label" | "ref" | "text">[] {
+  ): Pick<CommsRow, "id" | "at" | "from" | "to" | "label" | "ref" | "text" | "senderKind">[] {
     const rows = this.db
       .prepare(
-        `SELECT id, at, from_id, to_id, label, ref, substr(text, 1, ?) AS text FROM comms
+        `SELECT id, at, from_id, to_id, label, ref, sender_kind, substr(text, 1, ?) AS text FROM comms
          WHERE id > ? ORDER BY id DESC LIMIT ?`,
       )
       .all(textMax, sinceId, limit) as Row[];
@@ -6863,6 +6890,7 @@ export class Store {
       label: (r.label as CommsLabel | null) ?? null,
       ref: (r.ref as string | null) ?? null,
       text: r.text as string,
+      senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
     }));
   }
   markCommsScopeRead(scope: string, messageId: string): void {
@@ -6899,6 +6927,26 @@ export class Store {
          ORDER BY id`,
       )
       .all(from, to, since, to) as { id: number }[];
+    return rows.map((r) => String(r.id));
+  }
+  /**
+   * Ids of messages `from` sent `to` at or after `since` that `to` has read and not answered (no
+   * message from `to` carries `replyTo` naming it, `to` has not reacted to it, and it is not
+   * settled: the same closes an open Comms item), oldest first.
+   */
+  owedCommsFrom(from: string, to: string, since: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT c.id FROM comms c WHERE c.from_id = ? AND c.to_id = ? AND c.at >= ?
+           AND c.id IN (SELECT message_id FROM comms_inbox_reads WHERE seat_id = ?)
+           AND NOT EXISTS (SELECT 1 FROM comms r WHERE r.from_id = ? AND r.reply_to = c.id)
+           AND NOT EXISTS (
+             SELECT 1 FROM comms_reactions x WHERE x.message_id = c.id AND x.actor_id = c.to_id
+           )
+           AND NOT EXISTS (SELECT 1 FROM comms_settlements s WHERE s.message_id = c.id)
+         ORDER BY c.id`,
+      )
+      .all(from, to, since, to, to) as { id: number }[];
     return rows.map((r) => String(r.id));
   }
   markCommsInboxRead(seatId: string, messageIds: readonly string[]): void {
@@ -7918,7 +7966,7 @@ export class Store {
   }
 
   /** Records a seat's question; returns its id. */
-  addQuestion(q: Omit<SeatQuestion, "id" | "passedAt">): number {
+  addQuestion(q: Omit<SeatQuestion, "id" | "passedAt" | "asideAt">): number {
     const r = this.db
       .prepare("INSERT INTO seat_questions (agent_id, run_id, text, at) VALUES (?, ?, ?, ?)")
       .run(q.agentId, q.runId, q.text, q.at);
@@ -7959,10 +8007,22 @@ export class Store {
     }));
   }
 
-  /** Questions not yet answered, oldest first. */
+  /** Questions not yet answered and not set aside, oldest first: the ones that wait in Needs you. */
   openQuestions(): SeatQuestion[] {
     const rows = this.db
-      .prepare("SELECT * FROM seat_questions WHERE answered_at IS NULL ORDER BY id ASC")
+      .prepare(
+        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NULL ORDER BY id ASC",
+      )
+      .all() as Row[];
+    return rows.map(toQuestion);
+  }
+
+  /** Questions the operator set aside with Not now and nobody has answered, oldest first. */
+  asideQuestions(): SeatQuestion[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NOT NULL ORDER BY id ASC",
+      )
       .all() as Row[];
     return rows.map(toQuestion);
   }
@@ -7988,6 +8048,26 @@ export class Store {
       | Row
       | undefined;
     return r ? { ...toQuestion(r), answeredAt: r.answered_at as number | null } : null;
+  }
+
+  /** Sets an open question aside (Not now); true only when it was open and not yet set aside. */
+  setQuestionAside(id: number, at: number): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE seat_questions SET aside_at = ? WHERE id = ? AND answered_at IS NULL AND aside_at IS NULL",
+      )
+      .run(at, id);
+    return Number(r.changes) > 0;
+  }
+
+  /** Puts a set-aside question back in Needs you, for a Not now whose GitHub writes failed. */
+  clearQuestionAside(id: number): boolean {
+    const r = this.db
+      .prepare(
+        "UPDATE seat_questions SET aside_at = NULL WHERE id = ? AND answered_at IS NULL AND aside_at IS NOT NULL",
+      )
+      .run(id);
+    return Number(r.changes) > 0;
   }
 
   /** Marks an open question passed to the operator; true only when it was open and not yet passed. */
@@ -8136,7 +8216,10 @@ export class Store {
   private endQuestions(where: "run_id" | "agent_id", id: string, at: number): void {
     this.transaction(() => {
       const rows = this.db
-        .prepare(`SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL`)
+        // a question the operator set aside outlives its run: it is answered on the Ticket page
+        .prepare(
+          `SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL AND aside_at IS NULL`,
+        )
         .all(id) as Row[];
       for (const r of rows) {
         const q = toQuestion(r);

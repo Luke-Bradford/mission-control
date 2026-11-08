@@ -115,8 +115,8 @@ export const hubCodeHeldText = (held: HeldRange): string => {
   const beyond = heldPaths(held).length;
   const size = `${counted(held.commits.length, "change", "changes")} touching ${counted(held.paths.length, "file", "files")}, ${beyond} of them beyond the page and docs`;
   return held.unsafePaths !== undefined && held.unsafePaths.length > 0
-    ? `A new version of Mission Control is waiting for you: ${size}. One of the changes adds a shortcut to another file or folder, which automatic updating never applies. Check it, then run Update; nothing changes until you do.`
-    : `A new version of Mission Control is waiting for you: ${size}. Automatic updating leaves changes beyond the page and docs to you. Run Update when you are ready; nothing changes until you do.`;
+    ? `A new version of Mission Control is waiting for you: ${size}. One of the changes adds a shortcut to another file or folder, which automatic updating never applies. Check it, then run Update, or FLIGHT may run it for you once the crew is idle; nothing changes until you do.`
+    : `A new version of Mission Control is waiting for you: ${size}. Automatic updating leaves changes beyond the page and docs to you. Run Update when you are ready, or FLIGHT may run it for you once the crew is idle; nothing changes until you do.`;
 };
 /** Auto-Update's refusal when the checkout's HEAD is not on origin/main's history. */
 export const HUB_HEAD_OFF_MAIN =

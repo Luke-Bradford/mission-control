@@ -1,6 +1,7 @@
 import { statSync } from "node:fs";
 import { isDeepStrictEqual } from "node:util";
 import {
+  COMMS_MC,
   type CrewChanges,
   type LoopKind,
   type PendingSeatChange,
@@ -418,7 +419,8 @@ export function createCrewReloader(deps: {
           if (!supervisor.endRemovedAside?.(run.id)) continue;
           store.addComms({
             at,
-            from: "CAPCOM",
+            from: COMMS_MC,
+            senderKind: "hub",
             to: seatId,
             ticket: run.ticket,
             text: `Seat ${seatId} removed; ended set-aside run ${run.id}.`,

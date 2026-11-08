@@ -1078,6 +1078,11 @@ export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
 export const FLIGHT_SIGNALS_SETTING = "flight.signals";
 export const FLIGHT_LOOPS_SETTING = "flight.loops";
+/**
+ * The handover guard's cooldown, kept in the store so a hub restart does not lose it: when the hub
+ * starts FLIGHT again (`retryAt`) and when it last did (`restartedAt`), each a time or null.
+ */
+export const FLIGHT_GUARD_SETTING = "flight.guard";
 export const FLIGHT_MAIN_SETTING = "flight.main";
 export const FLIGHT_SIGNAL_KINDS = [
   "flaky_test",
@@ -1283,6 +1288,8 @@ export interface FlightWakeInputs {
   idle?: FlightIdleSeats;
   /** Ids of the operator's messages to FLIGHT that its inbox has not read; they wake it at once. */
   operator?: string[];
+  /** Ids of the operator's messages FLIGHT has read and not yet answered (a reply naming them); they stay in the wake until it does. */
+  owed?: string[];
   /** Moved PR pointers the digest leaves out because `prs` lists that PR: stamped read with `moved`. */
   movedCovered?: FlightMovedPointer[];
 }
@@ -1308,6 +1315,9 @@ export const idleLong = (idle: FlightIdleSeats | undefined): FlightIdleSeats["se
   idle?.seats.filter((x) => idlePeriod(x.ms) !== null) ?? [];
 
 /** The sentence FLIGHT is told when seats idle with tickets open: act, never wait on a person. */
+/** What the wake says on every wake while the operator's messages are owed an answer. */
+export const owedAsk = (ids: readonly string[]): string =>
+  `You owe the operator an answer to Comms message ${ids.join(", ")}: reply with mc comms_send { replyTo: "comms:<id>" }, or react to it with mc comms_react when it needs no answer. It stays owed until you do.`;
 export const IDLE_SEAT_ASK =
   "A free seat has stood idle while tickets are open. Do not report that you are waiting. Promote a ticket to Ready and start it, triage the tickets with no board status, or log with wait_on why none can start. A wait on a person is never the answer: go round it, take other work, or decide it yourself. Only money, direction, irreversible actions and security exceptions go to the operator, and those are parked with a brief while the seat takes the next ticket.";
 
@@ -1381,6 +1391,8 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 export const FLIGHT_BATCH_MS = 15 * 60_000;
 /** An operator message to FLIGHT unread this long after it was sent no longer wakes it. */
 export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
+/** An operator message FLIGHT read and has not answered stays owed this long. */
+export const FLIGHT_OWED_MS = 7 * 24 * 60 * 60_000;
 /** How many days back the cost and wait telemetry looks. */
 export const FLIGHT_COST_DAYS = 14;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
@@ -1395,8 +1407,22 @@ export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
 export const FLIGHT_CONTEXT_GROWTH_TOKENS = 50_000;
 /** Handovers (rotations) in an hour before the watch stops restarting FLIGHT and says why. */
 export const FLIGHT_ROTATIONS_MAX = 4;
-export const flightRotationLoopText = (n: number, startTokens: number | null): string =>
-  `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start.`;
+/** After the handover guard stops FLIGHT, the hub starts it again on its own this long after. */
+export const FLIGHT_GUARD_COOLDOWN_MS = 30 * 60_000;
+/**
+ * The guard's note. The first trip says when FLIGHT comes back on its own; a trip right after that
+ * restart stays stopped until the operator starts it.
+ */
+export const flightRotationLoopText = (
+  n: number,
+  startTokens: number | null,
+  again = false,
+): string =>
+  `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start. ${
+    again
+      ? "It has done this twice in a row, so it stays stopped until you start it. Your messages are kept and reach it when it starts."
+      : `The hub starts it again in ${FLIGHT_GUARD_COOLDOWN_MS / 60_000} minutes. Your messages are kept until then.`
+  }`;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
@@ -1555,7 +1581,8 @@ export function wakeLine(
     ? " Queued reviews with idle review seats are a fault (wait_on target `idle-reviewers`): name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
     : "";
   const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
+  const owed = s.wake?.owed?.length ? ` ${owedAsk(s.wake.owed)}` : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${owed}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

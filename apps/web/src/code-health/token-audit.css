@@ -1,0 +1,158 @@
+.ta {
+  display: grid;
+  gap: var(--sp-4);
+  min-width: 0;
+}
+.ta-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.ta-bar p {
+  margin: 0;
+  margin-right: auto;
+}
+.ta-strip {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--sp-3);
+}
+.ta-fig {
+  display: grid;
+  gap: var(--sp-1);
+  align-content: start;
+  padding: var(--sp-3);
+  border: 1px solid var(--line-2);
+  background: var(--surface-1, transparent);
+  min-width: 0;
+}
+.ta-fig strong {
+  font-size: var(--fs-title);
+  line-height: var(--lh-title);
+  overflow-wrap: anywhere;
+}
+.ta-label {
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  text-transform: uppercase;
+  color: var(--fg-2);
+}
+.ta-note {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+.ta-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.ta-col {
+  display: grid;
+  gap: var(--sp-4);
+  align-content: start;
+  min-width: 0;
+}
+@container (min-width: 1000px) {
+  .ta-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@container (min-width: 1700px) {
+  .ta-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+.ta-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ta-table th,
+.ta-table td {
+  padding: var(--sp-1) var(--sp-2);
+  height: var(--sp-6);
+  text-align: left;
+  font-weight: 400;
+  border-bottom: 1px solid var(--line-2);
+}
+.ta-table thead th {
+  color: var(--fg-2);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  text-transform: uppercase;
+}
+.ta-table th[scope="row"] {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ta-table .ta-n {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.ta-track {
+  display: block;
+  height: 8px;
+  min-width: 48px;
+  background: var(--surface-2);
+}
+.ta-track > span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+.ta-gap,
+.ta-flight {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+.ta-flight strong {
+  color: var(--fg-1, inherit);
+}
+.ta-missing {
+  list-style: none;
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+  display: grid;
+  gap: var(--sp-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ta-missing li {
+  display: grid;
+  gap: var(--sp-1);
+}
+.ta-missing span {
+  color: var(--fg-2);
+}
+.ta-fixed {
+  table-layout: fixed;
+}
+.ta-fixed thead th.ta-n {
+  white-space: normal;
+  vertical-align: bottom;
+}
+.ta-runs th:not(:first-child),
+.ta-runs td {
+  width: 13%;
+}
+.ta-runs th:first-child {
+  width: auto;
+  max-width: none;
+}
+.ta-run {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

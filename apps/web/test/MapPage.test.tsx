@@ -1,6 +1,7 @@
 import { type ConfigView, type MapSnapshot, mapSnapshotFixture } from "@mc/core";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { MapPage } from "../src/pages/MapPage.tsx";
 import { route, usePath } from "../src/router.ts";
 import { MAP_REPO_KEY } from "../src/storage.ts";
@@ -231,4 +232,20 @@ describe("Map page", () => {
     at("/map/sample");
     expect(await screen.findByText("Map snapshot unavailable. Retrying every 5 s.")).toBeTruthy();
   });
+});
+
+it("a tile prints only the real diff lines of a change, never the file's weight", () => {
+  const value: MapSnapshot = structuredClone(mapSnapshotFixture);
+  value.tree = [
+    { path: "src/a.ts", lines: 987_654 },
+    { path: "src/b.ts", lines: 987_654 },
+  ];
+  value.seats[0].scope = {
+    read: [],
+    modified: [{ file: "src/a.ts", add: 3, rem: 1, source: "diff" }],
+  };
+  const { container } = render(<CrewMapView snapshot={value} />);
+  const printed = [...container.querySelectorAll(".map-treemap-lines")].map((el) => el.textContent);
+  expect(printed).toEqual(["+3 −1"]);
+  expect(container.textContent).not.toContain("987");
 });

@@ -233,7 +233,14 @@ export async function closeSettledQuestions(d: {
       store.settleCommsItem(s.key.slice(COMMS_OPEN_PREFIX.length), COMMS_MC, closing.reason, now);
     if (s.seatId === null) continue;
     const text = questionClosedText(s.question, closing.reason);
-    store.addComms({ at: now, from: COMMS_MC, to: s.seatId, ticket: s.ticket, text });
+    store.addComms({
+      at: now,
+      from: COMMS_MC,
+      senderKind: "hub",
+      to: s.seatId,
+      ticket: s.ticket,
+      text,
+    });
     const live = s.runId !== null && store.run(s.runId)?.endedAt === null;
     if (live && d.deliver !== undefined) {
       try {
@@ -242,6 +249,26 @@ export async function closeSettledQuestions(d: {
         // the Comms line stands; the seat reads it on its next turn
       }
     }
+  }
+  // a question set aside with Not now ends with its ticket
+  for (const q of store.asideQuestions()) {
+    const ticket = store.run(q.runId)?.ticket ?? null;
+    const ref = ticket === null ? null : /^(.+)#(\d+)$/.exec(ticket);
+    if (ticket === null || ref === null) continue;
+    const card = store.board(ref[1] as string).find((b) => b.issueNumber === Number(ref[2]));
+    if (card?.closed !== true) continue;
+    const stored = store.closeQuestion({
+      key: `ask:${q.id}`,
+      askAt: q.at,
+      kind: "ticket-closed",
+      reason: ticketClosedReason(ticket),
+      by: "hub",
+      question: q.text,
+      ticket,
+      operator: true,
+      at: now,
+    });
+    if (stored) closed++;
   }
   return closed;
 }

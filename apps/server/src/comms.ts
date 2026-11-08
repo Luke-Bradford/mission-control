@@ -1,6 +1,7 @@
 import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
   COMMS_MESSAGE_MAX,
@@ -9,6 +10,7 @@ import {
   type CommsMessage,
   type CommsReaction,
   type CommsReactionKind,
+  type CommsSenderKind,
   type CommsSendInput,
   type CommsThreadMessage,
   commsCutMarker,
@@ -39,6 +41,8 @@ export interface CommsServiceDeps {
   /** Labelled direct or tagged delivery wakes a worker; reactions never use it. */
   notify?: (to: string, text: string, from: string) => void | Promise<void>;
   seatSender?: boolean;
+  /** Who is sending, set by the hub from how the request was made, never from the text. */
+  senderKind: CommsSenderKind;
   /** The sender's run ticket in `repo#n` form: the ticket of a message that names none. */
   senderTicket?: string;
   /** The sender's run and its newest open PR, which the hub stamps on the stored message. */
@@ -85,26 +89,32 @@ export async function sendComms(
   if (Array.from(input.text).length > COMMS_MESSAGE_MAX) throw new Error(commsTooLongText);
   const now = deps.now?.() ?? Date.now();
   let crew = deps.crew();
-  let members = new Set([...crew, COMMS_CAPCOM]);
+  let members = new Set([...crew, COMMS_CAPCOM, COMMS_CONTROLLER]);
   if (input.to !== COMMS_CREW && !members.has(input.to))
     throw new Error("Unknown Comms destination.");
-  if (!members.has(from)) throw new Error("Unknown Comms sender.");
+  if (!members.has(from) && !(deps.senderKind === "hub" && from === COMMS_MC))
+    throw new Error("Unknown Comms sender.");
   await validateCommsText(deps.knownSecrets, input.text);
   let replyFrom: string | undefined;
   let replyTicket: string | null | undefined;
   if (input.replyTo !== undefined) {
     const original = deps.store.commsMessage(input.replyTo);
     if (original === null) throw new Error("Unknown reply message.");
-    if (from !== COMMS_CAPCOM && !canReadComms(deps.store, from, original))
+    if (
+      from !== COMMS_CAPCOM &&
+      from !== COMMS_CONTROLLER &&
+      !canReadComms(deps.store, from, original)
+    )
       throw new Error("You cannot reply to that Comms message.");
     replyFrom = original.from;
     if (input.ref === undefined || input.ref === original.ref) replyTicket = original.ticket;
   }
   crew = deps.crew();
-  members = new Set([...crew, COMMS_CAPCOM]);
+  members = new Set([...crew, COMMS_CAPCOM, COMMS_CONTROLLER]);
   if (input.to !== COMMS_CREW && !members.has(input.to))
     throw new Error("Unknown Comms destination.");
-  if (!members.has(from)) throw new Error("Unknown Comms sender.");
+  if (!members.has(from) && !(deps.senderKind === "hub" && from === COMMS_MC))
+    throw new Error("Unknown Comms sender.");
   const mentions = new Set<string>();
   for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
     if (members.has(found[2])) mentions.add(found[2]);
@@ -118,6 +128,7 @@ export async function sendComms(
       {
         at: now,
         from,
+        senderKind: deps.senderKind,
         to: input.to,
         ticket: commsTicketForm(
           deps.ticket ??
@@ -257,6 +268,8 @@ export function reactComms(
   reaction: CommsReactionKind,
   reason: string | undefined,
   at: number,
+  /** The request came with the operator's credential (FLIGHT's operator tool): reach as the operator does. */
+  operatorLevel = false,
 ): CommsReaction {
   if (
     reaction === "cant" &&
@@ -267,13 +280,27 @@ export function reactComms(
     throw new Error("Only cant may include a reason.");
   const message = store.commsMessage(id);
   if (message === null) throw new Error("Unknown Comms message.");
-  if (actor !== COMMS_CAPCOM && !canReadComms(store, actor, message))
+  if (
+    !operatorLevel &&
+    actor !== COMMS_CAPCOM &&
+    actor !== COMMS_CONTROLLER &&
+    !canReadComms(store, actor, message)
+  )
     throw new Error("You cannot react to that Comms message.");
   const added = store.addCommsReaction(id, actor, reaction, reason, at);
   if (added === null) throw new Error("Unknown Comms message.");
-  if (actor === COMMS_CAPCOM && reaction === "done") {
-    store.settleCommsItem(id, COMMS_CAPCOM, "Marked done by the operator", at);
-    store.addHubEvent(`Comms ${id} marked done by the operator.`, at);
+  if (
+    (operatorLevel || actor === COMMS_CAPCOM || actor === COMMS_CONTROLLER) &&
+    reaction === "done"
+  ) {
+    const who =
+      actor === COMMS_CAPCOM
+        ? "the operator"
+        : actor === COMMS_CONTROLLER
+          ? "the controller"
+          : "FLIGHT";
+    store.settleCommsItem(id, actor, `Marked done by ${who}`, at);
+    store.addHubEvent(`Comms ${id} marked done by ${who}.`, at);
   }
   return added;
 }
