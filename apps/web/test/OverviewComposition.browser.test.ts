@@ -114,12 +114,14 @@ describeRendered("Overview composition", () => {
     60_000,
   );
 
-  it("a short window scrolls the grid, never the page, and reaches the log", async () => {
-    const page = await open("mixed", 1600, 520);
+  it("the shortest window that keeps the page fixed never scrolls the page and reaches the log", async () => {
+    // Below 560px high the page scrolls instead of the grid (hud.css), so 560 is the shortest
+    // window this guards. With the side column's minimums, the grid may or may not need to scroll.
+    const page = await open("mixed", 1600, 560);
     await settled(page);
     const m = await measure(page);
+    expect(m.pageScroll).toBeLessThanOrEqual(0);
     expect(m.pageScrollX).toBeLessThanOrEqual(0);
-    expect(m.gridScroll).toBeGreaterThan(0);
     expect(await page.reachable("#actP")).toEqual([true]);
   }, 60_000);
 
