@@ -3667,13 +3667,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (review.state !== "queued") return fail("Review is no longer queued.");
         const target = seatCfg(a.seat);
         if (target === undefined) return fail(notInSessionText(a.seat));
-        if (seatDef(target).loop !== "review") return fail(`${seatCallSign(a.seat)} is not a review seat.`);
+        if (seatDef(target).loop !== "review")
+          return fail(`${seatCallSign(a.seat)} is not a review seat.`);
         const at = now();
         if (accountAtStop(config, store, target.accountId, at))
           return fail(accountStoppedText(seatCallSign(a.seat), target.accountId));
-        if (budgetBrake(config, store, target.accountId, at) !== null && !P0_TICKET_BASIS.test(a.basis))
+        if (
+          budgetBrake(config, store, target.accountId, at) !== null &&
+          !P0_TICKET_BASIS.test(a.basis)
+        )
           return fail("The target account's budget brake needs a basis that names a P0 ticket.");
-        if (!store.moveQueuedReview(review.id, target.id, at)) return fail("Review is no longer queued.");
+        if (!store.moveQueuedReview(review.id, target.id, at))
+          return fail("Review is no longer queued.");
         return { text: `Moved queued review ${review.id} to ${seatCallSign(target.id)}.` };
       },
     ),
