@@ -119,7 +119,7 @@ it("keeps an ended budget run's operator-briefed Comms question visible", () => 
   store.addBrief({
     key,
     for: "operator",
-    ask: "May GUIDO proceed past the budget hold on its ticket?",
+    ask: "May the seat proceed past the budget hold on its ticket?",
     context: "The run is held and waits for your decision.",
     recommendation: "Keep held",
     options: [
