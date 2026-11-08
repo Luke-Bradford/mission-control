@@ -60,6 +60,11 @@ export interface CommsReaction {
 /** Who a stored message came from, set by the hub from how the request was made, never from the text. */
 export const COMMS_SENDER_KINDS = ["operator", "controller", "flight", "seat", "hub"] as const;
 export type CommsSenderKind = (typeof COMMS_SENDER_KINDS)[number];
+/** What a stored message is, beyond who sent it. A notice is a line the hub wrote about itself. */
+export const COMMS_NOTICE = "notice";
+export type CommsKind = typeof COMMS_NOTICE;
+/** `?notices=hide` on a Comms read leaves the notices out; any other value is refused. */
+export const COMMS_HIDE_NOTICES = "hide";
 export interface CommsMessage {
   id: string;
   at: number;
@@ -76,6 +81,8 @@ export interface CommsMessage {
   operator: boolean;
   /** Null on a message stored before senders were recorded. */
   senderKind?: CommsSenderKind | null;
+  /** `notice` on a line the hub wrote; null on any other message. A notice is never unread. */
+  kind?: CommsKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt?: number | null;
 }

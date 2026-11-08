@@ -598,6 +598,12 @@ What each seat's process starts with:
   evidence in `report_findings`, `report_plan` or `report_evidence`, then send Comms a short
   pointer. `GET /api/comms/metrics` reports each sender's p95 message length over the shared
   24-hour range.
+- **Hub notices.** Every message the hub writes itself is stored with sender kind `hub` and kind
+  `notice`. A notice is never unread, and `?notices=hide` on `GET /api/comms/crew`,
+  `/api/comms/flight` and `/api/comms/agents/:id` leaves notices out of the page and its counts.
+  The Comms copy of a CI failure is one line with a link, such as "CI failed on 341f108 in job
+  web-core. https://github.com/o/mc/commit/<sha>/checks"; the seat still gets the whole log
+  excerpt, with the failing test and its error.
 - **Push and draft PR, made by the engine.** The push sends the run's own branch
   (`feature/<issue>-…`, never the default branch or another live run's) as a plain fast-forward: no force, no lease, no tags. It sends only
   commits the commit tool recorded for that branch, none of them a merge or a root commit, and only

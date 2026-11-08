@@ -52,7 +52,9 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
+  COMMS_NOTICE,
   COMMS_TEXT_MAX,
+  type CommsKind,
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
@@ -967,6 +969,8 @@ export interface CommsRow {
   replyTo: string | null;
   mentions: string[];
   senderKind: CommsSenderKind | null;
+  /** `notice` for a line the hub wrote; null otherwise. */
+  kind: CommsKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt: number | null;
 }
@@ -1013,6 +1017,8 @@ export interface NewCommsRow {
    * apps/server/src names it (comms-sender-kind.test.ts scans for that); only fixtures omit it.
    */
   senderKind?: CommsSenderKind;
+  /** Defaults to `notice` for a hub message, so everything the hub writes is one. */
+  kind?: CommsKind | null;
 }
 
 /** A FLIGHT settlement of a stale Comms question or blocker. */
@@ -2067,6 +2073,8 @@ export class Store {
     this.addColumn("question_choices", "chosen_by", "TEXT");
     // Who sent it, set by the hub; NULL on rows stored before this column.
     this.addColumn("comms", "sender_kind", "TEXT");
+    // `notice` on a line the hub wrote; NULL on any other message.
+    this.addColumn("comms", "kind", "TEXT");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
@@ -6234,7 +6242,7 @@ export class Store {
       throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -6249,6 +6257,7 @@ export class Store {
         row.fromRunId ?? null,
         row.pr ?? null,
         row.senderKind ?? null,
+        row.kind ?? (row.senderKind === "hub" ? COMMS_NOTICE : null),
       );
     const id = Number(inserted.lastInsertRowid);
     const mention = this.db.prepare(
@@ -6277,6 +6286,7 @@ export class Store {
       mentions,
       deliveredAt: (r.delivered_at as number | null | undefined) ?? null,
       senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
+      kind: (r.kind as CommsKind | null) ?? null,
     };
   }
 
@@ -6646,8 +6656,9 @@ export class Store {
     limit: number,
     before?: string,
     recentSince?: number,
+    hideNotices = false,
   ): { rows: CommsRow[]; hasMore: boolean } {
-    const { where, args } = this.commsRecentScopeWhere(scope, recentSince);
+    const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
     const beforeId = before === undefined ? null : commsMessageNumber(before);
     const rows = (
       this.db
@@ -6666,18 +6677,24 @@ export class Store {
     scope: CommsReadScope,
     cursor: string | null,
     recentSince?: number,
+    hideNotices = false,
   ): { count: number; unread: number } {
-    const { where, args } = this.commsRecentScopeWhere(scope, recentSince);
+    const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
     const offset = cursor === null ? 0 : (commsMessageNumber(cursor) ?? 0);
+    // a notice is never unread, shown or not
     const r = this.db
       .prepare(
-        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ?), 0) AS unread FROM comms WHERE ${where}`,
+        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ? AND kind IS NOT ?), 0) AS unread
+         FROM comms WHERE ${where}`,
       )
-      .get(offset, ...args) as { count: number; unread: number };
+      .get(offset, COMMS_NOTICE, ...args) as { count: number; unread: number };
     return { count: r.count, unread: r.unread };
   }
-  private commsRecentScopeWhere(scope: CommsReadScope, since?: number) {
-    const base = this.commsScopeWhere(scope);
+  private commsRecentScopeWhere(scope: CommsReadScope, since?: number, hideNotices = false) {
+    const scoped = this.commsScopeWhere(scope);
+    const base = hideNotices
+      ? { where: `(${scoped.where}) AND kind IS NOT ?`, args: [...scoped.args, COMMS_NOTICE] }
+      : scoped;
     if (since === undefined) return base;
     return {
       where: `(${base.where}) AND at >= ? AND (
