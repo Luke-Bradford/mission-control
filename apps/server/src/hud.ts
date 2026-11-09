@@ -92,6 +92,7 @@ import {
   questionAskAt,
 } from "./attention-holds.ts";
 import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
+import { briefReadState, briefSourceRevision } from "./brief-source.ts";
 import { claudeVersion } from "./cli-version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
@@ -334,7 +335,7 @@ function reviewOf(
   prs?: readonly PullRequestView[],
 ): CrewRow["review"] {
   if (branch === null) return null;
-  const open = (prs ?? store.pullRequests(repoId))
+  const open = (prs ?? store.openPullRequests(repoId))
     .filter((p) => p.state === "open" && p.branch === branch)
     .sort((a, b) => b.number - a.number)[0];
   if (!open) return null;
@@ -619,7 +620,17 @@ function buildCrew(
   });
   const digestByRun = store.digests(latestRunIds);
   const contextWindows = store.digestContextWindows(allRuns.map((run) => run.id));
-  const pullRequests = store.pullRequestsForRepos(config.repos.map((repo) => repo.id));
+  const asideAll = store.asideRuns();
+  const referencedPrs = [...allRuns, ...asideAll].flatMap((run) =>
+    run.prs.flatMap((pr) => {
+      const repo = config.repos.find((repo) => repo.github.toLowerCase() === pr.repo.toLowerCase());
+      return repo ? [{ repoId: repo.id, number: pr.number }] : [];
+    }),
+  );
+  const pullRequests = store.openAndReferencedPullRequests(
+    config.repos.map((repo) => repo.id),
+    referencedPrs,
+  );
   for (const [repoId, rows] of pullRequests)
     prCache.set(repoId, new Map(rows.map((row) => [row.number, row])));
   const crewLoop = (run: Run, ticket: string | null): CrewLoop | null => {
@@ -644,7 +655,6 @@ function buildCrew(
     };
   };
   const eventIndex = summary ? null : runEventsIndex(store, now);
-  const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
   const queuedReviews = new Map<string, ReviewRow>();
   for (const review of reviewsInFlight) {
@@ -926,13 +936,13 @@ export function pinned(item: AttentionItem, store: Store, config: CcConfig): Att
         : null;
   const repoId = own !== null ? own[0] : (ref?.repoId ?? item.repoId);
   // a PR address in a repo this hub does not have maps to "": pin no PR rather than a guess
-  const prs = repoId ? store.pullRequests(repoId) : [];
-  const pr =
-    own !== null
-      ? prs.find((p) => p.number === own[1])
+  const pr = !repoId
+    ? undefined
+    : own !== null
+      ? (store.pullRequestLink(repoId, { number: own[1] }) ?? undefined)
       : ticket === null
         ? undefined
-        : prs.find((p) => p.ticket === ticket && p.state === "open");
+        : (store.pullRequestLink(repoId, { ticket }) ?? undefined);
   if (ticket === null && pr === undefined) return item;
   return {
     ...item,
@@ -1405,7 +1415,7 @@ function buildAttentionItems(
         .filter((b) => !b.closed)
         .map((b) => `${repo.id}#${b.issueNumber}`),
     );
-    for (const pr of store.pullRequests(repo.id)) {
+    for (const pr of store.openPullRequests(repo.id).sort((a, b) => b.number - a.number)) {
       if (pr.ticket === null || !onBoard.has(pr.ticket)) continue;
       const action = prYouAction(pr, working.has(pr.ticket), now);
       if (action === null) continue;
@@ -1515,7 +1525,17 @@ function buildAttentionItems(
         : { ...rest, owner: OWNER_FLIGHT, flightTriage: "down" };
     }
     // A new note is a new ask; a stored answer retires the old brief.
-    const brief = currentBrief(i);
+    const retained = currentBrief(i);
+    const brief = retained
+      ? {
+          ...retained,
+          state: briefReadState(config, store, { ...i, acked: false }, retained),
+          ...(retained.binding
+            ? { choice: store.briefChoice(retained.binding.epoch) ?? undefined }
+            : {}),
+        }
+      : undefined;
+
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
     const ackAt = acks.get(i.key);
@@ -1523,7 +1543,22 @@ function buildAttentionItems(
     const item: AttentionItem = {
       ...i,
       ...(brief === undefined ? {} : { brief }),
-      acked: ackAt !== undefined && ackAt >= Math.max(i.at, askAt),
+      acked:
+        ackAt !== undefined &&
+        ackAt >= Math.max(i.at, askAt) &&
+        (!brief?.binding ||
+          (store.getSetting(`brief-ack:${i.key}`) === brief.binding.epoch &&
+            (((brief.choice === undefined ||
+              ["refused", "unknown", "stale", "canceled"].includes(brief.choice.state)) &&
+              brief.state?.freshness === "current") ||
+              (brief.choice?.state === "applied" &&
+                brief.choice.settledSourceRevision ===
+                  briefSourceRevision(
+                    config,
+                    store,
+                    { ...i, acked: false },
+                    brief.binding.actions.map((entry) => entry.action),
+                  ))))),
     };
     if (
       brief?.for === "operator" &&
@@ -1761,16 +1796,13 @@ function endedParkGone(
 ): boolean {
   const loop = run.loop;
   if (loop?.phase !== "parked" || loop.parked?.kind !== "ended") return false;
-  const prs = store.pullRequests(run.repoId);
   const pr =
     loop.prNumber !== null
-      ? prs.find((p) => p.number === loop.prNumber)
+      ? store.pullRequest(run.repoId, loop.prNumber)
       : run.branch === null
-        ? undefined
-        : prs
-            .filter((p) => p.branch === run.branch && p.createdAt >= run.startedAt)
-            .sort((a, b) => b.number - a.number)[0];
-  if (pr !== undefined && pr.state !== "open") return true;
+        ? null
+        : store.pullRequestOfBranch(run.repoId, run.branch, run.startedAt);
+  if (pr !== null && pr.state !== "open") return true;
   const t = run.ticket === null ? null : parseTicket(run.ticket);
   if (!t) return false;
   if (!config.repos.some((r) => r.id === t.repoId)) return true;
@@ -1902,7 +1934,7 @@ function crewItems(
     const pr =
       run?.loop?.prNumber === undefined || run.loop.prNumber === null
         ? undefined
-        : store.pullRequests(run.repoId).find((p) => p.number === run.loop?.prNumber);
+        : (store.pullRequest(run.repoId, run.loop.prNumber) ?? undefined);
     const noteItem: OwnedItem = {
       owner: noteOwner(store, n),
       key: `${NOTE_KEY}${n.key}`,

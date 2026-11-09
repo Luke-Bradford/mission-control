@@ -488,6 +488,31 @@ pages reusable; it does not shrink the database file on disk.
 
 ### Ticket history
 
+The response also carries `questions` and `questionsNextBefore`. These are a separate question
+page, newest ask first (id breaks timestamp ties). The same `limit` applies; pass the returned
+cursor as `questionsBefore` to read older questions. This leaves the existing timeline's `before`
+and `nextBefore` unchanged. Question records include run, seat, text, ask/pass/set-aside times,
+`closedAt`, and the latest recorded `answer`, `answerAt` and `answerBasis`. A run can close a
+question without answering it: the answer fields then stay null. `asideAt` retains the stored
+set-aside time, including Not now; it does not itself prove a question has an answer. Each Comms
+timeline entry carries its recorded `senderKind`, or null for legacy unknown provenance.
+
+`GET /api/comms/ticket-counts` returns `{ tickets: [{ ticket, count }], unassignedCount }` across
+all recorded structured references, without the feed's 100-message or time window. Retention
+preserves reference totals transactionally when deleting message bodies, without preserving
+their text. Totals survive a database reopen and repeated retention sweeps. Already deleted
+messages from before this migration cannot be reconstructed. Tickets with
+no attributed messages have no row. Qualified ticket identity takes precedence over a PR/short
+reference. Legacy short references use the sender's configured repository, or the single
+configured repository; ambiguous multi-repository messages stay in `unassignedCount`. PR
+references resolve from stored primary and closing tickets, counting a message once per ticket.
+Counts do not infer references from free-form message text or invent missing repository context.
+
+The stored Comms agent and pair reads accept the hub id `MC` and the controller id `CONTROLLER`.
+Contact summaries include `hasMessages` from their all-time count. The configured FLIGHT and
+controller pair appears even before its first message, with count zero and `hasMessages: false`.
+Unknown agent ids still answer 404; existing paging and read cursors are unchanged.
+
 `GET /api/tickets/<repo id>/<number>` returns everything Mission Control knows about one ticket:
 its fields (title, outcome, done-when items with their ticked state, size, priority, status,
 labels, GitHub URL), every run on it (seat, phase, times, tokens), its PRs with each review round's
@@ -607,6 +632,7 @@ What each seat's process starts with:
   Old hub-written Comms briefs remain in history but are ignored by the attention projection.
   When FLIGHT is down, waiting crew messages count under one FLIGHT-down/not-triaging alert.
   Protected operator approvals, account and budget holds, and the runaway alert keep their own rules.
+
   The Comms graph also reports 24-hour run-token totals per link and flags a pair
   that exceeds six reciprocal rounds on one ticket, including when FLIGHT stepped in.
 - **Short Comms.** Messages are limited to 1,200 characters. Put complete findings, plans and
@@ -1948,10 +1974,14 @@ theme, Setup, and the dock toggle.
 | **Telemetry** (`/telemetry`) | KPIs, flow of work (throughput, cycle time, quality, you as CAPCOM), agents (tokens per minute, per turn, time), capacity and cost, for 1h/6h/24h/7d, by agent or account. Its read-only payload also carries bounded raw chart series: observed crew-state spans (open spans stop at their last observation), quota samples with configured alert/stop lines and reset causes, open and completed ticket Ready/start/merge/Done facts, timestamped range-bounded throughput, daily quality points (null means no evidence), and crew-pause, hub-Update and quota-reset annotations. Ticket cost retains both range-prorated cost and all-run cost for tickets merged in range. Charts take focus: ←/→ step the crosshair, Home/End jump. |
 | **Setup** (`/setup/<tab>`) | Read-only: sessions, loops, accounts, roles/guard/test lock, sources (each collector's last poll) with the glossary, access and notifications. |
 
-For a reversible operator decision, FLIGHT may brief a recommended option with a stored deadline.
-When that deadline passes, the hub records and delivers that recommendation once. Update holds,
-approvals, budget/account parks, guard acknowledgements, hard-rule flags, protected dismissal rows,
-observed-loop escalations, and briefs written before deadlines were stored are never defaulted.
+Operator briefs require complete decision context and typed, source-bound options. Genuine operator
+decisions wait for an explicit operator choice. A validated reversible action within FLIGHT's existing
+authority can receive a server-owned forty-minute FYI deadline. Its dispatch rechecks the current actor,
+exact target and existing holds; grants, approvals, review waivers and hold releases never default.
+Ordinary guidance follows its run across commits, while head-specific actions retain exact-head checks.
+An answer to a passed question set aside on that exact question is stored for its preserved run.
+Confirmed refusals release their choice claim for a new request. Uncertain outcomes retain their receipt
+and never replay automatically, including partial queue writes or a stored answer whose wake failed.
 
 **Overlays.** FLIGHT's dock is a column at 1200 px and wider, and a drawer with a scrim below
 that. The Item panel flies out from the right for one item; Away mode and Keys and lamps (`?`) are
