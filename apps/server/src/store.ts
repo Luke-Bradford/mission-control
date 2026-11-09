@@ -30,12 +30,14 @@ import {
   AUDIT_PR_OUTLIER_LINES,
   AUDIT_REFUSAL_SPIKE,
   AUDIT_SPEND_OUTLIER_FACTOR,
+  AUDIT_TOOL_WINDOW_MS,
   type AuditChange,
   type AuditItem,
   type AuditMetrics,
   type AuditOveruseFacts,
   type AuditPrSize,
   type AuditRunKind,
+  type AuditThresholds,
   type AuditTokenOveruse,
   type AuditView,
   auditTier,
@@ -160,6 +162,7 @@ import {
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
+import { auditThresholds, messageImprovements, toolImprovements } from "./audit-improvements.ts";
 import { CodeHealthReadError } from "./code-health/error.ts";
 import {
   failGitFileSource,
@@ -322,6 +325,12 @@ CREATE TABLE IF NOT EXISTS run_token_audit (
   output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
   read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL
 );
+-- Each finished mc tool call: when, which, and the characters sent and returned (Audit's tool rows).
+CREATE TABLE IF NOT EXISTS mcp_tool_calls (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, run_id TEXT NOT NULL,
+  tool TEXT NOT NULL, written INTEGER NOT NULL, returned INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS mcp_tool_calls_at ON mcp_tool_calls(at);
 CREATE TABLE IF NOT EXISTS run_token_calls (
   run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
   cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL,
@@ -2306,6 +2315,35 @@ export class Store {
     for (const s of sections) insert.run(runId, wake, s.section, s.bytes, s.tokens, at);
   }
 
+  /** Records one finished mc tool call. */
+  recordToolCall(c: {
+    at: number;
+    runId: string;
+    tool: string;
+    written: number;
+    returned: number;
+  }): void {
+    this.db
+      .prepare(
+        "INSERT INTO mcp_tool_calls (at, run_id, tool, written, returned) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(c.at, c.runId, c.tool, c.written, c.returned);
+  }
+
+  /** Calls and characters (sent plus returned) per mc tool, for calls made in `[from, to]`. */
+  toolUsage(from: number, to: number): Map<string, { calls: number; chars: number }> {
+    return new Map(
+      (
+        this.db
+          .prepare(
+            `SELECT tool, COUNT(*) AS calls, SUM(written + returned) AS chars FROM mcp_tool_calls
+             WHERE at >= ? AND at <= ? GROUP BY tool`,
+          )
+          .all(from, to) as { tool: string; calls: number; chars: number }[]
+      ).map((r) => [r.tool, { calls: r.calls, chars: r.chars }]),
+    );
+  }
+
   /** Stores a run's token audit and its calls; a run audited twice keeps the later read. */
   saveRunTokenAudit(
     runId: string,
@@ -3335,6 +3373,7 @@ export class Store {
       ["seat_questions", "answered_at IS NOT NULL AND answered_at < ?", AUDIT_RETENTION_DAYS],
       ["flight_decisions", `at < ? AND kind IN (${DECISION_KINDS_KEPT_SQL})`, AUDIT_RETENTION_DAYS],
       ["comms_repeats", "at < ?", OPERATIONAL_RETENTION_DAYS],
+      ["mcp_tool_calls", "at < ?", OPERATIONAL_RETENTION_DAYS],
       ["question_choices", "chosen_at < ?", AUDIT_RETENTION_DAYS],
       // a question message and the replies to it outlive the 90-day message log
       ["comms", `at < ? AND (${COMMS_QUESTION_THREAD_SQL})`, AUDIT_RETENTION_DAYS],
@@ -4122,6 +4161,7 @@ export class Store {
     since: number,
     until: number,
     kinds: ReadonlyMap<string, AuditRunKind> = new Map(),
+    thresholds?: Partial<AuditThresholds>,
   ): AuditView {
     const rows = (sql: string, ...args: SQLInputValue[]) =>
       this.db.prepare(sql).all(...args) as Row[];
@@ -4252,6 +4292,16 @@ export class Store {
       changes: this.auditChanges(since, until),
       tokenOveruse: this.auditTokenOveruse(since, until, kinds),
       items: this.auditItems(since, until),
+      improvements: [
+        ...toolImprovements(this.toolUsage(until - AUDIT_TOOL_WINDOW_MS, until), until),
+        ...messageImprovements(
+          this.db,
+          since,
+          until,
+          auditThresholds(thresholds),
+          this.commsChatter(since, until),
+        ),
+      ],
       surgeonProposals: [],
     };
   }

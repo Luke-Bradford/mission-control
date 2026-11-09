@@ -105,6 +105,8 @@ export interface CheckRecorder {
   dropRun(runId: string): void;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
+  /** Configured checks still executing or validating their completion, once per command. */
+  pending(runId: string): readonly string[];
 }
 
 /** How many dropped calls the recorder keeps for one run, and for how many runs. */
@@ -138,6 +140,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   const now = d.now ?? Date.now;
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, StartedCall>();
+  const finishing = new Set<StartedCall>();
   /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
   const dropped = new Map<string, CheckDrop[]>();
   const noteDrop = (
@@ -222,6 +225,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     async end(key, ok, exitCode = null) {
       const call = started.get(callId(key));
       if (call === undefined) return;
+      finishing.add(call);
       for (const [id, startedCall] of started) if (startedCall === call) started.delete(id);
       try {
         const at = await d.state(key.runId);
@@ -256,6 +260,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         }
       } catch (e) {
         d.log?.(`checks: could not record for ${key.runId}: ${(e as Error).message}`);
+      } finally {
+        finishing.delete(call);
       }
     },
     dropRun(runId) {
@@ -271,6 +277,15 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     drops(runId) {
       return dropped.get(runId) ?? [];
+    },
+    pending(runId) {
+      return [
+        ...new Set(
+          [...started.values(), ...finishing]
+            .filter((call) => call.runId === runId)
+            .flatMap((call) => call.matched),
+        ),
+      ];
     },
   };
 }
