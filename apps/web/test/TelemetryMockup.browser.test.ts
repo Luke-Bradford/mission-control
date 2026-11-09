@@ -25,6 +25,7 @@ interface Probe {
   overflowX: number;
   height: number;
   bandHeight: number;
+  gridTop: number;
   tileMin: number;
   tilesClipped: string[];
   valueSpill: string[];
@@ -69,6 +70,7 @@ const probe = (page: RenderedPage): Promise<Probe> =>
       overflowX: root.scrollWidth - root.clientWidth,
       height: root.scrollHeight,
       bandHeight: document.querySelector(".band")?.getBoundingClientRect().height ?? 0,
+      gridTop: document.querySelector(".grid")?.getBoundingClientRect().top ?? 0,
       tileMin: Math.min(
         ...[...document.querySelectorAll<HTMLElement>(".band .stat")].map(
           (t) => t.getBoundingClientRect().width,
@@ -133,7 +135,7 @@ describeRendered("Telemetry mockup in a browser", () => {
   );
 
   it(
-    "keeps the page height and layout when the Table view replaces the charts",
+    "adds no page height when the Table view replaces the charts",
     async () => {
       for (const [width, height] of SIZES) {
         for (const tab of TABS) {
@@ -151,7 +153,9 @@ describeRendered("Telemetry mockup in a browser", () => {
           await page.box(".panel table");
           const table = await probe(page);
           expect(page.errors(), where).toEqual([]);
-          expect(table.height, where).toBe(charts.height);
+          // The contract permits a shorter table; it prohibits adding page height.
+          expect(table.height, where).toBeLessThanOrEqual(charts.height);
+          expect(table.gridTop, where).toBe(charts.gridTop);
           expectSound(table, where);
           await page.close();
         }
@@ -292,4 +296,28 @@ describeRendered("Telemetry mockup in a browser", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+  it("keeps the enlarged 4K shell inside its viewport", async () => {
+    const page = await renderAt({
+      page: PAGE,
+      search: "?tab=crew&theme=dark",
+      width: 3840,
+      height: 2160,
+      colorScheme: "dark",
+    });
+    try {
+      await page.box(".panel");
+      const geometry = await page.evaluate(
+        () => ({
+          height: document.documentElement.scrollHeight,
+          bottom: document.querySelector(".keys")?.getBoundingClientRect().bottom,
+        }),
+        null,
+      );
+      expect(geometry.height).toBeLessThanOrEqual(2160);
+      expect(geometry.bottom).toBeLessThanOrEqual(2160);
+      expect(page.errors()).toEqual([]);
+    } finally {
+      await page.close();
+    }
+  });
 });

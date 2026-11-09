@@ -75,7 +75,7 @@ h1{font-size:20px;line-height:28px;margin:0 4px 0 0;white-space:nowrap}
 .summary .scope{padding:4px 0;font-size:12px;line-height:16px;color:var(--fg-2);display:grid;align-content:center;min-width:0}
 .summary .stat{padding:4px 12px}
 .summary .stat-main{padding-right:44px}
-.summary .stat-sub{position:absolute;bottom:6px;right:12px;display:block;white-space:nowrap}
+.summary .stat-sub{position:absolute;bottom:8px;right:12px;display:block;white-space:nowrap}
 .summary .stat-cmp{display:none}
 .summary .notcollected{border:1px dashed var(--line-2);border-radius:8px;padding:4px 12px;font-size:12px;line-height:16px;color:var(--fg-2);display:grid;align-content:center}
 .grid{display:grid;gap:8px;min-height:0;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(256px,1fr))}
@@ -93,7 +93,7 @@ h1{font-size:20px;line-height:28px;margin:0 4px 0 0;white-space:nowrap}
  .grid[data-n="3"] .panel:first-child{grid-row:auto}
  .grid[data-n="2"][data-view=charts]:not([data-state]){grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(256px,1fr)}
 }
-@media (min-width:3200px){html{zoom:1.5}}
+@media (min-width:3200px){html{zoom:1.5}body,.app{min-height:calc(100vh / 1.5)}}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 16px;min-width:0;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:8px;overflow:hidden}
 .phead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .phead h3{margin:0;font-size:14px;line-height:20px}
@@ -104,7 +104,7 @@ h1{font-size:20px;line-height:28px;margin:0 4px 0 0;white-space:nowrap}
 .chart{flex:1 1 auto;min-width:0;display:grid;grid-template-columns:36px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 20px}
 @container (min-width:1852px) and (max-width:2151px){.grid[data-view=charts]:not([data-n="2"]) .chart{max-width:720px}}
 .yax{position:relative}
-.yax span{position:absolute;right:6px;transform:translateY(50%);font:11px/16px var(--mono);color:var(--muted)}
+.yax span{position:absolute;right:8px;transform:translateY(50%);font:11px/16px var(--mono);color:var(--muted)}
 .plot{position:relative;border-left:1px solid var(--line-2);border-bottom:1px solid var(--line-2);min-height:120px}
 .plot svg{position:absolute;inset:0;width:100%;height:100%;overflow:hidden}
 .plot path,.plot rect{vector-effect:non-scaling-stroke}
@@ -284,7 +284,8 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
 
   F.spend = [];
   for (var h = 0; h < 24; h++) { var hr = rng(300 + h); F.spend.push(h >= 12 && h <= 14 ? null : { plan: round1(0.4 + hr() * 0.7), build: round1(1 + hr() * 2.4), review: round1(0.3 + hr() * 1.1) }); }
-  F.costToday = Math.round(sum(F.spend.map(function (b) { return b ? b.plan + b.build + b.review : 0; })) * 100) / 100;
+  // The fixture begins yesterday at 14:30; today begins at bucket 29 (00:10).
+  F.costToday = Math.round(sum(F.spend.slice(29).map(function (b) { return b ? b.plan + b.build + b.review : 0; })) * 100) / 100;
   F.costMedian7 = 41;
   F.byTicket = [["demo#112", "Retry the nightly sync when the first attempt times out", 23.8], ["demo#104", "Split the settings page into account and workspace tabs", 19.4], ["demo#118", "Cache the owner lookup for repeated imports", 16.2], ["demo#109", "Show the import error next to the row that caused it", 13.7], ["demo#121", "Add keyboard shortcuts to the review queue", 11.9], ["demo#101", "Fix the date range on the monthly export", 9.6], ["demo#115", "Rename the archive action to match the docs", 7.8], ["demo#107", "Move the notes field above the attachments", 6.1], ["demo#123", "Stop the sidebar scrolling the page behind it", 4.4], ["demo#120", "Tidy the empty state copy", 2.7]];
   if (WORST) {
@@ -569,7 +570,7 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
   }
 
   /* ---------- rendering ---------- */
-  var state = { tab: "crew", view: "charts", state: "normal", theme: "dark", flight: false };
+  var state = { tab: "crew", view: "charts", state: "normal", theme: "dark", flight: false, filters: {} };
   var models = [];
   function $(id) { return document.getElementById(id); }
   function tabDef() { return TABS.filter(function (t) { return t.id === state.tab; })[0]; }
@@ -591,9 +592,10 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
   }
   function statHtml(s, blank) {
     var shown = blank ? "—" : s.value, cls = "";
+    var unavailable = blank ? ' disabled aria-disabled="true"' : '';
     if (s.id === "health" && !blank) cls = " v-" + (s.value === "Healthy" ? "healthy" : s.value === "Watch" ? "watch" : "attention");
     var name = s.label + ": " + shown + " " + s.unit + ", " + s.window + ". " + (s.drill === "exists" ? "Opens " : "Needs a build: ") + s.target + (s.cmp && !blank ? ". " + s.cmp : "");
-    return '<div class="stat' + cls + '" data-stat="' + s.id + '"><span class="stat-label" title="' + esc(s.label) + '">' + esc(s.label) + '</span><div class="stat-main"><button type="button" class="num stat-value" data-drill="' + s.drill + '" data-target="' + esc(s.target) + '" data-label="' + esc(s.label) + '" data-shown="' + esc(shown) + '" aria-label="' + esc(name) + '">' + esc(shown) + '</button><span class="stat-unit" title="' + esc(s.unit) + '">' + esc(s.unit) + '</span></div><div class="stat-sub" title="' + esc(blank ? "" : s.window + (s.cmp ? " · " + s.cmp : "")) + '"><span class="stat-window">' + esc(s.window) + '</span><span class="stat-cmp">' + (s.cmp && !blank ? " · " + esc(s.cmp) : "") + '</span></div><span class="stat-def" role="tooltip">' + esc(s.def + " Unit: " + s.unit + ".") + "</span></div>";
+    return '<div class="stat' + cls + '" data-stat="' + s.id + '"><span class="stat-label" title="' + esc(s.label) + '">' + esc(s.label) + '</span><div class="stat-main"><button type="button" class="num stat-value"' + unavailable + ' aria-describedby="def-' + s.id + '" data-drill="' + s.drill + '" data-target="' + esc(s.target) + '" data-label="' + esc(s.label) + '" data-shown="' + esc(shown) + '" aria-label="' + esc(name) + '">' + esc(shown) + '</button><span class="stat-unit" title="' + esc(s.unit) + '">' + esc(s.unit) + '</span></div><div class="stat-sub" title="' + esc(blank ? "" : s.window + (s.cmp ? " · " + s.cmp : "")) + '"><span class="stat-window">' + esc(s.window) + '</span><span class="stat-cmp">' + (s.cmp && !blank ? " · " + esc(s.cmp) : "") + '</span></div><span class="stat-def" role="tooltip" id="def-' + s.id + '">' + esc(s.def + " Unit: " + s.unit + ".") + "</span></div>";
   }
   function cellHtml(t, c, i) {
     if (c === null || c === undefined) return "—";
@@ -603,7 +605,8 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
     return esc(text);
   }
   function tableHtml(t) {
-    return '<div class="tablewrap" data-scroll tabindex="0"><table><caption class="sr">' + esc(t.title) + "</caption><thead><tr>" + t.cols.map(function (c, i) { return "<th" + (t.nums.indexOf(i) >= 0 ? ' class="num"' : "") + (i === 0 ? ' aria-sort="ascending"' : "") + ">" + esc(c) + (i === 0 ? " ▴" : "") + "</th>"; }).join("") + "</tr></thead><tbody>" + t.rows.map(function (r) { return "<tr>" + r.map(function (c, i) { return "<td" + (t.nums.indexOf(i) >= 0 ? ' class="num"' : "") + ">" + cellHtml(t, c, i) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>";
+    var rows = t.rows.slice().sort(function (a, b) { return String(a[0]).localeCompare(String(b[0]), "en", { numeric: true }); });
+    return '<div class="tablewrap" data-scroll tabindex="0"><table><caption class="sr">' + esc(t.title) + "</caption><thead><tr>" + t.cols.map(function (c, i) { return "<th" + (t.nums.indexOf(i) >= 0 ? ' class="num"' : "") + (i === 0 ? ' aria-sort="ascending"' : "") + ">" + esc(c) + (i === 0 ? " ▴" : "") + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.map(function (r) { return "<tr>" + r.map(function (c, i) { return "<td" + (t.nums.indexOf(i) >= 0 ? ' class="num"' : "") + ">" + cellHtml(t, c, i) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>";
   }
   function panelHtml(p, inner) {
     return '<section class="panel" data-panel="' + p.id + '" aria-label="' + esc(p.title) + '"><div class="phead"><h3>' + esc(p.title) + '</h3><span class="sub">' + esc(p.sub) + '</span></div><div class="pbody">' + inner + "</div>" + (p.notes.length ? "<div>" + p.notes.map(function (n) { return '<p class="pnote">' + esc(n) + "</p>"; }).join("") + "</div>" : "<span></span>") + "</section>";
@@ -620,7 +623,7 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
     $("range").hidden = !!def.fixed;
     $("range").innerHTML = RANGES.map(function (r) { var on = r === SHOWN_RANGE; return '<button type="button" data-range aria-pressed="' + on + '"' + (on ? "" : ' disabled title="Mockup shows 24h"') + ">" + r + "</button>"; }).join("");
     $("filters").innerHTML = [["agent", "Agent", ["All"].concat(SEATS)], ["account", "Account", ["All", "acct-a", "acct-b"]], ["ticket", "Ticket", ["All"].concat(F.byTicket.map(function (t) { return t[0]; }))]].map(function (f) {
-      return "<label" + (def.filters.indexOf(f[0]) < 0 ? " hidden" : "") + "><span>" + f[1] + '</span><select data-filter="' + f[0] + '">' + f[2].map(function (o) { return "<option>" + o + "</option>"; }).join("") + "</select></label>";
+      return "<label" + (def.filters.indexOf(f[0]) < 0 ? " hidden" : "") + "><span>" + f[1] + '</span><select data-filter="' + f[0] + '">' + f[2].map(function (o) { return "<option" + (state.filters[f[0]] === o ? " selected" : "") + ">" + o + "</option>"; }).join("") + "</select></label>";
     }).join("");
     [].forEach.call(document.querySelectorAll("#view button"), function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-view") === state.view)); });
     $("state").innerHTML = STATES.map(function (s) { return '<option value="' + s + '"' + (s === state.state ? " selected" : "") + ">" + s + "</option>"; }).join("");
@@ -693,16 +696,16 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
       else { notice("Needs build: a new route for " + target + "."); openRuns(drill); }
       return;
     }
-    var tab = t.closest && t.closest("[data-tab]"); if (tab) { setTab(tab.getAttribute("data-tab"), false); return; }
+    var tab = t.closest && t.closest("[data-tab]"); if (tab) { setTab(tab.getAttribute("data-tab"), true); return; }
     var v = t.closest && t.closest("#view [data-view]"); if (v) { state.view = v.getAttribute("data-view"); writeState(); render(); return; }
-    if (t.closest && t.closest("[data-retry]")) { state.state = "normal"; writeState(); render(); return; }
+    if (t.closest && t.closest("[data-retry]")) { state.state = "normal"; writeState(); render(); $("tab-" + state.tab).focus(); return; }
     if (t.closest && t.closest("#flight-toggle")) { state.flight = !state.flight; writeState(); render(); return; }
     if (t.id === "theme") { state.theme = state.theme === "dark" ? "light" : "dark"; writeState(); render(); return; }
     if (t.id === "dlg-close" || t.id === "scrim") closeRuns();
   });
   document.addEventListener("change", function (e) {
     if (e.target.id === "state") { state.state = e.target.value; writeState(); render(); }
-    else if (e.target.getAttribute && e.target.getAttribute("data-filter")) notice("Mockup: filters do not change the fictional figures.");
+    else if (e.target.getAttribute && e.target.getAttribute("data-filter")) { state.filters[e.target.getAttribute("data-filter")] = e.target.value; notice("Mockup: filters do not change the fictional figures."); }
   });
   document.addEventListener("keydown", function (e) {
     var dlg = $("dlg");

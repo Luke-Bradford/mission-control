@@ -445,4 +445,40 @@ describe("Telemetry mockup", () => {
     expect(mockup).not.toMatch(/mission-control|Luke-Bradford|\/Users\/|C:\\|git push|pnpm/i);
     expect(mockup).toContain("demo");
   });
+  it("keeps selected-tab focus and filter choices across a view change", () => {
+    const document = render("?tab=cost");
+    const window = document.defaultView as unknown as Window & typeof globalThis;
+    const select = document.querySelector<HTMLSelectElement>('[data-filter="agent"]');
+    if (!select) throw new Error("Missing agent filter");
+    select.value = "dev-1";
+    select.dispatchEvent(new window.Event("change", { bubbles: true }));
+    const tab = document.getElementById("tab-cost");
+    tab?.focus();
+    tab?.click();
+    expect(document.activeElement?.id).toBe("tab-cost");
+    document.querySelector<HTMLButtonElement>('[data-view="table"]')?.click();
+    expect(document.querySelector<HTMLSelectElement>('[data-filter="agent"]')?.value).toBe("dev-1");
+    for (const table of document.querySelectorAll("table")) {
+      const labels = [...table.querySelectorAll("tbody tr")].map(
+        (row) => row.firstElementChild?.textContent ?? "",
+      );
+      expect(labels).toEqual(
+        [...labels].sort((a, b) => a.localeCompare(b, "en", { numeric: true })),
+      );
+    }
+  });
+
+  it("does not open runs for blank values, links definitions, and restores focus after retry", () => {
+    const empty = render("?state=empty");
+    const value = empty.querySelector<HTMLButtonElement>(".stat-value");
+    expect(value?.disabled).toBe(true);
+    value?.click();
+    expect(empty.getElementById("dlg")?.hasAttribute("hidden")).toBe(true);
+    expect(
+      empty.getElementById(value?.getAttribute("aria-describedby") ?? "")?.getAttribute("role"),
+    ).toBe("tooltip");
+    const error = render("?tab=quality&state=error");
+    error.querySelector<HTMLButtonElement>("[data-retry]")?.click();
+    expect(error.activeElement?.id).toBe("tab-quality");
+  });
 });
