@@ -92,6 +92,11 @@ export async function sendComms(
   input: CommsSendInput,
 ): Promise<SentComms> {
   if (Array.from(input.text).length > COMMS_MESSAGE_MAX) throw new Error(commsTooLongText);
+  if (
+    input.itemKey !== undefined &&
+    (typeof input.itemKey !== "string" || input.itemKey.length > 200)
+  )
+    throw new Error("itemKey must fit 200 characters.");
   const now = deps.now?.() ?? Date.now();
   let crew = deps.crew();
   let members = new Set([...crew, COMMS_CAPCOM, COMMS_CONTROLLER]);
@@ -144,6 +149,7 @@ export async function sendComms(
           deps.senderTicket,
         ),
         text: input.text,
+        itemKey: input.itemKey,
         label: input.label,
         ref: input.ref,
         replyTo: input.replyTo,
@@ -211,6 +217,7 @@ export function commsInboxContext(
     replyTo: row.replyTo,
     mentions: row.mentions,
     pinned: pins.has(row.id),
+    ...(row.itemKey === undefined ? {} : { itemKey: row.itemKey }),
   }));
   const heading =
     "Comms inbox (messages addressed to you, tags, replies to your messages and pins):";
