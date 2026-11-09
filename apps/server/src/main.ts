@@ -36,6 +36,7 @@ import {
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
+import { routineBriefChoices } from "./brief-routine.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
@@ -114,6 +115,7 @@ import {
   removeStaleEvidenceWork,
   runEvidenceCommand,
 } from "./pr-evidence/hubs.ts";
+import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview-browser.ts";
@@ -121,7 +123,11 @@ import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createQaReports } from "./qa-reports.ts";
-import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
+import {
+  prepareQueueReorderSnapshot,
+  type QueueReorderDeps,
+  reorderQueue,
+} from "./queue-reorder.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./review-preview.ts";
 import { rotatingLog } from "./rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
@@ -335,14 +341,25 @@ export async function main(): Promise<void> {
     hasViewClients: () => browserStreamCount > 0,
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
+    // Lazy: supervisor, shared queue services and mcDeps are initialized before scheduler.start.
+    defaultChoices: () =>
+      routineBriefChoices(
+        {
+          config,
+          store,
+          now: Date.now,
+          supervisor,
+          queue: queueReorder,
+          knownSecrets: mcDeps.knownSecrets,
+          bus,
+        },
+        () => lock.state(),
+      ),
     // lazy: the supervisor is built below, and the check only runs once the scheduler starts
     seatCheck: (tool) => supervisor.checkCli(tool),
     // lazy: `gh` is built below; the job only runs once the scheduler starts
     releaseWaiting: () =>
       releaseWaitingOperator({ config, store, gh, dbPath, log: (line) => log(line) }),
-    deliverDefault: async (seatId, text) => {
-      await supervisor.message(seatId, text, { interrupt: false });
-    },
   });
   const previewActivity = (() => {
     const url = process.env.MC_PREVIEW_ACTIVITY_URL;
@@ -400,6 +417,15 @@ export async function main(): Promise<void> {
           repoId: previewRepoId,
           workDir: join(dirname(dbPath), "pr-evidence-work"),
           baseUrl: `http://${HOST}:${port}`,
+          webGraph: async (sha, signal) => {
+            await runEvidenceCommand(
+              "git",
+              ["-C", evidenceCheckout, "fetch", "origin", sha],
+              undefined,
+              signal,
+            );
+            return readHeadWebPageGraph(evidenceCheckout, sha, signal);
+          },
           // Read the remote's immutable default head directly: another preview fetch must not
           // overwrite our baseline through the checkout's shared FETCH_HEAD.
           mainSha: async (signal) =>
@@ -852,6 +878,8 @@ export async function main(): Promise<void> {
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
     queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
+    prepareQueueReorder: (seatId, move, above) =>
+      prepareQueueReorderSnapshot(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     areas: flightAreas,
     config,

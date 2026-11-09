@@ -1,0 +1,34 @@
+// @vitest-environment node
+import {readFileSync,mkdirSync,writeFileSync} from "node:fs";
+import {createHash} from "node:crypto";
+import {expect,it} from "vitest";
+import {browserSession,describeRendered} from "./browserRunner.ts";
+import {desktopFixture} from "./desktopFixtures.ts";
+const {renderAt}=browserSession();
+const phase=process.env.MC_CLEAR_CAPTURE_PHASE??"after";
+const fixture=JSON.parse(readFileSync("/tmp/mc-1622-r1352-final-fixtures.json","utf8"));
+const out=`/tmp/mc-1622-r1352-final-evidence-${phase}`;mkdirSync(out,{recursive:true});const captures:unknown[]=[];
+describeRendered("Clear attention evidence",()=>{
+ for(const theme of ["light","dark"] as const) it(`${phase} ${theme}`,async()=>{
+  for(const scenario of ["left","answered","cleared","reraised"]) for(const [width,height] of [[1280,900],[1600,1000],[1600,700],[1920,940]]){
+   const state=fixture.phases[phase][scenario];const thread={id:"fixture-thread",itemKey:state.selectedKey,version:"fixture-v1",messages:[]};const discussion=`/api/attention/${encodeURIComponent(state.selectedKey)}/discussion`;
+   const api={...desktopFixture().api,"/api/attention":state.attention,"/api/attention/held":[],"/api/notifications":{open:[],handledToday:[]},"/api/flight":{seat:{id:"flight-1",call:"FLIGHT",model:"fixture",state:"idle",live:true},decisions:[]},[discussion]:thread,[discussion+"?id=fixture-thread"]:thread};
+   const page=await renderAt({page:"test/desktopBrowser.html",width,height,colorScheme:theme,search:"?path=/overview",api});
+   try{
+    await page.boxes("#page-overview");await page.evaluate(now=>{Date.now=()=>now},state.now);await page.click('a[href="/needs-you"]');await page.boxes("#page-needs .needs-grid");
+    await page.evaluate(path=>{history.pushState(null,"",path);window.dispatchEvent(new PopStateEvent("popstate"))},"/needs-you/"+encodeURIComponent(state.selectedKey));
+    await page.evaluate(async()=>{await document.fonts.ready;await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))},undefined);
+    const facts=await page.evaluate(()=>({path:location.pathname,text:document.querySelector("#page-needs")?.textContent??"",detail:document.querySelector(".needs-detail")?.textContent??"",count:document.querySelector('[data-metric="needsYou"]')?.textContent,width:innerWidth,height:innerHeight,dpr:devicePixelRatio,zoom:visualViewport?.scale??1,scrollWidth:document.documentElement.scrollWidth,clock:Date.now(),userAgent:navigator.userAgent,rail:document.querySelector(".dockrail")!==null,scroll:{x:scrollX,y:scrollY}}),undefined);
+    const expected=phase==="before"?3:(scenario==="cleared"||scenario==="answered")?1:2;expect(facts.count).toBe(String(expected));expect(facts.scrollWidth).toBeLessThanOrEqual(width);expect(page.errors()).toEqual([]);
+    if(phase==="after"){
+     expect(facts.text).not.toContain("FLIGHT left two work items");
+     if(scenario==="cleared"||scenario==="answered"){expect(facts.detail).toContain("no longer open");expect(facts.detail).toContain("Next waiting item");}
+     if(scenario==="answered"||scenario==="reraised")expect(facts.detail).not.toContain("Should the update wait");
+     if(scenario==="reraised")expect(facts.detail).toContain("Should the new update wait");
+    }else if(scenario==="answered"||scenario==="cleared")expect(facts.detail).toContain("Should the update wait");
+    const file=`clear-${scenario}-${width}x${height}-${theme}.png`;await page.screenshot(out+"/"+file);captures.push({phase,scenario,theme,width,height,file,sha256:createHash("sha256").update(readFileSync(out+"/"+file)).digest("hex"),capturedAt:new Date().toISOString(),clearStatus:state.clearStatus,arrival:"Overview -> Needs you nav -> selected item route through browser history",scope:"viewport",...facts});
+   }finally{await page.close()}
+  }
+  writeFileSync(out+"/capture.json",JSON.stringify({phase,captures},null,2));
+ },180000);
+});

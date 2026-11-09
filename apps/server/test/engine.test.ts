@@ -299,6 +299,8 @@ interface Harness {
   /** The supervisor has not taken the crew lock yet: its seat() refuses. */
   seatThrows: boolean;
   sent: { runId: string; key: string; text: string }[];
+  /** Boundary hook after the mock provider accepted its line, before the caller resumes. */
+  duringSend?: () => void;
   pushes: string[];
   prs: { title: string; note: string }[];
   excerpts: string[];
@@ -620,6 +622,7 @@ function harness(): Harness {
             });
             if (!claimed) return "dup";
             x.sent.push({ runId, key, text });
+            x.duringSend?.();
             return "sent";
           },
           async resumeDeferredRuns() {
@@ -4030,6 +4033,22 @@ describe("the engine runs reviews", () => {
       liftBrake("claude-main");
       await h.engine.tick();
       await vi.waitFor(() => expect(h.starts).toEqual([{ seat: RETRO, id: expect.any(Number) }]));
+    });
+
+    it("starts a FLIGHT-moved P0 review through its target budget brake only", async () => {
+      addCodexReviewer();
+      brakeAccount("claude-main");
+      brakeAccount("codex-main");
+      await toReview();
+      await h.engine.tick();
+      const review = first();
+      expect(store.moveQueuedReview(review.id, "retro-cx", clock, true)).toBe(true);
+
+      await h.engine.tick();
+
+      await vi.waitFor(() =>
+        expect(h.starts).toEqual([{ seat: "retro-cx", id: expect.any(Number) }]),
+      );
     });
 
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
@@ -7893,6 +7912,81 @@ describe("the engine runs reviews", () => {
   });
 });
 
+it("1389 checks a bound choice again after waiting on the real engine run chain", async () => {
+  const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+  setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
+  let sourceChanged = false;
+  const result = withinBriefDispatch(
+    () => {
+      if (sourceChanged) throw new Error("Fixture decision source changed");
+    },
+    () => h.engine.onOperatorMessage(RUN),
+  );
+  sourceChanged = true;
+  expect((await result).lifted).toBe(false);
+  expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "ci" } });
+  expect(loopTexts()).not.toContain("resumed by CAPCOM");
+});
+it("1389 rechecks a bound source after asynchronous beforeLift without weakening ordinary resume", async () => {
+  const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+  setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
+  let sourceChanged = false;
+  const result = await withinBriefDispatch(
+    () => {
+      if (sourceChanged) throw new Error("Fixture decision source changed");
+    },
+    () =>
+      h.engine.onOperatorMessage(RUN, "CAPCOM", {
+        beforeLift: async () => {
+          await Promise.resolve();
+          sourceChanged = true;
+          return true;
+        },
+      }),
+  );
+  expect(result.lifted).toBe(false);
+  expect(loopOf().phase).toBe("parked");
+  expect((await h.engine.onOperatorMessage(RUN)).lifted).toBe(true);
+});
+
+it.each(["controller", "uat"] as const)(
+  "1389 preserves the %s hold if source changes after awaited send-back",
+  async (kind) => {
+    const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+    setLoop({
+      phase: "parked",
+      parked: {
+        kind: kind === "controller" ? CONTROLLER_CHECK_PARK : UAT_PARK,
+        reason: "Bound fixture hold",
+        ended: false,
+      },
+      ...(kind === "controller"
+        ? { controllerCheck: { sha: SHA, from: "ci", pass: false } }
+        : { uat: { sha: SHA, from: "ci", accepted: false } }),
+    });
+    h.sent.length = 0;
+    let current = true;
+    h.duringSend = () => {
+      current = false;
+    };
+    const result = await withinBriefDispatch(
+      () => {
+        if (!current) throw new Error("Bound source changed after provider delivery");
+      },
+      () =>
+        kind === "controller"
+          ? h.engine.controllerCheck(RUN, "fail", SHA, "Fixture failure")
+          : h.engine.uat(RUN, "send_back", SHA, "Fixture failure"),
+    );
+    expect(result.lifted).toBe(false);
+    expect(h.sent).toHaveLength(1);
+    expect(loopOf()).toMatchObject({
+      phase: "parked",
+      parked: { kind: kind === "controller" ? CONTROLLER_CHECK_PARK : UAT_PARK },
+    });
+    expect(store.comms(0).some((line) => line.text.includes("Fixture failure"))).toBe(false);
+  },
+);
 describe("designFailedIn: the head's last design verdict", () => {
   const row = (id: number, sha: string, state: ReviewRow["state"] = "reported"): ReviewRow => ({
     id,

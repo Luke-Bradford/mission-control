@@ -2,7 +2,9 @@
 import {
   type EvidenceManifest,
   evidenceSectionText,
+  inertNegatedClosingRefs,
   isReviewBudgetFailure,
+  NEGATED_CLOSING_REFS_NOTE,
   type PullRequestView,
   REVIEW_STATUS_CONTEXT,
   type ReviewRow,
@@ -227,18 +229,27 @@ export function createExternalReviews(deps: {
       const findings = store.findingsOf(row.id);
       const report = store.qaReportForReview(row.id);
       const manifest = deps.evidenceManifest?.(row.repoId, row.prNumber, row.sha);
+      let proseChanged = false;
+      const prose = (text: string): string => {
+        const rendered = inertNegatedClosingRefs(text);
+        proseChanged ||= rendered !== text;
+        return rendered;
+      };
+      const summary = prose(row.summary ?? "No summary was recorded.");
+      const findingLines = findings.map(
+        (finding) =>
+          `- **${finding.severity}** ${finding.file}:${finding.line} — ${prose(finding.summary)}\n  ${prose(finding.scenario)}\n  Suggested fix: ${prose(finding.fix)}`,
+      );
       const body = [
         marker,
         `## QA review — ${row.sha}`,
         `Reviewer: ${row.seatId}. Round ${row.round}. ${row.blocking} blocking, ${row.minor} minor findings.`,
-        row.summary ?? "No summary was recorded.",
+        summary,
         ...(report
           ? [qaReportGitIndex(report, deps.reportBaseUrl ?? deps.evidence?.baseUrl ?? "")]
           : []),
-        ...findings.map(
-          (finding) =>
-            `- **${finding.severity}** ${finding.file}:${finding.line} — ${finding.summary}\n  ${finding.scenario}\n  Suggested fix: ${finding.fix}`,
-        ),
+        ...findingLines,
+        ...(proseChanged ? [NEGATED_CLOSING_REFS_NOTE] : []),
         "### Recorded checks",
         ...store.reviewChecks(row.id).map((check) => `- ${check.check}: ${check.result}`),
         "### Reviewer-reported test counts",

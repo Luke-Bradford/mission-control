@@ -210,12 +210,14 @@ describe("Needs you counts only what the operator must answer", () => {
       at: SENT,
     });
 
-  it("the wake-left alert stays the operator's, however many reasons it names", () => {
+  it("keeps the wake-left reminder off operator attention, however many reasons it names", () => {
     leftNote("FLIGHT left 1 wake reason without a decision after two wakes: PR #9 waited");
-    expect(noteItems(config(false)).map((i) => i.owner)).toEqual(["operator"]);
+    expect(noteItems(config(false))).toEqual([]);
+    expect(store.notes().some((n) => n.key === "flight:left")).toBe(true);
     store.clearNote("flight:left", SENT + 1);
     leftNote("FLIGHT left 5 wake reasons without a decision after two wakes: PR #9 waited");
-    expect(noteItems(config(false)).map((i) => i.owner)).toEqual(["operator"]);
+    expect(noteItems(config(false))).toEqual([]);
+    expect(store.notes().some((n) => n.key === "flight:left")).toBe(true);
   });
 
   it("a review PR no run owns is FLIGHT's, not the operator's", () => {
@@ -272,7 +274,7 @@ describe("Needs you counts only what the operator must answer", () => {
     expect(prs[0]?.owner).not.toBe("operator");
     expect(prs[0]?.text).toBe("PR #9 · You: review");
   });
-  it("the 17:40 items together leave only the reworded wake-left alert for the operator", () => {
+  it("the 17:40 crew items stay off operator attention while their internal reminder remains readable", () => {
     const c = config();
     c.repos.push({ id: "repo2", github: "o/repo2", project: 2, statusMap: {}, autonomy: "draft" });
     store.upsertRun({
@@ -388,8 +390,10 @@ describe("Needs you counts only what the operator must answer", () => {
     });
     const all = attentionItems(c, store, NOW, undefined, undefined, null, true);
     const mine = all.filter((i) => i.owner === "operator");
-    expect(mine.map((i) => i.key)).toEqual(["note:flight:left"]);
-    expect(mine[0]?.text).not.toMatch(/\d{13}/);
+    expect(mine).toEqual([]);
+    const reminder = store.notes().find((n) => n.key === "flight:left");
+    expect(reminder).toBeDefined();
+    expect(reminder?.text).not.toMatch(/\d{13}/);
     expect(all.filter((i) => i.hold && !nothingForOperator(i))).toEqual([]);
     expect(all.filter((i) => i.kind === "pr")).toHaveLength(3);
   });

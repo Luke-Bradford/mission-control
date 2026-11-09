@@ -47,12 +47,7 @@ describe("needsYouEntryFaults", () => {
   });
 
   it("passes the hub's alerts without a brief", () => {
-    for (const key of [
-      FLIGHT_NOT_TRIAGING_KEY,
-      `note:${FLIGHT_LEFT_NOTE_KEY}`,
-      "note:hub-update-held",
-      `note:${guardAckKey(7)}`,
-    ]) {
+    for (const key of [FLIGHT_NOT_TRIAGING_KEY, "note:hub-update-held", `note:${guardAckKey(7)}`]) {
       expect(needsYouAlert({ key, kind: "blocked" })).toBe(true);
       expect(needsYouEntryFaults(item({ key, kind: "blocked", brief: undefined }))).toEqual([]);
     }
@@ -64,6 +59,10 @@ describe("needsYouEntryFaults", () => {
     );
     // another approval (a loop's mvp-ready escalation) needs FLIGHT's brief like anything else
     expect(needsYouAlert({ key: "esc:shop#9", kind: "approval" })).toBe(false);
+  });
+
+  it("keeps unfinished-wake reminders outside the operator's own alerts", () => {
+    expect(needsYouAlert({ key: `note:${FLIGHT_LEFT_NOTE_KEY}`, kind: "blocked" })).toBe(false);
   });
 
   it("treats an old brief with no `for` as the operator's", () => {

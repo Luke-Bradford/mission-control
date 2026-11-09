@@ -2700,7 +2700,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       }
       store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
-      // refused publication. Budget, account and every other operator hold stay parked.
+      // refused or timed-out publication. Budget, account and every other operator hold stay parked.
       if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
         store.setRunLoop(currentRun.id, {
           ...currentLoop,

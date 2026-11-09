@@ -105,8 +105,9 @@ this list. It stops at the first step that fits:
 **Protected items always reach the operator.** These are the items the hub already protects
 (`protectedDecisionItem`, `apps/server/src/attention-holds.ts:197`): approvals, the safety stop,
 merging a change to the files that steer the crew, an Update only a person can run, an account at
-its limit. FLIGHT adds a brief. It cannot hold them back, return them or withdraw them. Hub code
-enforces this.
+its limit. FLIGHT adds a brief. It cannot hold back, return or withdraw the protected source.
+The 8 November amendment lets it withdraw its own brief only; the source and its stop remain.
+Hub code enforces this.
 
 **When a question closes without an answer.** The hub closes it on a recorded fact: the ticket
 closed, the PR merged or closed, the asking run ended. FLIGHT may also withdraw a question it wrote
@@ -143,9 +144,7 @@ run. It wakes FLIGHT only when one of them changes.
 - **Alerts** show only when the operator alone can fix something:
   - FLIGHT will not start;
   - an Update only a person can run;
-  - an account at its limit;
-  - FLIGHT left a wake undecided twice. The alert is in plain words, such as "FLIGHT has not
-    decided what to do about PR 1463 since 14:30".
+  - an account at its limit.
 
   A single late wake goes to FLIGHT's watch list, because the hub restarts and wakes FLIGHT itself.
 - **Comms** is the record. It sends no notifications, and the bell goes. A message addressed to the
@@ -190,7 +189,6 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
 
 1. **A hub alert the operator alone can act on.** Hub code writes its words. The alerts:
    - FLIGHT is not triaging;
-   - FLIGHT left a wake undecided twice (the alert counts the things by kind and gives the time);
    - an Update only a person can run (the alert says how much changed, not which commits or paths);
    - the runaway breaker tripped;
    - a run stopped on a budget or account limit;
@@ -251,6 +249,148 @@ item shows, top to bottom:
 What FLIGHT checked and who it asked sit below, one line each. Raw item text, "FLIGHT's view" and
 "What FLIGHT did" lists leave the first screen. This replaces item 8 of "The open question, in
 reading order" below.
+
+## Amendment, 8 November: one conversation with FLIGHT
+
+The operator wants one conversation, visible in several places, and fewer items asking for attention.
+This amendment replaces conflicting wording above and below. It records the plan in #1619; the
+implementation tickets below remain open until their own checks, review and deployment finish.
+
+### One source and one component
+
+`GET /api/comms/flight` is the only source for the operator–FLIGHT conversation. Its existing
+page shape stays: `messages`, `hasMore`, `cursor`, `unread`. It joins stored operator messages to
+FLIGHT, stored FLIGHT messages to CAPCOM, and FLIGHT's actual turn text in time order. No hub
+`[Mission Control]` lines, tool calls or internal thinking enter this thread. `before` accepts any
+line identity returned by this route, including a transcript line. Unknown times stay unknown.
+
+Lines may carry `state: "stored" | "delivered" | "answered"`, `itemKey` and `choice: { label }`.
+`POST /api/comms` is the only send route; it accepts an optional `itemKey` of at most 200 characters.
+An item link supplies context, never permission to act on that item. Delivery and response facts,
+not an optimistic client copy, determine message state.
+
+Create `apps/web/src/flight/FlightThread.tsx`. It reads and sends through those two routes everywhere:
+
+| Place | Current renderer and source | Change |
+|---|---|---|
+| Fly-out on every page | `FlightChat` in `apps/web/src/shell/Dock.tsx`; seat stream through `dockRows` and `withPending` in `apps/web/src/flight/conversation.ts` | Replace with FlightThread; remove the pending copies |
+| Comms › FLIGHT and you | `ModernConversation` and `MessagePane` in `apps/web/src/comms/Conversation.tsx`; stored-only FLIGHT route | Replace only the FLIGHT pane with FlightThread |
+| Needs you, beside an open question | `apps/web/src/comms/ItemDiscussion.tsx`, inside `apps/web/src/shell/ItemDetail.tsx`; item-discussion route | Show FlightThread headed `About: <item title>` and send its `itemKey` |
+| Working log and an agent's stream | `apps/web/src/flight/WorkingLog.tsx`, `apps/web/src/agent/StreamPanel.tsx` | Keep; these are work records, not a second operator conversation |
+
+`showDock` and the `f` handler in `apps/web/src/App.tsx`, and `FULL_WIDTH_PAGES` in
+`apps/web/src/router.ts`, must allow the same fly-out on Comms, FLIGHT and Needs you. Where the
+thread is already on screen, `f` focuses its box. The fly-out stays 380 px wide and covers those
+pages as the narrow drawer already does. No new mockup gate is added by this amendment.
+
+### Write each message once
+
+| Wording or copy today | Decision |
+|---|---|
+| Typed text stored by `sendComms` | Keep once as the source message |
+| `Re: <key> · <about>` from `flightText` and `itemLead` in `apps/web/src/comms/answer.ts` | Remove; `itemKey` carries context |
+| `You chose: <label>` posted to the item discussion by ItemDetail | Remove that post; draw the durable `choice` receipt once |
+| `… chose "<label>"` in `apps/server/src/choose.ts` | Keep the delivered seat copy; the operator sees the choice receipt |
+| `Short version: …` from `openDiscussion` in `apps/server/src/api.ts` | Remove with the discussion routes |
+| Item-discussion JSON sent to FLIGHT | Remove with the discussion store |
+| FLIGHT's actual turn text | Keep in the shared thread |
+| Client pending copies from `withPending` | Remove; show the server's message state |
+| A tagged FLIGHT line made into item text, plus FLIGHT's brief | Keep the brief as the operator's question; keep the raw line only in the thread |
+| Waiting lists in DockSummary and FlightChat | Remove through #1571; Needs you owns the question list |
+| Hub `[Mission Control]` lines | Keep in internal records; exclude from the shared thread |
+
+For an item-linked delivery, FLIGHT gets one hub context line:
+`The operator is writing about the Needs-you item <key>: <title>.` The operator's message text
+is unchanged. The shared thread excludes that internal context line.
+
+### What enters Needs you
+
+`needsYouEntryFaults` and `needsYouAlert` in `packages/core/src/needs-you-entry.ts`, through
+`entryCheck` in `apps/server/src/hud.ts`, admit only a hub alert the operator alone can fix or a
+complete question from FLIGHT. One question makes one item (#1576).
+
+Reminders to FLIGHT never reach the operator. Remove `note:flight:left` from `ALERT_KEYS`, filter it
+with `FLIGHT_DOWN_ITEMS` in `attentionItems`, and remove the `FLIGHT_LEFT_NOTE_KEY` routing exception.
+`apps/server/src/flight/watch.ts` still tells FLIGHT `You left these:` on its next wake; the reminder
+settles itself. An unhandled wake alone creates no new operator decision.
+
+### What leaves Needs you
+
+| Recorded action or fact | Code that owns the exit |
+|---|---|
+| An option is picked | `chooseOption` and `closeItem` in `apps/server/src/choose.ts` |
+| The ticket closes, PR ends or asking run ends | `apps/server/src/question-watch.ts` |
+| FLIGHT withdraws its question or returns a seat's question | `withdrawQuestion` and `return_question` in `apps/server/src/flight/tools.ts` |
+| FLIGHT dismisses a settled item it owns | `dismiss_item` in the same file |
+| The operator sets work aside or drops it | `apps/server/src/needs-you-actions.ts`; preserve its existing refusals |
+| The operator clears an item | New `POST /api/attention/:key/clear`; close the actual source and record a `cleared` question closure |
+
+`route` in hud.ts drops a brief whose choice is already stored at `store.choice(key, brief.at)`.
+For `note:` items it also drops a brief older than the note's current raise. An answered Update
+question cannot return with its old options. Typed chat text closes nothing.
+
+On a protected item FLIGHT may withdraw only its own brief. The protected source, safety stop,
+account stop, approval and merge hold remain in force. Only the operator clears a protected item.
+Clear is not a stop lift or approval. A runaway item refuses Clear and points to Lift.
+
+Clear responds `{ cleared: key }`; a missing item returns 404, `That item is no longer waiting.`
+Any `FLIGHT_OPERATOR_ACTOR_HEADER` makes this route return 403. Add `"cleared"` to
+`QuestionClosureKind` in `packages/core/src/types.ts`. Tell the waiting seat as on withdraw and
+store one hub notice for FLIGHT. The Answered group says `Cleared by you`. The same question stays
+gone unless asked again. Keep source changes and their notices consistent if a write fails.
+
+### Ticket map
+
+The replacements are filed already; do not create another set. A closed predecessor means its
+scope moved, not that the feature shipped.
+
+| Existing work | Verdict and target |
+|---|---|
+| #1512 fly-out, PR #1549 | Close and fold into #1621; recover its send-key helper and context chip |
+| #1513 Comms record, PR #1600 | Keep; #1621 replaces only its FLIGHT pane |
+| #1571 Needs you once, PR #1604 | Keep and merge first; #1621 reuses its smaller dock |
+| #1580 always talk to FLIGHT, PR #1615 | Keep and merge before #1621; reuse stopped text and choice wiring |
+| #1608 conversation endpoint, PR #1611 | Close and fold into #1620; its optional conversation flag would create a second shape |
+| #1514 hub notices, PR #1612 | Keep for the Comms record |
+| #1617 live chat | Close and fold into #1621; its rules belong to the shared thread |
+| #1598 Comms record server | Keep for the Comms record |
+| #1609 direct-message badge | Keep; a message to the operator must count without a tag |
+| #1509 Needs you counts | Keep, narrowed to the Alerts chip, filters and ordering |
+| #1576 one question, one item | Keep as an entry rule |
+| #1535 Not now and Drop web | Keep; #1625 adds Clear beside them |
+
+### Delivery order and checks
+
+| Stage | Ticket and size | Operator-visible completion |
+|---|---|---|
+| S1 | #1620, server S | The FLIGHT route returns stored messages and turn replies in order; both cursor families page; linked sends retain itemKey and deliver one internal key-and-title line, excluded from the conversation |
+| W1, after S1, #1571 and #1580 | #1621, web M | One FlightThread in Comms and the fly-out; a send appears in both; `f` opens or focuses it on every page |
+| W2, after W1 | #1624, web M | The same thread sits beside a question with `About: <title>`; a click check proves matching sends/replies in all three places and one choice receipt; the answered question leaves |
+| C1, after W2 | #1623, server XS | Remove item-discussion routes and store; no page calls them |
+| S2, independent of W1 | #1622, server M | No FLIGHT reminder on Needs you; answered briefs stay gone; operator-only Clear closes the actual source |
+| W3, after S2 and #1535 | #1625, web S | One Clear click removes an item; Answered says `Cleared by you` |
+
+S1 must test an item-linked operator send through `POST /api/comms` with `itemKey`.
+The returned operator line retains that key. FLIGHT receives exactly one internal context line
+containing the item key and title. `GET /api/comms/flight` excludes that internal line while
+retaining the operator's actual words. This does not add a second visible conversation.
+
+W2 must check the complete flow through operator clicks, after S1 and W1 land.
+Send beside a Needs-you question; inspect that send and FLIGHT's reply in Needs you, Comms,
+and the fly-out. All three show the same words. Choose an option, then verify one choice
+receipt in the shared conversation and the answered question leaving the waiting list.
+Retain the click steps, observations and screenshots with the ordinary visual QA evidence.
+
+W1 also covers Enter to send, Shift+Enter for a new line, scroll position when new lines arrive,
+and these states: loading, `No messages yet.`, stopped, working, failed send with the server's
+text and Retry, and loading older lines. The stopped line is
+`FLIGHT is stopped. It reads this when it starts.` with Start FLIGHT. The working line is
+`FLIGHT is working… since HH:MM`. Each operator message has one state line: Stored,
+`Delivered HH:MM` in Europe/London, or Answered. These replace client pending text.
+
+Check the fly-out at 1280, 1600, 1920 and 1600×700 in light and dark; check Needs you at 1280, 1600
+and 1920 in both themes. Apply `docs/design/system.md`, the hud-design checklist and visual QA.
+These are shared-component checks; S1 and S2 do not claim to deliver the W1–W3 pages.
 
 ## Words
 
@@ -741,7 +881,8 @@ it in place of looking things up.
   sent, delivered, or "FLIGHT is stopped", with a Start FLIGHT button. The hub delivers a stored
   message when FLIGHT starts.
 - **One conversation.** The fly-out and Comms show the same thread, read the same way and posted
-  the same way. The hub's thread read already joins stored messages with FLIGHT's own turn text.
+  the same way, through `GET /api/comms/flight` and `POST /api/comms`. The 8 November amendment
+  defines the shared source and component; this is a target, not a claim that every page uses it yet.
 - The box takes several lines. One send rule covers every box in the app. The mockup settles it:
   today the Needs you boxes send on Ctrl or Cmd with Enter, and the others on Enter.
 - The mockup also settles the width, and whether the panel can sit beside the page.
@@ -876,7 +1017,8 @@ follow the `hud-design` checklist.
   Backlog, adds the label `waiting:operator` (created once per repo) and posts one comment. **Drop**
   closes the ticket as not planned with one comment, under the same refusals as FLIGHT's close
   tool. Both act only on a crew ticket of the hub's own repo, never on a protected item.
-- Protected items cannot be held back, returned or withdrawn by FLIGHT. Hub code enforces it.
+- FLIGHT cannot hold back, return or withdraw a protected source. It may withdraw only its own
+  brief, as the 8 November amendment defines. Hub code preserves the source and its stop.
 - The controller's credential grants nothing new. It labels what the controller already does. An
   agent with shell access on this Mac could still read the operator's token, as today. Sender
   kinds make honest traffic clear. They are not a defence against that.

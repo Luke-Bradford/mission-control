@@ -192,6 +192,7 @@ export async function chooseOption(
       {
         to,
         text,
+        itemKey: key,
         ...(ticket === null ? {} : { ref: ticket }),
         ...(runId === undefined ? {} : { targetRunId: runId }),
       },

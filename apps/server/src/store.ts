@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
+  BriefChoiceReceipt,
   ChoiceTargetKind,
   ItemChatMessage,
   ItemDiscussion,
@@ -15,6 +16,7 @@ import type {
   QaReport,
   RunHandoff,
   RunTokenAudit,
+  TicketQuestion,
   TokenCall,
   TokenCounts,
   TokenSourceAdd,
@@ -54,6 +56,7 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
+  COMMS_OPEN_PREFIX,
   COMMS_TEXT_MAX,
   type CommsLabel,
   type CommsReaction,
@@ -61,6 +64,7 @@ import {
   type CommsSenderKind,
   classifyOveruse,
   commsCutMarker,
+  DECISION_DEFAULT_WAIT_MS,
   type DefectRefs,
   type DefectVia,
   type DoneWhenEntry,
@@ -373,6 +377,7 @@ CREATE TABLE IF NOT EXISTS question_choices (
   PRIMARY KEY (key, brief_at)
 );
 CREATE INDEX IF NOT EXISTS question_choices_ticket ON question_choices(ticket);
+CREATE INDEX IF NOT EXISTS question_choices_message ON question_choices(message_id);
 -- Status moves of a run's card (pending, then done or failed); the Activity page's board rows.
 CREATE TABLE IF NOT EXISTS board_moves (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
@@ -399,6 +404,11 @@ CREATE TABLE IF NOT EXISTS reviews (
   UNIQUE (author_run_id, sha, epoch, attempt)
 );
 CREATE INDEX IF NOT EXISTS reviews_state ON reviews(state, created_at);
+-- A FLIGHT-directed queued-review move overrides the engine's ordinary reviewer selection.
+CREATE TABLE IF NOT EXISTS review_moves (
+  review_id INTEGER PRIMARY KEY, seat_id TEXT NOT NULL, at INTEGER NOT NULL,
+  budget_brake_override INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS review_findings (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, author_run_id TEXT NOT NULL, pos INTEGER NOT NULL,
   severity TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, summary TEXT NOT NULL,
@@ -978,6 +988,7 @@ export interface CommsRow {
   senderKind: CommsSenderKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt: number | null;
+  itemKey?: string;
 }
 /** The operator's choice on a question, as stored. */
 export interface QuestionChoiceRow {
@@ -1008,6 +1019,7 @@ export interface NewCommsRow {
   to: string;
   ticket: string | null;
   text: string;
+  itemKey?: string;
   label?: CommsLabel | null;
   ref?: string | null;
   replyTo?: string | null;
@@ -1140,6 +1152,8 @@ export const MAX_OPEN_RUN_AGE_MS = 30 * 24 * 60 * 60_000;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
+const DIGEST_CONTEXT_WINDOW_SQL =
+  "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
 const toSample = (r: Row): UsageSample => ({
   accountId: r.account_id as string,
@@ -1274,6 +1288,19 @@ const toCiRun = (r: Row): CiRunView => ({
   url: r.url as string | null,
   firstSeenAt: r.first_seen_at as number,
   at: r.at as number,
+});
+
+const toEscalation = (r: Row): Escalation => ({
+  id: r.id as string,
+  repoId: r.repo_id as string,
+  issueNumber: r.issue_number as number,
+  title: r.title as string,
+  kind: r.kind as Escalation["kind"],
+  source: r.source === "title" ? "title" : "label",
+  openedAt: r.opened_at as number,
+  url: r.url as string,
+  question:
+    r.question === null ? null : (JSON.parse(r.question as string) as Escalation["question"]),
 });
 
 const toReview = (r: Row): ReviewRow => ({
@@ -1804,6 +1831,7 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    this.addColumn("review_moves", "budget_brake_override", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
@@ -1958,9 +1986,12 @@ export class Store {
       CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
       CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
+      CREATE INDEX IF NOT EXISTS runs_agent_recent ON runs(agent_id, started_at DESC, seq DESC, id);
+      CREATE INDEX IF NOT EXISTS run_digests_context_window ON run_digests(run_id, ${DIGEST_CONTEXT_WINDOW_SQL});
       CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
       CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
       CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS pull_requests_branch ON pull_requests(repo_id, branch, number DESC);
       CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
       CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
@@ -1968,11 +1999,14 @@ export class Store {
       CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
       CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
+      CREATE INDEX IF NOT EXISTS seat_questions_run_time ON seat_questions(run_id, at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS flight_decisions_question_answer ON flight_decisions(question_id, kind, at DESC, id DESC);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
+    this.addColumn("comms", "item_key", "TEXT");
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
     // Turns in a row that ended with no new commit; the resume line reads it.
@@ -1995,6 +2029,9 @@ export class Store {
     this.addColumn("decision_defaults", "target", "TEXT");
     this.addColumn("decision_defaults", "answer", "TEXT");
     this.addColumn("decision_defaults", "delivered_at", "INTEGER");
+    this.addColumn("decision_defaults", "binding", "TEXT");
+    this.addColumn("decision_defaults", "delivery_state", "TEXT NOT NULL DEFAULT 'legacy'");
+    this.addColumn("decision_defaults", "delivery_note", "TEXT");
     this.addColumn("pull_requests", "head_sha", "TEXT");
     this.addColumn("pull_requests", "merge_commit_sha", "TEXT");
     this.addColumn("pull_requests", "mergeable", "TEXT");
@@ -2080,6 +2117,22 @@ export class Store {
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
       CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
+      CREATE INDEX IF NOT EXISTS comms_ticket_count_refs ON comms(ticket, ref, from_id);
+      -- Preserve reference totals when retention removes bodies. Null flags avoid sentinel collisions.
+      CREATE TABLE IF NOT EXISTS comms_ticket_archived_counts (
+        ticket TEXT NOT NULL, ref TEXT NOT NULL, from_id TEXT NOT NULL,
+        ticket_null INTEGER NOT NULL, ref_null INTEGER NOT NULL, count INTEGER NOT NULL,
+        PRIMARY KEY (ticket, ref, from_id, ticket_null, ref_null)
+      );
+      CREATE TRIGGER IF NOT EXISTS comms_archive_ticket_count BEFORE DELETE ON comms
+      WHEN OLD.ticket IS NOT NULL OR OLD.ref IS NOT NULL
+      BEGIN
+        INSERT INTO comms_ticket_archived_counts (ticket, ref, from_id, ticket_null, ref_null, count)
+        VALUES (COALESCE(OLD.ticket, ''), COALESCE(OLD.ref, ''), OLD.from_id,
+          OLD.ticket IS NULL, OLD.ref IS NULL, 1)
+        ON CONFLICT(ticket, ref, from_id, ticket_null, ref_null)
+        DO UPDATE SET count = comms_ticket_archived_counts.count + 1;
+      END;
       CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
       CREATE TABLE IF NOT EXISTS comms_mentions (
         message_id INTEGER NOT NULL, mentioned_id TEXT NOT NULL, seen_at INTEGER,
@@ -2637,7 +2690,7 @@ export class Store {
     return rows.map(toRun);
   }
 
-  /** Recent runs for many HUD rows, ranked in SQLite so the runs table is read once. */
+  /** Indexed recent-run bounds for each HUD agent, with older held runs retained. */
   runsForAgents(
     agentIds: readonly AgentId[],
     limit: number,
@@ -2646,20 +2699,30 @@ export class Store {
     const out = new Map<AgentId, Run[]>();
     if (agentIds.length === 0) return out;
     for (const agentId of agentIds) out.set(agentId, []);
-    const held = [...new Set(heldRunIds)];
-    const rows = this.statement(
-      `SELECT runs.* FROM runs JOIN (
-         SELECT id, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
-         FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}
-       ) recent ON recent.id = runs.id
-       WHERE recent.row_number <= ?${held.length > 0 ? ` OR runs.id IN (${held.map(() => "?").join(", ")})` : ""}
-       ORDER BY runs.agent_id, runs.started_at DESC, runs.seq DESC`,
-    ).all(...agentIds, ...held, limit, ...held) as Row[];
-    for (const run of rows.map(toRun)) {
+    const seen = new Set<string>();
+    const take = (row: Row) => {
+      if (seen.has(row.id as string)) return;
+      seen.add(row.id as string);
+      const run = toRun(row);
       const runs = out.get(run.agentId) ?? [];
       runs.push(run);
       out.set(run.agentId, runs);
+    };
+    const recent = this.statement(`SELECT * FROM runs WHERE agent_id = ?
+      ORDER BY started_at DESC, seq DESC
+      LIMIT CASE WHEN ? > 0 THEN CAST(? AS INTEGER) ELSE 0 END`);
+    for (const agentId of out.keys()) {
+      for (const row of recent.all(agentId, limit, limit) as Row[]) take(row);
     }
+    const held = [...new Set(heldRunIds)];
+    if (held.length > 0)
+      for (const row of this.statement(
+        `SELECT * FROM runs WHERE id IN (${held.map(() => "?").join(", ")})
+        ORDER BY agent_id, started_at DESC, seq DESC`,
+      ).all(...held) as Row[])
+        take(row);
+    for (const runs of out.values())
+      runs.sort((a, b) => b.startedAt - a.startedAt || b.seq - a.seq);
     return out;
   }
 
@@ -3167,12 +3230,12 @@ export class Store {
     const out = new Map<string, number>();
     for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
       const ids = runIds.slice(i, i + DIGEST_BATCH);
-      const rows =
-        this.statement(`SELECT run_id, json_extract(digest, '$.contextWindow') AS context_window
-        FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
-          run_id: string;
-          context_window: number | null;
-        }[];
+      const rows = this.statement(`SELECT run_id, ${DIGEST_CONTEXT_WINDOW_SQL} AS context_window
+        FROM run_digests INDEXED BY run_digests_context_window
+        WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
+        run_id: string;
+        context_window: number | null;
+      }[];
       for (const row of rows)
         if (row.context_window !== null) out.set(row.run_id, row.context_window);
     }
@@ -3615,18 +3678,15 @@ export class Store {
     const rows = this.db
       .prepare("SELECT * FROM escalations ORDER BY opened_at ASC, id ASC")
       .all() as Row[];
-    return rows.map((r) => ({
-      id: r.id as string,
-      repoId: r.repo_id as string,
-      issueNumber: r.issue_number as number,
-      title: r.title as string,
-      kind: r.kind as Escalation["kind"],
-      source: r.source === "title" ? "title" : "label",
-      openedAt: r.opened_at as number,
-      url: r.url as string,
-      question:
-        r.question === null ? null : (JSON.parse(r.question as string) as Escalation["question"]),
-    }));
+    return rows.map(toEscalation);
+  }
+
+  /** Indexed canonical source lookup; freshness reads never mutate the escalation set. */
+  escalation(id: string): Escalation | null {
+    const row = this.db.prepare("SELECT * FROM escalations WHERE id = ?").get(id) as
+      | Row
+      | undefined;
+    return row ? toEscalation(row) : null;
   }
 
   /** True when any stored row changed. */
@@ -4582,11 +4642,37 @@ export class Store {
   pullRequestOfBranch(
     repoId: RepoId,
     branch: string,
+    createdSince?: number,
   ): { number: number; state: PullRequestView["state"] } | null {
-    const row = this.statement(
-      "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1",
-    ).get(repoId, branch) as { number: number; state: PullRequestView["state"] } | undefined;
+    const statement = this.statement(
+      createdSince === undefined
+        ? "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1"
+        : "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? AND created_at >= ? ORDER BY number DESC LIMIT 1",
+    );
+    const row = statement.get(
+      repoId,
+      branch,
+      ...(createdSince === undefined ? [] : [createdSince]),
+    ) as { number: number; state: PullRequestView["state"] } | undefined;
     return row ?? null;
+  }
+
+  /** A pinned link needs no historical checks, review metadata or escaped-defect hydration. */
+  pullRequestLink(
+    repoId: RepoId,
+    ref: { number: number } | { ticket: string },
+  ): Pick<PullRequestView, "repoId" | "number" | "title" | "url"> | null {
+    const row =
+      "number" in ref
+        ? this.statement(
+            "SELECT number, title, url FROM pull_requests WHERE repo_id = ? AND number = ?",
+          ).get(repoId, ref.number)
+        : this.statement(
+            "SELECT number, title, url FROM pull_requests WHERE repo_id = ? AND ticket = ? AND state = 'open' ORDER BY number DESC LIMIT 1",
+          ).get(repoId, ref.ticket);
+    return row === undefined
+      ? null
+      : { repoId, ...(row as { number: number; title: string; url: string }) };
   }
 
   /** The queue needs only open PRs, without decoding historical checks and bodies. */
@@ -4666,6 +4752,87 @@ export class Store {
     return rows.map((r) => this.commsRow(r));
   }
 
+  /** Counts retained and retired reference metadata; never reads text or limits by time. */
+  commsTicketReferenceCounts(): {
+    ticket: string | null;
+    ref: string | null;
+    from: string;
+    count: number;
+  }[] {
+    return (
+      this.statement(`SELECT ticket, ref, sender, SUM(count) AS count FROM (
+        SELECT ticket, ref, from_id AS sender, COUNT(*) AS count
+        FROM comms WHERE ticket IS NOT NULL OR ref IS NOT NULL
+        GROUP BY ticket, ref, from_id
+        UNION ALL
+        SELECT CASE WHEN ticket_null THEN NULL ELSE ticket END,
+          CASE WHEN ref_null THEN NULL ELSE ref END, from_id AS sender, count
+        FROM comms_ticket_archived_counts
+      ) GROUP BY ticket, ref, sender`).all() as Row[]
+    ).map((r) => ({
+      ticket: r.ticket as string | null,
+      ref: r.ref as string | null,
+      from: r.sender as string,
+      count: r.count as number,
+    }));
+  }
+
+  /** Lightweight links for referenced PR numbers, without parsing unrelated checks or history. */
+  commsPrTicketLinks(
+    numbers: readonly number[],
+  ): { repoId: string; number: number; ticket: string | null; closingIssues: number[] }[] {
+    const rows: Row[] = [];
+    const unique = [...new Set(numbers)];
+    for (let start = 0; start < unique.length; start += 400) {
+      const batch = unique.slice(start, start + 400);
+      rows.push(
+        ...(this.statement(`SELECT repo_id, number, ticket, closing_issues FROM pull_requests
+        WHERE number IN (${batch.map(() => "?").join(",")})`).all(...batch) as Row[]),
+      );
+    }
+    return rows.map((r) => ({
+      repoId: r.repo_id as string,
+      number: r.number as number,
+      ticket: r.ticket as string | null,
+      closingIssues: JSON.parse(r.closing_issues as string) as number[],
+    }));
+  }
+
+  /** A separate indexed question page; ending a run alone does not provide answer text. */
+  ticketQuestions(
+    repoId: string,
+    ticket: string,
+    limit: number,
+    before: { at: number; id: number } | null = null,
+  ): TicketQuestion[] {
+    const rows =
+      this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis
+      FROM seat_questions q JOIN runs r ON r.id = q.run_id
+      LEFT JOIN flight_decisions d ON d.id = (SELECT a.id FROM flight_decisions a
+        WHERE a.question_id = q.id AND a.kind = 'answer' ORDER BY a.at DESC, a.id DESC LIMIT 1)
+      WHERE r.repo_id = ? AND r.ticket = ?
+      ${before === null ? "" : "AND (q.at < ? OR (q.at = ? AND q.id < ?))"}
+      ORDER BY q.at DESC, q.id DESC LIMIT ?`).all(
+        repoId,
+        ticket,
+        ...(before === null ? [] : [before.at, before.at, before.id]),
+        limit,
+      ) as Row[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      runId: r.run_id as string,
+      seat: r.agent_id as string,
+      text: r.text as string,
+      at: r.at as number,
+      passedAt: r.passed_at as number | null,
+      asideAt: r.aside_at as number | null,
+      closedAt: r.answered_at as number | null,
+      answer: r.answer as string | null,
+      answerAt: r.answer_at as number | null,
+      answerBasis: r.answer_basis as string | null,
+    }));
+  }
+
   /** The newest `limit` FLIGHT decisions that name the ticket by ref or target one of its runs. */
   flightDecisionsOnTicket(ref: string, runIds: readonly string[], limit: number): FlightDecision[] {
     const byRef = this.db
@@ -4715,6 +4882,25 @@ export class Store {
       prs.push(pr);
       out.set(pr.repoId, prs);
     }
+    return out;
+  }
+
+  /** The HUD retains every open PR and the historical PRs its displayed runs actually name. */
+  openAndReferencedPullRequests(
+    repoIds: readonly RepoId[],
+    referenced: readonly Pick<PullRequestView, "repoId" | "number">[],
+  ): Map<RepoId, PullRequestView[]> {
+    const out = new Map<RepoId, PullRequestView[]>(repoIds.map((repoId) => [repoId, []]));
+    if (repoIds.length === 0) return out;
+    const rows = this.statement(`WITH referenced AS (
+      SELECT json_extract(value, '$.repoId') AS repo_id, json_extract(value, '$.number') AS number
+      FROM json_each(?)
+    ) SELECT p.* FROM pull_requests p
+      WHERE p.repo_id IN (${repoIds.map(() => "?").join(", ")})
+      AND (p.state = 'open' OR (p.repo_id, p.number) IN (
+        SELECT repo_id, number FROM referenced
+      )) ORDER BY p.number DESC`).all(JSON.stringify(referenced), ...repoIds) as Row[];
+    for (const pr of this.pullRequestRows(rows)) out.get(pr.repoId)?.push(pr);
     return out;
   }
 
@@ -4911,11 +5097,19 @@ export class Store {
   /** Acknowledges attention item keys at `at` (a re-ack moves the time; absence is kept). */
   ack(keys: string[], at: number): void {
     this.transaction(() => {
+      const briefs = this.briefs();
       const ins = this.db.prepare(
         `INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
          ON CONFLICT(key) DO UPDATE SET at = excluded.at`,
       );
-      for (const k of keys) ins.run(k, at);
+      for (const k of keys) {
+        ins.run(k, at);
+        const epoch = briefs.get(k)?.binding?.epoch;
+        if (epoch) {
+          this.setSetting(`brief-ack:${k}`, epoch);
+          this.setSetting(`brief-default-cancel:${epoch}`, String(at));
+        }
+      }
     });
   }
 
@@ -4928,16 +5122,19 @@ export class Store {
       dueAt: number;
       target: string | null;
       answer: string;
+      choice?: { epoch: string; requestKey: string; fingerprint: string; record: string };
+      binding?: string;
     },
     message: NewCommsRow,
     at: number,
   ): boolean {
     let claimed = false;
     this.transaction(() => {
+      if (d.choice && this.getSetting(`brief-choice:${d.choice.epoch}`)) return;
       const r = this.db
         .prepare(
-          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at, target, answer, delivered_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT OR IGNORE INTO decision_defaults (key, brief_at, option_id, label, due_at, applied_at, target, answer, delivered_at, binding, delivery_state)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           d.key,
@@ -4949,8 +5146,16 @@ export class Store {
           d.target,
           d.answer,
           d.target === null ? at : null,
+          d.binding ?? null,
+          d.binding ? "pending" : "legacy",
         );
       if (r.changes === 0) return;
+      if (d.choice) {
+        this.setSetting(`brief-choice:${d.choice.epoch}`, d.choice.record);
+        this.setSetting(d.choice.requestKey, d.choice.fingerprint);
+        this.setSetting(`${d.choice.requestKey}:epoch`, d.choice.epoch);
+        this.setSetting(`brief-ack:${d.key}`, d.choice.epoch);
+      }
       this.insertComms(message, cutCommsText(message.text), null);
       this.db
         .prepare(
@@ -4963,24 +5168,109 @@ export class Store {
     return claimed;
   }
 
-  pendingDecisionDeliveries(): { key: string; briefAt: number; target: string; answer: string }[] {
+  /** One local choice per semantic epoch, serialized across Store handles by SQLite. */
+  claimBriefChoice(
+    epoch: string,
+    requestKey: string,
+    fingerprint: string,
+    record: string,
+  ): boolean {
+    let claimed = false;
+    this.transaction(() => {
+      if (this.getSetting(`brief-choice:${epoch}`)) return;
+      const prior = this.getSetting(requestKey);
+      if (prior && prior !== fingerprint) return;
+      this.setSetting(requestKey, fingerprint);
+      this.setSetting(`${requestKey}:epoch`, epoch);
+      this.setSetting(`brief-choice:${epoch}`, record);
+      claimed = true;
+    }, true);
+    return claimed;
+  }
+
+  /** A confirmed authentication refusal performed no action and cannot consume the operator's decision. */
+  refuseBriefChoice(epoch: string, requestKey: string, fingerprint: string, record: string): void {
+    this.transaction(() => {
+      const raw = this.getSetting(`brief-choice:${epoch}`);
+      if (!raw || (JSON.parse(raw) as { fingerprint: string }).fingerprint !== fingerprint) return;
+      this.setSetting(`${requestKey}:receipt`, record);
+      this.setSetting(`brief-last-choice:${epoch}`, record);
+      this.deleteSetting(`brief-choice:${epoch}`);
+    }, true);
+  }
+
+  pendingDecisionDeliveries(): {
+    key: string;
+    briefAt: number;
+    target: string;
+    answer: string;
+    binding?: string;
+  }[] {
     return (
       this.db
-        .prepare(`SELECT key, brief_at, target, answer FROM decision_defaults
-      WHERE delivered_at IS NULL AND target IS NOT NULL ORDER BY applied_at, key`)
+        .prepare(`SELECT key, brief_at, target, answer, binding FROM decision_defaults d
+      WHERE delivered_at IS NULL AND target IS NOT NULL AND delivery_state = 'pending'
+        AND NOT EXISTS (SELECT 1 FROM question_closures c WHERE c.key = d.key AND c.kind = 'cleared' AND c.at >= d.applied_at)
+      ORDER BY applied_at, key`)
         .all() as Row[]
     ).map((r) => ({
       key: r.key as string,
       briefAt: r.brief_at as number,
       target: r.target as string,
       answer: r.answer as string,
+      ...(r.binding === null ? {} : { binding: r.binding as string }),
     }));
   }
 
   markDecisionDeliveryDone(key: string, briefAt: number, at: number): void {
     this.db
-      .prepare("UPDATE decision_defaults SET delivered_at = ? WHERE key = ? AND brief_at = ?")
+      .prepare(
+        "UPDATE decision_defaults SET delivered_at = ?, delivery_state = 'delivered' WHERE key = ? AND brief_at = ?",
+      )
       .run(at, key, briefAt);
+  }
+
+  stopDecisionDelivery(
+    key: string,
+    briefAt: number,
+    state: "canceled" | "unknown",
+    reason: string,
+  ): void {
+    this.db
+      .prepare(
+        "UPDATE decision_defaults SET delivery_state = ?, delivery_note = ? WHERE key = ? AND brief_at = ? AND delivered_at IS NULL",
+      )
+      .run(state, reason, key, briefAt);
+  }
+
+  briefChoice(epoch: string): BriefChoiceReceipt | null {
+    const raw =
+      this.getSetting(`brief-choice:${epoch}`) ?? this.getSetting(`brief-last-choice:${epoch}`);
+    if (!raw) return null;
+    try {
+      return (JSON.parse(raw) as { receipt: BriefChoiceReceipt }).receipt;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Retained delivery outcomes include legacy/unverifiable rows; none is silently rebound. */
+  decisionDeliveryState(
+    key: string,
+    briefAt: number,
+  ): { state: string; deliveredAt: number | null; note: string | null } | null {
+    const row = this.db
+      .prepare(
+        "SELECT delivery_state, delivered_at, delivery_note FROM decision_defaults WHERE key = ? AND brief_at = ?",
+      )
+      .get(key, briefAt) as Row | undefined;
+    return row
+      ? {
+          state: row.delivery_state as string,
+          deliveredAt: row.delivered_at as number | null,
+          note: row.delivery_note as string | null,
+        }
+      : null;
   }
 
   /** Every ack: key → when it was acknowledged. */
@@ -5473,6 +5763,37 @@ export class Store {
   review(id: number): ReviewRow | null {
     const row = this.db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
     return row ? toReview(row) : null;
+  }
+
+  /** Moves a queued review to another review seat; true only when it was still queued. */
+  moveQueuedReview(id: number, seatId: string, at: number, budgetBrakeOverride = false): boolean {
+    let moved = false;
+    this.transaction(() => {
+      moved =
+        this.db
+          .prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'")
+          .run(seatId, id).changes === 1;
+      if (moved)
+        this.db
+          .prepare(
+            "INSERT OR REPLACE INTO review_moves (review_id, seat_id, at, budget_brake_override) VALUES (?, ?, ?, ?)",
+          )
+          .run(id, seatId, at, Number(budgetBrakeOverride));
+    });
+    return moved;
+  }
+
+  /** Whether FLIGHT assigned the queued review to its current seat. */
+  reviewMoved(id: number): boolean {
+    return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
+  }
+
+  /** Whether FLIGHT explicitly passed the target account's budget brake for this review. */
+  reviewBudgetBrakeOverride(id: number): boolean {
+    const row = this.db
+      .prepare("SELECT budget_brake_override FROM review_moves WHERE review_id = ?")
+      .get(id) as { budget_brake_override?: number } | undefined;
+    return row?.budget_brake_override === 1;
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */
@@ -6189,6 +6510,8 @@ export class Store {
     rate?: { since: number; limit: number },
     /** An identical message stored at or after this time is returned, flagged, not stored again. */
     repeatSince?: number,
+    /** Server-resolved title for one internal context line accompanying an operator item send. */
+    flightContextTitle?: string,
   ): (CommsRow & { repeat?: true }) | null {
     const text = cutCommsText(row.text);
     const replyTo =
@@ -6202,7 +6525,7 @@ export class Store {
         const same = this.db
           .prepare(
             `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND text = ? AND at >= ?
-               AND ticket IS ? AND label IS ? AND reply_to IS ? AND target_run_id IS ?
+               AND ticket IS ? AND label IS ? AND reply_to IS ? AND target_run_id IS ? AND item_key IS ?
              ORDER BY id DESC LIMIT 1`,
           )
           .get(
@@ -6214,6 +6537,7 @@ export class Store {
             row.label ?? null,
             replyTo,
             row.targetRunId ?? null,
+            row.itemKey ?? null,
           ) as { id: number } | undefined;
         if (same !== undefined) {
           id = same.id;
@@ -6231,6 +6555,25 @@ export class Store {
         if (count.n >= rate.limit) return;
       }
       id = this.insertComms(row, text, replyTo);
+      if (
+        row.from === COMMS_CAPCOM &&
+        row.itemKey !== undefined &&
+        flightContextTitle !== undefined
+      ) {
+        const context: NewCommsRow = {
+          from: COMMS_MC,
+          to: row.to,
+          senderKind: "hub",
+          at: row.at,
+          ticket: row.ticket,
+          text: `[Mission Control] Needs-you context ${JSON.stringify({
+            messageId: `comms:${id}`,
+            itemKey: row.itemKey,
+            title: flightContextTitle,
+          })}`,
+        };
+        this.insertComms(context, cutCommsText(context.text), null);
+      }
       this.raiseChatterNote(row);
     }, true);
     const stored = id === null ? null : this.commsMessage(`comms:${id}`);
@@ -6284,7 +6627,7 @@ export class Store {
       throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, item_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -6299,6 +6642,7 @@ export class Store {
         row.fromRunId ?? null,
         row.pr ?? null,
         row.senderKind ?? null,
+        row.itemKey ?? null,
       );
     const id = Number(inserted.lastInsertRowid);
     const mention = this.db.prepare(
@@ -6308,12 +6652,16 @@ export class Store {
     return id;
   }
 
-  private commsRow(r: Row): CommsRow {
+  private commsRow(r: Row, knownMentions?: string[]): CommsRow {
     const id = Number(r.id);
-    const mentions = this.db
-      .prepare("SELECT mentioned_id FROM comms_mentions WHERE message_id = ? ORDER BY mentioned_id")
-      .all(id)
-      .map((m) => m.mentioned_id as string);
+    const mentions =
+      knownMentions ??
+      this.db
+        .prepare(
+          "SELECT mentioned_id FROM comms_mentions WHERE message_id = ? ORDER BY mentioned_id",
+        )
+        .all(id)
+        .map((m) => m.mentioned_id as string);
     return {
       id: `comms:${id}`,
       at: r.at as number,
@@ -6327,7 +6675,30 @@ export class Store {
       mentions,
       deliveredAt: (r.delivered_at as number | null | undefined) ?? null,
       senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
+      ...(typeof r.item_key === "string" ? { itemKey: r.item_key } : {}),
     };
+  }
+
+  /** Bound mention reads per snapshot; retain no message or mention cache between calls. */
+  private commsRows(rows: Row[]): CommsRow[] {
+    const mentions = new Map<number, string[]>();
+    // Stay below even SQLite's older 999-variable limit if the snapshot limit grows.
+    const batchSize = 400;
+    for (let start = 0; start < rows.length; start += batchSize) {
+      const ids = rows.slice(start, start + batchSize).map((row) => Number(row.id));
+      const found = this.db
+        .prepare(
+          `SELECT message_id, mentioned_id FROM comms_mentions WHERE message_id IN (${ids.map(() => "?").join(",")}) ORDER BY message_id, mentioned_id`,
+        )
+        .all(...ids);
+      for (const row of found) {
+        const id = Number(row.message_id);
+        const names = mentions.get(id) ?? [];
+        names.push(row.mentioned_id as string);
+        mentions.set(id, names);
+      }
+    }
+    return rows.map((row) => this.commsRow(row, mentions.get(Number(row.id))?.slice() ?? []));
   }
 
   /** Records that the recipient took a message; the first time wins. */
@@ -6664,6 +7035,119 @@ export class Store {
   }
   commsForPair(a: string, b: string): CommsRow[] {
     return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
+  }
+
+  /** Lightweight retained transcript sources; conversation paging is not limited to recent runs. */
+  flightConversationRuns(
+    agentId: string,
+  ): Pick<Run, "id" | "startedAt" | "endedAt" | "transcriptPath" | "vendor" | "ticket">[] {
+    const rows = this.db
+      .prepare(`SELECT id, started_at, ended_at, transcript_path, vendor, ticket FROM runs
+      WHERE agent_id = ? ORDER BY COALESCE(ended_at, 9223372036854775807) DESC, started_at DESC, seq DESC`)
+      .all(agentId) as Row[];
+    return rows.map((r) => ({
+      id: r.id as string,
+      startedAt: r.started_at as number,
+      endedAt: r.ended_at as number | null,
+      transcriptPath: r.transcript_path as string,
+      ticket: r.ticket as string | null,
+      ...(r.vendor ? { vendor: r.vendor as Run["vendor"] } : {}),
+    }));
+  }
+
+  private flightConversationScope(
+    flightId: string,
+    seats: readonly string[],
+  ): { sql: string; args: SQLInputValue[] } {
+    const targets = [...new Set([flightId, ...seats])];
+    return {
+      sql: `(((c.from_id = ? AND c.to_id = ?) OR (c.from_id = ? AND c.to_id = ?))
+      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")})))
+      AND c.sender_kind IS NOT 'hub'
+      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`,
+      args: [COMMS_CAPCOM, flightId, flightId, COMMS_CAPCOM, COMMS_CAPCOM, ...targets],
+    };
+  }
+
+  /** A choice is projected from its durable receipt, never inferred from its rendered text. */
+  flightConversationStored(
+    flightId: string,
+    seats: readonly string[],
+    limit: number,
+    before?: { at: number; id: number },
+    exactId?: string,
+  ): (CommsRow & { choice?: { label: string } })[] {
+    const scope = this.flightConversationScope(flightId, seats);
+    const id = exactId === undefined ? null : commsMessageNumber(exactId);
+    if (exactId !== undefined && id === null) return [];
+    const rows = this.db
+      .prepare(`SELECT c.*, q.key AS choice_key, q.label AS choice_label FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql}${id === null ? "" : " AND c.id = ?"}${before ? " AND (c.at, c.id) < (?, ?)" : ""}
+      ORDER BY c.at DESC, c.id DESC LIMIT ?`)
+      .all(
+        ...scope.args,
+        ...(id === null ? [] : [id]),
+        ...(before ? [before.at, before.id] : []),
+        limit,
+      ) as Row[];
+    return rows.reverse().map((r) => ({
+      ...this.commsRow(r),
+      ...(typeof r.choice_label === "string"
+        ? { choice: { label: r.choice_label }, itemKey: (r.item_key ?? r.choice_key) as string }
+        : {}),
+    }));
+  }
+
+  latestFlightStoredReplyAt(flightId: string): number | null {
+    const row = this.db
+      .prepare(`SELECT MAX(at) AS at FROM comms WHERE from_id = ? AND to_id = ? AND sender_kind IS NOT 'hub'
+      AND LTRIM(text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`)
+      .get(flightId, COMMS_CAPCOM) as Row;
+    return row.at as number | null;
+  }
+
+  flightConversationUnread(
+    flightId: string,
+    seats: readonly string[],
+    cursor: string | null,
+    bound?: { at: number; source: string; offset: number },
+  ): number {
+    const scope = this.flightConversationScope(flightId, seats);
+    const after = bound
+      ? bound.source === "comms"
+        ? "(c.at, c.id) > (?, ?)"
+        : "c.at > ?"
+      : "c.id > ?";
+    const args = bound
+      ? bound.source === "comms"
+        ? [bound.at, bound.offset]
+        : [bound.at]
+      : [cursor ? (commsMessageNumber(cursor) ?? 0) : 0];
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql} AND ${after}`)
+      .get(...scope.args, ...args) as Row;
+    return row.n as number;
+  }
+
+  flightConversationStoredReadThrough(
+    flightId: string,
+    seats: readonly string[],
+    bound: { at: number; source: string; offset: number },
+  ): number | null {
+    const scope = this.flightConversationScope(flightId, seats);
+    const through = bound.source === "comms" ? "(c.at, c.id) <= (?, ?)" : "c.at <= ?";
+    const row = this.db
+      .prepare(`SELECT MAX(c.id) AS id FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql} AND ${through}`)
+      .get(
+        ...scope.args,
+        ...[bound.at, ...(bound.source === "comms" ? [bound.offset] : [])],
+      ) as Row;
+    return row.id as number | null;
   }
   private commsScopeWhere(scope: CommsReadScope): { where: string; args: SQLInputValue[] } {
     if ("crew" in scope) return { where: "to_id = 'crew'", args: [] };
@@ -7225,7 +7709,7 @@ export class Store {
         THREAD_COMMS_LIMIT,
         THREAD_COMMS_LIMIT,
       ) as Row[];
-    return rows.reverse().map((r) => this.commsRow(r));
+    return this.commsRows(rows.reverse());
   }
 
   /** Prompt metadata remains available even after its body has been read. */
@@ -8339,6 +8823,45 @@ export class Store {
     return stored;
   }
 
+  /** Operator Clear closes the displayed source and records its closure in the same transaction. */
+  clearAttention(c: QuestionClosure, notices: NewCommsRow[] = []): boolean {
+    let stored = false;
+    this.transaction(() => {
+      stored = this.insertClosure(c);
+      if (!stored) return;
+      if (c.key.startsWith("note:")) this.dismissNote(c.key.slice("note:".length), c.at);
+      else if (c.key.startsWith("crew-error:")) {
+        const id = Number(c.key.slice("crew-error:".length));
+        if (Number.isSafeInteger(id) && id > 0) this.ackCrewError(id);
+      } else if (c.key.startsWith(COMMS_OPEN_PREFIX))
+        this.settleCommsItem(c.key.slice(COMMS_OPEN_PREFIX.length), c.by, c.reason, c.at);
+      this.db
+        .prepare(`INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
+        ON CONFLICT(key) DO UPDATE SET at = excluded.at`)
+        .run(c.key, c.at);
+      for (const notice of notices) this.insertComms(notice, cutCommsText(notice.text), null);
+    }, true);
+    return stored;
+  }
+
+  /** Hide only FLIGHT's latest brief; retain its history and the underlying question or hold. */
+  withdrawFlightBrief(key: string): boolean {
+    let withdrawn = false;
+    this.transaction(() => {
+      const row = this.db
+        .prepare("SELECT id, structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
+        .get(key) as Row | undefined;
+      if (
+        !row?.structured ||
+        (JSON.parse(row.structured as string) as AttentionBrief).by !== "flight"
+      )
+        return;
+      this.setSetting(`withdrawn-brief:${key}`, String(row.id));
+      withdrawn = true;
+    }, true);
+    return withdrawn;
+  }
+
   /** `closeQuestion` without its own transaction, for a caller already in one. */
   private insertClosure(c: QuestionClosure): boolean {
     const r = this.db
@@ -9205,10 +9728,56 @@ export class Store {
   }
 
   /** Stores FLIGHT's brief on an attention key; returns its id. */
-  addBrief(b: AttentionBrief & { key: string }): number {
+  addBrief(b: AttentionBrief & { key: string; defaultEligible?: boolean }): number {
     let id = 0;
     this.transaction(() => {
-      const { key, context, recommendation, options, basis, at, ...structured } = b;
+      id = this.writeBrief(b);
+    });
+    return id;
+  }
+
+  /** Source handoff, audit and the prepared brief commit together or not at all. */
+  addPreparedBrief(
+    makeBrief: () => AttentionBrief & { key: string; defaultEligible?: boolean },
+    handoff: () => void,
+  ): number {
+    let id = 0;
+    this.transaction(() => {
+      handoff();
+      id = this.writeBrief(makeBrief());
+    }, true);
+    return id;
+  }
+
+  /** A hub-produced queue proposal and its validated brief become visible atomically. */
+  addQueueReorderBrief(
+    key: string,
+    proposal: string,
+    note: NoteInput,
+    makeBrief: () => AttentionBrief,
+  ): number {
+    let id = 0;
+    this.transaction(() => {
+      this.setSetting(key, proposal);
+      this.raiseNote(note);
+      id = this.writeBrief({ ...makeBrief(), key: `note:${key}`, defaultEligible: false });
+    }, true);
+    return id;
+  }
+
+  private writeBrief(b: AttentionBrief & { key: string; defaultEligible?: boolean }): number {
+    let id = 0;
+    {
+      const {
+        key,
+        context,
+        recommendation,
+        options,
+        basis,
+        at,
+        defaultEligible = true,
+        ...structured
+      } = b;
       if (structured.person) {
         const thread = /^person:(\d+):(\d+)$/.exec(key);
         const n = thread ? this.notification(thread[1] as string) : null;
@@ -9248,6 +9817,10 @@ export class Store {
           })),
         };
       }
+      // Read-model identities and receipts are derived, never producer-owned persisted content.
+      delete structured.id;
+      delete structured.state;
+      delete structured.choice;
       // A rebrief with the same ask (for the same reader) keeps when that ask began; a new or
       // changed ask begins at its own `at`, so it carries no askAt.
       delete structured.askAt;
@@ -9255,10 +9828,32 @@ export class Store {
         .prepare("SELECT at, structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
         .get(key) as { at: number; structured: string | null } | undefined;
       const prior: AttentionBrief | null = last?.structured ? JSON.parse(last.structured) : null;
-      if (last !== undefined && prior?.ask === structured.ask && prior?.for === structured.for)
+      if (
+        last !== undefined &&
+        prior?.for === structured.for &&
+        (structured.binding
+          ? structured.binding.epoch === prior?.binding?.epoch
+          : prior?.ask === structured.ask)
+      )
         structured.askAt = prior?.askAt ?? last.at;
       // No timed default on a question to the operator (#1532): a brief never stores one.
       delete structured.defaultAt;
+      const eligibleBinding = structured.binding?.actions.some(
+        (action) => action.optionId === structured.recommendedOptionId && action.defaultable,
+      );
+      if (
+        defaultEligible &&
+        eligibleBinding &&
+        !structured.decision?.whyOperator &&
+        structured.for !== "flight" &&
+        structured.recommendedOptionId
+      ) {
+        const kept =
+          structured.binding?.epoch === prior?.binding?.epoch ? prior?.defaultAt : undefined;
+        // The wait starts when a default is first stamped, never at an older ask's time: an ask
+        // briefed before defaults existed must not come due the moment it is briefed again.
+        structured.defaultAt = kept ?? at + DECISION_DEFAULT_WAIT_MS;
+      }
       const r = this.db
         .prepare(`INSERT INTO briefs (key, context, recommendation, options, basis, at, structured)
         VALUES (?, ?, ?, ?, ?, ?, ?)`)
@@ -9272,7 +9867,13 @@ export class Store {
           JSON.stringify(structured),
         );
       id = Number(r.lastInsertRowid);
-    });
+      if (structured.binding && structured.binding.epochId === 0) {
+        structured.binding = { ...structured.binding, epochId: id };
+        this.db
+          .prepare("UPDATE briefs SET structured = ? WHERE id = ?")
+          .run(JSON.stringify(structured), id);
+      }
+    }
     return id;
   }
 
@@ -9290,7 +9891,8 @@ export class Store {
   /** The newest brief on each attention key. */
   briefs(): Map<string, AttentionBrief> {
     const rows = this.db
-      .prepare("SELECT * FROM briefs WHERE id IN (SELECT MAX(id) FROM briefs GROUP BY key)")
+      .prepare(`SELECT b.* FROM briefs b WHERE b.id IN (SELECT MAX(id) FROM briefs GROUP BY key)
+        AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key = 'withdrawn-brief:' || b.key AND s.value = CAST(b.id AS TEXT))`)
       .all() as Row[];
     return new Map(
       rows
@@ -9310,6 +9912,7 @@ export class Store {
           r.key as string,
           {
             ...(r.structured ? JSON.parse(r.structured as string) : {}),
+            id: r.id as number,
             context: r.context as string,
             recommendation: r.recommendation as string,
             options: JSON.parse(r.options as string) as BriefOption[],

@@ -47,6 +47,8 @@ export interface CommsSendInput {
   label?: CommsLabel;
   ref?: string;
   replyTo?: string;
+  /** The Needs-you item this conversation message is about; never an authority grant. */
+  itemKey?: string;
   /** A run-specific delivery stays pending for this run when its seat takes other work. */
   targetRunId?: string;
 }
@@ -60,6 +62,12 @@ export interface CommsReaction {
 /** Who a stored message came from, set by the hub from how the request was made, never from the text. */
 export const COMMS_SENDER_KINDS = ["operator", "controller", "flight", "seat", "hub"] as const;
 export type CommsSenderKind = (typeof COMMS_SENDER_KINDS)[number];
+/** Recorded ticket-reference totals, preserved across message retention rather than feed-limited. */
+export interface CommsTicketCounts {
+  tickets: { ticket: string; count: number }[];
+  /** Referenced messages whose repository or ticket cannot be established without guessing. */
+  unassignedCount: number;
+}
 export interface CommsMessage {
   id: string;
   at: number;
@@ -78,6 +86,19 @@ export interface CommsMessage {
   senderKind?: CommsSenderKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt?: number | null;
+  state?: "stored" | "delivered" | "answered";
+  itemKey?: string;
+  choice?: { label: string };
+}
+
+/** A transcript can lack a timestamp; keep that fact instead of inventing its clock time. */
+export type FlightConversationMessage = Omit<CommsMessage, "at"> & { at: number | null };
+
+export interface FlightConversationPage {
+  messages: FlightConversationMessage[];
+  hasMore: boolean;
+  cursor: string | null;
+  unread: number;
 }
 
 /** Where a message stands: kept by the hub, or taken by its recipient. */
@@ -147,6 +168,8 @@ export interface CommsCount {
 }
 export interface CommsContact {
   id: string;
+  /** Whether this contact has any stored messages; omitted by older servers. */
+  hasMessages?: boolean;
   lastMessage: CommsMessage | null;
   count: number;
   unread: number;
