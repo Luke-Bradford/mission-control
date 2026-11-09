@@ -866,6 +866,7 @@ async function safeReviewPnpmChanges(
     return false;
 
   let typesOnly = false;
+  let scriptsChanged = false;
   for (const file of changed.filter((file) => basename(file) === "package.json")) {
     const entry = await baseEntry(read, base, file);
     if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return false;
@@ -882,6 +883,7 @@ async function safeReviewPnpmChanges(
       const afterRest = { ...after };
       delete beforeRest.scripts;
       delete afterRest.scripts;
+      if (JSON.stringify(before.scripts) !== JSON.stringify(after.scripts)) scriptsChanged = true;
       for (const field of [
         "dependencies",
         "devDependencies",
@@ -914,7 +916,7 @@ async function safeReviewPnpmChanges(
       return false;
     }
   }
-  if (!changed.includes(PNPM_TOOL.lockfile)) return true;
+  if (!changed.includes(PNPM_TOOL.lockfile)) return scriptsChanged || typesOnly;
   if (!typesOnly) return false;
   try {
     const entry = await baseEntry(read, base, PNPM_TOOL.lockfile);
