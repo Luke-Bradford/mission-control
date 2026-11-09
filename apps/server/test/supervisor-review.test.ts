@@ -1283,6 +1283,7 @@ describe("startReview", () => {
   });
 
   it("a moved Size M review keeps the full model over its target's light model", async () => {
+    store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
     const base = DEFAULT_PROFILES[0] as Profile;
     const r = reviewOfPush({
       state: "queued",
