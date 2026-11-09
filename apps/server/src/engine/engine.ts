@@ -1,3 +1,4 @@
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief-dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -1246,6 +1247,7 @@ export function createEngine(deps: EngineDeps): Engine {
     key: string,
     mirror: string,
   ): Promise<boolean> {
+    checkBriefDispatch();
     const row = {
       at: now(),
       // the hub's own note about a verdict; never the operator's name
@@ -1269,6 +1271,7 @@ export function createEngine(deps: EngineDeps): Engine {
       return true;
     }
     const sent = await supervisor.send(run.id, key, text);
+    checkBriefDispatch();
     // a paused seat reads it when it resumes: the verdict is recorded all the same
     if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId, run.id)) return false;
     const stored = store.addComms(row);
@@ -2887,6 +2890,7 @@ export function createEngine(deps: EngineDeps): Engine {
         result = { lifted: false, reason };
       };
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || loop === undefined || loop === null) return refuse("not-parked");
@@ -2989,6 +2993,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (opts?.beforeLift !== undefined && !(await opts.beforeLift()))
           return refuse("before-lift");
+        checkBriefDispatch();
         const at = now();
         const head = store.newestRunCommit(run.id)?.sha ?? null;
         const pushed = store.runPush(run.id);
@@ -3094,12 +3099,13 @@ export function createEngine(deps: EngineDeps): Engine {
           }
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
+        checkBriefDispatch();
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3110,6 +3116,7 @@ export function createEngine(deps: EngineDeps): Engine {
       };
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
@@ -3177,6 +3184,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ))
           )
             return refuse("rework-undelivered");
+          checkBriefDispatch();
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
@@ -3189,7 +3197,7 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("agents");
         bus.emit("attention");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3200,6 +3208,7 @@ export function createEngine(deps: EngineDeps): Engine {
       };
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
@@ -3259,6 +3268,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ))
           )
             return refuse("rework-undelivered");
+          checkBriefDispatch();
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:uat:${held.sha}:send-back`,
@@ -3271,7 +3281,7 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("agents");
         bus.emit("attention");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3279,6 +3289,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
       return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
         if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop || run.endedAt !== null)
@@ -3314,6 +3325,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
       return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
         if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         const hold = loop?.mergeHold;
@@ -3338,7 +3350,7 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         lastTransient.delete(runId);
         bus.emit("agents");
-        await pass(runId);
+        await withoutBriefDispatch(() => pass(runId));
         return { ok: true };
       });
     },

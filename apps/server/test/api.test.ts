@@ -1760,6 +1760,11 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/attention/example/not-now", {}],
   ["POST", "/api/attention/example/drop", {}],
   ["GET", "/api/attention/unknown"],
+  [
+    "POST",
+    "/api/attention/example/choice",
+    { briefId: 1, sourceRevision: "a".repeat(64), optionId: "apply", requestId: "route-inventory" },
+  ],
   ["GET", "/api/attention/example/discussion"],
   ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
@@ -2606,6 +2611,14 @@ describe("local access", () => {
       if (url === "/api/repos/shop-app/prs/4") {
         // the fixture has no such PR: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
+      if (url.endsWith("/choice")) {
+        // Valid envelope, but this placeholder has no bound brief. It never grants authority.
+        expect(r.statusCode).toBe(409);
+        expect(r.json()).toEqual({
+          error: "Needs a refreshed brief: this brief identity is no longer current or bound.",
+        });
         continue;
       }
       if (url.endsWith("/discussion")) {
@@ -3842,10 +3855,20 @@ describe("crew and attention", () => {
       basis: "read the issue",
       at: NOW,
     };
-    store.addBrief({ key: "esc:shop-app#9", ...brief });
+    const id = store.addBrief({ key: "esc:shop-app#9", ...brief });
     bus.emit("attention");
     const items = (await get("/api/attention")).json() as AttentionItem[];
-    expect(items[0]?.brief).toEqual(brief);
+    expect(items[0]?.brief).toEqual({
+      ...brief,
+      id,
+      state: {
+        completeness: "incomplete",
+        freshness: "unknown",
+        reason: "Needs a refreshed brief: historical source/action binding is unknown.",
+      },
+    });
+    expect(items[0]?.brief).not.toHaveProperty("binding");
+    expect(items[0]?.brief).not.toHaveProperty("defaultAt");
   });
 
   it("POST /api/attention/ack acks the keys, emits attention, and the next GET shows them acked", async () => {
