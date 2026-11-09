@@ -327,6 +327,7 @@ describe("Codex check records", () => {
       lockedBy: async (_run, c) => (c === "pnpm -s typecheck" ? c : null),
       dropRun: () => {},
       drops: () => [],
+      pending: () => [],
     };
     return { begun, checks };
   };

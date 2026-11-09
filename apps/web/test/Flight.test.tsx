@@ -1002,7 +1002,7 @@ describe("FLIGHT page", () => {
     expect(container.querySelector("#timeline")).toBeNull();
   });
 
-  it("puts FLIGHT's next action and checkpoint on Crew & board, and the Needs you counter on its tab", async () => {
+  it("puts FLIGHT's next action and checkpoint on Crew & board", async () => {
     const work = ledgerEntry({
       key: "work:3349",
       refs: ["#3349"],
@@ -1027,11 +1027,7 @@ describe("FLIGHT page", () => {
     await findSeats();
     expect(container.querySelector("#wifP")?.textContent).toContain("Get RETRO's verdict");
     expect(container.querySelector("#wifP")?.textContent).toContain("Checkpoint in 1h 00m");
-    fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Needs you: 1" }));
-    // the asks have their own page now
-    expect(window.location.pathname).toBe("/needs-you");
-    window.history.replaceState(null, "", "/");
+    expect(screen.queryByRole("button", { name: /^Needs you/ })).toBeNull();
   });
 
   describe("a delivery-board row's next action", () => {
@@ -1276,7 +1272,7 @@ describe("FLIGHT page", () => {
       expect(await screen.findByRole("button", { name: "decided 24 h: 2" })).toBeTruthy();
     });
 
-    it("counts the whole inbox whatever the session filter, and each counter opens its tab", async () => {
+    it("counts what FLIGHT handles and decided, whatever the session filter, and each counter opens its tab", async () => {
       stubFetch({
         "/api/config": SESSION_CONFIG,
         "/api/flight": flightView(),
@@ -1287,22 +1283,18 @@ describe("FLIGHT page", () => {
         ],
       });
       render(<Flight />);
-      const needs = await screen.findByRole("button", { name: "Needs you: 2" });
-      expect(screen.getByRole("button", { name: "FLIGHT handling: 1" })).toBeTruthy();
+      await screen.findByRole("button", { name: "FLIGHT handling: 1" });
+      expect(screen.queryByRole("button", { name: /^Needs you/ })).toBeNull();
       expect(screen.getByRole("button", { name: "decided 24 h: 2" })).toBeTruthy();
       act(() => setSession("site-builder-session"));
-      expect(screen.getByRole("button", { name: "Needs you: 2" })).toBeTruthy();
       fireEvent.click(screen.getByRole("button", { name: "decided 24 h: 2" }));
       expect(
         screen.getByRole("tab", { name: "What FLIGHT did" }).getAttribute("aria-selected"),
       ).toBe("true");
-      fireEvent.click(needs);
-      expect(window.location.pathname).toBe("/needs-you");
-      window.history.replaceState(null, "", "/");
     });
   });
 
-  it("counts Needs you once: the header and the strip agree, one per key", async () => {
+  it("counts Needs you once, in the header: the strip has no counter for it", async () => {
     stubFetch({
       "/api/config": CONFIG,
       "/api/test-lock": { holder: null, waiting: [] },
@@ -1323,7 +1315,7 @@ describe("FLIGHT page", () => {
       </>,
     );
     expect(await screen.findByRole("link", { name: "Needs you: 2 waiting" })).toBeTruthy();
-    expect(await screen.findByRole("button", { name: "Needs you: 2" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Needs you: \d+$/ })).toBeNull();
     // What FLIGHT owns is its own group, never counted as Needs you.
     expect(screen.getByRole("button", { name: "FLIGHT handling: 1" })).toBeTruthy();
     expect(screen.getByTestId("needs-line").textContent).toContain("FLIGHT's to clear");

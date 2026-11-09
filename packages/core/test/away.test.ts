@@ -23,6 +23,13 @@ describe("away policy", () => {
     expect(awayTicketType({ size: "M", labels: [label] })).toBeNull();
   });
 
+  it("a small docs ticket gives type docs", () => {
+    expect(awayTicketType({ size: "S", labels: ["docs"] })).toBe("docs");
+    expect(awayTicketType({ size: "XS", labels: ["type:docs"] }, { "type:docs": "docs" })).toBe(
+      "docs",
+    );
+  });
+
   it("uses the repo mapping and refuses missing or conflicting types", () => {
     expect(awayTicketType({ size: "XS", labels: ["defect"] }, { defect: "bugfix" })).toBe("bug");
     expect(awayTicketType({ size: "S", labels: [] })).toBeNull();
