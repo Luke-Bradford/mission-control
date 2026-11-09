@@ -869,7 +869,9 @@ describe("move_review", () => {
     ["non-scratch", { mode: "writer" as const }, "RETRO-CX is not a review seat."],
   ])("refuses a %s target review seat", async (_kind, extra, text) => {
     const id = queuedReview();
-    Object.assign(need(cfg.crew?.sessions[0]).seats.at(-1), extra);
+    const target = need(cfg.crew?.sessions[0]).seats.find((seat) => seat.id === "retro-cx");
+    if (target === undefined) throw new Error("missing RETRO-CX");
+    Object.assign(target, extra);
 
     await expect(
       call("move_review", {
