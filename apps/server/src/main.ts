@@ -106,6 +106,7 @@ import {
   prTextProblem,
   readKnown,
 } from "./mcp/tools.ts";
+import { releaseWaitingOperator } from "./needs-you-actions.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import {
@@ -336,6 +337,9 @@ export async function main(): Promise<void> {
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
     // lazy: the supervisor is built below, and the check only runs once the scheduler starts
     seatCheck: (tool) => supervisor.checkCli(tool),
+    // lazy: `gh` is built below; the job only runs once the scheduler starts
+    releaseWaiting: () =>
+      releaseWaitingOperator({ config, store, gh, dbPath, log: (line) => log(line) }),
     deliverDefault: async (seatId, text) => {
       await supervisor.message(seatId, text, { interrupt: false });
     },

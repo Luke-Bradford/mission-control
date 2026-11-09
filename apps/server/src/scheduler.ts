@@ -313,6 +313,8 @@ export interface SchedulerDeps {
   seatCheck?: SeatCheck;
   /** Hands an applied default to the seat that asked it. */
   deliverDefault?: (seatId: string, text: string) => Promise<void>;
+  /** Takes `waiting:operator` off cards that left the Backlog; returns how many it freed. Absent: none. */
+  releaseWaiting?: () => Promise<number>;
   /** The PRs the engine waits on in a repo (CI running, a merge queued). Default: from the loop runs. */
   waitedPrs?: (repoId: RepoId) => number[];
 }
@@ -1007,6 +1009,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           scopeLogged.add(repo.id);
         }
       }
+      // a card that left the Backlog by another hand no longer waits on the operator's question
+      if (
+        !(client instanceof Error) &&
+        boardDue &&
+        deps.boardWrites !== false &&
+        deps.releaseWaiting
+      )
+        try {
+          if ((await deps.releaseWaiting()) > 0) changed.boards = true;
+        } catch (e) {
+          deps.log?.(`release waiting:operator: ${e instanceof Error ? e.message : String(e)}`);
+        }
       if (!(client instanceof Error) && boardDue) {
         lastBoardAt = startedAt;
         boardWanted = false;

@@ -346,11 +346,13 @@ import {
 import { metricsView } from "./metrics.ts";
 import {
   type ActionResult,
+  answerSetAside,
   drop as dropQuestion,
   type NeedsYouContext,
   type NeedsYouDeps,
   notNow as notNowQuestion,
   offersFor,
+  setAsideQuestions,
 } from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
@@ -4499,6 +4501,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (named !== null && named.agentId !== id) {
             throw new SupervisorError(409, "That question belongs to another seat.");
           }
+          // an answer to a question the operator set aside, whose run has ended, has no run to go to
+          if (named !== null && named.asideAt !== null && store.run(named.runId)?.endedAt != null)
+            throw new SupervisorError(
+              409,
+              "That question was set aside and its run has ended; answer it from its ticket with the set-aside answer route.",
+            );
           const parked =
             named !== null &&
             named.agentId === id &&
@@ -6076,6 +6084,59 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (needsYou === null) return reply.code(409).send({ error: "Drop is not available." });
         return answerAction(reply, await dropQuestion(needsYou, req.params.key));
       });
+      const asideTicket = (params: { repoId: string; number: string }) => {
+        const repo = config.repos.find((r) => r.id === params.repoId);
+        const n = /^[1-9]\d*$/.test(params.number) ? Number(params.number) : 0;
+        return repo === undefined || n === 0 || n > MAX_ISSUE_NUMBER ? null : { repo, n };
+      };
+      // Reader: docs/runbook.md#answering-a-set-aside-question (the Ticket page's answer box is a later web ticket)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/tickets/:repoId/:number/set-aside",
+        async (req, reply) => {
+          const t = asideTicket(req.params);
+          if (t === null) return reply.code(404).send({ error: "unknown ticket" });
+          return setAsideQuestions(store, t.repo.id, t.n);
+        },
+      );
+      // Reader: docs/runbook.md#answering-a-set-aside-question (the Ticket page's answer box is a later web ticket)
+      api.post<{ Params: { repoId: string; number: string; id: string } }>(
+        "/tickets/:repoId/:number/set-aside/:id/answer",
+        async (req, reply) => {
+          const t = asideTicket(req.params);
+          if (t === null) return reply.code(404).send({ error: "unknown ticket" });
+          const body = z.strictObject({ text: MessageBody.shape.text }).safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (needsYou === null)
+            return reply.code(409).send({ error: "Answering is not available." });
+          const id = /^[1-9]\d*$/.test(req.params.id) ? Number(req.params.id) : 0;
+          if (id === 0) return reply.code(404).send({ error: "unknown question" });
+          const sender = commsSender(req);
+          return answerAction(
+            reply,
+            await answerSetAside(
+              needsYou,
+              t.repo.id,
+              t.n,
+              id,
+              body.data.text,
+              async (seat, ticket, runId, text) => {
+                if (!commsCrew().includes(seat)) return;
+                await sendComms(
+                  {
+                    store,
+                    crew: commsCrew,
+                    knownSecrets: deps.knownSecrets ?? (async () => []),
+                    now,
+                    senderKind: sender.kind,
+                  },
+                  sender.from,
+                  { to: seat, text, ref: ticket, targetRunId: runId },
+                );
+              },
+            ),
+          );
+        },
+      );
       // Reader: apps/web/src/flight/HeldNeeds.tsx (the release button)
       api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
         if (!NoBody.safeParse(req.body).success)

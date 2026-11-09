@@ -8193,7 +8193,7 @@ export class Store {
          FROM seat_questions q
          JOIN runs r ON r.id = q.run_id
          JOIN flight_decisions d ON d.question_id = q.id AND d.kind = 'answer'
-         WHERE r.ticket = ? AND q.answered_at IS NOT NULL
+         WHERE r.ticket = ? AND (q.answered_at IS NOT NULL OR q.aside_at IS NOT NULL)
          ORDER BY d.at DESC, d.id DESC LIMIT ?`,
       )
       .all(ticket, limit) as Row[];
@@ -8767,6 +8767,36 @@ export class Store {
     ).map((r) => {
       const entry = JSON.parse(r.entry as string) as FlightArrivalDisposition;
       return { ...entry, repoId: entry.repoId ?? null, sourceRef: entry.sourceRef ?? null };
+    });
+  }
+
+  /**
+   * Records the operator's answer to a set-aside question where every later run on its ticket reads
+   * it (`answeredQuestionsOn`). A repeat for the same question replaces the earlier text.
+   */
+  recordSetAsideAnswer(d: {
+    at: number;
+    seatId: AgentId;
+    questionId: number;
+    ref: string;
+    about: string;
+    decision: string;
+  }): void {
+    this.transaction(() => {
+      this.db
+        .prepare("DELETE FROM flight_decisions WHERE question_id = ? AND kind = 'answer'")
+        .run(d.questionId);
+      this.addFlightDecision({
+        at: d.at,
+        kind: "answer",
+        seatId: d.seatId,
+        targetRunId: null,
+        ref: d.ref,
+        questionId: d.questionId,
+        about: d.about,
+        decision: d.decision,
+        basis: "Operator answered the set-aside question from its ticket.",
+      });
     });
   }
 

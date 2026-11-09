@@ -1643,6 +1643,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/boards/shop-app/setup"],
   ["GET", "/api/boards/shop-app/items/7"],
   ["GET", "/api/tickets/shop-app/7"],
+  ["GET", "/api/tickets/shop-app/7/set-aside"],
+  ["POST", "/api/tickets/shop-app/7/set-aside/3/answer", { text: "x" }],
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/prs/4"],
@@ -2539,6 +2541,7 @@ describe("local access", () => {
       if (/^\/api\/attention\/unknown\/choo?[si]/.test(url)) continue; // needs an open question; choose.test.ts covers it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
       if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
+      if (url.includes("/set-aside/")) continue; // needs the Needs-you wiring; needs-you-answer.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url.startsWith("/api/code-health/evidence/")) continue; // issued references are covered by code-health-reader.test.ts
       if (
@@ -2979,6 +2982,10 @@ describe("local access", () => {
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/tickets\/:repoId\/7$/, "/tickets/:repoId/:number")
+            .replace(
+              /\/tickets\/:repoId\/7\/set-aside(\/3\/answer)?$/,
+              (_m, a) => `/tickets/:repoId/:number/set-aside${a ? "/:id/answer" : ""}`,
+            )
             .replace(/\/prs\/4$/, "/prs/:number")
             .replace(
               /\/prs\/:repoId\/12\/(uat|controller-check|merge-hold|review-request)$/,

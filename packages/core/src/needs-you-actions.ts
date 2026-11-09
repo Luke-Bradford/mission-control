@@ -37,3 +37,4 @@ export const dropComment = (at: number): string =>
 
 export const NOT_NOW_REFUSED = "Not set aside:";
 export const DROP_REFUSED = "Not dropped:";
+export const ANSWER_REFUSED = "Not answered:";
