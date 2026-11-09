@@ -2199,7 +2199,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ...agentCommsCounts(id),
         }));
       });
-      // Reader: apps/web/src/comms/TicketsList.tsx (all-time counts for the Comms record).
+      // Reader: docs/runbook.md#ticket-history (all-time counts for the later Comms ticket list).
       api.get("/comms/ticket-counts", () => commsTicketCounts(config, store));
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
       api.get<{
