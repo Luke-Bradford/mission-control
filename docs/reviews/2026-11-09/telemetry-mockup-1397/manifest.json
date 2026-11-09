@@ -132,5 +132,10 @@
     "current-page/current-telemetry-1920x940-light.png": "90df9d4337f4588962581bdd579e5601a38c73efbe2c455f1fd253da0886cce7",
     "current-page/manifest.json": "1a3870cacdb89db349a6337d74418449ca0345a0059987b93208c46eb40c4da5",
     "current-page-fixture.json": "b4604e29cb2dbec4faa147907e8fc9174e7ca45c3028eb26ec9257900f32f5fe"
+  },
+  "runtimeCompatibilityMerge": {
+    "source": "b9c0b9ee911ea105822745808017562ea36a901b",
+    "cause": "The old branch rejected live accounts[].brake during automatic read-only screenshot preview. Current main already supports the setting. No budget flag is removed or changed.",
+    "visibleEvidence": "The exact self-contained mockup HTML bytes are unchanged from the captured product; current image source identities and capture times remain unchanged."
   }
 }

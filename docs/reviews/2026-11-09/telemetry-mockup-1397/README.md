@@ -23,3 +23,9 @@ Manual inspection covers Crew at 1280, Cost in both themes at 1600, Throughput a
 All 43 mockup checks pass, including eight real-browser cases, plus the three completed capture phases. Lint passes with the branch's 77 existing warnings; none is hidden or called warning-free. Workspace typecheck and production build pass. The temporary capture tests are retained as text and removed from the runnable suite.
 
 Fresh full CI and the configured most-capable independent whole-branch review remain required. The old failed design verdict is not waived or relabelled. A passing proposal review does not constitute the operator's approval to implement the redesigned product.
+
+## Automatic preview compatibility
+
+The automatic evidence preview of the old branch exits with an unrecognized `accounts[].brake` config key. A controller-owned preview reproduces that exact startup refusal without touching the live hub or loops. Current main is merged to bring its existing configuration parser. No live account setting or guard is removed. The exact self-contained mockup HTML hash remains identical, so the retained proposal images keep their actual capture-source identities and timestamps. New full CI and independent review are required on the composed head.
+
+The corrected private preview boots on the composed source, reports the exact commit, confirms crew disabled and exits normally when its own observation ends. All 43 mockup cases pass again after composition. Lint, workspace types and build pass; existing lint warnings remain reported.
