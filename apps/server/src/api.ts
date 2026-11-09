@@ -3405,9 +3405,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             const message = e instanceof Error ? e.message : "";
             // git's own failure text carries paths and flags; the page gets a plain sentence instead
             const reason =
-              message.startsWith("Command failed") || message === "the checkout has no files at this commit"
-              ? "git could not read the checkout"
-              : message;
+              message.startsWith("Command failed") ||
+              message === "the checkout has no files at this commit"
+                ? "git could not read the checkout"
+                : message;
             return reply.code(503).send({
               error: `map snapshot unavailable${/^[\w ,.'-]{1,120}$/.test(reason) ? `: ${reason}` : ""}`,
             });
