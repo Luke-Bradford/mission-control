@@ -25,6 +25,7 @@ import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { messageStateLine, sendStateLine } from "../flight/conversation.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
+import { FlightThread } from "../flight/FlightThread.tsx";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
 import { ago, dayMonth, hhmm } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -954,7 +955,7 @@ function ModernConversation({
           </button>
         </div>
       )}
-      <MessagePane
+      {view.kind === "flight" ? <FlightThread /> : <MessagePane
         emptyText={
           view.kind === "crew" && !crew.data && (crew.loading || crew.error) ? null : undefined
         }
@@ -967,8 +968,8 @@ function ModernConversation({
         flightId={flightSeat?.id}
         sent={sent}
         older={view.kind === "ticket" ? undefined : olderMessages}
-      />
-      {to ? (
+      />}
+      {to && view.kind !== "flight" ? (
         <Composer
           key={conversationScope}
           to={to}
@@ -979,26 +980,24 @@ function ModernConversation({
               ? "Post to #crew as CAPCOM · @name pings one agent"
               : view.kind === "ticket"
                 ? `Post to #crew as CAPCOM · tagged ${view.ref}`
-                : view.kind === "flight"
-                  ? "Message FLIGHT as CAPCOM"
-                  : `Message ${to} as CAPCOM`
+              : `Message ${to} as CAPCOM`
           }
           placeholder={
-            view.kind === "flight" ? "Ask FLIGHT, or give it direction…" : "Write a message…"
+            "Write a message…"
           }
           messageRef={view.kind === "ticket" ? view.ref : undefined}
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
-          flightSeat={view.kind === "flight" && flightView ? flightView.seat : undefined}
+          flightSeat={undefined}
           onSent={() => {
             setSent((count) => count + 1);
             if (view.kind === "contact" && view.contactId !== COMMS_CAPCOM)
               navigate(commsContactPath(view.agentId, COMMS_CAPCOM));
           }}
         />
-      ) : (
+      ) : view.kind !== "flight" ? (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>
-      )}
+      ) : null}
     </Panel>
   );
   return "agentId" in view ? (

@@ -1,0 +1,6 @@
+.flight-thread { display: flex; flex: 1; min-height: 0; flex-direction: column; }
+.flight-thread-log { flex: 1; min-height: 0; overflow: auto; padding: var(--sp-3); }
+.flight-thread-message { display: grid; gap: var(--sp-1); margin-bottom: var(--sp-3); }
+.flight-thread-message.operator { justify-items: end; }
+.flight-thread-message > div { max-width: min(68%, 760px); padding: var(--sp-2) var(--sp-3); overflow-wrap: anywhere; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
+.flight-thread-message.operator > div { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
