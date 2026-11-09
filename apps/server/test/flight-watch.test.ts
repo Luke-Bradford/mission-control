@@ -85,6 +85,7 @@ import {
   flightSeat,
   flightState,
   flightView,
+  flightWake,
   flightWakeHistory,
   markItemsShown,
   markPrsShown,
@@ -5746,6 +5747,15 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
       expect(overs(T0 + 2 * MIN)).toHaveLength(1);
     };
 
+    it("keeps the full read but omits a handled wait from a fresh session's digest", () => {
+      endedWait();
+      const state = read(T0 + 4 * MIN);
+      expect(state.signals.filter((s) => s.kind === "wait_over")).toHaveLength(1);
+      const digest = flightWake(state, undefined, [], false, T0 + 4 * MIN).digest;
+      expect(digest.signals.entries.filter((s) => s.kind === "wait_over")).toEqual([]);
+      expect(state.signals.filter((s) => s.kind === "wait_over")).toHaveLength(1);
+    });
+
     it("drops out once log_decision names its signal key in about", () => {
       endedWait();
       decide({ about: `wait_over:mc#7:${T0 + MIN}` });
@@ -5758,6 +5768,15 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
       recordFlightWait(store, "mc#7", { on: "its PR", until: T0 + 30 * MIN, at: T0 + 3 * MIN });
       expect(overs(T0 + 4 * MIN)).toEqual([]);
       expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
+      expect(
+        flightWake(
+          read(T0 + 4 * MIN),
+          undefined,
+          [],
+          false,
+          T0 + 4 * MIN,
+        ).digest.signals.entries.filter((s) => s.kind === "wait_over"),
+      ).toEqual([]);
     });
 
     it("drops out once an action on the target is recorded after it ended", () => {

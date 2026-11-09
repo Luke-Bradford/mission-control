@@ -1509,6 +1509,7 @@ export function flightWake(
   previous?: FlightWakeSnapshot,
   notes: FlightMemoryNote[] = [],
   fullRead = false,
+  now = Date.now(),
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
   const {
     brief,
@@ -1565,12 +1566,15 @@ export function flightWake(
       removed: [...(previous?.[list].keys() ?? [])].filter((id) => !snapshot[list].has(id)),
     };
   };
-  const signalChanges = changed(
-    "signals",
-    signals,
-    (s) => `${s.kind}:${s.key}`,
-    (s) => (s.told ? { kind: s.kind, key: s.key, told: s.told } : s),
+  // Delivery receipts survive a session handover; the per-session snapshot does not. A told
+  // episode must not become new again on the first wake. Changed reasons have a new key or
+  // are untold by the producer. Do not announce removals for entries never delivered.
+  const wakeSignals = signals.filter(
+    (signal) =>
+      !signal.told && (signal.kind !== "wait_over" || now - signal.since <= 24 * FLIGHT_HOUR_MS),
   );
+  const signalChanges = changed("signals", wakeSignals, (s) => `${s.kind}:${s.key}`);
+  signalChanges.unchanged += signals.length - wakeSignals.length;
   const memoryChanges = changed("memory", memory, (n) => `${n.kind}:${n.topic}`);
   const titles = Object.fromEntries(
     FLIGHT_MEMORY_KINDS.map((kind) => {
