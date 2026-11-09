@@ -126,12 +126,39 @@ describe("the FLIGHT page", () => {
     await waitFor(() => expect(document.getElementById(panel)).not.toBeNull());
   });
 
-  it("routes a decision link to Records so a decision outside the main screen is reachable", async () => {
-    expect(isFlightRecordHash("#decision-99")).toBe(true);
-    expect(recordPanelForHash("#decision-99")).toBe("decidedP");
-    window.history.replaceState(null, "", "/flight#decision-99");
+  it.each([
+    ["What FLIGHT did", "decidedP"],
+    ["Crew & board", "wifP"],
+    ["What FLIGHT knows", "ordersP"],
+  ])("keeps Records open while selecting %s", async (tab, panel) => {
+    window.history.replaceState(null, "", "/flight#handlingP");
     show("blocked");
-    await waitFor(() => expect(document.getElementById("decidedP")).not.toBeNull());
+    fireEvent.click(await screen.findByRole("tab", { name: tab }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Records" })).not.toBeNull());
+    expect(document.getElementById(panel)).not.toBeNull();
+  });
+
+  it("scrolls a decision outside the main screen into the Records decision list", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    expect(isFlightRecordHash("#decision-1")).toBe(true);
+    expect(recordPanelForHash("#decision-1")).toBe("decidedP");
+    window.history.replaceState(null, "", "/flight#decision-1");
+    show("blocked");
+    let target: HTMLElement | null = null;
+    await waitFor(() => {
+      target = document.getElementById("decision-1");
+      expect(target).not.toBeNull();
+    });
+    try {
+      expect(target?.dataset.testid).toBe("decided-row");
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }));
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: () => void }).scrollIntoView;
+    }
   });
 
   it.each(["#askP", "#defaultsP"])("keeps the old %s redirect to Needs you", async (hash) => {

@@ -1,5 +1,14 @@
 import { ORDER_ANCHOR_PREFIX } from "../instructions/links.ts";
 import { DECISION_ANCHOR_PREFIX } from "./conversation.ts";
+import type { FlightTab } from "./tabs.ts";
+
+/** A stable Records address for each retained record family. */
+const RECORDS_TAB_HASH: Readonly<Record<FlightTab, string>> = {
+  needs: "handlingP",
+  did: "decidedP",
+  crew: "wifP",
+  knows: "ordersP",
+};
 
 /** The retained FLIGHT panels, addressed by their original fragment identifiers. */
 const RECORD_PANEL: Readonly<Record<string, string>> = {
@@ -34,4 +43,9 @@ export function recordPanelForHash(hash: string): string | null {
 /** True when a fragment belongs in FLIGHT's secondary Records view. */
 export function isFlightRecordHash(hash: string): boolean {
   return recordPanelForHash(hash) !== null;
+}
+
+/** The root panel fragment for a Records family. */
+export function recordsHashForTab(tab: FlightTab): string {
+  return RECORDS_TAB_HASH[tab];
 }

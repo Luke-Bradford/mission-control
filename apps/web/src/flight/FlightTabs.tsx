@@ -11,6 +11,7 @@ import { CrewBoardTab } from "./CrewBoardTab.tsx";
 import { DidTab } from "./DidTab.tsx";
 import { KnowsTab } from "./KnowsTab.tsx";
 import { NeedsYouTab } from "./NeedsYouTab.tsx";
+import { recordsHashForTab } from "./records.ts";
 import { StatusStrip } from "./Situation.tsx";
 import { FLIGHT_TABS, type FlightTab, TAB_LABEL, tabForHash } from "./tabs.ts";
 import "./flight.css";
@@ -96,6 +97,12 @@ export function FlightTabs({ records = false }: { records?: boolean } = {}) {
   // switches back.
   const select = (next: FlightTab) => {
     setTab(next);
+    if (records) {
+      navigate(`${window.location.pathname}${window.location.search}#${recordsHashForTab(next)}`, {
+        replace: true,
+      });
+      return;
+    }
     if (window.location.hash !== "") {
       navigate(window.location.pathname + window.location.search, { replace: true });
     }
