@@ -460,7 +460,7 @@ describeRendered("Agent density in the production App", () => {
         await page.press("a");
         await page.press("b");
         await page.click('button[title="Collapse FLIGHT to its rail"]');
-        await page.click('button[aria-label^="Expand FLIGHT:"]');
+        await page.click('button[aria-label="Expand FLIGHT"]');
         await page.resize(1280, 700);
         await page.resize(1600, 1000);
         expect(

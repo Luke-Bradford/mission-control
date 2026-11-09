@@ -119,8 +119,8 @@ it("keeps an ended budget run's operator-briefed Comms question visible", () => 
   store.addBrief({
     key,
     for: "operator",
-    ask: "May GUIDO proceed past the budget hold on repo#7?",
-    context: "Held run",
+    ask: "May the seat proceed past the budget hold on its ticket?",
+    context: "The run is held and waits for your decision.",
     recommendation: "Keep held",
     options: [
       { label: "Hold", answer: "Keep the hold" },
@@ -145,7 +145,7 @@ it("routes FLIGHT's own current for:flight brief away from the operator", () => 
   store.addBrief({
     key,
     for: "flight",
-    context: "For the controller",
+    context: "This one is for the controller to decide.",
     recommendation: "Controller will inspect",
     options: [],
     basis: "Existing scope",
@@ -173,7 +173,7 @@ it("routes a controller-owned cleanup to the operator only after an explicit rec
     key,
     for: "operator",
     ask: "Keep the run's worktree for inspection, or remove it?",
-    context: "No controller is available",
+    context: "No controller is available, so you decide.",
     recommendation: "Keep the worktree and ask the operator to inspect the lock",
     options: [
       { label: "Keep", answer: "Keep the worktree" },

@@ -43,8 +43,59 @@ const RAW_TEXT: readonly [RegExp, string][] = [
   [/https?:\/\//i, "a web address (put links in the ticket or PR, not the question)"],
   [/\b[\w-]+:[\w./#-]+:\d{10,}\b/, "a raw signal id such as kind:key:1793825335003"],
   [/\b\d{12,}\b/, "a raw timestamp"],
-  [/^\s*\[[^\]]+\]/, "a [tag] prefix"],
 ];
+const TAG_PREFIX: readonly [RegExp, string] = [/^\s*\[[^\]]+\]/, "a [tag] prefix"];
+
+/**
+ * Ids a person cannot read (#1582): a question must make sense to someone who has never seen the
+ * project, so ticket and PR numbers, commit codes, paths, seat ids and tool names stay in the links.
+ * A brief has no title field yet: the title check joins this one with the Needs you page (#1583).
+ */
+const ID_TEXT: readonly [RegExp, string][] = [
+  [/#\d+|\bPR\s*\d+/i, "a ticket or PR number"],
+  // a hex run with both a digit and a letter, so words like "decade" pass
+  [/\b(?=[0-9a-f]*\d)(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}\b/i, "a commit code"],
+  [/\/[\w.-]+\.[a-z]\w{0,7}\b/i, "a file path"],
+  [/@capcom\b/i, "the CAPCOM tag"],
+  [/\bmcp__mc__\w+|\bmc\s+[a-z]+(?:_[a-z]+)*\b/i, "a tool name"],
+];
+
+const escapeRe = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** The seat ids (and so their call signs, which differ only in case) as one pattern, or null. */
+const seatPattern = (seatIds: readonly string[]): RegExp | null => {
+  const names = seatIds.filter((id) => id !== "");
+  return names.length === 0
+    ? null
+    : new RegExp(`(?<![\\w-])(?:${names.map(escapeRe).join("|")})(?![\\w-])`, "i");
+};
+
+/** Every unreadable id in `text`, named; `seatIds` are the configured seats' ids. */
+const idKinds = (text: string, seatIds: readonly string[]): string[] => {
+  const seat = seatPattern(seatIds);
+  return [
+    ...ID_TEXT.filter(([re]) => re.test(text)).map(([, what]) => what),
+    ...(seat?.test(text) ? ["a seat id"] : []),
+  ];
+};
+
+/** Whether `text` holds an id a person cannot read (a ticket number, commit code, path and so on). */
+export const hasUnreadableId = (text: string, seatIds: readonly string[] = []): boolean =>
+  RAW_TEXT.some(([re]) => re.test(text)) || idKinds(text, seatIds).length > 0;
+
+const plainFaults = (
+  part: string,
+  text: string,
+  raw: readonly (readonly [RegExp, string])[],
+  seatIds: readonly string[],
+): string[] => [
+  ...raw.filter(([re]) => re.test(text)).map(([, what]) => `the ${part} has ${what}`),
+  ...idKinds(text, seatIds).map((what) => `the ${part} has ${what}: say it in words`),
+];
+
+/** A context is at least one sentence: four or more words, ending in . ? or !, markdown allowed. */
+const isSentence = (text: string): boolean =>
+  text.split(/\s+/).length >= 4 && /[.?!]["')*_`]*$/.test(text);
 
 /**
  * Why an item may not count in Needs you, in words FLIGHT can act on in one try. Empty when it
@@ -52,6 +103,7 @@ const RAW_TEXT: readonly [RegExp, string][] = [
  */
 export function needsYouEntryFaults(
   item: Pick<AttentionItem, "key" | "kind" | "at" | "ticket" | "url" | "brief">,
+  seatIds: readonly string[] = [],
 ): string[] {
   if (needsYouAlert(item)) return [];
   const brief = item.brief;
@@ -65,8 +117,16 @@ export function needsYouEntryFaults(
     if (!/\?\s*$/.test(ask)) faults.push("the question does not end with ?: ask one question");
     if (ask.length > NEEDS_YOU_ASK_MAX)
       faults.push(`the question is over ${NEEDS_YOU_ASK_MAX} characters: one sentence`);
-    for (const [re, what] of RAW_TEXT) if (re.test(ask)) faults.push(`the question has ${what}`);
+    faults.push(...plainFaults("question", ask, [...RAW_TEXT, TAG_PREFIX], seatIds));
   }
+  const context = brief.context?.trim() ?? "";
+  if (context === "")
+    faults.push(
+      "no context: write two or three sentences saying what this is and why it comes up now",
+    );
+  else if (!isSentence(context))
+    faults.push("the context is not a full sentence: say what this is and why it comes up now");
+  faults.push(...plainFaults("context", context, RAW_TEXT, seatIds));
   const replies = brief.person?.replies?.length ?? 0;
   const n = brief.options.length;
   if (replies === 0 && (n < 2 || n > 4))

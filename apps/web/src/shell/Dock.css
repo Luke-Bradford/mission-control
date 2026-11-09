@@ -44,6 +44,7 @@
   padding: var(--sp-4);
   border-bottom: 1px solid var(--line);
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--sp-3);
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
@@ -74,33 +75,10 @@
   margin-top: var(--sp-2);
   overflow-wrap: anywhere;
 }
-.dock-summary-item {
-  padding: var(--sp-2) 0;
-  border-bottom: 1px solid var(--line);
-}
-.dock-summary-item > .row {
-  display: flex;
-  gap: var(--sp-2);
-  flex-wrap: wrap;
-  align-items: center;
-}
-.dock-item-reason {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  overflow-wrap: anywhere;
-  margin: var(--sp-1) 0;
-  font: var(--fs-s) / var(--lh-s) var(--sans);
-}
 .dock-next {
   display: grid;
   justify-items: start;
   gap: var(--sp-2);
-}
-.dock-next button {
-  white-space: normal;
-  text-align: left;
 }
 .dock-next a {
   display: inline-flex;
@@ -153,25 +131,6 @@
   background: inherit;
 }
 
-.dask {
-  display: flex;
-  align-items: center;
-  gap: var(--sp-2);
-  min-width: 0;
-  min-height: 26px;
-  font-size: var(--fs-s);
-}
-
-/* only the ask's text gives way; the kind, who and Open stay whole on one line */
-.dask > :not(.min0) {
-  flex: none;
-  white-space: nowrap;
-}
-
-.dask > button.sm {
-  padding: 0 var(--sp-2);
-}
-
 @media (max-width: 1199px) {
   .dock {
     display: none;
@@ -207,4 +166,31 @@
 .dolder {
   align-self: center;
   flex: none;
+}
+
+.dock-messages {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  justify-items: stretch;
+}
+.dock-message {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 24px;
+  align-items: center;
+  gap: var(--sp-2);
+  font-size: var(--fs-s);
+}
+.dock-message b {
+  flex: none;
+  white-space: nowrap;
+}
+.dock-message span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
