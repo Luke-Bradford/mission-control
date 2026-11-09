@@ -592,15 +592,6 @@ export function CommsRails({
               onMouseEnter={() => setTip({ kind: "seat", id: seat.id })}
               onMouseLeave={() => setTip(null)}
             >
-              {!reduced && (
-                <animateTransform
-                  attributeName="transform"
-                  type="translate"
-                  values={`0 0; ${(hashSeat(seat.id) % 5) - 2} ${((hashSeat(seat.id) >> 3) % 5) - 2}; 0 0`}
-                  dur={`${12 + (hashSeat(seat.id) % 7)}s`}
-                  repeatCount="indefinite"
-                />
-              )}
               {hub ? (
                 <>
                   <rect
@@ -705,8 +696,20 @@ export function CommsRails({
             aria-label={label}
           >
             <title>{label}</title>
-            {edgeMarks}
-            {nodeMarks}
+            <g className="comms-organic-layout">
+              {!reduced && (
+                <animateTransform
+                  attributeName="transform"
+                  type="translate"
+                  additive="sum"
+                  values="0 0; 2 -2; 0 0"
+                  dur="45s"
+                  repeatCount="indefinite"
+                />
+              )}
+              {edgeMarks}
+              {nodeMarks}
+            </g>
           </svg>
           {/* The travelling dots live on their own layer, so animating them repaints only them. */}
           <svg
@@ -759,10 +762,6 @@ export function CommsRails({
       </div>
     </div>
   );
-}
-
-function hashSeat(id: string): number {
-  return [...id].reduce((n, char) => (n * 31 + char.charCodeAt(0)) >>> 0, 7);
 }
 
 function SeatTip({

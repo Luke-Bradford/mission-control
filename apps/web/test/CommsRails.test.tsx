@@ -205,6 +205,13 @@ it("sends a dot along the link for each new message, and none under reduced moti
   expect(document.querySelector(".comms-edge.live")).not.toBeNull();
 });
 
+it("adds drift to each force position instead of replacing the node placement", () => {
+  view(3);
+  const drift = document.querySelector(".comms-organic-layout animateTransform");
+  expect(drift?.getAttribute("additive")).toBe("sum");
+  expect(document.querySelector(".comms-node")?.getAttribute("transform")).toMatch(/^translate\(/);
+});
+
 it("does not replay messages that were already there when the chart opened", () => {
   view(3, { flows: later });
   expect(document.querySelector(".comms-particle")).toBeNull();
