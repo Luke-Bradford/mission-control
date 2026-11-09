@@ -1,0 +1,342 @@
+{
+  "pr": 1586,
+  "publishedHead": "2f4357ba847b03b256fd490f135d29c262f6a60c",
+  "baseline": "416e0b17a1ab1efd723d96d4a913392ca01f2b8c",
+  "note": "Before reconstructed now from actual production source416e. Both built Apps use repository Demo seeds and the same capture harness, fixture clock, browser, viewport and theme. This PR deliberately adds eight seeded decisions and a running context to Demo; baseline retains its original empty decisions. No live operational data. Before is a static assets-only listener, After the copied-data preview with Demo active. Arrival Overview -> Flight in both. This is controller visual evidence, not independent QA or interaction sign-off.",
+  "before": {
+    "pr": 1586,
+    "publishedHead": "416e0b17a1ab1efd723d96d4a913392ca01f2b8c",
+    "renderedSource": "416e0b17a1ab1efd723d96d4a913392ca01f2b8c",
+    "baseline": "416e0b17a1ab1efd723d96d4a913392ca01f2b8c",
+    "browser": "156.0.8078.80",
+    "os": "Darwin 27.0.0 arm64",
+    "zoom": 1,
+    "fixture": "built App Demo seed, Date.now fixed; real timers retained; simulation may advance after 4s",
+    "evidence": [
+      {
+        "path": "before-flight-light-1920x940.png",
+        "sha256": "ecbe2dc8341908526ac1253209ad18d4bb3d7833483906ebb983b7bb45f63847",
+        "colorScheme": "light",
+        "viewport": {
+          "width": 1920,
+          "height": 940
+        },
+        "scope": "viewport",
+        "capturedAt": "2026-11-09T03:32:58.765Z",
+        "readyElapsedMs": 536,
+        "arrival": "Overview -> FLIGHT nav",
+        "errors": [],
+        "denied": [],
+        "url": "/flight",
+        "width": 1920,
+        "height": 940,
+        "scrollWidth": 1920,
+        "dpr": 1,
+        "fixtureClock": 1792238400000,
+        "demoBanner": true,
+        "body": "Flight\nRunning\nwaiting for a wake\nLast wake \u2014 \u00b7 next \u2014 \u00b7 woken on \u2014\nThe crew is shipping; one review needs attention. 1m 00s old\n0 FLIGHT handling\n0 decided 24 h\n0 active orders\n01\nHANDLING\n02\nWHAT FLIGHT DID\n03\nCREW & BOARD\n04\nWHAT FLIGHT KNOWS\n\nOpen Needs you\n\nPR flow\nwho owns the next step, and what holds it\nRefresh\nOpen\n5\nUnowned\n0\nOldest open\n4h 0m\nMerged \u00b7 24h\n63\np50 open to merge \u00b7 24h\n42m\nPR \u00b7 OLDEST UNOWNED FIRST\tNEXT OWNER \u00b7 TICKET\tSTAGE \u00b7 TIME HERE\tWAITS ON\tBLOCKS\tLAST ACTION \u00b7 ACTOR\nshop-app PR #1108\nShow delivery estimates in the cart\nOpen 4h 0m\tdev-9\n#108\n\t\nreview\n45m\nPast stage p90 (30m)\n\t\nreview by dev-9\n\tNone recorded\tpushed\ndev-9 \u00b7 4m ago\n\nshop-app PR #1107\nExport orders as CSV\nOpen 3h 20m\tdev-7\n#107\n\t\nCI\n36m\nPast stage p90 (30m)\n\t\nCI to finish\n\tNone recorded\tpushed\ndev-7 \u00b7 4m ago\n\nshop-app PR #1106\nSpeed up the search index rebuild\nOpen 2h 40m\tdev-6\n#106\n\t\nbuilding\n27m\nPast stage p50 (10m)\n\tNo recorded wait\tNone recorded\tpushed\ndev-6 \u00b7 4m ago\n\nshop-app PR #1105\nAdd stock badges to product cards\nOpen 2h 0m\tdev-5\n#105\n\t\nbuilding\n18m\nPast stage p50 (10m)\n\tNo recorded wait\tNone recorded\tpushed\ndev-5 \u00b7 4m ago\n\nshop-app PR #1103\nPaginate the order history\nOpen 1h 20m\tdev-3\n#103\n\t\nbuilding\n9m\nWithin usual stage time\n\tNo recorded wait\t\n#104\n\tpushed\ndev-3 \u00b7 4m ago\nFLIGHT is handling\n0 owned\n\nFLIGHT is not handling anything for you right now.\n\nHeld\n0 on a condition\n\nNothing is held.\n\nWaiting on others\n0 not yours\n\nNothing is waiting on anyone else.\n\nDraft replies\nfull working space for replies awaiting approval\n\nNo drafts to send.",
+        "panels": [],
+        "scroll": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "path": "before-flight-dark-1920x940.png",
+        "sha256": "a8978c08a372f4b0df71bc012e725ebf162c784a1318933855fb3c65c758a8de",
+        "colorScheme": "dark",
+        "viewport": {
+          "width": 1920,
+          "height": 940
+        },
+        "scope": "viewport",
+        "capturedAt": "2026-11-09T03:32:59.405Z",
+        "readyElapsedMs": 491,
+        "arrival": "Overview -> FLIGHT nav",
+        "errors": [],
+        "denied": [],
+        "url": "/flight",
+        "width": 1920,
+        "height": 940,
+        "scrollWidth": 1920,
+        "dpr": 1,
+        "fixtureClock": 1792238400000,
+        "demoBanner": true,
+        "body": "Flight\nRunning\nwaiting for a wake\nLast wake \u2014 \u00b7 next \u2014 \u00b7 woken on \u2014\nThe crew is shipping; one review needs attention. 1m 00s old\n0 FLIGHT handling\n0 decided 24 h\n0 active orders\n01\nHANDLING\n02\nWHAT FLIGHT DID\n03\nCREW & BOARD\n04\nWHAT FLIGHT KNOWS\n\nOpen Needs you\n\nPR flow\nwho owns the next step, and what holds it\nRefresh\nOpen\n5\nUnowned\n0\nOldest open\n4h 0m\nMerged \u00b7 24h\n63\np50 open to merge \u00b7 24h\n42m\nPR \u00b7 OLDEST UNOWNED FIRST\tNEXT OWNER \u00b7 TICKET\tSTAGE \u00b7 TIME HERE\tWAITS ON\tBLOCKS\tLAST ACTION \u00b7 ACTOR\nshop-app PR #1108\nShow delivery estimates in the cart\nOpen 4h 0m\tdev-9\n#108\n\t\nreview\n45m\nPast stage p90 (30m)\n\t\nreview by dev-9\n\tNone recorded\tpushed\ndev-9 \u00b7 4m ago\n\nshop-app PR #1107\nExport orders as CSV\nOpen 3h 20m\tdev-7\n#107\n\t\nCI\n36m\nPast stage p90 (30m)\n\t\nCI to finish\n\tNone recorded\tpushed\ndev-7 \u00b7 4m ago\n\nshop-app PR #1106\nSpeed up the search index rebuild\nOpen 2h 40m\tdev-6\n#106\n\t\nbuilding\n27m\nPast stage p50 (10m)\n\tNo recorded wait\tNone recorded\tpushed\ndev-6 \u00b7 4m ago\n\nshop-app PR #1105\nAdd stock badges to product cards\nOpen 2h 0m\tdev-5\n#105\n\t\nbuilding\n18m\nPast stage p50 (10m)\n\tNo recorded wait\tNone recorded\tpushed\ndev-5 \u00b7 4m ago\n\nshop-app PR #1103\nPaginate the order history\nOpen 1h 20m\tdev-3\n#103\n\t\nbuilding\n9m\nWithin usual stage time\n\tNo recorded wait\t\n#104\n\tpushed\ndev-3 \u00b7 4m ago\nFLIGHT is handling\n0 owned\n\nFLIGHT is not handling anything for you right now.\n\nHeld\n0 on a condition\n\nNothing is held.\n\nWaiting on others\n0 not yours\n\nNothing is waiting on anyone else.\n\nDraft replies\nfull working space for replies awaiting approval\n\nNo drafts to send.",
+        "panels": [],
+        "scroll": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "path": "before-flight-light-2560x1200.png",
+        "sha256": "03230ce190dd920b01db0949558500546d8c561e793bc24b532de4f800221ba8",
+        "colorScheme": "light",
+        "viewport": {
+          "width": 2560,
+          "height": 1200
+        },
+        "scope": "viewport",
+        "capturedAt": "2026-11-09T03:33:00.109Z",
+        "readyElapsedMs": 587,
+        "arrival": "Overview -> FLIGHT nav",
+        "errors": [],
+        "denied": [],
+        "url": "/flight",
+        "width": 2560,
+        "height": 1200,
+        "scrollWidth": 2560,
+        "dpr": 1,
+        "fixtureClock": 1792238400000,
+        "demoBanner": true,
+        "body": "Flight\nRunning\nwaiting for a wake\nLast wake \u2014 \u00b7 next \u2014 \u00b7 woken on \u2014\nThe crew is shipping; one review needs attention. 1m 00s old\n0 FLIGHT handling\n0 decided 24 h\n0 active orders\n01\nHANDLING\n02\nWHAT FLIGHT DID\n03\nCREW & BOARD\n04\nWHAT FLIGHT KNOWS\n\nOpen Needs you\n\nPR flow\nwho owns the next step, and what holds it\nRefresh\nOpen\n5\nUnowned\n0\nOldest open\n4h 0m\nMerged \u00b7 24h\n63\np50 open to merge \u00b7 24h\n42m\nPR \u00b7 OLDEST UNOWNED FIRST\tNEXT OWNER \u00b7 TICKET\tSTAGE \u00b7 TIME HERE\tWAITS ON\tBLOCKS\tLAST ACTION \u00b7 ACTOR\nshop-app PR #1108\nShow delivery estimates in the cart\nOpen 4h 0m\tdev-9\n#108\n\t\nreview\n45m\nPast stage p90 (30m)\n\t\nreview by dev-9\n\tNone recorded\tpushed\ndev-9 \u00b7 4m ago\n\nshop-app PR #1107\nExport orders as CSV\nOpen 3h 20m\tdev-7\n#107\n\t\nCI\n36m\nPast stage p90 (30m)\n\t\nCI to finish\n\tNone recorded\tpushed\ndev-7 \u00b7 4m ago\n\nshop-app PR #1106\nSpeed up the search index rebuild\nOpen 2h 40m\tdev-6\n#106\n\t\nbuilding\n27m\nPast stage p50 (10m)\n\tNo recorded wait\tNone recorded\tpushed\ndev-6 \u00b7 4m ago\n\nshop-app PR #1105\nAdd stock badges to product cards\nOpen 2h 0m\tdev-5\n#105\n\t\nbuilding\n18m\nPast stage p50 (10m)\n\tNo recorded wait\tNone recorded\tpushed\ndev-5 \u00b7 4m ago\n\nshop-app PR #1103\nPaginate the order history\nOpen 1h 20m\tdev-3\n#103\n\t\nbuilding\n9m\nWithin usual stage time\n\tNo recorded wait\t\n#104\n\tpushed\ndev-3 \u00b7 4m ago\nFLIGHT is handling\n0 owned\n\nFLIGHT is not handling anything for you right now.\n\nHeld\n0 on a condition\n\nNothing is held.\n\nWaiting on others\n0 not yours\n\nNothing is waiting on anyone else.\n\nDraft replies\nfull working space for replies awaiting approval\n\nNo drafts to send.",
+        "panels": [],
+        "scroll": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "path": "before-flight-dark-2560x1200.png",
+        "sha256": "ef291b6d3c6f07d0231586ecd820ce412b0ba92b9849ff5250cd24cb74afd0f3",
+        "colorScheme": "dark",
+        "viewport": {
+          "width": 2560,
+          "height": 1200
+        },
+        "scope": "viewport",
+        "capturedAt": "2026-11-09T03:33:00.805Z",
+        "readyElapsedMs": 575,
+        "arrival": "Overview -> FLIGHT nav",
+        "errors": [],
+        "denied": [],
+        "url": "/flight",
+        "width": 2560,
+        "height": 1200,
+        "scrollWidth": 2560,
+        "dpr": 1,
+        "fixtureClock": 1792238400000,
+        "demoBanner": true,
+        "body": "Flight\nRunning\nwaiting for a wake\nLast wake \u2014 \u00b7 next \u2014 \u00b7 woken on \u2014\nThe crew is shipping; one review needs attention. 1m 00s old\n0 FLIGHT handling\n0 decided 24 h\n0 active orders\n01\nHANDLING\n02\nWHAT FLIGHT DID\n03\nCREW & BOARD\n04\nWHAT FLIGHT KNOWS\n\nOpen Needs you\n\nPR flow\nwho owns the next step, and what holds it\nRefresh\nOpen\n5\nUnowned\n0\nOldest open\n4h 0m\nMerged \u00b7 24h\n63\np50 open to merge \u00b7 24h\n42m\nPR \u00b7 OLDEST UNOWNED FIRST\tNEXT OWNER \u00b7 TICKET\tSTAGE \u00b7 TIME HERE\tWAITS ON\tBLOCKS\tLAST ACTION \u00b7 ACTOR\nshop-app PR #1108\nShow delivery estimates in the cart\nOpen 4h 0m\tdev-9\n#108\n\t\nreview\n45m\nPast stage p90 (30m)\n\t\nreview by dev-9\n\tNone recorded\tpushed\ndev-9 \u00b7 4m ago\n\nshop-app PR #1107\nExport orders as CSV\nOpen 3h 20m\tdev-7\n#107\n\t\nCI\n36m\nPast stage p90 (30m)\n\t\nCI to finish\n\tNone recorded\tpushed\ndev-7 \u00b7 4m ago\n\nshop-app PR #1106\nSpeed up the search index rebuild\nOpen 2h 40m\tdev-6\n#106\n\t\nbuilding\n27m\nPast stage p50 (10m)\n\tNo recorded wait\tNone recorded\tpushed\ndev-6 \u00b7 4m ago\n\nshop-app PR #1105\nAdd stock badges to product cards\nOpen 2h 0m\tdev-5\n#105\n\t\nbuilding\n18m\nPast stage p50 (10m)\n\tNo recorded wait\tNone recorded\tpushed\ndev-5 \u00b7 4m ago\n\nshop-app PR #1103\nPaginate the order history\nOpen 1h 20m\tdev-3\n#103\n\t\nbuilding\n9m\nWithin usual stage time\n\tNo recorded wait\t\n#104\n\tpushed\ndev-3 \u00b7 4m ago\nFLIGHT is handling\n0 owned\n\nFLIGHT is not handling anything for you right now.\n\nHeld\n0 on a condition\n\nNothing is held.\n\nWaiting on others\n0 not yours\n\nNothing is waiting on anyone else.\n\nDraft replies\nfull working space for replies awaiting approval\n\nNo drafts to send.",
+        "panels": [],
+        "scroll": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    ]
+  },
+  "after": {
+    "pr": 1586,
+    "publishedHead": "2f4357ba847b03b256fd490f135d29c262f6a60c",
+    "renderedSource": "2f4357ba847b03b256fd490f135d29c262f6a60c",
+    "baseline": "Not captured here; native review evidence sweep supplies matched baseline separately",
+    "browser": "156.0.8078.80",
+    "os": "Darwin 27.0.0 arm64",
+    "zoom": 1,
+    "fixture": "built App Demo seed, Date.now fixed; real timers retained; simulation may advance after 4s",
+    "evidence": [
+      {
+        "path": "after-flight-light-1920x940.png",
+        "sha256": "6ee350e777affd90a68b8a460564a8e081d361af441b02e069839bf047d62a7d",
+        "colorScheme": "light",
+        "viewport": {
+          "width": 1920,
+          "height": 940
+        },
+        "scope": "viewport",
+        "capturedAt": "2026-11-09T03:29:39.834Z",
+        "readyElapsedMs": 570,
+        "arrival": "Overview -> FLIGHT nav",
+        "errors": [],
+        "denied": [],
+        "url": "/flight",
+        "width": 1920,
+        "height": 940,
+        "scrollWidth": 1920,
+        "dpr": 1,
+        "fixtureClock": 1792238400000,
+        "demoBanner": true,
+        "body": "FLIGHT\nIs FLIGHT working, what is it doing, and what blocks it? PR flow is on the Board.\nFLIGHT\nRunning\nWorking. Run start not recorded yet.\nCOST PER HOUR\nNot recorded yet\nAPI-equivalent cost of FLIGHT's sessions over the last 60 minutes, in dollars. Not a bill.\nSESSIONS PER HOUR\nNot recorded yet\nFLIGHT sessions started in the last 60 minutes. A handover starts a new one.\nCONTEXT SIZE\n74.2k\nof 200k \u00b7 37%\nTokens in the current session's latest reading, against the size where it hands over.\nDoing now\nHeadline The crew is shipping; one review needs attention.\nBlockers\n3 \u00b7 longest wait first\nBLOCKER\nOWNER\nWAITED \u2193\nWHAT FLIGHT IS DOING\nChoose the retry policy for failed payment webhooks.\nshop-app#103\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nConfirm the import scope for the order export.\nshop-app#102\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nWhich breakpoint should the address form use: 600 or 720 pixels?\nshop-app#104\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nRecent decisions\nlast 8 \u00b7 newest first\n11:49\nCache the quote total at checkout Keep the agreed scope and check the result against the ticket before merging.\n11:38\nRetry failed payment webhooks Keep the agreed scope and check the result against the ticket before merging.\n11:27\nPaginate the order history Keep the agreed scope and check the result against the ticket before merging.\n11:16\nFix the address form on narrow screens Keep the agreed scope and check the result against the ticket before merging.\n11:05\nAdd stock badges to product cards Keep the agreed scope and check the result against the ticket before merging.\n10:54\nSpeed up the search index rebuild Keep the agreed scope and check the result against the ticket before merging.\n10:43\nExport orders as CSV Keep the agreed scope and check the result against the ticket before merging.\n10:32\nShow delivery estimates in the cart Keep the agreed scope and check the result against the ticket before merging.",
+        "panels": [
+          {
+            "id": "doingP",
+            "x": 12,
+            "y": 231,
+            "width": 785,
+            "height": 82
+          },
+          {
+            "id": "blockersP",
+            "x": 809,
+            "y": 231,
+            "width": 1099,
+            "height": 244
+          },
+          {
+            "id": "decisionsP",
+            "x": 12,
+            "y": 487,
+            "width": 1896,
+            "height": 411
+          }
+        ],
+        "scroll": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "path": "after-flight-dark-1920x940.png",
+        "sha256": "319f8bfe3849d83584dc0e587626d3a91e9fbac9c76718b8b898a8149b932f1e",
+        "colorScheme": "dark",
+        "viewport": {
+          "width": 1920,
+          "height": 940
+        },
+        "scope": "viewport",
+        "capturedAt": "2026-11-09T03:29:40.489Z",
+        "readyElapsedMs": 521,
+        "arrival": "Overview -> FLIGHT nav",
+        "errors": [],
+        "denied": [],
+        "url": "/flight",
+        "width": 1920,
+        "height": 940,
+        "scrollWidth": 1920,
+        "dpr": 1,
+        "fixtureClock": 1792238400000,
+        "demoBanner": true,
+        "body": "FLIGHT\nIs FLIGHT working, what is it doing, and what blocks it? PR flow is on the Board.\nFLIGHT\nRunning\nWorking. Run start not recorded yet.\nCOST PER HOUR\nNot recorded yet\nAPI-equivalent cost of FLIGHT's sessions over the last 60 minutes, in dollars. Not a bill.\nSESSIONS PER HOUR\nNot recorded yet\nFLIGHT sessions started in the last 60 minutes. A handover starts a new one.\nCONTEXT SIZE\n74.2k\nof 200k \u00b7 37%\nTokens in the current session's latest reading, against the size where it hands over.\nDoing now\nHeadline The crew is shipping; one review needs attention.\nBlockers\n3 \u00b7 longest wait first\nBLOCKER\nOWNER\nWAITED \u2193\nWHAT FLIGHT IS DOING\nChoose the retry policy for failed payment webhooks.\nshop-app#103\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nConfirm the import scope for the order export.\nshop-app#102\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nWhich breakpoint should the address form use: 600 or 720 pixels?\nshop-app#104\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nRecent decisions\nlast 8 \u00b7 newest first\n11:49\nCache the quote total at checkout Keep the agreed scope and check the result against the ticket before merging.\n11:38\nRetry failed payment webhooks Keep the agreed scope and check the result against the ticket before merging.\n11:27\nPaginate the order history Keep the agreed scope and check the result against the ticket before merging.\n11:16\nFix the address form on narrow screens Keep the agreed scope and check the result against the ticket before merging.\n11:05\nAdd stock badges to product cards Keep the agreed scope and check the result against the ticket before merging.\n10:54\nSpeed up the search index rebuild Keep the agreed scope and check the result against the ticket before merging.\n10:43\nExport orders as CSV Keep the agreed scope and check the result against the ticket before merging.\n10:32\nShow delivery estimates in the cart Keep the agreed scope and check the result against the ticket before merging.",
+        "panels": [
+          {
+            "id": "doingP",
+            "x": 12,
+            "y": 231,
+            "width": 785,
+            "height": 82
+          },
+          {
+            "id": "blockersP",
+            "x": 809,
+            "y": 231,
+            "width": 1099,
+            "height": 244
+          },
+          {
+            "id": "decisionsP",
+            "x": 12,
+            "y": 487,
+            "width": 1896,
+            "height": 411
+          }
+        ],
+        "scroll": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "path": "after-flight-light-2560x1200.png",
+        "sha256": "c7cd10a87340b4b1b6b8f09f1fc6cee9c213e04fe936c38c47147c5cb18063d9",
+        "colorScheme": "light",
+        "viewport": {
+          "width": 2560,
+          "height": 1200
+        },
+        "scope": "viewport",
+        "capturedAt": "2026-11-09T03:29:41.123Z",
+        "readyElapsedMs": 529,
+        "arrival": "Overview -> FLIGHT nav",
+        "errors": [],
+        "denied": [],
+        "url": "/flight",
+        "width": 2560,
+        "height": 1200,
+        "scrollWidth": 2560,
+        "dpr": 1,
+        "fixtureClock": 1792238400000,
+        "demoBanner": true,
+        "body": "FLIGHT\nIs FLIGHT working, what is it doing, and what blocks it? PR flow is on the Board.\nFLIGHT\nRunning\nWorking. Run start not recorded yet.\nCOST PER HOUR\nNot recorded yet\nAPI-equivalent cost of FLIGHT's sessions over the last 60 minutes, in dollars. Not a bill.\nSESSIONS PER HOUR\nNot recorded yet\nFLIGHT sessions started in the last 60 minutes. A handover starts a new one.\nCONTEXT SIZE\n74.2k\nof 200k \u00b7 37%\nTokens in the current session's latest reading, against the size where it hands over.\nDoing now\nHeadline The crew is shipping; one review needs attention.\nBlockers\n3 \u00b7 longest wait first\nBLOCKER\nOWNER\nWAITED \u2193\nWHAT FLIGHT IS DOING\nChoose the retry policy for failed payment webhooks.\nshop-app#103\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nConfirm the import scope for the order export.\nshop-app#102\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nWhich breakpoint should the address form use: 600 or 720 pixels?\nshop-app#104\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nRecent decisions\nlast 8 \u00b7 newest first\n11:49\nCache the quote total at checkout Keep the agreed scope and check the result against the ticket before merging.\n11:38\nRetry failed payment webhooks Keep the agreed scope and check the result against the ticket before merging.\n11:27\nPaginate the order history Keep the agreed scope and check the result against the ticket before merging.\n11:16\nFix the address form on narrow screens Keep the agreed scope and check the result against the ticket before merging.\n11:05\nAdd stock badges to product cards Keep the agreed scope and check the result against the ticket before merging.\n10:54\nSpeed up the search index rebuild Keep the agreed scope and check the result against the ticket before merging.\n10:43\nExport orders as CSV Keep the agreed scope and check the result against the ticket before merging.\n10:32\nShow delivery estimates in the cart Keep the agreed scope and check the result against the ticket before merging.",
+        "panels": [
+          {
+            "id": "doingP",
+            "x": 12,
+            "y": 215,
+            "width": 1051.65625,
+            "height": 82
+          },
+          {
+            "id": "blockersP",
+            "x": 1075.65625,
+            "y": 215,
+            "width": 1472.328125,
+            "height": 244
+          },
+          {
+            "id": "decisionsP",
+            "x": 12,
+            "y": 471,
+            "width": 2536,
+            "height": 687
+          }
+        ],
+        "scroll": {
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "path": "after-flight-dark-2560x1200.png",
+        "sha256": "0854e498e852e4c46639f7ccf74299ed25ac511dd5d8d867842f794db7b2a828",
+        "colorScheme": "dark",
+        "viewport": {
+          "width": 2560,
+          "height": 1200
+        },
+        "scope": "viewport",
+        "capturedAt": "2026-11-09T03:29:42.292Z",
+        "readyElapsedMs": 1062,
+        "arrival": "Overview -> FLIGHT nav",
+        "errors": [],
+        "denied": [],
+        "url": "/flight",
+        "width": 2560,
+        "height": 1200,
+        "scrollWidth": 2560,
+        "dpr": 1,
+        "fixtureClock": 1792238400000,
+        "demoBanner": true,
+        "body": "FLIGHT\nIs FLIGHT working, what is it doing, and what blocks it? PR flow is on the Board.\nFLIGHT\nRunning\nWorking. Run start not recorded yet.\nCOST PER HOUR\nNot recorded yet\nAPI-equivalent cost of FLIGHT's sessions over the last 60 minutes, in dollars. Not a bill.\nSESSIONS PER HOUR\nNot recorded yet\nFLIGHT sessions started in the last 60 minutes. A handover starts a new one.\nCONTEXT SIZE\n74.2k\nof 200k \u00b7 37%\nTokens in the current session's latest reading, against the size where it hands over.\nDoing now\nHeadline The crew is shipping; one review needs attention.\nBlockers\n3 \u00b7 longest wait first\nBLOCKER\nOWNER\nWAITED \u2193\nWHAT FLIGHT IS DOING\nChoose the retry policy for failed payment webhooks.\nshop-app#103\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nConfirm the import scope for the order export.\nshop-app#102\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nWhich breakpoint should the address form use: 600 or 720 pixels?\nshop-app#104\nOperator\n3h 00m\nAsked in Needs you. Carrying on with work that does not depend on it.\nRecent decisions\nlast 8 \u00b7 newest first\n11:49\nCache the quote total at checkout Keep the agreed scope and check the result against the ticket before merging.\n11:38\nRetry failed payment webhooks Keep the agreed scope and check the result against the ticket before merging.\n11:27\nPaginate the order history Keep the agreed scope and check the result against the ticket before merging.\n11:16\nFix the address form on narrow screens Keep the agreed scope and check the result against the ticket before merging.\n11:05\nAdd stock badges to product cards Keep the agreed scope and check the result against the ticket before merging.\n10:54\nSpeed up the search index rebuild Keep the agreed scope and check the result against the ticket before merging.\n10:43\nExport orders as CSV Keep the agreed scope and check the result against the ticket before merging.\n10:32\nShow delivery estimates in the cart Keep the agreed scope and check the result against the ticket before merging.",
+        "panels": [
+          {
+            "id": "doingP",
+            "x": 12,
+            "y": 215,
+            "width": 1051.65625,
+            "height": 82
+          },
+          {
+            "id": "blockersP",
+            "x": 1075.65625,
+            "y": 215,
+            "width": 1472.328125,
+            "height": 244
+          },
+          {
+            "id": "decisionsP",
+            "x": 12,
+            "y": 471,
+            "width": 2536,
+            "height": 687
+          }
+        ],
+        "scroll": {
+          "x": 0,
+          "y": 0
+        }
+      }
+    ]
+  }
+}
