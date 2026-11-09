@@ -122,6 +122,7 @@ h1{font-size:20px;line-height:28px;margin:0 4px 0 0;white-space:nowrap}
 .readout{flex:0 0 148px;margin:0;padding:0;list-style:none;overflow:auto;font-size:12px;line-height:16px;min-height:0}
 .readout li{display:flex;align-items:center;gap:4px;min-height:24px}
 .readout .cell{min-width:24px;margin:0}
+.readout .cell[aria-disabled=true]{border-bottom-color:transparent;cursor:default}
 .readout .sw.st{width:16px;height:10px;border-radius:2px}
 .readout .sw{flex:none;width:12px;height:4px;border-radius:2px;background:var(--c,var(--accent))}
 .readout .sw.dash{background:none;border-top:2px dashed var(--c,var(--think));height:0;border-radius:0}
@@ -858,7 +859,7 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
     button.textContent = text;
     button.setAttribute("data-shown", text);
     button.setAttribute("aria-label", button.getAttribute("data-label") + ": " + text);
-    button.disabled = text === "—";
+    button.setAttribute("aria-disabled", text === "—" ? "true" : "false");
   }
   function setTab(id, focus) { state.tab = id; writeState(); render(); if (focus) $("tab-" + id).focus(); }
 
@@ -901,6 +902,7 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
   document.addEventListener("click", function (e) {
     var t = e.target, drill = t.closest && t.closest("[data-drill]");
     if (drill) {
+      if (drill.getAttribute("aria-disabled") === "true") { e.preventDefault(); return; }
       var target = drill.getAttribute("data-target");
       if (drill.getAttribute("data-drill") === "exists") notice("Opens " + target + ". This page exists today.");
       else { notice("Needs build: a new route for " + target + "."); openRuns(drill); }

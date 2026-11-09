@@ -414,3 +414,78 @@ describeRendered("Telemetry readout actions", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 });
+
+describeRendered("Telemetry unavailable readout focus", () => {
+  it(
+    "retains the same focused button through a real pointer gap and blocks unavailable activation",
+    async () => {
+      const page = await renderAt({ page: PAGE, width: 1600, height: 1000, search: "?tab=cost" });
+      try {
+        await page.evaluate(
+          () => document.querySelector<HTMLElement>('[data-panel="tpm"] .readout')?.focus(),
+          undefined,
+        );
+        await page.press("Tab");
+        const initial = await page.evaluate(() => {
+          const button = document.activeElement as HTMLButtonElement;
+          Reflect.set(window, "__focusedTelemetryReadout", button);
+          return {
+            inside: !!button.closest('[data-panel="tpm"] .readout'),
+            text: button.textContent,
+          };
+        }, undefined);
+        expect(initial.inside).toBe(true);
+        const plot = await page.box('[data-panel="tpm"] .plot');
+        await page.movePointer(plot.x + (plot.width * 31) / 71, plot.y + plot.height / 2);
+        const gap = await page.evaluate(() => {
+          const button = Reflect.get(window, "__focusedTelemetryReadout") as HTMLButtonElement;
+          return {
+            sameFocus: document.activeElement === button,
+            text: button.textContent,
+            unavailable: button.getAttribute("aria-disabled"),
+            nativeDisabled: button.disabled,
+          };
+        }, undefined);
+        expect(gap.sameFocus).toBe(true);
+        expect(gap.text).toBe("—");
+        expect(gap.unavailable).toBe("true");
+        expect(gap.nativeDisabled).toBe(false);
+        await page.press("Enter");
+        expect(
+          await page.evaluate(() => document.querySelector<HTMLElement>("#dlg")?.hidden, undefined),
+        ).toBe(true);
+        // Assistive activation can click without moving the pointer out of the unavailable sample.
+        await page.evaluate(
+          () => (Reflect.get(window, "__focusedTelemetryReadout") as HTMLButtonElement).click(),
+          undefined,
+        );
+        expect(
+          await page.evaluate(() => document.querySelector<HTMLElement>("#dlg")?.hidden, undefined),
+        ).toBe(true);
+        await page.movePointer(8, 8);
+        const restored = await page.evaluate(() => {
+          const button = Reflect.get(window, "__focusedTelemetryReadout") as HTMLButtonElement;
+          return {
+            sameFocus: document.activeElement === button,
+            text: button.textContent,
+            unavailable: button.getAttribute("aria-disabled"),
+          };
+        }, undefined);
+        expect(restored.sameFocus).toBe(true);
+        expect(restored.text).toBe(initial.text);
+        expect(restored.unavailable).toBe("false");
+        await page.press("Enter");
+        expect(
+          await page.evaluate(
+            () => !document.querySelector<HTMLElement>("#dlg")?.hidden,
+            undefined,
+          ),
+        ).toBe(true);
+        expect(page.errors()).toEqual([]);
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+});

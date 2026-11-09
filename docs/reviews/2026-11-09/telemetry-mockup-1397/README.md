@@ -1,6 +1,6 @@
 # Telemetry proposal: controller review corrections
 
-This is a static, fictional proposal, not the live Telemetry implementation. The operator's design approval remains outstanding on parent #1178. No tab build tickets are filed or started by this rework.
+This is a static, fictional proposal, not the live Telemetry implementation. The complete current ticket source is retained in [ticket-1397-source.md](ticket-1397-source.md), because the native input truncates its final section. The operator's design approval remains outstanding on parent #1178. No tab build tickets are filed or started by this rework.
 
 The carried author work and first controller rework corrected nine of the ten Important findings from review 1055. Fresh independent review 1358 identified that chart readout figures still lacked their promised actions. The current phase corrects that remaining defect. Its remaining CI failure asserted that Table had exactly the chart height. The actual ticket prohibits added page height and permits a shorter Table. The old assertion fails locally at 900 versus 975 px. The corrected check requires no added height, the same grid origin, readable panels and no overflow.
 
@@ -53,3 +53,21 @@ Manual inspection of the new Cost, light Crew, 4K Machine and open Cost target i
 button values, visible action marks and a legible named dialog, while preserving the earlier panel
 composition. The 45-case check and full capture phase pass without browser errors. Fresh current-head
 CI and independent review remain required; review 1358's failed design is retained and is not waived.
+
+
+## Review 1359: unavailable values preserve focus
+
+Review 1359 verifies that the readout actions are fixed, but finds a new Important focus defect:
+setting native `disabled` while a focused value crosses a gap makes Chromium blur the button.
+A new real-browser regression moves the actual pointer over the missing Tokens-per-minute sample
+and first fails with focus lost. The correction uses `aria-disabled` while preserving the same
+focused button, blocks both Enter and assistive click activation for `—`, and restores the latest
+value/action without moving focus when the pointer leaves. A visible unavailable value keeps its
+focus outline and loses its action underline. Nothing programmatically restores or steals focus.
+
+All 46 focused cases now pass, including ten real-browser cases. The native-pointer test proves
+focus through the gap, no unavailable action, and a working restored action. Lint, workspace types
+and build pass; existing diagnostics remain reported. Current-source visual evidence and fresh
+exact-head CI/independent review are recorded separately. Review 1359's failed verdict is retained.
+The full source ticket snapshot supplies the section the reviewer could not obtain from FLIGHT;
+it supplies no operator approval or waiver.

@@ -430,7 +430,9 @@ describe("Telemetry mockup", () => {
     document.querySelector<HTMLButtonElement>("#dlg-close")?.click();
     plot.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 300 }));
     expect(button.textContent).toBe("—");
-    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(button.disabled).toBe(false);
+    expect(document.activeElement).toBe(button);
     button.click();
     expect(document.querySelector<HTMLElement>("#dlg")?.hidden).toBe(true);
     plot.dispatchEvent(
@@ -439,7 +441,9 @@ describe("Telemetry mockup", () => {
     expect(value.querySelector("button")).toBe(button);
     expect(button.textContent).toBe(latest);
     expect(button.dataset.shown).toBe(latest);
+    expect(button.getAttribute("aria-disabled")).toBe("false");
     expect(button.disabled).toBe(false);
+    expect(document.activeElement).toBe(button);
   });
 
   it("draws state with shapes in both seat panels, and lets a title be focused", () => {
