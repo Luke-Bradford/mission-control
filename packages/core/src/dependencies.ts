@@ -362,11 +362,15 @@ export function dependencyChains(input: {
         stillWaiting: descendants.filter((ref) => !frees.includes(ref)),
       };
     })
-    .sort(
-      (a, b) =>
-        Number(a.longestWaitMs === null) - Number(b.longestWaitMs === null) ||
-        (b.longestWaitMs ?? 0) - (a.longestWaitMs ?? 0) ||
-        Number(b.state === "stuck") - Number(a.state === "stuck") ||
-        a.root.ref.localeCompare(b.root.ref),
-    );
+    .sort(compareDependencyChains);
+}
+
+/** Shared order for one repository or a combined response: longest known wait first. */
+export function compareDependencyChains(a: DependencyChain, b: DependencyChain): number {
+  return (
+    Number(a.longestWaitMs === null) - Number(b.longestWaitMs === null) ||
+    (b.longestWaitMs ?? 0) - (a.longestWaitMs ?? 0) ||
+    Number(b.state === "stuck") - Number(a.state === "stuck") ||
+    a.root.ref.localeCompare(b.root.ref)
+  );
 }

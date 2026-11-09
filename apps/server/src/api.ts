@@ -53,6 +53,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  compareDependencyChains,
   crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
@@ -4697,7 +4698,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
         if (repos.length === 0) return reply.code(404).send({ error: "Repository not found" });
         const at = now();
-        return repos.flatMap((repo) => readDependencyChains(store, repo.id, at));
+        return repos
+          .flatMap((repo) => readDependencyChains(store, repo.id, at))
+          .sort(compareDependencyChains);
       });
       const CodeHealthQuery = z.strictObject({
         repo: z.string().trim().min(1).max(128),

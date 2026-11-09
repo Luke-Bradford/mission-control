@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
+import { observeWaits } from "../src/dependencies.ts";
 import { readDependencyChains } from "../src/dependency-chains.ts";
 import { setExternalMergeHold } from "../src/external-pr-control.ts";
 import { Store } from "../src/store.ts";
@@ -159,6 +160,24 @@ describe("dependency chain stored read", () => {
     expect(chains[0]?.frees).toEqual(["mc#2"]);
     expect(chains[0]?.stillWaiting).toEqual(["mc#3"]);
   });
+  it("times each observed blocker separately as waits are added, removed and re-added", () => {
+    const set = (issues: number[], at: number) => {
+      store.replaceBoard("mc", [card(1), card(2), card(3, { after: { issues, prs: [] } })]);
+      observeWaits(store, "mc", at);
+    };
+    const duration = (root: string, at: number) =>
+      readDependencyChains(store, "mc", at).find((chain) => chain.root.ref === root)?.root
+        .children[0]?.waitedMs;
+    set([1], T);
+    set([1, 2], T + 10 * M);
+    expect(duration("mc#1", T + 20 * M)).toBe(20 * M);
+    expect(duration("mc#2", T + 20 * M)).toBe(10 * M);
+    set([1], T + 21 * M);
+    set([1, 2], T + 25 * M);
+    expect(duration("mc#1", T + 30 * M)).toBe(30 * M);
+    expect(duration("mc#2", T + 30 * M)).toBe(5 * M);
+  });
+
   it("uses both outstanding waits and only their observed start times", () => {
     store.replaceBoard("mc", [card(1), card(2), card(3, { after: { issues: [1, 2], prs: [] } })]);
     store.setSetting(
@@ -300,6 +319,8 @@ it("serves complete scoped chains without writing any database table", async () 
     })),
     poll: { usageMinutes: 30, githubSeconds: 60 },
   } as unknown as CcConfig;
+  observeWaits(store, "mc", T + 10 * M);
+  observeWaits(store, "other", T);
   const app = buildApp({
     config,
     store,
@@ -323,7 +344,8 @@ it("serves complete scoped chains without writing any database table", async () 
     ]);
     expect((await get("/api/dependencies?repoId=mc")).json()).toEqual(first.json());
     const all = (await get("/api/dependencies")).json();
-    expect(all.map((c: { repoId: string }) => c.repoId)).toEqual(["mc", "other"]);
+    expect(all.map((c: { repoId: string }) => c.repoId)).toEqual(["other", "mc"]);
+    expect(all.map((c: { longestWaitMs: number }) => c.longestWaitMs)).toEqual([20 * M, 10 * M]);
     expect(snapshot()).toBe(before);
   } finally {
     await app.close();

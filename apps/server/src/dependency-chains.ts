@@ -8,7 +8,7 @@ import {
   type Run,
   ticketWaits,
 } from "@mc/core";
-import { readWaitRecord } from "./dependencies.ts";
+import { observedWaitSince, readWaitRecord } from "./dependencies.ts";
 import { externalMergeHold, externalPrControl } from "./external-pr-control.ts";
 import { prFlow } from "./pr-flow.ts";
 import type { Store } from "./store.ts";
@@ -169,14 +169,9 @@ export function readDependencyChains(store: Store, repoId: string, now: number) 
                 base.number === Number(n[1]) && base.state === "open" && base.branch === p.base,
             ),
         );
-      // The observation belongs to an outstanding set. A newly introduced wait has no old start.
+      // Each outstanding edge owns its observed start, including waits added to an older set.
       const observed = record.waiting[ref];
-      add(
-        ref,
-        wait.ref,
-        stacked ? "stacked" : "depends",
-        observed?.open.includes(wait.ref) ? observed.since : null,
-      );
+      add(ref, wait.ref, stacked ? "stacked" : "depends", observedWaitSince(observed, wait.ref));
     }
   }
   for (const pr of prs.filter((p) => p.state === "open")) {
@@ -186,7 +181,7 @@ export function readDependencyChains(store: Store, repoId: string, now: number) 
     if (underlying) {
       const ref = prRef(pr.number);
       const observed = record.waiting[ref];
-      const since = observed?.open.includes(`PR ${underlying.number}`) ? observed.since : null;
+      const since = observedWaitSince(observed, `PR ${underlying.number}`);
       add(`PR ${pr.number}`, `PR ${underlying.number}`, "stacked", since);
     }
   }

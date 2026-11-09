@@ -24,3 +24,9 @@ These timings describe this frozen copy and host. They are not an idle CPU or me
 ## Scope
 
 The three web builds remain separate and depend on this server change merging. Parent #1196 is complete for its research/design criteria; this document does not claim the full Dependencies feature has shipped. Fresh independent whole-branch review, exact-head CI and any required merge clearance still apply.
+
+## Wait timing and combined ordering: review 1345
+
+Each outstanding blocker now keeps its own observed start. Adding a blocker preserves the first blocker's start and assigns the new one the current observation. Removing and later re-adding it starts a new edge clock. Existing stored records without per-edge starts fall back to their known set start.
+
+The all-repository endpoint sorts the combined chains with the same exported comparator used by scoped chains. The new transition regression and the two-repository HTTP ordering check both fail on the reviewed head, then pass after correction. All 44 dependency graph, release and chain cases pass, plus lint, workspace types and build. No additional full local-suite pass is claimed for this bounded existing-PR update; fresh full CI and independent QA remain required.
