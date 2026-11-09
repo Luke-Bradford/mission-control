@@ -3,7 +3,9 @@
  * A page is a file in `pages/` (the lazy `import()` in App.tsx is the boundary); the shell is what
  * `main.tsx` and `App.tsx` reach, and counts for every page. CSS belongs to the file that imports it.
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import {
   EVIDENCE_PAGES,
@@ -11,6 +13,7 @@ import {
   evidencePageOfPageFile,
   type WebPageGraph,
 } from "@mc/core";
+import { runEvidenceCommand } from "./hubs.ts";
 
 const SHELL_ROOTS = ["main.tsx", "App.tsx"];
 const REPO_PREFIX = "apps/web/src/";
@@ -28,8 +31,9 @@ const CSS_IMPORT = /@import\s+(?:url\(\s*)?["']([^"']+)["']/g;
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
-    if (statSync(full).isDirectory()) walk(full, out);
-    else out.push(full);
+    const stat = lstatSync(full);
+    if (stat.isDirectory()) walk(full, out);
+    else if (stat.isFile()) out.push(full);
   }
   return out;
 }
@@ -58,17 +62,20 @@ export function readWebPageGraph(srcDir: string): WebPageGraph {
   for (const name of known) {
     const text = readFileSync(join(srcDir, name), "utf8");
     const out: string[] = [];
-    const specs = [
+    const staticSpecs = [
       ...matches(FROM, text),
       ...matches(SIDE_EFFECT, text),
-      ...matches(DYNAMIC, text),
       ...matches(CSS_IMPORT, text),
     ];
-    for (const spec of specs) {
+    for (const spec of staticSpecs) {
+      const target = resolveSpec(name, spec);
+      if (target !== null) out.push(target);
+    }
+    for (const spec of matches(DYNAMIC, text)) {
       const target = resolveSpec(name, spec);
       if (target === null) continue;
       // a lazy page is a boundary; the page file is its own root
-      if (target.startsWith("pages/") && matches(DYNAMIC, text).includes(spec)) continue;
+      if (target.startsWith("pages/")) continue;
       out.push(target);
     }
     edges.set(name, out);
@@ -101,7 +108,33 @@ export function readWebPageGraph(srcDir: string): WebPageGraph {
   }
 
   const graph: Record<string, EvidencePage[]> = {};
-  for (const [file, set] of pages)
-    graph[REPO_PREFIX + file] = EVIDENCE_PAGES.filter((p) => set.has(p));
+  for (const file of known)
+    graph[REPO_PREFIX + file] = EVIDENCE_PAGES.filter((p) => pages.get(file)?.has(p));
   return graph;
+}
+
+/** Read the fetched immutable head, never the hub's working tree; always remove its archive. */
+export async function readHeadWebPageGraph(
+  checkout: string,
+  sha: string,
+  signal: AbortSignal,
+  tempRoot = tmpdir(),
+): Promise<WebPageGraph> {
+  if (!/^[a-f0-9]{40}$/.test(sha)) throw new Error("invalid graph head");
+  signal.throwIfAborted();
+  const dir = await mkdtemp(join(tempRoot, "mc-web-graph-"));
+  try {
+    const archive = join(dir, "source.tar");
+    await runEvidenceCommand(
+      "git",
+      ["-C", checkout, "archive", "--format=tar", "--output", archive, sha, "apps/web/src"],
+      undefined,
+      signal,
+    );
+    await runEvidenceCommand("tar", ["-xf", archive, "-C", dir], undefined, signal);
+    signal.throwIfAborted();
+    return readWebPageGraph(join(dir, "apps/web/src"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }

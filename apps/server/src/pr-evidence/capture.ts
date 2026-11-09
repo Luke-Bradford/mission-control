@@ -125,8 +125,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   /** Heads whose PR-body section is written. */
   const posted = new Set<string>();
   const controllers = new Set<AbortController>();
-  /** The pages each head's change reaches, once its import graph is read (or failed to read). */
+  /** Successfully read head graphs, plus deduplicated reads still in flight. */
   const pagesOf = new Map<string, EvidencePage[]>();
+  const readingPages = new Map<string, Promise<EvidencePage[]>>();
   let stopped = false;
   /** Captures run one at a time: each builds two hubs. */
   let queue: Promise<void> = Promise.resolve();
@@ -245,19 +246,34 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     if (known) return known;
     const byFolder = prEvidenceAffectedPages(t.paths);
     if (byFolder.length === 0 || deps.webGraph === undefined) return byFolder;
-    let pages = byFolder;
-    try {
-      pages = prEvidenceAffectedPages(
-        t.paths,
-        await deps.webGraph(t.sha, AbortSignal.timeout(2 * 60_000)),
-      );
-    } catch (e) {
-      log(
-        `#${t.pr}: import graph not read, photographing by folder: ${e instanceof Error ? e.message : String(e)}`,
-      );
-    }
-    pagesOf.set(key, pages);
-    return pages;
+    const reading = readingPages.get(key);
+    if (reading) return reading;
+    const graph = deps.webGraph;
+    const pending = Promise.resolve().then(async () => {
+      const controller = new AbortController();
+      controllers.add(controller);
+      const signal = AbortSignal.any([AbortSignal.timeout(2 * 60_000), controller.signal]);
+      if (stopped) controller.abort(new Error("the hub is shutting down"));
+      try {
+        const pages = prEvidenceAffectedPages(
+          t.paths,
+          await abortable(graph(t.sha, signal), signal),
+        );
+        pagesOf.set(key, pages);
+        return pages;
+      } catch (e) {
+        log(
+          `#${t.pr}: import graph not read, photographing by folder: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        // A temporary failure must not fix this head to the folder fallback forever.
+        return byFolder;
+      } finally {
+        controllers.delete(controller);
+        readingPages.delete(key);
+      }
+    });
+    readingPages.set(key, pending);
+    return pending;
   }
 
   async function post(t: EvidenceTarget): Promise<void> {
@@ -276,7 +292,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     async ensure(t) {
       if (stopped || t.repoId !== deps.repoId) return;
       const pages = await pagesFor(t);
-      if (pages.length === 0) return;
+      if (stopped || pages.length === 0) return;
       const key = keyOf(t);
       const have = manifest(t);
       if (evidenceMissing(have, t.sha, pages).length === 0) return post(t);
@@ -336,7 +352,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     async stop() {
       stopped = true;
       for (const controller of controllers) controller.abort(new Error("the hub is shutting down"));
-      await Promise.allSettled([...running.values()]);
+      await Promise.allSettled([...running.values(), ...readingPages.values()]);
     },
   };
 }

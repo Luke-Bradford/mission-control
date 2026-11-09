@@ -1,9 +1,10 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { EVIDENCE_PAGES, prEvidenceAffectedPages } from "@mc/core";
 import { afterEach, describe, expect, it } from "vitest";
-import { readWebPageGraph } from "../src/pr-evidence/import-graph.ts";
+import { readHeadWebPageGraph, readWebPageGraph } from "../src/pr-evidence/import-graph.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -53,6 +54,50 @@ function tree(): string {
 const P = (name: string) => `apps/web/src/${name}`;
 
 describe("readWebPageGraph", () => {
+  it("reads a committed head instead of changed checkout files and removes its scratch archive", async () => {
+    const repo = mkdtempSync(join(tmpdir(), "mc-head-graph-"));
+    dirs.push(repo);
+    const src = join(repo, "apps/web/src");
+    mkdirSync(join(src, "pages"), { recursive: true });
+    mkdirSync(join(src, "comms"), { recursive: true });
+    writeFileSync(join(src, "App.tsx"), `import("./pages/Needs.tsx");`);
+    writeFileSync(join(src, "pages/Needs.tsx"), `import "../comms/ItemBrief.tsx";`);
+    writeFileSync(join(src, "comms/ItemBrief.tsx"), "export {};");
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" }).trim();
+    git("init", "-q");
+    git("add", ".");
+    git(
+      "-c",
+      "user.name=Fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "commit",
+      "-qm",
+      "fixture head",
+    );
+    const sha = git("rev-parse", "HEAD");
+    writeFileSync(join(src, "pages/Needs.tsx"), "export {};");
+    const scratch = join(repo, "scratch");
+    mkdirSync(scratch);
+    const graph = await readHeadWebPageGraph(repo, sha, new AbortController().signal, scratch);
+    expect(graph[P("comms/ItemBrief.tsx")]).toEqual(["needs"]);
+    expect(readdirSync(scratch)).toEqual([]);
+    await expect(
+      readHeadWebPageGraph(repo, "f".repeat(40), new AbortController().signal, scratch),
+    ).rejects.toThrow();
+    expect(readdirSync(scratch)).toEqual([]);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(readHeadWebPageGraph(repo, sha, controller.signal, scratch)).rejects.toThrow();
+    expect(readdirSync(scratch)).toEqual([]);
+  });
+
+  it("does not read files through source-tree symlinks", () => {
+    const root = tree();
+    symlinkSync(join(root, "comms"), join(root, "outside"));
+    expect(readWebPageGraph(root)[P("outside/ItemBrief.tsx")]).toBeUndefined();
+  });
   it("lists a file used by two pages under both", () => {
     const graph = readWebPageGraph(tree());
     expect(graph[P("comms/ItemBrief.tsx")]).toEqual(["needs", "comms"]);
@@ -89,6 +134,16 @@ describe("readWebPageGraph", () => {
   it("leaves out tests and files only an unphotographed page reaches", () => {
     const graph = readWebPageGraph(tree());
     expect(graph[P("comms/Brief.test.tsx")]).toBeUndefined();
-    expect(graph[P("ticket/Ticket.tsx")]).toBeUndefined();
+    expect(graph[P("ticket/Ticket.tsx")]).toEqual([]);
+    expect(prEvidenceAffectedPages([P("ticket/Ticket.tsx")], graph)).toEqual([]);
+  });
+
+  it("keeps a static page edge even when the same specifier is also lazy", () => {
+    const root = tree();
+    writeFileSync(
+      join(root, "App.tsx"),
+      `import "./pages/Needs.tsx"; import("./pages/Needs.tsx");`,
+    );
+    expect(readWebPageGraph(root)[P("comms/ItemBrief.tsx")]).toEqual(EVIDENCE_PAGES);
   });
 });

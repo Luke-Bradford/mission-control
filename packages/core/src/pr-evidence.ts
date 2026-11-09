@@ -145,7 +145,7 @@ export function prEvidenceAffectedPages(
   for (const path of paths) {
     if (!path.startsWith(WEB_PREFIX) || TEST_FILE.test(path)) continue;
     const reached = graph !== undefined && Object.hasOwn(graph, path) ? graph[path] : undefined;
-    if (reached !== undefined && reached.length > 0) {
+    if (reached !== undefined) {
       for (const page of reached) add(page);
       continue;
     }

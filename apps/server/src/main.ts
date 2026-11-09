@@ -113,6 +113,7 @@ import {
   removeStaleEvidenceWork,
   runEvidenceCommand,
 } from "./pr-evidence/hubs.ts";
+import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview-browser.ts";
@@ -396,6 +397,15 @@ export async function main(): Promise<void> {
           repoId: previewRepoId,
           workDir: join(dirname(dbPath), "pr-evidence-work"),
           baseUrl: `http://${HOST}:${port}`,
+          webGraph: async (sha, signal) => {
+            await runEvidenceCommand(
+              "git",
+              ["-C", evidenceCheckout, "fetch", "origin", sha],
+              undefined,
+              signal,
+            );
+            return readHeadWebPageGraph(evidenceCheckout, sha, signal);
+          },
           // Read the remote's immutable default head directly: another preview fetch must not
           // overwrite our baseline through the checkout's shared FETCH_HEAD.
           mainSha: async (signal) =>
