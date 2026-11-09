@@ -532,10 +532,16 @@ export const answerSetAside = (
           return fail("the card could not be moved to Ready");
         }
       }
-      await tell(question.agentId, ref, question.runId, text);
     } catch (e) {
       c.log?.(`answer ${ref}: ${e instanceof Error ? e.message : "failed"}`);
       return fail("the answer could not be delivered; try again");
+    }
+    // The ticket's stored answer is the delivery. A direct notice is only a courtesy to the
+    // original seat, which can leave the crew while its question is set aside.
+    try {
+      await tell(question.agentId, ref, question.runId, text);
+    } catch {
+      c.log?.(`answer ${ref}: Comms notice was not delivered; the ticket retains the answer`);
     }
     c.store.answerQuestion(id, c.now());
     c.bus.emit("attention");

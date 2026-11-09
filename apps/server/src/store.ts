@@ -8193,7 +8193,7 @@ export class Store {
          FROM seat_questions q
          JOIN runs r ON r.id = q.run_id
          JOIN flight_decisions d ON d.question_id = q.id AND d.kind = 'answer'
-         WHERE r.ticket = ? AND q.answered_at IS NOT NULL
+         WHERE r.ticket = ? AND (q.answered_at IS NOT NULL OR q.aside_at IS NOT NULL)
          ORDER BY d.at DESC, d.id DESC LIMIT ?`,
       )
       .all(ticket, limit) as Row[];
@@ -8770,7 +8770,6 @@ export class Store {
     });
   }
 
-  /** Records one of FLIGHT's decisions; returns its id. */
   /**
    * Records the operator's answer to a set-aside question where every later run on its ticket reads
    * it (`answeredQuestionsOn`). A repeat for the same question replaces the earlier text.
@@ -8801,6 +8800,7 @@ export class Store {
     });
   }
 
+  /** Records one of FLIGHT's decisions; returns its id. */
   addFlightDecision(d: Omit<FlightDecision, "id">): number {
     const r = this.db
       .prepare(

@@ -9,7 +9,7 @@ import {
   type TicketView,
   WAITING_OPERATOR_LABEL,
 } from "@mc/core";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { Gql } from "../src/collectors/github.ts";
@@ -98,10 +98,10 @@ const run = (over: Partial<Run> = {}): Run => ({
 });
 
 /** A question set aside by Not now: its run ended with a handoff, the card sits in Backlog. */
-function asideQuestion(ticket = "mc#7", runId = "r-guido"): number {
-  store.upsertRun(run({ id: runId, ticket }));
+function asideQuestion(ticket = "mc#7", runId = "r-guido", agentId = "guido-1"): number {
+  store.upsertRun(run({ id: runId, ticket, agentId }));
   const id = store.addQuestion({
-    agentId: "guido-1",
+    agentId,
     runId,
     text: "Which lane?",
     at: NOW - 600_000,
@@ -289,12 +289,50 @@ describe("a question set aside with Not now", () => {
     try {
       expect((await answer(a, 7, id, "Use lane 2.")).statusCode).toBe(502);
       expect(store.question(id)?.answeredAt).toBeNull();
+      expect(store.answeredQuestionsOn("mc#7", 10)).toEqual([
+        expect.objectContaining({ id, answer: "Use lane 2." }),
+      ]);
       fail = false;
       expect((await answer(a, 7, id, "Use lane 3.")).statusCode).toBe(200);
       expect(store.answeredQuestionsOn("mc#7", 10)).toEqual([
         expect.objectContaining({ id, answer: "Use lane 3." }),
       ]);
     } finally {
+      await a.close();
+    }
+  });
+
+  it("delivers the stored answer to the ticket when the original asking seat has left the crew", async () => {
+    const id = asideQuestion("mc#7", "retired-run", "guido-2");
+    const a = app();
+    try {
+      expect((await answer(a, 7, id, "Use lane 2.")).statusCode).toBe(200);
+      expect(store.question(id)?.answeredAt).toBe(NOW);
+      expect(store.answeredQuestionsOn("mc#7", 10)).toEqual([
+        expect.objectContaining({ id, answer: "Use lane 2." }),
+      ]);
+      expect(moves).toEqual([{ runId: "retired-run", repoId: "mc", issue: 7, column: "Ready" }]);
+      expect((await a.inject("/api/tickets/mc/7/set-aside")).json()).toEqual([]);
+      expect(messaged).toEqual([]);
+    } finally {
+      await a.close();
+    }
+  });
+
+  it("does not make a saved answer fail when its courtesy Comms notice cannot be stored", async () => {
+    const id = asideQuestion();
+    const notice = vi.spyOn(store, "addComms").mockImplementation(() => {
+      throw new Error("notice storage failed");
+    });
+    const a = app();
+    try {
+      expect((await answer(a, 7, id, "Use lane 2.")).statusCode).toBe(200);
+      expect(store.question(id)?.answeredAt).toBe(NOW);
+      expect(store.answeredQuestionsOn("mc#7", 10)).toEqual([
+        expect.objectContaining({ id, answer: "Use lane 2." }),
+      ]);
+    } finally {
+      notice.mockRestore();
       await a.close();
     }
   });
@@ -385,6 +423,21 @@ describe("releasing waiting:operator on a repo the hub does not write", () => {
     repo.autonomy = "draft";
     const released = await releaseWaitingOperator({ config: draft, store, gh, dbPath: store.path });
     expect(released).toBe(0);
+    expect(ghCalls).toEqual([]);
+  });
+  it("leaves a merge repo outside FLIGHT's own session alone", async () => {
+    const cfg = config();
+    cfg.repos.push({
+      id: "other",
+      github: "o/other",
+      project: 2,
+      statusMap: {},
+      autonomy: "merge",
+    });
+    store.replaceBoard("other", [
+      card(7, { repoId: "other", status: "In progress", state: "in progress" }),
+    ]);
+    expect(await releaseWaitingOperator({ config: cfg, store, gh, dbPath: store.path })).toBe(0);
     expect(ghCalls).toEqual([]);
   });
 });

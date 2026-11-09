@@ -6036,6 +6036,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               id,
               body.data.text,
               async (seat, ticket, runId, text) => {
+                if (!commsCrew().includes(seat)) return;
                 await sendComms(
                   {
                     store,
