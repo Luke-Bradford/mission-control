@@ -2968,6 +2968,31 @@ const CLOSING_REF = new RegExp(
   "gi",
 );
 
+export const NEGATED_CLOSING_REFS_NOTE =
+  "Negated closing references in review prose use plain issue wording here; the retained review is unchanged.";
+
+/**
+ * Render an immediately negated closing reference as prose, without changing the retained review.
+ * The GitHub text guard still checks the result: positive closing references, mentions, secrets
+ * and references to another repository retain their ordinary refusals.
+ */
+export function inertNegatedClosingRefs(text: string): string {
+  return text.replace(CLOSING_REF, (match: string, ...args: unknown[]) => {
+    const offset = args.at(-2);
+    // Only a bare same-repository issue number gets plain wording. Named repository and URL
+    // references retain their original spelling and the ordinary reference checks.
+    if (typeof args[0] !== "string" || typeof offset !== "number") return match;
+    let end = offset;
+    while (end > 0 && /\s/u.test(text.charAt(end - 1))) end--;
+    if (
+      end === offset ||
+      !/\b(?:not|never|cannot|[a-z]+n['’]t)$/i.test(text.slice(Math.max(0, end - 32), end))
+    )
+      return match;
+    return match.replace("#", "issue ");
+  });
+}
+
 /**
  * What GitHub itself links as a closing keyword: the keyword, an optional `:`, blanks, then `#n`,
  * `GH-n`, `owner/repo#n` or an issue URL. Same capture groups as `CLOSING_REF`. For deciding
