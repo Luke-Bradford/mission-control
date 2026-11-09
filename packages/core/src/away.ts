@@ -1,5 +1,6 @@
 import type { FlightDecision, ReplyDraft } from "./flight.ts";
-import { DEFAULT_PROFILES, SMALL_SIZES } from "./profiles.ts";
+import { SMALL_SIZES } from "./loop-config-model.ts";
+import { DEFAULT_PROFILES } from "./profiles.ts";
 import type { RepoRules } from "./repo-rules-model.ts";
 import { DEFAULT_HARD_RULES } from "./rule-paths.ts";
 import { globMatches } from "./runtime.ts";
@@ -19,6 +20,7 @@ export const AWAY_PLAN_REFUSED =
   "Away mode: the plan cannot be written to the GitHub issue. Report it again when the operator returns.";
 export const AWAY_BUG_PROFILE = "bugfix";
 export const AWAY_SMALL_PROFILE = "small-change";
+export const AWAY_DOCS_PROFILE = "docs";
 export const AWAY_TYPE_PREFIX = /^type:/;
 export const AWAY_STATUS_ADDED = "A";
 export const AWAY_DIFF_STATUSES = [AWAY_STATUS_ADDED, "M", "D"];
@@ -42,6 +44,7 @@ export function awayTicketType(
     const profile = Object.hasOwn(templates, label) ? templates[label] : undefined;
     if (profile === undefined) continue;
     if (profile === AWAY_BUG_PROFILE) types.add("bug");
+    else if (profile === AWAY_DOCS_PROFILE) types.add("docs");
     else if (profile === AWAY_SMALL_PROFILE) {
       const type = label.replace(AWAY_TYPE_PREFIX, "");
       types.add(type === "test" || type === "docs" ? type : "chore");

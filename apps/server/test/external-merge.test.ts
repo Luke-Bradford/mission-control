@@ -1,15 +1,32 @@
 import { Buffer } from "node:buffer";
-import { DEFAULT_REPO_RULES, type PullRequestView, type TicketView } from "@mc/core";
+import {
+  type AttentionBrief,
+  type BoardItem,
+  DEFAULT_REPO_RULES,
+  NEW_LOOP,
+  PR_WAIT_MS,
+  type PullRequestView,
+  type TicketView,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { bindCompleteBrief } from "../src/brief-prepare.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { externalPrControl, setExternalMergeHold } from "../src/external-pr-control.ts";
+import {
+  askExternalReview,
+  externalMergeHold,
+  externalPrControl,
+  externalReviewAsked,
+  setExternalMergeHold,
+} from "../src/external-pr-control.ts";
 import { externalReviewKey } from "../src/external-reviews.ts";
 import { mergeExternalPr } from "../src/flight/external-merge.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
 import { grantApproval, mergeFloorScope } from "../src/flight-approvals.ts";
+import { attentionItems } from "../src/hud.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import { ownsPr } from "../src/ownership.ts";
 import { prAcceptanceFor, prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
@@ -110,7 +127,7 @@ function harness() {
       ...DEFAULT_REPO_RULES,
       hardRules: [] as string[],
       hardRulesSet: true,
-      hardRulesBy: "controller" as const,
+      hardRulesBy: "controller" as "controller" | "operator",
       uat: { labels: [] as string[], paths: [] as string[] },
     },
     clock: 100,
@@ -172,6 +189,336 @@ describe("external PR controller merge", () => {
     expect(store.run(externalReviewKey("sample", 7))).toBeNull();
   });
 
+  const buildRun = (endedAt: number | null) =>
+    store.upsertRun({
+      id: "builder:old",
+      agentId: "builder",
+      repoId: "sample",
+      seq: 1,
+      startedAt: 1,
+      endedAt,
+      status: "ok",
+      model: null,
+      sessionId: null,
+      branch: pr.branch,
+      ticket: "sample#1",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+
+  it("merges a PR whose build run ended, and still refuses one whose run is unfinished", async () => {
+    const h = harness();
+    buildRun(null);
+    expect((await mergeExternalPr(h.deps)).text).toContain("belongs to a crew run");
+    store.upsertRun({ ...store.run("builder:old")!, endedAt: 2 });
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
+  it("refuses when a seat takes the branch between the first check and the merge", async () => {
+    const h = harness();
+    buildRun(2);
+    let reads = 0;
+    const gh: GhRunner = async (args) => {
+      if (
+        args.some((a) => a.startsWith("--json=headRefOid,baseRefOid,changedFiles")) &&
+        ++reads === 2
+      )
+        buildRun(null);
+      return h.deps.gh(args, { cwd: "/fixture" });
+    };
+    const result = await mergeExternalPr({ ...h.deps, gh });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("ownership or hold changed");
+    expect(h.merges).toEqual([]);
+  });
+
+  it("serves the PR control routes for an ended run and refuses an unfinished one", async () => {
+    const h = harness();
+    buildRun(2);
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+    });
+    const hold = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/merge-hold",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA, action: "hold", reason: "x" }),
+      });
+    try {
+      expect((await hold()).statusCode).toBe(200);
+      expect(externalMergeHold(store, "sample", 7)).not.toBeNull();
+      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      expect((await hold()).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("records an ask for a QA review in this store and refuses an unfinished run", async () => {
+    const h = harness();
+    buildRun(2);
+    const post = (app: Awaited<ReturnType<typeof buildApp>>) =>
+      app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/review-request",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA }),
+      });
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+    });
+    try {
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+      expect((await post(app)).statusCode).toBe(200);
+      expect((await post(app)).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+      // asking again for the same head writes no second Activity line
+      expect(
+        store.hubEvents(0).filter((e) => e.text.includes("asked for a QA review of external PR")),
+      ).toHaveLength(1);
+      // a withdrawn ask is gone, and asking is repeatable after it
+      const withdraw = () =>
+        app.inject({
+          method: "POST",
+          url: "/api/prs/sample/7/review-request",
+          headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+          payload: JSON.stringify({ sha: SHA, action: "withdraw" }),
+        });
+      expect((await withdraw()).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+      expect((await withdraw()).statusCode).toBe(200);
+      expect((await post(app)).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      expect((await post(app)).statusCode).toBe(404);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("an ask over Update's seeded ask for the same head is stored and logged once", async () => {
+    const h = harness();
+    buildRun(2);
+    askExternalReview(store, "sample", 7, "Update", 1, SHA);
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+    });
+    const post = () =>
+      app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/review-request",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA }),
+      });
+    try {
+      expect((await post()).statusCode).toBe(200);
+      expect((await post()).statusCode).toBe(200);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+      expect(ownsPr(store, "sample", pr)).toBe(true);
+      expect(
+        store.hubEvents(0).filter((e) => e.text.includes("asked for a QA review of external PR")),
+      ).toHaveLength(1);
+      // Update does not downgrade the real ask
+      askExternalReview(store, "sample", 7, "Update", 2, SHA);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("answers 409 to an ask on a hub that writes nothing", async () => {
+    const h = harness();
+    const app = await buildApp({
+      config,
+      store,
+      bus: h.deps.bus,
+      gh: h.deps.gh,
+      operatorToken: TOKEN,
+      noLoopWrites: true,
+    });
+    try {
+      const r = await app.inject({
+        method: "POST",
+        url: "/api/prs/sample/7/review-request",
+        headers: { "x-mc-operator": TOKEN, "content-type": "application/json" },
+        payload: JSON.stringify({ sha: SHA }),
+      });
+      expect(r.statusCode).toBe(409);
+      expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(false);
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("refuses a PR whose ended run still has a merge hold, until the hold is released", async () => {
+    const h = harness();
+    buildRun(2);
+    const hold = { by: "CAPCOM" as const, reason: "wait for the demo", at: 1 };
+    store.setRunLoop("builder:old", { ...NEW_LOOP, mergeHold: hold });
+    expect((await mergeExternalPr(h.deps)).text).toContain("merge hold from CAPCOM");
+    expect(h.merges).toHaveLength(0);
+    store.setRunLoop("builder:old", { ...NEW_LOOP });
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
+  it("clears a hard-rule PR with an ended run only on a controller's approval for the head", async () => {
+    const h = harness();
+    buildRun(2);
+    h.state.files = [{ filename: "docs/hard/x.md", status: "modified" }];
+    h.state.rules = {
+      ...h.state.rules,
+      hardRules: ["docs/hard/**"],
+      hardRulesBy: "operator" as const,
+    };
+    expect((await mergeExternalPr(h.deps)).text).toContain("requires the operator's approval");
+    grantApproval(
+      store,
+      { rule: "merge-floor", scope: mergeFloorScope(7, SHA), until: 150, reason: "Reviewed." },
+      90,
+    );
+    expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+  });
+
+  it("a superuser repo clears protected paths itself and reports them for the operator's line", async () => {
+    const h = harness();
+    const superuser = {
+      ...config,
+      repos: [{ ...config.repos[0]!, flightPowers: "superuser" as const }],
+    };
+    h.deps.config = superuser;
+    h.deps.repo = superuser.repos[0]!;
+    h.state.files = [
+      { filename: ".github/workflows/ci.yml", status: "modified" },
+      { filename: "apps/server/src/guard/rules.ts", status: "modified" },
+    ];
+    h.facts.changedFiles = 2;
+    h.state.rules = { ...h.state.rules, hardRulesBy: "operator" as const };
+    const result = await mergeExternalPr(h.deps);
+    expect(result.isError).toBeUndefined();
+    expect(h.merges).toHaveLength(1);
+    expect(result.ticket).toBeUndefined();
+    // a linked ticket comes back with the result, for the decision's ref and the operator's link
+    const linked = harness();
+    linked.deps.config = superuser;
+    linked.deps.repo = superuser.repos[0]!;
+    linked.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
+    linked.facts.closingIssuesReferences = [
+      { number: 9, url: "https://github.com/example/sample/issues/9" },
+    ];
+    linked.deps.fetchTicket = async () =>
+      ({
+        number: 9,
+        title: "t",
+        url: "u",
+        state: "open",
+        body: "",
+        bodyTruncated: false,
+        labels: [],
+      }) as unknown as TicketView;
+    const withTicket = await mergeExternalPr(linked.deps);
+    expect(withTicket.isError).toBeUndefined();
+    expect(withTicket.ticket).toBe(9);
+    expect(withTicket.paths).toEqual([".github/workflows/ci.yml"]);
+    expect(result.paths).toEqual([".github/workflows/ci.yml", "apps/server/src/guard/rules.ts"]);
+    // an always_ask label still needs the operator
+    const again = harness();
+    again.deps.config = superuser;
+    again.deps.repo = superuser.repos[0]!;
+    again.state.rules = { ...again.state.rules, alwaysAsk: ["secret"] };
+    again.wire.labels = [{ name: "secret" }];
+    expect((await mergeExternalPr(again.deps)).text).toContain("requires the operator's approval");
+    expect(again.merges).toHaveLength(0);
+  });
+
+  it("a superuser repo needs a hub review row when protected paths change, not only an mc/review status", async () => {
+    store.close();
+    store = new Store(":memory:");
+    store.upsertPullRequests("sample", [pr], 1);
+    const superuser = {
+      ...config,
+      repos: [{ ...config.repos[0]!, flightPowers: "superuser" as const }],
+    };
+    const guarded = harness();
+    guarded.deps.config = superuser;
+    guarded.deps.repo = superuser.repos[0]!;
+    guarded.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
+    expect((await mergeExternalPr(guarded.deps)).text).toContain("independent clean QA report");
+    expect(guarded.merges).toHaveLength(0);
+    // a PR with no protected path still rides on the real mc/review status
+    const plain = harness();
+    plain.deps.config = superuser;
+    plain.deps.repo = superuser.repos[0]!;
+    expect((await mergeExternalPr(plain.deps)).isError).toBeUndefined();
+  });
+
+  it("needs an external review row on a crew branch's head, even with a passing mc/review status", async () => {
+    store.close();
+    store = new Store(":memory:");
+    store.upsertPullRequests("sample", [pr], 1);
+    buildRun(2);
+    const h = harness();
+    expect((await mergeExternalPr(h.deps)).text).toContain("independent clean QA report");
+    expect(h.merges).toHaveLength(0);
+  });
+
+  describe("a crew review row on the same head", () => {
+    const crewRow = (blocking: number) => {
+      buildRun(2);
+      const id = store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: 5,
+      });
+      if (id === null) throw new Error("review fixture missing");
+      store.setReviewState(id, ["queued"], "running", { at: 6, runId: "retro:crew" });
+      store.recordFindings(id, "retro:crew", {
+        verdict: blocking ? { spec: "fail", quality: "pass" } : { spec: "pass", quality: "pass" },
+        summary: "Checked.",
+        findings: [],
+        at: 7,
+      });
+    };
+
+    it("does not undo a clean external review", async () => {
+      crewRow(0);
+      const h = harness();
+      expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
+      expect(h.merges).toHaveLength(1);
+    });
+
+    it("blocks when it reported a failing verdict after the external one", async () => {
+      crewRow(1);
+      const h = harness();
+      expect((await mergeExternalPr(h.deps)).isError).toBe(true);
+      expect(h.merges).toHaveLength(0);
+    });
+  });
+
   it("respects a real external mc/review sign-off without inventing a scratch report", async () => {
     store.close();
     store = new Store(":memory:");
@@ -222,7 +569,7 @@ describe("external PR controller merge", () => {
   it("uses a controller approval only for protected paths and rechecks its expiry", async () => {
     const h = harness();
     h.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
-    expect((await mergeExternalPr(h.deps)).text).toContain("requires controller approval");
+    expect((await mergeExternalPr(h.deps)).text).toContain("requires the operator's approval");
     grantApproval(
       store,
       {
@@ -241,6 +588,84 @@ describe("external PR controller merge", () => {
     h.state.expireOnFinalRead = false;
     expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
   });
+
+  it.each([
+    ["superuser", 200],
+    ["standard", 403],
+  ] as const)(
+    "FLIGHT records a run's controller check on its own runtime paths: %s repo answers %i",
+    async (powers, status) => {
+      const repos = [{ ...config.repos[0]!, flightPowers: powers }];
+      store.upsertRun({
+        id: "flight:1",
+        agentId: "flight",
+        repoId: "sample",
+        seq: 1,
+        startedAt: 1,
+        endedAt: null,
+        status: "running",
+        model: "opus",
+        sessionId: null,
+        branch: null,
+        ticket: null,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "",
+        prs: [],
+        summary: null,
+      });
+      store.upsertRun({
+        id: "r-cc",
+        agentId: "flight",
+        repoId: "sample",
+        seq: 1,
+        startedAt: 1,
+        endedAt: null,
+        status: "running",
+        model: null,
+        sessionId: null,
+        branch: "b",
+        ticket: "sample#1",
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "",
+        prs: [],
+        summary: null,
+        loop: {
+          ...NEW_LOOP,
+          phase: "review",
+          prNumber: 7,
+          touches: { sha: SHA, paths: ["apps/server/src/guard/rules.ts"] },
+        },
+      });
+      const engine = {
+        status: () => ({ on: true, note: null }),
+        controllerCheck: async () => ({ lifted: true as const }),
+      };
+      const app = await buildApp({
+        config: { ...config, repos },
+        store,
+        bus: new ChangeBus(),
+        operatorToken: TOKEN,
+        engine: engine as never,
+        supervisor: { status: () => ({ enabled: true, note: null }) } as never,
+      });
+      try {
+        const r = await operatorCall(
+          () => app,
+          TOKEN,
+        )({
+          method: "POST",
+          path: "/api/runs/r-cc/controller-check",
+          body: { sha: SHA, verdict: "pass" },
+          actor: { seatId: "flight", runId: "flight:1" },
+        });
+        expect(r.status).toBe(status);
+      } finally {
+        await app.close();
+      }
+    },
+  );
 
   it("does not demand an approval for prose changes that leave Mission Control unchanged", async () => {
     const h = harness();
@@ -371,4 +796,123 @@ describe("external PR controller merge", () => {
       await app.close();
     }
   });
+});
+
+it("1389 binds an external controller choice to the actual current PR and shares its provenance reread", async () => {
+  const h = harness();
+  h.state.files = [{ filename: "apps/server/src/runtime/supervisor.ts", status: "modified" }];
+  expect((await mergeExternalPr(h.deps)).isError).toBe(true);
+  // Actual PR attention is produced for a configured-board ticket after its existing quiet wait.
+  // The earlier external merge tests also cover unlinked PRs; those have no Needs-you brief source.
+  const card: BoardItem = {
+    repoId: "sample",
+    issueNumber: 12,
+    title: "Fixture ticket",
+    status: "Ready",
+    state: "planned",
+    labels: [],
+    assignees: [],
+    priority: "P1",
+    prioritySource: "field",
+    stage: null,
+    owner: null,
+    parent: null,
+    subIssues: null,
+    blockedBy: [],
+    milestone: null,
+    size: "S",
+    url: "https://example.test/12",
+    closed: false,
+    createdAt: 1,
+    updatedAt: 1,
+    itemId: "fixture-12",
+    projectId: "fixture-project",
+  };
+  store.replaceBoard("sample", [card]);
+  store.upsertPullRequests("sample", [{ ...pr, ticket: "sample#12" }], 1);
+  h.state.clock = PR_WAIT_MS + 100;
+  const item = attentionItems(config, store, h.state.clock).find((entry) =>
+    entry.key.startsWith("pr:sample#7:"),
+  );
+  if (!item) throw new Error("Missing external controller attention source");
+  const target = { kind: "pr" as const, repoId: "sample", number: 7, sha: SHA };
+  const content: AttentionBrief = {
+    for: "operator",
+    at: h.state.clock,
+    context: "The exact external head needs an independent controller verdict.",
+    ask: "Record the independent check?",
+    did: [],
+    checked: [],
+    recommendation: "Record this exact checked head.",
+    recommendedOptionId: "pass",
+    basis: "Controlled external fixture",
+    decision: {
+      whyOperator: {
+        kind: "floor-approval",
+        explanation: "Independent controller check required.",
+      },
+      consulted: [],
+      costOfDelay: "The PR remains held.",
+      waiting: "Explicit controller evidence.",
+    },
+    options: [
+      {
+        id: "pass",
+        label: "Record pass",
+        answer: "The current head passed the independent check.",
+        consequence: "Record a controller pass; do not merge the PR.",
+        reversibility: { kind: "partly-reversible", detail: "A newer head requires a new check." },
+        action: {
+          kind: "controller-check",
+          target,
+          verdict: "pass",
+          evidence: "Fixture independent controller receipt",
+        },
+      },
+      {
+        id: "hold",
+        label: "Hold",
+        answer: "Keep this PR held.",
+        consequence: "Record only an explicit merge hold.",
+        reversibility: { kind: "reversible", detail: "The controller may release the hold." },
+        action: { kind: "merge-hold", target, action: "hold", reason: "Await explicit evidence." },
+      },
+    ],
+  };
+  const bound = await bindCompleteBrief(
+    { config, store, now: () => h.state.clock },
+    item,
+    content,
+    { seatId: "fixture-flight", runId: "fixture-run" },
+  );
+  store.addBrief({ key: item.key, ...bound });
+  const brief = store.briefs().get(item.key);
+  const app = buildApp({
+    config,
+    store,
+    bus: h.deps.bus,
+    gh: h.deps.gh,
+    now: () => h.state.clock,
+    operatorToken: TOKEN,
+    knownSecrets: async () => [],
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/attention/${encodeURIComponent(item.key)}/choice`,
+      headers: { "x-mc-operator": TOKEN },
+      payload: {
+        briefId: brief?.id,
+        sourceRevision: brief?.binding?.sourceRevision,
+        optionId: "pass",
+        requestId: "external-controller-choice",
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(externalPrControl(store, "sample", 7, SHA)?.controllerPassed).toBe(true);
+    expect(h.merges).toHaveLength(0);
+    expect(store.pullRequest("sample", 7)?.state).toBe("open");
+  } finally {
+    await app.close();
+  }
 });

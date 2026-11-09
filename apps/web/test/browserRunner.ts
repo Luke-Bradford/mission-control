@@ -23,8 +23,17 @@ export interface Box {
   height: number;
 }
 
+/** One request the page made to the harness origin, in the order it left the browser. */
+export interface LoggedRequest {
+  method: string;
+  /** Path and query, such as `/api/crew?shape=summary`. */
+  path: string;
+}
+
 export interface RenderedPage {
   errors(): readonly string[];
+  /** Every request the page has made to the harness origin so far, served or not. */
+  requests(): readonly LoggedRequest[];
   /** Resize the actual browser viewport, including its live media-query change events. */
   resize(width: number, height: number): Promise<void>;
   /** Reload the harness entry in the same browser session, preserving sessionStorage. */
@@ -78,6 +87,7 @@ interface Route {
 interface Page {
   keyboard: { press(key: string): Promise<void> };
   on(event: "pageerror", handler: (error: Error) => void): void;
+  on(event: "request", handler: (request: { url(): string; method(): string }) => void): void;
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   route(url: RegExp, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string, options: { waitUntil: "load" }): Promise<unknown>;
@@ -243,6 +253,12 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       const page = await browser.newPage({ viewport: { width, height } });
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
+      const requests: LoggedRequest[] = [];
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (url.origin === ORIGIN)
+          requests.push({ method: request.method(), path: `${url.pathname}${url.search}` });
+      });
       await page.route(new RegExp(`^${ORIGIN}/`), async (route) => {
         const url = new URL(route.request().url());
         const key = `${url.pathname}${url.search}`;
@@ -344,6 +360,7 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       return {
         press: (key) => page.keyboard.press(key),
         errors: () => errors.slice(),
+        requests: () => requests.slice(),
         resize: (width, height) => page.setViewportSize({ width, height }),
         reload: async () => {
           await page.goto(`${ORIGIN}/${entry}${search}`, { waitUntil: "load" });

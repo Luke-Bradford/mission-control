@@ -727,6 +727,45 @@
   transition: background-color 150ms ease;
 }
 
+.comms-ref-pair {
+  display: inline-flex;
+  gap: var(--sp-1);
+  align-items: center;
+  vertical-align: middle;
+}
+
+.comms-ref-plain {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  font-family: var(--mono);
+}
+
+/* The filter is a quieter, outlined control so it never reads as the number's own link. */
+.comms-ref-filter {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 var(--sp-1);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-micro);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.comms-ref-filter:hover {
+  color: var(--fg);
+  border-color: var(--fg-2);
+}
+
+a.comms-ref {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  text-decoration: none;
+}
+
 .comms-ref:hover {
   background: color-mix(in srgb, var(--accent) 24%, transparent);
 }
@@ -873,7 +912,7 @@
     overflow: visible;
   }
   #convo {
-    max-height: 60vh;
+    max-height: calc(60 * var(--vh));
   }
 }
 

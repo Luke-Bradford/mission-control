@@ -17,6 +17,7 @@ import {
   type SessionEvent,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { createCodexApprover } from "../src/runtime/codex-approval.ts";
 import {
@@ -28,6 +29,9 @@ import {
   startCodexSession,
 } from "../src/runtime/codex-session.ts";
 import { attachSession, type CrewSession } from "../src/runtime/session.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 const FAKE = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));
 const KEEPER = fileURLToPath(new URL("../src/runtime/keeper-cli.ts", import.meta.url));
@@ -284,9 +288,15 @@ describe("Codex session", () => {
         kind: "tool-result",
         toolUseId: "command-approval",
         ok: false,
+        wrapped: false,
       }),
     );
-    expect(events).toContainEqual({ kind: "tool-result", toolUseId: "item-1", ok: false });
+    expect(events).toContainEqual({
+      kind: "tool-result",
+      toolUseId: "item-1",
+      ok: false,
+      wrapped: false,
+    });
     expect(recorded()).toContainEqual({ id: "approval-1", result: { decision: "accept" } });
   });
 
@@ -304,7 +314,55 @@ describe("Codex session", () => {
         toolUseId: "item-1",
         ok,
         ...(exitCode === undefined ? {} : { exitCode }),
+        wrapped: false,
       },
+    ]);
+  });
+
+  it.each([0, 1])(
+    "records a yielded command only after its polled final exit %s",
+    async (exitCode) => {
+      const command = "pnpm -s test:related";
+      const head = "a".repeat(40);
+      const rows: { ok: boolean; exitCode?: number | null }[] = [];
+      const checks = createCheckRecorder({
+        store: { addCheckRun: (row) => void rows.push(row) },
+        checks: async () => [command],
+        state: async () => ({ head, clean: true }),
+      });
+      const { session, events } = start(
+        {},
+        {
+          approve: async (request) => {
+            const params = request.params as { itemId: string };
+            await checks.begin({ runId: "run", toolUseId: params.itemId }, command);
+            return "accept";
+          },
+        },
+      );
+      session.on((event) => {
+        if (event.kind === "tool-result" && event.ok !== undefined)
+          void checks.end({ runId: "run", toolUseId: event.toolUseId }, event.ok, event.exitCode);
+        if (event.kind === "result") checks.dropRun("run");
+      });
+      session.send(JSON.stringify({ command, exitCode, holdItem: true }));
+      await until(() => expect(checks.pending("run")).toEqual([command]));
+      expect(rows).toEqual([]);
+      expect(events.some((event) => event.kind === "result")).toBe(false);
+      session.send(JSON.stringify({ completeItem: true }));
+      await until(() => expect(rows).toHaveLength(1));
+      expect(rows[0]).toMatchObject({ ok: exitCode === 0, exitCode });
+      expect(checks.pending("run")).toEqual([]);
+      expect(checks.drops("run")).toEqual([]);
+    },
+  );
+
+  it("marks a command that pipes past the check as wrapped (#1411)", async () => {
+    const { session, events } = start();
+    session.send(JSON.stringify({ command: "pnpm -s test | tail -5", exitCode: 0 }));
+    await until(() => expect(events.some((e) => e.kind === "tool-result")).toBe(true));
+    expect(events.filter((e) => e.kind === "tool-result")).toEqual([
+      { kind: "tool-result", toolUseId: "item-1", ok: true, exitCode: 0, wrapped: true },
     ]);
   });
 

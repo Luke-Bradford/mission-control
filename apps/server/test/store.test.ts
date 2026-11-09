@@ -116,6 +116,50 @@ describe("Store", () => {
     expect(rows.get("empty")).toEqual([]);
   });
 
+  it("reads a branch's newest PR as a number and a state only", () => {
+    const pr = (number: number, branch: string, state: "open" | "closed" | "merged") => ({
+      repoId: "r",
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch,
+      ticket: null,
+      state,
+      isDraft: false,
+      review: null,
+      ci: null,
+      createdAt: 1,
+      updatedAt: 1,
+      mergedAt: null,
+      headSha: "sha",
+      mergeCommitSha: null,
+      mergeable: null,
+      author: "a",
+      assignees: [],
+      checks: [],
+      closingIssues: [],
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+    });
+    store.upsertPullRequests(
+      "r",
+      [pr(3, "feature/x", "closed"), pr(7, "feature/x", "open"), pr(5, "feature/y", "merged")],
+      1,
+    );
+    expect(store.pullRequestOfBranch("r", "feature/x")).toEqual({ number: 7, state: "open" });
+    expect(store.pullRequestOfBranch("r", "feature/y")).toEqual({ number: 5, state: "merged" });
+    expect(store.pullRequestOfBranch("r", "feature/none")).toBeNull();
+    expect(store.pullRequestOfBranch("other", "feature/x")).toBeNull();
+    store.upsertPullRequests("r", [{ ...pr(9, "feature/x", "closed"), createdAt: 0 }], 1);
+    expect(store.pullRequestOfBranch("r", "feature/x")).toEqual({ number: 9, state: "closed" });
+    expect(store.pullRequestOfBranch("r", "feature/x", 1)).toEqual({
+      number: 7,
+      state: "open",
+    });
+    expect(store.pullRequestOfBranch("r", "feature/x", 2)).toBeNull();
+  });
+
   it("partitions batched pull requests and reuses a prepared statement", () => {
     const pr = (repoId: string, number: number) => ({
       repoId,
@@ -147,6 +191,35 @@ describe("Store", () => {
     const batches = store.pullRequestsForRepos(["one", "two"]);
     expect(batches.get("one")).toEqual(store.pullRequests("one"));
     expect(batches.get("two")).toEqual(store.pullRequests("two"));
+
+    store.upsertPullRequests(
+      "one",
+      [
+        { ...pr("one", 3), state: "closed" },
+        { ...pr("one", 4), state: "merged" },
+      ],
+      1,
+    );
+    store.upsertPullRequests("other", [pr("other", 5)], 1);
+    const needed = store.openAndReferencedPullRequests(
+      ["one", "two", "empty"],
+      [
+        { repoId: "one", number: 3 },
+        { repoId: "one", number: 3 },
+        { repoId: "one", number: 999 },
+        { repoId: "other", number: 5 },
+      ],
+    );
+    expect(needed.get("one")).toEqual([store.pullRequest("one", 3), store.pullRequest("one", 1)]);
+    expect(needed.get("two")).toEqual([store.pullRequest("two", 2)]);
+    expect(needed.get("empty")).toEqual([]);
+    expect(needed.has("other")).toBe(false);
+    expect(store.pullRequestLink("one", { number: 3 })).toEqual({
+      repoId: "one",
+      number: 3,
+      title: "PR 3",
+      url: "u",
+    });
 
     const raw = (store as unknown as { rawDb: DatabaseSync }).rawDb;
     const prepare = vi.spyOn(raw, "prepare");
@@ -3308,6 +3381,95 @@ describe("comms", () => {
   });
 });
 
+describe("answeredQuestionsOn", () => {
+  const mkRun = (id: string, ticket: string) =>
+    store.upsertRun(run({ id, ticket, agentId: "a", endedAt: 2 }));
+  const ask = (runId: string, text: string, answered: boolean, at: number) => {
+    const q = store.addQuestion({ agentId: "a", runId, text, at });
+    if (answered) {
+      store.answerQuestion(q, at + 1);
+      store.addFlightDecision({
+        at: at + 1,
+        kind: "answer",
+        seatId: "a",
+        targetRunId: null,
+        ref: null,
+        questionId: q,
+        about: text,
+        decision: `answer to ${text}`,
+        basis: "b",
+      });
+    }
+  };
+
+  it("returns the ticket's answered questions only, newest first, up to the limit", () => {
+    mkRun("r42", "mc#42");
+    mkRun("r7", "mc#7");
+    ask("r42", "old", true, 10);
+    ask("r42", "unanswered", false, 20);
+    ask("r7", "elsewhere", true, 30);
+    ask("r42", "new", true, 40);
+    expect(store.answeredQuestionsOn("mc#42", 10).map((d) => d.question)).toEqual(["new", "old"]);
+    expect(store.answeredQuestionsOn("mc#42", 1).map((d) => d.question)).toEqual(["new"]);
+    expect(store.answeredQuestionsOn("mc#42", 10)[0]?.answer).toBe("answer to new");
+  });
+});
+
+describe("question and answer retention", () => {
+  it("keeps an answered seat question and FLIGHT's answer for 365 days, other decisions and messages for 90", async () => {
+    const day = 86_400_000;
+    const q = store.addQuestion({ agentId: "a", runId: "r", text: "Which?", at: 0 });
+    store.answerQuestion(q, 1);
+    const decision = (kind: "answer" | "note", questionId: number | null) =>
+      store.addFlightDecision({
+        at: 0,
+        kind,
+        seatId: "a",
+        targetRunId: null,
+        ref: null,
+        questionId,
+        about: "x",
+        decision: kind,
+        basis: "b",
+      });
+    decision("answer", q);
+    decision("note", null);
+    store.addComms({ at: 0, from: "a", to: "b", ticket: null, text: "old" });
+    const count = (table: string) =>
+      (
+        (store as unknown as { db: DatabaseSync }).db
+          .prepare(`SELECT COUNT(*) AS n FROM ${table}`)
+          .get() as { n: number }
+      ).n;
+    for (let i = 0; i < 20; i++) await store.pruneHistory(100 * day);
+    expect([count("seat_questions"), count("flight_decisions"), count("comms")]).toEqual([1, 1, 0]);
+    expect(store.flightDecisionsAbout("answer", "x")).toEqual([]);
+    for (let i = 0; i < 20; i++) await store.pruneHistory(367 * day);
+    expect([count("seat_questions"), count("flight_decisions")]).toEqual([0, 0]);
+  });
+});
+
+describe("Comms question retention", () => {
+  it("keeps a question message and its reply for 365 days, a plain message for 90", async () => {
+    const day = 86_400_000;
+    const q = store.addComms({
+      at: 0,
+      from: "a",
+      to: "b",
+      ticket: null,
+      text: "q",
+      label: "question",
+    });
+    if (q === null) throw new Error("not stored");
+    store.addComms({ at: 1, from: "b", to: "a", ticket: null, text: "reply", replyTo: q.id });
+    store.addComms({ at: 2, from: "a", to: "b", ticket: null, text: "plain" });
+    for (let i = 0; i < 25; i++) await store.pruneHistory(100 * day);
+    expect(store.comms(0).map((m) => m.text)).toEqual(["q", "reply"]);
+    for (let i = 0; i < 25; i++) await store.pruneHistory(367 * day);
+    expect(store.comms(0)).toEqual([]);
+  });
+});
+
 describe("test lock history", () => {
   it("keeps one row per hold, closes the last call with the supplied clock, and frees runs", () => {
     store.upsertRun(run({ ticket: "MC-1" }));
@@ -3333,6 +3495,37 @@ describe("test lock history", () => {
     store.addLockHold({ ...h, since: 5000, queuedAt: 4500 });
     store.deleteLockHolds("r1", 6000);
     expect(store.lockRuns(0)[0]).toMatchObject({ queuedAt: 4500, endedAt: 6000, outcome: "freed" });
+  });
+
+  it("keeps a review run's wrapped (done) locked call as a hub receipt with no pass claimed (#1411)", () => {
+    const sha = "a".repeat(40);
+    const id = store.requestReview({
+      authorRunId: "author",
+      repoId: "repo",
+      seatId: "retro",
+      prNumber: 7,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: 100,
+    });
+    if (id === null) throw new Error("no id");
+    store.setReviewState(id, ["queued"], "starting", { at: 110 });
+    store.setReviewState(id, ["starting"], "running", { at: 120, runId: "rev-run" });
+    const h = {
+      runId: "rev-run",
+      seatId: "retro",
+      command: "pnpm -s vitest run 2>&1 | tail -20",
+      toolUseId: "one",
+      since: 1000,
+    };
+    store.addLockHold(h);
+    store.deleteLockHold("rev-run", "one", 2000, undefined);
+    const receipts = store.qaCheckReceipts("rev-run", sha);
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({ command: h.command, ok: null, exitCode: null });
+    expect(receipts[0]?.evidence).toContain("tool done");
   });
 
   it("records the Post hook event as pass or fail, and a failed call fails the whole hold", () => {
@@ -3522,14 +3715,14 @@ it("retains complete and legacy briefs across restart without inventing checked 
     ],
     recommendedOptionId: "scope",
   };
-  store.addBrief(legacy);
-  store.addBrief(complete);
+  const legacyId = store.addBrief(legacy);
+  const completeId = store.addBrief(complete);
   store.close();
   store = new Store(join(dir, "mc.sqlite"));
   const { key: _legacyKey, ...legacyBrief } = legacy;
   const { key: _completeKey, ...completeBrief } = complete;
-  expect(store.briefs().get(legacy.key)).toEqual(legacyBrief);
-  expect(store.briefs().get(complete.key)).toEqual(completeBrief);
+  expect(store.briefs().get(legacy.key)).toEqual({ ...legacyBrief, id: legacyId });
+  expect(store.briefs().get(complete.key)).toEqual({ ...completeBrief, id: completeId });
   expect(store.briefs().get(legacy.key)?.checked).toBeUndefined();
 });
 
@@ -3657,7 +3850,7 @@ describe("hub retention", () => {
         INSERT INTO briefs (key,context,recommendation,options,basis,at) VALUES
         ('brief:open','context','recommendation','[]','basis',0),
         ('brief:cleared','context','recommendation','[]','basis',0);`);
-      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(91 * 86_400_000);
       expect(db.prepare("SELECT key FROM briefs ORDER BY key").all()).toEqual([
         { key: "brief:open" },
       ]);
@@ -3685,16 +3878,30 @@ describe("hub retention", () => {
         INSERT INTO drafts (target,kind,text,created_at,state) VALUES
           ('old','plan','old',0,'done'), ('pending','plan','pending',0,'pending');
         INSERT INTO crew_errors (agent_id,text,at,acked) VALUES
-          ('seat','old',0,1), ('seat','unacked',0,0);`);
-      for (let i = 0; i < 12; i++) await store.pruneHistory(91 * 86_400_000);
+          ('seat','old',0,1), ('seat','unacked',0,0);
+        INSERT INTO question_closures (key,ask_at,kind,reason,by,question,ticket,operator,at) VALUES
+          ('ask:1',0,'returned','r','flight-1','q',NULL,1,0);`);
+      for (let i = 0; i < 24; i++) await store.pruneHistory(91 * 86_400_000);
       expect(db.prepare("SELECT key FROM attention_notes ORDER BY key").all()).toEqual([
         { key: "open" },
       ]);
-      for (const table of ["guard_hits", "hub_events", "drafts", "crew_errors"])
+      for (const table of [
+        "guard_hits",
+        "hub_events",
+        "drafts",
+        "crew_errors",
+        "question_closures",
+      ])
         expect(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get()).toEqual(
           table === "drafts" || table === "crew_errors" ? { n: 1 } : { n: 0 },
         );
       expect(db.prepare("SELECT state FROM board_moves").all()).toEqual([{ state: "pending" }]);
+      // an answered question to FLIGHT is kept a year, not ninety days
+      expect(db.prepare("SELECT answered_at FROM seat_questions ORDER BY id").all()).toEqual([
+        { answered_at: 1 },
+        { answered_at: null },
+      ]);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(366 * 86_400_000);
       expect(db.prepare("SELECT answered_at FROM seat_questions").all()).toEqual([
         { answered_at: null },
       ]);
@@ -3720,7 +3927,7 @@ describe("hub retention", () => {
         INSERT INTO run_pushes VALUES ('old-run','sha',0);
         INSERT INTO run_attempts (run_id,kind,at,data) VALUES ('old-run','ci',0,'{}');
         INSERT INTO pr_history VALUES ('repo',1,0,'{}');`);
-      for (let i = 0; i < 13; i++) await store.pruneHistory(366 * 86_400_000);
+      for (let i = 0; i < 20; i++) await store.pruneHistory(366 * 86_400_000);
       for (const table of [
         "runs",
         "reviews",
@@ -4286,6 +4493,37 @@ it("keeps an out-of-window held run without disturbing the newest-first order", 
   expect(grouped.get("a")?.map((r) => r.id)).toEqual(["r4", "r0"]);
   expect(grouped.get("missing")).toEqual([]);
 });
+it("preserves timestamp and sequence order, duplicate agents and held runs outside the requested agents", () => {
+  store.upsertRun(run({ id: "older", agentId: "a", seq: 1, startedAt: 1 }));
+  store.upsertRun(run({ id: "tie-low", agentId: "a", seq: 2, startedAt: 2 }));
+  store.upsertRun(run({ id: "tie-high", agentId: "a", seq: 3, startedAt: 2 }));
+  store.upsertRun(run({ id: "foreign", agentId: "b", seq: 1, startedAt: 3 }));
+  const held = ["older", "older", "tie-high", "foreign", "absent"];
+  const grouped = store.runsForAgents(["a", "a", "empty"], 1, held);
+  expect(grouped.get("a")?.map((r) => r.id)).toEqual(["tie-high", "older"]);
+  expect(grouped.get("b")?.map((r) => r.id)).toEqual(["foreign"]);
+  expect(grouped.get("empty")).toEqual([]);
+  expect(store.runsForAgents([], 1, held)).toEqual(new Map());
+  expect(
+    store
+      .runsForAgents(["a"], 0, ["older"])
+      .get("a")
+      ?.map((r) => r.id),
+  ).toEqual(["older"]);
+  expect(store.runsForAgents(["a"], -1).get("a")).toEqual([]);
+  expect(
+    store
+      .runsForAgents(["a"], 1.5)
+      .get("a")
+      ?.map((r) => r.id),
+  ).toEqual(["tie-high"]);
+});
+it("handles a large list of empty agents without dropping their entries", () => {
+  const agents = Array.from({ length: 600 }, (_, i) => `agent-${i}`);
+  const grouped = store.runsForAgents(agents, 50);
+  expect([...grouped.keys()]).toEqual(agents);
+  expect([...grouped.values()].every((runs) => runs.length === 0)).toBe(true);
+});
 it("projects historical context windows without inventing missing measurements", () => {
   store.setDigest("zero", digest({ contextWindow: 0 }));
   store.setDigest("unknown", digest({ contextWindow: null }));
@@ -4296,6 +4534,26 @@ it("projects historical context windows without inventing missing measurements",
       ["known", 200000],
     ]),
   );
+});
+it("updates cached historical context measurements and removes a value when it becomes unknown", () => {
+  store.setDigest("changing", digest({ contextWindow: null }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map());
+  store.setDigest("changing", digest({ contextWindow: 200000 }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map([["changing", 200000]]));
+  store.setDigest("changing", digest({ contextWindow: 1000000 }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map([["changing", 1000000]]));
+  store.setDigest("changing", digest({ contextWindow: null }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map());
+});
+it("reopens a legacy digest cache with malformed history while keeping its window unknown", () => {
+  store.setDigest("known", digest({ contextWindow: 200000 }));
+  store.close();
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  db.exec("DROP INDEX run_digests_context_window");
+  db.prepare("INSERT INTO run_digests (run_id, digest) VALUES (?, ?)").run("malformed", "{");
+  db.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(store.digestContextWindows(["known", "malformed"])).toEqual(new Map([["known", 200000]]));
 });
 it("looks up canonical and closingIssues-only ticket links within their repository", () => {
   const pr = (number: number, patch: Partial<PullRequestView> = {}): PullRequestView => ({

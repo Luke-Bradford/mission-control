@@ -850,9 +850,12 @@ export function setAccount(
     const { bytes, text, current } = await readCurrent(path);
     const index = current.accounts.findIndex((existing) => existing.id === id);
     if (index < 0) throw new ConfigWriteError("missing", "account not found");
-    // the form does not carry the review budget: an edit leaves it as the file has it
-    const reviewTokenBudget = current.accounts[index]?.reviewTokenBudget;
-    const kept = reviewTokenBudget === undefined ? {} : { reviewTokenBudget };
+    // the form does not carry the review budget or the brake: an edit leaves them as the file has them
+    const cur = current.accounts[index];
+    const kept = {
+      ...(cur?.reviewTokenBudget === undefined ? {} : { reviewTokenBudget: cur.reviewTokenBudget }),
+      ...(cur?.brake === undefined ? {} : { brake: cur.brake }),
+    };
     const nextAccount = {
       id,
       vendor: account.provider,

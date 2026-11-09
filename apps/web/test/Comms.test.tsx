@@ -1,3 +1,4 @@
+import { COMMS_CAPCOM } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
@@ -255,7 +256,7 @@ describe("Comms routes", () => {
     const earlier = document.getElementById("comms-message-comms:earlier") as HTMLElement;
     const later = document.getElementById("comms-message-comms:later") as HTMLElement;
     expect(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    fireEvent.click(within(earlier).getAllByRole("button", { name: "PR 44" })[0]);
+    fireEvent.click(within(earlier).getAllByRole("button", { name: "Filter chat to PR 44" })[0]);
     expect(window.location.pathname).toBe("/comms/tickets/PR%2044");
     fireEvent.change(ticketComposer, { target: { value: "Ticket update" } });
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
@@ -266,6 +267,113 @@ describe("Comms routes", () => {
         text: "Ticket update",
         ref: "#707",
       });
+    });
+  });
+
+  describe("a ticket number in a message", () => {
+    const base = {
+      id: "comms:ref",
+      at: NOW,
+      from: "alpha",
+      to: "crew",
+      text: "Look at #707 now",
+      ticket: "shop-app#707",
+      label: null,
+      ref: "#707",
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const stub = (message: object, repos = CONFIG.repos) =>
+      stubFetch({
+        "/api/config": { ...CONFIG, repos },
+        "/api/crew?shape=summary": {
+          rows: [crewRow({ id: "sender", repoId: "shop-app" })],
+          firstRunToday: null,
+        },
+        "/api/comms/crew": { messages: [message] },
+        "/api/comms/mentions": { mentions: [] },
+        "/api/comms/pins": { messages: [] },
+        "/api/flight": { seat: null, decisions: [] },
+      });
+    const open = async (message: object, repos?: typeof CONFIG.repos) => {
+      stub(message, repos);
+      window.history.replaceState(null, "", "/comms/crew");
+      render(<CommsConversation view={{ kind: "crew" }} row={null} />);
+    };
+
+    it("opens the ticket and leaves the conversation filter alone", async () => {
+      await open(base);
+      const links = await screen.findAllByRole("link", { name: "#707" });
+      expect(links.length).toBe(2);
+      for (const link of links) {
+        expect(link.getAttribute("href")).toBe("/tickets/shop-app/707");
+        fireEvent.click(link);
+        expect(window.location.pathname).toBe("/tickets/shop-app/707");
+        window.history.replaceState(null, "", "/comms/crew");
+      }
+      expect(window.location.pathname).not.toMatch(/^\/comms\/tickets/);
+    });
+
+    it("filters from a separate control and opens nothing", async () => {
+      await open(base);
+      await screen.findAllByRole("link", { name: "#707" });
+      const filters = screen.getAllByRole("button", { name: "Filter chat to #707" });
+      expect(filters.length).toBe(2);
+      expect(filters[0]?.textContent).toBe("⌕");
+      fireEvent.click(filters[0] as HTMLElement);
+      expect(window.location.pathname).toBe("/comms/tickets/%23707");
+    });
+
+    it("opens another ticket of the message's repo, not only its own", async () => {
+      await open({ ...base, ref: null, text: "see #708" });
+      const link = await screen.findByRole("link", { name: "#708" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/708");
+      expect(screen.getByRole("button", { name: "Filter chat to #708" }).textContent).toBe("⌕");
+    });
+
+    it("uses the sender's repo when the message has no ticket", async () => {
+      await open({ ...base, from: "sender", ticket: null, ref: null, text: "check #5" });
+      const link = await screen.findByRole("link", { name: "#5" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
+    });
+
+    it("uses the recipient's repo when the sender, CAPCOM, has none", async () => {
+      await open({
+        ...base,
+        from: COMMS_CAPCOM,
+        to: "sender",
+        ticket: null,
+        ref: null,
+        text: "check #5",
+      });
+      const link = await screen.findByRole("link", { name: "#5" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
+      expect(screen.getByRole("button", { name: "Filter chat to #5" }).textContent).toBe("⌕");
+    });
+
+    it("leaves a number with no known repo as plain text with only the filter button", async () => {
+      await open({ ...base, ticket: null, ref: null, text: "check #5" });
+      await screen.findByRole("button", { name: "Filter chat to #5" });
+      expect(screen.queryByRole("link", { name: "#5" })).toBeNull();
+      expect(document.querySelector("button.comms-ref")).toBeNull();
+      expect(document.querySelector(".comms-ref-plain")?.textContent).toBe("#5");
+    });
+
+    it("opens a PR on GitHub from the message's repo, with a separate filter", async () => {
+      await open({ ...base, ref: null, text: "see PR 12" });
+      const link = await screen.findByRole("link", { name: "PR 12 on GitHub" });
+      expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/12");
+      expect(link.getAttribute("target")).toBe("_blank");
+      expect(screen.getByRole("button", { name: "Filter chat to PR 12" })).toBeTruthy();
+    });
+
+    it("keeps a PR with no GitHub repo configured as the filter alone", async () => {
+      await open({ ...base, ref: null, text: "see PR 12" }, []);
+      await screen.findByRole("button", { name: "Filter chat to PR 12" });
+      expect(screen.queryByRole("link", { name: /PR 12/ })).toBeNull();
     });
   });
 
@@ -773,6 +881,7 @@ describe("Comms routes", () => {
       "/api/comms/pins": { messages: [] },
       "POST /api/comms/read": { ok: true },
       "POST /api/comms": { message: reply },
+      "/api/comms/comms%3A8/reply-route": { to: "crew", redirected: false, note: "" },
       "PUT /api/comms/comms%3A8/pin": { pinned: true },
     });
     render(<Comms item={null} view={{ kind: "crew" }} />);
@@ -786,6 +895,11 @@ describe("Comms routes", () => {
     fireEvent.change(screen.getByLabelText("Post to #crew as CAPCOM · @name pings one agent"), {
       target: { value: "Acknowledged" },
     });
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => {
       const sent = fetch.mock.calls.find(([path]) => path === "/api/comms");
@@ -985,7 +1099,7 @@ describe("Comms routes", () => {
     );
     // The loop sits on the graph's loops spoke (#790), but has no conversation of its own.
     expect(
-      screen.queryAllByText("studio-builder").filter((el) => !el.closest(".comms-spider")),
+      screen.queryAllByText("studio-builder").filter((el) => !el.closest(".comms-rails")),
     ).toEqual([]);
   });
 
@@ -1023,8 +1137,6 @@ describe("Decisions", () => {
           }),
         ]}
         rows={ROWS}
-        flightSeat={null}
-        onDiscuss={() => {}}
       />,
     );
 
@@ -1125,5 +1237,201 @@ describe("current crew and Earlier", () => {
     );
     expect(await screen.findByText(old.text)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Current crew" })).toBeTruthy();
+  });
+});
+
+describe("Comms: the operator can always talk to FLIGHT", () => {
+  const msg = (over: Record<string, unknown>) => ({
+    id: "comms:1",
+    at: NOW - MIN,
+    from: COMMS_CAPCOM,
+    to: "flight-1",
+    text: "Do it",
+    ticket: null,
+    label: null,
+    ref: null,
+    replyTo: null,
+    mentions: [],
+    reactions: [],
+    pinned: false,
+    operator: true,
+    deliveredAt: null,
+    ...over,
+  });
+  const STOPPED = { seat: { id: "flight-1", live: false, state: "stopped" }, decisions: [] };
+  const base = (messages: unknown[], extra: Record<string, unknown> = {}) =>
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS, firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": STOPPED,
+      "/api/comms/flight": { messages },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+      ...extra,
+    });
+  const view = () =>
+    render(<CommsConversation view={{ kind: "flight" }} row={null} onJumped={() => {}} />);
+
+  it("keeps the box open with FLIGHT stopped, and says what happens to the message", async () => {
+    const fetch = base([], {
+      "POST /api/comms": {
+        message: msg({}),
+        state: "stored",
+        deliveredAt: null,
+        alreadySent: false,
+      },
+      "POST /api/seats/flight-1/start": { runId: "r1" },
+    });
+    view();
+    expect(
+      await screen.findByText("FLIGHT is stopped. It reads this when it starts."),
+    ).toBeTruthy();
+    const input = screen.getByLabelText("Message FLIGHT as CAPCOM") as HTMLInputElement;
+    expect(input.disabled).toBe(false);
+    fireEvent.change(input, { target: { value: "Do it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect((await screen.findByTestId("sent-state")).textContent).toBe("Stored");
+    fireEvent.click(screen.getByRole("button", { name: "Start FLIGHT" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/seats/flight-1/start", expect.anything()),
+    );
+  });
+
+  it("shows a repeated send as already sent", async () => {
+    base([], {
+      "POST /api/comms": {
+        message: msg({}),
+        state: "delivered",
+        deliveredAt: NOW,
+        alreadySent: true,
+      },
+    });
+    view();
+    const input = (await screen.findByLabelText("Message FLIGHT as CAPCOM")) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Do it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect((await screen.findByTestId("sent-state")).textContent).toMatch(
+      /^Delivered \d\d:\d\d · Already sent in the last minute$/,
+    );
+  });
+
+  it("draws sent, delivered and answered under the operator's messages", async () => {
+    base([
+      msg({ id: "comms:1", text: "first", deliveredAt: null }),
+      msg({ id: "comms:2", text: "second", deliveredAt: NOW }),
+      msg({ id: "comms:3", text: "third", deliveredAt: NOW }),
+      msg({
+        id: "comms:4",
+        from: "flight-1",
+        to: COMMS_CAPCOM,
+        operator: false,
+        replyTo: "comms:3",
+        text: "done",
+      }),
+    ]);
+    view();
+    await screen.findByText("third");
+    const lines = (await screen.findAllByTestId("message-state")).map((l) => l.textContent);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe("Stored");
+    expect(lines[1]).toMatch(/^Delivered \d\d:\d\d$/);
+    expect(lines[2]).toBe("Answered");
+  });
+
+  it("shows the reply-route note before a reply to an ended run is sent", async () => {
+    base(
+      [
+        msg({
+          id: "comms:8",
+          from: "alpha",
+          to: COMMS_CAPCOM,
+          operator: false,
+          text: "Need a call",
+        }),
+      ],
+      {
+        "/api/comms/comms%3A8/reply-route": {
+          to: "flight-1",
+          redirected: true,
+          note: "alpha's run has ended. Your reply goes to FLIGHT.",
+        },
+      },
+    );
+    view();
+    fireEvent.click(await screen.findByRole("button", { name: "Reply to alpha" }));
+    expect((await screen.findByTestId("reply-route-note")).textContent).toBe(
+      "alpha's run has ended. Your reply goes to FLIGHT.",
+    );
+  });
+
+  it("keeps typing available but waits for the reply route before sending", async () => {
+    const fetch = base(
+      [msg({ id: "comms:8", from: "alpha", operator: false, text: "Need a call" })],
+      {
+        "POST /api/comms": { state: "stored", deliveredAt: null },
+      },
+    );
+    let settle!: (r: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      settle = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: RequestInit) =>
+        input === "/api/comms/comms%3A8/reply-route" ? pending : fetch(input, init),
+      ),
+    );
+    view();
+    fireEvent.click(await screen.findByRole("button", { name: "Reply to alpha" }));
+    const input = screen.getByLabelText("Message FLIGHT as CAPCOM") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Please continue" } });
+    expect(input.disabled).toBe(false);
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    expect(
+      fetch.mock.calls.filter(([url, init]) => url === "/api/comms" && init?.method === "POST"),
+    ).toHaveLength(0);
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () =>
+      settle(
+        new Response(
+          JSON.stringify({
+            to: "flight-1",
+            redirected: true,
+            note: "alpha's run has ended. Your reply goes to FLIGHT.",
+          }),
+        ),
+      ),
+    );
+    await screen.findByTestId("reply-route-note");
+    expect(input.value).toBe("Please continue");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms", expect.objectContaining({ method: "POST" })),
+    );
+  });
+
+  it("keeps the draft and offers retry when the reply route cannot be read", async () => {
+    let attempts = 0;
+    base([msg({ id: "comms:8", from: "alpha", operator: false, text: "Need a call" })], {
+      "/api/comms/comms%3A8/reply-route": () =>
+        ++attempts === 1
+          ? { status: 503, body: { error: "Unavailable" } }
+          : {
+              status: 200,
+              body: { to: "flight-1", redirected: true, note: "Your reply goes to FLIGHT." },
+            },
+    });
+    view();
+    fireEvent.click(await screen.findByRole("button", { name: "Reply to alpha" }));
+    const input = screen.getByLabelText("Message FLIGHT as CAPCOM") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Keep this draft" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Retry reply route" }));
+    await screen.findByTestId("reply-route-note");
+    expect(input.value).toBe("Keep this draft");
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 });

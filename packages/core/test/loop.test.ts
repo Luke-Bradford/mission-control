@@ -12,6 +12,7 @@ import {
   controllerCheckOf,
   controllerCheckParkText,
   fillLoopText,
+  flightClearanceReasons,
   hardRulesFlagKey,
   isHardRulesFlagKey,
   LOOP_TEXT_CI,
@@ -2034,6 +2035,84 @@ describe("review decisions", () => {
     expect(sends(reconcile(idle).actions)).toEqual([`nudge:r1:0:1:1`]);
   });
 
+  it("a reported review with blocking findings moves the card to In progress, a clean one does not", () => {
+    const blocked = reconcile(inReview(withReview([fact({ id: 5, blocking: 2 })], [finding])));
+    expect(kinds(blocked.actions, "move-card")).toEqual([
+      { kind: "move-card", column: "In progress", mark: "rework:0" },
+    ]);
+    const clean = reconcile(inReview(withReview([fact({ id: 5, blocking: 0 })])));
+    expect(kinds(clean.actions, "move-card")).toEqual([]);
+    // once per state: the mark is set, so the next pass leaves the card alone
+    const done = inReview(
+      withReview([fact({ id: 5, blocking: 2 })], [finding]),
+      {},
+      { cardFor: "rework:0" },
+    );
+    expect(kinds(reconcile(done).actions, "move-card")).toEqual([]);
+  });
+
+  it("a new push after rework moves the card back to In review", () => {
+    const NEW = "b".repeat(40);
+    const pushed = inReview(
+      withReview([fact({ id: 5, blocking: 2 })], [finding]),
+      { headCommit: NEW, pushed: { sha: NEW, at: NOW }, pr: pr({ ci: "passing", headSha: NEW }) },
+      { cardFor: "rework:0" },
+    );
+    expect(kinds(reconcile(pushed).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "In review" },
+    ]);
+  });
+
+  it("an ended run with blocking findings sends its card to Ready, not Blocked", () => {
+    const ended = inReview(withReview([fact({ id: 5, blocking: 1 })], [finding]), {
+      ended: { reason: "stopped" },
+    });
+    expect(kinds(reconcile(ended).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "Ready" },
+    ]);
+  });
+
+  it("a dollar-cap stop during rework stays Blocked, not Ready", () => {
+    const capped = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "exit" }, costUsd: 12.5, budgetUsd: 12.5 },
+      { cardFor: "rework:0" },
+    );
+    expect(kinds(reconcile(capped).actions, "move-card")).toEqual([
+      { kind: "move-card", column: "Blocked" },
+    ]);
+  });
+
+  it("an ended run whose PR was closed keeps its card Blocked", () => {
+    const closed = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "stopped" }, pr: pr({ ci: "passing", state: "closed" }) },
+      {
+        phase: "parked",
+        parked: { kind: "pr-closed", reason: "closed", ended: false },
+        cardFor: "parked:0",
+      },
+    );
+    expect(kinds(reconcile(closed).actions, "move-card")).toEqual([]);
+  });
+
+  it("a run that parked on blocking findings and then ended moves its Blocked card to Ready", () => {
+    const parked = inReview(
+      withReview([fact({ id: 5, blocking: 1 })], [finding]),
+      { ended: { reason: "stopped" } },
+      {
+        phase: "parked",
+        parked: { kind: "review", reason: "rounds", ended: false },
+        cardFor: "parked:0",
+      },
+    );
+    const r = reconcile(parked);
+    expect(r.loop.parked?.ended).toBe(true);
+    expect(kinds(r.actions, "move-card")).toEqual([{ kind: "move-card", column: "Ready" }]);
+    // the stale Blocked mark is cleared so the move is planned; the engine sets the new mark
+    expect(r.loop.cardFor).toBeNull();
+  });
+
   it("the fix line for one blocking finding carries its file, line, summary and fix", () => {
     const rows = [fact({ id: 5, blocking: 1 })];
     const [send] = kinds(reconcile(inReview(withReview(rows, [finding]))).actions, "send");
@@ -2388,9 +2467,210 @@ describe("set aside", () => {
       }
     });
 
+    /** A run that pushed once, then made a commit the push gate refused: the commit stays unpushed. */
+    const refused = (over: Partial<LoopSnapshot> = {}, loop: Partial<RunLoop> = {}) => {
+      const s = base(
+        { headCommit: SHA2, pr: pr({ ci: "passing" }), reworkDue: true, ...over },
+        {
+          phase: "ci",
+          pushFor: SHA2,
+          pushStartedAt: NOW - 60_000,
+          transient: 1,
+          lastRefusal: "the push gate refused the commit",
+          cardFor: "ci:0",
+          ...loop,
+        },
+      );
+      return { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false, ...over.seat } };
+    };
+
+    it("sets aside a pushed run whose newer commit was refused, when rework is due on the seat", () => {
+      const cases: [string, LoopSnapshot][] = [
+        ["in ci", refused()],
+        [
+          "stuck",
+          refused(
+            {},
+            { phase: "parked", parked: { kind: "stuck", reason: "not on GitHub", ended: false } },
+          ),
+        ],
+        [
+          "refused park",
+          refused(
+            {},
+            { phase: "parked", parked: { kind: "refused", reason: "refused", ended: false } },
+          ),
+        ],
+      ];
+      for (const [name, s] of cases) {
+        const r = reconcile(s);
+        expect(
+          kindsOf(r.actions).filter((k) => k === "set-aside"),
+          name,
+        ).toHaveLength(1);
+        expect(
+          r.actions.find((a) => a.kind === "set-aside"),
+          name,
+        ).toEqual({
+          kind: "set-aside",
+          displaced: true,
+        });
+      }
+    });
+
+    it("keeps a refused run on its seat while no rework is due", () => {
+      const cases: [string, LoopSnapshot][] = [
+        ["no rework due", refused({ reworkDue: false })],
+        ["no commit read", refused({ headCommit: null })],
+        ["in turn", refused({ seat: { ...refused().seat, inTurn: true } })],
+        ["review phase", refused({}, { phase: "review" })],
+        // in ci with nothing refused: the push has not been tried yet
+        ["not refused yet", refused({}, { lastRefusal: null, transient: 0 })],
+      ];
+      for (const [name, s] of cases) {
+        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+      }
+    });
+
+    it("does not displace a rework run that has just reported its fix, before its push is tried", () => {
+      const s = base(
+        {
+          headCommit: SHA2,
+          reworkDue: true,
+          evidence: { id: 2, at: 3000, ruling: false },
+          evidenceCount: 2,
+        },
+        { phase: "working", reportedEvidenceId: 1 },
+      );
+      const idle = { ...s, seat: { ...s.seat, state: "idle" as const, inTurn: false } };
+      expect(reconcile(idle).actions).not.toContainEqual({ kind: "set-aside", displaced: true });
+    });
+
+    it("a run off its seat with a refused commit is due back, behind the rework", () => {
+      const r = reconcile(
+        off({ headCommit: SHA2, reworkDue: true }, { phase: "ci", ...asideOf(true) }),
+      );
+      expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+    });
+
     it("the displaced run is flagged to come back, behind the rework", () => {
       const r = reconcile(off({ reworkDue: true }, { phase: "working", ...asideOf() }));
       expect(r.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+    });
+  });
+
+  describe("a question the operator must answer", () => {
+    const waiting = (over: Partial<LoopSnapshot> = {}) => {
+      const s = base(
+        { headCommit: null, pushed: null, pr: null, review: null, operatorAsk: true, ...over },
+        { phase: "working", cardFor: "working:0" },
+      );
+      return {
+        ...s,
+        seat: { ...s.seat, state: "idle" as const, inTurn: false, openQuestion: true },
+      };
+    };
+
+    it("parks the ticket: the run leaves its seat so the seat can take the next one", () => {
+      const r = reconcile(waiting());
+      expect(kindsOf(r.actions).filter((k) => k === "set-aside")).toHaveLength(1);
+    });
+
+    it("keeps a question that is not the operator's, a running turn or a missing seat", () => {
+      const w = waiting();
+      const cases: [string, LoopSnapshot][] = [
+        ["FLIGHT's question", waiting({ operatorAsk: false })],
+        ["in turn", { ...w, seat: { ...w.seat, inTurn: true } }],
+        ["not idle", { ...w, seat: { ...w.seat, state: "running" } }],
+        ["seat does not hold the run", { ...w, seat: { ...w.seat, holdsRun: false } }],
+        ["ended", waiting({ ended: { reason: "done" } })],
+      ];
+      for (const [name, s] of cases) {
+        expect(kindsOf(reconcile(s).actions), name).not.toContain("set-aside");
+      }
+    });
+
+    it("parks a run in ci or review too, and brings it back once answered", () => {
+      const inReview = (over: Partial<LoopSnapshot> = {}) => {
+        const s = base({ operatorAsk: true, ...over });
+        return { ...s, seat: { ...s.seat, openQuestion: true } };
+      };
+      const inCi = () => {
+        const s = base(
+          { operatorAsk: true, pr: pr({ ci: "pending" }), review: facts([]) },
+          { phase: "ci", pushFor: SHA, pushStartedAt: NOW - 60_000, cardFor: "ci:0" },
+        );
+        return { ...s, seat: { ...s.seat, openQuestion: true } };
+      };
+      for (const [name, s] of [
+        ["review", inReview()],
+        ["ci", inCi()],
+      ] as const) {
+        expect(kindsOf(reconcile(s).actions), name).toContain("set-aside");
+        const off = (operatorAsk: boolean) => {
+          const x = {
+            ...s,
+            operatorAsk,
+            seat: {
+              ...s.seat,
+              state: "stopped" as const,
+              inTurn: true,
+              holdsRun: false,
+              openQuestion: operatorAsk,
+            },
+          };
+          return reconcile({
+            ...x,
+            loop: { ...x.loop, aside: { worktree: "/w/r1", wake: false, ask: 3 } },
+          });
+        };
+        expect(off(true).loop.aside?.wake, name).toBe(false);
+        expect(kindsOf(off(true).actions), name).not.toContain("wake");
+        expect(off(false).loop.aside?.wake, name).toBe(true);
+        expect(kindsOf(off(false).actions), name).toContain("wake");
+      }
+    });
+
+    it("sends the answer line before the woken run is set aside again", () => {
+      const pending = { key: "answer:r1:3", text: "x" };
+      const review = () => {
+        const s = base({ operatorAsk: false }, { pendingLine: pending });
+        return { ...s, seat: { ...s.seat, openQuestion: false } };
+      };
+      const ci = () => {
+        const s = base(
+          { operatorAsk: false, pr: pr({ ci: "pending" }), review: facts([]) },
+          {
+            phase: "ci",
+            pushFor: SHA,
+            pushStartedAt: NOW - 60_000,
+            cardFor: "ci:0",
+            pendingLine: pending,
+          },
+        );
+        return { ...s, seat: { ...s.seat, openQuestion: false } };
+      };
+      for (const [name, s] of [
+        ["review", review()],
+        ["ci", ci()],
+      ] as const) {
+        const kinds = kindsOf(reconcile(s).actions);
+        expect(kinds, name).toContain("send");
+        expect(kinds, name).not.toContain("set-aside");
+      }
+    });
+
+    it("stays off the seat while the operator has not answered, and comes back after", () => {
+      const parked = (operatorAsk: boolean) => {
+        const s = off({ operatorAsk, review: null }, { phase: "working", ...asideOf() });
+        return { ...s, seat: { ...s.seat, openQuestion: operatorAsk } };
+      };
+      const held = reconcile(parked(true));
+      expect(held.loop.aside).toEqual({ worktree: "/w/r1", wake: false });
+      expect(kindsOf(held.actions)).not.toContain("wake");
+      const answered = reconcile(parked(false));
+      expect(answered.loop.aside).toEqual({ worktree: "/w/r1", wake: true });
+      expect(kindsOf(answered.actions)).toContain("wake");
     });
   });
 
@@ -2598,37 +2878,34 @@ describe("merge workspace", () => {
     ".github/workflows/ci.yml",
     ".github/CODEOWNERS",
     ".github/actions/setup/action.yml",
-  ])("FLIGHT clearance cannot waive %s", (path) => {
-    const s = merge(
+  ])("FLIGHT's clearance merges %s on a superuser repo, with no approval", (path) => {
+    const base = merge(
       { flightPowers: "superuser" },
       {
         touches: { sha: SHA, paths: [path] },
-        flightClearedSha: SHA,
+        gate: gateOf({ missionControlChanged: path === "CLAUDE.md" }),
       },
     );
-    expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
+    const held = reconcile(base);
+    expect(held.loop.awaitingFlight).toBe(SHA);
+    expect(kindsOf(held.actions)).not.toContain("merge");
+    const cleared = { ...base.loop, flightClearedSha: SHA };
+    expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
   });
 
   it.each(["CLAUDE.md", ".github/workflows/ci.yml"])(
-    "a controller's approval for the head lets FLIGHT clear %s, and the engine merge it (#1214)",
+    "a standard repo never awaits FLIGHT for %s, approval or not",
     (path) => {
       const base = merge(
-        { flightPowers: "superuser", floorApproved: true },
+        { flightPowers: "standard", floorApproved: true },
         {
           touches: { sha: SHA, paths: [path] },
           gate: gateOf({ missionControlChanged: path === "CLAUDE.md" }),
+          flightClearedSha: SHA,
         },
       );
-      const held = reconcile(base);
-      expect(held.loop.awaitingFlight).toBe(SHA);
-      expect(kindsOf(held.actions)).not.toContain("merge");
-      const cleared = { ...base.loop, flightClearedSha: SHA };
-      expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
-      // without the approval the same clearance still merges nothing
-      expect(
-        kindsOf(reconcile({ ...base, floorApproved: false, loop: cleared }).actions),
-      ).not.toContain("merge");
-      expect(reconcile({ ...base, floorApproved: false }).loop.awaitingFlight).toBeNull();
+      expect(reconcile(base).loop.awaitingFlight).toBeNull();
+      expect(kindsOf(reconcile(base).actions)).not.toContain("merge");
     },
   );
 
@@ -2671,19 +2948,89 @@ describe("merge workspace", () => {
     expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
   });
   it.each(["apps/other/hard-rule.ts", "package.json"])(
-    "clearance never hides a stray: %s",
+    "a stray (%s) waits for FLIGHT on a superuser repo and parks a standard one",
     (path) => {
-      const s = merge(
+      const base = merge(
         { flightPowers: "superuser" },
-        {
-          flightClearedSha: SHA,
-          touches: { sha: SHA, paths: [path] },
-          gate: gateOf({ strays: [path] }),
-        },
+        { touches: { sha: SHA, paths: [] }, gate: gateOf({ strays: [path] }) },
       );
-      expect(kindsOf(reconcile(s).actions)).not.toContain("merge");
+      expect(reconcile(base).loop.awaitingFlight).toBe(SHA);
+      expect(kindsOf(reconcile(base).actions)).not.toContain("merge");
+      const standard = reconcile({ ...base, flightPowers: "standard" });
+      expect(standard.loop.parked?.kind).toBe("gate");
     },
   );
+
+  it("superuser: an outside commit and stray files wait for FLIGHT, then merge", () => {
+    const base = merge(
+      { flightPowers: "superuser" },
+      { touches: { sha: SHA, paths: [] }, gate: gateOf({ hubOnly: false, strays: ["x/a.ts"] }) },
+    );
+    const held = reconcile(base);
+    expect(held.loop.parked).toBeNull();
+    expect(held.loop.awaitingFlight).toBe(SHA);
+    expect(kindsOf(held.actions)).not.toContain("merge");
+    const cleared = { ...base.loop, flightClearedSha: SHA };
+    expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
+  });
+
+  it("a head FLIGHT adopted waits for its clearance even with nothing else to call, then merges", () => {
+    const base = merge(
+      { flightPowers: "superuser" },
+      { touches: { sha: SHA, paths: [] }, adopted: true },
+    );
+    const held = reconcile(base);
+    expect(held.loop.awaitingFlight).toBe(SHA);
+    expect(kindsOf(held.actions)).not.toContain("merge");
+    const cleared = { ...base.loop, flightClearedSha: SHA };
+    expect(kindsOf(reconcile({ ...base, loop: cleared }).actions)).toContain("merge");
+    expect(flightClearanceReasons(cleared, SHA)).toEqual(["a head adopted from outside the run"]);
+  });
+
+  it.each([
+    ["a later head pushed by the seat", {}],
+    ["the hub's merge of main into the adopted head", { carry: { from: SHA2, to: SHA } }],
+  ])("an adopted head keeps every later head waiting for FLIGHT: %s", (_name, extra) => {
+    const base = merge(
+      { flightPowers: "superuser" },
+      { touches: { sha: SHA, paths: [] }, adopted: true, ...extra },
+    );
+    expect(reconcile(base).loop.awaitingFlight).toBe(SHA);
+    expect(kindsOf(reconcile(base).actions)).not.toContain("merge");
+    expect(flightClearanceReasons(base.loop, SHA)).toContain("a head adopted from outside the run");
+  });
+
+  it("flightClearanceReasons names every floor and guard path first, never inside 'and N more'", () => {
+    const paths = [
+      "a",
+      "b",
+      "c",
+      "d",
+      "e",
+      "f",
+      "CLAUDE.md",
+      ".github/workflows/ci.yml",
+      "apps/server/src/guard/x.ts",
+    ];
+    const [reason] = flightClearanceReasons({ touches: { sha: SHA, paths }, gate: gateOf() }, SHA);
+    expect(reason).toBe(
+      "touches CLAUDE.md, .github/workflows/ci.yml, apps/server/src/guard/x.ts, a, b and 4 more",
+    );
+  });
+
+  it("flightClearanceReasons names what needed FLIGHT's call, for this head only", () => {
+    const loop = {
+      touches: { sha: SHA, paths: ["a", "b", "c", "d", "e", "f", "g"] },
+      gate: gateOf({ hubOnly: false, strays: ["x/a.ts", "a"] }),
+    };
+    expect(flightClearanceReasons(loop, SHA)).toEqual([
+      "touches a, b, c, d, e and 2 more",
+      "files outside the seat's area: x/a.ts",
+      "a commit from outside the run",
+    ]);
+    expect(flightClearanceReasons(loop, SHA2)).toEqual([]);
+    expect(flightClearanceReasons({ touches: null, gate: null }, SHA)).toEqual([]);
+  });
 
   it("superuser accepted review merges, but operator stops still hold", () => {
     const s = merge({ flightPowers: "superuser" }, { reviewWaivedSha: SHA });

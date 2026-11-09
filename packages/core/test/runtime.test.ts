@@ -258,6 +258,7 @@ describe("the allowlist in phase 2b", () => {
     for (const t of [
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
+      MC_TOOLS.publishPreview,
       MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
     ]) {
@@ -313,6 +314,7 @@ describe("the allowlist in phase 2b", () => {
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
       prBody: "mcp__mc__pr_body",
+      publishPreview: "mcp__mc__publish_preview",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",
@@ -323,6 +325,8 @@ describe("the allowlist in phase 2b", () => {
       recall: "mcp__mc__recall",
       holdItem: "mcp__mc__hold_item",
       releaseHold: "mcp__mc__release_hold",
+      returnQuestion: "mcp__mc__return_question",
+      withdrawQuestion: "mcp__mc__withdraw_question",
       screenshotHud: "mcp__mc__screenshot_hud",
       previewBrowser: "mcp__mc__preview_browser",
       askFlight: "mcp__mc__ask_flight",
@@ -392,6 +396,8 @@ describe("the allowlist in phase 2b", () => {
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       DISABLE_AUTOUPDATER: "1",
+      // marks every crew seat's environment, so tests that need what a seat denies can tell (#1411)
+      MC_SEAT_SANDBOX: "1",
     });
   });
 
@@ -732,6 +738,8 @@ describe("crew constants", () => {
           "recall",
           "hold_item",
           "release_hold",
+          "return_question",
+          "withdraw_question",
           "edit_issue",
           "set_fields",
           "operator",
@@ -864,6 +872,8 @@ describe("mc tool grants", () => {
       "recall",
       "hold_item",
       "release_hold",
+      "return_question",
+      "withdraw_question",
       "edit_issue",
       "set_fields",
       "operator",

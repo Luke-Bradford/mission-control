@@ -1,5 +1,4 @@
 import {
-  type AttentionItem,
   type AwaySettings,
   type ConfigView,
   type Crew,
@@ -9,23 +8,26 @@ import {
   type MachineSample,
 } from "@mc/core";
 import { type ReactNode, useEffect, useSyncExternalStore } from "react";
-import { openNeedsYou, useNeedsYou } from "../attention.ts";
+import { useNeedsCount } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { needsLamp, useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
-import { hhmm, hms, MONTHS, percent, plural, swapOfRam } from "../fmt.ts";
+import { DEMO_MARKER_TEXT, useDemo } from "../demo/mode.ts";
+import { hhmm, hms, MONTHS, percent, swapOfRam } from "../fmt.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
+import { useOperatorUnread } from "./operatorMessages.ts";
 import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
 
-/** The page tabs carry no lamps: Needs you is the one lamp, and its home is FLIGHT (roadmap item 2). */
+/** The page tabs carry no lamps except Needs you, the one lamp, which is itself a page. */
 const TABS: readonly { page: Page; label: string; to: string }[] = [
   { page: "overview", label: "Overview", to: PAGE_PATHS.overview },
+  { page: "needs", label: "Needs you", to: PAGE_PATHS.needs },
   { page: "flight", label: "Flight", to: PAGE_PATHS.flight },
   { page: "board", label: "Board", to: PAGE_PATHS.board },
   { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
@@ -38,16 +40,21 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
 export function Header({ page }: { page: Page }) {
-  const attention = useNeedsYou();
+  const unread = useOperatorUnread().length;
+  const demo = useDemo();
   return (
     <header className="top">
-      <span className="brand">MISSION CONTROL</span>
+      {demo ? <DemoMarker /> : <span className="brand">MISSION CONTROL</span>}
       <nav className="tabs" aria-label="Pages">
-        {TABS.map((t) => (
-          <Tab key={t.label} to={t.to} on={page === t.page}>
-            {t.label}
-          </Tab>
-        ))}
+        {TABS.map((t) =>
+          t.page === "needs" ? (
+            <NeedsTab key={t.label} on={page === "needs"} />
+          ) : (
+            <Tab key={t.label} to={t.to} on={page === t.page}>
+              {t.label}
+            </Tab>
+          ),
+        )}
       </nav>
       <span className="spacer" />
       <div className="top-status">
@@ -55,17 +62,30 @@ export function Header({ page }: { page: Page }) {
         <Clock />
         <MachineButton />
         <SessionSelect />
-        <NeedsButton items={attention} />
         <AwayButton />
         <ThemeButton />
         <SetupButton on={page === "setup"} />
-        <DockButton page={page} waiting={attention.length} />
+        <DockButton page={page} unread={unread} />
       </div>
       <span className="sr-only">
         <LiveIndicator />
         <Met />
       </span>
     </header>
+  );
+}
+
+/** Says on every page that the crew is simulated: the word, not only the colour. */
+function DemoMarker() {
+  return (
+    <span
+      className="brand demo-marker"
+      role="img"
+      aria-label={DEMO_MARKER_TEXT}
+      title={DEMO_MARKER_TEXT}
+    >
+      DEMO
+    </span>
   );
 }
 
@@ -255,32 +275,36 @@ function MachineButton() {
   );
 }
 
-/** Where the Needs-you button leads, in its accessible name. */
-const NEEDS_YOU_OPENS = "Opens FLIGHT's Operator actions";
-
-function NeedsButton({ items }: { items: readonly AttentionItem[] }) {
+/** The Needs you tab: the page's name, a lamp and the count, so a waiting ask shows on every page. */
+function NeedsTab({ on }: { on: boolean }) {
+  const { state, items, n } = useNeedsCount();
   const notAcked = items.filter((i) => !i.acked).length;
-  const unacked = notAcked > 0;
-  const lamp = needsLamp(items, unacked);
-  // The accessible name starts with the visible "Needs you {n}" (WCAG 2.5.3), then says more.
-  const n = items.length;
-  const what = n === 0 ? "nothing" : plural(n, "thing");
-  const label = `Needs you ${n}: ${what}${unacked ? ", some not yet acknowledged" : ""}. ${NEEDS_YOU_OPENS}.`;
+  const lamp = state === "ready" ? needsLamp(items, notAcked > 0) : null;
+  const shown = state === "ready" ? String(n) : state === "loading" ? "…" : "—";
+  const name =
+    state === "ready"
+      ? n === 0
+        ? "Needs you: nothing waiting"
+        : `Needs you: ${n} waiting`
+      : state === "loading"
+        ? "Needs you: loading"
+        : "Needs you: count unavailable";
   return (
-    <button
-      type="button"
-      className={`needs-btn${items.length ? " has" : ""}`}
-      title={`Everything waiting on you (FLIGHT › Plan › Operator actions)${unacked ? ` · ${notAcked} not acknowledged` : ""}`}
-      aria-label={label}
-      onClick={openNeedsYou}
+    <a
+      href={PAGE_PATHS.needs}
+      className={`${on ? "on " : ""}needs-tab${n ? " has" : ""}`}
+      aria-current={on ? "page" : undefined}
+      aria-label={name}
+      title={`Everything waiting on you${notAcked > 0 ? ` · ${notAcked} not acknowledged` : ""}`}
+      onClick={(e) => followLink(e, PAGE_PATHS.needs)}
     >
       {lamp ? (
         <Lamp {...lamp} title={false} />
       ) : (
         <Lamp kind="off" label="nothing needs you" title={false} />
       )}
-      Needs you <b>{items.length}</b>
-    </button>
+      Needs you <b data-metric="needsYou">{shown}</b>
+    </a>
   );
 }
 
@@ -371,10 +395,10 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
 }
 
 /**
- * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Its badge is the
- * Needs-you count, which the chat's "Waiting on you" lists.
+ * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Its badge counts the
+ * unread messages addressed to the operator (CAPCOM); the Needs you tab owns the waiting count.
  */
-function DockButton({ page, waiting }: { page: Page; waiting: number }) {
+function DockButton({ page, unread }: { page: Page; unread: number }) {
   const dock = useDock();
   const inComms = page === "comms";
   const fullWidth = FULL_WIDTH_PAGES.has(page);
@@ -388,7 +412,7 @@ function DockButton({ page, waiting }: { page: Page; waiting: number }) {
       type="button"
       className={`iconbtn${inComms || (!fullWidth && dock.visible && !dock.collapsed) ? " on" : ""}`}
       title={title}
-      aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
+      aria-label={unread > 0 ? `FLIGHT chat, ${unread} unread to you` : "FLIGHT chat"}
       aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible && !dock.collapsed}
       onClick={() => {
         if (fullWidth) navigate(PAGE_PATHS.comms);
@@ -405,7 +429,7 @@ function DockButton({ page, waiting }: { page: Page; waiting: number }) {
           strokeLinejoin="round"
         />
       </svg>
-      {waiting > 0 && <span className="dock-unread">{waiting}</span>}
+      {unread > 0 && <span className="dock-unread">{unread}</span>}
     </button>
   );
 }

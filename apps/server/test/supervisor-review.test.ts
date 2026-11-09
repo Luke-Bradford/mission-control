@@ -48,6 +48,7 @@ import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   BRANCH,
   boardCard,
@@ -69,6 +70,8 @@ import {
   until,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 describe("questions and strays", () => {
   const stray = (path: string, agentId = "guido-1") => ({
@@ -124,6 +127,59 @@ describe("questions and strays", () => {
     await sup.endRun("guido-1");
     expect(store.openQuestions()).toEqual([]);
     expect(store.strays().map((s) => s.path)).toEqual(["docs/b.md"]);
+  });
+
+  it("another run's end or a message spares a question of a set-aside run of the seat (#1451)", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    const parked = store.addQuestion({
+      agentId: "guido-1",
+      runId: "guido-1:parked",
+      text: "parked?",
+      at: 1,
+    });
+    store.passQuestion(parked, 2);
+    store.addQuestion({ agentId: "guido-1", runId, text: "one?", at: 1 });
+    await sup.message("guido-1", "per customer", { interrupt: false });
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["parked?"]);
+    store.addQuestion({ agentId: "guido-1", runId, text: "two?", at: 1 });
+    await sup.endRun("guido-1");
+    expect(store.openQuestions().map((q) => q.text)).toEqual(["parked?"]);
+  });
+
+  it("ending a set-aside run closes its question (#1451)", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "guido-1:parked",
+      agentId: "guido-1",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: null,
+      status: "running",
+      sessionId: "s",
+      model: "haiku",
+      branch: BRANCH,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+      loop: { ...NEW_LOOP, aside: { worktree: "/w/none", wake: false, ask: 1 } },
+    });
+    const q = store.addQuestion({
+      agentId: "guido-1",
+      runId: "guido-1:parked",
+      text: "which?",
+      at: 1,
+    });
+    store.passQuestion(q, 2);
+    await sup.endAsideRun("guido-1:parked");
+    expect(store.openQuestions()).toEqual([]);
   });
 
   it("a run that crashes closes them too", async () => {
@@ -722,6 +778,192 @@ describe("startReview", () => {
     const argv = recorded()[0].argv as string[];
     expect(argv[argv.indexOf("--model") + 1]).toBe(REVIEW_FULL_MODEL);
     expect(subject).toHaveBeenCalledTimes(2);
+  });
+
+  describe("an ended run's PR, reviewed at a newer head", () => {
+    const OLD_SHA = "a".repeat(40);
+    const finding = (
+      summary: string,
+      severity: "Critical" | "Important" | "Minor",
+      file: string,
+    ) => ({
+      severity,
+      file,
+      line: 7,
+      summary,
+      scenario: `why ${summary}`,
+      fix: "f",
+    });
+    /** A reported crew review of PR 10 at OLD_SHA, then the external review of the new head. */
+    function seed(
+      findings: ReturnType<typeof finding>[],
+      between?: (authorRunId: string) => void,
+      sameHead = false,
+    ) {
+      const seeded = reviewOfPush();
+      const old = store.requestReview({
+        authorRunId: seeded.author.id,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: sameHead ? seeded.sha : OLD_SHA,
+        epoch: 0,
+        attempt: sameHead ? 2 : 1,
+        round: 1,
+        at: 1,
+      })!;
+      store.setReviewState(old, ["queued"], "running", { at: 2, runId: "retro:old" });
+      store.recordFindings(old, "retro:old", {
+        verdict: { spec: "fail", quality: "fail" },
+        summary: "s",
+        findings,
+        at: 3,
+      });
+      between?.(seeded.author.id);
+      const id = store.requestReview({
+        authorRunId: externalReviewKey("mc", 10),
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: seeded.sha,
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: 4,
+      })!;
+      store.setReviewState(id, ["queued"], "starting", { at: 5 });
+      return { old, id, sha: seeded.sha, authorRunId: seeded.author.id };
+    }
+    async function briefOf(id: number, sha: string) {
+      const subject = async () => ({ sha, branch: "pr", ticket: TICKET });
+      const { sup } = make({ scratchRetro: true, externalReviewSubject: subject });
+      sup.start();
+      await sup.startReview("retro", id);
+      await until(() => expect(userLines()).toHaveLength(1));
+      return userLines()[0] as string;
+    }
+
+    it("lists the blocking findings still open from the older head", async () => {
+      const s = seed([
+        finding("race on the queue", "Critical", "src/q.ts"),
+        finding("a nit", "Minor", "src/n.ts"),
+      ]);
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).toContain("## Open blocking findings from earlier reviews");
+      expect(brief).toContain(`review id ${s.old}, pos 0, head ${OLD_SHA.slice(0, 7)}`);
+      expect(brief).toContain("[Critical] src/q.ts:7 — race on the queue");
+      expect(brief).toContain("why race on the queue");
+      expect(brief).not.toContain("a nit");
+    });
+
+    it("lists a crew finding on the very head under review, where the run ended", async () => {
+      const s = seed([finding("left unfixed", "Critical", "src/h.ts")], undefined, true);
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).toContain("## Open blocking findings from earlier reviews");
+      expect(brief).toContain("[Critical] src/h.ts:7 — left unfixed");
+      expect(brief).toContain(`review id ${s.old}, pos 0, head ${s.sha.slice(0, 7)}`);
+    });
+
+    it("leaves out a finding fixed or waived at a later head", async () => {
+      const s = seed([
+        finding("fixed one", "Critical", "src/a.ts"),
+        finding("waived one", "Important", "src/b.ts"),
+        finding("still open", "Important", "src/c.ts"),
+      ]);
+      // a later review of the same PR resolved the first two
+      const middle = store.requestReview({
+        authorRunId: externalReviewKey("mc", 10),
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: "b".repeat(40),
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: 4,
+      })!;
+      store.setReviewState(middle, ["queued"], "running", { at: 4, runId: "retro:mid" });
+      store.recordFindings(middle, "retro:mid", {
+        verdict: { spec: "fail", quality: "fail" },
+        summary: "s",
+        findings: [finding("new problem", "Critical", "src/d.ts")],
+        resolutions: [
+          { findingRef: { reviewId: s.old, pos: 0 }, outcome: "fixed" },
+          { findingRef: { reviewId: s.old, pos: 1 }, outcome: "waived" },
+        ],
+        at: 5,
+      });
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).not.toContain("fixed one");
+      expect(brief).not.toContain("waived one");
+      expect(brief).toContain("still open");
+    });
+
+    /** A reported review of PR 10, with the findings, under the given author identity. */
+    function reported(
+      authorRunId: string,
+      sha: string,
+      round: number,
+      findings: ReturnType<typeof finding>[],
+    ) {
+      const id = store.requestReview({
+        authorRunId,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha,
+        epoch: 0,
+        attempt: 1,
+        round,
+        at: 4,
+      })!;
+      store.setReviewState(id, ["queued"], "running", { at: 4, runId: `retro:r${id}` });
+      store.recordFindings(id, `retro:r${id}`, {
+        verdict:
+          findings.length === 0
+            ? { spec: "pass", quality: "pass" }
+            : { spec: "fail", quality: "fail" },
+        summary: "s",
+        findings,
+        at: 5,
+      });
+      return id;
+    }
+
+    it("drops the findings before a clean review of the PR, even when it is the previous review", async () => {
+      // a clean external review of an earlier head: it is `prev` of the review under test
+      const s = seed([finding("crew finding", "Critical", "src/a.ts")], () =>
+        reported(externalReviewKey("mc", 10), "b".repeat(40), 2, []),
+      );
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).not.toContain("crew finding");
+      expect(brief).not.toContain("Open blocking findings from earlier reviews");
+    });
+
+    it("drops the findings before a clean review by the crew run", async () => {
+      const seeded = seed([finding("crew finding", "Critical", "src/a.ts")], (author) =>
+        reported(author, "b".repeat(40), 2, []),
+      );
+      const brief = await briefOf(seeded.id, seeded.sha);
+      expect(brief).not.toContain("Open blocking findings from earlier reviews");
+    });
+
+    it("shows the previous review's findings once, in the last-review section only", async () => {
+      const s = seed([], () =>
+        reported(externalReviewKey("mc", 10), "b".repeat(40), 2, [
+          finding("the previous one", "Critical", "src/p.ts"),
+        ]),
+      );
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief.split("— the previous one")).toHaveLength(2);
+      expect(brief).not.toContain("Open blocking findings from earlier reviews");
+    });
+
+    it("adds nothing when no earlier head has findings", async () => {
+      const s = seed([finding("a nit", "Minor", "src/n.ts")]);
+      const brief = await briefOf(s.id, s.sha);
+      expect(brief).not.toContain("Open blocking findings from earlier reviews");
+    });
   });
 
   it.each(["changed", "unavailable"])(

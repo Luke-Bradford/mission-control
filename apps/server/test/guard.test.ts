@@ -1137,6 +1137,7 @@ describe("POST /api/guard/check", () => {
         lockedBy: async (_run, c) => CONFIGURED.find((x) => x === c) ?? null,
         dropRun: () => {},
         drops: () => [],
+        pending: () => [],
       };
       return { calls, checks, options };
     };
@@ -1228,6 +1229,90 @@ describe("POST /api/guard/check", () => {
     expect(store.lockRuns(0).map((r) => [r.runId, r.outcome])).toEqual([
       ["run-b", "fail"],
       ["run-a", "pass"],
+    ]);
+  });
+
+  it("ends the lock row by what the hook reports, and never as pass for a wrapped call (#1411)", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    app = await build();
+    // the bodies the real hook posts: PostToolUse carries exit_code 0, a failure carries "Exit code N"
+    const run = async (
+      tok: string,
+      id: string,
+      command: string,
+      event: "PostToolUse" | "PostToolUseFailure",
+    ) => {
+      await check(tok, bash(id, command));
+      await check(tok, {
+        ...post(id, event),
+        tool_input: { command },
+        exit_code: event === "PostToolUse" ? 0 : 1,
+      });
+      const row = store.lockRuns(0).find((r) => r.runId === (tok === tokA ? "run-a" : "run-b"));
+      return row?.outcome;
+    };
+    expect(await run(tokA, "a1", "pnpm -s test", "PostToolUse")).toBe("pass");
+    expect(await run(tokB, "b1", "pnpm -s test", "PostToolUseFailure")).toBe("fail");
+    // the seat saw exit 1 from `pnpm -s test`, but the call ended with echo's status
+    expect(await run(tokA, "a2", "pnpm -s test; echo exit=$?", "PostToolUse")).toBe("done");
+    expect(await run(tokB, "b2", "pnpm -s test | tail -5", "PostToolUse")).toBe("done");
+  });
+
+  it("treats a null exit code (an interrupted or background call) as unknown: done, and not ok for the recorder (#1411)", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const ends: [boolean, number | null | undefined][] = [];
+    app = await build({
+      checks: {
+        begin: async () => {},
+        end: async (_key, ok, exitCode) => {
+          ends.push([ok, exitCode]);
+        },
+        lockedBy: async () => null,
+        dropRun: () => {},
+        drops: () => [],
+        pending: () => [],
+      },
+    });
+    await check(tokA, bash("a1", "pnpm -s test"));
+    await check(tokA, {
+      ...post("a1", "PostToolUse"),
+      tool_input: { command: "pnpm -s test" },
+      exit_code: null,
+    });
+    expect(store.lockRuns(0)[0]?.outcome).toBe("done");
+    expect(ends).toEqual([[false, null]]);
+  });
+
+  it("hands the hook's exit code to the check recorder (#1411)", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const ends: [boolean, number | null | undefined][] = [];
+    app = await build({
+      checks: {
+        begin: async () => {},
+        end: async (_key, ok, exitCode) => {
+          ends.push([ok, exitCode]);
+        },
+        lockedBy: async () => null,
+        dropRun: () => {},
+        drops: () => [],
+        pending: () => [],
+      },
+    });
+    const command = "pnpm -s test";
+    await check(tokA, bash("a1", command));
+    await check(tokA, {
+      ...post("a1", "PostToolUseFailure"),
+      tool_input: { command },
+      exit_code: 1,
+    });
+    await check(tokA, bash("a2", command));
+    await check(tokA, { ...post("a2", "PostToolUse"), tool_input: { command }, exit_code: 0 });
+    expect(ends).toEqual([
+      [false, 1],
+      [true, 0],
     ]);
   });
 

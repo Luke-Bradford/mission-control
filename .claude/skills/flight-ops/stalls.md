@@ -8,7 +8,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 
 - Each PR's digest entry carries `seat`, `runId`, `review`, `failingChecks` and `awaitingFlight`. From them, know who moves it next and what it waits on. Read the PR with `mc gh_read` only when they don't say.
 - Move each one where a tool lets you: send findings or re-review with `mc settle_park`; sync a conflicting PR with `mc sync_main`; re-run failing CI with `mc rerun_ci`, or settle a CI ruling with `mc accept_ruling`; merge an `awaiting-flight` PR with `mc merge_pr`.
-- **Merging.** `mc merge_pr { pr, basis }` clears an `awaiting-flight` run PR in your lane, and the engine merges it. Non-collaborator forks and operator holds remain protected. Read the hard-rule hunk before you clear a PR. A PR that changes what confines seats gets a Controller check with `mc add_controller_check` before you clear it. That is `apps/server/src/guard/**`, `packages/core/src/guard.ts`, `packages/core/src/runtime.ts`, `packages/core/src/path-grants.ts`, `codex-floor.ts`, `codex-approval.ts`, `grants.ts` and `toolchain.ts` under `apps/server/src/runtime/`, and the push gate in `apps/server/src/mcp/tools.ts`. Clear every other hard-rule PR yourself, your own tools and the engine included, once a review on the most capable model is clean. The Mission Control block in `CLAUDE.md` and `.github/**` need a recorded controller approval. Never clear a PR that widens your own access.
+- **Merging.** Use `mc merge_pr { pr, basis }` for an `awaiting-flight` PR in your lane, after reading its hard-rule hunk. Require independent clean QA on the most capable model where required and exact-head green CI. On a superuser repo, FLIGHT completes ordinary hard-rule clearance itself. On a standard repo, confinement changes need an independent controller check, and the Mission Control block in `CLAUDE.md` and `.github/**` need recorded merge-floor approval. Preserve every operator hold and reserved independent check. A change to FLIGHT’s own authority never supplies its own independent verdict.
 
 ## Stuck and failed runs
 
@@ -49,11 +49,11 @@ Use `mc settle_park { runId, action, basis }`:
 
 ## Controller-check parks
 
-- For changes to FLIGHT's own runtime or approval guidance, the engine requests the independent current-head verdict while the PR is awaiting FLIGHT clearance. The operator records it through `/api/runs/:id/controller-check`; then FLIGHT can clear the PR.
-- At merge, the engine parks a run whose ticket has a `## Controller check` (park kind `controller-check`). It stays parked until the controller records a verdict for that head; a later push needs a new one.
-- Produce the required evidence and record the head-bound verdict with `mc operator`. A check expressly reserved for the controller remains theirs. Never end the run to bypass evidence.
-- When the check belongs to the controller, record the evidence and the one outstanding action. Use a named wait condition.
-- An open check is not a rework reason: the controller's `fail` sends the rework itself.
+- An ordinary ticket's `## Controller check` names evidence to produce. Produce it and record the verdict for that exact head with `mc operator` POST `/api/runs/:id/controller-check`. A later push needs new head-bound evidence.
+- On a superuser repo, FLIGHT completes ordinary ticket checks and hard-rule clearance after the required independent clean QA and green CI. This does not lift an operator hold or a check expressly reserved for an independent controller.
+- On a standard repo, changes to confinement paths require the operator's independent controller verdict before FLIGHT clears the PR. The Mission Control block in `CLAUDE.md` and `.github/**` also require recorded merge-floor approval.
+- A check reserved for the operator or independent controller stays with them, including a required check of FLIGHT's own runtime or approval guidance. Record the evidence and the one outstanding action, with a named wait condition. FLIGHT cannot grant itself an approval through POST `/api/flight/approvals`.
+- At merge the engine may park the run on its ticket's check. Never end the run to bypass evidence, a budget stop, a review or an operator hold. An open check is not a rework reason: the controller's `fail` sends the rework itself.
 
 ## Ending a run
 

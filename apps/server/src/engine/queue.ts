@@ -28,7 +28,9 @@ import {
   fillLoopText,
   hudColumnOf,
   NEW_LOOP,
+  PACE_HELD_PREFIX,
   type Profile,
+  paceRefusal,
   priorityRank,
   QUEUE_DEPTH,
   REFUSAL_TRIES,
@@ -39,6 +41,7 @@ import {
   type TicketView,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
+import { budgetBrake } from "../budget-brake.ts";
 import type { CardNow } from "../collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../collectors/usage-claude.ts";
 import {
@@ -56,6 +59,7 @@ import {
   machineCapacity,
   machineCapacitySince,
 } from "../machine-capacity.ts";
+import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
@@ -120,6 +124,9 @@ const bodyCache = new Map<string, { updatedAt: number; body: string }>();
 
 /** Empties the body cache (for tests). */
 export const clearBodyCache = (): void => bodyCache.clear();
+
+/** Seats whose start is under way while a slow pace is on: their run rows are not written yet. */
+const paceReservations = new WeakMap<Store, Set<string>>();
 
 /** The writer seats of crew sessions, with their session. */
 function writerSeats(config: CcConfig): { session: CrewSessionConfig; seat: CrewSeatConfig }[] {
@@ -285,10 +292,12 @@ export async function refillQueues(deps: QueueDeps): Promise<void> {
       // the one start check every start applies
       const startable = (body: string | null): boolean => {
         const away = activeAway(store, now(), config.operator.timezone);
+        const pace = paceStartCheck(store, config, now());
         return group.some(
           ({ seat }) =>
             eligibleToStart({
               ...(away ? { away: { pickUp: away.may.pickUp, flight: false } } : {}),
+              ...(pace ? { pace } : {}),
               repoId,
               issue: card.issueNumber,
               card,
@@ -591,6 +600,21 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
     store.untake(seatId, repoId, issue);
     return;
   }
+  // The slow pace may have been set, or its starts used, since the card was dealt. A start under way
+  // has no run row yet, so seats starting at once are counted from the reservations held here;
+  // nothing awaits between the check and the reservation.
+  const pace = paceStartCheck(store, config, deps.now());
+  let reserved: Set<string> | null = null;
+  if (pace) {
+    reserved = paceReservations.get(store) ?? new Set<string>();
+    paceReservations.set(store, reserved);
+    const others = [...reserved].filter((id) => id !== seatId).length;
+    if (paceRefusal({ ...pace, startsLeft: pace.startsLeft - others }, ref, card.labels) !== null) {
+      store.untake(seatId, repoId, issue);
+      return;
+    }
+    reserved.add(seatId);
+  }
   try {
     await supervisor.startRun(seatId, issue, { loop: NEW_LOOP });
     store.dropQueued(seatId, repoId, issue);
@@ -603,7 +627,9 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   } catch (e) {
     if (
       e instanceof SupervisorError &&
-      (e.message === AWAY_START_REFUSED || e.message === AWAY_QUOTA_REFUSED)
+      (e.message === AWAY_START_REFUSED ||
+        e.message === AWAY_QUOTA_REFUSED ||
+        e.message.startsWith(PACE_HELD_PREFIX))
     ) {
       store.untake(seatId, repoId, issue);
       return;
@@ -659,6 +685,8 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
       });
       deps.onNotes?.();
     }
+  } finally {
+    reserved?.delete(seatId);
   }
 }
 
@@ -709,5 +737,21 @@ export function awayQuotaReserve(
   );
 }
 
+/**
+ * Whether the account may not take on new work: at its usage stop, or its weekly projection has
+ * the budget brake on. Only new deals and starts ask this; runs in progress and resumes do not.
+ */
+export function accountHoldsNewWork(
+  config: CcConfig,
+  store: Store,
+  accountId: string,
+  at: number,
+): boolean {
+  return (
+    accountAtStop(config, store, accountId, at) ||
+    budgetBrake(config, store, accountId, at) !== null
+  );
+}
+
 const atQuotaStop = (deps: TakeDeps, accountId: string): boolean =>
-  accountAtStop(deps.config, deps.store, accountId, deps.now());
+  accountHoldsNewWork(deps.config, deps.store, accountId, deps.now());

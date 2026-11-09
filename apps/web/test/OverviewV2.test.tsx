@@ -2,10 +2,11 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, expect, it } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
-import { KpiStrip } from "../src/overview/KpiStrip.tsx";
 import { MachinePanel } from "../src/overview/MachinePanel.tsx";
+import { MacRow } from "../src/overview/MacRow.tsx";
 import { PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { QuotaMeter } from "../src/overview/QuotaMeter.tsx";
+import { TokensPanel } from "../src/overview/TokensPanel.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
 import { CONFIG, HOUR, limit7d, NOW, OVERVIEW } from "./fixtures.ts";
 
@@ -90,22 +91,36 @@ it("filters each live log chip and remembers the selection", async () => {
   const view = render(<ActivityPanel />);
   await screen.findByText("run-start");
   for (const [chip, count] of [
-    ["All", 6],
+    ["All", 5],
     ["Steps", 5],
     ["Reviews", 2],
     ["Merges", 2],
     ["Guard", 1],
-    ["Needs you", 1],
   ] as const) {
     fireEvent.click(screen.getByRole("button", { name: chip }));
     expect(screen.getByRole("button", { name: chip }).getAttribute("aria-pressed")).toBe("true");
     expect(view.container.querySelectorAll(".arow")).toHaveLength(count);
   }
+  expect(screen.queryByRole("button", { name: "Needs you" })).toBeNull();
   view.unmount();
   render(<ActivityPanel />);
-  expect(screen.getByRole("button", { name: "Needs you" }).getAttribute("aria-pressed")).toBe(
-    "true",
-  );
+  expect(screen.getByRole("button", { name: "Guard" }).getAttribute("aria-pressed")).toBe("true");
+});
+it("falls back to the default filter when Needs you was remembered, and lists no waiting item", async () => {
+  localStorage.setItem("overview.live-log.filter", "needs");
+  stubFetch({
+    "/api/activity": [],
+    "/api/crew?shape=summary": { rows: [] },
+    "/api/config": CONFIG,
+    "/api/attention": [
+      { key: "a", at: NOW, text: "Operator call", owner: "operator", agentId: null, repoId: null },
+    ],
+  });
+  render(<ActivityPanel />);
+  expect(screen.getByRole("button", { name: "Steps" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "All" }));
+  await screen.findByText("No events yet.");
+  expect(screen.queryByText("Operator call")).toBeNull();
 });
 it("shows machine history as CPU and memory graphs", async () => {
   stubFetch({
@@ -137,119 +152,6 @@ it("shows a backed-off quota row's next try beside its stale age", async () => {
   expect(await screen.findByText(/3h 0m ago · next try in 2m/)).toBeTruthy();
 });
 
-const attentionItem = {
-  key: "esc:shop:42",
-  kind: "decision",
-  at: NOW,
-  text: "Operator decision",
-  owner: "operator",
-  agentId: null,
-  repoId: "shop",
-  ticket: "shop#42",
-  escalationId: "shop:42",
-  url: "https://github.com/example/shop/issues/42",
-};
-function logRoutes(attention: unknown) {
-  return {
-    "/api/activity": [],
-    "/api/crew?shape=summary": { rows: [] },
-    "/api/config": CONFIG,
-    "/api/attention": attention,
-  };
-}
-it("reports attention loading, first-load failure, and stale refetch failure", async () => {
-  localStorage.setItem("overview.live-log.filter", "needs");
-  let finish!: (response: Response) => void;
-  const fetch = stubFetch(logRoutes([]));
-  const original = fetch.getMockImplementation();
-  if (!original) throw new Error("Missing fetch stub");
-  fetch.mockImplementation((path, init) =>
-    path === "/api/attention"
-      ? new Promise<Response>((resolve) => {
-          finish = resolve;
-        })
-      : original(path, init),
-  );
-  render(<ActivityPanel />);
-  expect(screen.getByText("Loading attention…")).toBeTruthy();
-  await act(async () => {
-    finish(new Response("{}", { status: 500 }));
-  });
-  expect(await screen.findByText("Could not load attention.")).toBeTruthy();
-  expect(screen.queryByText("No events yet.")).toBeNull();
-  stubFetch(logRoutes([attentionItem]));
-  await act(async () => {
-    hub.refetch("/api/attention");
-  });
-  await screen.findByText("Operator decision");
-  stubFetch(logRoutes(() => ({ status: 500, body: {} })));
-  await act(async () => {
-    hub.refetch("/api/attention");
-  });
-  expect(
-    await screen.findByText("Could not refresh attention. Showing last known items."),
-  ).toBeTruthy();
-  expect(screen.getByText("Operator decision")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "All" }));
-  expect(screen.getByText("Could not refresh attention. Showing last known items.")).toBeTruthy();
-});
-it("reconciles All escalations by ticket identity", async () => {
-  const routes = logRoutes([
-    attentionItem,
-    { ...attentionItem, text: "Updated decision", at: NOW + 1 },
-    { ...attentionItem, key: "other", ticket: "shop#43", text: "Different issue" },
-  ]);
-  stubFetch({
-    ...routes,
-    "/api/activity": [
-      {
-        at: NOW - 100,
-        who: "shop",
-        kind: "escalation",
-        text: "Original decision",
-        ref: "shop#42",
-        url: attentionItem.url,
-        status: null,
-        prs: [],
-        summary: null,
-      },
-    ],
-  });
-  const view = render(<ActivityPanel />);
-  await screen.findByText("Original decision");
-  fireEvent.click(screen.getByRole("button", { name: "All" }));
-  expect(view.container.querySelectorAll(".arow")).toHaveLength(2);
-  expect(screen.getByText("Different issue")).toBeTruthy();
-});
-it("links attention without a ticket to its external URL or detail page", async () => {
-  localStorage.setItem("overview.live-log.filter", "needs");
-  stubFetch(
-    logRoutes([
-      { ...attentionItem, ticket: null },
-      { ...attentionItem, key: "notice:one", ticket: null, url: null, text: "Local notice" },
-    ]),
-  );
-  render(<ActivityPanel />);
-  const external = await screen.findByRole("link", { name: "Operator decision" });
-  expect(external.getAttribute("href")).toBe(attentionItem.url);
-  expect(external.getAttribute("target")).toBe("_blank");
-  expect(external.getAttribute("rel")).toContain("noreferrer");
-  expect(screen.getByRole("link", { name: "Local notice" }).getAttribute("href")).toBe(
-    "/comms/notice%3Aone",
-  );
-});
-
-it("reconciles ticketless attention by key without collapsing matching text", async () => {
-  localStorage.setItem("overview.live-log.filter", "all");
-  const item = { ...attentionItem, escalationId: null, ticket: null };
-  stubFetch(logRoutes([item, { ...item, at: NOW + 1 }, { ...item, key: "another" }]));
-  const view = render(<ActivityPanel />);
-  await screen.findAllByText("Operator decision");
-  expect(view.container.querySelectorAll(".arow")).toHaveLength(2);
-  fireEvent.click(screen.getByRole("button", { name: "Needs you" }));
-  expect(view.container.querySelectorAll(".arow")).toHaveLength(2);
-});
-
 it.each([
   {},
   { pipeline: [] },
@@ -264,17 +166,24 @@ it.each([
   const { container } = render(
     <>
       <MachinePanel />
-      <KpiStrip />
+      <MacRow />
+      <TokensPanel />
       <PipelinePanel />
     </>,
   );
   await settled(fetch, "/api/overview");
   expect(container.querySelector("#machP")).toBeTruthy();
   expect(screen.queryByRole("img", { name: "Memory history" })).toBeNull();
-  expect([...container.querySelectorAll(".overview-kpi .v")].map((el) => el.textContent)).toEqual(
-    Array(8).fill("—"),
-  );
-  // Lanes with no cards collapse to their header; none holds a chip.
-  expect(container.querySelectorAll(".pipeline-stage:not(.empty)")).toHaveLength(0);
-  expect(container.querySelectorAll(".pipeline-chip")).toHaveLength(0);
+  // The Mac row has no reading (the lock is free), and the Board's head figures have no registry
+  // value: dashes.
+  expect(
+    [...container.querySelectorAll("#macP .mac-measure b")].map((el) => el.textContent),
+  ).toEqual(["—", "—", "—", "—", "free"]);
+  expect(
+    [...container.querySelectorAll("#pipelineP .ph b[data-metric]")].map((el) => el.textContent),
+  ).toEqual(["—", "—", "—"]);
+  // Stages with no cards hold none; the Board still shows all five.
+  expect(container.querySelectorAll(".board-stage")).toHaveLength(5);
+  expect(container.querySelectorAll(".board-card")).toHaveLength(0);
+  expect(container.querySelector(".token-spend")).toBeNull();
 });

@@ -12,6 +12,7 @@ import {
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
+  FLIGHT_OWED_MS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REWAKE_MS,
   FLIGHT_TICKETS_LISTED,
@@ -118,6 +119,31 @@ const busyBoard = (): FlightState => ({
 });
 
 describe("wake deltas", () => {
+  it("starts a new session with one new signal instead of 400 already handled ones", () => {
+    const state = busyBoard();
+    state.signals = Array.from({ length: 400 }, (_, n) => ({
+      kind: "chain_stalled" as const,
+      key: `mc#${n}>mc#500`,
+      since: 1,
+      evidence: "An unchanged chain that FLIGHT already handled. ".repeat(10),
+      told: true,
+    }));
+    const fresh = { kind: "main_red" as const, key: "new-sha", since: 2, evidence: "new failure" };
+    state.signals.push(fresh);
+    const first = flightWake(state);
+    expect(first.digest.signals).toEqual({ entries: [fresh], unchanged: 400, removed: [] });
+    expect(state.signals).toHaveLength(401);
+    expect(flightWake(state, first.snapshot).digest.signals.unchanged).toBe(401);
+    expect(
+      flightWake({ ...state, signals: [fresh] }, first.snapshot).digest.signals.removed,
+    ).toEqual([]);
+    // A different episode is new even when the previous episode was handled.
+    state.signals.push({ ...fresh, key: "next-sha" });
+    expect(flightWake(state, first.snapshot).digest.signals.entries).toEqual([
+      { ...fresh, key: "next-sha" },
+    ]);
+  });
+
   it("ignores changing evidence on told signals but includes changes while untold", () => {
     const state = busyBoard();
     state.signals = [
@@ -130,7 +156,7 @@ describe("wake deltas", () => {
     expect(flightWake(state, untold.snapshot).digest.signals.entries).toHaveLength(1);
     signal.told = true;
     const told = flightWake(state, untold.snapshot);
-    expect(told.digest.signals.entries).toHaveLength(1);
+    expect(told.digest.signals.entries).toHaveLength(0);
     signal.evidence = "98/5000";
     signal.since = 2;
     expect(flightWake(state, told.snapshot).digest.signals).toEqual({
@@ -138,6 +164,40 @@ describe("wake deltas", () => {
       unchanged: 1,
       removed: [],
     });
+  });
+
+  it("omits waits older than a day without losing them from the full state", () => {
+    const now = Date.parse("2026-11-09T08:00:00Z");
+    const day = 24 * 60 * 60_000;
+    const state = busyBoard();
+    state.signals = [
+      { kind: "wait_over", key: "mc#1:old", since: now - day - 1, evidence: "old wait" },
+      { kind: "wait_over", key: "mc#2:boundary", since: now - day, evidence: "due wait" },
+      { kind: "main_red", key: "old-main", since: now - day - 1, evidence: "still red" },
+    ];
+    const first = flightWake(state, undefined, [], false, now);
+    expect(first.digest.signals.entries.map((s) => s.key)).toEqual(["mc#2:boundary", "old-main"]);
+    expect(first.digest.signals.unchanged).toBe(1);
+    expect(state.signals.map((s) => s.key)).toEqual(["mc#1:old", "mc#2:boundary", "old-main"]);
+    const later = flightWake(state, first.snapshot, [], false, now + 1);
+    expect(later.digest.signals).toEqual({
+      entries: [],
+      unchanged: 3,
+      removed: ["wait_over:mc#2:boundary"],
+    });
+    expect(
+      flightWake({ ...state, signals: [] }, later.snapshot, [], false, now + 1).digest.signals
+        .removed,
+    ).toEqual(["main_red:old-main"]);
+  });
+
+  it("lists a handled reason again when its producer marks it untold", () => {
+    const state = busyBoard();
+    state.signals = [{ kind: "hub_error", key: "episode", since: 1, evidence: "old", told: true }];
+    const first = flightWake(state);
+    expect(first.digest.signals.entries).toEqual([]);
+    state.signals[0] = { ...state.signals[0]!, evidence: "new actionable reason", told: false };
+    expect(flightWake(state, first.snapshot).digest.signals.entries).toEqual(state.signals);
   });
 
   it("deltas signals and names the changed wake facts in the stored header", () => {
@@ -710,5 +770,65 @@ describe("wake facts that name a seat or tickets", () => {
   it("clears fresh items from the delivered baseline", () => {
     const s = { ...busyBoard(), wake: { fit: {}, fresh: ["note:b"] } };
     expect(JSON.parse(deliveredFacts(s)).items).toEqual([]);
+  });
+});
+
+describe("operator messages FLIGHT owes an answer", () => {
+  const seat = "flight-1";
+  const send = (store: Store, id: number, at = 1000) =>
+    store.addComms({
+      at,
+      from: "CAPCOM",
+      to: seat,
+      ticket: null,
+      text: `message ${id}`,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+    });
+
+  it("lists a message FLIGHT read and has not answered, until a reply names it", () => {
+    const store = new Store(":memory:");
+    const first = send(store, 1);
+    const second = send(store, 2);
+    if (first === null || second === null) throw new Error("not stored");
+    // unread is not owed: it is delivered, not owed
+    expect(store.owedCommsFrom("CAPCOM", seat, 0)).toEqual([]);
+    store.markCommsInboxRead(seat, [first.id, second.id]);
+    expect(store.owedCommsFrom("CAPCOM", seat, 0)).toEqual([first.id.slice(6), second.id.slice(6)]);
+    store.addComms({
+      at: 2000,
+      from: seat,
+      to: "CAPCOM",
+      ticket: null,
+      text: "answered the first",
+      label: null,
+      ref: null,
+      replyTo: first.id,
+      mentions: [],
+    });
+    expect(store.owedCommsFrom("CAPCOM", seat, 0)).toEqual([second.id.slice(6)]);
+    store.close();
+  });
+
+  it("keeps a message owed past the six hours an unread one wakes for, and drops a settled one", () => {
+    const store = new Store(":memory:");
+    const kept = send(store, 1, 1000);
+    const settled = send(store, 2, 1000);
+    if (kept === null || settled === null) throw new Error("not stored");
+    store.markCommsInboxRead(seat, [kept.id, settled.id]);
+    store.settleCommsItem(settled.id, "CAPCOM", "handled", 1500);
+    const sevenHours = 1000 + 7 * 60 * 60_000;
+    expect(store.owedCommsFrom("CAPCOM", seat, sevenHours - FLIGHT_OWED_MS)).toEqual([
+      kept.id.slice(6),
+    ]);
+    store.close();
+  });
+
+  it("puts the owed ids in the wake facts, and a lone owed message keeps FLIGHT's wake pending", () => {
+    const s = { ...busyBoard(), wake: { fit: {}, fresh: [], owed: ["7"] } };
+    expect((JSON.parse(wakeFacts(s)) as Record<string, unknown[]>).owed).toEqual(["7"]);
+    expect(wakeFacts({ ...busyBoard(), wake: { fit: {}, fresh: [] } })).not.toBe(wakeFacts(s));
   });
 });

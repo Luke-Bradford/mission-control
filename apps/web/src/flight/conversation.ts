@@ -1,8 +1,15 @@
-import { type AgentStream, FOR_THE_CONTROLLER, startOfLocalDay } from "@mc/core";
+import {
+  type AgentStream,
+  type CommsMessage,
+  type CommsSendState,
+  commsStateLine,
+  FOR_THE_CONTROLLER,
+  startOfLocalDay,
+} from "@mc/core";
 import { type FlightDecision, MC_LINE_PREFIX } from "./flightTypes.ts";
 
 export type DockRow =
-  | { kind: "you"; id: string; at: number | null; text: string; pending?: true }
+  | { kind: "you"; id: string; at: number | null; text: string; pending?: true; line?: string }
   | { kind: "flight"; id: string; at: number | null; text: string }
   | { kind: "hub"; id: string; at: number | null; text: string }
   | { kind: "decision"; id: string; at: number; d: FlightDecision };
@@ -68,6 +75,8 @@ export interface PendingMsg {
   text: string;
   at: number;
   seen: readonly string[];
+  /** What the hub said of it once stored: "Stored", "Delivered 10:42"; absent while the send is out. */
+  line?: string;
 }
 
 /** The stream's copy of a sent message: the hub cuts long text to end in "…", so a cut copy matches too. */
@@ -86,7 +95,14 @@ export function withPending(
     rows: [
       ...rows,
       ...open.map(
-        (p): DockRow => ({ kind: "you", id: p.id, at: p.at, text: p.text, pending: true }),
+        (p): DockRow => ({
+          kind: "you",
+          id: p.id,
+          at: p.at,
+          text: p.text,
+          pending: true,
+          ...(p.line === undefined ? {} : { line: p.line }),
+        }),
       ),
     ],
     open,
@@ -137,4 +153,51 @@ export function dockRows(
   }
   out.push(...pending.slice(next));
   return out;
+}
+
+/** The state line under an operator message: "Answered" once a reply links to it, else stored or delivered. */
+export function messageStateLine(
+  message: Pick<CommsMessage, "id" | "deliveredAt">,
+  all: readonly Pick<CommsMessage, "replyTo">[],
+  timeZone: string,
+): string {
+  if (all.some((m) => m.replyTo === message.id)) return "Answered";
+  const at = message.deliveredAt ?? null;
+  return commsStateLine(at === null ? "stored" : "delivered", at, timeZone);
+}
+
+type MessageReceipt = Pick<
+  CommsMessage,
+  "id" | "at" | "text" | "operator" | "deliveredAt" | "replyTo"
+>;
+
+/** Match each stream row to one receipt. A later repeat cannot answer an earlier question. */
+export function withMessageStates(
+  rows: readonly DockRow[],
+  messages: readonly MessageReceipt[],
+  timeZone: string,
+): DockRow[] {
+  const available = messages.filter((m) => m.operator).sort((a, b) => b.at - a.at);
+  const used = new Set<string>();
+  const out = [...rows];
+  // Both lists can be windows: align their newest eligible messages first.
+  for (let i = out.length - 1; i >= 0; i--) {
+    const row = out[i];
+    if (row?.kind !== "you" || row.pending || row.line !== undefined) continue;
+    const at = row.at;
+    const candidates = available.filter((m) => !used.has(m.id) && sameMessage(row.text, m.text));
+    const receipt =
+      candidates.find((m) => m.id === row.id) ??
+      (at === null ? undefined : candidates.find((m) => m.at <= at && m.deliveredAt != null));
+    if (!receipt) continue;
+    used.add(receipt.id);
+    out[i] = { ...row, line: messageStateLine(receipt, messages, timeZone) };
+  }
+  return out;
+}
+
+/** The line for a send's answer: the state, and a note when the same words went a moment ago. */
+export function sendStateLine(s: CommsSendState, timeZone: string): string {
+  const line = commsStateLine(s.state, s.deliveredAt, timeZone);
+  return s.alreadySent ? `${line} · Already sent in the last minute` : line;
 }

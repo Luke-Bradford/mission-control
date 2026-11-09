@@ -1,3 +1,5 @@
+import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   EVIDENCE_HEADING,
@@ -6,9 +8,11 @@ import {
   evidenceMissing,
   evidenceRefusalText,
   evidenceSectionText,
+  evidenceUncataloguedText,
   HUD_PAGE_PATHS,
   isEvidenceImageName,
   prEvidenceAffectedPages,
+  prEvidenceUncatalogued,
   sectionOf,
   withSection,
 } from "../src/index.ts";
@@ -50,6 +54,31 @@ describe("prEvidenceAffectedPages", () => {
     expect(prEvidenceAffectedPages(["apps/web/src/hud.css"])).toEqual(ALL);
     expect(prEvidenceAffectedPages(["apps/web/src/shell/Header.tsx"])).toEqual(ALL);
     expect(prEvidenceAffectedPages(["apps/web/src/components/Markdown.tsx"])).toEqual(ALL);
+  });
+
+  it("uses the import graph: a file maps to the pages that reach it, else the folder rule", () => {
+    const graph = {
+      "apps/web/src/comms/ItemBrief.tsx": ["comms", "needs"],
+      "apps/web/src/setup/Accounts.tsx": ["setup"],
+      "apps/web/src/shell/Header.tsx": [...ALL],
+    } as never;
+    expect(prEvidenceAffectedPages(["apps/web/src/comms/ItemBrief.tsx"], graph)).toEqual([
+      "needs",
+      "comms",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/setup/Accounts.tsx"], graph)).toEqual([
+      "setup",
+      "setup_repos",
+      "setup_loops",
+      "setup_accounts",
+      "setup_roles",
+      "setup_sources",
+      "setup_access",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/shell/Header.tsx"], graph)).toEqual(ALL);
+    // not in the graph: today's folder rule
+    expect(prEvidenceAffectedPages(["apps/web/src/board/Card.tsx"], graph)).toEqual(["board"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/comms/ItemBrief.tsx"])).toEqual(["comms"]);
   });
 
   it("treats a file it cannot place as the whole app, and a test-only change as none", () => {
@@ -156,5 +185,60 @@ describe("evidenceSectionText", () => {
       `http://127.0.0.1:7421/api/prs/7/evidence/${"a".repeat(40)}/board-light-diff.png`,
     );
     expect(text).toContain("1 region");
+  });
+});
+
+describe("prEvidenceUncatalogued: a page no screenshot can show", () => {
+  it("names a new page file with no evidence address", () => {
+    expect(
+      prEvidenceUncatalogued([
+        "apps/web/src/pages/Inbox.tsx",
+        "apps/web/src/pages/Needs.tsx",
+        "apps/web/src/pages/QaHotspots.tsx",
+        "apps/web/src/pages/CommsChartPage.tsx",
+        "apps/web/src/pages/TicketPage.tsx",
+        "apps/web/src/pages/Inbox.test.tsx",
+        "apps/web/src/needs/NeedsList.tsx",
+      ]),
+    ).toEqual(["pages/Inbox.tsx"]);
+    expect(evidenceUncataloguedText(["pages/Inbox.tsx"])).toContain(
+      "pages/Inbox.tsx has no screenshot address",
+    );
+  });
+
+  it("maps the pages that have an address, and aliases to their host page", () => {
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/Needs.tsx"])).toEqual(["needs"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/CommsChartPage.tsx"])).toEqual(ALL);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/LegacyAudit.tsx"])).toEqual([
+      "audit",
+      "readiness",
+      "hotspots",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/qa-hotspots.css"])).toEqual(["hotspots"]);
+  });
+
+  it("lifts the hold when the PR also changes the catalogue, which the hub reads from main", () => {
+    expect(
+      prEvidenceUncatalogued(["apps/web/src/pages/Inbox.tsx", "packages/core/src/pr-evidence.ts"]),
+    ).toEqual([]);
+    expect(
+      prEvidenceUncatalogued(["apps/web/src/pages/Inbox.tsx", "packages/core/src/flight.ts"]),
+    ).toEqual([]);
+  });
+
+  it("does not take inherited object keys for pages", () => {
+    expect(prEvidenceUncatalogued(["apps/web/src/pages/Constructor.tsx"])).toEqual([
+      "pages/Constructor.tsx",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/pages/Constructor.tsx"])).toEqual(ALL);
+  });
+
+  it("every page in apps/web has an address, an alias or a stated reason", () => {
+    const dir = join(import.meta.dirname, "../../../apps/web/src/pages");
+    const pages = readdirSync(dir)
+      .filter((f) => f.endsWith(".tsx"))
+      .map((f) => `apps/web/src/pages/${f}`);
+    expect(pages.length).toBeGreaterThan(5);
+    expect(prEvidenceUncatalogued(pages)).toEqual([]);
   });
 });

@@ -1,0 +1,24 @@
+{
+  "at": "2026-11-03T16:05:40.241277+00:00",
+  "review": "Root reviewed all final drafts and source-bound audit against759/741/roadmap; static refinement only, no implementation or runtime proof.",
+  "children": [
+    {
+      "number": 1389,
+      "url": "https://github.com/Luke-Bradford/mission-control/issues/1389",
+      "area": "server",
+      "bodyFile": "/Users/lukebradford/.local/share/mission-control/controller/759-refinement-2026-11-03/published-server-child.md",
+      "issueId": 6186392806,
+      "nodeId": "I_kwDOVTS7688AAAABcLzc5g",
+      "projectItemId": "PVTI_lAHOAeXwRM4Bn7o5zhFu0Fs"
+    },
+    {
+      "number": 1390,
+      "url": "https://github.com/Luke-Bradford/mission-control/issues/1390",
+      "area": "web",
+      "bodyFile": "/Users/lukebradford/.local/share/mission-control/controller/759-refinement-2026-11-03/published-web-child.md",
+      "issueId": 6186393396,
+      "nodeId": "I_kwDOVTS7688AAAABcLzfNA",
+      "projectItemId": "PVTI_lAHOAeXwRM4Bn7o5zhFu0PM"
+    }
+  ]
+}

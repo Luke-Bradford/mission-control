@@ -1,4 +1,4 @@
-/** The controller merge path for a PR without a crew author. No synthetic run or gate waiver. */
+/** The merge path for a PR with no unfinished crew run. No synthetic run or gate waiver. */
 import { Buffer } from "node:buffer";
 import type { RepoRules } from "@mc/core";
 import {
@@ -7,6 +7,7 @@ import {
   FLIGHT_FLOOR_PATHS,
   globMatches,
   REVIEW_STATUS_CONTEXT,
+  type ReviewRow,
   type TicketView,
   ticketControllerCheck,
 } from "@mc/core";
@@ -20,7 +21,7 @@ import {
   externalPrControl,
   setExternalPrControl,
 } from "../external-pr-control.ts";
-import { isExternalReview, readExternalSubject } from "../external-reviews.ts";
+import { branchOwned, isExternalReview, readExternalSubject } from "../external-reviews.ts";
 import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import type { Store } from "../store.ts";
@@ -36,15 +37,17 @@ export async function mergeExternalPr(i: {
   rules: () => Promise<RepoRules | Error>;
   now: () => number;
   fetchTicket(repo: CcConfig["repos"][number], number: number): Promise<TicketView | null>;
-}): Promise<{ text: string; isError?: boolean }> {
+}): Promise<{ text: string; isError?: boolean; paths?: string[]; ticket?: number }> {
   const fail = (text: string) => ({ text, isError: true as const });
   const { repo, store, number } = i;
   const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
   const sha = cached?.headSha;
   if (!cached || cached.state !== "open" || !sha || repo.autonomy !== "merge")
     return fail("No open external PR in this merge workspace.");
-  if (store.runsOnBranch(repo.id, cached.branch).some((run) => run.reviewId == null))
+  if (branchOwned(i.config, store, repo.id, cached.branch, cached.ticket))
     return fail("This branch belongs to a crew run; use its normal merge path.");
+  const runHold = store.branchMergeHold(repo.id, cached.branch);
+  if (runHold) return fail(`This PR has a merge hold from ${runHold.by}: ${runHold.reason}`);
   let rules: RepoRules;
   try {
     const loaded = await i.rules();
@@ -100,20 +103,29 @@ export async function mergeExternalPr(i: {
       !checks.some((check) => check.name === REVIEW_STATUS_CONTEXT && check.state === "passing")
     )
       return fail("CI and mc/review must pass on this exact head.");
+    const crewBranch = store
+      .runsOnBranch(repo.id, cached.branch)
+      .some((run) => run.reviewId == null);
+    const clean = (row: ReviewRow) =>
+      row.state === "reported" &&
+      row.blocking === 0 &&
+      row.verdict?.spec === "pass" &&
+      row.verdict.quality === "pass";
     const reviewProof = () => {
       const rows = store.reviewsOfPr(repo.id, number).filter((row) => row.sha === sha);
       // #91 respects a real external mc/review status when the hub has no attempt for this head.
       // Never manufacture a scratch report or revive a superseded/failed attempt to represent it.
-      if (rows.length === 0) return null;
-      const row = rows.findLast((value) => value.state !== "superseded");
-      return row &&
-        isExternalReview(row) &&
-        row.state === "reported" &&
-        row.blocking === 0 &&
-        row.verdict?.spec === "pass" &&
-        row.verdict.quality === "pass"
-        ? row
-        : undefined;
+      // A branch with a crew build run is different: its mc/review status may be the crew's own
+      // (waived or carried), so that head still needs an external review row.
+      if (rows.length === 0) return crewBranch ? undefined : null;
+      const live = rows.filter((value) => value.state !== "superseded");
+      const external = live.findLast((row) => isExternalReview(row) && clean(row));
+      if (!external) return undefined;
+      // a later row that reported a problem (or failed) still blocks; a later clean crew row does not
+      const blocked = live
+        .slice(live.indexOf(external) + 1)
+        .some((row) => row.state === "failed" || (row.state === "reported" && !clean(row)));
+      return blocked ? undefined : external;
     };
     const review = reviewProof();
     if (review === undefined)
@@ -210,12 +222,31 @@ export async function mergeExternalPr(i: {
         (await section(sha, claude.status === "removed"));
     }
     const hard = matches(effectiveHardRules(rules, flightPowersOf(i.config, repo.id)), paths);
-    const approvalRequired =
-      floor || matches(rules.alwaysAsk, labels) || (hard && rules.hardRulesBy === "operator");
+    // the protected paths this PR changes: what FLIGHT's own call covered
+    const protectedPaths = [
+      ...new Set(
+        paths.filter((path) =>
+          [
+            ...effectiveHardRules(rules, flightPowersOf(i.config, repo.id)),
+            ...FLIGHT_FLOOR_PATHS.filter((p) => p !== "CLAUDE.md"),
+            ...FLIGHT_CONTROLLER_CHECK_PATHS,
+          ].some((pattern) => globMatches(pattern, path, true)),
+        ),
+      ),
+    ];
+    if (floor && claude && !protectedPaths.includes("CLAUDE.md")) protectedPaths.push("CLAUDE.md");
+    const superuser = flightPowersOf(i.config, repo.id) === "superuser";
+    // protected paths need a hub review row on this head, not only an external mc/review status
+    if (superuser && protectedPaths.length > 0 && review === null)
+      return fail("An independent clean QA report is required on this exact head.");
+    // a superuser repo's FLIGHT clears the floor and hard-rule paths itself; always_ask stays
+    const approvalRequired = superuser
+      ? matches(rules.alwaysAsk, labels)
+      : floor || matches(rules.alwaysAsk, labels) || (hard && rules.hardRulesBy === "operator");
     const approval = approvalRequired ? mergeFloorApproval(store, number, sha, i.now()) : undefined;
     if (approvalRequired && !approval)
       return fail(
-        `The repository requires controller approval for this head. Record merge-floor approval for ${mergeFloorScope(number, sha)}.`,
+        `The repository requires the operator's approval for this head. Record merge-floor approval for ${mergeFloorScope(number, sha)}.`,
       );
     const current = externalPrControl(store, repo.id, number, sha);
     const control = {
@@ -224,8 +255,8 @@ export async function mergeExternalPr(i: {
       uatAccepted: current?.uatAccepted ?? false,
       controllerRequired:
         tickets.some((ticket) => ticketControllerCheck(ticket) !== null) ||
-        matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
-      protectedController: matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
+        (!superuser && matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths)),
+      protectedController: !superuser && matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
       controllerPassed: current?.controllerPassed ?? false,
       note: current?.note ?? null,
     };
@@ -265,7 +296,7 @@ export async function mergeExternalPr(i: {
       latestReview?.id !== review?.id ||
       (approvalRequired && !mergeFloorApproval(store, number, sha, i.now()))
     )
-      return fail("The repository rules, review or controller approval changed before merge.");
+      return fail("The repository rules, review or recorded approval changed before merge.");
     if (
       !finalSubject ||
       finalSubject.branch !== subject.branch ||
@@ -285,7 +316,8 @@ export async function mergeExternalPr(i: {
       (final.reviewDecision !== null && !["", "APPROVED"].includes(String(final.reviewDecision))) ||
       externalControlReason(store, repo.id, number, sha) !== null ||
       store.pullRequests(repo.id).find((pr) => pr.number === number)?.headSha !== sha ||
-      store.runsOnBranch(repo.id, finalSubject.branch).some((run) => run.reviewId == null)
+      branchOwned(i.config, store, repo.id, finalSubject.branch, cached.ticket) ||
+      store.branchMergeHold(repo.id, finalSubject.branch)
     )
       return fail("The PR head, checks, ownership or hold changed before merge.");
     const merged = await i.gh(
@@ -319,7 +351,13 @@ export async function mergeExternalPr(i: {
       return fail("The merge result is not confirmed; refresh GitHub before retrying.");
     i.bus.emit("boards");
     return {
-      text: `Merged external PR #${number} at ${sha}.${approval ? " Used the controller's recorded approval." : ""}`,
+      text: `Merged external PR #${number} at ${sha}.${approval ? " Used the recorded approval." : ""}`,
+      ...(superuser && protectedPaths.length > 0
+        ? {
+            paths: protectedPaths,
+            ...(tickets[0] ? { ticket: tickets[0].number } : {}),
+          }
+        : {}),
     };
   } catch {
     return fail(

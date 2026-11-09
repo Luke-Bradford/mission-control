@@ -1849,12 +1849,6 @@
   .overview-workspace {
     grid-template-columns: minmax(0, 1.15fr) minmax(380px, 1fr);
   }
-  .overview-primary > #agentsP {
-    width: 100cqw;
-  }
-  .overview-secondary {
-    margin-top: calc(var(--crew-height, 0px) + var(--sp-3));
-  }
   .overview-primary > #actP > .ph {
     flex-wrap: wrap;
   }
@@ -2123,4 +2117,723 @@ button.quota-details {
   justify-content: space-between;
   gap: var(--sp-2);
   color: var(--fg-2);
+}
+
+/* Composition (hud-design dashboard reference). Crew and Board carry the most fields, so they take
+   the wide column. The other column is as wide as its Tokens plots need and no wider. Board and
+   Activity take spare height, so both columns end level; a viewport too short for the minimums
+   scrolls .overview-grid. */
+.overview-grid {
+  --overview-side: 560px;
+  container: overview-canvas / inline-size;
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) var(--overview-side);
+  grid-template-rows: minmax(min-content, 1fr);
+  gap: var(--sp-3);
+  min-height: 0;
+  overflow-y: auto;
+}
+.overview-grid > * {
+  flex: none;
+  overflow: visible;
+}
+.overview-primary,
+.overview-secondary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+}
+.overview-primary > #agentsP {
+  flex: none;
+}
+.overview-primary > #pipelineP {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  /* Panel head, stage head and one two-line card. */
+  min-height: 160px;
+}
+.overview-secondary > .panel {
+  flex: none;
+}
+.overview-secondary > #actP {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  /* Panel head and three log rows. */
+  min-height: 124px;
+  height: auto;
+}
+#actP > .log {
+  flex: 1;
+  min-height: 0;
+}
+@media (min-width: 2200px) {
+  .overview-grid {
+    --overview-side: 640px;
+  }
+}
+/* A narrower two-column canvas keeps the same shape with a smaller side column. */
+@media (max-width: 1699px) {
+  .overview-grid {
+    --overview-side: 480px;
+  }
+}
+/* Too narrow for two columns: stack them, and the stack scrolls inside the page. */
+@media (max-width: 1499px) {
+  .overview-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+  }
+  .overview-primary,
+  .overview-secondary {
+    min-height: auto;
+  }
+  .overview-primary > #pipelineP {
+    flex: none;
+    height: 360px;
+  }
+  .overview-secondary > #actP {
+    flex: none;
+    height: 320px;
+  }
+}
+
+/* Crew: state, seat, work, step, the last hour, then numbers as their own columns. */
+#page-overview {
+  --table-row: 40px;
+}
+#agentsList {
+  /* Under half the window, so the Board keeps at least three cards a stage; a longer crew scrolls. */
+  max-height: calc(45 * var(--dvh));
+  overflow-x: hidden;
+  scrollbar-gutter: auto;
+}
+#agentsList .trow {
+  min-width: 0;
+  grid-template-columns: 88px 168px minmax(0, 1fr) 104px 168px 44px 40px 48px;
+  padding-inline: var(--sp-3);
+}
+#agentsList .trow.head {
+  height: var(--sp-5);
+  min-height: var(--sp-5);
+}
+/* The folded free seats: one row, a button and the names beside it. */
+#agentsList .trow.free-seats {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: center;
+  min-height: var(--table-row);
+}
+#agentsList .trow.free-seats > :last-child {
+  min-width: 0;
+  flex: 1;
+}
+.crew-wide {
+  display: none;
+}
+@container agents (min-width: 1440px) {
+  #agentsList .trow {
+    grid-template-columns: 88px 168px minmax(0, 1fr) 104px 224px 52px 52px 52px 40px 60px 48px;
+  }
+  .crew-wide {
+    display: block;
+  }
+}
+#agentsList .state-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  line-height: var(--lh-s);
+}
+#agentsList .agent-identity,
+#agentsList .ticket-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+#agentsList .step-cell {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: calc(var(--sp-1) / 2);
+  min-width: 0;
+}
+.crew-lane {
+  display: block;
+  height: var(--sp-6);
+}
+.crew-lane svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.crew-lane-bar {
+  opacity: 0.8;
+}
+.lane-axis {
+  display: flex;
+  justify-content: space-between;
+}
+.lane-key {
+  display: inline-flex;
+  gap: var(--sp-3);
+  align-items: center;
+  margin-right: var(--sp-3);
+  font-size: var(--fs-s);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.lane-key > span {
+  display: inline-flex;
+  gap: var(--sp-1);
+  align-items: center;
+}
+.lane-key i {
+  display: block;
+  width: 12px;
+  height: var(--sp-1);
+}
+.context-pct {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Board: a stage per column. Merging rarely holds much, so on the wide column it sits under review. */
+#pipelineP .ph .sub b {
+  font-weight: 600;
+  color: var(--fg);
+}
+.board-stages {
+  display: grid;
+  flex: 1;
+  /* An empty stage is only as wide as its head; the busy ones share the rest (set by the Board). */
+  grid-template-columns: var(--board-cols, repeat(5, minmax(0, 1fr)));
+  grid-template-rows: minmax(0, 1fr);
+  border-top: 1px solid var(--line);
+  min-height: 0;
+}
+.board-stage {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  border-left: 1px solid var(--line);
+}
+.board-stage:first-child {
+  border-left: 0;
+}
+.board-stage h3 {
+  display: flex;
+  flex: none;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+  align-items: baseline;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  font-size: var(--fs);
+  font-weight: 600;
+}
+/* The label and count never break; "oldest" drops to its own line when the column is too narrow. */
+.board-stage h3 > * {
+  white-space: nowrap;
+}
+.board-stage.empty h3 {
+  border-bottom: 0;
+}
+.board-oldest {
+  margin-left: auto;
+  font-size: var(--fs-s);
+  font-weight: 400;
+  color: var(--muted);
+}
+/* Whole cards only: the Board trims the list to the cards that fit, so nothing here scrolls or clips. */
+.board-cards {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.board-card {
+  display: block;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+  color: var(--fg);
+  text-decoration: none;
+}
+.board-card:hover,
+.board-card:focus-visible {
+  background: var(--surface-2);
+}
+.board-title {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.board-ticket {
+  color: var(--accent);
+}
+.board-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-2);
+  align-items: center;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+}
+.board-tag {
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--fg-2);
+}
+/* a card sent back by review: its own line under the title, wrapping with the card */
+.board-rework {
+  display: block;
+  margin-top: var(--sp-1);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+.board-age {
+  margin-left: auto;
+}
+.board-more {
+  display: block;
+  padding: var(--sp-1) var(--sp-3);
+}
+.board-more.measuring {
+  visibility: hidden;
+}
+.ci-marks {
+  display: inline-flex;
+  gap: calc(var(--sp-1) / 2);
+  align-items: center;
+}
+.ci-marks i {
+  display: block;
+  width: 6px;
+  height: 6px;
+}
+.ci-count {
+  font-variant-numeric: tabular-nums;
+}
+.ci-pass {
+  border-radius: 50%;
+  background: var(--ok);
+}
+.ci-fail {
+  background: var(--crit);
+}
+.ci-pending {
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+}
+/* Wide canvas: the same five lanes, bigger text. An empty lane is only its head, so Merging keeps its own column. */
+@container overview-canvas (min-width: 2000px) {
+  .board-title {
+    font-size: var(--fs);
+    line-height: var(--lh);
+  }
+}
+
+/* Mac: one row, because the question is only whether it is coping. */
+.mac-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-3);
+  align-items: center;
+  min-height: var(--table-row);
+  padding: var(--sp-1) var(--sp-3);
+}
+.mac-row h2 {
+  margin: 0;
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+}
+.mac-measure {
+  display: inline-flex;
+  flex: 1 1 auto;
+  gap: var(--sp-1);
+  align-items: center;
+  min-width: 0;
+  font-size: var(--fs-s);
+  white-space: nowrap;
+}
+.mac-measure b {
+  font-weight: 600;
+}
+.mac-measure .spark {
+  flex: 1 1 0;
+  width: 0;
+  min-width: var(--sp-5);
+  height: var(--sp-4);
+}
+.mac-warning {
+  flex-basis: 100%;
+}
+
+/* Tokens: the week, then the hour, on each account's own scale. */
+.token-account {
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.token-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--sp-2);
+  align-items: baseline;
+}
+.token-used {
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
+}
+.token-verdict {
+  margin-left: auto;
+  font-weight: 500;
+}
+.token-plots {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  margin-top: var(--sp-1);
+}
+.burnup-plot {
+  position: relative;
+  height: var(--overview-plot, 72px);
+  margin-right: var(--sp-7);
+}
+.burnup-plot svg,
+.hourbars svg {
+  display: block;
+  width: 100%;
+  height: var(--overview-plot, 72px);
+}
+.hourbars svg {
+  height: calc(var(--overview-plot, 72px) - var(--lh-s));
+}
+.hourbars rect {
+  fill: var(--muted);
+}
+.burnup-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+}
+.burnup-fill {
+  fill: var(--accent-soft);
+}
+.burnup-projection {
+  stroke: var(--fg-2);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.burnup-now {
+  stroke: var(--fg-2);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.burnup-stop,
+.burnup-alert {
+  stroke-dasharray: 2 3;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+.burnup-stop {
+  stroke: var(--crit);
+}
+.burnup-alert {
+  stroke: var(--warn);
+}
+.burnup-mark {
+  position: absolute;
+  left: 100%;
+  padding-left: var(--sp-1);
+  font: var(--fs-micro) / var(--lh-axis) var(--mono);
+  color: var(--muted);
+  white-space: nowrap;
+  transform: translateY(-50%);
+}
+.burnup-axis {
+  position: relative;
+  height: var(--lh-axis);
+  margin-right: var(--sp-7);
+  font: var(--fs-micro) / var(--lh-axis) var(--mono);
+  color: var(--muted);
+}
+.burnup-axis > span {
+  position: absolute;
+  top: 0;
+}
+/* Past the plot's end, in the column that holds the limit labels. */
+.burnup-axis > .burnup-reset {
+  left: 100%;
+  padding-left: var(--sp-1);
+}
+.plot-axis {
+  display: flex;
+  justify-content: space-between;
+  font: var(--fs-micro) / var(--lh-axis) var(--mono);
+  color: var(--muted);
+}
+.plot-reading {
+  display: flex;
+  justify-content: space-between;
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+@media (min-height: 1100px) {
+  .overview-grid {
+    --overview-plot: 88px;
+  }
+}
+
+/* The older roster rules gave a row's cells flex bases meant for a single line. */
+#agentsList .ticket-cell,
+#agentsList .agent-identity {
+  align-items: flex-start;
+  gap: 0;
+}
+#agentsList .ticket-cell > *,
+#agentsList .ticket-cell > .ellip:first-child,
+#agentsList .work-summary,
+#agentsList .ticket-cell .need {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+}
+#agentsList .work-summary {
+  display: flex;
+}
+#agentsList .work-summary > .ellip {
+  flex: 1 1 0;
+}
+#agentsList .ticket-cell:has(.need) {
+  flex-wrap: nowrap;
+}
+#agentsList .trow:not(.head) {
+  grid-template-rows: minmax(0, 1fr);
+}
+.mac-row {
+  flex-direction: row;
+}
+.token-plots {
+  margin-top: var(--sp-2);
+}
+.token-spend {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+  letter-spacing: normal;
+  text-transform: none;
+}
+#actP .seg button {
+  padding-inline: var(--sp-1);
+}
+#actP .ph {
+  flex-wrap: nowrap;
+}
+#actList .arow {
+  grid-template-columns: 40px 14px 72px minmax(0, 1fr) auto;
+  gap: var(--sp-1);
+  padding-block: calc(var(--sp-1) / 2);
+}
+.overview-secondary #actList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* A long log line stays one row: its control is a small mark at the end, still named Show more. */
+#actList .expandable:not(.open) {
+  display: flex;
+  gap: var(--sp-1);
+  align-items: baseline;
+}
+#actList .expandable:not(.open) .expandable-content {
+  flex: 1 1 0;
+}
+#actList .expandable:not(.open) .sm {
+  position: relative;
+  flex: none;
+  width: var(--sp-5);
+  min-height: var(--sp-5);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  background: none;
+  text-indent: 100%;
+  white-space: nowrap;
+}
+#actList .expandable:not(.open) .sm::after {
+  content: "⋯";
+  position: absolute;
+  inset: 0;
+  color: var(--accent);
+  text-align: center;
+  text-indent: 0;
+}
+#agentsList .agent-identity > .xs::before,
+#agentsList .agent-identity > a.xs::before {
+  content: none;
+}
+@media (max-width: 1699px) {
+  #actP .ph {
+    flex-wrap: wrap;
+  }
+}
+/* A link that carries a panel or lane name stays a full-size target. */
+.board-stage h3 a,
+.token-head a,
+.mac-row h2 a,
+#page-overview .ph h2 a {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--sp-5);
+}
+
+/* Crew under enlarged text. Every track is its accepted pixel width or the same width in em of the
+   row's own text size, whichever is larger: at normal text the pixels win and nothing moves; with
+   enlarged text the columns grow with the words in them. The table then scrolls sideways, with the
+   header and the State and Seat cells held in place. */
+@property --crew-state-w {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 88px;
+}
+#agentsList {
+  overflow-x: auto;
+}
+#agentsList .trow {
+  /* Head and body rows share one em, so their tracks line up whatever the text size. */
+  font-size: var(--fs);
+  --crew-state-w: max(88px, 6.7em);
+  min-width: min-content;
+  grid-template-columns:
+    var(--crew-state-w) max(168px, 12.9em)
+    minmax(max(0px, calc((1em - 13px) * 16)), 1fr)
+    max(104px, 7.9em) max(168px, 12.9em) max(44px, 3.3em) max(40px, 3em) max(48px, 3.6em);
+}
+@container agents (min-width: 1440px) {
+  #agentsList .trow {
+    grid-template-columns:
+      var(--crew-state-w) max(168px, 12.9em)
+      minmax(max(0px, calc((1em - 13px) * 16)), 1fr)
+      max(104px, 7.9em) max(224px, 17.2em) max(52px, 4em) max(52px, 4em) max(52px, 4em)
+      max(40px, 3em) max(60px, 4.6em) max(48px, 3.6em);
+  }
+}
+#agentsList .trow.head {
+  height: auto;
+  min-height: var(--sp-5);
+}
+#agentsList .trow.head > span {
+  font-size: var(--fs-s);
+}
+#agentsList .state-cell .pill,
+#agentsList .state-cell .pill > span {
+  overflow: visible;
+  text-overflow: clip;
+}
+/* The held cells fill their row and reach the table's left edge, so scrolled content never shows
+   beside, above or below them. Their padding keeps the words where they were. */
+#agentsList .trow > :first-child,
+#agentsList .trow > :nth-child(2) {
+  position: sticky;
+  z-index: 1;
+  align-self: stretch;
+  justify-content: center;
+  background: var(--surface);
+}
+#agentsList .trow > :first-child {
+  left: 0;
+  margin-left: calc(-1 * var(--sp-3));
+  padding-left: var(--sp-3);
+  /* Reach over the column gap so nothing scrolls into view between State and Seat. */
+  margin-right: calc(-1 * var(--sp-2));
+  padding-right: var(--sp-2);
+}
+/* The heading rule caps cells at their track; State's heading must reach as far as its cells do. */
+#agentsList .trow.head > :first-child {
+  max-width: none;
+}
+/* The row's own tint is translucent: paint the same tint over an opaque surface. */
+#agentsList .trow.flight > :first-child,
+#agentsList .trow.flight > :nth-child(2) {
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--accent-soft) 45%, transparent),
+      color-mix(in srgb, var(--accent-soft) 45%, transparent)
+    ),
+    var(--surface);
+}
+#agentsList .trow:not(.head):hover > :first-child,
+#agentsList .trow:not(.head):hover > :nth-child(2),
+#agentsList .trow.sel > :first-child,
+#agentsList .trow.sel > :nth-child(2) {
+  background: var(--surface-2);
+}
+#agentsList .trow.needs::before,
+#agentsList .trow.going::before {
+  z-index: 2;
+}
+/* Below 640px the Seat scrolls with the rest and only State is held. */
+@container agents (max-width: 639px) {
+  #agentsList .trow > :nth-child(2) {
+    position: static;
+    align-self: center;
+    background: none;
+  }
+  #agentsList .trow.flight > :nth-child(2),
+  #agentsList .trow:not(.head):hover > :nth-child(2),
+  #agentsList .trow.sel > :nth-child(2) {
+    background: none;
+  }
+}
+@container agents (min-width: 640px) {
+  /* The seat stays beside its State. */
+  #agentsList .trow > :nth-child(2) {
+    left: calc(var(--sp-3) + var(--crew-state-w) + var(--sp-2));
+  }
+}
+/* Headings and loading bars are plain blocks: centre the stretched held cells' content so it sits
+   where the other columns' does. */
+#agentsList .trow.head > :first-child,
+#agentsList .trow.head > :nth-child(2),
+#agentsList .crew-skeleton > :first-child,
+#agentsList .crew-skeleton > :nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* The pause line: "Paused by" and "· last #N" stay whole; only the issue reference shortens. */
+#agentsList .ticket-cell > .pause-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+#agentsList .pause-line > .pause-label,
+#agentsList .pause-line > .pause-last {
+  flex: none;
+}
+#agentsList .pause-line > .rref {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+/* a block, not the inline-flex link of .rref: an ellipsis needs a block box to cut */
+#agentsList .pause-line > .rref > a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

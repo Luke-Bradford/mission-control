@@ -25,6 +25,7 @@ import {
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_CHATTER_WINDOW_MS,
+  COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_LABELS,
@@ -38,8 +39,10 @@ import {
   COMMS_TICKET,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
+  CONTROLLER_HEADER,
   type CommsCount,
   type CommsMetricsView,
+  type CommsSenderKind,
   type ContextUsage,
   CREW_DISABLED,
   type Crew,
@@ -50,6 +53,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  compareDependencyChains,
   crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
@@ -83,6 +87,7 @@ import {
   guardStopOutput,
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
+  isOperatorItem,
   type LimitRow,
   LOCK_WAIT_MS,
   LOOPBACK_HOST,
@@ -98,9 +103,12 @@ import {
   METER_FULL_PCT,
   type MilestonesView,
   NEW_LOOP,
+  needsYouAlert,
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  PACE_SETTING,
+  type PaceSettings,
   PR_LIST_DAYS,
   PR_LIST_DAYS_MAX,
   type PrUatView,
@@ -111,7 +119,6 @@ import {
   pace5h,
   packMapTree,
   percentile,
-  projectAtReset,
   QA_FLOW_METRICS,
   QA_RETENTION_DAYS,
   type QaFindingsView,
@@ -141,6 +148,8 @@ import {
   type TestLockHistory,
   type TestLockView,
   type TicketView,
+  TOKEN_AUDIT_DAYS_DEFAULT,
+  TOKEN_AUDIT_DAYS_MAX,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -162,10 +171,12 @@ import Fastify, {
 import { z } from "zod";
 import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
+import { AsideAnswerChanged, AsideAnswerUnconfirmed, answerAsideQuestion } from "./aside-answer.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
   holdItem,
+  nothingForOperator,
   releaseHold,
 } from "./attention-holds.ts";
 import {
@@ -175,8 +186,14 @@ import {
   awayDigest,
   readAwaySettings,
 } from "./away.ts";
+import { registerBriefChoiceRoutes } from "./brief-api.ts";
+import { checkBriefDispatch } from "./brief-dispatch.ts";
+import { boundBriefGuard } from "./brief-dispatch-context.ts";
+import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
+import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
+import { clearAttentionItem } from "./clear-attention.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -199,13 +216,19 @@ import { teamsStatus } from "./collectors/teams.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_SETTING } from "./collectors/usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, WINDOWS } from "./collectors/usage-common.ts";
 import {
+  COMMS_FEED_DEFAULT,
+  COMMS_FEED_MAX,
+  COMMS_OPEN_TEXT_MAX,
   COMMS_SNAPSHOT_LIMIT,
+  commsSendState,
   pinComms,
   reactComms,
   sendComms,
   threadMessages,
   validateCommsText,
 } from "./comms.ts";
+import { replyRoute } from "./comms-reply.ts";
+import { commsTicketCounts } from "./comms-ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -248,16 +271,21 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
+import { readDependencyChains } from "./dependency-chains.ts";
+import type { DesignPreviews } from "./design-previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
+  askExternalReview,
   externalMergeHold,
   externalPrControl,
+  externalReviewAsked,
   setExternalMergeHold,
   setExternalPrControl,
+  withdrawExternalReview,
 } from "./external-pr-control.ts";
-import { readExternalSubject } from "./external-reviews.ts";
+import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -285,8 +313,13 @@ import {
   grantApproval,
   useApproval,
 } from "./flight-approvals.ts";
+import {
+  FlightConversationCursorError,
+  flightConversation,
+  readFlightConversation,
+} from "./flight-conversation.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
-import type { CheckRecorder } from "./guard/check-runs.ts";
+import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { rereadDenial } from "./guard/rereads.ts";
@@ -296,8 +329,11 @@ import {
   CREW_ERROR_KEY,
   crew,
   forgetViews,
+  hubAlert,
   NO_LOCK,
   NOTE_KEY,
+  pinned,
+  seatQuestionTriage,
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loophistory.ts";
@@ -321,8 +357,19 @@ import {
   seatPlace,
 } from "./mcp/tools.ts";
 import { metricsView } from "./metrics.ts";
+import {
+  type ActionResult,
+  answerSetAside,
+  drop as dropQuestion,
+  type NeedsYouContext,
+  type NeedsYouDeps,
+  notNow as notNowQuestion,
+  offersFor,
+  setAsideQuestions,
+} from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
+import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
@@ -382,9 +429,10 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
+import { tokenAuditView } from "./token-audit-view.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 import { transcriptFootprint } from "./transcript-lifecycle.ts";
-import { UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
+import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
 
@@ -431,7 +479,6 @@ export const TRANSCRIPT_NOT_FOUND = "transcript not found";
 const DEFAULT_TELEMETRY_RANGE = "6h";
 const HOUR_MS = 3600e3;
 const DAY_MS = 24 * HOUR_MS;
-const WEEK_MS = 7 * DAY_MS;
 const FIVE_HOURS_MS = 5 * HOUR_MS;
 
 /** Never log credentials: request/response headers that can carry them are censored. */
@@ -462,6 +509,8 @@ export interface AppDeps {
   previews?: PreviewManager;
   /** The repository whose checkout runs this hub; only its branches can become preview hubs. */
   previewRepoId?: RepoId;
+  /** The hub's design previews (a branch's built app, shown with Demo data); absent on preview hubs. */
+  designPreviews?: DesignPreviews;
   /** A child preview reports browser activity to its parent without exposing an operator token. */
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
@@ -481,6 +530,8 @@ export interface AppDeps {
   codexModelsFor?: (account: CcConfig["accounts"][number]) => Pick<CodexModels, "entries">;
   /** The per-boot operator token every mutating /api route requires; absent: not required (tests). */
   operatorToken?: string;
+  /** The per-boot controller token: the controller's own key, which labels its messages. */
+  controllerToken?: string;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
@@ -533,7 +584,17 @@ export interface AppDeps {
   supervisor?: Supervisor;
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
   engine?: Pick<Engine, "onOperatorMessage" | "status"> &
-    Partial<Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold">>;
+    Partial<
+      Pick<
+        Engine,
+        | "controllerCheck"
+        | "uat"
+        | "holdMerge"
+        | "releaseMergeHold"
+        | "reconcileRun"
+        | "adoptPrHead"
+      >
+    >;
   /** The Update button (`update.ts`); absent: version says why, and update answers 409. */
   updater?: Updater;
   /** The per-run tokens that authorise `/mcp`; absent: the endpoint is not served. */
@@ -554,6 +615,8 @@ export interface AppDeps {
   checks?: CheckRecorder;
   /** The hub's own `gh` login, for telling another login's draft PRs from its own; default: unknown. */
   hubLogin?: () => string | null;
+  /** The board, rules and ticket reads Not now and Drop write through; absent: neither is offered. */
+  needsYou?: NeedsYouDeps;
 }
 
 /**
@@ -606,10 +669,16 @@ const MessageBody = z.strictObject({
     .max(COMMS_MESSAGE_MAX)
     .refine((t) => t.trim() !== "", "must not be blank"),
   interrupt: z.boolean().optional(),
+  /**
+   * The seat question this text answers (a Needs-you reply to an ask item names it). Only then does
+   * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
+   */
+  question: z.number().int().positive().optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
 const NoBody = z.strictObject({});
+const CLEAR_ATTENTION_ROUTE = "/attention/:key/clear";
 /** `POST /api/runs/:id/merge-hold`: the controller holds a run's merge (with a reason) or releases it. */
 const MergeHoldBody = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("hold"), reason: z.string().trim().min(1).max(300) }),
@@ -710,6 +779,9 @@ const QA_DAYS_ERROR = `days must be an integer 1..${QA_RETENTION_DAYS}`;
 /** `GET /api/agents/:id/files/diff?path=`: one path, as the file list gives it. */
 const DiffPath = z.string().min(1).max(4096);
 
+/** `GET /api/attention/answered`: the questions closed without an answer, over the last week. */
+const ANSWERED_WINDOW_MS = 7 * 24 * 60 * 60_000;
+const ANSWERED_LIMIT = 50;
 /** `POST /api/attention/ack`. */
 const AckBody = z.strictObject({
   keys: z.array(z.string().min(1).max(200)).min(1).max(ACK_BATCH_MAX),
@@ -1196,6 +1268,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
   });
 
+  // A cross-site no-cors GET (an <img>, fetch with
+  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
+  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
+  // callers that send no header (the guard hook, curl) are unaffected. A design preview runs on
+  // another port of this host, which browsers call same-site, so that is refused too; the HUD's
+  // own requests are same-origin. The matched route is
+  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
+  app.addHook("onRequest", async (req, reply) => {
+    const path = req.routeOptions.url ?? req.url;
+    if (
+      path.startsWith("/api/") &&
+      (req.headers["sec-fetch-site"] === "cross-site" ||
+        req.headers["sec-fetch-site"] === "same-site")
+    ) {
+      return reply.code(403).send({ error: "cross-site request refused" });
+    }
+  });
+
   // CSRF defence (there is no login, so these are the only cross-site guard): a cross-site form
   // cannot send application/json, and a cross-site fetch carries a foreign Origin.
   app.addHook("onRequest", async (req, reply) => {
@@ -1204,10 +1294,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       Number(req.headers["content-length"] ?? 0) > 0 ||
       req.headers["transfer-encoding"] !== undefined;
     const previewActivity = req.routeOptions.url === "/api/previews/:pr/activity";
+    const emptyClear =
+      req.method === "POST" &&
+      req.routeOptions.url === `${API_PREFIX}${CLEAR_ATTENTION_ROUTE}` &&
+      !hasBody;
     if (
       mutating &&
       (req.method !== "DELETE" || hasBody) &&
       !previewActivity &&
+      !emptyClear &&
       mediaType(req.headers["content-type"]) !== "application/json"
     ) {
       return reply
@@ -1224,18 +1319,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       !isLocalOrigin(origin)
     ) {
       return reply.code(403).send({ error: "cross-origin request refused" });
-    }
-  });
-
-  // A cross-site no-cors GET (an <img>, fetch with
-  // mode: "no-cors") carries no Origin. The page cannot read the answer, but it could drain the
-  // GitHub rate limit or spawn gh and git. Browsers mark such a request Sec-Fetch-Site: cross-site;
-  // callers that send no header (the guard hook, curl) are unaffected. The matched route is
-  // checked because the router decodes %XX in the path, so the raw URL may not start with /api/.
-  app.addHook("onRequest", async (req, reply) => {
-    const path = req.routeOptions.url ?? req.url;
-    if (path.startsWith("/api/") && req.headers["sec-fetch-site"] === "cross-site") {
-      return reply.code(403).send({ error: "cross-site request refused" });
     }
   });
 
@@ -1295,6 +1378,41 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       return reply.code(403).send({ error: SEAT_REFUSED });
   });
 
+  // The controller's own key. A request that carries it passes where the operator token does (it
+  // grants nothing new) and is marked, so what it sends is recorded as the controller's.
+  const controllerRequests = new WeakSet<FastifyRequest>();
+  if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
+    const { controllerToken, operatorToken: held } = deps;
+    app.addHook("onRequest", async (req) => {
+      const given = req.headers[CONTROLLER_HEADER];
+      delete req.headers[CONTROLLER_HEADER];
+      if (!operatorTokenMatches(controllerToken, given)) return;
+      controllerRequests.add(req);
+      req.headers[OPERATOR_HEADER] = held;
+    });
+  }
+  /**
+   * Who a request's message is from, judged by how it was made and never by its text: FLIGHT's
+   * operator tool, the controller's credential, or a person using the app.
+   */
+  /** Who reacts or pins: FLIGHT through its operator tool, the controller, or the operator. */
+  /**
+   * Wakes a seat to take its Comms inbox. Not while the seat is mid-turn (it takes the inbox at its
+   * next turn, and an empty wake burns tokens), and never FLIGHT: the hub wakes FLIGHT itself.
+   */
+  const wakeSeat = (seatId: string, text: string, from: string): void => {
+    if (seatId === flightSeat(config)?.seat.id) return;
+    if (deps.supervisor?.busy?.().some((b) => b.seatId === seatId && b.state === "running")) return;
+    deps.deliverComms?.(seatId, text, from);
+  };
+  const commsActor = (req: FastifyRequest): string => commsSender(req).from;
+  const commsSender = (req: FastifyRequest): { from: string; kind: CommsSenderKind } => {
+    const actor = flightActor(req);
+    if (actor !== null) return { from: actor.seatId, kind: "flight" };
+    if (controllerRequests.has(req)) return { from: COMMS_CONTROLLER, kind: "controller" };
+    return { from: COMMS_CAPCOM, kind: "operator" };
+  };
+
   const operatorToken = deps.operatorToken;
   if (operatorToken !== undefined) {
     app.addHook("onRequest", async (req, reply) => {
@@ -1331,6 +1449,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       seatMode: deps.seatMode ?? (() => "read-only"),
       ...(deps.seatGrants === undefined ? {} : { seatGrants: deps.seatGrants }),
       ...(deps.runGrants === undefined ? {} : { runGrants: deps.runGrants }),
+      onToolCall: (c) => store.recordToolCall({ ...c, at: now() }),
     });
   }
 
@@ -1641,21 +1760,83 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/pages/Comms.tsx#Comms (unanswered questions and blockers)
       api.get("/comms/open", () => {
         const at = now();
-        return {
-          items: store.openCommsItems().map((item) => {
-            const flightAt = item.at + COMMS_FLIGHT_ESCALATION_MS;
-            const atFlight = at >= flightAt;
+        const step = (askedAt: number) => {
+          const flightAt = askedAt + COMMS_FLIGHT_ESCALATION_MS;
+          const atFlight = at >= flightAt;
+          return {
+            waitedMs: Math.max(0, at - askedAt),
+            nextStep: atFlight ? ("flight-not-triaging" as const) : ("flight" as const),
+            nextAt: atFlight ? flightAt + COMMS_CAPCOM_ESCALATION_MS : flightAt,
+          };
+        };
+        const asked = store.openCommsItems().map((item) => ({
+          id: item.id,
+          label: item.label,
+          from: item.from,
+          to: item.to,
+          ticket: item.ticket,
+          text: item.text.slice(0, COMMS_OPEN_TEXT_MAX),
+          at: item.at,
+          ...step(item.at),
+        }));
+        const flightId = flightSeat(config)?.seat.id ?? COMMS_CAPCOM;
+        // A seat question is FLIGHT's from the start: its deadline is FLIGHT's triage window,
+        // and with no FLIGHT seat it is the operator's now.
+        // A question FLIGHT passed to the operator is the operator's, whatever the window says.
+        const seatQuestionStep = (askedAt: number, passedAt: number | null) => {
+          if (passedAt !== null)
             return {
-              id: item.id,
-              label: item.label,
-              from: item.from,
-              to: item.to,
-              ticket: item.ticket,
-              waitedMs: Math.max(0, at - item.at),
-              nextStep: atFlight ? ("flight-not-triaging" as const) : ("flight" as const),
-              nextAt: atFlight ? flightAt + COMMS_CAPCOM_ESCALATION_MS : flightAt,
+              waitedMs: Math.max(0, at - askedAt),
+              nextStep: "operator" as const,
+              nextAt: passedAt,
             };
-          }),
+          const triage = seatQuestionTriage(config, store, at, askedAt);
+          if (triage === null)
+            return {
+              waitedMs: Math.max(0, at - askedAt),
+              nextStep: "operator" as const,
+              nextAt: at,
+            };
+          const late = !triage.triaging || at >= triage.dueAt;
+          return {
+            waitedMs: Math.max(0, at - askedAt),
+            nextStep: late ? ("flight-not-triaging" as const) : ("flight" as const),
+            nextAt: triage.triaging ? triage.dueAt : at,
+          };
+        };
+        const seatQuestions = store.openQuestions().map((q) => ({
+          id: `ask:${q.id}`,
+          label: "question" as const,
+          from: q.agentId,
+          to: q.passedAt === null ? flightId : COMMS_CAPCOM,
+          ticket: store.run(q.runId)?.ticket ?? null,
+          text: q.text.slice(0, COMMS_OPEN_TEXT_MAX),
+          at: q.at,
+          ...seatQuestionStep(q.at, q.passedAt),
+        }));
+        return {
+          items: [...asked, ...seatQuestions]
+            .sort((a, b) => a.at - b.at)
+            .map(({ at: _at, ...item }) => item),
+        };
+      });
+      // Reader: apps/web/src/pages/Comms.tsx#Comms (the chart's travelling messages)
+      api.get("/comms/feed", (req, reply) => {
+        const query = z
+          .strictObject({
+            since: z.string().optional(),
+            limit: z.coerce.number().int().min(1).max(COMMS_FEED_MAX).optional(),
+          })
+          .safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: zodError(query.error) });
+        const sinceId = query.data.since === undefined ? 0 : commsMessageNumber(query.data.since);
+        if (sinceId === null) return reply.code(400).send({ error: "invalid Comms message id" });
+        return {
+          messages: store.commsFeed(
+            sinceId,
+            query.data.limit ?? COMMS_FEED_DEFAULT,
+            COMMS_OPEN_TEXT_MAX,
+          ),
         };
       });
       // Reader: apps/web/src/comms/Conversation.tsx (thread snapshot)
@@ -1721,6 +1902,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         repoId: z.string().optional(),
         to: z.string().min(1),
         text: z.string().min(1).max(COMMS_MESSAGE_MAX),
+        itemKey: z.string().max(200).optional(),
         label: z.enum(COMMS_LABELS).optional(),
         ref: z.string().regex(COMMS_REF).optional(),
         replyTo: z
@@ -1740,6 +1922,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply.code(400).send({ error: "unknown PR thread" });
           prThread = store.pullRequest(repo.id, Number(number))?.ticket ?? `${repo.id}#${number}`;
         }
+        const sender = commsSender(req);
+        // a reply to a seat whose run ended goes to the seat now on that ticket, or to FLIGHT
+        let input = body.data;
+        let redirectedTo: string | undefined;
+        if (input.replyTo !== undefined) {
+          const route = replyRoute({ config, store, crew: commsCrew }, input.replyTo);
+          if (route?.redirected === true && route.to !== input.to) {
+            const original = store.commsMessage(input.replyTo);
+            if (original !== null && original.from === input.to) {
+              redirectedTo = route.to;
+              // the reply is no longer read as an answer to the ended run's seat: it keeps the
+              // ticket but not the link to that seat's message
+              prThread ??= original.ticket ?? undefined;
+              const { replyTo: _dropped, ...rest } = input;
+              input = { ...rest, to: route.to };
+            }
+          }
+        }
         try {
           const message = await sendComms(
             {
@@ -1748,20 +1948,50 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               knownSecrets: deps.knownSecrets ?? (async () => []),
               now,
               seatSender: false,
+              senderKind: sender.kind,
+              wakeUnlabelled: true,
+              ...(sender.from === COMMS_CAPCOM &&
+              input.itemKey !== undefined &&
+              input.to === flightSeat(config)?.seat.id
+                ? {
+                    flightItem: {
+                      to: input.to,
+                      title:
+                        attentionItems(config, store, now(), deps.lock?.state() ?? NO_LOCK).find(
+                          (item) => item.key === input.itemKey,
+                        )?.text ?? "This Needs-you item is no longer waiting.",
+                    },
+                  }
+                : {}),
+              // redirected away from the ended run: its seat is not told of the reply
+              ...(redirectedTo === undefined ? {} : { replyAuthorMention: false }),
               ...(prThread === undefined ? {} : { ticket: prThread }),
-              notify: (seatId, text, from) => deps.deliverComms?.(seatId, text, from),
+              notify: (seatId, text, from) => wakeSeat(seatId, text, from),
             },
-            COMMS_CAPCOM,
-            body.data,
+            sender.from,
+            input,
           );
           bus.emit("agents");
           bus.emit("attention");
-          return { message };
+          const state = commsSendState(store, message.id, message.repeat === true, redirectedTo);
+          return { message: { ...message, deliveredAt: state.deliveredAt }, ...state };
         } catch (e) {
           return reply
             .code(400)
             .send({ error: e instanceof Error ? e.message : "Comms message refused." });
         }
+      });
+      // Reader: apps/web/src/App.tsx#App (the note before a reply to a seat whose run ended)
+      api.get<{ Params: { id: string } }>("/comms/:id/reply-route", async (req, reply) => {
+        const route = replyRoute({ config, store, crew: commsCrew }, req.params.id);
+        return route ?? reply.code(404).send({ error: "Unknown Comms message." });
+      });
+      // Reader: apps/web/src/App.tsx#App (a message's stored or delivered line)
+      api.get<{ Params: { id: string } }>("/comms/:id/state", async (req, reply) => {
+        const message = store.commsMessage(req.params.id);
+        return message === null
+          ? reply.code(404).send({ error: "Unknown Comms message." })
+          : commsSendState(store, message.id, false);
       });
       // Reader: apps/web/src/App.tsx#App (operator reactions)
       api.post<{ Params: { id: string } }>("/comms/:id/reactions", async (req, reply) => {
@@ -1777,11 +2007,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           const reaction = reactComms(
             store,
-            COMMS_CAPCOM,
+            commsActor(req),
             req.params.id,
             body.data.reaction,
             body.data.reason,
             now(),
+            true,
           );
           bus.emit("agents");
           bus.emit("attention");
@@ -1798,7 +2029,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (commsMessageNumber(req.params.id) === null)
             return reply.code(400).send({ error: "invalid Comms message id" });
           try {
-            pinComms(store, COMMS_CAPCOM, req.params.id, pinned, now());
+            pinComms(store, commsActor(req), req.params.id, pinned, now());
             bus.emit("agents");
             return { pinned };
           } catch (e) {
@@ -1828,10 +2059,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const pins = new Set(store.commsPins().map((pin) => pin.id));
         return rows.map((row) => storedCommsMessage(row, pins));
       };
-      const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+      const knownCommsAgent = (id: string) =>
+        commsCrew().includes(id) ||
+        id === COMMS_CAPCOM ||
+        id === COMMS_CONTROLLER ||
+        id === COMMS_MC;
       /** The agents an agent has talked with, as its conversation list names them. */
-      const commsContacts = (id: string) =>
-        store.commsContactIds(id).filter((contact) => contact !== id && contact !== COMMS_CREW);
+      const commsContacts = (id: string) => {
+        const flight = flightSeat(config)?.seat.id;
+        const pair =
+          id === flight ? COMMS_CONTROLLER : id === COMMS_CONTROLLER ? flight : undefined;
+        return [
+          ...new Set([...store.commsContactIds(id), ...(pair === undefined ? [] : [pair])]),
+        ].filter((contact) => contact !== id && contact !== COMMS_CREW);
+      };
       /** Direct-line replies not yet seen. Needs you no longer counts them; the thread does (#757). */
       const directUnreadOf = (id: string) =>
         id === COMMS_CAPCOM
@@ -1931,13 +2172,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
       api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
         "/comms/flight",
-        (req, reply) => {
-          const paging = commsPaging(req.query);
-          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        async (req, reply) => {
+          const limit = parseLimit(req.query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
+          const before = req.query.before;
+          if (
+            limit === null ||
+            (before !== undefined &&
+              (typeof before !== "string" || before.length === 0 || before.length > 300))
+          )
+            return reply.code(400).send({ error: COMMS_PAGING_ERROR });
           const flight = flightSeat(config)?.seat.id;
           if (flight === undefined)
             return { messages: [], hasMore: false, cursor: null, unread: 0 };
-          return commsScopePage({ pair: [COMMS_CAPCOM, flight] }, "flight", paging);
+          try {
+            return await flightConversation(
+              store,
+              flight,
+              flightSeat(config)?.session.seats.map((s) => s.id) ?? [],
+              { limit, before },
+            );
+          } catch (error) {
+            if (error instanceof FlightConversationCursorError)
+              return reply.code(400).send({ error: error.message });
+            throw error;
+          }
         },
       );
       // Reader: apps/web/src/App.tsx#App (agent Comms)
@@ -1967,6 +2225,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             id: contact,
             lastMessage: last === undefined ? null : storedCommsMessage(last),
             count: counts.count,
+            hasMessages: counts.count > 0,
             unread: counts.unread,
           };
         });
@@ -1989,6 +2248,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ...agentCommsCounts(id),
         }));
       });
+      // Reader: docs/runbook.md#ticket-history (all-time counts for the later Comms ticket list).
+      api.get("/comms/ticket-counts", () => commsTicketCounts(config, store));
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
       api.get<{
         Params: { id: string; contact: string };
@@ -2116,14 +2377,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ),
       }));
       // Reader: apps/web/src/App.tsx#App (Comms read cursors)
-      api.post("/comms/read", (req, reply) => {
+      api.post("/comms/read", async (req, reply) => {
         const body = z
           .strictObject({
             scope: z.string().min(1).max(200),
-            messageId: z.string().regex(/^comms:\d+$/),
+            messageId: z.string().min(1).max(300),
           })
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.scope === "flight") {
+          const flight = flightSeat(config);
+          if (!flight) return reply.code(400).send({ error: "invalid Comms read cursor" });
+          try {
+            await readFlightConversation(
+              store,
+              flight.seat.id,
+              flight.session.seats.map((s) => s.id),
+              body.data.messageId,
+            );
+            bus.emit("attention");
+            return { ok: true };
+          } catch (error) {
+            if (error instanceof FlightConversationCursorError)
+              return reply.code(400).send({ error: "invalid Comms read cursor" });
+            throw error;
+          }
+        }
+        if (!/^comms:\d+$/.test(body.data.messageId))
+          return reply.code(400).send({ error: "invalid Comms read cursor" });
         const scope = commsScope(body.data.scope);
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
@@ -2319,9 +2600,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (body.data.hook_event_name !== "PreToolUse") {
             const failed = body.data.hook_event_name === "PostToolUseFailure";
             if (failed) store.forgetRunRead(who.runId, body.data.tool_use_id);
-            lock?.release(key, failed);
-            await checks?.end(key, !failed);
             const command = body.data.tool_input?.command;
+            // A call that pipes or chains past the check (`pnpm -s test; echo $?`, `| tail`) ends
+            // with the last command's status, not the check's: it is `done`, never `pass` (#1411).
+            const wrapped = typeof command === "string" && !plainCall(command);
+            // the hook sends a null exit code for an interrupted or background call: unknown, so
+            // it neither passes the lock row nor counts toward the push gate
+            const unknown = body.data.exit_code === null;
+            lock?.release(key, failed ? true : wrapped || unknown ? undefined : false);
+            await checks?.end(key, !failed && !unknown, body.data.exit_code ?? null);
             const auditKey = `flight-shell-audit:${who.runId}:${body.data.tool_use_id}`;
             if (
               fullAccess &&
@@ -3200,7 +3487,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               { reason: e instanceof Error ? e.message : String(e) },
               "map snapshot unavailable",
             );
-            return reply.code(503).send({ error: "map snapshot unavailable" });
+            const message = e instanceof Error ? e.message : "";
+            // git's own failure text carries paths and flags; the page gets a plain sentence instead
+            const reason = message.startsWith("Command failed")
+              ? "git could not read the checkout"
+              : message;
+            return reply.code(503).send({
+              error: `map snapshot unavailable${/^[\w ,.'-]{1,120}$/.test(reason) ? `: ${reason}` : ""}`,
+            });
           }
         };
 
@@ -3397,6 +3691,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return deps.previews?.list() ?? [];
       });
 
+      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you lists previews)
+      api.get("/design-previews", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        return deps.designPreviews?.list() ?? [];
+      });
+
+      // Reader: docs/runbooks/visual-qa.md#show-it-on-a-branch (the operator's Needs you opens one)
+      api.post<{ Params: { ticket: string } }>(
+        "/design-previews/:ticket/open",
+        async (req, reply) => {
+          if (
+            operatorToken !== undefined &&
+            !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+          )
+            return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+          const ticket = /^[1-9]\d*$/.test(req.params.ticket) ? Number(req.params.ticket) : 0;
+          const view = ticket === 0 ? null : ((await deps.designPreviews?.open(ticket)) ?? null);
+          if (view === null)
+            return reply.code(404).send({ error: "No stored preview for this ticket." });
+          return view;
+        },
+      );
+
       // Reader: apps/server/src/main.ts#PreviewManager (child-preview idle activity)
       api.post<{ Params: { pr: string } }>("/previews/:pr/activity", async (req, reply) => {
         const pr = /^[1-9]\d*$/.test(req.params.pr) ? Number(req.params.pr) : 0;
@@ -3506,7 +3827,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: docs/runbook.md#ticket-history (the ticket page is a later web ticket)
       api.get<{
         Params: { repoId: string; number: string };
-        Querystring: { before?: string; limit?: string };
+        Querystring: { before?: string; limit?: string; questionsBefore?: string };
       }>("/tickets/:repoId/:number", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
@@ -3517,6 +3838,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const before = rawBefore === undefined ? null : decodeCursor(rawBefore);
         if (rawBefore !== undefined && before === null)
           return reply.code(400).send({ error: "before: not a cursor from this endpoint" });
+        const rawQuestionsBefore = req.query.questionsBefore;
+        const questionCursor =
+          rawQuestionsBefore === undefined ? null : decodeCursor(rawQuestionsBefore);
+        if (
+          rawQuestionsBefore !== undefined &&
+          (questionCursor === null ||
+            !/^question:[1-9]\d*$/.test(questionCursor.key) ||
+            !Number.isSafeInteger(Number(questionCursor.key.slice("question:".length))))
+        )
+          return reply
+            .code(400)
+            .send({ error: "questionsBefore: not a question cursor from this endpoint" });
         const limit = rawLimit === undefined ? TICKET_PAGE_DEFAULT : Number(rawLimit);
         if (!Number.isInteger(limit) || limit < 1 || limit > TICKET_PAGE_MAX)
           return reply
@@ -3541,6 +3874,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
           before,
           limit,
+          questionsBefore:
+            questionCursor === null
+              ? null
+              : { at: questionCursor.at, id: Number(questionCursor.key.slice("question:".length)) },
         });
         return history ?? reply.code(404).send({ error: "unknown issue" });
       });
@@ -3712,7 +4049,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             a.kind === "loop" ? "observed" : seatDef(a.seat).loop,
           ]),
         );
-        return capAudit(store.audit(until - Number(match[1]) * 86_400_000, until, kinds));
+        return capAudit(
+          store.audit(
+            until - Number(match[1]) * 86_400_000,
+            until,
+            kinds,
+            config.audit?.thresholds,
+          ),
+        );
+      });
+      // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
+      api.get<{ Querystring: { days?: string } }>("/audit/tokens", async (req, reply) => {
+        const raw = req.query.days ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
+        const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
+        if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
+          return reply
+            .code(400)
+            .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
+        }
+        return tokenAuditView(store, config, now(), days);
       });
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
@@ -3919,17 +4274,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!deps.queueReorder || deps.noLoopWrites)
           return reply.code(409).send({ error: "Queue Priority writes unavailable." });
         try {
+          checkBriefDispatch();
           const result = await resolveQueueReorder(
             deps.queueReorder,
             req.params.key,
             body.data.action,
+            boundBriefGuard(),
           );
           bus.emit("attention");
           bus.emit("boards");
           bus.emit("agents");
-          return reply.code(result.ok ? 200 : 409).send(result);
+          return reply.code(result.ok ? 200 : 502).send(result);
         } catch (e) {
-          return reply.code(409).send({
+          return reply.code(e instanceof QueueReorderError ? 409 : 502).send({
             error:
               e instanceof QueueReorderError ? e.message : "Queue changed; refresh and try again.",
           });
@@ -4161,7 +4518,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const seatAction = <B>(
         path: string,
         schema: z.ZodType<B>,
-        act: (sup: Supervisor, id: string, body: B) => Promise<unknown>,
+        act: (sup: Supervisor, id: string, body: B, req: FastifyRequest) => Promise<unknown>,
         options: { bodyLimit?: number } = {},
       ) =>
         api.post<{ Params: { id: string } }>(path, options, async (req, reply) => {
@@ -4170,7 +4527,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const body = schema.safeParse(req.body);
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           try {
-            const out = await act(supervisor, id, body.data);
+            const out = await act(supervisor, id, body.data, req);
             bus.emit("agents");
             return out;
           } catch (e) {
@@ -4179,7 +4536,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         });
       // A writer's run is looped whenever the engine is on, in a draft repo too (its card is
       // never moved there); a read-only seat's run has no loop.
-      seatAction("/seats/:id/start", StartBody, async (sup, id, b) => {
+      seatAction("/seats/:id/start", StartBody, async (sup, id, b, req) => {
         const pause = pausedSeat(store, id, null);
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         const at = now();
@@ -4201,9 +4558,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           started = await sup.startWatch(id);
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
+          // FLIGHT calling this route is not the operator: the slow pace still holds its starts
+          const holdPace = flightActor(req) === null ? {} : { holdPace: true };
           started = await (deps.engine?.status().on === true && loop === "build"
-            ? startUnpausedRun(store, sup, id, b.issue, { loop: NEW_LOOP, operator: true })
-            : startUnpausedRun(store, sup, id, b.issue, { operator: true }));
+            ? startUnpausedRun(store, sup, id, b.issue, {
+                loop: NEW_LOOP,
+                operator: true,
+                ...holdPace,
+              })
+            : startUnpausedRun(store, sup, id, b.issue, { operator: true, ...holdPace }));
         }
         if (capacity.blocked && b.force === true) {
           const repoId = configuredAgents(config).find(
@@ -4226,22 +4589,92 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       seatAction(
         "/seats/:id/message",
         MessageBody,
-        async (sup, id, b) => {
+        async (sup, id, b, req) => {
+          const sender = commsSender(req);
           const runId = sup.seat(id)?.runId ?? null;
+          // A reply that names a passed question whose run was set aside is that run's answer, not
+          // the run now on the seat's: the text waits in the run's inbox, only that question
+          // closes, and the engine wakes the run. Nothing is written to the run on the seat.
+          const named = b.question === undefined ? null : store.question(b.question);
+          if (b.question !== undefined && (named === null || named.answeredAt !== null)) {
+            throw new SupervisorError(409, "That question is already closed.");
+          }
+          if (named !== null && named.agentId !== id) {
+            throw new SupervisorError(409, "That question belongs to another seat.");
+          }
+          // an answer to a question the operator set aside, whose run has ended, has no run to go to
+          if (named !== null && named.asideAt !== null && store.run(named.runId)?.endedAt != null)
+            throw new SupervisorError(
+              409,
+              "That question was set aside and its run has ended; answer it from its ticket with the set-aside answer route.",
+            );
+          const parked =
+            named !== null &&
+            named.agentId === id &&
+            named.passedAt !== null &&
+            named.runId !== runId &&
+            store.run(named.runId)?.endedAt === null &&
+            store.run(named.runId)?.loop?.aside != null
+              ? named
+              : undefined;
+          if (parked !== undefined) {
+            try {
+              await answerAsideQuestion(
+                {
+                  store,
+                  crew: commsCrew,
+                  knownSecrets: deps.knownSecrets ?? (async () => []),
+                  now,
+                  bus,
+                  senderKind: sender.kind,
+                  beforeWrite: checkBriefDispatch,
+                  reconcileRun: deps.engine?.reconcileRun?.bind(deps.engine),
+                },
+                parked.id,
+                sender.from,
+                b.text,
+              );
+            } catch (e) {
+              throw new SupervisorError(
+                e instanceof AsideAnswerChanged
+                  ? 409
+                  : e instanceof AsideAnswerUnconfirmed
+                    ? 502
+                    : 400,
+                e instanceof Error ? e.message : "Comms message refused.",
+              );
+            }
+            return { ok: true };
+          }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
           try {
-            await sendComms(
+            let delivered = false;
+            let wakeFailed = false;
+            const sent = await sendComms(
               {
                 store,
                 crew: commsCrew,
                 knownSecrets: deps.knownSecrets ?? (async () => []),
                 now,
                 seatSender: false,
+                senderKind: sender.kind,
+                wakeUnlabelled: true,
                 notify: async (seatId, text) => {
-                  await sup.message(seatId, text, { interrupt: b.interrupt === true });
+                  try {
+                    // the text answers no question by itself: only the one it names closes, below
+                    await sup.message(seatId, text, {
+                      interrupt: b.interrupt === true,
+                      questions: "none",
+                    });
+                    delivered = true;
+                  } catch (e) {
+                    // a plain message stays stored for the seat's next turn; only an interrupt must land
+                    if (b.interrupt === true) throw e;
+                    wakeFailed = true;
+                  }
                 },
               },
-              COMMS_CAPCOM,
+              sender.from,
               {
                 to: id,
                 text: b.text,
@@ -4249,6 +4682,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 ref: ticket ?? undefined,
               },
             );
+            // the text itself reached the seat, so its inbox has nothing unread (an in-turn message marks none)
+            if (delivered) store.markCommsInboxRead(id, [sent.id], now());
+            // a retry of the same text wakes the seat again
+            if (wakeFailed) store.markCommsWakeFailed(sent.id, now());
+            // the reply names its question: that one closes, and no other
+            if (named !== null) {
+              store.answerQuestion(named.id, now());
+              bus.emit("attention");
+            }
+            return { ok: true, ...commsSendState(store, sent.id, sent.repeat === true) };
           } catch (e) {
             if (e instanceof SupervisorError) throw e;
             throw new SupervisorError(
@@ -4256,7 +4699,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               e instanceof Error ? e.message : "Comms message refused.",
             );
           }
-          return { ok: true };
         },
         // Bound the encoded request before parsing; accepted messages stay whole.
         { bodyLimit: COMMS_MESSAGE_BODY_LIMIT },
@@ -4337,6 +4779,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           })),
           generatedAt: now(),
         };
+      });
+      // Reader: docs/runbook.md#dependency-chains-api (approved Dependencies build contract).
+      api.get<{ Querystring: { repoId?: string } }>("/dependencies", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const query = z
+          .strictObject({ repoId: z.string().trim().min(1).optional() })
+          .safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: "Invalid dependency query" });
+        const repos = config.repos.filter(
+          (r) => query.data.repoId === undefined || r.id === query.data.repoId,
+        );
+        if (repos.length === 0) return reply.code(404).send({ error: "Repository not found" });
+        const at = now();
+        return repos
+          .flatMap((repo) => readDependencyChains(store, repo.id, at))
+          .sort(compareDependencyChains);
       });
       const CodeHealthQuery = z.strictObject({
         repo: z.string().trim().min(1).max(128),
@@ -4564,6 +5026,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.post("/flight/runaway/lift", async (req, reply) => {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        checkBriefDispatch();
         if (!liftRunaway(store, bus, now()))
           return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
         return { ok: true };
@@ -4586,6 +5049,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const until = Date.parse(body.data.until);
         if (until <= at || until - at > FLIGHT_APPROVAL_MAX_MS)
           return reply.code(400).send({ error: "until must be in the future and within 7 days" });
+        checkBriefDispatch();
         const approval = grantApproval(
           store,
           { rule: body.data.rule, scope: body.data.scope, until, reason: body.data.reason },
@@ -4811,9 +5275,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             allowOwnRepoRefs: true,
           });
           if (problem) return reply.code(400).send({ error: evidenceProblemText(problem) });
+          checkBriefDispatch();
           await writeFile(file, body, { mode: 0o600, flag: "wx" });
           wroteBody = true;
           store.setSetting(attemptKey, body);
+          checkBriefDispatch();
           const result = await (deps.gh ?? createGh())(
             [draft.kind, "comment", String(n), `--repo=${repo.github}`, `--body-file=${file}`],
             { cwd: crewDir(store.path) },
@@ -4912,8 +5378,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const reviewWaiver =
           run.loop.parked?.kind === "review" || run.loop.parked?.kind === "review-ruling";
         const by = flightActor(req) ? "FLIGHT" : "CAPCOM";
+        checkBriefDispatch();
+        const guard = boundBriefGuard();
         const lifted = reviewWaiver
-          ? await deps.engine.onOperatorMessage(run.id, by, { action: "accept" })
+          ? await deps.engine.onOperatorMessage(run.id, by, {
+              action: "accept",
+              ...(guard
+                ? {
+                    beforeLift: async () => {
+                      guard();
+                      return true;
+                    },
+                  }
+                : {}),
+            })
           : await deps.engine.onOperatorMessage(run.id, by);
         if (!lifted.lifted) {
           return reply
@@ -4922,8 +5400,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return { ok: true };
       });
-      // The verdict on a run's `## Controller check`. FLIGHT may record routine evidence, while
-      // checks of its own runtime and approval guidance require an independent controller.
+      // The verdict on a run's `## Controller check`. On a superuser repo FLIGHT records it on any
+      // path; on a standard repo FLIGHT may only record routine evidence.
       // Reader: docs/runbook.md#record-a-controller-check
       api.post<{ Params: { id: string } }>(
         "/runs/:id/controller-check",
@@ -4937,13 +5415,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
           if (
             flightActor(req) &&
+            flightPowersOf(config, run.repoId) !== "superuser" &&
             run.loop.touches?.paths.some((path) =>
               FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
             )
           )
             return reply.code(403).send({
-              error:
-                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+              error: "The operator must check changes to FLIGHT's runtime or approval rules.",
             });
           if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
           if (deps.engine?.controllerCheck === undefined || deps.engine.status().on !== true) {
@@ -4959,6 +5437,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               );
             }
           }
+          checkBriefDispatch();
           const result = await deps.engine.controllerCheck(
             run.id,
             body.data.verdict,
@@ -4973,6 +5452,82 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
+      // Reader: docs/runbook.md#recover-a-preserved-crew-pr (controller recovery, never a waiver).
+      api.post<{ Params: { id: string } }>("/runs/:id/pr-head", async (req, reply) => {
+        if (
+          req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined ||
+          deps.tokens?.resolve(bearer(req))
+        )
+          return reply
+            .code(403)
+            .send({ error: "This action belongs to the operator or independent controller." });
+        const body = z
+          .strictObject({ sha: z.string().regex(/^[a-f0-9]{40}$/) })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: "invalid published head" });
+        const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
+        const repo = config.repos.find((value) => value.id === run?.repoId);
+        const pr =
+          repo && store.pullRequests(repo.id).find((value) => value.number === run?.loop?.prNumber);
+        if (
+          !run?.loop ||
+          run.endedAt !== null ||
+          !repo ||
+          repo.autonomy !== "merge" ||
+          flightPowersOf(config, repo.id) !== "superuser" ||
+          !pr ||
+          pr.state !== "open" ||
+          pr.branch !== run.branch ||
+          pr.headSha !== body.data.sha
+        )
+          return reply.code(409).send({ error: "no matching preserved crew PR" });
+        if (!crewGate(run.agentId, reply)) return reply;
+        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+        if (crewSeatDef(config, run.agentId).loop !== "build" || run.reviewId != null)
+          return reply.code(409).send({ error: "only a preserved build run can adopt a PR head" });
+        if (deps.engine?.status().on !== true || !deps.engine.adoptPrHead)
+          return reply.code(409).send({ error: "the loop engine is off" });
+        try {
+          const subject = await readExternalSubject(
+            deps.gh ?? createGh(),
+            crewDir(store.path),
+            repo,
+            pr.number,
+            body.data.sha,
+          );
+          if (
+            !subject ||
+            subject.branch !== run.branch ||
+            store.pullRequest(repo.id, pr.number)?.headSha !== body.data.sha
+          )
+            return reply
+              .code(409)
+              .send({ error: "the current PR head and provenance could not be verified" });
+        } catch {
+          return reply.code(502).send({ error: "the current PR could not be read" });
+        }
+        if (store.runPush(run.id)?.sha === body.data.sha && store.run(run.id)?.loop?.adopted)
+          return { ok: true };
+        if (!(await deps.engine.adoptPrHead(run.id, body.data.sha, "Controller")))
+          return reply
+            .code(409)
+            .send({ error: "the author is active, its worktree is not clean, or the run is held" });
+        store.addFlightDecision({
+          at: now(),
+          kind: "sync",
+          seatId: null,
+          targetRunId: run.id,
+          ref: run.ticket,
+          questionId: null,
+          about: `Controller adopted PR ${pr.number}`,
+          decision: `Adopted published head ${body.data.sha}; fresh CI and independent QA are required.`,
+          basis:
+            "Explicit controller recovery of an inactive preserved crew PR. No author checks, waiver or clearance are carried over.",
+        });
+        bus.emit("agents");
+        return { ok: true };
+      });
       const externalTarget = async (
         repoId: string,
         number: number,
@@ -4988,7 +5543,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           pr.state !== "open" ||
           !sha ||
           repo.autonomy !== "merge" ||
-          store.runsOnBranch(repoId, pr.branch).some((run) => run.reviewId == null)
+          branchOwned(config, store, repoId, pr.branch, pr.ticket)
         ) {
           reply.code(404).send({ error: "no external PR is waiting here" });
           return null;
@@ -5048,12 +5603,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           const control = externalPrControl(store, target.repo.id, number, target.sha);
           if (!control?.controllerRequired)
             return reply.code(404).send({ error: "this head has no outstanding controller check" });
-          if (flightActor(req) && control.protectedController)
+          if (
+            flightActor(req) &&
+            flightPowersOf(config, target.repo.id) !== "superuser" &&
+            control.protectedController
+          )
             return reply.code(403).send({
-              error:
-                "An independent controller must check changes to FLIGHT's runtime or approval rules.",
+              error: "The operator must check changes to FLIGHT's runtime or approval rules.",
             });
           if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
+          checkBriefDispatch();
           setExternalPrControl(store, target.repo.id, number, target.sha, {
             ...control,
             controllerPassed: body.data.verdict === "pass",
@@ -5061,6 +5620,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           });
           store.addHubEvent(
             `Controller check ${body.data.verdict} for external PR ${target.repo.id}#${number} at ${target.sha}${body.data.note ? `: ${cleanText(body.data.note, 1000)}` : ""}`,
+            now(),
+          );
+          bus.emit("boards");
+          return { ok: true };
+        },
+      );
+      // Reader: docs/runbook.md#external-pr-merge-and-sign-off (asking this hub to review a hand-opened PR).
+      api.post<{ Params: { repoId: string; number: string } }>(
+        "/prs/:repoId/:number/review-request",
+        async (req, reply) => {
+          const body = z
+            .strictObject({
+              sha: z.string().regex(/^[a-f0-9]{40}$/i),
+              action: z.enum(["ask", "withdraw"]).default("ask"),
+            })
+            .safeParse(req.body);
+          const number = /^[1-9]\d*$/.test(req.params.number) ? Number(req.params.number) : 0;
+          if (!body.success || !Number.isSafeInteger(number) || number < 1)
+            return reply.code(400).send({ error: "invalid review-request" });
+          const who = flightActor(req) ? "FLIGHT" : "Controller";
+          if (body.data.action === "withdraw") {
+            // taking an ask back only narrows what this hub does: no GitHub read, works on a closed PR
+            if (!config.repos.some((r) => r.id === req.params.repoId))
+              return reply.code(404).send({ error: "unknown repo" });
+            if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+            if (withdrawExternalReview(store, req.params.repoId, number)) {
+              store.addHubEvent(
+                `${who} withdrew the ask for a QA review of external PR ${req.params.repoId}#${number}`,
+                now(),
+              );
+              bus.emit("boards");
+            }
+            return { ok: true };
+          }
+          const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
+          if (!target) return reply;
+          // asking again for the same head changes nothing and says nothing
+          if (externalReviewAsked(store, target.repo.id, number, target.sha)) return { ok: true };
+          askExternalReview(
+            store,
+            target.repo.id,
+            number,
+            flightActor(req) ? "FLIGHT" : "CAPCOM",
+            now(),
+            target.sha,
+          );
+          store.addHubEvent(
+            `${who} asked for a QA review of external PR ${target.repo.id}#${number} at ${target.sha}`,
             now(),
           );
           bus.emit("boards");
@@ -5095,6 +5702,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               .code(403)
               .send({ error: "Only the controller may change this operator merge hold." });
           if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
+          checkBriefDispatch();
           setExternalMergeHold(
             store,
             target.repo.id,
@@ -5139,6 +5747,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (!control?.uatRequired)
               return reply.code(404).send({ error: "this PR is not waiting for acceptance" });
             if (!(await externalNoteAllowed(body.data.note, reply))) return reply;
+            checkBriefDispatch();
             setExternalPrControl(store, repo.id, n, target.sha, {
               ...control,
               uatAccepted: body.data.action === "accept",
@@ -5170,6 +5779,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               );
             }
           }
+          checkBriefDispatch();
           const result = await deps.engine.uat(
             run.id,
             body.data.action,
@@ -5199,6 +5809,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!engine?.holdMerge || !engine.releaseMergeHold || engine.status().on !== true) {
           return reply.code(409).send({ error: "the loop engine is off" });
         }
+        checkBriefDispatch();
         const result =
           body.data.action === "hold"
             ? await engine.holdMerge(
@@ -5240,16 +5851,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
           }
           let commsError: unknown = null;
+          let commsStored = false;
+          checkBriefDispatch();
+          const sender = commsSender(req);
           const result = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
             kinds: [kind],
             beforeLift: async () => {
               try {
-                await sendComms({ store, crew: commsCrew, knownSecrets, now }, COMMS_CAPCOM, {
-                  to: run.agentId,
-                  text: body.data.text,
-                  ref: run.ticket ?? undefined,
-                  targetRunId: run.id,
-                });
+                checkBriefDispatch();
+                await sendComms(
+                  {
+                    store,
+                    crew: commsCrew,
+                    knownSecrets,
+                    now,
+                    beforeWrite: checkBriefDispatch,
+                    senderKind: sender.kind,
+                  },
+                  sender.from,
+                  {
+                    to: run.agentId,
+                    text: body.data.text,
+                    ref: run.ticket ?? undefined,
+                    targetRunId: run.id,
+                  },
+                );
+                commsStored = true;
                 return true;
               } catch (e) {
                 commsError = e;
@@ -5266,7 +5893,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               reply,
             );
           if (!result.lifted)
-            return reply.code(409).send({
+            return reply.code(commsStored ? 502 : 409).send({
               error: `the review park could not be resumed for rework: ${operatorRefusalText(result.reason)}`,
             });
           return { ok: true };
@@ -5422,12 +6049,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const scope = viewScope(req.query.session);
         if (scope === null) return reply.code(404).send({ error: "unknown session" });
         const at = now();
-        return overviewSummary(store, at, {
-          repoIds: scope.repoIds,
-          pipelineRepoIds: scope.pipelineRepoIds,
-          timezone: config.operator.timezone,
-          attention: sharedAttention(),
-        });
+        return {
+          ...overviewSummary(store, at, {
+            repoIds: scope.repoIds,
+            pipelineRepoIds: scope.pipelineRepoIds,
+            timezone: config.operator.timezone,
+            attention: sharedAttention(),
+          }),
+          pace: paceView(store, config, at),
+        };
       });
 
       // The Update button. Its texts are fixed. The commands' output goes to update.log, which GET
@@ -5463,10 +6093,31 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = NoBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         if (!updater) return reply.code(409).send({ error: UPDATE_UNAVAILABLE, logged: false });
+        // FLIGHT runs a held Update on its own superuser repo, once no other seat is working
+        const actor = flightActor(req);
+        if (actor !== null) {
+          const repoId = configuredAgents(config).find((a) => a.id === actor.seatId)?.repoId;
+          if (repoId === undefined || flightPowersOf(config, repoId) !== "superuser")
+            return reply
+              .code(403)
+              .send({ error: "Only FLIGHT on a superuser repo runs Update.", logged: false });
+          // FLIGHT runs the Update the hub held for a person, not any Update
+          if (!store.notes().some((n) => n.key === HUB_UPDATE_HELD_KEY))
+            return reply
+              .code(409)
+              .send({ error: "No Update is held for a person.", logged: false });
+          const working = (supervisor?.busy() ?? []).find((b) => b.seatId !== actor.seatId);
+          if (working !== undefined)
+            return reply.code(409).send({
+              error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
+              logged: false,
+            });
+        }
         try {
           const out = await updater.update();
           if ("restarting" in out) updater.restart();
-          if (!("upToDate" in out)) store.addHubEvent("Updated manually", now());
+          if (!("upToDate" in out))
+            store.addHubEvent(actor === null ? "Updated manually" : "Updated by FLIGHT", now());
           return "restarting" in out ? reply.code(202).send(out) : out;
         } catch (e) {
           captureError(reply, e);
@@ -5489,21 +6140,61 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
+      const needsYou: NeedsYouContext | null =
+        deps.needsYou === undefined
+          ? null
+          : {
+              ...deps.needsYou,
+              config,
+              store,
+              bus,
+              gh: deps.gh ?? createGh(),
+              gql: githubGql,
+              dbPath: store.path,
+              knownSecrets:
+                deps.knownSecrets ??
+                (async () => {
+                  throw new Error("secret scan unavailable");
+                }),
+              ...(deps.supervisor === undefined ? {} : { supervisor: deps.supervisor }),
+              items: () => sharedAttention(),
+              now,
+              log: (line) => app.log.warn(line),
+            };
+      const pinnedFor = (item: AttentionItem): AttentionItem => {
+        const offers = needsYou === null ? undefined : offersFor(needsYou, item);
+        return isOperatorItem(item)
+          ? {
+              ...pinned(item, store, config),
+              ...(needsYouAlert(item) || hubAlert(item, store) ? { alert: true as const } : {}),
+              ...(offers === undefined ? {} : { offers }),
+            }
+          : item;
+      };
       api.get(
         "/attention",
         async (): Promise<AttentionItem[]> =>
           sharedAttention().map((item) =>
-            item.kind === "tag" && item.text.length > 170
-              ? { ...item, text: `${item.text.slice(0, 169)}…` }
-              : item,
+            // the operator's items carry their ticket and PR with titles (#1543)
+            pinnedFor(
+              item.kind === "tag" && item.text.length > 170
+                ? { ...item, text: `${item.text.slice(0, 169)}…` }
+                : item,
+            ),
           ),
+      );
+      // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
+      registerBriefChoiceRoutes(api, app, deps, flightActor);
+      // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-flight-s-side-flight-is-the-gate (the Answered group; the web side is a follow-up ticket)
+      api.get("/attention/answered", async () =>
+        store.questionClosures(now() - ANSWERED_WINDOW_MS, ANSWERED_LIMIT),
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (whole tag message on open)
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
-        return item ?? reply.code(404).send({ error: "Item is no longer open." });
+        return item ? pinnedFor(item) : reply.code(404).send({ error: "Item is no longer open." });
       });
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
+      // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>
         attentionItems(
           config,
@@ -5513,14 +6204,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           sharedCrew().rows,
           deps.hubLogin?.() ?? null,
           true,
-        ).filter((i) => i.hold),
+        ).filter((i) => i.hold && !nothingForOperator(i)),
       );
-      // Reader: apps/web/src/comms/Decisions.tsx
+      // Reader: apps/web/src/needs/HoldItem.tsx
       api.post<{ Params: { key: string } }>("/attention/:key/hold", async (req, reply) => {
         const body = AttentionHoldInput.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: attentionHoldError(body.error) });
         if (!sharedAttention().some((i) => i.key === req.params.key))
           return reply.code(404).send({ error: "Item is no longer waiting." });
+        checkBriefDispatch();
         if (
           !holdItem(store, req.params.key, body.data.reason, body.data.condition, "operator", now())
         )
@@ -5530,7 +6222,78 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("attention");
         return { ok: true };
       });
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the Held group)
+      const answerAction = (
+        reply: { code: (n: number) => { send: (b: unknown) => unknown } },
+        r: ActionResult,
+      ) => (r.ok ? { ok: true } : reply.code(r.status).send({ error: r.error }));
+      // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-the-operator-s-side (the Not now button; the web side is a follow-up ticket)
+      api.post<{ Params: { key: string } }>("/attention/:key/not-now", async (req, reply) => {
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Expected an empty object." });
+        if (needsYou === null) return reply.code(409).send({ error: "Not now is not available." });
+        return answerAction(reply, await notNowQuestion(needsYou, req.params.key));
+      });
+      // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-the-operator-s-side (the Drop button; the web side is a follow-up ticket)
+      api.post<{ Params: { key: string } }>("/attention/:key/drop", async (req, reply) => {
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Expected an empty object." });
+        if (needsYou === null) return reply.code(409).send({ error: "Drop is not available." });
+        return answerAction(reply, await dropQuestion(needsYou, req.params.key));
+      });
+      const asideTicket = (params: { repoId: string; number: string }) => {
+        const repo = config.repos.find((r) => r.id === params.repoId);
+        const n = /^[1-9]\d*$/.test(params.number) ? Number(params.number) : 0;
+        return repo === undefined || n === 0 || n > MAX_ISSUE_NUMBER ? null : { repo, n };
+      };
+      // Reader: docs/runbook.md#answering-a-set-aside-question (the Ticket page's answer box is a later web ticket)
+      api.get<{ Params: { repoId: string; number: string } }>(
+        "/tickets/:repoId/:number/set-aside",
+        async (req, reply) => {
+          const t = asideTicket(req.params);
+          if (t === null) return reply.code(404).send({ error: "unknown ticket" });
+          return setAsideQuestions(store, t.repo.id, t.n);
+        },
+      );
+      // Reader: docs/runbook.md#answering-a-set-aside-question (the Ticket page's answer box is a later web ticket)
+      api.post<{ Params: { repoId: string; number: string; id: string } }>(
+        "/tickets/:repoId/:number/set-aside/:id/answer",
+        async (req, reply) => {
+          const t = asideTicket(req.params);
+          if (t === null) return reply.code(404).send({ error: "unknown ticket" });
+          const body = z.strictObject({ text: MessageBody.shape.text }).safeParse(req.body);
+          if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+          if (needsYou === null)
+            return reply.code(409).send({ error: "Answering is not available." });
+          const id = /^[1-9]\d*$/.test(req.params.id) ? Number(req.params.id) : 0;
+          if (id === 0) return reply.code(404).send({ error: "unknown question" });
+          const sender = commsSender(req);
+          return answerAction(
+            reply,
+            await answerSetAside(
+              needsYou,
+              t.repo.id,
+              t.n,
+              id,
+              body.data.text,
+              async (seat, ticket, runId, text) => {
+                if (!commsCrew().includes(seat)) return;
+                await sendComms(
+                  {
+                    store,
+                    crew: commsCrew,
+                    knownSecrets: deps.knownSecrets ?? (async () => []),
+                    now,
+                    senderKind: sender.kind,
+                  },
+                  sender.from,
+                  { to: seat, text, ref: ticket, targetRunId: runId },
+                );
+              },
+            ),
+          );
+        },
+      );
+      // Reader: apps/web/src/flight/HeldNeeds.tsx (the release button)
       api.post<{ Params: { key: string } }>("/attention/:key/hold/release", async (req, reply) => {
         if (!NoBody.safeParse(req.body).success)
           return reply.code(400).send({ error: "Expected an empty object." });
@@ -5549,7 +6312,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           deps.lock?.state() ?? NO_LOCK,
           sharedCrew().rows,
           deps.hubLogin?.() ?? null,
-        ).find((item) => item.key === key && !item.acked);
+          // read is not resolved: the operator discusses an item they have opened (#1543)
+        ).find((item) => item.key === key && (!item.acked || isOperatorItem(item)));
         return item ? { ...item, version: attentionVersion(item) } : undefined;
       };
       const openDiscussion = (item: AttentionItem & { version: string }) => {
@@ -5558,7 +6322,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ? brief.options.find((o) => o.id === brief.recommendedOptionId)
           : undefined;
         const text = recommended?.description
-          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description}. What would help you decide? I can pull the Teams thread or the code.`
+          ? `Short version: ${brief?.recommendation} I lean towards "${recommended.label}": ${recommended.description.replace(/[.\s]+$/, "")}. What would help you decide? I can pull the Teams thread or the code.`
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
@@ -5589,6 +6353,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const item = currentDiscussionItem(req.params.key);
         if (!item || item.version !== body.data.version)
           return reply.code(409).send({ error: "Item changed or ended; refresh before sending." });
+        // no FLIGHT seat is configured: nothing would ever pick the reply up
+        const flight = flightSeat(config);
+        if (!flight) return reply.code(409).send({ error: "This hub has no FLIGHT seat." });
         const thread = openDiscussion({ ...item, version: body.data.version });
         const { messageId, text } = body.data;
         try {
@@ -5598,9 +6365,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         if (store.discussionSent(thread.id, messageId))
           return store.discussion(item.key, thread.id);
-        const flight = flightSeat(config);
-        if (!flight || !supervisor || !crewGate(flight.seat.id, reply))
-          return reply.sent ? reply : reply.code(503).send({ error: "FLIGHT is unavailable." });
+        // The reply is stored whether or not FLIGHT is running: an unsent one is in FLIGHT's wake
+        // (pendingDiscussions) when it starts, so nothing here answers "FLIGHT is unavailable".
+        const flightOn = supervisor?.status().enabled === true;
+        if (!supervisor || !flightOn) return store.discussion(item.key, thread.id);
         const sendKey = `${thread.id}:${messageId}`;
         if (discussionSends.has(sendKey))
           return reply.code(409).send({ error: "Message is being sent." });
@@ -5622,11 +6390,107 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           bus.emit("attention");
           return store.discussion(item.key, thread.id);
         } catch (e) {
+          // not pushed now (FLIGHT is down or between turns): it stays stored, and the wake carries it
           captureError(reply, e);
-          return reply.code(503).send({ error: "Could not send to FLIGHT. Retry this message." });
+          return store.discussion(item.key, thread.id);
         } finally {
           discussionSends.delete(sendKey);
         }
+      });
+
+      api.register(async (api) => {
+        // Only Clear accepts an empty JSON stream; other routes keep the standard parser.
+        const parseJson = api.getDefaultJsonParser("error", "error");
+        api.removeContentTypeParser("application/json");
+        api.addContentTypeParser<string>(
+          "application/json",
+          { parseAs: "string" },
+          (req, body, done) => {
+            if (body.length === 0) done(null, {});
+            else parseJson(req, body, done);
+          },
+        );
+        // Reader: docs/runbook.md#clearing-a-needs-you-item (#1625 supplies the web control)
+        api.post<{ Params: { key: string } }>("/attention/:key/clear", async (req, reply) => {
+          if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined)
+            return reply.code(403).send({ error: "Only the operator can clear an item." });
+          if (!NoBody.safeParse(req.body === undefined ? {} : req.body).success)
+            return reply.code(400).send({ error: "Clear takes an empty body." });
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const { key } = req.params;
+          if (key === `note:${FLIGHT_RUNAWAY_NOTE_KEY}`)
+            return reply.code(409).send({ error: "Use Lift to release the runaway flag." });
+          const item = attentionItems(
+            config,
+            store,
+            now(),
+            deps.lock?.state() ?? NO_LOCK,
+            sharedCrew().rows,
+            deps.hubLogin?.() ?? null,
+            true,
+          ).find((i) => i.key === key);
+          if (!item) return reply.code(404).send({ error: "That item is no longer waiting." });
+          const sender = commsSender(req);
+          const cleared = await clearAttentionItem(
+            {
+              config,
+              store,
+              bus,
+              now,
+              by: sender.from,
+              actorName: sender.kind === "controller" ? "The controller" : "The operator",
+              reconcileRun: deps.engine?.reconcileRun?.bind(deps.engine),
+            },
+            item,
+          );
+          return cleared
+            ? { cleared: key }
+            : reply.code(404).send({ error: "That item is no longer waiting." });
+        });
+      });
+
+      const ChooseBody = z.strictObject({
+        optionId: z.string().min(1).max(100),
+        briefAt: z.number().int().nonnegative(),
+      });
+      // Reader: apps/web/src/comms/answer.ts#sendAnswer (the page's choice of an option)
+      api.post<{ Params: { key: string } }>("/attention/:key/choose", async (req, reply) => {
+        const body = ChooseBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const { key } = req.params;
+        try {
+          const receipt = await chooseOption(
+            {
+              config,
+              store,
+              now,
+              crew: commsCrew,
+              knownSecrets: deps.knownSecrets ?? (async () => []),
+              sender: commsSender(req),
+              wake: (seatId) => wakeSeat(seatId, "", commsSender(req).from),
+              ...(deps.engine?.reconcileRun === undefined
+                ? {}
+                : {
+                    reconcileRun: (runId: string) =>
+                      deps.engine?.reconcileRun?.(runId) ?? Promise.resolve(),
+                  }),
+            },
+            currentDiscussionItem(key),
+            key,
+            body.data,
+          );
+          bus.emit("attention");
+          bus.emit("agents");
+          return receipt;
+        } catch (e) {
+          if (e instanceof ChoiceRefused) return reply.code(e.status).send({ error: e.message });
+          throw e;
+        }
+      });
+      // Reader: apps/web/src/comms/answer.ts#sendAnswer (the receipt after a choice)
+      api.get<{ Params: { key: string } }>("/attention/:key/choice", async (req, reply) => {
+        const receipt = choiceReceipt(store, req.params.key);
+        return receipt ?? reply.code(404).send({ error: "No choice was made on that question." });
       });
 
       api.post("/attention/ack", async (req, reply) => {
@@ -5650,6 +6514,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
         const noteKey = key.startsWith(NOTE_KEY) ? key.slice(NOTE_KEY.length) : "";
+        checkBriefDispatch();
         // This note is another breaker-recovery route. Preserve the same independent operator
         // authority as /flight/runaway/lift, including decoded attention keys. The header was
         // validated before body parsing: keep that provenance if the watch run has since ended.
@@ -5727,7 +6592,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      // Reader: apps/web/src/flight/AskedOfYou.tsx (the person cards)
+      // Reader: apps/web/src/pages/Needs.tsx (the person cards)
       api.get(
         "/notifications",
         async (): Promise<NotificationsView> => notificationsView(config, store, now()),
@@ -5743,6 +6608,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         const key = req.params.key;
+        checkBriefDispatch();
         const how = body.data.how ?? "marked";
         const person = store.briefs().get(key)?.person;
         if (
@@ -5799,6 +6665,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       api.get("/settings/away", async (): Promise<AwaySettings> => readAwaySettings(store));
+
+      // Reader: docs/runbook.md#slow-pace (the Overview reads the same view from GET /api/overview)
+      api.get("/settings/pace", async (): Promise<PaceSettings> => readPaceSettings(store));
+
+      // Reader: docs/runbook.md#slow-pace (set by the operator or FLIGHT; the Overview shows it)
+      api.post("/settings/pace", async (req, reply) => {
+        const body = PaceInput.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        const at = now();
+        if (body.data.on && body.data.until <= at)
+          return reply.code(400).send({ error: "until must be a time in the future" });
+        // Counting starts from the moment it was switched on; saving it again keeps that moment.
+        const since = activePace(store, at)?.since ?? at;
+        const saved: PaceSettings = { ...body.data, since };
+        store.setSetting(PACE_SETTING, JSON.stringify(saved));
+        bus.emit("settings");
+        return saved;
+      });
 
       // Reader: apps/web/src/shell/AwayDigest.tsx
       api.get<{ Querystring: { meta?: unknown } }>("/away/digest", async (req, reply) => {
@@ -5919,6 +6803,17 @@ export function githubRate(store: Store): GithubRateState {
  * short for the 24h pace model), from the current window's samples only (`at >= resetAt - 7d`,
  * resetAt from the latest sample), so a previous window's pace never leaks into the projection.
  */
+
+/** A window's readings for a chart: the last in each hour, oldest first, so the reply stays small. */
+function hourlyReadings(samples: readonly UsageSample[]): { at: number; pct: number }[] {
+  const hours = new Map<number, { at: number; pct: number }>();
+  for (const sample of samples) {
+    const hour = Math.floor(sample.at / 3_600_000);
+    const kept = hours.get(hour);
+    if (!kept || sample.at >= kept.at) hours.set(hour, { at: sample.at, pct: sample.pct });
+  }
+  return [...hours.values()].sort((a, b) => a.at - b.at);
+}
 export function limitRows(config: CcConfig, store: Store, now: number): LimitRow[] {
   const rows: LimitRow[] = [];
   for (const acct of config.accounts) {
@@ -5966,13 +6861,15 @@ export function limitRows(config: CcConfig, store: Store, now: number): LimitRow
         });
         continue;
       }
-      const samples: UsageSample[] = store.usage(acct.id, window, resetAt - WEEK_MS);
+      const week = weeklyProjection(store, acct.id);
+      const samples: UsageSample[] = week?.samples ?? [];
       rows.push({
         ...base,
         window,
-        projected: projectAtReset(samples, resetAt),
+        projected: week?.projected ?? null,
         stopForecast: stopForecast(samples, acct.stopAt, resetAt),
         fullAt: stopForecast(samples, METER_FULL_PCT, resetAt),
+        history: hourlyReadings(samples),
       });
     }
   }

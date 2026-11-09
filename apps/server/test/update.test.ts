@@ -56,8 +56,10 @@ import {
   VERSION_CHECK_FLOOR_MS,
   VERSION_CHECK_MS,
 } from "../src/update.ts";
+import { blockedHere } from "./sandbox-gaps.ts";
 
 const execFileP = promisify(execFile);
+const itInstall = it.skipIf(await blockedHere("install"));
 
 let dir: string;
 let origin: string;
@@ -679,65 +681,68 @@ describe("update", () => {
     expect(readFileSync(web("dist", "index.html"), "utf8")).toBe("old");
   });
 
-  it("installs a package added by a lockfile update through node_modules' store", async () => {
-    const store = join(dir, "operator-store");
-    const pnpmEnv = {
-      ...process.env,
-      CI: "false",
-      NPM_CONFIG_WORKSPACE_DIR: dev,
-      pnpm_config_store_dir: store,
-    };
-    const packageJson = (dependencies: Record<string, string>) =>
-      `${JSON.stringify({ name: "hub", version: "1.0.0", private: true, dependencies })}\n`;
+  itInstall(
+    "installs a package added by a lockfile update through node_modules' store",
+    async () => {
+      const store = join(dir, "operator-store");
+      const pnpmEnv = {
+        ...process.env,
+        CI: "false",
+        NPM_CONFIG_WORKSPACE_DIR: dev,
+        pnpm_config_store_dir: store,
+      };
+      const packageJson = (dependencies: Record<string, string>) =>
+        `${JSON.stringify({ name: "hub", version: "1.0.0", private: true, dependencies })}\n`;
 
-    mkdirSync(join(dev, "vendor", "base-package"), { recursive: true });
-    writeFileSync(
-      join(dev, "vendor", "base-package", "package.json"),
-      JSON.stringify({ name: "base-package", version: "1.0.0" }),
-    );
-    writeFileSync(
-      join(dev, "package.json"),
-      packageJson({ "base-package": "file:vendor/base-package" }),
-    );
-    execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
-    git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/base-package/package.json");
-    git(dev, "commit", "-qm", "initial pnpm workspace");
-    git(dev, "push", "-q", "origin", "main");
-    git(hub, "pull", "--ff-only", "origin", "main");
-    execFileSync("pnpm", ["install", "--frozen-lockfile"], {
-      cwd: hub,
-      env: { ...pnpmEnv, NPM_CONFIG_WORKSPACE_DIR: hub },
-    });
+      mkdirSync(join(dev, "vendor", "base-package"), { recursive: true });
+      writeFileSync(
+        join(dev, "vendor", "base-package", "package.json"),
+        JSON.stringify({ name: "base-package", version: "1.0.0" }),
+      );
+      writeFileSync(
+        join(dev, "package.json"),
+        packageJson({ "base-package": "file:vendor/base-package" }),
+      );
+      execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
+      git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/base-package/package.json");
+      git(dev, "commit", "-qm", "initial pnpm workspace");
+      git(dev, "push", "-q", "origin", "main");
+      git(hub, "pull", "--ff-only", "origin", "main");
+      execFileSync("pnpm", ["install", "--frozen-lockfile"], {
+        cwd: hub,
+        env: { ...pnpmEnv, NPM_CONFIG_WORKSPACE_DIR: hub },
+      });
 
-    mkdirSync(join(dev, "vendor", "added-package"), { recursive: true });
-    writeFileSync(
-      join(dev, "vendor", "added-package", "package.json"),
-      JSON.stringify({ name: "added-package", version: "1.0.0" }),
-    );
-    writeFileSync(
-      join(dev, "package.json"),
-      packageJson({
-        "base-package": "file:vendor/base-package",
-        "added-package": "file:vendor/added-package",
-      }),
-    );
-    execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
-    git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/added-package/package.json");
-    git(dev, "commit", "-qm", "add package");
-    git(dev, "push", "-q", "origin", "main");
+      mkdirSync(join(dev, "vendor", "added-package"), { recursive: true });
+      writeFileSync(
+        join(dev, "vendor", "added-package", "package.json"),
+        JSON.stringify({ name: "added-package", version: "1.0.0" }),
+      );
+      writeFileSync(
+        join(dev, "package.json"),
+        packageJson({
+          "base-package": "file:vendor/base-package",
+          "added-package": "file:vendor/added-package",
+        }),
+      );
+      execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
+      git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/added-package/package.json");
+      git(dev, "commit", "-qm", "add package");
+      git(dev, "push", "-q", "origin", "main");
 
-    const fake = fakeExec();
-    const exec: Exec = (file, args, options) =>
-      file === "pnpm" && args[0] === "install"
-        ? execFileP(file, [...args], { cwd: options.cwd, env: options.env, encoding: "utf8" })
-        : fake.exec(file, args, options);
-    const { u } = updater({ exec });
-    await expect(u.update()).resolves.toEqual({ restarting: true });
+      const fake = fakeExec();
+      const exec: Exec = (file, args, options) =>
+        file === "pnpm" && args[0] === "install"
+          ? execFileP(file, [...args], { cwd: options.cwd, env: options.env, encoding: "utf8" })
+          : fake.exec(file, args, options);
+      const { u } = updater({ exec });
+      await expect(u.update()).resolves.toEqual({ restarting: true });
 
-    expect(
-      readFileSync(join(hub, "node_modules", "added-package", "package.json"), "utf8"),
-    ).toContain('"added-package"');
-  });
+      expect(
+        readFileSync(join(hub, "node_modules", "added-package", "package.json"), "utf8"),
+      ).toContain('"added-package"');
+    },
+  );
 
   it("leaves node_modules alone when pnpm says it needs a non-interactive purge", async () => {
     upstreamCommit("pnpm-lock.yaml");
@@ -1558,7 +1563,7 @@ describe("auto update", () => {
       expect(a.held).toHaveBeenCalledWith(expect.objectContaining({ paths: ["docs/linked"] }));
       const held = a.held.mock.calls.at(-1)?.[0];
       expect(held?.unsafePaths).toEqual(["docs/linked"]);
-      expect(hubCodeHeldText(held)).toContain("symlink or submodule");
+      expect(hubCodeHeldText(held)).toContain("shortcut to another file or folder");
       await expect(a.u.update({ auto: true })).rejects.toMatchObject({
         status: 409,
         message: HUB_CODE_NEEDS_PERSON,
@@ -1640,13 +1645,24 @@ describe("auto update", () => {
     expect(a.held).toHaveBeenCalledWith(null);
   });
 
-  it("the held text names the commits and the paths", () => {
+  it("the held text says what is waiting in words, with counts, not commits or paths", () => {
     const text = hubCodeHeldText({
-      commits: ["a1 one", "b2 two"],
+      commits: ["a1b2c3d one", "b2c3d4e two"],
       paths: ["apps/server/src/x.ts", "package.json"],
     });
-    expect(text).toContain("a1 one, b2 two");
-    expect(text).toContain("apps/server/src/x.ts, package.json");
+    expect(text).toContain("2 changes");
+    expect(text).toContain("2 files");
+    expect(text).not.toMatch(/a1b2c3d|\.ts|package\.json|\/|Commits:|Paths:/);
+    expect(text).not.toMatch(/\d{10,}|\w+:[\w-]+:\d/);
+    const one = hubCodeHeldText({ commits: ["a1b2c3d one"], paths: ["package.json"] });
+    expect(one).toContain("1 change ");
+    expect(one).toContain("1 file");
+    const link = hubCodeHeldText({
+      commits: ["a1b2c3d one"],
+      paths: ["docs/linked"],
+      unsafePaths: ["docs/linked"],
+    });
+    expect(link).not.toMatch(/docs\/linked|a1b2c3d/);
   });
 
   it("does nothing when main has not moved", async () => {

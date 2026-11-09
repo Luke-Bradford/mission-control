@@ -19,7 +19,7 @@
 }
 
 .expandable.open .expandable-content {
-  max-height: min(50vh, 24rem);
+  max-height: min(calc(50 * var(--vh)), 24rem);
   overflow: auto;
 }
 
@@ -43,7 +43,7 @@
 }
 
 .disclosure[open] > .expandable-content {
-  max-height: min(50vh, 24rem);
+  max-height: min(calc(50 * var(--vh)), 24rem);
   overflow: auto;
   scrollbar-gutter: stable;
 }

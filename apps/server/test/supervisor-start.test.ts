@@ -54,6 +54,7 @@ import {
   NEW_LOOP,
   notOnBoardText,
   otherLaneText,
+  PACE_SETTING,
   PNPM_STORE_ENV,
   type Profile,
   pathGrantProblem,
@@ -63,6 +64,7 @@ import {
   type RepoRules,
   researchText,
   retiringText,
+  SEAT_SANDBOX_ENV,
   SHARED_PNPM_STORE_NAME,
   START_NO_RULES,
   startClosedText,
@@ -113,6 +115,7 @@ import {
 } from "../src/store.ts";
 import { crewRefusal } from "../src/update.ts";
 import { writeCodexHostileFiles } from "./fixtures/codex-hostile.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   BRANCH,
   boardCard,
@@ -143,6 +146,8 @@ import {
   untilGone,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 vi.mock("node:os", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:os")>();
@@ -208,6 +213,43 @@ describe("startRun eligibility", () => {
     await refused(422, AWAY_QUOTA_REFUSED);
   });
 
+  describe("the budget brake", () => {
+    const brake = () => {
+      const at = Date.now();
+      for (const [t, pct] of [
+        [at - 6 * 3_600_000, 40],
+        [at, 60],
+      ] as const)
+        store.addUsage({
+          accountId: "claude-main",
+          window: "7d",
+          at: t,
+          resetAt: at + 86_400_000,
+          pct,
+          source: "test",
+        });
+    };
+    it("refuses a new start while the weekly projection passes 100%", async () => {
+      brake();
+      const claim = vi.fn(async () => {});
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}), claim });
+      sup.start();
+      const e = await refusal(sup.startRun("guido-1", 42));
+      expect(e.status).toBe(422);
+      expect(e.message).toMatch(
+        /^Not started: the budget brake is on\. GUIDO-1's account claude-main/,
+      );
+      expect(claim).not.toHaveBeenCalled();
+      expect(store.seatSession("guido-1")).toBeNull();
+    });
+    it("lets the operator's explicit start through", async () => {
+      brake();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+      sup.start();
+      expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
+    });
+  });
+
   it("allows the operator's manual start while away with pickUp off and unknown quota", async () => {
     store.setSetting(
       AWAY_SETTING,
@@ -215,6 +257,31 @@ describe("startRun eligibility", () => {
     );
     const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
     sup.start();
+    const started = await sup.startRun("guido-1", 42, { operator: true });
+    expect(started.runId).toBeTruthy();
+  });
+
+  it("holds a start for the slow pace unless the operator makes it, and holds FLIGHT's operator route", async () => {
+    const at = Date.now();
+    store.setSetting(
+      PACE_SETTING,
+      JSON.stringify({
+        on: true,
+        until: at + 3_600_000,
+        since: at - 1,
+        labels: ["bug"],
+        maxStarts: 2,
+        note: "weekend",
+      }),
+    );
+    await refused(
+      422,
+      "Slow pace (weekend) is on and starts only tickets labelled bug: mc#42 waits.",
+    );
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42, { operator: true, holdPace: true }));
+    expect(e.message).toMatch(/^Slow pace/);
     const started = await sup.startRun("guido-1", 42, { operator: true });
     expect(started.runId).toBeTruthy();
   });
@@ -808,6 +875,52 @@ describe("startRun", () => {
     expect(run?.transcriptPath).toBe(join(dir, "db", "crew", `${out.runId}.jsonl`));
   });
 
+  it("starts a run on a ticket with the ticket's answered questions in its brief", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "old-run",
+      agentId: "retro",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: "haiku",
+      // no branch: a run that left one would start the next as a handoff
+      branch: null,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    const asked = store.addQuestion({
+      agentId: "retro",
+      runId: "old-run",
+      text: "Which store shape?",
+      at: 1,
+    });
+    store.answerQuestion(asked, 3);
+    store.addFlightDecision({
+      at: 3,
+      kind: "answer",
+      seatId: "retro",
+      targetRunId: null,
+      ref: null,
+      questionId: asked,
+      about: "Which store shape?",
+      decision: "Use one table, repo#n keys.",
+      basis: "operator call",
+    });
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain("Already decided on this ticket");
+    expect(userLines()[0]).toContain("- Which store shape? -> Use one table, repo#n keys.");
+  });
+
   it("passes no --effort for a seat without one", async () => {
     const { sup } = make();
     sup.start();
@@ -860,6 +973,7 @@ describe("startRun", () => {
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
       "DISABLE_AUTOUPDATER",
+      SEAT_SANDBOX_ENV,
       ...Object.keys(CREW_PNPM_ENV),
       PNPM_STORE_ENV,
       "UV_NO_SYNC",

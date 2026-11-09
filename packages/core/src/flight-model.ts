@@ -18,3 +18,13 @@ export const FLIGHT_NOT_TRIAGING_CAUSES = [
 ] as const;
 
 export type FlightNotTriagingCause = (typeof FLIGHT_NOT_TRIAGING_CAUSES)[number];
+
+/**
+ * Rules FLIGHT may accept by itself: work it can ticket without a code or rule change (breaking up
+ * a bloated file today; flaky-test, minor-dependency and fold-into-agreed-work rules join when
+ * they exist). Every other rule stays with the operator. Adding a rule widens what FLIGHT does
+ * alone: this file is a hard rule, so the change needs operator clearance.
+ */
+export const CODE_HEALTH_FLIGHT_TIER_RULES: readonly string[] = ["repeatedly-changed-large-file"];
+/** When FLIGHT accepts without a date, the accepted proposal is re-measured this long after. */
+export const CODE_HEALTH_FLIGHT_REVIEW_DAYS = 30;

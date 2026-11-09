@@ -4,8 +4,11 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { blockedHere, skipTestsIf } from "../../core/test/sandbox-gaps.ts";
 import { startApi } from "../src/api.ts";
 import { daemonFixture } from "./daemon-fixtures.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 let home: string;
 let f: Awaited<ReturnType<typeof daemonFixture>> | undefined;

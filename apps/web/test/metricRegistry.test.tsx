@@ -3,17 +3,17 @@ import {
   type MetricId,
   type MetricsView,
   metricHover,
-  metricLabel,
   type Telemetry as TelemetryData,
 } from "@mc/core";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
+import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
-import { Flight } from "../src/pages/Flight.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
+import { Header } from "../src/shell/Header.tsx";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
 import {
@@ -79,7 +79,7 @@ const EXPECTED: Record<MetricId, string> = {
 /** The FLIGHT page opened on the tab a `#fragment` link names. */
 function flightAt(hash: string): ReactElement {
   window.history.replaceState(null, "", `/flight${hash}`);
-  return <Flight />;
+  return <FlightTabs />;
 }
 
 /** Where each page shows a figure; every figure appears on at least one. */
@@ -87,23 +87,24 @@ const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
   {
     name: "Overview",
     page: () => <Overview />,
-    shows: ["agentsWorking", "cost", "inProgress", "merged", "cycleTime", "needsYou"],
+    shows: ["agentsWorking", "inProgress", "merged", "cycleTime"],
   },
   // Only the open tab is mounted, so each tab that shows a figure is opened by its link.
   {
-    name: "FLIGHT",
-    page: () => flightAt("#askP"),
-    shows: ["needsYou"],
-  },
-  {
     name: "FLIGHT Crew & board",
     page: () => flightAt("#wifP"),
-    shows: ["inProgress", "blocked", "needsYou"],
+    shows: ["inProgress", "blocked"],
   },
   {
     name: "FLIGHT What FLIGHT did",
     page: () => flightAt("#outcomesP"),
-    shows: ["cost", "needsYou"],
+    shows: ["cost"],
+  },
+  // Needs you has one home: the header tab.
+  {
+    name: "Header",
+    page: () => <Header page="board" />,
+    shows: ["needsYou"],
   },
   {
     name: "Telemetry",
@@ -214,22 +215,21 @@ describe("the metric registry across pages", () => {
     },
   );
 
-  it("labels carry the registry's window and hover carries its definition", async () => {
+  it("the Overview's registry figures carry the registry's definition on hover", async () => {
     stubFetch({ ...LEGACY, ...REGISTRY_ROUTES, "/api/config": CONFIG });
     const { container } = render(<Overview />);
     await waitFor(() => expect(shown(container).get("merged")).toEqual(["6"]));
-    for (const id of [
-      "agentsWorking",
-      "cost",
-      "inProgress",
-      "merged",
-      "cycleTime",
-      "needsYou",
-    ] as const) {
-      const label = [...container.querySelectorAll(".overview-kpi .lbl")].find(
-        (el) => el.textContent === metricLabel(id),
-      );
-      expect(label?.getAttribute("title"), id).toBe(metricHover(id));
+    for (const id of ["agentsWorking", "inProgress", "merged", "cycleTime"] as const) {
+      const figure = container.querySelector<HTMLElement>(`[data-metric="${id}"]`);
+      expect(figure?.closest("[title]")?.getAttribute("title"), id).toBe(metricHover(id));
     }
+  });
+
+  it("the Overview's spend today is the registry's cost, not the old summary's", async () => {
+    stubFetch({ ...LEGACY, ...REGISTRY_ROUTES, "/api/config": CONFIG });
+    const { container } = render(<Overview />);
+    await waitFor(() => expect(shown(container).get("merged")).toEqual(["6"]));
+    expect(container.querySelector("#tokensP .token-spend")?.textContent).toBe("~$24.31 today");
+    expect(shown(container).get("cost")).toEqual(["~$24.31"]);
   });
 });

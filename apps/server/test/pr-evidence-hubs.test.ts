@@ -1,8 +1,13 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { evidenceSideStarter, runEvidenceCommand } from "../src/pr-evidence/hubs.ts";
+import {
+  evidenceSideStarter,
+  removeStaleEvidenceWork,
+  runEvidenceCommand,
+} from "../src/pr-evidence/hubs.ts";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -95,5 +100,63 @@ describe("evidenceSideStarter", () => {
     const t = setup();
     await expect(t.start({ sha: "--upload-pack=x", db: "/x/y.sqlite" })).rejects.toThrow(/sha/);
     expect(t.commands).toEqual([]);
+  });
+});
+
+describe("removeStaleEvidenceWork", () => {
+  const git = (cwd: string, ...args: string[]): string =>
+    execFileSync("git", args, { cwd, encoding: "utf8" });
+  const run = async (command: string, args: string[]): Promise<void> => {
+    execFileSync(command, args, { stdio: "ignore" });
+  };
+
+  it("removes a dead capture's folder and its registered worktree, and leaves other files", async () => {
+    const base = mkdtempSync(join(tmpdir(), "mc-stale-"));
+    dirs.push(base);
+    const checkout = join(base, "checkout");
+    mkdirSync(checkout);
+    git(checkout, "init", "-q");
+    git(
+      checkout,
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "x",
+    );
+    const workDir = join(base, "pr-evidence-work");
+    const side = join(workDir, "sides", "abc-1234");
+    mkdirSync(side, { recursive: true });
+    git(checkout, "worktree", "add", "-q", "--detach", join(side, "worktree"));
+    const capture = join(workDir, "capture-xyz");
+    mkdirSync(capture);
+    writeFileSync(join(capture, "snapshot.sqlite"), "db");
+    writeFileSync(join(workDir, "keep.txt"), "not ours");
+    expect(git(checkout, "worktree", "list")).toContain("abc-1234");
+
+    const removed = await removeStaleEvidenceWork({ workDir, checkout, run });
+
+    expect(removed.sort()).toEqual(["capture-xyz", join("sides", "abc-1234")]);
+    expect(existsSync(capture)).toBe(false);
+    expect(existsSync(side)).toBe(false);
+    expect(readFileSync(join(workDir, "keep.txt"), "utf8")).toBe("not ours");
+    expect(git(checkout, "worktree", "list")).not.toContain("abc-1234");
+  });
+
+  it("does nothing when there is no work folder", async () => {
+    const base = mkdtempSync(join(tmpdir(), "mc-stale-"));
+    dirs.push(base);
+    const calls: string[][] = [];
+    const removed = await removeStaleEvidenceWork({
+      workDir: join(base, "none"),
+      checkout: base,
+      run: async (_c, args) => void calls.push(args),
+    });
+    expect(removed).toEqual([]);
+    expect(calls).toEqual([]);
   });
 });

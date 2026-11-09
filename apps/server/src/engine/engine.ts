@@ -1,3 +1,4 @@
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief-dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -19,7 +20,10 @@ import {
   AWAY_STATUS_ADDED,
   AWAY_TEST_PATH,
   AWAY_WRITES_REFUSED,
+  answeredLineText,
+  answerLineKey,
   asideEventText,
+  asideForAnswerEventText,
   asideForReworkEventText,
   asideInCiEventText,
   awayBugDecisionAbout,
@@ -32,7 +36,6 @@ import {
   CI_PASSED_EVENT_PREFIX,
   CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
-  COMMS_CAPCOM,
   COMMS_MC,
   COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_PARK,
@@ -62,13 +65,13 @@ import {
   evidenceSectionText,
   FLIGHT_ANSWER_WAIT_MS,
   FLIGHT_CONTROLLER_CHECK_PATHS,
+  FLIGHT_FLOOR_PATHS,
   fillLoopText,
   fixCommsText,
   fixKey,
   fixSentText,
   fixText,
   gateView,
-  globMatches,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
   hardRulesUnsetText,
@@ -111,6 +114,7 @@ import {
   REVIEW_STATUS_WAIVED,
   type RepoId,
   type RepoRules,
+  type ReviewCheck,
   type ReviewFact,
   type ReviewRow,
   RULING_PARK,
@@ -179,12 +183,27 @@ import {
   UPDATE_UP_TO_DATE,
   type UpdateBranchResult,
 } from "./publish.ts";
-import { accountAtStop, isTransientStart, maxOpenRunsOf, seatMayTake } from "./queue.ts";
+import {
+  accountAtStop,
+  accountHoldsNewWork,
+  isTransientStart,
+  maxOpenRunsOf,
+  seatMayTake,
+} from "./queue.ts";
 import { hardRulesBy, type RepoRulesError } from "./rules.ts";
 import { overrunText, tickLogOf } from "./ticks.ts";
 
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
+
+/** The Comms copy of the seat's CI message: the intro, then the excerpt from its start, cut to a Comms message. */
+export function ciSeatText(intro: string, excerpt: string): string {
+  const shortened = "\n[CI output shortened; inspect the CI log.]";
+  const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
+  return Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
+    ? intro + excerpt
+    : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
+}
 
 /** What `ciExcerpt` says when it has no excerpt to give: not kept, but asked for again. */
 const NOT_EXCERPTS = [NO_FAILED_RUN, CI_LOG_UNREADABLE, EMPTY_LOG];
@@ -251,6 +270,7 @@ export type OperatorRefusal =
   | "second-review-done"
   | "no-second-reviewer"
   | "floor-enforced"
+  | "design-failed"
   | "before-lift"
   | "rework-undelivered"
   | "use-controller-check"
@@ -276,7 +296,9 @@ const OPERATOR_REFUSAL_TEXT: Record<OperatorRefusal, string> = {
   "second-review-done": "a second review was already requested on this head",
   "no-second-reviewer": "no reviewer on another account than the first review's is available",
   "floor-enforced":
-    "a blocking review on floor-enforcing paths cannot be accepted past; only the controller can merge it",
+    "a blocking review on floor-enforcing paths cannot be accepted past; use second_review or send it for rework",
+  "design-failed":
+    "the run's last design verdict is a fail and no later review passed it, so only the operator can accept it, with Waive on the run's review park (Agents page). Send it back for rework; if the next review fails the design again, brief the operator with the review's images (mc operator GET /api/qa-reports?repoId=<repo>&prNumber=<n>&headSha=<full sha>, whose /api/qa-report-assets links the operator can open) and the failed points. Your accept stays refused after they answer",
   "before-lift": "the operator's message could not be stored",
   "rework-undelivered": "the rework request could not be delivered to the seat",
   "use-controller-check": CONTROLLER_CHECK_USE_ROUTE,
@@ -355,6 +377,14 @@ export interface Engine {
    * author the failure.
    */
   clearFlight(runId: string, expectedSha?: string): Promise<boolean>;
+  /**
+   * FLIGHT takes in a PR head that came from outside the run: it is recorded as the run's push
+   * and the run goes back to CI on it. False when the run is not in review or ci on an open PR
+   * whose head is this one, or when it already is the push.
+   * The independent controller may also recover an inactive, clean working run preserved aside.
+   * This creates no author checks and retains every explicit stop and merge hold.
+   */
+  adoptPrHead(runId: string, head: string, by?: "Controller"): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
   acceptRuling(runId: string): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
@@ -415,7 +445,7 @@ export function reviewerOf(
   const pool = ofRole.length > 0 ? ofRole : seats;
   if (avail === undefined) return pool[0] ?? null;
   const notStopped = pool.filter(
-    (x) => !accountAtStop(config, avail.store, x.accountId, avail.now),
+    (x) => !accountHoldsNewWork(config, avail.store, x.accountId, avail.now),
   );
   const busy = new Set(
     avail.store.reviewsIn(["starting", "running"]).map((review) => review.seatId),
@@ -456,6 +486,22 @@ const reviewFact = (r: ReviewRow): ReviewFact => ({
   minor: r.minor,
   failure: r.failure,
 });
+
+/**
+ * Whether the run's last design verdict, on this head or an earlier one, is a fail. A review with no
+ * design verdict, or `n-a`, does not clear an earlier fail, on the same head or after a rework; a
+ * later pass does. The carried review from before a main merge is one of the run's rows, so it counts.
+ */
+export function designFailedIn(
+  rows: readonly ReviewRow[],
+  checks: (reviewId: number) => readonly Pick<ReviewCheck, "check" | "result">[],
+): boolean {
+  const verdicts = rows
+    .filter((r) => r.state === "reported")
+    .map((r) => checks(r.id).find((c) => c.check === "design")?.result)
+    .filter((v) => v === "pass" || v === "fail");
+  return verdicts.at(-1) === "fail";
+}
 
 const endReason = (run: Run): string => {
   switch (run.endedBy) {
@@ -587,7 +633,7 @@ export function createEngine(deps: EngineDeps): Engine {
     return loop.aside?.worktree ?? (seatRow?.runId === run.id ? (seatRow.worktree ?? null) : null);
   }
 
-  function flightHeld(run: Run): boolean {
+  function flightHeld(run: Run, action: "work" | "merge" = "work"): boolean {
     const seat = seatConfig(run.agentId);
     return (
       store.seatSession(run.agentId)?.state === "stopped" ||
@@ -599,16 +645,8 @@ export function createEngine(deps: EngineDeps): Engine {
             q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
         ) ||
       seat === undefined ||
-      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
-    );
-  }
-
-  function requiresIndependentController(loop: RunLoop, sha: string): boolean {
-    return (
-      loop.touches?.sha === sha &&
-      loop.touches.paths.some((path) =>
-        FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
-      )
+      (action === "work" &&
+        accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now()))
     );
   }
 
@@ -938,7 +976,7 @@ export function createEngine(deps: EngineDeps): Engine {
         repo?.autonomy === "merge" && activeAway(store, at, config.operator.timezone) === null,
       hardRulesSet: mergeAllowed,
       flightPowers: flightPowersOf(config, run.repoId),
-      flightHeld: flightHeld(run),
+      flightHeld: flightHeld(run, "merge"),
       floorApproved:
         pr !== null && mergeFloorApproval(store, pr.number, pr.headSha, at) !== undefined,
       card: item === undefined ? null : hudColumnOf(item),
@@ -952,6 +990,8 @@ export function createEngine(deps: EngineDeps): Engine {
       ended: ended ? { reason: endReason(run) } : null,
       review,
       asideOk: reviewer !== null,
+      // a question FLIGHT passed to the operator: the run waits off its seat for the answer
+      operatorAsk: store.openQuestions().some((q) => q.runId === run.id && q.passedAt !== null),
       reworkDue: reworkDueBesides(store, run),
       ...(run.profile
         ? { limits: { tries: run.profile.profile.tries, rounds: run.profile.profile.rounds } }
@@ -1207,9 +1247,12 @@ export function createEngine(deps: EngineDeps): Engine {
     key: string,
     mirror: string,
   ): Promise<boolean> {
+    checkBriefDispatch();
     const row = {
       at: now(),
-      from: COMMS_CAPCOM,
+      // the hub's own note about a verdict; never the operator's name
+      from: COMMS_MC,
+      senderKind: "hub" as const,
       to: run.agentId,
       ticket: run.ticket ?? null,
       ref: run.ticket ?? null,
@@ -1228,6 +1271,7 @@ export function createEngine(deps: EngineDeps): Engine {
       return true;
     }
     const sent = await supervisor.send(run.id, key, text);
+    checkBriefDispatch();
     // a paused seat reads it when it resumes: the verdict is recorded all the same
     if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId, run.id)) return false;
     const stored = store.addComms(row);
@@ -1306,7 +1350,14 @@ export function createEngine(deps: EngineDeps): Engine {
     };
     /** A line sent to the run's seat, recorded as a hand-off to it about the run's ticket. */
     const handOff = (from: string, text: string): void => {
-      store.addComms({ at, from, to: run.agentId, ticket: run.ticket ?? null, text });
+      store.addComms({
+        at,
+        from,
+        senderKind: from === COMMS_MC ? "hub" : "seat",
+        to: run.agentId,
+        ticket: run.ticket ?? null,
+        text,
+      });
       bus.emit("agents");
     };
     /** The run as the merge steps see it: its stored row, with the loop this pass is writing. */
@@ -1335,7 +1386,7 @@ export function createEngine(deps: EngineDeps): Engine {
       flightPowersOf(config, run.repoId) === "superuser"
     ) {
       const current = store.run(run.id);
-      if (current === null || flightHeld(current)) return;
+      if (current === null || flightHeld(current, "merge")) return;
       const snap = snapshot(current, cur, now(), hardRulesSet.get(run.repoId) === true);
       if (snap === null || !gateView(snap, cur).passes) return;
     }
@@ -1428,14 +1479,10 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
         const intro = fillLoopText(head, { sha7: a.sha.slice(0, 7) });
-        const shortened = "\n[CI output shortened; inspect the CI log.]";
-        const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
-        const text =
-          Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
-            ? intro + excerpt
-            : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
-        const sent = await send(run.id, a.key, text);
-        if (sent === "sent") handOff(COMMS_MC, text);
+        // the seat gets the whole excerpt (already cut to CI_EXCERPT_MAX bytes); only the Comms
+        // copy is held to a Comms message
+        const sent = await send(run.id, a.key, intro + excerpt);
+        if (sent === "sent") handOff(COMMS_MC, ciSeatText(intro, excerpt));
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);
@@ -1468,7 +1515,7 @@ export function createEngine(deps: EngineDeps): Engine {
       case "move-card": {
         await deps.board.move({ runId: run.id, repoId: run.repoId, issue, column: a.column });
         // moved or failed (a failure is its Activity row): not tried again until the phase changes
-        cur.cardFor = cardMark(planned.phase, planned.epoch);
+        cur.cardFor = a.mark ?? cardMark(planned.phase, planned.epoch);
         return;
       }
       case "note":
@@ -1562,7 +1609,15 @@ export function createEngine(deps: EngineDeps): Engine {
         if (worktree === null) return;
         // stored before the call: a restart in between finds the run on its seat, which clears it
         // (a run set aside mid-build is due back as soon as the rework is out of the way)
-        cur.aside = { worktree, wake: cur.phase === "working" };
+        // (not while the run waits for the operator's answer: that wakes it)
+        const asked = store.openQuestions().find((q) => q.runId === run.id && q.passedAt !== null);
+        const waitsOnPerson = asked !== undefined;
+        cur.aside = {
+          worktree,
+          wake: (cur.phase === "working" || a.displaced === true) && !waitsOnPerson,
+          ...(a.displaced ? { displaced: true as const } : {}),
+          ...(asked ? { ask: asked.id } : {}),
+        };
         store.setRunLoop(run.id, cur);
         const r = await supervisor.setAside(run.id);
         if (r === null) {
@@ -1574,11 +1629,13 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${run.id}:${cur.epoch}:aside:${sha}`,
           run.id,
-          cur.phase === "working"
-            ? asideForReworkEventText(call)
-            : cur.phase === "ci"
-              ? asideInCiEventText(call)
-              : asideEventText(call),
+          waitsOnPerson
+            ? asideForAnswerEventText(call)
+            : cur.phase === "working" || a.displaced
+              ? asideForReworkEventText(call)
+              : cur.phase === "ci"
+                ? asideInCiEventText(call)
+                : asideEventText(call),
           at,
         );
         kickAside(run.agentId, run.id);
@@ -1631,6 +1688,15 @@ export function createEngine(deps: EngineDeps): Engine {
           out.again = true;
           return;
         }
+        // a run parked on the operator's question gets one line to carry on with the answer
+        // (only when it was answered: if FLIGHT took the question back, its answer reaches the run
+        // on the seat as any other)
+        if (cur.aside?.ask !== undefined && store.question(cur.aside.ask)?.answeredAt != null) {
+          cur.pendingLine = {
+            key: answerLineKey(run.id, cur.aside.ask),
+            text: answeredLineText,
+          };
+        }
         cur.aside = null;
         store.addLoopEvent(
           `${run.id}:woken:${at}`,
@@ -1679,7 +1745,7 @@ export function createEngine(deps: EngineDeps): Engine {
         return;
       }
       case "merge": {
-        // a hold from FLIGHT or the controller keeps the merge until it is released
+        // a hold from FLIGHT or the operator keeps the merge until it is released
         if (cur.mergeHold) {
           const hold = cur.mergeHold;
           const reason = mergeHoldParkText(hold.by, hold.reason);
@@ -1696,7 +1762,7 @@ export function createEngine(deps: EngineDeps): Engine {
           out.again = true;
           return;
         }
-        // a ticket's `## Controller check` holds the merge until the operator's pass on this head
+        // a ticket's `## Controller check` holds the merge until a recorded pass on this head
         const check = await controllerCheckHold(run, cur, a.sha);
         if (check !== null) {
           out.parked = true;
@@ -2080,16 +2146,6 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     const step = reconcile(snap);
     const cur = step.loop;
-    // FLIGHT cannot clear its own authority changes. Request the independent verdict while
-    // clearance is pending, before the merge action that used to create this check too late.
-    if (
-      cur.phase === "review" &&
-      cur.awaitingFlight &&
-      requiresIndependentController(cur, cur.awaitingFlight) &&
-      !(cur.controllerCheck?.sha === cur.awaitingFlight && cur.controllerCheck.pass)
-    ) {
-      cur.controllerCheck = { sha: cur.awaitingFlight, from: "review", pass: false };
-    }
     if (
       config.repos.find((r) => r.id === run.repoId)?.autonomy === "merge" &&
       activeAway(store, now(), config.operator.timezone)?.may.safePr &&
@@ -2185,9 +2241,11 @@ export function createEngine(deps: EngineDeps): Engine {
     const item = store.board(run.repoId).find((b) => b.issueNumber === issue);
     // Only a card the hub moved to Blocked can have left it: a draft repo's card is never moved,
     // and a move that failed leaves the card wherever it was.
-    const movedThere = store
-      .boardMovesOfRun(run.id)
-      .some((m) => m.column === "Blocked" && m.state === "done");
+    const moves = store.boardMovesOfRun(run.id);
+    // A card sent to Ready (an ended run with review findings) is on offer to the next seat: the
+    // work is not stuck, so the note is not wanted.
+    if (moves.some((m) => m.column === "Ready" && m.state === "done")) return true;
+    const movedThere = moves.some((m) => m.column === "Blocked" && m.state === "done");
     return (
       repo?.autonomy === "merge" &&
       movedThere &&
@@ -2586,7 +2644,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const heldRun = held === null ? null : store.run(held);
       const free = heldRun === null || heldRun.endedAt !== null;
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
-      if (accountAtStop(config, store, seat.accountId, now())) continue;
+      if (accountHoldsNewWork(config, store, seat.accountId, now())) continue;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
         if (!reviewWanted(row)) {
           dropReview(row);
@@ -2832,6 +2890,7 @@ export function createEngine(deps: EngineDeps): Engine {
         result = { lifted: false, reason };
       };
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || loop === undefined || loop === null) return refuse("not-parked");
@@ -2847,7 +2906,7 @@ export function createEngine(deps: EngineDeps): Engine {
         if (kind === "pr-closed") return refuse("pr-closed");
         if (by === "FLIGHT" && kind === "budget") return refuse("held");
         if (kind === "budget" && isDollarCapReason(loop.parked.reason)) return refuse("dollar-cap");
-        // only the controller's verdict settles a controller check, for every caller
+        // only a recorded verdict settles a controller check, for every caller
         if (kind === CONTROLLER_CHECK_PARK) return refuse("use-controller-check");
         if (kind === UAT_PARK) return refuse("use-uat");
         if (kind === MERGE_HOLD_PARK) return refuse("use-merge-hold");
@@ -2859,15 +2918,26 @@ export function createEngine(deps: EngineDeps): Engine {
         let secondOf: { firstReviewId: number; firstAccountId: string } | null = null;
         if (opts?.action !== undefined) {
           if (by === "CAPCOM" && opts.action !== "accept") return refuse("not-permitted");
-          const pushed = store.runPush(run.id);
           const pr = findPr(run, loop);
+          // A push the push gate refused and a person made later is never recorded on a CI step.
+          // When the PR's head is the run's newest commit, origin holds exactly what the seat has,
+          // so a stuck lift records it.
+          if (opts.action === "lift" && kind === "stuck") {
+            const newest = store.newestRunCommit(run.id)?.sha;
+            if (newest && pr?.state === "open" && pr.headSha === newest)
+              store.setRunPush({ runId: run.id, sha: newest, at: now() });
+          }
+          const pushed = store.runPush(run.id);
           if (!pushed) return refuse("head-moved");
           if (opts.action !== "lift" && pr?.state !== "open") return refuse("pr-not-open");
           if (opts.action !== "lift" && pr?.headSha !== pushed.sha) return refuse("head-moved");
           if (opts.action === "lift") {
-            if (kind !== "stuck") return refuse("wrong-action");
+            if (kind !== "stuck" && kind !== "gate") return refuse("wrong-action");
             const head = store.newestRunCommit(run.id)?.sha;
-            if (!head || !(await publisher.isDescendant(run, pushed.sha, head)))
+            if (
+              !head ||
+              (head !== pushed.sha && !(await publisher.isDescendant(run, pushed.sha, head)))
+            )
               return refuse("head-moved");
           } else if (
             kind !== "review" &&
@@ -2884,11 +2954,10 @@ export function createEngine(deps: EngineDeps): Engine {
               .at(-1);
             // only a blocking review on the floor paths needs a reviewer FLIGHT does not control
             if (!first || first.blocking === 0) return refuse("wrong-action");
-            const paths = await publisher.hardRuleTouches(
-              run,
-              pushed.sha,
-              FLIGHT_CONTROLLER_CHECK_PATHS,
-            );
+            const paths = await publisher.hardRuleTouches(run, pushed.sha, [
+              ...FLIGHT_CONTROLLER_CHECK_PATHS,
+              ...FLIGHT_FLOOR_PATHS,
+            ]);
             if (paths.length === 0) return refuse("wrong-action");
             const firstAccountId = seatConfig(first.seatId)?.accountId ?? "";
             if (
@@ -2907,18 +2976,24 @@ export function createEngine(deps: EngineDeps): Engine {
               .filter((r) => r.sha === pushed.sha && r.state === "reported")
               .at(-1);
             if (!review || review.blocking > 0) {
-              const paths = await publisher.hardRuleTouches(
-                run,
-                pushed.sha,
-                FLIGHT_CONTROLLER_CHECK_PATHS,
-              );
+              const paths = await publisher.hardRuleTouches(run, pushed.sha, [
+                ...FLIGHT_CONTROLLER_CHECK_PATHS,
+                ...FLIGHT_FLOOR_PATHS,
+              ]);
               if (paths.length > 0) return refuse("floor-enforced");
             }
+            // A failed design needs the operator's own accept (PR 1465, #1529).
+            if (
+              by === "FLIGHT" &&
+              designFailedIn(store.reviewsOfRun(run.id), (id) => store.reviewChecks(id))
+            )
+              return refuse("design-failed");
           }
           if (flightHeld(store.run(run.id) ?? run)) return refuse("held");
         }
         if (opts?.beforeLift !== undefined && !(await opts.beforeLift()))
           return refuse("before-lift");
+        checkBriefDispatch();
         const at = now();
         const head = store.newestRunCommit(run.id)?.sha ?? null;
         const pushed = store.runPush(run.id);
@@ -2998,7 +3073,8 @@ export function createEngine(deps: EngineDeps): Engine {
                 from:
                   config.crew?.sessions
                     .flatMap((x) => x.seats)
-                    .find((x) => seatDef(x).loop === "watch")?.id ?? COMMS_CAPCOM,
+                    .find((x) => seatDef(x).loop === "watch")?.id ?? COMMS_MC,
+                senderKind: "flight",
                 to: run.agentId,
                 ticket: run.ticket ?? null,
                 ref: run.ticket ?? null,
@@ -3023,12 +3099,13 @@ export function createEngine(deps: EngineDeps): Engine {
           }
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
+        checkBriefDispatch();
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3039,6 +3116,7 @@ export function createEngine(deps: EngineDeps): Engine {
       };
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
@@ -3048,8 +3126,7 @@ export function createEngine(deps: EngineDeps): Engine {
           held !== undefined &&
           held !== null &&
           !held.pass &&
-          loop.awaitingFlight === held.sha &&
-          requiresIndependentController(loop, held.sha);
+          loop.awaitingFlight === held.sha;
         if (
           run.endedAt !== null ||
           (!awaiting &&
@@ -3107,6 +3184,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ))
           )
             return refuse("rework-undelivered");
+          checkBriefDispatch();
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
@@ -3119,7 +3197,7 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("agents");
         bus.emit("attention");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3130,6 +3208,7 @@ export function createEngine(deps: EngineDeps): Engine {
       };
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
@@ -3189,6 +3268,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ))
           )
             return refuse("rework-undelivered");
+          checkBriefDispatch();
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:uat:${held.sha}:send-back`,
@@ -3201,7 +3281,7 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("agents");
         bus.emit("attention");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3209,6 +3289,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
       return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
         if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop || run.endedAt !== null)
@@ -3244,6 +3325,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
       return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
         if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         const hold = loop?.mergeHold;
@@ -3268,7 +3350,7 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         lastTransient.delete(runId);
         bus.emit("agents");
-        await pass(runId);
+        await withoutBriefDispatch(() => pass(runId));
         return { ok: true };
       });
     },
@@ -3278,17 +3360,109 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!live()) return false;
         await pass(runId);
         const run = store.run(runId);
-        if (!run?.loop || run.endedAt !== null || flightHeld(run)) return false;
+        if (
+          !run?.loop ||
+          run.endedAt !== null ||
+          flightHeld(run, "merge") ||
+          pausedSeat(store, run.agentId, run.id)
+        )
+          return false;
         const sha = run.loop.awaitingFlight;
         if (
           !sha ||
           (expectedSha !== undefined && sha !== expectedSha) ||
-          sha !== store.runPush(runId)?.sha ||
-          (requiresIndependentController(run.loop, sha) &&
-            !(run.loop.controllerCheck?.sha === sha && run.loop.controllerCheck.pass))
+          sha !== store.runPush(runId)?.sha
         )
           return false;
-        store.setRunLoop(runId, { ...run.loop, flightClearedSha: sha, awaitingFlight: null });
+        // a stored pending check row for this head is FLIGHT's to pass with this verdict
+        const check = run.loop.controllerCheck;
+        store.setRunLoop(runId, {
+          ...run.loop,
+          flightClearedSha: sha,
+          awaitingFlight: null,
+          ...(check?.sha === sha && !check.pass
+            ? { controllerCheck: { ...check, pass: true } }
+            : {}),
+        });
+        await pass(runId);
+        return true;
+      });
+    },
+
+    adoptPrHead(runId, head, by) {
+      return onChainResult(runId, false, async () => {
+        if (!live()) return false;
+        const run = store.run(runId);
+        let loop = run?.loop;
+        if (
+          !run ||
+          !loop ||
+          run.endedAt !== null ||
+          flightHeld(run, "merge") ||
+          pausedSeat(store, run.agentId, run.id) ||
+          (loop.phase !== "review" &&
+            loop.phase !== "ci" &&
+            !(by === "Controller" && loop.phase === "working" && loop.aside)) ||
+          run.branch === null ||
+          flightPowersOf(config, run.repoId) !== "superuser"
+        )
+          return false;
+        const pr = findPr(run, loop);
+        if (pr?.state !== "open" || pr.headSha !== head || store.runPush(runId)?.sha === head)
+          return false;
+        if (by === "Controller") {
+          // Recovery changes no checkout and starts no author. Preserve its unpublished work and
+          // explicit holds; a working run is eligible only from its preserved, inactive worktree.
+          const activeAuthor = () =>
+            supervisor.seat(run.agentId)?.runId === run.id &&
+            (supervisor.seatFacts(run.agentId)?.inTurn !== false ||
+              supervisor.busy().some((seat) => seat.seatId === run.agentId));
+          if (loop.parked || loop.mergeHold || activeAuthor()) return false;
+          const worktree = worktreeOf(run, loop);
+          if (worktree === null) return false;
+          const changes = await publisher.worktreeChanges(run, worktree);
+          const current = store.run(runId);
+          if (
+            !Array.isArray(changes) ||
+            changes.length > 0 ||
+            current?.endedAt !== null ||
+            current.loop?.phase !== loop.phase ||
+            current.branch !== run.branch ||
+            current.loop?.parked ||
+            current.loop?.mergeHold ||
+            activeAuthor() ||
+            flightHeld(current, "merge") ||
+            pausedSeat(store, current.agentId, current.id) ||
+            findPr(current, current.loop)?.headSha !== head
+          )
+            return false;
+          loop = current.loop;
+        }
+        const at = now();
+        store.addRunCommit({ runId, repoId: run.repoId, branch: run.branch, sha: head, at });
+        store.setRunPush({ runId, sha: head, at });
+        store.setRunLoop(runId, {
+          ...loop,
+          phase: "ci",
+          pushFor: head,
+          pushStartedAt: at,
+          gate: null,
+          touches: null,
+          flightClearedSha: null,
+          reviewWaivedSha: null,
+          carry: null,
+          awaitingFlight: null,
+          adopted: true,
+          transient: 0,
+        });
+        store.addLoopEvent(
+          `${runId}:${loop.epoch}:adopted:${head}`,
+          runId,
+          `${by ?? "FLIGHT"} adopted head ${head.slice(0, 7)} from outside the run`,
+          at,
+        );
+        lastTransient.delete(runId);
+        bus.emit("agents");
         await pass(runId);
         return true;
       });

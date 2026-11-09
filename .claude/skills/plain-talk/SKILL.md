@@ -14,31 +14,41 @@ Write so the message makes sense by itself.
 2. **One point per message.** One question per message. One topic per paragraph. At most four
    sentences in a paragraph.
 3. **Short sentences, plain words.** Keep a sentence under 20 words. Prefer the shorter word:
-   "stop", not "terminate"; "turn on", not "enable"; "ask", not "escalate". Name an id the first
-   time you use it: "#1027 (the check-lock ticket)", "GUIDO-1 (a server developer seat)".
+   "stop", not "terminate"; "turn on", not "enable"; "ask", not "escalate". Text for the
+   operator carries no ids at all: no ticket or PR numbers, commit codes, paths, links, seat ids
+   or tool names. Say what the thing is: "the check-lock fix", "a server developer". Between
+   agents, name an id the first time you use it: "#1027 (the check-lock ticket)".
 4. **Facts, not feelings.** No "I think", "it seems", "unfortunately", "great news". No
    exclamation marks. No "just", "simply", "easy", "quick". Apologise once, only for your own
    mistake.
-5. **A question works on its own.** Name the thing, the choice, and what happens with no answer:
-   "PR 975 (the FLIGHT page) passed review and CI. Merge now, or wait for the mockup? Default:
-   hold until Monday 3 November." A default is allowed only for a choice within the writer's own
-   authority. An operator approval has no default.
-6. **An error says what failed and what to do.** "Push of 73f0d3d refused: `pnpm -s test` was
-   not run on this commit. Commit or delete any changed files, run it, then push again." Not the
-   log, not the rule text.
+5. **A question works on its own.** Name the thing and the choice. To the operator, the context
+   says what happens with no answer; between agents, a default may say it:
+   "The new FLIGHT page passed review and its checks. Merge it now, or wait for the mockup?"
+   A default is allowed only between agents, for a choice within the writer's own authority. A
+   question to the operator has no default.
+6. **An error says what failed and what to do.** To a seat or FLIGHT: "Push of 73f0d3d refused:
+   `pnpm -s test` was not run on this commit. Commit or delete any changed files, run it, then
+   push again." To the operator, without the code or the command: "A developer's push was
+   refused because the tests were not run." Not the log, not the rule text.
 
 ## One message, one shape
 
 - **Comms message (to a seat or to FLIGHT).** Order: what happened, what you did, what you need.
   Two to four sentences. Put long content (findings, a plan, evidence) in its structured tool and
   point at it. The hub allows 1,200 characters (#995); aim for 600.
-- **Question to the operator.** Only FLIGHT writes these, as a brief (`brief_item`). The fields
-  come from the `mc brief_item` tool description:
-  - the question, in one sentence;
-  - why it is the operator's: money, direction, security, irreversible, or a floor approval;
-  - an assessment in two or three sentences, and what FLIGHT did;
-  - two to four options as a list, each with its cost in time or money;
-  - the recommendation and its basis. No default on an approval.
+- **Question to the operator.** Only FLIGHT writes these, as a brief (`brief_item`). It must make
+  sense to someone new to the project, from the question alone, with nothing to look up:
+  - **title (the item's heading):** what the decision is about, in words: "Approve the new dependencies view on the
+    Board", not "PR · You: review";
+  - **context:** two or three sentences: what this is, why it comes up now, and what happens if
+    nothing is decided;
+  - **the question (`ask`):** one sentence ending in "?", at most 300 characters;
+  - **options:** two to four, each a plain action and its consequence: "Approve: the crew builds
+    it next; you can change it later.";
+  - **recommendation:** which option, and why, in plain words;
+  - **references:** the ticket goes in `ticket`, never in the text.
+  No ticket or PR numbers, commit codes, paths, links, seat ids or tool names in the title,
+  context, question, options or recommendation. No default.
 - **Ticket.** Sections, in order:
   - Outcome: what is true when the work is done, measurable;
   - Why: the evidence;
@@ -69,13 +79,15 @@ Seats do not post comments on GitHub and do not message the operator; both go th
 | Monday 3 November, 14:00 UK | tomorrow, currently, later |
 
 More rules for words:
-- Say "you" to the reader. Name yourself by your seat name ("GUIDO-1"), not "I".
+- Say "you" to the reader. To the operator, name yourself by role ("the planner", "a
+  developer"), not "I". Between agents, use your seat name ("GUIDO-1").
 - Use one name for one thing. The roles say "seat" and "developer"; do not add "builder".
 - No hub state names in text for the operator ("parked", "aside", "controller check").
   Say what the state means: "waiting for a review".
 - No @mentions. No links to other repositories.
 - Present tense for state: "Review done", not "Review has been completed".
-- Say who did what: "RETRO-CX found two problems", not "two problems were found".
+- Say who did what: "the reviewer found two problems", not "two problems were found". Between
+  agents, name the seat.
 - A list for options or steps; prose for one idea.
 
 ## Between agents
@@ -95,11 +107,11 @@ in 20 minutes."
 
 - [ ] The first sentence says what happened.
 - [ ] Someone who sees only this message can act on it.
-- [ ] At most one question, and its default if a default is allowed.
+- [ ] At most one question. A default only between agents.
 - [ ] No sentence of 20 words or more. Count every word; ignore code, shas and ids.
 - [ ] No paragraph over four sentences.
 - [ ] No hedge, hype, exclamation mark or second apology.
-- [ ] Every id is named the first time it appears.
+- [ ] For the operator: no ids at all. Between agents: every id named the first time.
 
 ## For a reviewer
 
@@ -123,13 +135,21 @@ and it's writing the plan now. The three builders are still held up by the push 
 waiting on the controller to check the test records and push. Nothing new since my last update,
 and nothing needs a decision from you."
 
-**After:** "No decision needed. FAO-1 (the planner) is writing the plan for #1028, the verify
-queue. Three developer seats cannot push until the controller checks their test records."
+**After:** "No decision needed. The planner is writing the plan for the verify queue. Three
+developers cannot push until the controller checks their test records."
 
-**Before (a question):** "Would you like to merge PR 975 now?"
+**Before (a question):** "Do you approve the Dependencies mockup (PR 1423, #1417) so I can merge
+it and file the build tickets? Renders: /Users/.../previews/pr-1423-b21e1d6/."
 
-**After:** "PR 975 (the FLIGHT page) passed review and CI. Merge now, or wait for the mockup?
-Default: hold until Monday 3 November."
+**After:**
+- Title: "Approve the new dependencies view on the Board"
+- Context: "The Board does not show which work waits on which. The design adds a 'waits on'
+  label to each card, a list of stuck chains on the FLIGHT page, and a line on QA saying what a
+  merge frees. Until you decide, the build work stays unstarted."
+- Question: "Should the crew build this design?"
+- Options: "Approve: the crew builds it next; you can change it later." "Change it: tell FLIGHT
+  what to change, and it comes back to you."
+- Recommendation: "Approve. Review found no problems and the pictures match the design."
 
 ## Sources
 

@@ -47,6 +47,8 @@ export interface CommsSendInput {
   label?: CommsLabel;
   ref?: string;
   replyTo?: string;
+  /** The Needs-you item this conversation message is about; never an authority grant. */
+  itemKey?: string;
   /** A run-specific delivery stays pending for this run when its seat takes other work. */
   targetRunId?: string;
 }
@@ -56,6 +58,15 @@ export interface CommsReaction {
   reaction: CommsReactionKind;
   reason: string | null;
   at: number;
+}
+/** Who a stored message came from, set by the hub from how the request was made, never from the text. */
+export const COMMS_SENDER_KINDS = ["operator", "controller", "flight", "seat", "hub"] as const;
+export type CommsSenderKind = (typeof COMMS_SENDER_KINDS)[number];
+/** Recorded ticket-reference totals, preserved across message retention rather than feed-limited. */
+export interface CommsTicketCounts {
+  tickets: { ticket: string; count: number }[];
+  /** Referenced messages whose repository or ticket cannot be established without guessing. */
+  unassignedCount: number;
 }
 export interface CommsMessage {
   id: string;
@@ -71,6 +82,80 @@ export interface CommsMessage {
   reactions: CommsReaction[];
   pinned?: boolean;
   operator: boolean;
+  /** Null on a message stored before senders were recorded. */
+  senderKind?: CommsSenderKind | null;
+  /** When the recipient seat took the message; null while it is only stored. */
+  deliveredAt?: number | null;
+  state?: "stored" | "delivered" | "answered";
+  itemKey?: string;
+  choice?: { label: string };
+}
+
+/** A transcript can lack a timestamp; keep that fact instead of inventing its clock time. */
+export type FlightConversationMessage = Omit<CommsMessage, "at"> & { at: number | null };
+
+export interface FlightConversationPage {
+  messages: FlightConversationMessage[];
+  hasMore: boolean;
+  cursor: string | null;
+  unread: number;
+}
+
+/** Where a message stands: kept by the hub, or taken by its recipient. */
+export type CommsDeliveryState = "stored" | "delivered";
+
+/** What the page shows after a send: the state, and whether this was an exact repeat. */
+export interface CommsSendState {
+  state: CommsDeliveryState;
+  deliveredAt: number | null;
+  /** An identical message went within the last minute; `state` is the first copy's. */
+  alreadySent: boolean;
+  /** A reply to an ended run went here instead; absent when it went where it was addressed. */
+  redirectedTo?: string;
+}
+
+/** The small state line under a message: "Stored", or "Delivered" with the clock time. */
+export function commsStateLine(
+  state: CommsDeliveryState,
+  deliveredAt: number | null,
+  timeZone: string,
+): string {
+  if (state === "stored" || deliveredAt === null) return "Stored";
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone,
+  }).format(new Date(deliveredAt));
+  return `Delivered ${time}`;
+}
+
+/** Where a reply to a message will go, shown before it is sent. */
+export interface CommsReplyRoute {
+  /** The recipient the reply will be stored for. */
+  to: string;
+  /** The run that wrote the message has ended, so the reply goes elsewhere. */
+  redirected: boolean;
+  /** One plain line for the page; empty when the reply goes where it was addressed. */
+  note: string;
+}
+
+/** Where a seat's answer from a choice went. */
+export type ChoiceTargetKind = "seat" | "flight" | "flight-for-next-run";
+
+/** The receipt a choice returns: what was chosen, where it went and when it was delivered. */
+export interface ChoiceReceipt {
+  key: string;
+  optionId: string;
+  label: string;
+  /** The seat or FLIGHT the answer was stored for. */
+  to: string;
+  target: ChoiceTargetKind;
+  chosenAt: number;
+  /** When the recipient took it; null while it waits for its next turn. */
+  deliveredAt: number | null;
+  /** The same choice was made before: this is the first receipt. */
+  alreadyChosen: boolean;
 }
 /** One agent's Comms figures for the nav: messages in the last 24 hours, with its contacts, and the unread counts. */
 export interface CommsCount {
@@ -83,6 +168,8 @@ export interface CommsCount {
 }
 export interface CommsContact {
   id: string;
+  /** Whether this contact has any stored messages; omitted by older servers. */
+  hasMessages?: boolean;
   lastMessage: CommsMessage | null;
   count: number;
   unread: number;
@@ -139,7 +226,10 @@ export interface CommsOpenItem {
   from: string;
   to: string;
   ticket: string | null;
+  /** The message text, cut to a few hundred characters. */
+  text?: string;
   waitedMs: number;
-  nextStep: "flight" | "flight-not-triaging";
+  /** "operator": no FLIGHT seat, so the question is the operator's now. */
+  nextStep: "flight" | "flight-not-triaging" | "operator";
   nextAt: number;
 }

@@ -198,6 +198,8 @@ export const reviewedEventText = (
 export const FIX_TEXT_MAX = 16_000;
 /** The author's notes in RETRO's brief are cut to this many characters, newest kept. */
 export const REVIEW_NOTES_MAX = 12_000;
+/** The most open findings from earlier heads an external review's brief lists. */
+export const OLDER_FINDINGS_MAX = 20;
 export const REVIEW_INPUT_DIR = ".mc-review";
 export const REVIEW_DIFF_FILE = ".mc-review/pr.diff";
 export const REVIEW_SINCE_FILE = ".mc-review/since-last-review.diff";
@@ -611,7 +613,7 @@ function holdOf(loop: ReviewCheckLoop | null): ReviewCheckState | null {
     by,
     ...(loop.parked?.reason ? { reason: loop.parked.reason } : {}),
   });
-  if (loop.controllerCheck && !loop.controllerCheck.pass) return held("operator");
+  if (loop.controllerCheck && !loop.controllerCheck.pass) return held("FLIGHT");
   if (loop.uat && !loop.uat.accepted) return held("operator");
   if (loop.mergeHold) return held(loop.mergeHold.by);
   if (loop.awaitingFlight) return held("FLIGHT");

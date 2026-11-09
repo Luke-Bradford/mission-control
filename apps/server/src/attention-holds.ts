@@ -1,17 +1,18 @@
 import type {
+  AttentionBrief,
   AttentionHold,
   AttentionHoldCondition,
   AttentionItem,
   AttentionWaitCondition,
 } from "@mc/core";
 import {
-  BRIEF_KEY_MAX,
   type BriefOption,
   COMMS_OPEN_PREFIX,
+  DECISION_DEFAULT_WAIT_MS,
   flightFloorBlocked,
   GUARD_ACK_PREFIX,
 } from "@mc/core";
-import { z } from "zod";
+import type { z } from "zod";
 import { runAccountId } from "./account-bindings.ts";
 import type { CcConfig } from "./config.ts";
 import { accountAtStop } from "./engine/queue.ts";
@@ -107,6 +108,14 @@ export function evaluateHolds(
   }
   return changed;
 }
+const NOTHING_FOR_OPERATOR = /\bnone for the operator\.?\s*$/i;
+/**
+ * A held item whose hold or text says it has nothing for the operator ("None for the operator.").
+ * It stays held (other holds may wait on it), but the Held group in Needs you does not list it.
+ */
+export const nothingForOperator = (item: AttentionItem): boolean =>
+  NOTHING_FOR_OPERATOR.test(item.hold?.reason ?? "") || NOTHING_FOR_OPERATOR.test(item.text);
+
 export function partitionAttention(
   store: Store,
   items: AttentionItem[],
@@ -134,37 +143,7 @@ export function partitionAttention(
   return { items: active, held };
 }
 
-const PR_REF = /^[^#\s]+#[1-9]\d*$/;
-
-export const AttentionHoldInput = z
-  .object({
-    reason: z.string().trim().min(1).max(1000),
-    condition: z.discriminatedUnion("kind", [
-      z.object({ kind: z.literal("manual") }).strict(),
-      z.object({ kind: z.literal("crew") }).strict(),
-      z
-        .object({
-          kind: z.literal("date"),
-          at: z.number().int().min(0).max(8640000000000000),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("ticket"),
-          ticket: z.string().regex(PR_REF),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("ci"),
-          pr: z.string().regex(PR_REF),
-          state: z.enum(["passing", "failing"]),
-        })
-        .strict(),
-      z.object({ kind: z.literal("item"), key: z.string().min(1).max(BRIEF_KEY_MAX) }).strict(),
-    ]),
-  })
-  .strict();
+export { AttentionHoldInput } from "./attention-hold-schema.ts";
 
 export function attentionHoldError(e: z.ZodError): string {
   const issue = e.issues[0];
@@ -173,13 +152,17 @@ export function attentionHoldError(e: z.ZodError): string {
   return path === "" ? issue.message : `${path}: ${issue.message}`;
 }
 
-/** Items whose authority belongs to the operator and which a timer must never settle. */
+/**
+ * Items whose authority belongs to the operator and which a timer must never settle. A merge
+ * spends no author quota; every explicit stop, budget park and operator question still holds it.
+ */
 export function heldRun(
   store: Store,
   config: CcConfig,
   at: number,
   run: NonNullable<ReturnType<Store["run"]>>,
   repoId?: string,
+  options: { excludeQuestionId?: number; action?: "work" | "merge" } = {},
 ): boolean {
   const seat = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === run.agentId);
   return (
@@ -189,8 +172,14 @@ export function heldRun(
     run.loop?.parked?.kind === "budget" ||
     store
       .openQuestions()
-      .some((q) => q.runId === run.id && (q.passedAt !== null || at - q.at >= 20 * 60_000)) ||
-    accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), at)
+      .some(
+        (q) =>
+          q.runId === run.id &&
+          q.id !== options.excludeQuestionId &&
+          (q.passedAt !== null || at - q.at >= 20 * 60_000),
+      ) ||
+    ((options.action ?? "work") === "work" &&
+      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), at))
   );
 }
 
@@ -252,7 +241,25 @@ export function protectedDecisionItem(
   return note === undefined || note.runId === null || parked === "budget" || parked === "account";
 }
 
-/** A recommended reversible decision and the stored point at which it may apply. */
+/**
+ * When the ask on an item began, the identity of one question: a seat's question is its `at`, a
+ * briefed ask its `askAt` (else the brief's `at`), anything else the item's own `at`. A closure
+ * stands for that ask only: a new or changed ask is open again.
+ */
+export function questionAskAt(
+  item: Pick<AttentionItem, "key" | "at">,
+  brief: AttentionBrief | undefined,
+): number {
+  if (item.key.startsWith("ask:")) return item.at;
+  if (brief !== undefined && brief.for !== "flight") return brief.askAt ?? brief.at;
+  return item.at;
+}
+
+/**
+ * A recommended reversible decision and the stored point at which it may apply. Only a brief for
+ * FLIGHT can carry one: a question to the operator has no timed default (#1532), so a `defaultAt`
+ * stored on an older operator brief never applies.
+ */
 export function decisionDefault(
   store: Store,
   item: AttentionItem,
@@ -263,6 +270,9 @@ export function decisionDefault(
   if (
     item.owner !== "operator" ||
     !brief ||
+    !brief.binding ||
+    brief.state?.freshness !== "current" ||
+    brief.decision?.whyOperator !== undefined ||
     brief.for === "flight" ||
     brief.defaultAt === undefined ||
     protectedDecisionItem(store, item, config, at)
@@ -272,12 +282,18 @@ export function decisionDefault(
     (o) => o.id !== undefined && o.id === brief.recommendedOptionId,
   );
   if (!option) return null;
-  const briefAt = brief.askAt ?? brief.at;
+  const prepared = brief.binding.actions.find((action) => action.optionId === option.id);
+  if (
+    !prepared?.defaultable ||
+    !["ordinary-run-guidance", "direct-queue-priority-swap"].includes(prepared.action.kind)
+  )
+    return null;
+  const briefAt = brief.binding.epochId;
   const hold = holds(store)[item.key];
   const released = hold?.releasedAt !== undefined && hold.at >= item.at ? hold.releasedAt : 0;
   return {
     option,
     briefAt,
-    dueAt: Math.max(brief.defaultAt, released + (brief.defaultAt - briefAt)),
+    dueAt: Math.max(brief.defaultAt, released + DECISION_DEFAULT_WAIT_MS),
   };
 }

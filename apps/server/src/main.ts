@@ -36,9 +36,11 @@ import {
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
+import { routineBriefChoices } from "./brief-routine.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";
+import { CODE_HEALTH_AUDIT_EVERY_MS, runCodeHealthAudit } from "./code-health/audit.ts";
 import { createFileContext } from "./code-health/file-context.ts";
 import { createGitFileCollector } from "./code-health/git-collector.ts";
 import {
@@ -66,11 +68,13 @@ import {
   pausedSeat,
   startUnpausedRun,
 } from "./crew-pause.ts";
+import { DESIGN_PREVIEW_PORT, DESIGN_PREVIEW_SWEEP_MS, DesignPreviews } from "./design-previews.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
-import { createExternalReviews, readExternalSubject } from "./external-reviews.ts";
+import { seedExternalReviewAsks } from "./external-pr-control.ts";
+import { branchOwned, createExternalReviews, readExternalSubject } from "./external-reviews.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
@@ -79,7 +83,12 @@ import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
 import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
-import { cloneState, configuredChecks, createCheckRecorder } from "./guard/check-runs.ts";
+import {
+  cloneState,
+  configuredChecks,
+  createCheckRecorder,
+  seatWorktree,
+} from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
 import {
@@ -98,9 +107,15 @@ import {
   prTextProblem,
   readKnown,
 } from "./mcp/tools.ts";
-import { newOperatorToken, writeOperatorToken } from "./operator.ts";
+import { releaseWaitingOperator } from "./needs-you-actions.ts";
+import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
-import { evidenceSideStarter, runEvidenceCommand } from "./pr-evidence/hubs.ts";
+import {
+  evidenceSideStarter,
+  removeStaleEvidenceWork,
+  runEvidenceCommand,
+} from "./pr-evidence/hubs.ts";
+import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview-browser.ts";
@@ -108,7 +123,11 @@ import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createQaReports } from "./qa-reports.ts";
-import { type QueueReorderDeps, reorderQueue } from "./queue-reorder.ts";
+import {
+  prepareQueueReorderSnapshot,
+  type QueueReorderDeps,
+  reorderQueue,
+} from "./queue-reorder.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./review-preview.ts";
 import { rotatingLog } from "./rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
@@ -157,6 +176,8 @@ export async function main(): Promise<void> {
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
   const operatorToken = newOperatorToken(); // per boot; FLIGHT alone also receives it in memory
   writeOperatorToken(dirname(dbPath), operatorToken);
+  const controllerToken = newOperatorToken(); // the controller's own key, per boot
+  writeControllerToken(dirname(dbPath), controllerToken);
   const hubStartedAt = Date.now();
   markHubStarted(hubStartedAt);
   const store = new Store(dbPath);
@@ -309,6 +330,7 @@ export async function main(): Promise<void> {
   const scheduler = createScheduler({
     config,
     teamsEnabled: !isPreview(port, process.env),
+    boardWrites: !preview,
     store,
     bus,
     cliHold,
@@ -319,9 +341,25 @@ export async function main(): Promise<void> {
     hasViewClients: () => browserStreamCount > 0,
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
-    deliverDefault: async (seatId, text) => {
-      await supervisor.message(seatId, text, { interrupt: false });
-    },
+    // Lazy: supervisor, shared queue services and mcDeps are initialized before scheduler.start.
+    defaultChoices: () =>
+      routineBriefChoices(
+        {
+          config,
+          store,
+          now: Date.now,
+          supervisor,
+          queue: queueReorder,
+          knownSecrets: mcDeps.knownSecrets,
+          bus,
+        },
+        () => lock.state(),
+      ),
+    // lazy: the supervisor is built below, and the check only runs once the scheduler starts
+    seatCheck: (tool) => supervisor.checkCli(tool),
+    // lazy: `gh` is built below; the job only runs once the scheduler starts
+    releaseWaiting: () =>
+      releaseWaitingOperator({ config, store, gh, dbPath, log: (line) => log(line) }),
   });
   const previewActivity = (() => {
     const url = process.env.MC_PREVIEW_ACTIVITY_URL;
@@ -356,6 +394,19 @@ export async function main(): Promise<void> {
     config.repos,
     config.crew?.sessions ?? [],
   );
+  // A seat's published design previews (its branch's built app, shown with Demo data): live hub only.
+  const designPreviews =
+    !preview && previewRepoId !== undefined
+      ? new DesignPreviews({
+          root: join(dirname(dbPath), "design-previews"),
+          port: DESIGN_PREVIEW_PORT,
+          hubPort: port,
+          repoId: previewRepoId,
+          // the newest PR of the branch decides: a closed one takes its preview with it
+          prOf: (branch) => store.pullRequestOfBranch(previewRepoId, branch),
+          log: (line) => log(line),
+        })
+      : undefined;
   // A web PR's screenshot pairs: kept under the private data dir, captured on the live hub only.
   const evidenceStore = prEvidenceStore(join(dirname(dbPath), "pr-evidence"));
   const evidenceCheckout = hubRoot ?? undefined;
@@ -366,6 +417,15 @@ export async function main(): Promise<void> {
           repoId: previewRepoId,
           workDir: join(dirname(dbPath), "pr-evidence-work"),
           baseUrl: `http://${HOST}:${port}`,
+          webGraph: async (sha, signal) => {
+            await runEvidenceCommand(
+              "git",
+              ["-C", evidenceCheckout, "fetch", "origin", sha],
+              undefined,
+              signal,
+            );
+            return readHeadWebPageGraph(evidenceCheckout, sha, signal);
+          },
           // Read the remote's immutable default head directly: another preview fetch must not
           // overwrite our baseline through the checkout's shared FETCH_HEAD.
           mainSha: async (signal) =>
@@ -440,6 +500,7 @@ export async function main(): Promise<void> {
     store,
     checks: runChecks,
     state: cloneState(config, store),
+    worktree: seatWorktree(store),
     log: (line) => log(line),
   });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
@@ -494,7 +555,7 @@ export async function main(): Promise<void> {
       const pr = store.pullRequests(repo.id).find((value) => value.number === review.prNumber);
       if (
         pr?.headSha !== review.sha ||
-        store.runsOnBranch(repo.id, subject.branch).some((run) => run.reviewId == null)
+        branchOwned(config, store, repo.id, subject.branch, pr?.ticket)
       )
         return null;
       const linked = pr?.ticket?.startsWith(`${repo.id}#`)
@@ -519,7 +580,11 @@ export async function main(): Promise<void> {
     fileContext: createFileContext({
       config,
       store,
-      knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
+      knownSecrets: async () => [
+        await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
+        operatorToken,
+        controllerToken,
+      ],
     }),
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
@@ -545,12 +610,33 @@ export async function main(): Promise<void> {
   const early: string[] = [];
   let log: (line: string) => void = (line) => void early.push(line);
   const gh = createGh(ghCommand(process.env, preview, (line) => log(line)));
+  // A hub that died mid-capture left database copies, checkouts and git worktree registrations in
+  // the work folder. Nothing else uses it yet (no capture starts before the engine does), so clear it.
+  if (prEvidence !== undefined && evidenceCheckout !== undefined) {
+    try {
+      const removed = await removeStaleEvidenceWork({
+        workDir: join(dirname(dbPath), "pr-evidence-work"),
+        checkout: evidenceCheckout,
+        run: runEvidenceCommand,
+      });
+      if (removed.length > 0)
+        log(`removed ${removed.length} stale screenshot capture folder(s): ${removed.join(", ")}`);
+    } catch (e) {
+      log(
+        `could not clear stale screenshot capture folders: ${e instanceof Error ? e.message : e}`,
+      );
+    }
+  }
   const qaReports = createQaReports({
     store,
     config,
     gh,
     cwd: hubRoot ?? process.cwd(),
-    knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
+    knownSecrets: async () => [
+      await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
+      operatorToken,
+      controllerToken,
+    ],
     evidence: evidenceStore,
     reviewShots,
   });
@@ -581,10 +667,15 @@ export async function main(): Promise<void> {
     profiles,
     checks: runChecks,
     checkDrops: (runId) => checkRecorder.drops(runId),
+    pendingChecks: (runId) => checkRecorder.pending(runId),
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
-    knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
+    knownSecrets: async () => [
+      await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
+      operatorToken,
+      controllerToken,
+    ],
     log: (line) => log(line),
     onEvidence: (seatId, runId) => supervisor.emitEvidence(seatId, runId),
     onFindings: (seatId, runId) => supervisor.emitFindings(seatId, runId),
@@ -595,6 +686,15 @@ export async function main(): Promise<void> {
         );
       });
     },
+    ...(designPreviews === undefined || previewRepoId === undefined
+      ? {}
+      : {
+          designPreviews: {
+            repoId: previewRepoId,
+            url: `http://${HOST}:${DESIGN_PREVIEW_PORT}/`,
+            publish: (input) => designPreviews.publish(input),
+          },
+        }),
     crewIds: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
     onComms: deliverComms,
     ...(prEvidence === undefined
@@ -661,11 +761,15 @@ export async function main(): Promise<void> {
       store,
       gh,
       cwd: hubRoot ?? process.cwd(),
-      reviewer: (repoId) => {
+      reviewer: (repoId, pick) => {
         const session = config.crew?.sessions.find((value) => value.repoId === repoId);
         const first = session?.seats[0];
         return first
-          ? (reviewerOf(config, first.id, undefined, { store, now: Date.now() })?.id ?? null)
+          ? (reviewerOf(config, first.id, pick?.role, {
+              store,
+              now: Date.now(),
+              ...(pick?.avoid === undefined ? {} : { avoid: pick.avoid }),
+            })?.id ?? null)
           : null;
       },
       ...(prEvidence === undefined ? {} : { evidence: prEvidence }),
@@ -774,6 +878,8 @@ export async function main(): Promise<void> {
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
     queueReorder: (seatId, move, above) => reorderQueue(queueReorder, seatId, move, above),
+    prepareQueueReorder: (seatId, move, above) =>
+      prepareQueueReorderSnapshot(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     areas: flightAreas,
     config,
@@ -906,6 +1012,7 @@ export async function main(): Promise<void> {
     qaReports,
     previews,
     previewRepoId,
+    designPreviews,
     previewActivity,
     hudShots,
     prEvidence: evidenceStore,
@@ -914,6 +1021,7 @@ export async function main(): Promise<void> {
     mapRing,
     warmMap: true,
     operatorToken,
+    controllerToken,
     gh,
     knownSecrets: mcDeps.knownSecrets,
     deliverComms,
@@ -930,6 +1038,11 @@ export async function main(): Promise<void> {
       browserStreamCount = count;
     },
     hubLogin: () => hubLogin,
+    needsYou: {
+      board: engineBoard,
+      rules: engineRules,
+      fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
+    },
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath: writableConfigPath,
@@ -993,6 +1106,18 @@ export async function main(): Promise<void> {
       log(`crew: restored ${r.tokens} token(s) and ${r.holds} test-lock hold(s)`);
     }
   }
+  if (designPreviews !== undefined) {
+    const sweep = setInterval(() => void designPreviews.sweep(), DESIGN_PREVIEW_SWEEP_MS);
+    sweep.unref();
+    app.addHook("onClose", async () => {
+      clearInterval(sweep);
+      await designPreviews.close();
+    });
+    // a taken port must not stop the hub: previews just cannot be shown
+    await designPreviews.listen().catch((e: unknown) => {
+      log(`design previews: cannot listen on ${DESIGN_PREVIEW_PORT}: ${String(e)}`);
+    });
+  }
   await app.listen({ host: HOST, port });
   // External service tooling can identify this hub without inspecting a process command line.
   if (!preview) {
@@ -1002,6 +1127,8 @@ export async function main(): Promise<void> {
       unlinkSync(pidPath);
     });
   }
+  // reviews already in flight when this hub updated keep finishing: they count as asked once
+  if (!preview) seedExternalReviewAsks(store, Date.now());
   scheduler.start();
   gitFiles?.start();
   supervisor.start();
@@ -1043,14 +1170,21 @@ export async function main(): Promise<void> {
         log(`branch tidy: ${what} failed: ${e instanceof Error ? e.message : String(e)}`);
       });
     };
-    const everyTenMinutes = quietly("closed-PR pass and local prune", async () => [
-      ...(await tidy.closedPass()),
-      ...(await tidy.pruneLocal()),
-    ]);
+    const everyTenMinutes = quietly("local prune", () => tidy.pruneLocal());
     setInterval(everyTenMinutes, TIDY_EVERY_MS).unref();
     setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
     setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
   }
+  // Local only (no GitHub write): merged PRs' reviews are recorded and due proposals re-measured.
+  const audit = () => {
+    try {
+      runCodeHealthAudit({ store, config, now: Date.now });
+    } catch (e) {
+      log(`code-health audit failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  setInterval(audit, CODE_HEALTH_AUDIT_EVERY_MS).unref();
+  setTimeout(audit, 60_000).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({

@@ -4,7 +4,7 @@
   "packageManager": "pnpm@11.28.7",
   "type": "module",
   "engines": {
-    "node": ">=25"
+    "node": ">=26"
   },
   "scripts": {
     "build": "pnpm --filter @mc/web build",
