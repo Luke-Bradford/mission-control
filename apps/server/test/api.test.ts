@@ -1600,6 +1600,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/comms:1/reply-route"],
   ["GET", "/api/comms/comms:1/state"],
   ["POST", "/api/attention/unknown/choose", { optionId: "yes", briefAt: 1 }],
+  ["POST", "/api/attention/unknown/clear", {}],
   ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
   ["DELETE", "/api/comms/comms:1/pin", {}],
@@ -1665,6 +1666,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
   ["GET", "/api/prs/flow"],
+  ["GET", "/api/dependencies"],
   ["GET", "/api/flight/orders"],
   ["GET", "/api/flight/orders/:id"],
   ["POST", "/api/flight/orders", { text: "Fixture order" }],
@@ -2232,6 +2234,7 @@ describe("repo onboarding (POST /api/repos/onboard)", () => {
       store,
       bus,
       configPath,
+      configHubRoot: "/mc-api-fixture-hub",
       crewReloader: reloader,
       seatWrites: true,
       githubGql: async () => gql,
@@ -2713,7 +2716,11 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
-      if (url === "/api/attention/unknown" || /^\/api\/attention\/unknown\/choo?[si]/.test(url)) {
+      if (
+        url === "/api/attention/unknown" ||
+        url === "/api/attention/unknown/clear" ||
+        /^\/api\/attention\/unknown\/choo?[si]/.test(url)
+      ) {
         expect(r.statusCode).toBe(404);
         continue;
       }
@@ -9724,6 +9731,24 @@ describe("operator token", () => {
         })
       ).statusCode,
     ).toBe(200);
+  });
+
+  it("protects the dependency chains read and validates repository scope", async () => {
+    for (const headers of [{}, { [OPERATOR_HEADER]: "wrong" }]) {
+      const response = await guarded.inject({ method: "GET", url: "/api/dependencies", headers });
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
+    }
+    const read = (url: string) =>
+      guarded.inject({ method: "GET", url, headers: { [OPERATOR_HEADER]: "tok-1" } });
+    expect((await read("/api/dependencies?repoId=unknown")).statusCode).toBe(404);
+    expect((await read("/api/dependencies?repoId=")).statusCode).toBe(400);
+    expect((await read("/api/dependencies?unexpected=yes")).statusCode).toBe(400);
+    const response = await read("/api/dependencies?repoId=shop-app");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+    expect((await read("/api/dependencies")).json()).toEqual([]);
+    expect(store.getSetting("dependency-waits:shop-app")).toBeNull();
   });
 
   describe("controller check route", () => {

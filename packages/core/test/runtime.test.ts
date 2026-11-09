@@ -376,6 +376,7 @@ describe("the allowlist in phase 2b", () => {
       updateBrief: "mcp__mc__update_brief",
       editIssue: "mcp__mc__edit_issue",
       setFields: "mcp__mc__set_fields",
+      moveReview: "mcp__mc__move_review",
       operator: "mcp__mc__operator",
       ghWrite: "mcp__mc__gh_write",
       crewTidy: "mcp__mc__crew_tidy",

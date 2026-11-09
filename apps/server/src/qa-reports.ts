@@ -10,6 +10,8 @@ import {
   FINDING_RESOLUTION_OUTCOMES,
   FINDING_SEVERITIES,
   type FindingResolution,
+  inertNegatedClosingRefs,
+  NEGATED_CLOSING_REFS_NOTE,
   prEvidenceAffectedPages,
   type QaImageRef,
   type QaReport,
@@ -1012,7 +1014,12 @@ export function qaReportGitIndex(report: QaReport, baseUrl = ""): string {
 
 /** Kept inside the existing review-comment/PR-body write; the full export remains immutable. */
 export function qaReportGitSummary(report: QaReport, baseUrl = ""): string {
-  const short = (text: string, limit = 800) => Array.from(text).slice(0, limit).join("");
+  let proseChanged = false;
+  const short = (text: string, limit = 800) => {
+    const rendered = inertNegatedClosingRefs(text);
+    proseChanged ||= rendered !== text;
+    return Array.from(rendered).slice(0, limit).join("");
+  };
   const lines = [
     qaReportGitIndex(report, baseUrl),
     "",
@@ -1045,8 +1052,9 @@ export function qaReportGitSummary(report: QaReport, baseUrl = ""): string {
     `Visual applicability: ${report.visual.applicability}${report.visual.reason ? ` — ${short(report.visual.reason, 1000)}` : ""}.`,
     `${report.visual.pairs.length} retained/reference before-and-after pairs. Test commands and their hub/controller/reviewer provenance are in the immutable report; reported counts are not execution receipts.`,
   ];
+  if (proseChanged) lines.push("", NEGATED_CLOSING_REFS_NOTE);
   const body = lines.join("\n");
   return body.length <= 12000
     ? body
-    : `${short(body, 11900)}\n[Summary shortened; read the immutable report.]`;
+    : `${Array.from(body).slice(0, 11900).join("")}\n[Summary shortened; read the immutable report.]`;
 }

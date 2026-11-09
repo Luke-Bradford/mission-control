@@ -154,6 +154,7 @@ import {
 } from "@mc/core";
 import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
+import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
@@ -2613,7 +2614,8 @@ export function createEngine(deps: EngineDeps): Engine {
     // next pass requests it again for the current one
     for (const row of store.reviewsIn(["queued"])) {
       const author = store.run(row.authorRunId);
-      if (author === null || row.seatId === reviewerFor(author)?.id) continue;
+      if (author === null || store.reviewMoved(row.id) || row.seatId === reviewerFor(author)?.id)
+        continue;
       const at = now();
       if (store.setReviewState(row.id, ["queued"], "superseded", { at })) {
         store.addLoopEvent(
@@ -2644,8 +2646,11 @@ export function createEngine(deps: EngineDeps): Engine {
       const heldRun = held === null ? null : store.run(held);
       const free = heldRun === null || heldRun.endedAt !== null;
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
-      if (accountHoldsNewWork(config, store, seat.accountId, now())) continue;
+      const at = now();
+      if (accountAtStop(config, store, seat.accountId, at)) continue;
+      const braked = budgetBrake(config, store, seat.accountId, at) !== null;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
+        if (braked && !store.reviewBudgetBrakeOverride(row.id)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;

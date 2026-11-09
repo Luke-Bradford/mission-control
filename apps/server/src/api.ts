@@ -53,6 +53,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  compareDependencyChains,
   crewProfileOf,
   crewSummary,
   DEFAULT_REPO_RULES,
@@ -190,6 +191,7 @@ import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
+import { clearAttentionItem } from "./clear-attention.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -267,6 +269,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
+import { readDependencyChains } from "./dependency-chains.ts";
 import type { DesignPreviews } from "./design-previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
@@ -566,6 +569,8 @@ export interface AppDeps {
   noLoopWrites?: boolean;
   /** The config.yaml the server loaded, which `POST /api/repos` appends to; absent: no config writes. */
   configPath?: string;
+  /** Trusted embedded hosts may override the path used to validate crew path containment. */
+  configHubRoot?: string | null;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
   crewReloader?: CrewReloader;
   /** True when this server may write crew seats to `configPath` (not a preview on the live file). */
@@ -668,6 +673,7 @@ const MessageBody = z.strictObject({
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
 const NoBody = z.strictObject({});
+const CLEAR_ATTENTION_ROUTE = "/attention/:key/clear";
 /** `POST /api/runs/:id/merge-hold`: the controller holds a run's merge (with a reason) or releases it. */
 const MergeHoldBody = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("hold"), reason: z.string().trim().min(1).max(300) }),
@@ -1283,10 +1289,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       Number(req.headers["content-length"] ?? 0) > 0 ||
       req.headers["transfer-encoding"] !== undefined;
     const previewActivity = req.routeOptions.url === "/api/previews/:pr/activity";
+    const emptyClear =
+      req.method === "POST" &&
+      req.routeOptions.url === `${API_PREFIX}${CLEAR_ATTENTION_ROUTE}` &&
+      !hasBody;
     if (
       mutating &&
       (req.method !== "DELETE" || hasBody) &&
       !previewActivity &&
+      !emptyClear &&
       mediaType(req.headers["content-type"]) !== "application/json"
     ) {
       return reply
@@ -3338,28 +3349,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? { github: liveRepo.github, project: liveRepo.project }
             : undefined;
         try {
-          const result = await onboardRepo(configPath, body.data, now(), async (repo) => {
-            if (
-              conversionIdentity &&
-              (repo.github !== conversionIdentity.github ||
-                repo.project !== conversionIdentity.project)
-            )
-              throw new ConfigWriteError(
-                "conflict",
-                "the repo identity changed in config.yaml; refresh and try again",
+          const result = await onboardRepo(
+            configPath,
+            body.data,
+            now(),
+            async (repo) => {
+              if (
+                conversionIdentity &&
+                (repo.github !== conversionIdentity.github ||
+                  repo.project !== conversionIdentity.project)
+              )
+                throw new ConfigWriteError(
+                  "conflict",
+                  "the repo identity changed in config.yaml; refresh and try again",
+                );
+              const preview = await repoPreview(
+                await githubGql(),
+                { github: repo.github, project: repo.project },
+                config,
+                store,
               );
-            const preview = await repoPreview(
-              await githubGql(),
-              { github: repo.github, project: repo.project },
-              config,
-              store,
-            );
-            if (body.data.checkout.branch !== preview.defaultBranch)
-              throw new ConfigWriteError(
-                "invalid",
-                "the checkout branch must match GitHub's default branch",
-              );
-          });
+              if (body.data.checkout.branch !== preview.defaultBranch)
+                throw new ConfigWriteError(
+                  "invalid",
+                  "the checkout branch must match GitHub's default branch",
+                );
+            },
+            deps.configHubRoot,
+          );
           const onboarded = result.config.repos.find((repo) => repo.id === body.data.repoId);
           if (!onboarded)
             throw new ConfigWriteError("write", "the new config.yaml has no added repo");
@@ -3473,9 +3490,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
             const message = e instanceof Error ? e.message : "";
             // git's own failure text carries paths and flags; the page gets a plain sentence instead
-            const reason = message.startsWith("Command failed")
-              ? "git could not read the checkout"
-              : message;
+            const reason =
+              message.startsWith("Command failed") ||
+              message === "the checkout has no files at this commit"
+                ? "git could not read the checkout"
+                : message;
             return reply.code(503).send({
               error: `map snapshot unavailable${/^[\w ,.'-]{1,120}$/.test(reason) ? `: ${reason}` : ""}`,
             });
@@ -4163,7 +4182,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = NewSessionBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         try {
-          const result = await createSession(configPath, body.data, now(), config);
+          const result = await createSession(
+            configPath,
+            body.data,
+            now(),
+            config,
+            deps.configHubRoot,
+          );
           const changes = await crewReloader.reload();
           return {
             id: body.data.id,
@@ -4190,7 +4215,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         try {
           const result = await crewReloader.removeSession(req.params.id, (stopped, session) =>
-            closeSession(configPath, req.params.id, stopped, now(), session),
+            closeSession(configPath, req.params.id, stopped, now(), session, deps.configHubRoot),
           );
           const checkout = await removeSessionCheckout(result.session, result.worktrees);
           return {
@@ -4297,6 +4322,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               body.data.base,
               body.data.seats,
               now(),
+              deps.configHubRoot,
             );
           } catch (e) {
             captureError(reply, e);
@@ -4763,6 +4789,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           })),
           generatedAt: now(),
         };
+      });
+      // Reader: docs/runbook.md#dependency-chains-api (approved Dependencies build contract).
+      api.get<{ Querystring: { repoId?: string } }>("/dependencies", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const query = z
+          .strictObject({ repoId: z.string().trim().min(1).optional() })
+          .safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: "Invalid dependency query" });
+        const repos = config.repos.filter(
+          (r) => query.data.repoId === undefined || r.id === query.data.repoId,
+        );
+        if (repos.length === 0) return reply.code(404).send({ error: "Repository not found" });
+        const at = now();
+        return repos
+          .flatMap((repo) => readDependencyChains(store, repo.id, at))
+          .sort(compareDependencyChains);
       });
       const CodeHealthQuery = z.strictObject({
         repo: z.string().trim().min(1).max(128),
@@ -6360,6 +6406,57 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } finally {
           discussionSends.delete(sendKey);
         }
+      });
+
+      api.register(async (api) => {
+        // Only Clear accepts an empty JSON stream; other routes keep the standard parser.
+        const parseJson = api.getDefaultJsonParser("error", "error");
+        api.removeContentTypeParser("application/json");
+        api.addContentTypeParser<string>(
+          "application/json",
+          { parseAs: "string" },
+          (req, body, done) => {
+            if (body.length === 0) done(null, {});
+            else parseJson(req, body, done);
+          },
+        );
+        // Reader: docs/runbook.md#clearing-a-needs-you-item (#1625 supplies the web control)
+        api.post<{ Params: { key: string } }>("/attention/:key/clear", async (req, reply) => {
+          if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined)
+            return reply.code(403).send({ error: "Only the operator can clear an item." });
+          if (!NoBody.safeParse(req.body === undefined ? {} : req.body).success)
+            return reply.code(400).send({ error: "Clear takes an empty body." });
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const { key } = req.params;
+          if (key === `note:${FLIGHT_RUNAWAY_NOTE_KEY}`)
+            return reply.code(409).send({ error: "Use Lift to release the runaway flag." });
+          const item = attentionItems(
+            config,
+            store,
+            now(),
+            deps.lock?.state() ?? NO_LOCK,
+            sharedCrew().rows,
+            deps.hubLogin?.() ?? null,
+            true,
+          ).find((i) => i.key === key);
+          if (!item) return reply.code(404).send({ error: "That item is no longer waiting." });
+          const sender = commsSender(req);
+          const cleared = await clearAttentionItem(
+            {
+              config,
+              store,
+              bus,
+              now,
+              by: sender.from,
+              actorName: sender.kind === "controller" ? "The controller" : "The operator",
+              reconcileRun: deps.engine?.reconcileRun?.bind(deps.engine),
+            },
+            item,
+          );
+          return cleared
+            ? { cleared: key }
+            : reply.code(404).send({ error: "That item is no longer waiting." });
+        });
       });
 
       const ChooseBody = z.strictObject({

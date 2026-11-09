@@ -56,6 +56,7 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
+  COMMS_OPEN_PREFIX,
   COMMS_TEXT_MAX,
   type CommsLabel,
   type CommsReaction,
@@ -403,6 +404,11 @@ CREATE TABLE IF NOT EXISTS reviews (
   UNIQUE (author_run_id, sha, epoch, attempt)
 );
 CREATE INDEX IF NOT EXISTS reviews_state ON reviews(state, created_at);
+-- A FLIGHT-directed queued-review move overrides the engine's ordinary reviewer selection.
+CREATE TABLE IF NOT EXISTS review_moves (
+  review_id INTEGER PRIMARY KEY, seat_id TEXT NOT NULL, at INTEGER NOT NULL,
+  budget_brake_override INTEGER NOT NULL DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS review_findings (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, author_run_id TEXT NOT NULL, pos INTEGER NOT NULL,
   severity TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, summary TEXT NOT NULL,
@@ -1825,6 +1831,7 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
+    this.addColumn("review_moves", "budget_brake_override", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
@@ -5201,8 +5208,10 @@ export class Store {
   }[] {
     return (
       this.db
-        .prepare(`SELECT key, brief_at, target, answer, binding FROM decision_defaults
-      WHERE delivered_at IS NULL AND target IS NOT NULL AND delivery_state = 'pending' ORDER BY applied_at, key`)
+        .prepare(`SELECT key, brief_at, target, answer, binding FROM decision_defaults d
+      WHERE delivered_at IS NULL AND target IS NOT NULL AND delivery_state = 'pending'
+        AND NOT EXISTS (SELECT 1 FROM question_closures c WHERE c.key = d.key AND c.kind = 'cleared' AND c.at >= d.applied_at)
+      ORDER BY applied_at, key`)
         .all() as Row[]
     ).map((r) => ({
       key: r.key as string,
@@ -5754,6 +5763,37 @@ export class Store {
   review(id: number): ReviewRow | null {
     const row = this.db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
     return row ? toReview(row) : null;
+  }
+
+  /** Moves a queued review to another review seat; true only when it was still queued. */
+  moveQueuedReview(id: number, seatId: string, at: number, budgetBrakeOverride = false): boolean {
+    let moved = false;
+    this.transaction(() => {
+      moved =
+        this.db
+          .prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'")
+          .run(seatId, id).changes === 1;
+      if (moved)
+        this.db
+          .prepare(
+            "INSERT OR REPLACE INTO review_moves (review_id, seat_id, at, budget_brake_override) VALUES (?, ?, ?, ?)",
+          )
+          .run(id, seatId, at, Number(budgetBrakeOverride));
+    });
+    return moved;
+  }
+
+  /** Whether FLIGHT assigned the queued review to its current seat. */
+  reviewMoved(id: number): boolean {
+    return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
+  }
+
+  /** Whether FLIGHT explicitly passed the target account's budget brake for this review. */
+  reviewBudgetBrakeOverride(id: number): boolean {
+    const row = this.db
+      .prepare("SELECT budget_brake_override FROM review_moves WHERE review_id = ?")
+      .get(id) as { budget_brake_override?: number } | undefined;
+    return row?.budget_brake_override === 1;
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */
@@ -6612,12 +6652,16 @@ export class Store {
     return id;
   }
 
-  private commsRow(r: Row): CommsRow {
+  private commsRow(r: Row, knownMentions?: string[]): CommsRow {
     const id = Number(r.id);
-    const mentions = this.db
-      .prepare("SELECT mentioned_id FROM comms_mentions WHERE message_id = ? ORDER BY mentioned_id")
-      .all(id)
-      .map((m) => m.mentioned_id as string);
+    const mentions =
+      knownMentions ??
+      this.db
+        .prepare(
+          "SELECT mentioned_id FROM comms_mentions WHERE message_id = ? ORDER BY mentioned_id",
+        )
+        .all(id)
+        .map((m) => m.mentioned_id as string);
     return {
       id: `comms:${id}`,
       at: r.at as number,
@@ -6633,6 +6677,28 @@ export class Store {
       senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
       ...(typeof r.item_key === "string" ? { itemKey: r.item_key } : {}),
     };
+  }
+
+  /** Bound mention reads per snapshot; retain no message or mention cache between calls. */
+  private commsRows(rows: Row[]): CommsRow[] {
+    const mentions = new Map<number, string[]>();
+    // Stay below even SQLite's older 999-variable limit if the snapshot limit grows.
+    const batchSize = 400;
+    for (let start = 0; start < rows.length; start += batchSize) {
+      const ids = rows.slice(start, start + batchSize).map((row) => Number(row.id));
+      const found = this.db
+        .prepare(
+          `SELECT message_id, mentioned_id FROM comms_mentions WHERE message_id IN (${ids.map(() => "?").join(",")}) ORDER BY message_id, mentioned_id`,
+        )
+        .all(...ids);
+      for (const row of found) {
+        const id = Number(row.message_id);
+        const names = mentions.get(id) ?? [];
+        names.push(row.mentioned_id as string);
+        mentions.set(id, names);
+      }
+    }
+    return rows.map((row) => this.commsRow(row, mentions.get(Number(row.id))?.slice() ?? []));
   }
 
   /** Records that the recipient took a message; the first time wins. */
@@ -7643,7 +7709,7 @@ export class Store {
         THREAD_COMMS_LIMIT,
         THREAD_COMMS_LIMIT,
       ) as Row[];
-    return rows.reverse().map((r) => this.commsRow(r));
+    return this.commsRows(rows.reverse());
   }
 
   /** Prompt metadata remains available even after its body has been read. */
@@ -8757,6 +8823,45 @@ export class Store {
     return stored;
   }
 
+  /** Operator Clear closes the displayed source and records its closure in the same transaction. */
+  clearAttention(c: QuestionClosure, notices: NewCommsRow[] = []): boolean {
+    let stored = false;
+    this.transaction(() => {
+      stored = this.insertClosure(c);
+      if (!stored) return;
+      if (c.key.startsWith("note:")) this.dismissNote(c.key.slice("note:".length), c.at);
+      else if (c.key.startsWith("crew-error:")) {
+        const id = Number(c.key.slice("crew-error:".length));
+        if (Number.isSafeInteger(id) && id > 0) this.ackCrewError(id);
+      } else if (c.key.startsWith(COMMS_OPEN_PREFIX))
+        this.settleCommsItem(c.key.slice(COMMS_OPEN_PREFIX.length), c.by, c.reason, c.at);
+      this.db
+        .prepare(`INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
+        ON CONFLICT(key) DO UPDATE SET at = excluded.at`)
+        .run(c.key, c.at);
+      for (const notice of notices) this.insertComms(notice, cutCommsText(notice.text), null);
+    }, true);
+    return stored;
+  }
+
+  /** Hide only FLIGHT's latest brief; retain its history and the underlying question or hold. */
+  withdrawFlightBrief(key: string): boolean {
+    let withdrawn = false;
+    this.transaction(() => {
+      const row = this.db
+        .prepare("SELECT id, structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
+        .get(key) as Row | undefined;
+      if (
+        !row?.structured ||
+        (JSON.parse(row.structured as string) as AttentionBrief).by !== "flight"
+      )
+        return;
+      this.setSetting(`withdrawn-brief:${key}`, String(row.id));
+      withdrawn = true;
+    }, true);
+    return withdrawn;
+  }
+
   /** `closeQuestion` without its own transaction, for a caller already in one. */
   private insertClosure(c: QuestionClosure): boolean {
     const r = this.db
@@ -9786,7 +9891,8 @@ export class Store {
   /** The newest brief on each attention key. */
   briefs(): Map<string, AttentionBrief> {
     const rows = this.db
-      .prepare("SELECT * FROM briefs WHERE id IN (SELECT MAX(id) FROM briefs GROUP BY key)")
+      .prepare(`SELECT b.* FROM briefs b WHERE b.id IN (SELECT MAX(id) FROM briefs GROUP BY key)
+        AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key = 'withdrawn-brief:' || b.key AND s.value = CAST(b.id AS TEXT))`)
       .all() as Row[];
     return new Map(
       rows

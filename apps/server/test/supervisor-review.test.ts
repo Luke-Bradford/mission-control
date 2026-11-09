@@ -1295,6 +1295,37 @@ describe("startReview", () => {
     expect(await reviewModel("full")).toBe(REVIEW_FULL_MODEL);
   });
 
+  it("a moved Size M review keeps the full model over its target's light model", async () => {
+    store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
+    const base = DEFAULT_PROFILES[0] as Profile;
+    const r = reviewOfPush({
+      state: "queued",
+      profile: {
+        profile: { ...base, reviewer: { role: "RETRO", depth: "light" } },
+        route: { by: "size", size: "M" },
+        hash: "h",
+      },
+    });
+    const { sup } = make({
+      extraSeat: {
+        id: "retro-2",
+        role: "RETRO",
+        accountId: "claude-main",
+        model: REVIEW_FULL_MODEL,
+        lightModel: "haiku",
+        area: [],
+        mode: "scratch",
+      },
+    });
+    expect(store.moveQueuedReview(r.reviewId, "retro-2", 2)).toBe(true);
+    expect(store.setReviewState(r.reviewId, ["queued"], "starting", { at: 2 })).toBe(true);
+
+    sup.start();
+    const { runId } = await sup.startReview("retro-2", r.reviewId);
+
+    expect(store.run(runId)?.model).toBe(REVIEW_FULL_MODEL);
+  });
+
   it("a Codex full-depth review runs on the seat's model", async () => {
     const r = reviewOfPush({
       profile: {

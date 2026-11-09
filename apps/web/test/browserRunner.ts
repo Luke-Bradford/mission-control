@@ -39,6 +39,8 @@ export interface RenderedPage {
   /** Reload the harness entry in the same browser session, preserving sessionStorage. */
   reload(): Promise<void>;
   press(key: string): Promise<void>;
+  /** Moves the real browser pointer in viewport CSS pixels. */
+  movePointer(x: number, y: number): Promise<void>;
   /** The first element matching `selector`; throws if there is none. */
   box(selector: string): Promise<Box>;
   /** Every element matching `selector`, in document order; throws if there is none. */
@@ -85,6 +87,7 @@ interface Route {
   fulfill(options: { status?: number; contentType?: string; body: string | Buffer }): Promise<void>;
 }
 interface Page {
+  mouse: { move(x: number, y: number): Promise<void> };
   keyboard: { press(key: string): Promise<void> };
   on(event: "pageerror", handler: (error: Error) => void): void;
   on(event: "request", handler: (request: { url(): string; method(): string }) => void): void;
@@ -359,6 +362,7 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       };
       return {
         press: (key) => page.keyboard.press(key),
+        movePointer: (x, y) => page.mouse.move(x, y),
         errors: () => errors.slice(),
         requests: () => requests.slice(),
         resize: (width, height) => page.setViewportSize({ width, height }),

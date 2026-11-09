@@ -4036,6 +4036,22 @@ describe("the engine runs reviews", () => {
       await vi.waitFor(() => expect(h.starts).toEqual([{ seat: RETRO, id: expect.any(Number) }]));
     });
 
+    it("starts a FLIGHT-moved P0 review through its target budget brake only", async () => {
+      addCodexReviewer();
+      brakeAccount("claude-main");
+      brakeAccount("codex-main");
+      await toReview();
+      await h.engine.tick();
+      const review = first();
+      expect(store.moveQueuedReview(review.id, "retro-cx", clock, true)).toBe(true);
+
+      await h.engine.tick();
+
+      await vi.waitFor(() =>
+        expect(h.starts).toEqual([{ seat: "retro-cx", id: expect.any(Number) }]),
+      );
+    });
+
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
       addCodexReviewer();
       h.busyList = [{ seatId: "retro-cx", state: "running" }];

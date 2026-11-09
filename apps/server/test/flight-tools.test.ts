@@ -742,6 +742,160 @@ const named = (name: string): McTool => {
 };
 const call = (name: string, a: Record<string, unknown>, c = ctx()) => named(name).call(c, a);
 
+describe("move_review", () => {
+  const queuedReview = () => {
+    engineOn = true;
+    cfg.accounts.push({ id: "codex-main", vendor: "codex", alertAt: 80, stopAt: 95 });
+    need(cfg.crew?.sessions[0]).seats.push(
+      seat("retro-cx", "RETRO", { accountId: "codex-main", mode: "scratch" }),
+    );
+    const id = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 3,
+      attempt: 2,
+      round: 2,
+      at: NOW,
+    });
+    if (id === null) throw new Error("review was not queued");
+    return id;
+  };
+
+  it("moves one queued review to the named review seat and records its basis", async () => {
+    const id = queuedReview();
+
+    const result = await call("move_review", {
+      reviewId: id,
+      seat: "retro-cx",
+      basis: "mc#7 P0 must not wait for the stopped reviewer",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.text).toBe("Moved queued review 1 to RETRO-CX.");
+    expect(store.review(id)).toMatchObject({
+      seatId: "retro-cx",
+      sha: SHA,
+      epoch: 3,
+      attempt: 2,
+      round: 2,
+    });
+    expect(store.reviewMoved(id)).toBe(true);
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        about: "move_review",
+        basis: "mc#7 P0 must not wait for the stopped reviewer",
+      }),
+    ]);
+  });
+
+  it("refuses and records a target review seat whose account is at its usage stop", async () => {
+    const id = queuedReview();
+    store.addUsage({
+      accountId: "codex-main",
+      window: "7d",
+      at: NOW,
+      pct: 100,
+      resetAt: NOW + 60_000,
+      source: "test",
+    });
+
+    const result = await call("move_review", {
+      reviewId: id,
+      seat: "retro-cx",
+      basis: "mc#7 P0 must not wait for the stopped reviewer",
+    });
+
+    expect(result).toEqual({
+      text: "Not started: RETRO-CX's account codex-main is at its usage stop.",
+      isError: true,
+    });
+    expect(store.review(id)?.seatId).toBe("retro-1");
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        about: "move_review",
+        decision: "Not started: RETRO-CX's account codex-main is at its usage stop.",
+      }),
+    ]);
+  });
+
+  it("passes a target budget brake only with a basis that names a P0 ticket", async () => {
+    const id = queuedReview();
+    for (const [at, pct] of [
+      [NOW - 6 * 60 * 60_000, 40],
+      [NOW, 60],
+    ] as const)
+      store.addUsage({
+        accountId: "codex-main",
+        window: "7d",
+        at,
+        pct,
+        resetAt: NOW + 24 * 60 * 60_000,
+        source: "test",
+      });
+
+    expect(
+      (
+        await call("move_review", {
+          reviewId: id,
+          seat: "retro-cx",
+          basis: "priority work needs a reviewer",
+        })
+      ).isError,
+    ).toBe(true);
+    expect(store.review(id)?.seatId).toBe("retro-1");
+    expect(
+      (
+        await call("move_review", {
+          reviewId: id,
+          seat: "retro-cx",
+          basis: "mc#7 P0 must not wait for the stopped reviewer",
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(store.review(id)?.seatId).toBe("retro-cx");
+    expect(store.reviewBudgetBrakeOverride(id)).toBe(true);
+  });
+
+  it.each([
+    ["retiring", { retiring: true }, "RETRO-CX is retiring."],
+    [
+      "unavailable",
+      { modelVendor: "codex" as const, model: "unknown" },
+      "RETRO-CX is unavailable.",
+    ],
+    ["non-scratch", { mode: "writer" as const }, "RETRO-CX is not a review seat."],
+  ])("refuses a %s target review seat", async (_kind, extra, text) => {
+    const id = queuedReview();
+    const target = need(cfg.crew?.sessions[0]).seats.find((seat) => seat.id === "retro-cx");
+    if (target === undefined) throw new Error("missing RETRO-CX");
+    Object.assign(target, extra);
+
+    await expect(
+      call("move_review", {
+        reviewId: id,
+        seat: "retro-cx",
+        basis: "mc#7 P0 needs the available reviewer",
+      }),
+    ).resolves.toEqual({ text, isError: true });
+    expect(store.review(id)?.seatId).toBe("retro-1");
+  });
+
+  it("refuses the review's current seat", async () => {
+    const id = queuedReview();
+
+    await expect(
+      call("move_review", {
+        reviewId: id,
+        seat: "retro-1",
+        basis: "mc#7 P0 needs the available reviewer",
+      }),
+    ).resolves.toEqual({ text: "RETRO-1 already has this review.", isError: true });
+  });
+});
+
 describe("resume_seat", () => {
   it("does not report a stopped seat's held run as resumed when resumeRun is a no-op", async () => {
     need(cfg.repos[0]).flightPowers = "superuser";
@@ -1289,6 +1443,7 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
+      "move_review",
       "resume_seat",
       "merge_pr",
       "settle_park",
@@ -11045,6 +11200,49 @@ describe("return_question and withdraw_question (#1532)", () => {
       });
     });
     const key = "note:blocked:prot";
+    it("withdraws only FLIGHT's protected brief without answering a passed seat question", async () => {
+      live("guido-1", "r-protected-question", { ticket: "mc#7" });
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "r-protected-question",
+        text: "Choose the required approval.",
+        at: NOW,
+      });
+      store.passQuestion(id, NOW);
+      const questionKey = key;
+      store.addBrief({
+        key: questionKey,
+        for: "operator",
+        by: "flight",
+        at: NOW,
+        context: "The operator must choose.",
+        ask: "Approve this direction?",
+        recommendation: "Keep waiting.",
+        basis: "Existing authority.",
+        options: [],
+      });
+      const result = await call("withdraw_question", W(questionKey));
+      expect(result.isError, result.text).toBeUndefined();
+      expect(store.briefs().has(questionKey)).toBe(false);
+      expect(store.question(id)?.answeredAt).toBeNull();
+      expect(store.question(id)?.passedAt).toBe(NOW);
+      expect(store.questionClosures(0, 10)).toEqual([]);
+      expect(store.acks().has(questionKey)).toBe(false);
+      expect(messageCalls).toEqual([]);
+      store.addBrief({
+        key: questionKey,
+        for: "operator",
+        by: "flight",
+        at: NOW + 1,
+        context: "The operator still must choose.",
+        ask: "Approve this direction?",
+        recommendation: "Keep waiting.",
+        basis: "Refreshed context.",
+        options: [],
+      });
+      expect(store.briefs().has(questionKey)).toBe(true);
+      expect(store.question(id)?.answeredAt).toBeNull();
+    });
     it.each([
       ["hold_item", { key, reason: "Waiting", condition: { kind: "manual" } }],
       [

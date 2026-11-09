@@ -369,6 +369,28 @@ invalidate them immediately. Live ownership and waits are read fresh on every re
 FLIGHT wakes after five unowned minutes, a stage's seven-day p90, or fifteen minutes waiting for
 the controller or operator. Repeated polls do not reset stage clocks or repeat the same wake fact.
 
+## Dependency chains API
+
+`GET /api/dependencies?repoId=<configured repository>` uses the same operator-token check as
+PR flow. It returns `DependencyChain[]`; omit `repoId` for all configured repositories.
+An unknown repository returns 404 and an invalid query returns 400. This is the approved server
+contract for the Dependencies Board, FLIGHT and QA builds. Those web readers ship separately.
+
+The read joins stored ticket dependencies, stacked PRs, active holds, PR ownership and seat queues.
+A PR reference continues through its carried ticket's waits. All open waits participate; work
+with multiple roots appears under each, with its other roots in `alsoWaitsOn`. Cycles return
+`stuck` with their refs. Unread or out-of-repository roots remain `unknown`.
+The response retains all dependents; the web applies its five-dependent disclosure.
+
+`waitedMs` and `longestWaitMs` use observed wait, hold or queue-transition times. An older run's
+start is not evidence of when it entered a queue. Unknown ages stay null. Sort is longest wait
+first, unknown last, then stuck first and ref. `frees` names only dependents whose last direct
+wait ends with the root; grandchildren still waiting on intervening work stay in `stillWaiting`.
+Ownership comes from PR flow or an active author; operator holds remain visible. A root without
+an owner, closed without merging, or past its seven-day stage p90 is stuck.
+
+Page reads never observe waits, change settings, release holds, call GitHub or write decisions.
+
 ### As a launchd job (optional; nothing loads it for you)
 
 `ops/com.missioncontrol.server.plist.tmpl` runs
@@ -1516,6 +1538,7 @@ named pause or attributes an unknown grant to FLIGHT.
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
+| `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. FLIGHT may pass the target budget brake only with a recorded basis that names a P0 ticket. |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
 | `resume_seat` | Resume a seat's unfinished run after a stop, a crew pause, an error or a restart; a build or plan seat in FLIGHT's session and a run in its lane. A stop can be lifted, but a crew-pause exception covers that run only. The original pause keeps its owner and seat coverage. Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), an already live unpaused session, and a machine without headroom. A failed resume removes only its own exception and restores the stop unless the operator changed it |
 | `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
@@ -2915,3 +2938,22 @@ keep their permission checks.
 - **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,
   FLIGHT's `answer` and `pass` decisions, question messages (label `question`) and the replies to
   them keep 365.
+
+
+### Clearing a Needs-you item
+
+`POST /api/attention/:key/clear` with an empty body returns `{ cleared: key }`. The operator or
+independent controller can clear an acknowledged item too. A delegated FLIGHT actor is refused
+with 403; a missing item returns 404, `That item is no longer waiting.` The runaway flag directs
+the operator to Lift and stays in force.
+
+Clear records a `cleared` closure, closes the displayed source and stores its notices atomically.
+A waiting seat receives a notice for its exact preserved run. FLIGHT receives one hub line.
+Existing approvals, budget stops and run holds remain in force. A new ask can appear again;
+refreshing the presentation cannot reopen the cleared ask. A queued legacy default for it stays
+undelivered and is excluded from new delivery attempts.
+
+FLIGHT can withdraw its own brief from a protected item. This retains the underlying question,
+source and protections; the original brief remains in history. Its unfinished-wake reminder stays
+in FLIGHT's wake and is omitted from operator attention. Answered and superseded note briefs
+are excluded from the current projection.
