@@ -1,0 +1,159 @@
+{
+  "scope": "Local stopped-FLIGHT Needs you correction; real App shell with controlled data, not live operational data or a whole-site visual approval.",
+  "baseline": "94007708fd47b3bfc11d298636df7e0d6db99d66",
+  "head": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3",
+  "capturedAt": "2026-11-09T04:42:03.237474+00:00",
+  "browser": "Google Chrome 156.0.8078.80",
+  "platform": "macOS",
+  "deviceScaleFactor": 1,
+  "route": "/needs-you",
+  "harness": "test/needsBrowser.html",
+  "clock": "NOW from test/fixtures.ts, Date.now fixed by needsBrowser.tsx",
+  "readiness": "Needs form exists; document.fonts.ready and two animation frames; page.errors empty",
+  "fixture": "FlightStopped.browser.test.ts api(): stopped FLIGHT, one operator decision with two choices, empty discussion. Same JSON fixture in both captures.",
+  "baselineMethod": "Reconstructed now from baseline app94007708. Temporary copy of current capture test omits the newly added geometry/keyboard assertions that correctly fail on baseline. No app source changed.",
+  "headMethod": "Committed head test passed all8 viewport/theme cases including painted composer+notice bounds and Tab to Start FLIGHT. Screenshots taken before keyboard focus.",
+  "baselineFailure": "1280x800 light Ask FLIGHT form bottom1147 exceeds viewport800; retained red log /tmp/mc-1580-viewport-red.log.",
+  "limitations": [
+    "Controlled App route, not live data. Arrival from Overview and busy/error states remain independent whole-branch QA work; existing NeedsPage.browser six cases passed.",
+    "The answer pane scrolls independently on stacked layouts; its options and visible reply field were visually inspected at1280x800. No whole-site design pass is claimed."
+  ],
+  "pairs": [
+    {
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "scheme": "light",
+      "before": {
+        "file": "before-1280x800-light.png",
+        "sha256": "841c5c03dcba9f4617255c7e643e55467e9d7857df34fbf56150c6ef8caa3fd5",
+        "source": "94007708fd47b3bfc11d298636df7e0d6db99d66"
+      },
+      "after": {
+        "file": "after-1280x800-light.png",
+        "sha256": "0277872453f53e9af7bfdc1ef3cc446933031777e3dcca7c6218c6c4a3d9b674",
+        "source": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3"
+      }
+    },
+    {
+      "viewport": {
+        "width": 1280,
+        "height": 800
+      },
+      "scheme": "dark",
+      "before": {
+        "file": "before-1280x800-dark.png",
+        "sha256": "d229bff12afbe60d83343027738eed47ede5415a535bf4ae37bb49f78d4b32af",
+        "source": "94007708fd47b3bfc11d298636df7e0d6db99d66"
+      },
+      "after": {
+        "file": "after-1280x800-dark.png",
+        "sha256": "558f7b0c8119e1641273bd548526a1514e45ec8db7ec8d98b3e6b35e4780db60",
+        "source": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3"
+      }
+    },
+    {
+      "viewport": {
+        "width": 1600,
+        "height": 900
+      },
+      "scheme": "light",
+      "before": {
+        "file": "before-1600x900-light.png",
+        "sha256": "e81be0cb140d23537dff97368d405488ea3e9afe1bdedd0b6473bc7af4ae4f08",
+        "source": "94007708fd47b3bfc11d298636df7e0d6db99d66"
+      },
+      "after": {
+        "file": "after-1600x900-light.png",
+        "sha256": "865d0b8f90e94756a624b8a38876644c08c116859a6bbd1d2f0c2a139879c9b5",
+        "source": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3"
+      }
+    },
+    {
+      "viewport": {
+        "width": 1600,
+        "height": 900
+      },
+      "scheme": "dark",
+      "before": {
+        "file": "before-1600x900-dark.png",
+        "sha256": "4d156a4fb7989b0bd9d020f48e125c1f5c450f1778105a5edc0404ed85318bd5",
+        "source": "94007708fd47b3bfc11d298636df7e0d6db99d66"
+      },
+      "after": {
+        "file": "after-1600x900-dark.png",
+        "sha256": "b2789daac06461df186ae6f1593f41743c6458f27976fc02671bc8c675bab71e",
+        "source": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3"
+      }
+    },
+    {
+      "viewport": {
+        "width": 1600,
+        "height": 700
+      },
+      "scheme": "light",
+      "before": {
+        "file": "before-1600x700-light.png",
+        "sha256": "3ab02b8f065c7619ae3c223f033281f7caeea8139195a5a05effd3b77987f167",
+        "source": "94007708fd47b3bfc11d298636df7e0d6db99d66"
+      },
+      "after": {
+        "file": "after-1600x700-light.png",
+        "sha256": "4e17fc24ce2510b5bda47a69a84eef5d372516ecda8c86a91d63b2cc8a801743",
+        "source": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3"
+      }
+    },
+    {
+      "viewport": {
+        "width": 1600,
+        "height": 700
+      },
+      "scheme": "dark",
+      "before": {
+        "file": "before-1600x700-dark.png",
+        "sha256": "dcc97a30f247b24ffa236d6bfae7d24eaf0318f1f9c9d051ee10873779336410",
+        "source": "94007708fd47b3bfc11d298636df7e0d6db99d66"
+      },
+      "after": {
+        "file": "after-1600x700-dark.png",
+        "sha256": "71f1339b9e6ac23e653e9c87fc84c2be7071adbfef2de95e54a5565e8d00edd7",
+        "source": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3"
+      }
+    },
+    {
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "scheme": "light",
+      "before": {
+        "file": "before-1920x1080-light.png",
+        "sha256": "1e88614c2a85e74ef4a182d71d75bdfc27ffef8819f507c037724f481886ce8b",
+        "source": "94007708fd47b3bfc11d298636df7e0d6db99d66"
+      },
+      "after": {
+        "file": "after-1920x1080-light.png",
+        "sha256": "52e6f7ebb87b4929478b3871627501fa8ef7aff8cd2c91c56ac73b91ce320313",
+        "source": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3"
+      }
+    },
+    {
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "scheme": "dark",
+      "before": {
+        "file": "before-1920x1080-dark.png",
+        "sha256": "adf8c109e2bebccd3877a53b984d358f80e8f22d2e207e688ea03bc359b927c7",
+        "source": "94007708fd47b3bfc11d298636df7e0d6db99d66"
+      },
+      "after": {
+        "file": "after-1920x1080-dark.png",
+        "sha256": "a1042d99a0b9d5cc25828b29a21fc943a7688d8cf15b53bf4ff48966fd9f8f11",
+        "source": "b1dc19706630dc3cf234a1840e9f8e1ecafc6ec3"
+      }
+    }
+  ]
+}
