@@ -264,9 +264,6 @@
 .fp-w {
   min-width: 0;
 }
-.fp-empty b {
-  font-weight: 600;
-}
 .fp-w b {
   font-weight: 600;
 }
@@ -406,4 +403,7 @@
   flex-direction: column;
   gap: var(--sp-1);
   padding: var(--sp-4);
+}
+.fp-empty b {
+  font-weight: 600;
 }
