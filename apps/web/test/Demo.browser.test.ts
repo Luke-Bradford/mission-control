@@ -70,7 +70,7 @@ interface PageCase {
 
 const PAGES: PageCase[] = [
   { name: "Overview", at: "/", minText: 2000, populated: ["#agentsList .trow:not(.head)", 10] },
-  { name: "Flight", at: "/flight", minText: 800 },
+  { name: "Flight", at: "/flight", minText: 800, populated: ["#decisions .fp-drow", 3] },
   { name: "Board", at: "/board", minText: 700 },
   { name: "a ticket", at: "/tickets/shop-app/101", minText: 150 },
   { name: "an agent", at: "/agent/dev-1", minText: 500 },
