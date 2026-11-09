@@ -30,3 +30,11 @@ The three web builds remain separate and depend on this server change merging. P
 Each outstanding blocker now keeps its own observed start. Adding a blocker preserves the first blocker's start and assigns the new one the current observation. Removing and later re-adding it starts a new edge clock. Existing stored records without per-edge starts fall back to their known set start.
 
 The all-repository endpoint sorts the combined chains with the same exported comparator used by scoped chains. The new transition regression and the two-repository HTTP ordering check both fail on the reviewed head, then pass after correction. All 44 dependency graph, release and chain cases pass, plus lint, workspace types and build. No additional full local-suite pass is claimed for this bounded existing-PR update; fresh full CI and independent QA remain required.
+
+## CI readiness regressions
+
+The dependency change's web/core CI job failed two unchanged preparations: CommsLength measured graph geometry before metrics/font/ResizeObserver layout settled, and daemon-memory's setup allowed only Vitest's short default poll for a valid handshake/replay. The same two unchanged files pass45 cases in isolation. Their source and graph styles are identical between the reviewed dependency head and the baseline checkout used here. No production dependency or UI style code changes in this follow-up.
+
+CommsLength now first asserts the exact scenario row count, waits for font readiness and two animation frames, then applies the same strict containment, reachability and clipping assertions. It does not poll until the graph happens to fit. The daemon mock deliberately delays opening by1.5seconds, within the real10second HELLO deadline. This reproduces the original zero-versus-two presence failure under the old setup. Setup now uses the actual HELLO_TIMEOUT_MS bound; replay ordering, page requests and frame-headroom assertions remain unchanged. Mock pending opens are cancelled on termination.
+
+All89 graph, daemon and dependency cases pass, including all scenarios and the delayed-handshake regression, on both the earlier local runtime and the app's configured Node26.13.0. Configured-runtime lint and workspace types pass. Fresh full CI and independent QA remain required. No failure assertion, quota stop, provider limit, observed loop or product contract is relaxed.
