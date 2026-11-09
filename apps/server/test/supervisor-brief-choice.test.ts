@@ -1,8 +1,9 @@
 // Actual keeper/fake CLI boundary only; never a paid provider or live workspace.
 import "./supervisor-harness.ts";
+import { writeFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { checkBriefDispatch, withinBriefDispatch } from "../src/brief-dispatch-context.ts";
-import { make, seatState, store, until, userLines } from "./supervisor-harness.ts";
+import { make, recordFile, seatState, store, until, userLines } from "./supervisor-harness.ts";
 
 it("1389 refuses an expected-run change in the actual queued provider message", async () => {
   const { sup } = make();
@@ -115,22 +116,30 @@ it("1389 keeps keyed delivery deduplication scoped to the exact bound decision e
   sup.start();
   const { runId } = await sup.startRun("guido-1", 42);
   await until(() => expect(seatState("guido-1")).toBe("idle"));
+  const initialTurnEnd = store.seatSession("guido-1")?.lastTurnEndedAt ?? 0;
   expect(
     await withinBriefDispatch(
       () => {},
-      () => sup.send(runId, "same-controller-line", "First exact intent"),
+      () => sup.send(runId, "same-controller-line", "QUIET First exact intent"),
       "fixture-epoch-one",
     ),
   ).toBe("sent");
   await until(() => expect(userLines()).toHaveLength(2));
-  await until(() => expect(seatState("guido-1")).toBe("idle"));
+  // The CLI has received the line but has not started it: the old idle state is not completion.
+  expect(store.seatSession("guido-1")?.lastTurnEndedAt ?? 0).toBe(initialTurnEnd);
+  writeFileSync(`${recordFile}.go`, "release the held fake turn");
+  await until(() => {
+    expect(store.seatSession("guido-1")?.lastTurnEndedAt ?? 0).toBeGreaterThan(initialTurnEnd);
+    expect(seatState("guido-1")).toBe("idle");
+  });
   expect(
     await withinBriefDispatch(
       () => {},
-      () => sup.send(runId, "same-controller-line", "First exact intent"),
+      () => sup.send(runId, "same-controller-line", "QUIET First exact intent"),
       "fixture-epoch-one",
     ),
   ).toBe("dup");
+  expect(userLines()).toHaveLength(2);
   expect(
     await withinBriefDispatch(
       () => {},
