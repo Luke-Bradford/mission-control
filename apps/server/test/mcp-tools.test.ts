@@ -2630,6 +2630,7 @@ describe("push and draft_pr", () => {
     git(clone, "fetch", "-q", "origin");
     ghDir = join(dir, "fakegh");
     mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "package.json"), '{"type":"commonjs"}');
     writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
     ghState({ "pr list": { stdout: "[]\n" }, "pr create": { stdout: `${PR_URL}\n` } });
     known = [LOCAL];
@@ -4157,6 +4158,7 @@ describe("the gh wrapper", () => {
   beforeEach(() => {
     ghDir = join(dir, "fakegh");
     mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "package.json"), '{"type":"commonjs"}');
     writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
   });
 
@@ -5561,6 +5563,7 @@ describe("report_plan", () => {
   beforeEach(() => {
     ghDir = join(dir, "fakegh");
     mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "package.json"), '{"type":"commonjs"}');
     writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
     ghState(view("Do X."));
     const cfg = config();

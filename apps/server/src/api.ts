@@ -576,6 +576,8 @@ export interface AppDeps {
   noLoopWrites?: boolean;
   /** The config.yaml the server loaded, which `POST /api/repos` appends to; absent: no config writes. */
   configPath?: string;
+  /** Trusted embedded hosts may override the path used to validate crew path containment. */
+  configHubRoot?: string | null;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
   crewReloader?: CrewReloader;
   /** True when this server may write crew seats to `configPath` (not a preview on the live file). */
@@ -3354,28 +3356,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? { github: liveRepo.github, project: liveRepo.project }
             : undefined;
         try {
-          const result = await onboardRepo(configPath, body.data, now(), async (repo) => {
-            if (
-              conversionIdentity &&
-              (repo.github !== conversionIdentity.github ||
-                repo.project !== conversionIdentity.project)
-            )
-              throw new ConfigWriteError(
-                "conflict",
-                "the repo identity changed in config.yaml; refresh and try again",
+          const result = await onboardRepo(
+            configPath,
+            body.data,
+            now(),
+            async (repo) => {
+              if (
+                conversionIdentity &&
+                (repo.github !== conversionIdentity.github ||
+                  repo.project !== conversionIdentity.project)
+              )
+                throw new ConfigWriteError(
+                  "conflict",
+                  "the repo identity changed in config.yaml; refresh and try again",
+                );
+              const preview = await repoPreview(
+                await githubGql(),
+                { github: repo.github, project: repo.project },
+                config,
+                store,
               );
-            const preview = await repoPreview(
-              await githubGql(),
-              { github: repo.github, project: repo.project },
-              config,
-              store,
-            );
-            if (body.data.checkout.branch !== preview.defaultBranch)
-              throw new ConfigWriteError(
-                "invalid",
-                "the checkout branch must match GitHub's default branch",
-              );
-          });
+              if (body.data.checkout.branch !== preview.defaultBranch)
+                throw new ConfigWriteError(
+                  "invalid",
+                  "the checkout branch must match GitHub's default branch",
+                );
+            },
+            deps.configHubRoot,
+          );
           const onboarded = result.config.repos.find((repo) => repo.id === body.data.repoId);
           if (!onboarded)
             throw new ConfigWriteError("write", "the new config.yaml has no added repo");
@@ -3489,9 +3497,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
             const message = e instanceof Error ? e.message : "";
             // git's own failure text carries paths and flags; the page gets a plain sentence instead
-            const reason = message.startsWith("Command failed")
-              ? "git could not read the checkout"
-              : message;
+            const reason =
+              message.startsWith("Command failed") ||
+              message === "the checkout has no files at this commit"
+                ? "git could not read the checkout"
+                : message;
             return reply.code(503).send({
               error: `map snapshot unavailable${/^[\w ,.'-]{1,120}$/.test(reason) ? `: ${reason}` : ""}`,
             });
@@ -4179,7 +4189,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = NewSessionBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         try {
-          const result = await createSession(configPath, body.data, now(), config);
+          const result = await createSession(
+            configPath,
+            body.data,
+            now(),
+            config,
+            deps.configHubRoot,
+          );
           const changes = await crewReloader.reload();
           return {
             id: body.data.id,
@@ -4206,7 +4222,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         try {
           const result = await crewReloader.removeSession(req.params.id, (stopped, session) =>
-            closeSession(configPath, req.params.id, stopped, now(), session),
+            closeSession(configPath, req.params.id, stopped, now(), session, deps.configHubRoot),
           );
           const checkout = await removeSessionCheckout(result.session, result.worktrees);
           return {
@@ -4313,6 +4329,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               body.data.base,
               body.data.seats,
               now(),
+              deps.configHubRoot,
             );
           } catch (e) {
             captureError(reply, e);

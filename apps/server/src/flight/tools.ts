@@ -343,7 +343,7 @@ import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
-import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
+import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
@@ -3736,8 +3736,42 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   const ResumeSeatArgs = z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg });
+  const MoveReviewArgs = z.strictObject({
+    reviewId: z.number().int().positive(),
+    seat: z.string().regex(SEAT_ID),
+    basis: basisArg,
+  });
+  const P0_TICKET_BASIS = /(?:\bP0\b.*\b[^\s#]+#[1-9]\d*\b|\b[^\s#]+#[1-9]\d*\b.*\bP0\b)/;
 
   const superTools = [
+    superTool(
+      MC_TOOL_NAMES.moveReview,
+      "Move one queued review to a named review seat. The target account must not be at its usage stop. A budget-brake pass needs a basis that names a P0 ticket; the basis is recorded. The queued review keeps its head, round and review model rule.",
+      MoveReviewArgs,
+      "status",
+      async (a) => {
+        const review = store.review(a.reviewId);
+        if (review === null) return fail("Queued review not found.");
+        if (review.state !== "queued") return fail("Review is no longer queued.");
+        const target = seatCfg(a.seat);
+        if (target === undefined) return fail(notInSessionText(a.seat));
+        if (target.id === review.seatId)
+          return fail(`${seatCallSign(target.id)} already has this review.`);
+        if (seatDef(target).loop !== "review" || modeOfSeat(target) !== "scratch")
+          return fail(`${seatCallSign(a.seat)} is not a review seat.`);
+        if (target.retiring) return fail(`${seatCallSign(target.id)} is retiring.`);
+        if (seatUnavailable(target)) return fail(`${seatCallSign(target.id)} is unavailable.`);
+        const at = now();
+        if (accountAtStop(config, store, target.accountId, at))
+          return fail(accountStoppedText(seatCallSign(a.seat), target.accountId));
+        const brakeOverride = budgetBrake(config, store, target.accountId, at) !== null;
+        if (brakeOverride && !P0_TICKET_BASIS.test(a.basis))
+          return fail("The target account's budget brake needs a basis that names a P0 ticket.");
+        if (!store.moveQueuedReview(review.id, target.id, at, brakeOverride))
+          return fail("Review is no longer queued.");
+        return { text: `Moved queued review ${review.id} to ${seatCallSign(target.id)}.` };
+      },
+    ),
     superTool(
       MC_TOOL_NAMES.resumeSeat,
       "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). A stop can be lifted; a crew-pause exception applies only to this unfinished run, including a live session that is paused. The original pause keeps covering other work. A failed resume removes its own exception and restores the stop unless the operator changed it. Refuses budget, account, Away-quota, machine-capacity and held runs.",
