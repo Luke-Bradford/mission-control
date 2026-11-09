@@ -151,6 +151,13 @@ describe("Store", () => {
     expect(store.pullRequestOfBranch("r", "feature/y")).toEqual({ number: 5, state: "merged" });
     expect(store.pullRequestOfBranch("r", "feature/none")).toBeNull();
     expect(store.pullRequestOfBranch("other", "feature/x")).toBeNull();
+    store.upsertPullRequests("r", [{ ...pr(9, "feature/x", "closed"), createdAt: 0 }], 1);
+    expect(store.pullRequestOfBranch("r", "feature/x")).toEqual({ number: 9, state: "closed" });
+    expect(store.pullRequestOfBranch("r", "feature/x", 1)).toEqual({
+      number: 7,
+      state: "open",
+    });
+    expect(store.pullRequestOfBranch("r", "feature/x", 2)).toBeNull();
   });
 
   it("partitions batched pull requests and reuses a prepared statement", () => {
@@ -184,6 +191,35 @@ describe("Store", () => {
     const batches = store.pullRequestsForRepos(["one", "two"]);
     expect(batches.get("one")).toEqual(store.pullRequests("one"));
     expect(batches.get("two")).toEqual(store.pullRequests("two"));
+
+    store.upsertPullRequests(
+      "one",
+      [
+        { ...pr("one", 3), state: "closed" },
+        { ...pr("one", 4), state: "merged" },
+      ],
+      1,
+    );
+    store.upsertPullRequests("other", [pr("other", 5)], 1);
+    const needed = store.openAndReferencedPullRequests(
+      ["one", "two", "empty"],
+      [
+        { repoId: "one", number: 3 },
+        { repoId: "one", number: 3 },
+        { repoId: "one", number: 999 },
+        { repoId: "other", number: 5 },
+      ],
+    );
+    expect(needed.get("one")).toEqual([store.pullRequest("one", 3), store.pullRequest("one", 1)]);
+    expect(needed.get("two")).toEqual([store.pullRequest("two", 2)]);
+    expect(needed.get("empty")).toEqual([]);
+    expect(needed.has("other")).toBe(false);
+    expect(store.pullRequestLink("one", { number: 3 })).toEqual({
+      repoId: "one",
+      number: 3,
+      title: "PR 3",
+      url: "u",
+    });
 
     const raw = (store as unknown as { rawDb: DatabaseSync }).rawDb;
     const prepare = vi.spyOn(raw, "prepare");

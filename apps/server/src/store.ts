@@ -1961,6 +1961,7 @@ export class Store {
       CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
       CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
       CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS pull_requests_branch ON pull_requests(repo_id, branch, number DESC);
       CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
       CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
@@ -4582,11 +4583,37 @@ export class Store {
   pullRequestOfBranch(
     repoId: RepoId,
     branch: string,
+    createdSince?: number,
   ): { number: number; state: PullRequestView["state"] } | null {
-    const row = this.statement(
-      "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1",
-    ).get(repoId, branch) as { number: number; state: PullRequestView["state"] } | undefined;
+    const statement = this.statement(
+      createdSince === undefined
+        ? "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1"
+        : "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? AND created_at >= ? ORDER BY number DESC LIMIT 1",
+    );
+    const row = statement.get(
+      repoId,
+      branch,
+      ...(createdSince === undefined ? [] : [createdSince]),
+    ) as { number: number; state: PullRequestView["state"] } | undefined;
     return row ?? null;
+  }
+
+  /** A pinned link needs no historical checks, review metadata or escaped-defect hydration. */
+  pullRequestLink(
+    repoId: RepoId,
+    ref: { number: number } | { ticket: string },
+  ): Pick<PullRequestView, "repoId" | "number" | "title" | "url"> | null {
+    const row =
+      "number" in ref
+        ? this.statement(
+            "SELECT number, title, url FROM pull_requests WHERE repo_id = ? AND number = ?",
+          ).get(repoId, ref.number)
+        : this.statement(
+            "SELECT number, title, url FROM pull_requests WHERE repo_id = ? AND ticket = ? AND state = 'open' ORDER BY number DESC LIMIT 1",
+          ).get(repoId, ref.ticket);
+    return row === undefined
+      ? null
+      : { repoId, ...(row as { number: number; title: string; url: string }) };
   }
 
   /** The queue needs only open PRs, without decoding historical checks and bodies. */
@@ -4715,6 +4742,25 @@ export class Store {
       prs.push(pr);
       out.set(pr.repoId, prs);
     }
+    return out;
+  }
+
+  /** The HUD retains every open PR and the historical PRs its displayed runs actually name. */
+  openAndReferencedPullRequests(
+    repoIds: readonly RepoId[],
+    referenced: readonly Pick<PullRequestView, "repoId" | "number">[],
+  ): Map<RepoId, PullRequestView[]> {
+    const out = new Map<RepoId, PullRequestView[]>(repoIds.map((repoId) => [repoId, []]));
+    if (repoIds.length === 0) return out;
+    const rows = this.statement(`WITH referenced AS (
+      SELECT json_extract(value, '$.repoId') AS repo_id, json_extract(value, '$.number') AS number
+      FROM json_each(?)
+    ) SELECT p.* FROM pull_requests p
+      WHERE p.repo_id IN (${repoIds.map(() => "?").join(", ")})
+      AND (p.state = 'open' OR (p.repo_id, p.number) IN (
+        SELECT repo_id, number FROM referenced
+      )) ORDER BY p.number DESC`).all(JSON.stringify(referenced), ...repoIds) as Row[];
+    for (const pr of this.pullRequestRows(rows)) out.get(pr.repoId)?.push(pr);
     return out;
   }
 

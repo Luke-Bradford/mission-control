@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   ATTENTION_LABEL,
   type BoardItem,
@@ -2616,6 +2617,56 @@ describe("the engine's notes in Needs you", () => {
     pr12("open");
     expect(keys()).toEqual([KEY]);
     pr12("merged");
+    expect(keys()).toEqual([]);
+  });
+
+  it("does not decode an unrelated closed PR's historical check payload to show an active park", () => {
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    endedRun();
+    note("blocked:r1:0", "blocked");
+    pr12("open");
+    const current = store.pullRequest("shop-app", 12);
+    if (!current) throw new Error("Missing fixture PR");
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 99, branch: "historical/99", state: "closed" }],
+      NOW,
+    );
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.prepare("UPDATE pull_requests SET checks = ? WHERE repo_id = ? AND number = ?").run(
+        "unreadable historical checks",
+        "shop-app",
+        99,
+      );
+    } finally {
+      db.close();
+    }
+    expect(keys()).toEqual([KEY]);
+    expect(noteItems()[0]).toMatchObject({
+      ticket: "shop-app#7",
+      url: "https://github.com/o/shop-app/pull/12",
+    });
+  });
+
+  it("ignores older uses of a branch but takes the newest PR created for the ended run", () => {
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    endedRun({}, { prNumber: null });
+    note("blocked:r1:0", "blocked");
+    pr12("open");
+    const current = store.pullRequest("shop-app", 12);
+    if (!current) throw new Error("Missing fixture PR");
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 13, createdAt: NOW - 2 * HOUR, state: "closed" }],
+      NOW,
+    );
+    expect(keys()).toEqual([KEY]);
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 14, createdAt: NOW - MIN, state: "closed" }],
+      NOW,
+    );
     expect(keys()).toEqual([]);
   });
 
