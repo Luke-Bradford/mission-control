@@ -239,6 +239,7 @@ describeRendered("Telemetry mockup in a browser", () => {
           const result = await probe(page);
           expect(page.errors(), where).toEqual([]);
           expectSound(result, where);
+          if (width === 1600) expect(result.height, where).toBeLessThanOrEqual(height);
           await page.click('#view [data-view="table"]');
           await page.box(".panel table");
           expectSound(await probe(page), `${where} table`);
@@ -291,7 +292,29 @@ describeRendered("Telemetry mockup in a browser", () => {
       await page.box(".panel");
       const result = await probe(page);
       expect(result.clipped).toEqual([]);
-      expect(result.height).toBeGreaterThan(700);
+      const space = await page.evaluate(() => {
+        const work = document.querySelector<HTMLElement>(".work");
+        work?.focus();
+        return { height: work?.clientHeight ?? 0, total: work?.scrollHeight ?? 0 };
+      }, null);
+      expect(space.total).toBeGreaterThan(space.height);
+      await page.press("End");
+      await expect
+        .poll(
+          () =>
+            page.evaluate(() => {
+              const work = document.querySelector<HTMLElement>(".work");
+              const last = document.querySelector<HTMLElement>(".panel:last-child");
+              return (
+                !!work &&
+                !!last &&
+                work.scrollTop > 0 &&
+                last.getBoundingClientRect().bottom <= work.getBoundingClientRect().bottom + 1
+              );
+            }, null),
+          { timeout: 2000 },
+        )
+        .toBe(true);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
