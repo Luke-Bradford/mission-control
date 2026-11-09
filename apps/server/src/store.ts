@@ -1141,6 +1141,8 @@ export const MAX_OPEN_RUN_AGE_MS = 30 * 24 * 60 * 60_000;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
+const DIGEST_CONTEXT_WINDOW_SQL =
+  "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
 const toSample = (r: Row): UsageSample => ({
   accountId: r.account_id as string,
@@ -1959,9 +1961,12 @@ export class Store {
       CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
       CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
+      CREATE INDEX IF NOT EXISTS runs_agent_recent ON runs(agent_id, started_at DESC, seq DESC, id);
+      CREATE INDEX IF NOT EXISTS run_digests_context_window ON run_digests(run_id, ${DIGEST_CONTEXT_WINDOW_SQL});
       CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
       CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
       CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS pull_requests_branch ON pull_requests(repo_id, branch, number DESC);
       CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
       CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
@@ -2656,7 +2661,7 @@ export class Store {
     return rows.map(toRun);
   }
 
-  /** Recent runs for many HUD rows, ranked in SQLite so the runs table is read once. */
+  /** Indexed recent-run bounds for each HUD agent, with older held runs retained. */
   runsForAgents(
     agentIds: readonly AgentId[],
     limit: number,
@@ -2665,20 +2670,30 @@ export class Store {
     const out = new Map<AgentId, Run[]>();
     if (agentIds.length === 0) return out;
     for (const agentId of agentIds) out.set(agentId, []);
-    const held = [...new Set(heldRunIds)];
-    const rows = this.statement(
-      `SELECT runs.* FROM runs JOIN (
-         SELECT id, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
-         FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}
-       ) recent ON recent.id = runs.id
-       WHERE recent.row_number <= ?${held.length > 0 ? ` OR runs.id IN (${held.map(() => "?").join(", ")})` : ""}
-       ORDER BY runs.agent_id, runs.started_at DESC, runs.seq DESC`,
-    ).all(...agentIds, ...held, limit, ...held) as Row[];
-    for (const run of rows.map(toRun)) {
+    const seen = new Set<string>();
+    const take = (row: Row) => {
+      if (seen.has(row.id as string)) return;
+      seen.add(row.id as string);
+      const run = toRun(row);
       const runs = out.get(run.agentId) ?? [];
       runs.push(run);
       out.set(run.agentId, runs);
+    };
+    const recent = this.statement(`SELECT * FROM runs WHERE agent_id = ?
+      ORDER BY started_at DESC, seq DESC
+      LIMIT CASE WHEN ? > 0 THEN CAST(? AS INTEGER) ELSE 0 END`);
+    for (const agentId of out.keys()) {
+      for (const row of recent.all(agentId, limit, limit) as Row[]) take(row);
     }
+    const held = [...new Set(heldRunIds)];
+    if (held.length > 0)
+      for (const row of this.statement(
+        `SELECT * FROM runs WHERE id IN (${held.map(() => "?").join(", ")})
+        ORDER BY agent_id, started_at DESC, seq DESC`,
+      ).all(...held) as Row[])
+        take(row);
+    for (const runs of out.values())
+      runs.sort((a, b) => b.startedAt - a.startedAt || b.seq - a.seq);
     return out;
   }
 
@@ -3186,12 +3201,12 @@ export class Store {
     const out = new Map<string, number>();
     for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
       const ids = runIds.slice(i, i + DIGEST_BATCH);
-      const rows =
-        this.statement(`SELECT run_id, json_extract(digest, '$.contextWindow') AS context_window
-        FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
-          run_id: string;
-          context_window: number | null;
-        }[];
+      const rows = this.statement(`SELECT run_id, ${DIGEST_CONTEXT_WINDOW_SQL} AS context_window
+        FROM run_digests INDEXED BY run_digests_context_window
+        WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
+        run_id: string;
+        context_window: number | null;
+      }[];
       for (const row of rows)
         if (row.context_window !== null) out.set(row.run_id, row.context_window);
     }
@@ -4601,11 +4616,37 @@ export class Store {
   pullRequestOfBranch(
     repoId: RepoId,
     branch: string,
+    createdSince?: number,
   ): { number: number; state: PullRequestView["state"] } | null {
-    const row = this.statement(
-      "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1",
-    ).get(repoId, branch) as { number: number; state: PullRequestView["state"] } | undefined;
+    const statement = this.statement(
+      createdSince === undefined
+        ? "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1"
+        : "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? AND created_at >= ? ORDER BY number DESC LIMIT 1",
+    );
+    const row = statement.get(
+      repoId,
+      branch,
+      ...(createdSince === undefined ? [] : [createdSince]),
+    ) as { number: number; state: PullRequestView["state"] } | undefined;
     return row ?? null;
+  }
+
+  /** A pinned link needs no historical checks, review metadata or escaped-defect hydration. */
+  pullRequestLink(
+    repoId: RepoId,
+    ref: { number: number } | { ticket: string },
+  ): Pick<PullRequestView, "repoId" | "number" | "title" | "url"> | null {
+    const row =
+      "number" in ref
+        ? this.statement(
+            "SELECT number, title, url FROM pull_requests WHERE repo_id = ? AND number = ?",
+          ).get(repoId, ref.number)
+        : this.statement(
+            "SELECT number, title, url FROM pull_requests WHERE repo_id = ? AND ticket = ? AND state = 'open' ORDER BY number DESC LIMIT 1",
+          ).get(repoId, ref.ticket);
+    return row === undefined
+      ? null
+      : { repoId, ...(row as { number: number; title: string; url: string }) };
   }
 
   /** The queue needs only open PRs, without decoding historical checks and bodies. */
@@ -4815,6 +4856,25 @@ export class Store {
       prs.push(pr);
       out.set(pr.repoId, prs);
     }
+    return out;
+  }
+
+  /** The HUD retains every open PR and the historical PRs its displayed runs actually name. */
+  openAndReferencedPullRequests(
+    repoIds: readonly RepoId[],
+    referenced: readonly Pick<PullRequestView, "repoId" | "number">[],
+  ): Map<RepoId, PullRequestView[]> {
+    const out = new Map<RepoId, PullRequestView[]>(repoIds.map((repoId) => [repoId, []]));
+    if (repoIds.length === 0) return out;
+    const rows = this.statement(`WITH referenced AS (
+      SELECT json_extract(value, '$.repoId') AS repo_id, json_extract(value, '$.number') AS number
+      FROM json_each(?)
+    ) SELECT p.* FROM pull_requests p
+      WHERE p.repo_id IN (${repoIds.map(() => "?").join(", ")})
+      AND (p.state = 'open' OR (p.repo_id, p.number) IN (
+        SELECT repo_id, number FROM referenced
+      )) ORDER BY p.number DESC`).all(JSON.stringify(referenced), ...repoIds) as Row[];
+    for (const pr of this.pullRequestRows(rows)) out.get(pr.repoId)?.push(pr);
     return out;
   }
 
