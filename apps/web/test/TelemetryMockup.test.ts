@@ -487,4 +487,19 @@ describe("Telemetry mockup", () => {
     error.querySelector<HTMLButtonElement>("[data-retry]")?.click();
     expect(error.activeElement?.id).toBe("tab-quality");
   });
+  it("distinguishes the nonzero observed Today spend from the complete 24-hour chart total", () => {
+    const document = render("?tab=cost");
+    const money = (text: string | null | undefined) => Number((text ?? "").replace(/[^0-9.]/g, ""));
+    const today = money(document.querySelector('[data-stat="cost"] .stat-value')?.textContent);
+    const totals = [...document.querySelectorAll('[data-panel="spend"] .readout li')]
+      .slice(0, 4)
+      .map((row) => money(row.querySelector(".vl")?.textContent));
+    const full = totals[3] ?? 0;
+    expect(today).toBeGreaterThan(0);
+    expect(today).toBeLessThan(full);
+    expect(full).toBeCloseTo(
+      totals.slice(0, 3).reduce((a, b) => a + b, 0),
+      2,
+    );
+  });
 });
