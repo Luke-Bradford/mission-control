@@ -4309,9 +4309,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // the first review's findings and FLIGHT's reason
       const secondOf = author?.loop?.flightSecondReview?.[review.sha];
       const second = secondOf?.epoch === review.epoch ? secondOf : null;
+      const touches = author?.loop?.touches;
+      const hardRuleReview = touches?.sha === review.sha && touches.paths.length > 0;
       // a Claude full-depth profile wins; a Codex seat always keeps its configured model
       const model =
-        external || second !== null || author?.profile?.profile.reviewer.depth === "full"
+        external ||
+        second !== null ||
+        hardRuleReview ||
+        author?.profile?.profile.reviewer.depth === "full"
           ? isCodex(info)
             ? info.seat.model
             : REVIEW_FULL_MODEL
@@ -4430,7 +4435,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               branch: author?.branch ?? subject?.branch ?? "",
               sha: review.sha,
             });
-      const touches = author?.loop?.touches;
       const evidence = author ? store.evidenceNotes(author.id) : [];
       const prevReply =
         prev === null

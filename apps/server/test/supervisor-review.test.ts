@@ -1313,6 +1313,55 @@ describe("startReview", () => {
     expect(store.run(runId)?.model).toBe(REVIEW_FULL_MODEL);
   });
 
+  it.each([
+    { label: "docs", current: true, paths: ["packages/core/src/guard.ts"], full: true },
+    { label: "chore", current: true, paths: ["apps/server/src/engine/engine.ts"], full: true },
+    { label: "docs", current: false, paths: ["packages/core/src/guard.ts"], full: false },
+    { label: "docs", current: true, paths: [], full: false },
+  ])(
+    "a moved Size S $label review selects its model from current=$current hard-rule touches $paths",
+    async ({ label, current, paths, full }) => {
+      store.replaceBoard("mc", [boardCard(42, { size: "S" })]);
+      const base = DEFAULT_PROFILES[0] as Profile;
+      const r = reviewOfPush({
+        state: "queued",
+        profile: {
+          profile: { ...base, reviewer: { role: "RETRO", depth: "light" } },
+          route: { by: "size", size: "S" },
+          hash: "h",
+        },
+      });
+      store.setRunLoop(r.author.id, {
+        ...NEW_LOOP,
+        touches: { sha: current ? r.sha : r.fork, paths, flightPowers: "superuser" },
+      });
+      const { sup } = make({
+        fetchTicket: async () => ({ ...TICKET, labels: [label] }),
+        extraSeat: {
+          id: "retro-2",
+          role: "RETRO",
+          accountId: "claude-main",
+          model: "sonnet",
+          lightModel: "haiku",
+          area: [],
+          mode: "scratch",
+        },
+      });
+      expect(store.moveQueuedReview(r.reviewId, "retro-2", 2)).toBe(true);
+      expect(store.setReviewState(r.reviewId, ["queued"], "starting", { at: 2 })).toBe(true);
+      const upsert = vi.spyOn(store, "upsertRun");
+      sup.start();
+      await sup.startReview("retro-2", r.reviewId);
+      await until(() => expect(userLines()).toHaveLength(1));
+      const written = upsert.mock.calls.find(([run]) => run.reviewId === r.reviewId);
+      const argv = recorded()[0]?.argv as string[];
+      const expected = full ? REVIEW_FULL_MODEL : "haiku";
+      expect(written?.[0].model).toBe(expected);
+      expect(argv[argv.indexOf("--model") + 1]).toBe(expected);
+      upsert.mockRestore();
+    },
+  );
+
   it("a Codex full-depth review runs on the seat's model", async () => {
     const r = reviewOfPush({
       profile: {
