@@ -306,6 +306,11 @@ import {
   grantApproval,
   useApproval,
 } from "./flight-approvals.ts";
+import {
+  FlightConversationCursorError,
+  flightConversation,
+  readFlightConversation,
+} from "./flight-conversation.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
@@ -1884,6 +1889,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         repoId: z.string().optional(),
         to: z.string().min(1),
         text: z.string().min(1).max(COMMS_MESSAGE_MAX),
+        itemKey: z.string().max(200).optional(),
         label: z.enum(COMMS_LABELS).optional(),
         ref: z.string().regex(COMMS_REF).optional(),
         replyTo: z
@@ -1931,6 +1937,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               seatSender: false,
               senderKind: sender.kind,
               wakeUnlabelled: true,
+              ...(sender.from === COMMS_CAPCOM &&
+              input.itemKey !== undefined &&
+              input.to === flightSeat(config)?.seat.id
+                ? {
+                    flightItem: {
+                      to: input.to,
+                      title:
+                        attentionItems(config, store, now(), deps.lock?.state() ?? NO_LOCK).find(
+                          (item) => item.key === input.itemKey,
+                        )?.text ?? "This Needs-you item is no longer waiting.",
+                    },
+                  }
+                : {}),
               // redirected away from the ended run: its seat is not told of the reply
               ...(redirectedTo === undefined ? {} : { replyAuthorMention: false }),
               ...(prThread === undefined ? {} : { ticket: prThread }),
@@ -2140,13 +2159,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
       api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
         "/comms/flight",
-        (req, reply) => {
-          const paging = commsPaging(req.query);
-          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        async (req, reply) => {
+          const limit = parseLimit(req.query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
+          const before = req.query.before;
+          if (
+            limit === null ||
+            (before !== undefined &&
+              (typeof before !== "string" || before.length === 0 || before.length > 300))
+          )
+            return reply.code(400).send({ error: COMMS_PAGING_ERROR });
           const flight = flightSeat(config)?.seat.id;
           if (flight === undefined)
             return { messages: [], hasMore: false, cursor: null, unread: 0 };
-          return commsScopePage({ pair: [COMMS_CAPCOM, flight] }, "flight", paging);
+          try {
+            return await flightConversation(
+              store,
+              flight,
+              flightSeat(config)?.session.seats.map((s) => s.id) ?? [],
+              { limit, before },
+            );
+          } catch (error) {
+            if (error instanceof FlightConversationCursorError)
+              return reply.code(400).send({ error: error.message });
+            throw error;
+          }
         },
       );
       // Reader: apps/web/src/App.tsx#App (agent Comms)
@@ -2328,14 +2364,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ),
       }));
       // Reader: apps/web/src/App.tsx#App (Comms read cursors)
-      api.post("/comms/read", (req, reply) => {
+      api.post("/comms/read", async (req, reply) => {
         const body = z
           .strictObject({
             scope: z.string().min(1).max(200),
-            messageId: z.string().regex(/^comms:\d+$/),
+            messageId: z.string().min(1).max(300),
           })
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.scope === "flight") {
+          const flight = flightSeat(config);
+          if (!flight) return reply.code(400).send({ error: "invalid Comms read cursor" });
+          try {
+            await readFlightConversation(
+              store,
+              flight.seat.id,
+              flight.session.seats.map((s) => s.id),
+              body.data.messageId,
+            );
+            bus.emit("attention");
+            return { ok: true };
+          } catch (error) {
+            if (error instanceof FlightConversationCursorError)
+              return reply.code(400).send({ error: "invalid Comms read cursor" });
+            throw error;
+          }
+        }
+        if (!/^comms:\d+$/.test(body.data.messageId))
+          return reply.code(400).send({ error: "invalid Comms read cursor" });
         const scope = commsScope(body.data.scope);
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });

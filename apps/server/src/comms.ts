@@ -35,6 +35,8 @@ export const COMMS_OPEN_TEXT_MAX = 280;
 export interface CommsServiceDeps {
   /** A PR-scoped thread resolved and validated by the operator API. */
   ticket?: string;
+  /** Item title resolved by the operator API for a direct message to FLIGHT. Context only. */
+  flightItem?: { to: string; title: string };
   store: Store;
   crew: () => readonly string[];
   knownSecrets: () => Promise<readonly string[]>;
@@ -92,6 +94,11 @@ export async function sendComms(
   input: CommsSendInput,
 ): Promise<SentComms> {
   if (Array.from(input.text).length > COMMS_MESSAGE_MAX) throw new Error(commsTooLongText);
+  if (
+    input.itemKey !== undefined &&
+    (typeof input.itemKey !== "string" || input.itemKey.length > 200)
+  )
+    throw new Error("itemKey must fit 200 characters.");
   const now = deps.now?.() ?? Date.now();
   let crew = deps.crew();
   let members = new Set([...crew, COMMS_CAPCOM, COMMS_CONTROLLER]);
@@ -146,6 +153,7 @@ export async function sendComms(
           deps.senderTicket,
         ),
         text: input.text,
+        itemKey: input.itemKey,
         label: input.label,
         ref: input.ref,
         replyTo: input.replyTo,
@@ -159,6 +167,7 @@ export async function sendComms(
         : undefined,
       // an exact repeat is stored once, whoever sends it
       now - COMMS_REPEAT_WINDOW_MS,
+      from === COMMS_CAPCOM && deps.flightItem?.to === input.to ? deps.flightItem.title : undefined,
     );
   // A seat's rate limit is enforced atomically before it can wake anyone.
   let stored = deps.seatSender ? storeMessage() : null;
@@ -213,6 +222,7 @@ export function commsInboxContext(
     replyTo: row.replyTo,
     mentions: row.mentions,
     pinned: pins.has(row.id),
+    ...(row.itemKey === undefined ? {} : { itemKey: row.itemKey }),
   }));
   const heading =
     "Comms inbox (messages addressed to you, tags, replies to your messages and pins):";

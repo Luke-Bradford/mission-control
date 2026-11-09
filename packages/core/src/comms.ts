@@ -47,6 +47,8 @@ export interface CommsSendInput {
   label?: CommsLabel;
   ref?: string;
   replyTo?: string;
+  /** The Needs-you item this conversation message is about; never an authority grant. */
+  itemKey?: string;
   /** A run-specific delivery stays pending for this run when its seat takes other work. */
   targetRunId?: string;
 }
@@ -84,6 +86,19 @@ export interface CommsMessage {
   senderKind?: CommsSenderKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt?: number | null;
+  state?: "stored" | "delivered" | "answered";
+  itemKey?: string;
+  choice?: { label: string };
+}
+
+/** A transcript can lack a timestamp; keep that fact instead of inventing its clock time. */
+export type FlightConversationMessage = Omit<CommsMessage, "at"> & { at: number | null };
+
+export interface FlightConversationPage {
+  messages: FlightConversationMessage[];
+  hasMore: boolean;
+  cursor: string | null;
+  unread: number;
 }
 
 /** Where a message stands: kept by the hub, or taken by its recipient. */

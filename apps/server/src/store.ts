@@ -374,6 +374,7 @@ CREATE TABLE IF NOT EXISTS question_choices (
   PRIMARY KEY (key, brief_at)
 );
 CREATE INDEX IF NOT EXISTS question_choices_ticket ON question_choices(ticket);
+CREATE INDEX IF NOT EXISTS question_choices_message ON question_choices(message_id);
 -- Status moves of a run's card (pending, then done or failed); the Activity page's board rows.
 CREATE TABLE IF NOT EXISTS board_moves (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
@@ -979,6 +980,7 @@ export interface CommsRow {
   senderKind: CommsSenderKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt: number | null;
+  itemKey?: string;
 }
 /** The operator's choice on a question, as stored. */
 export interface QuestionChoiceRow {
@@ -1009,6 +1011,7 @@ export interface NewCommsRow {
   to: string;
   ticket: string | null;
   text: string;
+  itemKey?: string;
   label?: CommsLabel | null;
   ref?: string | null;
   replyTo?: string | null;
@@ -1981,6 +1984,7 @@ export class Store {
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
+    this.addColumn("comms", "item_key", "TEXT");
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
     // Turns in a row that ended with no new commit; the resume line reads it.
@@ -6349,6 +6353,8 @@ export class Store {
     rate?: { since: number; limit: number },
     /** An identical message stored at or after this time is returned, flagged, not stored again. */
     repeatSince?: number,
+    /** Server-resolved title for one internal context line accompanying an operator item send. */
+    flightContextTitle?: string,
   ): (CommsRow & { repeat?: true }) | null {
     const text = cutCommsText(row.text);
     const replyTo =
@@ -6362,7 +6368,7 @@ export class Store {
         const same = this.db
           .prepare(
             `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND text = ? AND at >= ?
-               AND ticket IS ? AND label IS ? AND reply_to IS ? AND target_run_id IS ?
+               AND ticket IS ? AND label IS ? AND reply_to IS ? AND target_run_id IS ? AND item_key IS ?
              ORDER BY id DESC LIMIT 1`,
           )
           .get(
@@ -6374,6 +6380,7 @@ export class Store {
             row.label ?? null,
             replyTo,
             row.targetRunId ?? null,
+            row.itemKey ?? null,
           ) as { id: number } | undefined;
         if (same !== undefined) {
           id = same.id;
@@ -6391,6 +6398,25 @@ export class Store {
         if (count.n >= rate.limit) return;
       }
       id = this.insertComms(row, text, replyTo);
+      if (
+        row.from === COMMS_CAPCOM &&
+        row.itemKey !== undefined &&
+        flightContextTitle !== undefined
+      ) {
+        const context: NewCommsRow = {
+          from: COMMS_MC,
+          to: row.to,
+          senderKind: "hub",
+          at: row.at,
+          ticket: row.ticket,
+          text: `[Mission Control] Needs-you context ${JSON.stringify({
+            messageId: `comms:${id}`,
+            itemKey: row.itemKey,
+            title: flightContextTitle,
+          })}`,
+        };
+        this.insertComms(context, cutCommsText(context.text), null);
+      }
       this.raiseChatterNote(row);
     }, true);
     const stored = id === null ? null : this.commsMessage(`comms:${id}`);
@@ -6444,7 +6470,7 @@ export class Store {
       throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, item_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -6459,6 +6485,7 @@ export class Store {
         row.fromRunId ?? null,
         row.pr ?? null,
         row.senderKind ?? null,
+        row.itemKey ?? null,
       );
     const id = Number(inserted.lastInsertRowid);
     const mention = this.db.prepare(
@@ -6487,6 +6514,7 @@ export class Store {
       mentions,
       deliveredAt: (r.delivered_at as number | null | undefined) ?? null,
       senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
+      ...(typeof r.item_key === "string" ? { itemKey: r.item_key } : {}),
     };
   }
 
@@ -6824,6 +6852,119 @@ export class Store {
   }
   commsForPair(a: string, b: string): CommsRow[] {
     return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
+  }
+
+  /** Lightweight retained transcript sources; conversation paging is not limited to recent runs. */
+  flightConversationRuns(
+    agentId: string,
+  ): Pick<Run, "id" | "startedAt" | "endedAt" | "transcriptPath" | "vendor" | "ticket">[] {
+    const rows = this.db
+      .prepare(`SELECT id, started_at, ended_at, transcript_path, vendor, ticket FROM runs
+      WHERE agent_id = ? ORDER BY COALESCE(ended_at, 9223372036854775807) DESC, started_at DESC, seq DESC`)
+      .all(agentId) as Row[];
+    return rows.map((r) => ({
+      id: r.id as string,
+      startedAt: r.started_at as number,
+      endedAt: r.ended_at as number | null,
+      transcriptPath: r.transcript_path as string,
+      ticket: r.ticket as string | null,
+      ...(r.vendor ? { vendor: r.vendor as Run["vendor"] } : {}),
+    }));
+  }
+
+  private flightConversationScope(
+    flightId: string,
+    seats: readonly string[],
+  ): { sql: string; args: SQLInputValue[] } {
+    const targets = [...new Set([flightId, ...seats])];
+    return {
+      sql: `(((c.from_id = ? AND c.to_id = ?) OR (c.from_id = ? AND c.to_id = ?))
+      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")})))
+      AND c.sender_kind IS NOT 'hub'
+      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`,
+      args: [COMMS_CAPCOM, flightId, flightId, COMMS_CAPCOM, COMMS_CAPCOM, ...targets],
+    };
+  }
+
+  /** A choice is projected from its durable receipt, never inferred from its rendered text. */
+  flightConversationStored(
+    flightId: string,
+    seats: readonly string[],
+    limit: number,
+    before?: { at: number; id: number },
+    exactId?: string,
+  ): (CommsRow & { choice?: { label: string } })[] {
+    const scope = this.flightConversationScope(flightId, seats);
+    const id = exactId === undefined ? null : commsMessageNumber(exactId);
+    if (exactId !== undefined && id === null) return [];
+    const rows = this.db
+      .prepare(`SELECT c.*, q.key AS choice_key, q.label AS choice_label FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql}${id === null ? "" : " AND c.id = ?"}${before ? " AND (c.at, c.id) < (?, ?)" : ""}
+      ORDER BY c.at DESC, c.id DESC LIMIT ?`)
+      .all(
+        ...scope.args,
+        ...(id === null ? [] : [id]),
+        ...(before ? [before.at, before.id] : []),
+        limit,
+      ) as Row[];
+    return rows.reverse().map((r) => ({
+      ...this.commsRow(r),
+      ...(typeof r.choice_label === "string"
+        ? { choice: { label: r.choice_label }, itemKey: (r.item_key ?? r.choice_key) as string }
+        : {}),
+    }));
+  }
+
+  latestFlightStoredReplyAt(flightId: string): number | null {
+    const row = this.db
+      .prepare(`SELECT MAX(at) AS at FROM comms WHERE from_id = ? AND to_id = ? AND sender_kind IS NOT 'hub'
+      AND LTRIM(text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`)
+      .get(flightId, COMMS_CAPCOM) as Row;
+    return row.at as number | null;
+  }
+
+  flightConversationUnread(
+    flightId: string,
+    seats: readonly string[],
+    cursor: string | null,
+    bound?: { at: number; source: string; offset: number },
+  ): number {
+    const scope = this.flightConversationScope(flightId, seats);
+    const after = bound
+      ? bound.source === "comms"
+        ? "(c.at, c.id) > (?, ?)"
+        : "c.at > ?"
+      : "c.id > ?";
+    const args = bound
+      ? bound.source === "comms"
+        ? [bound.at, bound.offset]
+        : [bound.at]
+      : [cursor ? (commsMessageNumber(cursor) ?? 0) : 0];
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql} AND ${after}`)
+      .get(...scope.args, ...args) as Row;
+    return row.n as number;
+  }
+
+  flightConversationStoredReadThrough(
+    flightId: string,
+    seats: readonly string[],
+    bound: { at: number; source: string; offset: number },
+  ): number | null {
+    const scope = this.flightConversationScope(flightId, seats);
+    const through = bound.source === "comms" ? "(c.at, c.id) <= (?, ?)" : "c.at <= ?";
+    const row = this.db
+      .prepare(`SELECT MAX(c.id) AS id FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql} AND ${through}`)
+      .get(
+        ...scope.args,
+        ...[bound.at, ...(bound.source === "comms" ? [bound.offset] : [])],
+      ) as Row;
+    return row.id as number | null;
   }
   private commsScopeWhere(scope: CommsReadScope): { where: string; args: SQLInputValue[] } {
     if ("crew" in scope) return { where: "to_id = 'crew'", args: [] };
