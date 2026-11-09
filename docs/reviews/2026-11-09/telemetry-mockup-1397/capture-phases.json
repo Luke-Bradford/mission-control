@@ -10,12 +10,21 @@
     "captures": 70,
     "source": "e16054b0375c3fb29659336df7edf71f14457096",
     "executedAt": "2026-11-09T14:30:17.115Z",
-    "checks": "zero page errors; no horizontal overflow; panel bounds inside workspace at1600x1000 and4K"
+    "checks": "zero page errors; no horizontal overflow; panel bounds inside workspace at1600x1000 and4K",
+    "supersededBy": "Review1358: geometry passes, but readout figures still lacked actions"
   },
   "currentPage": {
     "passed": true,
     "captures": 6,
     "source": "51f827e675e5ed1fe4ecfaf5d2f00428e4addbff",
     "executedAt": "2026-11-09T14:21:02.738Z"
+  },
+  "readoutAfter": {
+    "passed": true,
+    "captures": 80,
+    "source": "650315a4c9ffeeb380befdd3e7c1617e3b4cd4fb",
+    "htmlSha256": "3ea3c67e71f5cf318d98cc92fa59eb4c8f236d3786894b38cb8209082b1b1018",
+    "executedAt": "2026-11-09T15:41:13.841Z",
+    "checks": "all80viewportcaptures pass; zero page errors; no horizontal overflow; panel bounds at1600x1000 and4K; actual keyboard-focus and activation states for allfive tabs"
   }
 }

@@ -2,7 +2,7 @@
 
 This is a static, fictional proposal, not the live Telemetry implementation. The operator's design approval remains outstanding on parent #1178. No tab build tickets are filed or started by this rework.
 
-The previous author head already corrected the ten Important findings from review 1055. Its remaining CI failure asserted that Table had exactly the chart height. The actual ticket prohibits added page height and permits a shorter Table. The old assertion fails locally at 900 versus 975 px. The corrected check requires no added height, the same grid origin, readable panels and no overflow.
+The carried author work and first controller rework corrected nine of the ten Important findings from review 1055. Fresh independent review 1358 identified that chart readout figures still lacked their promised actions. The current phase corrects that remaining defect. Its remaining CI failure asserted that Table had exactly the chart height. The actual ticket prohibits added page height and permits a shorter Table. The old assertion fails locally at 900 versus 975 px. The corrected check requires no added height, the same grid origin, readable panels and no overflow.
 
 The seven Minor findings are also addressed: table rows follow their marked ascending order; selected-tab and retry focus are retained; blank values cannot open runs; filter selections survive view changes; 4K enlargement respects viewport height; Today spend differs from the 24-hour total; and every stat has a unique accessible definition reference. The full plotted 24-hour cost is $78.10; the observed Today fixture total is $39.10. Figures remain fictional.
 
@@ -10,7 +10,7 @@ The new 4K regression fails on the earlier shell at 3,240 px in a 2,160 px viewp
 
 ## Rendered evidence
 
-The manifest binds the final product commit and exact HTML hash. There are 31 matched earlier-proposal images, 70 current-proposal images and six current-page comparison images. Before is reconstructed from the exact earlier HTML and remains labelled as an iteration of the proposal. After images are regenerated after the last visible source correction; rejected intermediate images stay private and are not published as final evidence.
+The manifest binds the final product commit and exact HTML hash. There are 31 matched earlier-proposal images, 70 historical pre-readout-correction images, 80 current-proposal images and six current-page comparison images. Before is reconstructed from the exact earlier HTML and remains labelled as an iteration of the proposal. After images are regenerated after the last visible source correction; rejected intermediate images stay private and are not published as final evidence.
 
 The normal matrix covers all five tabs at 1280×900, 1600×1000 and 1920×940 in both themes. Further current captures cover all tabs at 2560×1145, 3840×2160 with actual CSS enlargement, 1600×700, the 50-ticket/300-character-title fixture, and an open FLIGHT drawer at three sizes. Loading, empty, error, stale and disconnected states are captured at 1600×1000. Both proposal phases use the repository browser harness and the self-contained mockup shell. No provider, live database or observed loop is used.
 
@@ -20,7 +20,7 @@ Manual inspection covers Crew at 1280, Cost in both themes at 1600, Throughput a
 
 ## Validation and limits
 
-All 43 mockup checks pass, including eight real-browser cases, plus the three completed capture phases. Lint passes with the branch's 77 existing warnings; none is hidden or called warning-free. Workspace typecheck and production build pass. The temporary capture tests are retained as text and removed from the runnable suite.
+All 45 mockup checks pass, including nine real-browser cases. The latest 80-image capture phase also passes. Before the current-main composition, lint reported 77 warnings; current composed-source lint reports 103 existing warnings and seven infos. None is hidden or called warning-free. Workspace typecheck and production build pass. The temporary capture tests are retained as text and removed from the runnable suite.
 
 Fresh full CI and the configured most-capable independent whole-branch review remain required. The old failed design verdict is not waived or relabelled. A passing proposal review does not constitute the operator's approval to implement the redesigned product.
 
@@ -29,3 +29,27 @@ Fresh full CI and the configured most-capable independent whole-branch review re
 The automatic evidence preview of the old branch exits with an unrecognized `accounts[].brake` config key. A controller-owned preview reproduces that exact startup refusal without touching the live hub or loops. Current main is merged to bring its existing configuration parser. No live account setting or guard is removed. The exact self-contained mockup HTML hash remains identical, so the retained proposal images keep their actual capture-source identities and timestamps. New full CI and independent review are required on the composed head.
 
 The corrected private preview boots on the composed source, reports the exact commit, confirms crew disabled and exits normally when its own observation ends. All 43 mockup cases pass again after composition. Lint, workspace types and build pass; existing lint warnings remain reported.
+
+
+## Review 1358: readout controls
+
+The independent reviewer found a genuine remaining Important defect: `.readout .vl` figures were
+plain text. The extended all-tab regression fails first on `crew: 9 now` before the correction.
+Every non-blank readout now uses the existing drill-button renderer with explicit target and label
+metadata. Existing readers are named honestly; missing filtered readers keep the `needs-build` mark.
+Blank legend keys remain keys rather than empty controls.
+
+The chart cursor updates the existing button, its accessible name and the value used by the dialog.
+It does not replace the button or lose focus. A missing sample disables the button while showing
+`—`; leaving the chart restores the latest value and action. A focused test exercises the sample,
+gap, restored value and drill-dialog contents. The real browser checks native Tab/Enter activation,
+24 px targets and Escape/focus return on all five tabs.
+
+The `readout-after/` phase is captured from product source
+`650315a4c9ffeeb380befdd3e7c1617e3b4cd4fb`, with its exact HTML hash in the manifest. Its 80 images
+repeat the full 70-image matrix and add focused and activated readout states on all five tabs.
+The older `after/` phase remains explicitly historical and does not establish current design approval.
+Manual inspection of the new Cost, light Crew, 4K Machine and open Cost target images shows readable
+button values, visible action marks and a legible named dialog, while preserving the earlier panel
+composition. The 45-case check and full capture phase pass without browser errors. Fresh current-head
+CI and independent review remain required; review 1358's failed design is retained and is not waived.
