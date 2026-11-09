@@ -270,11 +270,11 @@
     flex-direction: column;
   }
   .needs-main {
-    flex: 1 1 55%;
+    flex: 1 1 auto;
     overflow: auto;
   }
   .needs-side {
-    flex: 1 1 45%;
+    flex: 1 1 240px;
     min-height: 240px;
     overflow: hidden;
     border-left: 0;

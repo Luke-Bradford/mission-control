@@ -83,9 +83,12 @@ describeRendered("Needs you with FLIGHT stopped", () => {
             width,
             height,
             colorScheme: scheme,
+            search: "?path=/overview",
             api: api(),
           });
           try {
+            await page.boxes("#page-overview");
+            await page.click('a[href="/needs-you"]');
             await ready(page);
             if (SHOTS) {
               mkdirSync(SHOTS, { recursive: true });
@@ -113,6 +116,13 @@ describeRendered("Needs you with FLIGHT stopped", () => {
                 )?.disabled,
                 notice,
                 start: rect(start),
+                main: rect(q("#needsMain")),
+                mainNotices: [...document.querySelectorAll("#needsMain .flight-stopped")].map(
+                  (n) => ({
+                    row: rect(n),
+                    button: rect(n.querySelector("button")),
+                  }),
+                ),
                 ask: rect(q("#needsDiscussionForm")),
                 stopped: rect(q("#needsDiscussionForm .flight-stopped")),
                 input: rect(input),
@@ -120,6 +130,25 @@ describeRendered("Needs you with FLIGHT stopped", () => {
                 height: innerHeight,
               };
             }, undefined);
+            if (!state.main) throw new Error(`${label}: main pane missing`);
+            for (const notice of state.mainNotices) {
+              for (const box of [notice.row, notice.button]) {
+                if (!box) throw new Error(`${label}: stopped control missing`);
+                expect(box.y, `${label}: full stopped control above pane`).toBeGreaterThanOrEqual(
+                  state.main.y,
+                );
+                expect(
+                  box.y + box.h,
+                  `${label}: full stopped control within pane ${JSON.stringify(state)}`,
+                ).toBeLessThanOrEqual(state.main.y + state.main.h);
+                expect(
+                  box.y + box.h,
+                  `${label}: full stopped control within viewport`,
+                ).toBeLessThanOrEqual(height);
+              }
+              expect(notice.button?.w, `${label}: Start width`).toBeGreaterThanOrEqual(24);
+              expect(notice.button?.h, `${label}: Start height`).toBeGreaterThanOrEqual(24);
+            }
             expect(state.inputDisabled, `${label}: reply box enabled`).toBe(false);
             expect(state.optionsDisabled.length, `${label}: options shown`).toBeGreaterThan(0);
             expect(
