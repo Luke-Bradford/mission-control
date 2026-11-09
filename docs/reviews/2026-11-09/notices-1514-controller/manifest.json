@@ -1,0 +1,93 @@
+{
+  "head": "cb95c25d48fcf8bf6bab7070b81782b11e27b021",
+  "kind": "Interaction proof on one committed head: notices shown and hidden. These are not before/after source comparisons.",
+  "capturedAt": "2026-11-09T05:05:58.072816+00:00",
+  "browser": "Google Chrome 156.0.8078.80",
+  "deviceScaleFactor": 1,
+  "viewportCases": [
+    "1280x800",
+    "1600x900",
+    "1600x700",
+    "1920x1080"
+  ],
+  "themes": [
+    "light",
+    "dark"
+  ],
+  "clock": "NOW in needsBrowser.tsx and fixtures.ts",
+  "harness": "Real App via test/needsBrowser.html; navigate from Overview to Comms then crew.",
+  "fixture": "desktopFixture plus one real crew message and one hub notice, fixed public data. Hidden query returns the crew message only.",
+  "interaction": "Keyboard Space hides the notice, preserves the real message and Space restores the notice. Control painted bounds and reachable hit area checked.",
+  "readiness": "Message rows, document.fonts.ready, two animation frames; page.errors empty.",
+  "limitations": [
+    "These captures prove the local switch task, not whole-site design approval.",
+    "The unrelated graph uses a sparse fixture and shows a loading traffic panel; no graph completeness claim.",
+    "No live data, providers or observed loops were used."
+  ],
+  "images": [
+    {
+      "file": "notices-hidden-1280x800-dark.png",
+      "sha256": "dc6bca9ec9b881b8c94e2aacd54b5d3bc86cb70a41a7a30bac2b6a3e1a168fc8"
+    },
+    {
+      "file": "notices-hidden-1280x800-light.png",
+      "sha256": "deadc167ec84f81fc4c3e9c844092442ffc5d47ab0ee3386dd34d20576236c47"
+    },
+    {
+      "file": "notices-hidden-1600x700-dark.png",
+      "sha256": "d4045fb0f00c3a6cddb9b1b37687f77125ce020d273a55269313748a6d34539e"
+    },
+    {
+      "file": "notices-hidden-1600x700-light.png",
+      "sha256": "1106eadeb06a50d038ee903d5a98debdacbc7bd9dd46547b79a90e4942b97c39"
+    },
+    {
+      "file": "notices-hidden-1600x900-dark.png",
+      "sha256": "d5bfd69997bd85beef8cb415289914fd4f2c8f9a959bbd4b54ae553bdc46f055"
+    },
+    {
+      "file": "notices-hidden-1600x900-light.png",
+      "sha256": "271ec5ad5ded3efca085451bcfd249f23267f3be1c5187913e859a7c7fca4fe2"
+    },
+    {
+      "file": "notices-hidden-1920x1080-dark.png",
+      "sha256": "3603b0e145315fdcc05515df67493a21386a46c1c4c914a6ee03949b69ab2439"
+    },
+    {
+      "file": "notices-hidden-1920x1080-light.png",
+      "sha256": "7839cda08f1f5865fdf7623a0d46068f36e448355fdacf6dd1dc3c0af74a2702"
+    },
+    {
+      "file": "notices-shown-1280x800-dark.png",
+      "sha256": "8ebefea47b5d8087fb42c1c6d67271792ef97b44cb6ee449fb9f4e838a4a6529"
+    },
+    {
+      "file": "notices-shown-1280x800-light.png",
+      "sha256": "2de736d9bb0a84d72b211270abba80b3afe63ed2b5125064cfa45523d7f4dc84"
+    },
+    {
+      "file": "notices-shown-1600x700-dark.png",
+      "sha256": "fd57a2d143c1c08dbc6ead03da105d63a22e04e04871ceddd27a6bfac8ef9d8b"
+    },
+    {
+      "file": "notices-shown-1600x700-light.png",
+      "sha256": "8d03d937d6bae0af8d22da7378e2fc9d3b9e9584c11849cbf1bf5940623f2db4"
+    },
+    {
+      "file": "notices-shown-1600x900-dark.png",
+      "sha256": "3b9cf3f31803bbae3047d0b78e413d295f5cd90b6ca9023dcca22529a5d37821"
+    },
+    {
+      "file": "notices-shown-1600x900-light.png",
+      "sha256": "957d4c0d5c14bd81e9b77bb44d08f84b34df4c5001f7ce49fec39876bdba1adf"
+    },
+    {
+      "file": "notices-shown-1920x1080-dark.png",
+      "sha256": "f466c8fafb59f79774e7227bc246a16adfc1357141e4f98d5ab3efa9d6e171c0"
+    },
+    {
+      "file": "notices-shown-1920x1080-light.png",
+      "sha256": "7b74af72cb7c08e7ac76fccf7ab2a46d2f7f2511a527a9b05e86b578b915c616"
+    }
+  ]
+}
