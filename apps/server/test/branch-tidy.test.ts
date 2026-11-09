@@ -331,3 +331,15 @@ it("a hub with no runs of its own deletes nothing", async () => {
   expect(await tidyWith(gh).sweep()).toEqual([]);
   expect(deleted).toEqual([]);
 });
+
+it("leaves a closed PR's branch with no run here", async () => {
+  store.upsertPullRequests(
+    "mc",
+    [{ ...pr(2, "feature/2-theirs", "closed"), headSha: "sha-feature/2-theirs" }],
+    NOW,
+  );
+  const { gh, deleted } = fakeGh({ "feature/2-theirs": 1 }, []);
+  const t = tidyWith(gh);
+  expect(await t.sweep()).toEqual([]);
+  expect(deleted).toEqual([]);
+});

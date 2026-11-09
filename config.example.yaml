@@ -9,6 +9,7 @@ accounts:
     vendor: claude
     alert_at: 85
     stop_at: 95
+    # brake: false   # no budget brake: new runs go on until stop_at, whatever the weekly pace
   - id: codex-main
     vendor: codex
     alert_at: 70

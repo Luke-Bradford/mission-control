@@ -2445,50 +2445,6 @@ button.quota-details {
   }
 }
 
-/* Needs you: a row per item. */
-.next-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.next-row {
-  display: grid;
-  width: 100%;
-  min-height: var(--sp-5);
-  grid-template-columns: 64px minmax(0, 1fr) auto;
-  gap: var(--sp-2);
-  align-items: baseline;
-  padding: var(--sp-1) var(--sp-3);
-  border: 0;
-  border-top: 1px solid var(--line);
-  border-radius: 0;
-  background: none;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-}
-.next-row:hover {
-  background: var(--surface-2);
-}
-.next-kind {
-  font: 500 var(--fs-micro) / var(--lh) var(--mono);
-  color: var(--warn);
-}
-.next-text {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.next-age {
-  font-size: var(--fs-s);
-  color: var(--muted);
-}
-.next-more {
-  margin: 0;
-  padding: var(--sp-1) var(--sp-3);
-  border-top: 1px solid var(--line);
-}
-
 /* Mac: one row, because the question is only whether it is coping. */
 .mac-row {
   display: flex;
@@ -2743,11 +2699,6 @@ button.quota-details {
   align-items: center;
   min-height: var(--sp-5);
 }
-.next-more a {
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--sp-5);
-}
 
 /* Crew under enlarged text. Every track is its accepted pixel width or the same width in em of the
    row's own text size, whichever is larger: at normal text the pixels win and nothing moves; with
@@ -2863,4 +2814,26 @@ button.quota-details {
   flex-direction: column;
   justify-content: center;
   align-items: flex-start;
+}
+
+/* The pause line: "Paused by" and "· last #N" stay whole; only the issue reference shortens. */
+#agentsList .ticket-cell > .pause-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+#agentsList .pause-line > .pause-label,
+#agentsList .pause-line > .pause-last {
+  flex: none;
+}
+#agentsList .pause-line > .rref {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+/* a block, not the inline-flex link of .rref: an ellipsis needs a block box to cut */
+#agentsList .pause-line > .rref > a {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }

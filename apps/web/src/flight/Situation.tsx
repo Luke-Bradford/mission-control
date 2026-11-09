@@ -13,8 +13,7 @@ import { MarkdownInline } from "../components/Markdown.tsx";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { dur, hhmm, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
-import { useMetrics } from "../metrics.ts";
-import { NEEDS_YOU_PATH, navigate } from "../router.ts";
+import { navigate } from "../router.ts";
 import { stateWord } from "../shell/Dock.tsx";
 import { useStore } from "../shell/store.ts";
 import { type FlightSeat, type FlightView, flightOffText } from "./flightTypes.ts";
@@ -108,8 +107,6 @@ export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
   const summaryResource = useResource<FlightSummaryView>(RESOURCES.flightSummary);
   const summary = summaryResource.data;
   const attention = useResource<AttentionItem[]>(RESOURCES.attention).data;
-  // The registry figure, so the strip agrees with the header, Overview and Comms.
-  const needsYou = useMetrics().readings.needsYou?.n ?? null;
   const now = useNow();
   const tz = useTz();
   const run = flightRun(flight.data, pause);
@@ -166,15 +163,6 @@ export function StatusStrip({ onOpen }: { onOpen: (tab: FlightTab) => void }) {
         )}
       </span>
       <span className="flight-strip-counters">
-        <Counter
-          tab="needs"
-          label="Needs you"
-          n={needsYou}
-          warn
-          metric="needsYou"
-          onOpen={onOpen}
-          to={NEEDS_YOU_PATH}
-        />
         <Counter tab="needs" label="FLIGHT handling" n={handling} onOpen={onOpen} />
         <Counter tab="did" label="decided 24 h" n={decided} onOpen={onOpen} />
         <button

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   ATTENTION_LABEL,
   type BoardItem,
+  BUDGET_BRAKE_KEY,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
@@ -740,7 +741,7 @@ describe("attention items", () => {
     const brief = (ask: string, at: number) =>
       store.addBrief({
         key: "note:blocked:y",
-        context: "c",
+        context: "The crew asked a question and waits for your answer.",
         ask,
         recommendation: "r",
         options: [],
@@ -2198,7 +2199,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     // FLIGHT's brief for the operator is the only way it becomes theirs
     store.addBrief({
       key: `ask:${id}`,
-      context: "GUIDO-1 needs a product call.",
+      context: "A seat needs a product call from you.",
       ask: "One lane per customer?",
       recommendation: "Yes.",
       options: TWO_OPTIONS,
@@ -2223,6 +2224,61 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       // the unbriefed decision and flag from above are counted too
       keys: [`ask:${held}`, "esc:shop-app#9", "note:triage"],
     });
+  });
+
+  it("passes the configured seat ids to the Needs you entry check", () => {
+    const base = withCrew();
+    const session = base.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const c: CcConfig = {
+      ...base,
+      crew: {
+        ...base.crew,
+        worktrees: join(dir, "crew-wt"),
+        maxSeats: 4,
+        sessions: [
+          {
+            ...session,
+            seats: [
+              ...session.seats,
+              { id: "FLIGHT-1", role: "FLIGHT", accountId: "claude-main", model: "opus", area: [] },
+            ],
+          },
+        ],
+      },
+    };
+    store.upsertRun(run({ id: "f1", agentId: "FLIGHT-1", repoId: "shop-app" }));
+    store.upsertRun(
+      run({ id: "c1", agentId: "GUIDO-1", repoId: "shop-app", ticket: "shop-app#5" }),
+    );
+    store.setSeatSession({
+      seatId: "FLIGHT-1",
+      runId: "f1",
+      cliSessionId: null,
+      state: "idle",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    const id = store.addQuestion({
+      agentId: "GUIDO-1",
+      runId: "c1",
+      text: "Lanes?",
+      at: NOW - 5 * MIN,
+    });
+    store.addBrief({
+      key: `ask:${id}`,
+      context: "A seat needs a product call from you before it can carry on.",
+      ask: "Should GUIDO-1 carry on?",
+      recommendation: "Yes.",
+      options: TWO_OPTIONS,
+      basis: "product direction",
+      at: NOW,
+      for: "operator",
+    });
+    const item = attentionItems(c, store, NOW).find((i) => i.key === `ask:${id}`);
+    expect(item?.owner).toBe("flight");
+    expect(item?.returned).toContain("the question has a seat id: say it in words");
   });
 
   it("FLIGHT triages questions from every session", () => {
@@ -2816,7 +2872,7 @@ describe("messages are not Needs you", () => {
     store.addBrief({
       key,
       for: "operator",
-      ask: "Merge #551 now, or wait for #498?",
+      ask: "Merge the dependencies view now, or wait for the older change?",
       context: "Both touch the parser.",
       recommendation: "Wait for #498.",
       options: TWO_OPTIONS,
@@ -2836,7 +2892,9 @@ describe("messages are not Needs you", () => {
         flightTriage: "waiting",
         triageDueAt: NOW - 2 * MIN + FLIGHT_TRIAGE_WAIT_MS,
         returned: [FLIGHT_ASKED_AGAIN],
-        brief: expect.objectContaining({ ask: "Merge #551 now, or wait for #498?" }),
+        brief: expect.objectContaining({
+          ask: "Merge the dependencies view now, or wait for the older change?",
+        }),
       }),
     ]);
     expect(flightTriageItems(c, store, NOW, null, []).map((i) => i.key)).toContain(key);
@@ -2886,7 +2944,7 @@ describe("messages are not Needs you", () => {
     store.addBrief({
       key,
       for: "operator",
-      ask: "Merge #551 now, or wait for #498?",
+      ask: "Merge the dependencies view now, or wait for the older change?",
       context: "Both touch the parser.",
       recommendation: "Yes.",
       options: TWO_OPTIONS,
@@ -2951,8 +3009,8 @@ describe("messages are not Needs you", () => {
       expect(chatter()).toEqual([expect.objectContaining({ kind, owner: "flight" })]);
       store.addBrief({
         key,
-        context: "GUIDO-1 needs the operator.",
-        ask: "Decide for GUIDO-1?",
+        context: "A seat needs a decision from you.",
+        ask: "Decide for the seat?",
         recommendation: "Yes.",
         options: TWO_OPTIONS,
         basis: "product direction",
@@ -2968,7 +3026,7 @@ describe("messages are not Needs you", () => {
           kind,
           owner: "operator",
           text: next,
-          brief: expect.objectContaining({ ask: "Decide for GUIDO-1?" }),
+          brief: expect.objectContaining({ ask: "Decide for the seat?" }),
         }),
       ]);
     },
@@ -2980,7 +3038,7 @@ describe("messages are not Needs you", () => {
     const key = chatter()[0]?.key ?? "";
     store.addBrief({
       key,
-      context: "GUIDO-1 needs a production key.",
+      context: "A seat needs a production key from you.",
       ask: "Add the key to the vault?",
       recommendation: "Add it.",
       options: TWO_OPTIONS,
@@ -3335,7 +3393,8 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       current,
     );
     expect(all(current).some((item) => item.key === key)).toBe(true);
-    expect(needsYouItems(all(current))).toHaveLength(1);
+    // FLIGHT's own question is FLIGHT's to brief; the late alert is FLIGHT's watch (#1537)
+    expect(needsYouItems(all(current))).toHaveLength(0);
 
     store.replacePullRequests(
       "shop-app",
@@ -3469,20 +3528,20 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     const id2 = ask(NOW - 25 * MIN);
     const item = aggregate();
     expect(item).toMatchObject({
-      owner: "operator",
+      owner: "flight",
       kind: "blocked",
       agentId: "flight-1",
       text: "FLIGHT is not triaging: 2 waiting since 12:30. FLIGHT has not triaged them within its window.",
       at: NOW - 30 * MIN,
       notTriaging: { cause: "late", keys: [`ask:${id}`, `ask:${id2}`], since: NOW - 30 * MIN },
     });
-    // the raw items stay FLIGHT's, so Needs you holds the one item
-    expect(needsYouItems(all()).map((i) => i.key)).toEqual([FLIGHT_NOT_TRIAGING_KEY]);
+    // a late wake is FLIGHT's own watch (#1537): the operator's Needs you holds none of it
+    expect(needsYouItems(all())).toEqual([]);
     noRawAsk();
     // FLIGHT keeps one and answers the other: the item clears
     store.addBrief({
       key: `ask:${id}`,
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "r",
       options: [],
       basis: "b",
@@ -3616,7 +3675,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       key: "note:flag-x",
       for: "operator",
       ask: "[operator-decision] prFlow 1407:stage:clearance:1793825335003",
-      context: "x",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Merge.",
       options: [{ label: "Merge", answer: "Merge it." }],
       basis: "b",
@@ -3656,6 +3715,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     flight();
     expect(HUB_STOP_KEYS).toEqual([
       `note:${MACHINE_CAPACITY_KEY}`,
+      `note:${BUDGET_BRAKE_KEY}`,
       `note:${CLI_NOTE_KEY}`,
       `note:${CLI_AUTO_NOTE_PREFIX}`,
       `note:${INSTRUCTION_FOCUS_NOTE_PREFIX}`,
@@ -3711,7 +3771,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
         key,
         for: "operator",
         ask: "Go?",
-        context: "c",
+        context: "The crew asked a question and waits for your answer.",
         recommendation: "Go.",
         options: [{ label: "Go", answer: "Go." }],
         basis: "b",
@@ -3745,7 +3805,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     });
     store.addBrief({
       key: "note:legacy",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Go.",
       options: [{ label: "Go", answer: "Go." }],
       basis: "b",
@@ -3772,7 +3832,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     store.addBrief({
       key: "note:kept",
       for: "flight",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Wait for CI.",
       options: [],
       basis: "b",
@@ -3876,7 +3936,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(isOperatorCall({ key: "note:blocked:r-budget:0", kind: "blocked" }, store)).toBe(true);
     expect(isOperatorCall({ key: "note:hub-update-held", kind: "question" }, store)).toBe(true);
     expect(isOperatorCall({ key: "note:plain", kind: "question" }, store)).toBe(false);
-    // a controller check is the operator's call too
+    // a controller check is FLIGHT's to do, so it is not the operator's call
     store.upsertRun(
       run({
         id: "r-cc",
@@ -3888,8 +3948,8 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       }),
     );
     raise("blocked:r-cc:0", "blocked", "r-cc");
-    expect(isOperatorCall({ key: "note:blocked:r-cc:0", kind: "blocked" }, store)).toBe(true);
-    // so is a PR waiting for the operator's acceptance
+    expect(isOperatorCall({ key: "note:blocked:r-cc:0", kind: "blocked" }, store)).toBe(false);
+    // a PR waiting for the operator's acceptance
     store.upsertRun(
       run({
         id: "r-uat",

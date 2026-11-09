@@ -35,7 +35,9 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
       },
       {
         at: now,
-        from: flightId ?? COMMS_MC,
+        // the hub's timer applied it, not FLIGHT
+        from: COMMS_MC,
+        senderKind: "hub",
         to: COMMS_CAPCOM,
         ticket: item.ticket,
         text: defaultAppliedText(def.option.label, item.brief?.ask || item.text),

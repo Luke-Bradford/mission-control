@@ -107,6 +107,7 @@ export interface MapUnchecked {
  */
 export interface MapTree {
   repoId: string;
+  /** `lines` is the tile weight: the file's bytes over 32, from file metadata; the file is not opened. */
   tree: { path: string; lines: number }[];
   imports: { from: string; to: string }[];
   /** Merged-PR file history, keyed by the index of the file in `tree` to keep the snapshot small. */

@@ -1,5 +1,7 @@
 /** Shared vocabulary and data shapes; independent of the domain algorithms. */
 
+import type { LoopDef } from "./loop-config-model.ts";
+
 export const PROFILE_STEP_PHASES = ["working", "ci", "review"] as const;
 
 export type ProfileStepPhase = (typeof PROFILE_STEP_PHASES)[number];
@@ -43,6 +45,8 @@ export interface Profile {
   tries: number;
   /** The review round limit. */
   rounds: number;
+  /** Absent: the loop the hub runs today (`standardLoop`). */
+  loop?: LoopDef;
 }
 
 export interface ProfileOverride {

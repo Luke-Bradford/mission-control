@@ -12,13 +12,13 @@ import {
   type AttentionOwner,
   agentState,
   type BoardItem,
+  BUDGET_BRAKE_KEY,
   CI_TRIES,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
-  CONTROLLER_CHECK_PARK,
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
@@ -41,12 +41,12 @@ import {
   FLIGHT_TRIAGE_WAIT_MS,
   type FlightNotTriagingCause,
   fixesSent,
-  flightFloorBlocked,
   flightNotTriagingText,
   hardRulesBySettingKey,
   hudState,
   isCleanupNoteKey,
   isFlakeNoteKey,
+  isForTheController,
   isHardRulesFlagKey,
   isNoReportNoteKey,
   LOCK_WAITING_TEXT,
@@ -85,13 +85,17 @@ import {
   UAT_PARK,
 } from "@mc/core";
 import { runAccountId } from "./account-bindings.ts";
-import { decisionDefault, partitionAttention, protectedDecisionItem } from "./attention-holds.ts";
+import {
+  decisionDefault,
+  partitionAttention,
+  protectedDecisionItem,
+  questionAskAt,
+} from "./attention-holds.ts";
 import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
 import { claudeVersion } from "./cli-version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
-import { isPaused } from "./collectors/ta-loop.ts";
 import { attentionChatter, resolvedCommsReason } from "./comms.ts";
 import {
   agentIds,
@@ -106,7 +110,8 @@ import { reviewerOf } from "./engine/engine.ts";
 import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
-import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
+import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
+import { loopPause } from "./loop-pause.ts";
 import { loopTries } from "./loophistory.ts";
 import { reviewCheckFor } from "./review-check.ts";
 import {
@@ -175,6 +180,12 @@ function crewFields(
   };
 }
 
+/** A repo's GitHub slug by its id, for links the hub builds. */
+const githubOf =
+  (config: CcConfig) =>
+  (repoId: string): string | undefined =>
+    config.repos.find((r) => r.id === repoId)?.github;
+
 /** The driver stop the collector stored, else null (also when the stored text is not a stop). */
 function readStop(store: Store, loopId: string): DriverStop | null {
   const raw = store.getSetting(driverStopKey(loopId));
@@ -207,7 +218,7 @@ export function stateInputs(config: CcConfig, store: Store): string {
         status.get(collectorName(loop.kind, loop.id))?.ok,
         status.get(collectorName(loop.kind, loop.id))?.error,
         status.get(noteCollectorName(loop.kind, loop.id))?.error,
-        loop.kind === "ta-loop" ? isPaused(loop) : false,
+        loopPause(loop, store, githubOf(config)),
         loop.kind === "studio-loop" ? store.getSetting(driverStopKey(loop.id)) : null,
         // a late line can turn the newest ended run blocked
         store.runs(agent.id, 1).map((r) => [r.id, r.status, r.endedAt]),
@@ -264,6 +275,7 @@ function loopViews(
         stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
         currentRun: latest ? runSummary(latest) : null,
         paused: false,
+        pausedBy: null,
         sourceError: hud === "error" ? (reason ?? "seat error") : null,
         // The seat's reason is its doing line, unless it is already the error text.
         note: hud === "error" ? null : reason,
@@ -275,7 +287,7 @@ function loopViews(
     const loop = agent.loop;
     const st = status.get(collectorName(loop.kind, loop.id));
     const sourceError = st && !st.ok ? (st.error ?? "collector failed") : null;
-    const paused = loop.kind === "ta-loop" ? isPaused(loop) : false;
+    const { paused, by: pausedBy, url: pausedByUrl } = loopPause(loop, store, githubOf(config));
     // Only a title marker (`[operator-decision]` / `[loop-blocked]` / `[mvp-ready]`) means the
     // loop waits on the operator; a label-only escalation is listed in Needs you and nothing more.
     const waitingOnOperator = escalations.some(
@@ -294,6 +306,8 @@ function loopViews(
       stateSince: since,
       currentRun: latest ? runSummary(latest) : null,
       paused,
+      pausedBy,
+      pausedByUrl,
       sourceError,
       note,
       stop,
@@ -750,6 +764,9 @@ function buildCrew(
               };
             })()),
         paused: view.paused,
+        ...(view.pausedBy
+          ? { pausedBy: view.pausedBy, pausedByUrl: view.pausedByUrl ?? null }
+          : {}),
         note: view.note,
         stop: view.stop,
         sourceError: view.sourceError,
@@ -859,7 +876,7 @@ interface FlightTriage {
 /**
  * The operator's call (#758): FLIGHT may brief it for the operator but never keep it. Unless it is
  * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, the
- * held hub Update, and a run parked on its budget or account, a controller check or acceptance.
+ * held hub Update, and a run parked on its budget or account, or on the operator's acceptance.
  */
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
@@ -867,9 +884,7 @@ export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store:
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
   const park = noteParkOf(item, store);
-  return (
-    park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
-  );
+  return park === "budget" || park === "account" || park === UAT_PARK;
 }
 
 /**
@@ -965,6 +980,8 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
+  // the budget brake on an account (budget-brake.ts)
+  `${NOTE_KEY}${BUDGET_BRAKE_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
   // a seat's focus could not be imported: the operator's config to fix (instruction-notices.ts)
@@ -1023,6 +1040,25 @@ function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage
   if (triage === null) return null;
   // items raised while the breaker held FLIGHT back get a fresh window after the lift
   return { ...triage, liveSince: Math.max(triage.liveSince, runawayLiftedAt(store)) };
+}
+
+/**
+ * How an open seat question (`ask:<id>`) is triaged now: null with no FLIGHT seat (the operator's
+ * at once), else whether FLIGHT is triaging and when its triage window for a question asked at
+ * `askedAt` ends. The same window the attention builder gives that item.
+ */
+export function seatQuestionTriage(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  askedAt: number,
+): { triaging: boolean; dueAt: number } | null {
+  const triage = flightTriage(config, store, now);
+  if (triage === null) return null;
+  return {
+    triaging: triage.triaging,
+    dueAt: Math.max(askedAt, triage.liveSince) + FLIGHT_TRIAGE_WAIT_MS,
+  };
 }
 
 function flightTriageNow(config: CcConfig, store: Store, now: number): FlightTriage | null {
@@ -1109,7 +1145,7 @@ export function flightNotTriagingDueAt(config: CcConfig, store: Store, now: numb
 }
 
 /** "14:05" today, "27 Oct 14:05" before today, in the operator's timezone. */
-function sinceText(at: number, now: number, timeZone: string): string {
+export function sinceText(at: number, now: number, timeZone: string): string {
   const hm = clockHm(at, timeZone);
   if (at >= startOfLocalDay(now, timeZone)) return hm;
   const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone }).format(
@@ -1255,10 +1291,12 @@ function buildAttentionItems(
       ) !== null
     )
       continue;
+    // FLIGHT's message for the controller is the controller's, never a stuck run the operator keeps
+    const forController = message.from === flight?.seat.id && isForTheController(message.text);
     items.push({
-      owner: OWNER_OPERATOR,
+      owner: forController ? OWNER_CONTROLLER : OWNER_OPERATOR,
       key: `${COMMS_OPEN_PREFIX}${message.id}`,
-      kind: message.label === "blocker" ? "blocked" : "question",
+      kind: message.label === "blocker" && !forController ? "blocked" : "question",
       agentId: message.from,
       repoId: repoId ?? null,
       text: message.text,
@@ -1347,6 +1385,7 @@ function buildAttentionItems(
   // A PR waits on you when it is linked to a ticket on a configured board and no agent is running
   // on that ticket (the loops merge their own PRs; see PR_WAIT_MS). A ticket whose run is still
   // open is the crew's, whether or not a seat is running on it (set aside, queued, held).
+  const unownedReviews = new Set<string>();
   const working = new Set(
     rows.filter((r) => r.run?.status === "running" && r.ticket !== null).map((r) => r.ticket),
   );
@@ -1377,6 +1416,9 @@ function buildAttentionItems(
         loopRow && (!crewed || pr.branch === loopRow.run?.branch || pr.ticket === loopRow.ticket)
           ? loopRow
           : null;
+      // A review no run owns is FLIGHT's to route (whatever the PR's login), never the operator's.
+      const flightReview = !loopOwner && !pr.isDraft && action === "review" && flightId !== null;
+      if (flightReview) unownedReviews.add(`pr:${pr.repoId}#${pr.number}:${pr.updatedAt}`);
       items.push({
         owner: loopOwner
           ? OWNER_LOOP
@@ -1441,7 +1483,26 @@ function buildAttentionItems(
     flightTriage: "missed",
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
+  const closures = store.closedItemKeys();
+  /** The item's ask was closed without an answer: FLIGHT's own tag leaves, the rest is FLIGHT's. */
+  const closedAsk = (i: OwnedItem): boolean => {
+    const list = closures.get(i.key);
+    if (list === undefined) return false;
+    const at = questionAskAt(i, briefs.get(i.key));
+    // a closure covers the item as it stood: one raised again after it is a new item
+    return list.some((c) => c.askAt === at && c.at >= i.at);
+  };
   const route = (i: OwnedItem): AttentionItem => {
+    if (closedAsk(i) && !ownReply(i, flightId)) {
+      const { brief: _closed, ...rest } = {
+        ...i,
+        acked: (acks.get(i.key) ?? -1) >= i.at,
+      } as AttentionItem;
+      if (triage === null) return rest;
+      return triaging
+        ? { ...rest, owner: OWNER_FLIGHT, flightTriage: "handling" }
+        : { ...rest, owner: OWNER_FLIGHT, flightTriage: "down" };
+    }
     const saved = briefs.get(i.key);
     // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
     const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
@@ -1464,6 +1525,8 @@ function buildAttentionItems(
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
     const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
     const unansweredComms = i.key.startsWith(COMMS_OPEN_PREFIX);
+    // FLIGHT's message for the controller stays the controller's, whatever FLIGHT's triage state
+    if (unansweredComms && i.owner === OWNER_CONTROLLER) return item;
     if (unansweredComms && triage !== null) {
       if (brief !== undefined && brief.for !== "flight") return item;
       if (!triaging) return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
@@ -1490,6 +1553,9 @@ function buildAttentionItems(
     // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
     if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
+    // FLIGHT's review queue, even when FLIGHT is not triaging: the count item carries it
+    if (unownedReviews.has(i.key) && (!live || !triaging))
+      return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
     if (!live || (!triaging && keptRaw(i, store))) return item;
     if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
@@ -1518,7 +1584,9 @@ function buildAttentionItems(
       item.brief !== undefined &&
       item.brief.for !== "flight" &&
       item.brief.at < item.at;
-    const returned = restated ? [FLIGHT_ASKED_AGAIN] : needsYouEntryFaults(item);
+    const returned = restated
+      ? [FLIGHT_ASKED_AGAIN]
+      : needsYouEntryFaults(item, crewSeatIds(config));
     if (returned.length === 0) return item;
     // a default applies only to the operator's item, so a returned one carries none
     const { defaultDueAt: _default, ...rest } = item;
@@ -1561,6 +1629,8 @@ function buildAttentionItems(
   const result: AttentionItem[] = items
     // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
     .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
+    // FLIGHT withdrew its own question to the operator, or the hub closed it: it has left
+    .filter((i) => !(i.kind === "tag" && ownReply(i, flightId) && closedAsk(i)))
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
     .map((i): AttentionItem => {
       const item = route(i);
@@ -1626,7 +1696,8 @@ function withNotTriaging(
   const item: AttentionItem = {
     key: FLIGHT_NOT_TRIAGING_KEY,
     kind: "blocked",
-    owner: OWNER_OPERATOR,
+    // FLIGHT live but late on a wake is its own watch's business; down or stopped is the operator's
+    owner: cause === "late" ? OWNER_FLIGHT : OWNER_OPERATOR,
     agentId: triage.flightId,
     repoId: triage.repoId,
     text: flightNotTriagingText(
@@ -1708,7 +1779,7 @@ function noteOwner(
     (isHardRulesFlagKey(n.key) || n.key.startsWith("ready:"))
   ) {
     const loop = n.runId === null ? null : store.run(n.runId)?.loop;
-    return loop && !flightFloorBlocked(loop) ? OWNER_FLIGHT : OWNER_OPERATOR;
+    return loop?.touches ? OWNER_FLIGHT : OWNER_OPERATOR;
   }
   if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key) || isNoReportNoteKey(n.key))
     return OWNER_CONTROLLER;

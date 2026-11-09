@@ -72,6 +72,7 @@ import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./external-reviews.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
@@ -105,7 +106,8 @@ import {
   prTextProblem,
   readKnown,
 } from "./mcp/tools.ts";
-import { newOperatorToken, writeOperatorToken } from "./operator.ts";
+import { releaseWaitingOperator } from "./needs-you-actions.ts";
+import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import {
   evidenceSideStarter,
@@ -168,6 +170,8 @@ export async function main(): Promise<void> {
   chmodSync(dirname(dbPath), 0o700); // tighten a directory that already existed, too
   const operatorToken = newOperatorToken(); // per boot; FLIGHT alone also receives it in memory
   writeOperatorToken(dirname(dbPath), operatorToken);
+  const controllerToken = newOperatorToken(); // the controller's own key, per boot
+  writeControllerToken(dirname(dbPath), controllerToken);
   const hubStartedAt = Date.now();
   markHubStarted(hubStartedAt);
   const store = new Store(dbPath);
@@ -320,6 +324,7 @@ export async function main(): Promise<void> {
   const scheduler = createScheduler({
     config,
     teamsEnabled: !isPreview(port, process.env),
+    boardWrites: !preview,
     store,
     bus,
     cliHold,
@@ -330,6 +335,11 @@ export async function main(): Promise<void> {
     hasViewClients: () => browserStreamCount > 0,
     // lazy: the updater is built below; the check only runs once the scheduler starts
     autoUpdate: () => autoUpdate?.() ?? Promise.resolve("off"),
+    // lazy: the supervisor is built below, and the check only runs once the scheduler starts
+    seatCheck: (tool) => supervisor.checkCli(tool),
+    // lazy: `gh` is built below; the job only runs once the scheduler starts
+    releaseWaiting: () =>
+      releaseWaitingOperator({ config, store, gh, dbPath, log: (line) => log(line) }),
     deliverDefault: async (seatId, text) => {
       await supervisor.message(seatId, text, { interrupt: false });
     },
@@ -374,6 +384,7 @@ export async function main(): Promise<void> {
           root: join(dirname(dbPath), "design-previews"),
           port: DESIGN_PREVIEW_PORT,
           hubPort: port,
+          repoId: previewRepoId,
           // the newest PR of the branch decides: a closed one takes its preview with it
           prOf: (branch) => store.pullRequestOfBranch(previewRepoId, branch),
           log: (line) => log(line),
@@ -543,7 +554,11 @@ export async function main(): Promise<void> {
     fileContext: createFileContext({
       config,
       store,
-      knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
+      knownSecrets: async () => [
+        await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
+        operatorToken,
+        controllerToken,
+      ],
     }),
     // lazy: `gh` is declared below
     claim: (repo, n) => claimAs(gh, hubRoot ?? process.cwd(), () => hubLogin)(repo, n),
@@ -591,7 +606,11 @@ export async function main(): Promise<void> {
     config,
     gh,
     cwd: hubRoot ?? process.cwd(),
-    knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
+    knownSecrets: async () => [
+      await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
+      operatorToken,
+      controllerToken,
+    ],
     evidence: evidenceStore,
     reviewShots,
   });
@@ -622,10 +641,15 @@ export async function main(): Promise<void> {
     profiles,
     checks: runChecks,
     checkDrops: (runId) => checkRecorder.drops(runId),
+    pendingChecks: (runId) => checkRecorder.pending(runId),
     gh,
     dbPath,
     // its own timeout: a hung gh is killed, not only abandoned (readKnown has a timeout too)
-    knownSecrets: async () => [await githubToken(KNOWN_SECRETS_TIMEOUT_MS), operatorToken],
+    knownSecrets: async () => [
+      await githubToken(KNOWN_SECRETS_TIMEOUT_MS),
+      operatorToken,
+      controllerToken,
+    ],
     log: (line) => log(line),
     onEvidence: (seatId, runId) => supervisor.emitEvidence(seatId, runId),
     onFindings: (seatId, runId) => supervisor.emitFindings(seatId, runId),
@@ -969,6 +993,7 @@ export async function main(): Promise<void> {
     mapRing,
     warmMap: true,
     operatorToken,
+    controllerToken,
     gh,
     knownSecrets: mcDeps.knownSecrets,
     deliverComms,
@@ -985,6 +1010,11 @@ export async function main(): Promise<void> {
       browserStreamCount = count;
     },
     hubLogin: () => hubLogin,
+    needsYou: {
+      board: engineBoard,
+      rules: engineRules,
+      fetchTicket: async (repo, n) => fetchTicket(repo, n, makeGql(await githubToken())),
+    },
     noLoopWrites: process.env.MC_NO_LOOP_WRITES === "1",
     // Add-repo writes back to the file this process loaded, and only that file.
     configPath: writableConfigPath,
@@ -1069,6 +1099,8 @@ export async function main(): Promise<void> {
       unlinkSync(pidPath);
     });
   }
+  // reviews already in flight when this hub updated keep finishing: they count as asked once
+  if (!preview) seedExternalReviewAsks(store, Date.now());
   scheduler.start();
   gitFiles?.start();
   supervisor.start();

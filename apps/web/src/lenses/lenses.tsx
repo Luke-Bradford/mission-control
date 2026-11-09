@@ -643,14 +643,13 @@ export function OwnershipLens({
       </section>
     );
   // null is the files no area owns
-  const areas = new Map<string | null, { files: number; lines: number }>(
-    [...owner.labels, null].map((label) => [label, { files: 0, lines: 0 }]),
+  const areas = new Map<string | null, { files: number }>(
+    [...owner.labels, null].map((label) => [label, { files: 0 }]),
   );
   for (const file of snapshot.tree) {
     const row = areas.get(owner.areaOf(file.path));
     if (!row) continue;
     row.files++;
-    row.lines += file.lines;
   }
   const owned = snapshot.tree.length - (areas.get(null)?.files ?? 0);
   const changed = snapshot.seats.flatMap((seat) =>
@@ -688,7 +687,7 @@ export function OwnershipLens({
         </div>
         <div className="map-lens-columns">
           <span>area</span>
-          <span>files · lines</span>
+          <span>files</span>
         </div>
         {[...areas.entries()].map(([area, row]) => (
           <div className="map-lens-row" key={area ?? "(none)"}>
@@ -698,9 +697,7 @@ export function OwnershipLens({
                 {area === null ? "everything else" : owner.globs[area]?.join(", ")}
               </span>
             </span>
-            <span>
-              {row.files} · {row.lines.toLocaleString()}
-            </span>
+            <span>{row.files}</span>
           </div>
         ))}
       </div>

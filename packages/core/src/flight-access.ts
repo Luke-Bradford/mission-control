@@ -6,8 +6,9 @@
 import { API_PREFIX } from "./mcp.ts";
 import { FLIGHT_FLOOR_ENFORCING_PATHS } from "./rule-paths.ts";
 
-/** Full-profile FLIGHT cannot approve changes to its own authority; independent current-head evidence is required.
- * This workflow floor is separate from each repository's configured/default hard-rule catalogue. */
+/** The paths that confine seats and FLIGHT: they classify a PR's touches and set the second-review floor.
+ * On a superuser repo FLIGHT's own logged clearance covers them; a standard repo needs independent
+ * current-head evidence. Separate from each repository's configured/default hard-rule catalogue. */
 export const FLIGHT_CONTROLLER_CHECK_PATHS: readonly string[] = Object.freeze([
   ...FLIGHT_FLOOR_ENFORCING_PATHS,
   "roles/FLIGHT.md",
@@ -25,6 +26,7 @@ export const FLIGHT_OPERATOR_ROUTES: readonly string[] = [
   "/runs/:id/end",
   "/runs/:id/message",
   "/runs/:id/controller-check",
+  "/prs/:repo/:number/review-request",
   "/prs/:repo/:number/controller-check",
   "/prs/:repo/:number/merge-hold",
   "/runs/:id/merge-hold",
@@ -62,8 +64,8 @@ export const flightOperatorRefusedText = (method: string, path: string): string 
   `Refused: ${method} ${path} is not a route mc operator calls. It POSTs to ${FLIGHT_OPERATOR_ROUTES.join(", ")}, and reads any other /api path with GET.`;
 
 /**
- * The rules a controller's approval can override, for the guard and the merge gate. `merge-floor`:
- * clearing a PR that touches `CLAUDE.md` or `.github/**` (scope `pr:<number>@<head sha>`); the
+ * The rules an operator's approval can override, for the guard and the merge gate. `merge-floor`:
+ * clearing a PR that touches `CLAUDE.md` or `.github/**` on a standard repo (scope `pr:<number>@<head sha>`); the
  * guard's rules: one refused command or file path (scope: the exact command or path).
  */
 export const FLIGHT_APPROVAL_RULES = ["merge-floor", "repo-rules", "merge-push"] as const;

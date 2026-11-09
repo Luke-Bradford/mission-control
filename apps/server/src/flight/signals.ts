@@ -2,6 +2,7 @@
 import {
   BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
+  COMMS_CONTROLLER,
   FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_COST_DAYS,
@@ -35,10 +36,12 @@ import {
   parkedEventText,
   STUCK_PARK,
   seatDef,
+  WAITING_OPERATOR_LABEL,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
+import { ownsCard } from "../ownership.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -59,6 +62,8 @@ interface RecordState {
     }
   >;
   flakes: Record<string, { key: string; at: number; evidence: string }>;
+  /** The facts last seen about each open question (`key@askAt`), to tell a change from none. */
+  questions: Record<string, { facts: string }>;
 }
 export interface MainCi {
   sha: string;
@@ -102,6 +107,7 @@ function read(store: Store, repo: string, now: number): RecordState {
     triage: {},
     checks: {},
     flakes: {},
+    questions: {},
     ...stored<Partial<RecordState>>(store, `${FLIGHT_SIGNALS_SETTING}:${repo}`, {}),
   } as RecordState;
   const cutoff = now - FLIGHT_SIGNAL_KEEP_MS;
@@ -314,6 +320,8 @@ export function flightSignals(i: {
   triageItems?: { key: string; kind: string; at: number; text: string }[];
   /** Open PRs whose run reported them ready to merge, with when it did. */
   readyPrs?: { ref: string; pr: number; at: number }[];
+  /** Each open question with the facts about its ticket, PR and run, and whether they close it. */
+  questions?: { id: string; facts: string; closing: boolean }[];
   now: number;
 }): Pick<FlightState, "signals" | "triage"> {
   const { config, store, session, seats, now } = i;
@@ -353,6 +361,8 @@ export function flightSignals(i: {
       continue;
     const ref = `${repo}#${card.issueNumber}`;
     const column = hudColumnOf(card);
+    // the operator set it aside with a question: it moves when they answer, not when FLIGHT looks
+    if (card.labels.includes(WAITING_OPERATOR_LABEL)) continue;
     if (column === "Backlog" || column === "Refinement") {
       triage(ref, "new", now, `${ref} arrived in ${column}: ${card.title}`);
     }
@@ -363,6 +373,7 @@ export function flightSignals(i: {
   for (const line of releasedLines(
     record.released.filter((r) => onBoard.has(r.ref)),
     verb,
+    (ref) => ownsCard(store, repo, Number(ref.slice(ref.lastIndexOf("#") + 1))),
   )) {
     triage(line.ref, "dependency", line.at, line.text);
   }
@@ -705,7 +716,7 @@ export function flightSignals(i: {
   const flightId = flightSeatId(config);
   const answers = store
     .comms(now - FLIGHT_HOUR_MS * 6)
-    .filter((m) => m.from === COMMS_CAPCOM && m.to === flightId)
+    .filter((m) => (m.from === COMMS_CAPCOM || m.from === COMMS_CONTROLLER) && m.to === flightId)
     .map((m) => m.at);
   for (const d of store.flightDecisions(now - FLIGHT_HOUR_MS * 6, 200)) {
     if (!d.about.includes(FOR_THE_CONTROLLER) && !d.decision.includes(FOR_THE_CONTROLLER)) continue;
@@ -719,13 +730,48 @@ export function flightSignals(i: {
     );
   }
   const waits = flightWaits(store);
+  const ended = Object.values(waits).filter((w) => w.until <= now);
+  const decisions =
+    ended.length === 0
+      ? []
+      : store
+          .flightDecisions(Math.min(...ended.map((w) => w.until)), 500)
+          .filter((d) => d.kind !== "wait");
   for (const [target, wait] of Object.entries(waits)) {
+    // a wait on a wait_over key is a nest from before waits kept their original target
+    if (waitTargetOf(target) !== target) {
+      delete waits[target];
+      continue;
+    }
     // what it waited on has settled on its own: nothing to look at again
     if (waitResolved(store, repo, target)) {
       delete waits[target];
       continue;
     }
     if (wait.until > now) continue;
+    // FLIGHT has been told it ended, and nothing is left to look at again
+    if (
+      state.signals[`wait_over:${target}:${wait.until}`]?.toldAt != null &&
+      (now - wait.until > FLIGHT_WAIT_OVER_KEEP_MS || waitSubjectDone(store, repo, target))
+    ) {
+      delete waits[target];
+      continue;
+    }
+    // FLIGHT dealt with it since it ended: a decision on the target, or naming the signal's key
+    const signalKey = `${target}:${wait.until}`;
+    if (
+      decisions.some(
+        (d) =>
+          d.at >= wait.until &&
+          (d.ref === target ||
+            d.seatId === target ||
+            d.about.includes(`wait_over:${signalKey}`) ||
+            d.decision.includes(`wait_over:${signalKey}`)),
+      )
+    ) {
+      delete waits[target];
+      continue;
+    }
     raise(
       "wait_over",
       `${target}:${wait.until}`,
@@ -737,8 +783,38 @@ export function flightSignals(i: {
     store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));
   }
   for (const [id, signal] of Object.entries(state.signals)) {
-    if (signal.kind === "wait_over" && signal.toldAt === null && !active.has(id)) {
+    if (
+      signal.kind === "wait_over" &&
+      !active.has(id) &&
+      (signal.toldAt === null || signal.key.includes("wait_over:"))
+    ) {
       delete state.signals[id];
+    }
+  }
+  if (i.questions !== undefined) {
+    const seen = new Set<string>();
+    for (const q of i.questions) {
+      seen.add(q.id);
+      const before = state.questions[q.id];
+      state.questions[q.id] = { facts: q.facts };
+      // the first sight records and raises nothing; unchanged facts raise nothing
+      if (before === undefined || before.facts === q.facts) continue;
+      // a change that closes the question is the sweep's, told once it has closed it
+      if (!q.closing)
+        raise(
+          "question_changed",
+          `${q.id}:${q.facts}`,
+          now,
+          `${q.id.slice(0, q.id.lastIndexOf("@"))}: ${before.facts} → ${q.facts}`,
+        );
+    }
+    for (const id of Object.keys(state.questions)) {
+      if (seen.has(id)) continue;
+      delete state.questions[id];
+      const at = id.lastIndexOf("@");
+      const closure = store.questionClosure(id.slice(0, at), Number(id.slice(at + 1)));
+      if (closure?.by === "hub")
+        raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
   }
   const loops = heartbeats(store).loops;
@@ -844,15 +920,42 @@ function waitResolved(store: Store, repo: string, target: string): boolean {
   return false;
 }
 
+/** A told wait that ended this long ago leaves the signal list, whatever it waited on. */
+export const FLIGHT_WAIT_OVER_KEEP_MS = 48 * FLIGHT_HOUR_MS;
+
+/**
+ * Whether a told wait's subject needs nothing more, however FLIGHT wrote the target (`PR 1294`,
+ * `#1294`, `1401`, `mc#7`): its PR is merged or closed, its ticket is closed, or its run has ended.
+ */
+function waitSubjectDone(store: Store, repo: string, target: string): boolean {
+  if (waitResolved(store, repo, target)) return true;
+  const run = store.run(target);
+  if (run !== null && run !== undefined) return run.endedAt !== null;
+  const n = /^(?:(?:PR|pull|ticket|issue)\s*)?#?(\d+)$/i.exec(target.trim())?.[1];
+  if (n === undefined) return false;
+  return waitResolved(store, repo, `${repo}#${n}`);
+}
+
 /** The waits FLIGHT recorded with `wait_on`, by target. */
 export function flightWaits(store: Store): Record<string, FlightWait> {
   return stored<Record<string, FlightWait>>(store, FLIGHT_WAITS_SETTING, {});
 }
 
+/**
+ * The target a wait is really on. FLIGHT may pass a `wait_over` signal's id back as the target; that
+ * waits on the original target again, so ending the wait never wraps the key in another `wait_over:`.
+ */
+export const waitTargetOf = (target: string): string => {
+  let t = target.trim();
+  // each wait_over: wrapped the key in the time its wait ended; the target's own trailing time stays
+  while (t.startsWith("wait_over:")) t = t.slice("wait_over:".length).replace(/:\d{10,}$/, "");
+  return t;
+};
+
 /** Keeps a wait; a later one on the same target replaces it. Entries a week past their time go. */
 export function recordFlightWait(store: Store, target: string, wait: FlightWait): void {
   const waits = flightWaits(store);
-  waits[target] = wait;
+  waits[waitTargetOf(target)] = wait;
   for (const [key, w] of Object.entries(waits))
     if (w.until < wait.at - FLIGHT_SIGNAL_KEEP_MS) delete waits[key];
   store.setSetting(FLIGHT_WAITS_SETTING, JSON.stringify(waits));

@@ -218,6 +218,7 @@ function approvalItem(
     owner: "operator",
     brief: {
       for: "operator",
+      by: "hub",
       original: text,
       context: text,
       ask: text,
