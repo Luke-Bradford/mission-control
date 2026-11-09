@@ -861,7 +861,11 @@ describe("move_review", () => {
 
   it.each([
     ["retiring", { retiring: true }, "RETRO-CX is retiring."],
-    ["unavailable", { modelVendor: "codex" as const, model: "unknown" }, "RETRO-CX is unavailable."],
+    [
+      "unavailable",
+      { modelVendor: "codex" as const, model: "unknown" },
+      "RETRO-CX is unavailable.",
+    ],
     ["non-scratch", { mode: "writer" as const }, "RETRO-CX is not a review seat."],
   ])("refuses a %s target review seat", async (_kind, extra, text) => {
     const id = queuedReview();
