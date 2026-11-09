@@ -467,7 +467,11 @@ function Composer({
   const [sentLine, setSentLine] = useState<string | null>(null);
   const tz = useTz();
   // A reply to a message from a run that has ended goes elsewhere: say so before it is sent.
-  const route = useResource<CommsReplyRoute>(reply ? RESOURCES.replyRoute(reply.id) : null).data;
+  const routeRef = reply ? RESOURCES.replyRoute(reply.id) : null;
+  const routeResource = useResource<CommsReplyRoute>(routeRef);
+  const route = routeResource.data;
+  const routeReady =
+    !reply || (route !== undefined && routeResource.error === null && !routeResource.loading);
   const consumedPrefills = useRef(new Set<number>());
   useEffect(() => {
     if (!prefill || consumedPrefills.current.has(prefill.token)) return;
@@ -478,7 +482,7 @@ function Composer({
   const send = (event: React.FormEvent) => {
     event.preventDefault();
     const value = text.trim();
-    if (!value) return;
+    if (!value || !routeReady) return;
     void apiPost<Partial<CommsSendState> | undefined>("/api/comms", {
       to,
       text: value,
@@ -512,6 +516,20 @@ function Composer({
           {route.note}
         </p>
       )}
+      {reply &&
+        !routeReady &&
+        (routeResource.error ? (
+          <p role="alert">
+            Could not check where this reply goes. Your draft is kept.{" "}
+            <button type="button" onClick={() => routeRef && hub.refetch(routeRef.path)}>
+              Retry reply route
+            </button>
+          </p>
+        ) : (
+          <p className="note" role="status">
+            Checking where this reply goes…
+          </p>
+        ))}
       <label htmlFor="comms-compose">{label}</label>
       <div>
         <input
@@ -520,7 +538,9 @@ function Composer({
           onChange={(event) => setText(event.target.value)}
           placeholder={placeholder}
         />
-        <button type="submit">Send</button>
+        <button type="submit" disabled={!routeReady}>
+          Send
+        </button>
       </div>
       {flightSeat !== undefined && <FlightStoppedNote seat={flightSeat} />}
       {sentLine !== null && (

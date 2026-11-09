@@ -1,4 +1,10 @@
-import { type AgentStream, type CommsMessagesResponse, type CommsSendState, type Crew, flightTurnText } from "@mc/core";
+import {
+  type AgentStream,
+  type CommsMessagesResponse,
+  type CommsSendState,
+  type Crew,
+  flightTurnText,
+} from "@mc/core";
 import { type FormEvent, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
@@ -11,10 +17,10 @@ import {
   type DockRow,
   dockRows,
   kindLabel,
-  messageStateLine,
   type PendingMsg,
   sameMessage,
   sendStateLine,
+  withMessageStates,
   withPending,
 } from "../flight/conversation.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
@@ -219,13 +225,8 @@ export function FlightChat({
   const { rows, open } = useMemo(() => withPending(all, pending), [all, pending]);
   const flightComms = useResource<CommsMessagesResponse>(RESOURCES.commsFlight).data?.messages;
   const shown = useMemo(() => {
-    const operator = flightComms?.filter((m) => m.operator) ?? [];
-    return chatRows(rows).map((r): DockRow => {
-      if (r.kind !== "you" || r.line !== undefined || tz === null) return r;
-      // the newest message of the operator's with these words is the one this row shows
-      const sent = operator.findLast((m) => sameMessage(r.text, m.text));
-      return sent ? { ...r, line: messageStateLine(sent, flightComms ?? [], tz) } : r;
-    });
+    const chat = chatRows(rows);
+    return tz === null ? chat : withMessageStates(chat, flightComms ?? [], tz);
   }, [rows, flightComms, tz]);
   // Settled messages leave the list, so it does not grow for ever.
   useEffect(() => {

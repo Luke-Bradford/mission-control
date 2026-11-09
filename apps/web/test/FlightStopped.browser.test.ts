@@ -74,6 +74,8 @@ describeRendered("Needs you with FLIGHT stopped", () => {
         for (const [width, height] of [
           [1280, 800],
           [1600, 900],
+          [1600, 700],
+          [1920, 1080],
         ] as const) {
           const label = `${width}x${height} ${scheme}`;
           const page = await renderAt({
@@ -85,6 +87,10 @@ describeRendered("Needs you with FLIGHT stopped", () => {
           });
           try {
             await ready(page);
+            if (SHOTS) {
+              mkdirSync(SHOTS, { recursive: true });
+              await page.screenshot(join(SHOTS, `flight-stopped-${width}x${height}-${scheme}.png`));
+            }
             const state = await page.evaluate(() => {
               const q = (s: string) => document.querySelector<HTMLElement>(s);
               const form = q("#needsForm") as HTMLElement;
@@ -107,6 +113,8 @@ describeRendered("Needs you with FLIGHT stopped", () => {
                 )?.disabled,
                 notice,
                 start: rect(start),
+                ask: rect(q("#needsDiscussionForm")),
+                stopped: rect(q("#needsDiscussionForm .flight-stopped")),
                 input: rect(input),
                 width: innerWidth,
                 height: innerHeight,
@@ -119,6 +127,17 @@ describeRendered("Needs you with FLIGHT stopped", () => {
               `${label}: options enabled`,
             ).toBe(true);
             expect(state.askDisabled, `${label}: Ask FLIGHT box enabled`).toBe(false);
+            for (const [name, box] of [
+              ["Ask FLIGHT", state.ask],
+              ["stopped notice", state.stopped],
+            ] as const) {
+              expect(box, `${label}: ${name} exists`).not.toBeNull();
+              if (!box) throw new Error(`${label}: ${name} missing`);
+              expect(box.y, `${label}: ${name} visible above`).toBeGreaterThanOrEqual(0);
+              expect(box.y + box.h, `${label}: ${name} inside first screen`).toBeLessThanOrEqual(
+                height,
+              );
+            }
             expect(state.notice.join(" "), `${label}: notice`).toContain(NOTICE);
             expect(state.start, `${label}: Start FLIGHT shown`).not.toBeNull();
             const start = state.start as { x: number; y: number; w: number; h: number };
@@ -129,10 +148,16 @@ describeRendered("Needs you with FLIGHT stopped", () => {
             expect(start.w, `${label}: Start FLIGHT has a real hit area`).toBeGreaterThanOrEqual(
               60,
             );
-            if (SHOTS) {
-              mkdirSync(SHOTS, { recursive: true });
-              await page.screenshot(join(SHOTS, `flight-stopped-${width}x${height}-${scheme}.png`));
-            }
+            await page.evaluate(() => {
+              (
+                document.querySelector("#needsDiscussionForm textarea") as HTMLTextAreaElement
+              ).focus();
+            }, undefined);
+            await page.press("Tab");
+            // The empty Ask button is disabled; keyboard reaches Start FLIGHT next.
+            expect(await page.evaluate(() => document.activeElement?.textContent, undefined)).toBe(
+              "Start FLIGHT",
+            );
           } finally {
             await page.close();
           }

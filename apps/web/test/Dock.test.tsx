@@ -659,6 +659,56 @@ describe("stopped FLIGHT", () => {
 });
 
 describe("each message shows what became of it", () => {
+  it("keeps separate receipts for repeated questions", async () => {
+    const operator = (id: string, at: number) => ({
+      id,
+      at,
+      from: "operator",
+      to: "flight-1",
+      text: "Status?",
+      operator: true,
+      deliveredAt: at,
+      reactions: [],
+      mentions: [],
+      label: null,
+      ref: null,
+      replyTo: null,
+    });
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      {
+        "/api/comms/flight": {
+          messages: [
+            operator("m1", NOW - 60000),
+            operator("m2", NOW),
+            {
+              ...operator("reply", NOW),
+              operator: false,
+              from: "flight-1",
+              replyTo: "m2",
+              text: "Done",
+            },
+          ],
+        },
+        "/api/agents/flight-1/stream?limit=20": {
+          ...STREAM,
+          events: [
+            { id: "s1", at: NOW - 60000, kind: "op", text: "Status?" },
+            { id: "s2", at: NOW, kind: "op", text: "Status?" },
+          ],
+        },
+      },
+    );
+    const { container } = render(<Dock />);
+    await waitFor(() => {
+      const states = [...container.querySelectorAll("[data-testid=message-state]")].map(
+        (e) => e.textContent,
+      );
+      expect(states).toHaveLength(2);
+      expect(states[0]).toMatch(/^Delivered /);
+      expect(states[1]).toBe("Answered");
+    });
+  });
   const send = async (reply: unknown) => {
     stubFlight(
       { seat: flightSeat(), decisions: [] },

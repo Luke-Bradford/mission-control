@@ -881,6 +881,7 @@ describe("Comms routes", () => {
       "/api/comms/pins": { messages: [] },
       "POST /api/comms/read": { ok: true },
       "POST /api/comms": { message: reply },
+      "/api/comms/comms%3A8/reply-route": { to: "crew", redirected: false, note: "" },
       "PUT /api/comms/comms%3A8/pin": { pinned: true },
     });
     render(<Comms item={null} view={{ kind: "crew" }} />);
@@ -894,6 +895,11 @@ describe("Comms routes", () => {
     fireEvent.change(screen.getByLabelText("Post to #crew as CAPCOM · @name pings one agent"), {
       target: { value: "Acknowledged" },
     });
+    await waitFor(() =>
+      expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      ),
+    );
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => {
       const sent = fetch.mock.calls.find(([path]) => path === "/api/comms");
@@ -1357,6 +1363,75 @@ describe("Comms: the operator can always talk to FLIGHT", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reply to alpha" }));
     expect((await screen.findByTestId("reply-route-note")).textContent).toBe(
       "alpha's run has ended. Your reply goes to FLIGHT.",
+    );
+  });
+
+  it("keeps typing available but waits for the reply route before sending", async () => {
+    const fetch = base(
+      [msg({ id: "comms:8", from: "alpha", operator: false, text: "Need a call" })],
+      {
+        "POST /api/comms": { state: "stored", deliveredAt: null },
+      },
+    );
+    let settle!: (r: Response) => void;
+    const pending = new Promise<Response>((resolve) => {
+      settle = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((input: string, init?: RequestInit) =>
+        input === "/api/comms/comms%3A8/reply-route" ? pending : fetch(input, init),
+      ),
+    );
+    view();
+    fireEvent.click(await screen.findByRole("button", { name: "Reply to alpha" }));
+    const input = screen.getByLabelText("Message FLIGHT as CAPCOM") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Please continue" } });
+    expect(input.disabled).toBe(false);
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    expect(
+      fetch.mock.calls.filter(([url, init]) => url === "/api/comms" && init?.method === "POST"),
+    ).toHaveLength(0);
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () =>
+      settle(
+        new Response(
+          JSON.stringify({
+            to: "flight-1",
+            redirected: true,
+            note: "alpha's run has ended. Your reply goes to FLIGHT.",
+          }),
+        ),
+      ),
+    );
+    await screen.findByTestId("reply-route-note");
+    expect(input.value).toBe("Please continue");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms", expect.objectContaining({ method: "POST" })),
+    );
+  });
+
+  it("keeps the draft and offers retry when the reply route cannot be read", async () => {
+    let attempts = 0;
+    base([msg({ id: "comms:8", from: "alpha", operator: false, text: "Need a call" })], {
+      "/api/comms/comms%3A8/reply-route": () =>
+        ++attempts === 1
+          ? { status: 503, body: { error: "Unavailable" } }
+          : {
+              status: 200,
+              body: { to: "flight-1", redirected: true, note: "Your reply goes to FLIGHT." },
+            },
+    });
+    view();
+    fireEvent.click(await screen.findByRole("button", { name: "Reply to alpha" }));
+    const input = screen.getByLabelText("Message FLIGHT as CAPCOM") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Keep this draft" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Retry reply route" }));
+    await screen.findByTestId("reply-route-note");
+    expect(input.value).toBe("Keep this draft");
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(
+      false,
     );
   });
 });

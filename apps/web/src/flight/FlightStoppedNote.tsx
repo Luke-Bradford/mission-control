@@ -2,6 +2,7 @@ import { useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { ACTIONS } from "../data.ts";
 import { FLIGHT_NO_SEAT, FLIGHT_STOPPED_NOTICE, type FlightSeat } from "./flightTypes.ts";
+import "./FlightStoppedNote.css";
 
 /**
  * Shown beside a message box that is bound for FLIGHT while FLIGHT is not running. The box stays
