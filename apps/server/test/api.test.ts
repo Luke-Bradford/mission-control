@@ -1581,6 +1581,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/flight"],
   ["GET", "/api/comms/agents/guido-1"],
   ["GET", "/api/comms/counts"],
+  ["GET", "/api/comms/ticket-counts"],
   ["GET", "/api/comms/agents/guido-1/contacts/CAPCOM"],
   ["GET", "/api/comms/pairs/guido-1/CAPCOM"],
   ["GET", "/api/comms/tickets/%237"],

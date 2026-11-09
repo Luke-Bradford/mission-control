@@ -222,6 +222,7 @@ import {
   validateCommsText,
 } from "./comms.ts";
 import { replyRoute } from "./comms-reply.ts";
+import { commsTicketCounts } from "./comms-ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -2026,10 +2027,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const pins = new Set(store.commsPins().map((pin) => pin.id));
         return rows.map((row) => storedCommsMessage(row, pins));
       };
-      const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+      const knownCommsAgent = (id: string) =>
+        commsCrew().includes(id) ||
+        id === COMMS_CAPCOM ||
+        id === COMMS_CONTROLLER ||
+        id === COMMS_MC;
       /** The agents an agent has talked with, as its conversation list names them. */
-      const commsContacts = (id: string) =>
-        store.commsContactIds(id).filter((contact) => contact !== id && contact !== COMMS_CREW);
+      const commsContacts = (id: string) => {
+        const flight = flightSeat(config)?.seat.id;
+        const pair =
+          id === flight ? COMMS_CONTROLLER : id === COMMS_CONTROLLER ? flight : undefined;
+        return [
+          ...new Set([...store.commsContactIds(id), ...(pair === undefined ? [] : [pair])]),
+        ].filter((contact) => contact !== id && contact !== COMMS_CREW);
+      };
       /** Direct-line replies not yet seen. Needs you no longer counts them; the thread does (#757). */
       const directUnreadOf = (id: string) =>
         id === COMMS_CAPCOM
@@ -2165,6 +2176,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             id: contact,
             lastMessage: last === undefined ? null : storedCommsMessage(last),
             count: counts.count,
+            hasMessages: counts.count > 0,
             unread: counts.unread,
           };
         });
@@ -2187,6 +2199,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ...agentCommsCounts(id),
         }));
       });
+      // Reader: docs/runbook.md#ticket-history (all-time counts for the later Comms ticket list).
+      api.get("/comms/ticket-counts", () => commsTicketCounts(config, store));
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
       api.get<{
         Params: { id: string; contact: string };
@@ -3744,7 +3758,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: docs/runbook.md#ticket-history (the ticket page is a later web ticket)
       api.get<{
         Params: { repoId: string; number: string };
-        Querystring: { before?: string; limit?: string };
+        Querystring: { before?: string; limit?: string; questionsBefore?: string };
       }>("/tickets/:repoId/:number", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
@@ -3755,6 +3769,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const before = rawBefore === undefined ? null : decodeCursor(rawBefore);
         if (rawBefore !== undefined && before === null)
           return reply.code(400).send({ error: "before: not a cursor from this endpoint" });
+        const rawQuestionsBefore = req.query.questionsBefore;
+        const questionCursor =
+          rawQuestionsBefore === undefined ? null : decodeCursor(rawQuestionsBefore);
+        if (
+          rawQuestionsBefore !== undefined &&
+          (questionCursor === null ||
+            !/^question:[1-9]\d*$/.test(questionCursor.key) ||
+            !Number.isSafeInteger(Number(questionCursor.key.slice("question:".length))))
+        )
+          return reply
+            .code(400)
+            .send({ error: "questionsBefore: not a question cursor from this endpoint" });
         const limit = rawLimit === undefined ? TICKET_PAGE_DEFAULT : Number(rawLimit);
         if (!Number.isInteger(limit) || limit < 1 || limit > TICKET_PAGE_MAX)
           return reply
@@ -3779,6 +3805,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
           before,
           limit,
+          questionsBefore:
+            questionCursor === null
+              ? null
+              : { at: questionCursor.at, id: Number(questionCursor.key.slice("question:".length)) },
         });
         return history ?? reply.code(404).send({ error: "unknown issue" });
       });
