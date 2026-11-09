@@ -436,6 +436,7 @@ button.flight-link:hover {
 }
 
 #wifP .wif-row {
+  height: auto;
   padding: var(--sp-3) var(--sp-3);
   border-bottom: 1px solid var(--line);
   border-radius: 0;

@@ -17,6 +17,38 @@ const SIZES = [
 const STATES: PageState[] = ["stopped", "running", "blocked"];
 
 describeRendered("FLIGHT page in a browser", () => {
+  it(
+    "moves an older decision from the main page into Records at its deep link",
+    async () => {
+      const api = { ...flightPageApi("blocked"), "/api/repos": REPOS };
+      const main = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        search: `?dock=folded&at=${encodeURIComponent("/flight")}`,
+        api,
+      });
+      await main.box("#decisions li");
+      expect(await main.evaluate(() => document.getElementById("decision-30") !== null, null)).toBe(
+        false,
+      );
+      await main.close();
+      const records = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        search: `?dock=folded&at=${encodeURIComponent("/flight#decision-30")}`,
+        api,
+      });
+      await records.box("#decision-30");
+      expect(await records.evaluate(() => document.getElementById("decision-30") !== null, null)).toBe(
+        true,
+      );
+      await records.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
   for (const [width, height] of [
     [1280, 800],
     [1600, 1000],

@@ -144,14 +144,14 @@ describe("the FLIGHT page", () => {
       configurable: true,
       value: scrollIntoView,
     });
-    expect(isFlightRecordHash("#decision-1")).toBe(true);
-    expect(recordPanelForHash("#decision-1")).toBe("decidedP");
-    window.history.replaceState(null, "", "/flight#decision-1");
+    expect(isFlightRecordHash("#decision-30")).toBe(true);
+    expect(recordPanelForHash("#decision-30")).toBe("decidedP");
+    window.history.replaceState(null, "", "/flight#decision-30");
     show("blocked");
     await waitFor(() => {
-      expect(document.getElementById("decision-1")).not.toBeNull();
+      expect(document.getElementById("decision-30")).not.toBeNull();
     });
-    const target = document.getElementById("decision-1") as HTMLElement;
+    const target = document.getElementById("decision-30") as HTMLElement;
     try {
       expect(target.dataset.testid).toBe("decided-row");
       await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }));
