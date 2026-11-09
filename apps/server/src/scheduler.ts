@@ -102,7 +102,6 @@ import {
   latestTranscriptLimits,
   UsageRateLimited,
 } from "./collectors/usage-sources.ts";
-import { raiseStalledCommsDecisions } from "./comms-decisions.ts";
 import type { CcConfig } from "./config.ts";
 import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
 import { applyDecisionDefaults } from "./decision-defaults.ts";
@@ -579,8 +578,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         deliver: deps.deliverDefault,
       });
       if (closed > 0) bus.emit("attention");
-      const raised = raiseStalledCommsDecisions({ config, store, now: now() });
-      if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,

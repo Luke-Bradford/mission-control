@@ -131,6 +131,8 @@ export async function sendComms(
   for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
     if (members.has(found[2])) mentions.add(found[2]);
   }
+  // A direct message is for the operator even when its text has no explicit tag.
+  if (input.to === COMMS_CAPCOM) mentions.add(COMMS_CAPCOM);
   if (replyFrom !== undefined && deps.replyAuthorMention !== false) mentions.add(replyFrom);
   const notify = new Set<string>();
   if (crew.includes(input.to)) notify.add(input.to);

@@ -1,6 +1,7 @@
 import type {
   AttentionItem,
   BriefOption,
+  ChoiceReceipt,
   Crew,
   ItemDiscussion as Discussion,
   Escalation,
@@ -10,7 +11,15 @@ import type {
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
-import { answerTarget, askFlight, dismissItem, sendAnswer } from "../comms/answer.ts";
+import {
+  answerTarget,
+  askFlight,
+  choiceLine,
+  choosable,
+  dismissItem,
+  sendAnswer,
+  sendChoice,
+} from "../comms/answer.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
 import {
   BRIEF_FOLD_AFTER,
@@ -26,7 +35,7 @@ import { Expandable, Toggle } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
-import { flightOffText } from "../flight/flightTypes.ts";
+import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import { dayMonth, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
@@ -94,7 +103,8 @@ export function useItemDetail(key: string | null) {
   const [receipts, setReceipts] = useState<
     Record<string, { id: string; text: string; note?: string }>
   >({});
-  const [chosen, setChosen] = useState<Record<string, string>>({});
+  const [chosenLocal, setChosen] = useState<Record<string, string>>({});
+  const [choices, setChoices] = useState<Record<string, ChoiceReceipt>>({});
   const [err, setErr] = useState<string | null>(null);
   const tz = useTz();
   const now = useNow();
@@ -108,6 +118,17 @@ export function useItemDetail(key: string | null) {
   const k: string = key ?? "";
 
   const item = currentItem ?? savedPerson?.item ?? (savedAsk?.key === key ? savedAsk : undefined);
+  // The choice already made on this item, so a reload still shows it recorded.
+  const choiceRes = useResource<ChoiceReceipt>(
+    item?.brief && item.brief.options.length > 0 ? RESOURCES.choice(item.key) : null,
+  );
+  const serverChoice =
+    choiceRes.data?.key === k && item?.brief && choiceRes.data.chosenAt >= item.brief.at
+      ? choiceRes.data
+      : undefined;
+  const recorded = choices[k] ?? serverChoice;
+  const chosen =
+    recorded && !chosenLocal[k] ? { ...chosenLocal, [k]: recorded.label } : chosenLocal;
   const esc = item?.escalationId ? escalations?.find((e) => e.id === item.escalationId) : undefined;
   // An escalation item waits for its escalations rather than flash the generic view.
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
@@ -118,7 +139,8 @@ export function useItemDetail(key: string | null) {
   const about = esc?.title ?? item?.text ?? "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
   const queueApproval = item?.kind === "approval" && item.key.startsWith("note:queue-reorder:");
-  const replyOk = target?.to === "seat" || (target?.to === "flight" && live);
+  // FLIGHT being stopped never blocks the operator: the hub keeps the message for its next start.
+  const replyOk = target?.to === "seat" || target?.to === "flight";
   const act = async (run: () => Promise<string | null>) => {
     setBusy(true);
     setErr(null);
@@ -180,6 +202,17 @@ export function useItemDetail(key: string | null) {
       toast("Opens the draft so you can change it before approving.");
       return;
     }
+    if (choosable(item, o)) {
+      void act(async () => {
+        const result = await sendChoice(item, o);
+        if ("error" in result) return result.error;
+        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
+        setChoices((prev) => ({ ...prev, [item.key]: result.receipt }));
+        hub.refetch(RESOURCES.choice(item.key).path);
+        return null;
+      });
+      return;
+    }
     const resource = RESOURCES.discussion(item.key);
     const discussion = hub.snapshot(resource.path, resource.topic).data as Discussion | undefined;
     const id = crypto.randomUUID();
@@ -234,7 +267,6 @@ export function useItemDetail(key: string | null) {
   const thread = currentThread ?? savedPerson?.thread;
   const handled = thread ? notes?.handledToday.find((h) => h.id === thread.id) : undefined;
   const handledHow = handled?.how ?? justHandled[k];
-  const flightTitle = live ? undefined : flightOffText(seat);
   const options = item?.brief?.person ? [] : (item?.brief?.options ?? []);
   const when = (ms: number): string => (tz ? rel(ms, now, tz) : "—");
 
@@ -264,9 +296,9 @@ export function useItemDetail(key: string | null) {
     busy,
     err,
     chosen,
+    recorded,
     receipts,
     handledHow,
-    flightTitle,
     options,
     currentItem,
     submit,
@@ -310,9 +342,9 @@ export function ItemDetail({
     busy,
     err,
     chosen,
+    recorded,
     receipts,
     handledHow,
-    flightTitle,
     options,
     currentItem,
     submit,
@@ -323,6 +355,7 @@ export function ItemDetail({
   if (key === null) return null;
   const page = layout === "page";
   const p = page ? "needs" : "ds";
+  const flightSeat = flight === undefined ? undefined : flight.seat;
   const previewBlock = item && !holding ? <PreviewOpener item={item} /> : null;
   const briefBlock = (
     <div className="pb" id={`${p}Brief`}>
@@ -408,6 +441,12 @@ export function ItemDetail({
               {chosen[k] && (
                 <p>
                   You chose: <b>{chosen[k]}</b>
+                  {recorded && (
+                    <span className="note" data-testid="choice-line">
+                      {" "}
+                      · {choiceLine(recorded, tz ?? "UTC")}
+                    </span>
+                  )}
                 </p>
               )}
               <BriefOptions
@@ -419,15 +458,14 @@ export function ItemDetail({
                 title={
                   !queueApproval && target?.to === "github"
                     ? "Reply on GitHub to answer this item."
-                    : !queueApproval && target?.to === "flight"
-                      ? flightTitle
-                      : undefined
+                    : undefined
                 }
                 variant={item.kind === "approval" ? "row" : "panel"}
                 rowLabel={item.kind === "approval" ? "Your call:" : undefined}
                 primaryFirst={item.kind === "approval"}
                 onPick={pick}
               />
+              {!queueApproval && target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
             </>
           )}
           {esc && (
@@ -477,7 +515,6 @@ export function ItemDetail({
               aria-label="Your answer"
               placeholder="Type your answer… (Ctrl or ⌘ + Enter sends)"
               rows={3}
-              title={!replyOk ? flightTitle : undefined}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -491,20 +528,15 @@ export function ItemDetail({
               autoComplete="off"
               aria-label="Your answer"
               placeholder="Type your answer…"
-              title={!replyOk ? flightTitle : undefined}
               value={text}
               onChange={(e) => setText(e.target.value)}
               disabled={!replyOk}
             />
           )}
-          <button
-            type="submit"
-            className="primary"
-            title={target?.to === "flight" ? flightTitle : undefined}
-            disabled={!replyOk || busy}
-          >
+          <button type="submit" className="primary" disabled={!replyOk || busy}>
             Reply
           </button>
+          {target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
         </form>
       )}
     </>
@@ -516,7 +548,7 @@ export function ItemDetail({
           layout={layout}
           itemKey={item.key}
           live={flight === undefined ? undefined : live}
-          title={flightTitle}
+          seat={flightSeat}
           receipt={queueApproval ? undefined : receipts[item.key]}
           focus={options.length === 0 && !item.brief?.person?.replies?.length}
           collapsed={options.length > 0 || Boolean(item.brief?.person?.replies?.length)}
