@@ -98,7 +98,6 @@ import {
   MC_TOOLS,
   NEW_LOOP,
   NOT_ON_BOARD,
-  needsSuperuserText,
   needsYouItems,
   OPERATOR_HEADER,
   openPrText,
