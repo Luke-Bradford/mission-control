@@ -363,12 +363,23 @@ scope moved, not that the feature shipped.
 
 | Stage | Ticket and size | Operator-visible completion |
 |---|---|---|
-| S1 | #1620, server S | The FLIGHT route returns stored messages and turn replies in order; no hub/tool lines; one choice receipt; both cursor families page |
+| S1 | #1620, server S | The FLIGHT route returns stored messages and turn replies in order; both cursor families page; linked sends retain itemKey and deliver one internal key-and-title line, excluded from the conversation |
 | W1, after S1, #1571 and #1580 | #1621, web M | One FlightThread in Comms and the fly-out; a send appears in both; `f` opens or focuses it on every page |
-| W2, after W1 | #1624, web M | The same thread sits beside a question with `About: <title>`; ItemDiscussion and duplicate choice posts go |
+| W2, after W1 | #1624, web M | The same thread sits beside a question with `About: <title>`; a click check proves matching sends/replies in all three places and one choice receipt; the answered question leaves |
 | C1, after W2 | #1623, server XS | Remove item-discussion routes and store; no page calls them |
 | S2, independent of W1 | #1622, server M | No FLIGHT reminder on Needs you; answered briefs stay gone; operator-only Clear closes the actual source |
 | W3, after S2 and #1535 | #1625, web S | One Clear click removes an item; Answered says `Cleared by you` |
+
+S1 must test an item-linked operator send through `POST /api/comms` with `itemKey`.
+The returned operator line retains that key. FLIGHT receives exactly one internal context line
+containing the item key and title. `GET /api/comms/flight` excludes that internal line while
+retaining the operator's actual words. This does not add a second visible conversation.
+
+W2 must check the complete flow through operator clicks, after S1 and W1 land.
+Send beside a Needs-you question; inspect that send and FLIGHT's reply in Needs you, Comms,
+and the fly-out. All three show the same words. Choose an option, then verify one choice
+receipt in the shared conversation and the answered question leaving the waiting list.
+Retain the click steps, observations and screenshots with the ordinary visual QA evidence.
 
 W1 also covers Enter to send, Shift+Enter for a new line, scroll position when new lines arrive,
 and these states: loading, `No messages yet.`, stopped, working, failed send with the server's
