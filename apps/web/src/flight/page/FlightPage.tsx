@@ -43,6 +43,13 @@ export function FlightPage() {
           </a>
           .
         </span>
+        <a
+          className="fp-records"
+          href={`${PAGE_PATHS.flight}#handlingP`}
+          onClick={(e) => followLink(e, `${PAGE_PATHS.flight}#handlingP`)}
+        >
+          Records
+        </a>
       </div>
       <StatusBand run={run} view={view} now={now} />
       <div className="fp-mid">

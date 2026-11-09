@@ -5,6 +5,7 @@ import { hub } from "../src/data.ts";
 import { buildBlockers, waitOwner } from "../src/flight/page/blockers.ts";
 import { decisionLine, readableText } from "../src/flight/page/decisionText.ts";
 import { NOT_RECORDED } from "../src/flight/page/StatusBand.tsx";
+import { isFlightRecordHash, recordPanelForHash } from "../src/flight/records.ts";
 import { Flight } from "../src/pages/Flight.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { HOUR, item, MIN, NOW } from "./fixtures.ts";
@@ -97,6 +98,48 @@ describe("buildBlockers", () => {
 });
 
 describe("the FLIGHT page", () => {
+  it.each([
+    ["#ordersP", "ordersP"],
+    ["#instructionsP", "instructionsP"],
+    ["#memoryP", "memoryP"],
+    ["#briefP", "briefP"],
+    ["#order-7", "ordersP"],
+    ["#flight-note-project", "briefP"],
+    ["#draft-7", "draftsP"],
+    ["#handlingP", "handlingP"],
+    ["#heldP", "heldP"],
+    ["#waitingP", "waitingP"],
+    ["#draftsP", "draftsP"],
+    ["#decidedP", "decidedP"],
+    ["#outcomesP", "outcomesP"],
+    ["#powersP", "powersP"],
+    ["#incP", "incP"],
+    ["#logP", "logP"],
+    ["#wifP", "wifP"],
+    ["#ledgerP", "ledgerP"],
+    ["#watchP", "watchP"],
+  ])("routes old %s links to the %s Records panel", async (hash, panel) => {
+    expect(isFlightRecordHash(hash)).toBe(true);
+    expect(recordPanelForHash(hash)).toBe(panel);
+    window.history.replaceState(null, "", `/flight${hash}`);
+    show("blocked");
+    await waitFor(() => expect(document.getElementById(panel)).not.toBeNull());
+  });
+
+  it("routes a decision link to Records so a decision outside the main screen is reachable", async () => {
+    expect(isFlightRecordHash("#decision-99")).toBe(true);
+    expect(recordPanelForHash("#decision-99")).toBe("decidedP");
+    window.history.replaceState(null, "", "/flight#decision-99");
+    show("blocked");
+    await waitFor(() => expect(document.getElementById("decidedP")).not.toBeNull());
+  });
+
+  it.each(["#askP", "#defaultsP"])("keeps the old %s redirect to Needs you", async (hash) => {
+    window.history.replaceState(null, "", `/flight${hash}`);
+    show("blocked");
+    await waitFor(() => expect(window.location.pathname).toBe("/needs-you"));
+  });
+
   it("shows the four tiles with their definitions, and says Not recorded yet for cost and sessions", async () => {
     show("blocked");
     const band = await screen.findByLabelText("FLIGHT status");

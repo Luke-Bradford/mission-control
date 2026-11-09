@@ -1,5 +1,12 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
-import { LEGACY_NEEDS_HASHES, NEEDS_YOU_PATH, navigate, useHash } from "../router.ts";
+import {
+  followLink,
+  LEGACY_NEEDS_HASHES,
+  NEEDS_YOU_PATH,
+  navigate,
+  PAGE_PATHS,
+  useHash,
+} from "../router.ts";
 import { CrewBoardTab } from "./CrewBoardTab.tsx";
 import { DidTab } from "./DidTab.tsx";
 import { KnowsTab } from "./KnowsTab.tsx";
@@ -63,7 +70,7 @@ function TabPanel({
  * The tabbed FLIGHT page: a status strip over four tabs named for the operator's questions. The
  * one-screen FLIGHT page replaced it; it stays, with its tests, until its panels have a new home.
  */
-export function FlightTabs() {
+export function FlightTabs({ records = false }: { records?: boolean } = {}) {
   const hash = useHash();
   const [tab, setTab] = useState<FlightTab>(() => tabForHash(hash));
   // A link to a section opens its tab, on load and when the fragment changes on this page.
@@ -95,8 +102,22 @@ export function FlightTabs() {
   };
   return (
     <section id="page-flight">
-      <h1 className="sr-only">Flight</h1>
-      <StatusStrip onOpen={select} />
+      {records ? (
+        <div className="flight-records-title">
+          <div>
+            <h1>Records</h1>
+            <p>Orders, instructions, memory, decisions, and FLIGHT's operating record.</p>
+          </div>
+          <a href={PAGE_PATHS.flight} onClick={(event) => followLink(event, PAGE_PATHS.flight)}>
+            Back to FLIGHT
+          </a>
+        </div>
+      ) : (
+        <>
+          <h1 className="sr-only">Flight</h1>
+          <StatusStrip onOpen={select} />
+        </>
+      )}
       <div className="flight-tabs" role="tablist" aria-label="Flight views">
         {FLIGHT_TABS.map((item) => (
           <button
