@@ -19,3 +19,7 @@ Manual inspection of the short dark viewport confirms readable selected-question
 ## CI route inventory correction
 
 CI found that the scoped parser wrapper separated Clear's reader comment from the route declaration. The declaration now has the comment immediately beside it and uses the scanner-supported api name and literal route. All eight route-inventory tests and all 24 Clear cases pass; lint and workspace typecheck pass. This is a registration-spelling/documentation correction with the same endpoint and scoped parser behavior. Fresh pushed-head CI and QA are still required.
+
+## Main-branch attention merge
+
+The newly merged watcher fix also changes brief projection. The conflict keeps both rules in the shared currentBrief helper: automatic hub Comms briefs remain stored history, answered briefs stay retired, and a re-raised or re-triaged ask cannot reuse a stale brief. Clear source closure and the new operator/FLIGHT ownership rules both remain. All190 Clear/HUD/lifecycle cases and all8 actual Comms routing cases pass after the merge. Lint, workspace typecheck and build pass. The earlier scoped-parser reader correction remains included. Fresh pushed-head full CI and independent QA remain required.
