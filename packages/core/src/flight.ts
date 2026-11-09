@@ -1384,12 +1384,14 @@ export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
  * second or two. A wake due sooner waits for the gap.
  */
 export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
+/** An unread operator request is delivered within a minute, even just after another wake. */
+export const FLIGHT_OPERATOR_WAKE_GAP_MS = 30_000;
 /**
  * Routine wake facts (a free seat, a PR moving) wait this long after the last wake and are sent
  * together. Anything else wakes at once.
  */
 export const FLIGHT_BATCH_MS = 15 * 60_000;
-/** An operator message to FLIGHT unread this long after it was sent no longer wakes it. */
+/** @deprecated Unread operator requests no longer expire from FLIGHT's wake inputs. */
 export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
 /** An operator message FLIGHT read and has not answered stays owed this long. */
 export const FLIGHT_OWED_MS = 7 * 24 * 60 * 60_000;

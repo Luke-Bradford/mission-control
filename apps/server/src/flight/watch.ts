@@ -26,6 +26,7 @@ import {
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
+  FLIGHT_OPERATOR_WAKE_GAP_MS,
   FLIGHT_REWAKE_MS,
   FLIGHT_ROTATIONS_MAX,
   FLIGHT_RUN_TOOLS_SETTING,
@@ -81,6 +82,7 @@ import {
   routineOnly,
   trackIdleSeat,
   unhandledReasons,
+  unreadOperatorComms,
   type WakeReason,
   wakeFacts,
   wakeReasons,
@@ -477,16 +479,19 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     if (!flightLive(config, store, () => alive)) {
       const accountId = runAccountId(store, row?.runId ?? null, found.seat.accountId);
       const atStop = accountAtStop(config, store, accountId, t);
+      const operatorWaiting = unreadOperatorComms(store, id).length > 0;
       // Parked or held at a stop line is an outage; the operator's own Stop is not, and a failed
       // start already says so. Once its reason passes, FLIGHT is restarting, not down.
       if (row?.state === "parked" && !noteOpen())
         raiseDown(id, found.session.repoId, "it is parked", t);
-      else if (atStop && row?.state !== "stopped" && !noteOpen())
+      else if (atStop && !operatorWaiting && row?.state !== "stopped" && !noteOpen())
         raiseDown(id, found.session.repoId, `account ${accountId} is at its usage stop line`, t);
       else clearDown(t);
-      if (row?.state === "stopped" || row?.state === "parked" || atStop) return;
-      // parked or at the stop line, FLIGHT waits for that first; a run left with no session goes
-      // before any start, which it would refuse
+      // A usage stop holds background work, not an answer the operator explicitly requested.
+      // The same start path still enforces operator Stop, unavailable seats and runtime guards.
+      if (row?.state === "stopped" || row?.state === "parked" || (atStop && !operatorWaiting))
+        return;
+      // A run left without a session must settle before a new start, which would refuse it.
       if (await settleGhost(id, row, alive, t)) return;
       // the handover guard's cooldown is over: FLIGHT starts again, and a trip soon after is the second in a row
       const guard = readGuard();
@@ -575,6 +580,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
             freshStartLine(note ?? null),
           ),
         });
+        clearDown(t);
         audit = nextAudit(t, reasons, left);
         processGone = false;
         store.setSetting(
@@ -600,6 +606,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         );
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
+        if (operatorWaiting)
+          raiseDown(id, found.session.repoId, "it could not start. Your message is saved", t);
         const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         const failure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
         lastReason = processGone
@@ -732,8 +740,10 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       (wake !== lastFacts && listed && !batched) ||
       (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     const since = Math.max(lastWakeAt, lastTurnEndAt);
-    if (due && t - since < FLIGHT_MIN_WAKE_GAP_MS) {
-      later(since + FLIGHT_MIN_WAKE_GAP_MS - t);
+    const wakeGap =
+      (state.wake?.operator.length ?? 0) > 0 ? FLIGHT_OPERATOR_WAKE_GAP_MS : FLIGHT_MIN_WAKE_GAP_MS;
+    if (due && t - since < wakeGap) {
+      later(since + wakeGap - t);
       return;
     }
     if (due) {

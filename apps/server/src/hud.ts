@@ -1504,8 +1504,13 @@ function buildAttentionItems(
         : { ...rest, owner: OWNER_FLIGHT, flightTriage: "down" };
     }
     const saved = briefs.get(i.key);
+    // An old automatic Proceed/Hold brief is history, not an operator question. Crew messages
+    // remain FLIGHT's work until FLIGHT writes a real brief; keep the stored history unchanged.
+    const legacyCommsBrief =
+      i.key.startsWith(COMMS_OPEN_PREFIX) && saved?.by === "hub" && saved.for !== "flight";
     // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
-    const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
+    const brief =
+      legacyCommsBrief || (saved?.for === "flight" && saved.at < i.at) ? undefined : saved;
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
     const ackAt = acks.get(i.key);
