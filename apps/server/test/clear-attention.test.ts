@@ -303,33 +303,54 @@ it("rolls back the closure and source if its durable notice cannot be stored", a
   expect(store.acks().has("note:hub-update-held")).toBe(false);
   expect(store.notes().some((n) => n.key === "hub-update-held")).toBe(true);
 });
-it("lets the operator clear an acknowledged item and cancels queued legacy delivery without inventing a delivery receipt", async () => {
-  raise();
-  const key = "note:hub-update-held";
-  store.claimDecisionDefault(
-    {
-      key,
-      briefAt: AT,
-      optionId: "go",
-      label: "Go",
-      dueAt: AT,
-      target: "GUIDO-1",
-      answer: "Proceed.",
-    },
-    {
-      at: AT,
-      from: "MC",
-      senderKind: "hub",
-      to: "CAPCOM",
-      ticket: "repo#1",
-      text: "Earlier default was claimed.",
-    },
-    AT,
-  );
-  expect(store.pendingDecisionDeliveries()).toHaveLength(1);
-  expect((await clear(key)).statusCode).toBe(200);
-  expect(store.pendingDecisionDeliveries()).toEqual([]);
-});
+it.each([false, true])(
+  "clears an acknowledged item without delivering its legacy or bound outbox row (bound=%s)",
+  async (bound) => {
+    raise();
+    const key = "note:hub-update-held";
+    store.claimDecisionDefault(
+      {
+        key,
+        briefAt: AT,
+        optionId: "go",
+        label: "Go",
+        dueAt: AT,
+        target: "GUIDO-1",
+        answer: "Proceed.",
+        // This is an outbox storage fixture, not an assertion of dispatch authority.
+        ...(bound
+          ? {
+              binding: JSON.stringify({
+                epoch: "fixture-epoch",
+                request: {
+                  briefId: 1,
+                  sourceRevision: "fixture-source",
+                  optionId: "go",
+                  requestId: "fixture-request",
+                },
+              }),
+            }
+          : {}),
+      },
+      {
+        at: AT,
+        from: "MC",
+        senderKind: "hub",
+        to: "CAPCOM",
+        ticket: "repo#1",
+        text: "Earlier default was claimed.",
+      },
+      AT,
+    );
+    expect(store.pendingDecisionDeliveries()).toHaveLength(bound ? 1 : 0);
+    expect((await clear(key)).statusCode).toBe(200);
+    expect(store.pendingDecisionDeliveries()).toEqual([]);
+    expect(store.decisionDeliveryState(key, AT)?.deliveredAt).toBeNull();
+    expect(store.questionClosures(0, 10)).toContainEqual(
+      expect.objectContaining({ key, kind: "cleared" }),
+    );
+  },
+);
 it("keeps the runaway flag and directs the operator to Lift", async () => {
   raise(FLIGHT_RUNAWAY_NOTE_KEY);
   const result = await clear(`note:${FLIGHT_RUNAWAY_NOTE_KEY}`);
