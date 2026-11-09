@@ -18,6 +18,7 @@ export * from "./handoff.ts";
 export * from "./hud.ts";
 export * from "./hud-paths.ts";
 export * from "./loop.ts";
+export * from "./loop-config.ts";
 export * from "./map.ts";
 export * from "./map-fixture.ts";
 export * from "./map-wire.ts";

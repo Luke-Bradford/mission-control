@@ -2,6 +2,7 @@ import {
   isReviewBudgetFailure,
   NEW_LOOP,
   type PullRequestView,
+  type QaReport,
   type RunHandoff,
   reviewBudgetFailure,
   reviewCheckOf,
@@ -17,6 +18,7 @@ import {
 } from "../src/external-pr-control.ts";
 import { branchOwned, createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import { prTextProblem } from "../src/mcp/tools.ts";
 import { ownsPr } from "../src/ownership.ts";
 import { prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
@@ -867,6 +869,122 @@ describe("external PR review subjects", () => {
     expect(h.writes).toHaveLength(1);
     expect(h.writes[0]?.body.state).toBe("pending");
     expect(h.deps.log).toHaveBeenCalledWith(expect.not.stringContaining("Sensitive content"));
+    expect(h.deps.log).toHaveBeenCalledWith(
+      expect.stringContaining("external review comment was withheld by the text check"),
+    );
+  });
+
+  it.each(["@someone", "&#64;someone", "fixture-sensitive-key"])(
+    "keeps a disallowed review summary private: %s",
+    async (summary) => {
+      const h = harness();
+      await createExternalReviews(h.deps).sync();
+      const row = store.reviewsIn(["queued"])[0]!;
+      store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+      store.recordFindings(row.id, "retro:review", {
+        verdict: { spec: "pass", quality: "pass" },
+        summary,
+        findings: [],
+        at: 102,
+      });
+      await createExternalReviews({
+        ...h.deps,
+        textAllowed: async (text) =>
+          prTextProblem(text, {
+            repo: "example/sample",
+            issue: 7,
+            known: ["fixture-sensitive-key"],
+            label: "QA review",
+            allowOwnRepoRefs: true,
+          }) === null,
+      }).sync();
+      expect(h.comments).toEqual([]);
+      expect(h.writes).toHaveLength(1);
+      expect(h.writes[0]?.body.state).toBe("pending");
+      expect(h.deps.log).toHaveBeenCalledWith(expect.not.stringContaining(summary));
+    },
+  );
+
+  it("keeps an unexpected publication exception out of the log", async () => {
+    const h = harness();
+    await createExternalReviews({
+      ...h.deps,
+      gh: async () => {
+        throw new Error("fixture-sensitive-unexpected-error");
+      },
+    }).sync();
+    expect(h.deps.log).toHaveBeenCalledWith(
+      expect.stringContaining("could not complete its queue/status update"),
+    );
+    expect(h.deps.log).toHaveBeenCalledWith(
+      expect.not.stringContaining("fixture-sensitive-unexpected-error"),
+    );
+    expect(h.writes).toEqual([]);
+  });
+
+  it("publishes a retained QA report through the real GitHub text check", async () => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = store.reviewsIn(["queued"])[0]!;
+    store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    store.recordFindings(row.id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked.",
+      findings: [],
+      at: 102,
+    });
+    const report: QaReport = {
+      schemaVersion: 1,
+      id: "c".repeat(64),
+      repoId: "sample",
+      github: "example/sample",
+      prNumber: 7,
+      headSha: SHA,
+      prTitle: "Sample change",
+      prUrl: "https://github.com/example/sample/pull/7",
+      branch: "feature/sample",
+      source: "native",
+      reviewer: { id: "retro", label: "retro" },
+      reviewedAt: 102,
+      registeredAt: 102,
+      nativeReviewId: row.id,
+      nativeRunId: "retro:review",
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked.",
+      worksWell: [],
+      coverage: [{ check: "scope", result: "pass", note: "A saved note names @someone." }],
+      findings: [],
+      resolutions: [],
+      tests: [],
+      limitations: [],
+      followUps: [],
+      visual: { applicability: "not_applicable", reason: "Backend only.", pairs: [] },
+      ci: { observedAt: 102, headSha: SHA, source: "github", checks: [] },
+      completeness: { state: "complete", missing: [] },
+      permalink: `/qa?repo=sample&pr=7&report=${"c".repeat(64)}`,
+    };
+    vi.spyOn(store, "qaReportForReview").mockReturnValue(report);
+    const textAllowed = vi.fn(
+      async (text: string) =>
+        prTextProblem(text, {
+          repo: "example/sample",
+          issue: 7,
+          known: [],
+          label: "QA review",
+          allowOwnRepoRefs: true,
+        }) === null,
+    );
+    await createExternalReviews({
+      ...h.deps,
+      reportBaseUrl: "http://127.0.0.1:7431",
+      textAllowed,
+    }).sync();
+    expect(h.comments).toHaveLength(1);
+    expect(h.comments[0]?.body).toContain(`/api/qa-reports/${report.id}/markdown`);
+    expect(h.comments[0]?.body).not.toContain("@someone");
+    expect(report.coverage[0]?.note).toContain("@someone");
+    expect(h.writes.at(-1)?.body.state).toBe("success");
+    expect(textAllowed).toHaveBeenCalled();
   });
 
   it("keeps a failed review red and does not repeatedly start paid retries", async () => {

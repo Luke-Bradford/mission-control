@@ -19,7 +19,11 @@ describe("routeProfile", () => {
     const a = routeProfile(DEFAULT_PROFILES, ["chore", "bug"], "M");
     expect(a.profile.name).toBe("bugfix");
     expect(a.route).toEqual({ by: "label", label: "bug" });
-    expect(routeProfile(DEFAULT_PROFILES, ["docs"], "XL").profile.name).toBe("small-change");
+  });
+
+  it("docs routes to the docs loop", () => {
+    expect(routeProfile(DEFAULT_PROFILES, ["docs"], "XL").profile.name).toBe("docs");
+    expect(routeProfile(DEFAULT_PROFILES, ["chore"], "XL").profile.name).toBe("small-change");
   });
 
   it("routes by Size when no label matches", () => {
