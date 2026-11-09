@@ -3,9 +3,11 @@
  * server that must never be reached, and the system Chrome. Skipped where there is no Chrome.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { Socket } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   QA_DISCLOSURE_LABEL,
   QA_TAB_LABELS,
@@ -198,37 +200,44 @@ const stopServers = async (): Promise<void> => {
   await Promise.all([hub, other].map((x) => new Promise((r) => x.server.close(r))));
 };
 
-const chromeCount = (): number => {
-  try {
-    return execFileSync("ps", ["-axo", "command"], { encoding: "utf8" })
+/** Track this launch's unique profile, including leaked processes reparented after helper exit. */
+function ownedChrome() {
+  const dir = mkdtempSync(join(tmpdir(), "mc-hud-owned-"));
+  const receipt = join(dir, "profile");
+  const executablePath = join(dir, "chrome");
+  const quote = (text: string) => `'${text.replaceAll("'", "'\\''")}'`;
+  // exec preserves Chrome's pipes and process group. The receipt precedes launch, so even an
+  // orphan from a timed-out launch is attributable without counting anyone else's Chrome.
+  writeFileSync(
+    executablePath,
+    `#!/bin/sh\nfor arg in "$@"; do\n  case "$arg" in\n    --user-data-dir=*) printf '%s' "\${arg#--user-data-dir=}" > ${quote(receipt)};;\n  esac\ndone\nexec ${quote(CHROME as string)} "$@"\n`,
+    { mode: 0o700 },
+  );
+  const pids = (): number[] => {
+    const profile = existsSync(receipt) ? readFileSync(receipt, "utf8") : "";
+    if (profile === "") return [];
+    return execFileSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" })
       .split("\n")
-      .filter((l) => l.includes("playwright_chromiumdev_profile")).length;
-  } catch {
-    return 0;
-  }
-};
-
-/** The pids of the Chrome processes started under this process (the helper's children, and theirs). */
-const ownChrome = (): number[] => {
-  const rows = execFileSync("ps", ["-axo", "pid=,ppid=,command="], { encoding: "utf8" })
-    .split("\n")
-    .flatMap((line) => {
-      const m = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-      return m ? [{ pid: Number(m[1]), ppid: Number(m[2]), command: m[3] ?? "" }] : [];
-    });
-  const mine = new Set([process.pid]);
-  for (let grew = true; grew; ) {
-    grew = false;
-    for (const r of rows)
-      if (mine.has(r.ppid) && !mine.has(r.pid)) {
-        mine.add(r.pid);
-        grew = true;
+      .flatMap((line) => {
+        const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+        return match?.[2]?.includes(profile) ? [Number(match[1])] : [];
+      });
+  };
+  return {
+    executablePath,
+    pids,
+    dispose() {
+      for (const pid of pids()) {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch {
+          /* already gone */
+        }
       }
-  }
-  return rows
-    .filter((r) => mine.has(r.pid) && r.command.includes("playwright_chromiumdev_profile"))
-    .map((r) => r.pid);
-};
+      rmSync(dir, { recursive: true, force: true });
+    },
+  };
+}
 
 // A cold Chrome start on a loaded CI runner can take most of 20 s; the deadline covers launch too.
 // Every render's test timeout must exceed this.
@@ -337,63 +346,97 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
     });
 
     it("leaves no Chrome behind after a deadline in the owned helper", async () => {
-      const baseline = chromeCount();
+      const owned = ownedChrome();
       const guard = hudRenderRequest(hub.origin);
-      await expect(
-        renderHudInHelper(guard.page("/setup"), guard, {
-          executablePath: CHROME as string,
-          deadlineMs: 3_000,
-        }),
-      ).rejects.toThrow("timed out");
-      await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
+      try {
+        await expect(
+          renderHudInHelper(guard.page("/setup"), guard, {
+            executablePath: owned.executablePath,
+            deadlineMs: 3_000,
+          }),
+        ).rejects.toThrow("timed out");
+        await expect.poll(() => owned.pids().length, { timeout: 10_000 }).toBe(0);
+      } finally {
+        owned.dispose();
+      }
     }, 150_000);
 
-    it("leaves no Chrome behind when a render is stopped in the owned helper", async () => {
-      const baseline = chromeCount();
-      const guard = hudRenderRequest(hub.origin);
-      const stop = new AbortController();
-      const job = renderHudInHelper(guard.page("/setup"), guard, {
-        executablePath: CHROME as string,
-        deadlineMs: COLD_START_DEADLINE_MS,
-        signal: stop.signal,
-      });
-      const settled = job.then(
-        () => "rendered",
-        (e: unknown) => (e instanceof Error ? e.message : String(e)),
-      );
-      // /setup never answers, so the render is parked on a running Chrome until it is stopped
-      await expect.poll(chromeCount, { timeout: 30_000 }).toBeGreaterThan(baseline);
-      stop.abort(new Error("stopped by the test"));
-      expect(await settled).toBe("stopped by the test");
-      // the call settles only after the helper is stopped; Chrome goes with it
-      await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
-    }, 150_000);
-
-    it("leaves no Chrome behind when the render is stopped while Chrome is frozen", async () => {
-      const baseline = chromeCount();
-      const guard = hudRenderRequest(hub.origin);
-      const stop = new AbortController();
-      const settled = renderHudInHelper(guard.page("/setup"), guard, {
-        executablePath: CHROME as string,
-        deadlineMs: COLD_START_DEADLINE_MS,
-        signal: stop.signal,
-      }).then(
-        () => "rendered",
-        (e: unknown) => (e instanceof Error ? e.message : String(e)),
-      );
-      await expect.poll(chromeCount, { timeout: 30_000 }).toBeGreaterThan(baseline);
-      // freeze this test's own Chrome only (our descendants), so its graceful close cannot run
-      const mine = ownChrome();
-      expect(mine.length).toBeGreaterThan(0);
-      for (const pid of mine)
+    it.each([false, true])(
+      "leaves no Chrome behind when stopped, frozen=%s",
+      async (frozen) => {
+        const owned = ownedChrome();
+        const guard = hudRenderRequest(hub.origin);
+        const stop = new AbortController();
+        const before = hub.requests.filter((path) => path === "/setup").length;
+        const settled = renderHudInHelper(guard.page("/setup"), guard, {
+          executablePath: owned.executablePath,
+          deadlineMs: COLD_START_DEADLINE_MS,
+          signal: stop.signal,
+        }).then(
+          () => "rendered",
+          (e: unknown) => (e instanceof Error ? e.message : String(e)),
+        );
         try {
-          process.kill(pid, "SIGSTOP");
-        } catch {
-          // it exited between the listing and the signal
+          // A request to this test's never-answering server proves its actual Chrome has started.
+          await expect
+            .poll(() => hub.requests.filter((path) => path === "/setup").length, {
+              timeout: 30_000,
+            })
+            .toBeGreaterThan(before);
+          const mine = owned.pids();
+          expect(mine.length).toBeGreaterThan(0);
+          if (frozen)
+            for (const pid of mine) {
+              try {
+                process.kill(pid, "SIGSTOP");
+              } catch {
+                /* already gone */
+              }
+            }
+          stop.abort(new Error("stopped by the test"));
+          expect(await settled).toBe("stopped by the test");
+          await expect.poll(() => owned.pids().length, { timeout: 10_000 }).toBe(0);
+        } finally {
+          stop.abort(new Error("test cleanup"));
+          await settled;
+          owned.dispose();
         }
-      stop.abort(new Error("stopped by the test"));
-      expect(await settled).toBe("stopped by the test");
-      await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
+      },
+      150_000,
+    );
+
+    it("does not count another render's Chrome as its own", async () => {
+      const first = ownedChrome();
+      const second = ownedChrome();
+      const firstStop = new AbortController();
+      const secondStop = new AbortController();
+      const guard = hudRenderRequest(hub.origin);
+      const before = hub.requests.filter((path) => path === "/setup").length;
+      const launch = (owned: ReturnType<typeof ownedChrome>, signal: AbortSignal) =>
+        renderHudInHelper(guard.page("/setup"), guard, {
+          executablePath: owned.executablePath,
+          deadlineMs: COLD_START_DEADLINE_MS,
+          signal,
+        }).catch(() => undefined);
+      const firstJob = launch(first, firstStop.signal);
+      const secondJob = launch(second, secondStop.signal);
+      try {
+        await expect
+          .poll(() => hub.requests.filter((path) => path === "/setup").length, { timeout: 30_000 })
+          .toBe(before + 2);
+        expect(first.pids().length).toBeGreaterThan(0);
+        expect(second.pids().length).toBeGreaterThan(0);
+        firstStop.abort(new Error("first stopped"));
+        await firstJob;
+        await expect.poll(() => first.pids().length, { timeout: 10_000 }).toBe(0);
+        expect(second.pids().length).toBeGreaterThan(0);
+      } finally {
+        firstStop.abort(new Error("test cleanup"));
+        secondStop.abort(new Error("test cleanup"));
+        await Promise.all([firstJob, secondJob]);
+        first.dispose();
+        second.dispose();
+      }
     }, 150_000);
 
     it("releases a queued screenshot_hud render after the render before it failed", async () => {
