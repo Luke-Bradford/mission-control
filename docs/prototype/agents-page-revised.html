@@ -6,12 +6,14 @@
 :root{color-scheme:dark;--bg:#070a0e;--surface:#0c1117;--surface-2:#131a23;--line:#1b2430;--line-2:#2a3646;--fg:#e7eaef;--fg-2:#aab2bf;--muted:#808999;--accent:#56d8e6;--accent-ink:#021417;--accent-soft:rgba(86,216,230,.14);--ok:#45c486;--ok-soft:rgba(69,196,134,.16);--warn:#f2b53a;--warn-soft:rgba(242,181,58,.15);--crit:#f1706d;--think:#b8a8f7;
 --sans:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",Consolas,ui-monospace,monospace;--display:"Barlow Semi Condensed","Arial Narrow",sans-serif}
 *{box-sizing:border-box}
-body{background:var(--bg);color:var(--fg);font:13px/20px var(--sans);padding-block:16px 40px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
-main{max-width:1888px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+html,body{height:100%}
+body{background:var(--bg);color:var(--fg);font:13px/20px var(--sans);padding-block:0;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+main{height:100%;margin:0 auto;display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:12px;padding-block:0 12px}
+.top{display:flex;align-items:center;gap:20px;height:48px;border-bottom:1px solid var(--line);margin:0 -16px;padding:0 16px}.top b{font:600 18px/24px var(--display);letter-spacing:.12em}.top span{font:500 12px/16px var(--mono);letter-spacing:.08em;color:var(--fg-2)}.top span.on{color:var(--fg);box-shadow:0 17px 0 -15px var(--accent)}
+.intro{font-size:12px;line-height:16px}.intro p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:none}
 .intro p{margin:0;color:var(--fg-2);max-width:130ch}.intro b{color:var(--fg)}
 h1{font:600 20px/28px var(--display);letter-spacing:.02em;margin:0 0 4px}
-.app{display:grid;grid-template-columns:348px minmax(0,1fr);gap:16px;align-items:start}
-@media(max-width:1100px){.app{grid-template-columns:minmax(0,1fr)}}
+.app{display:grid;grid-template-columns:348px minmax(0,1fr);gap:12px;align-items:stretch;min-height:0}
 .panel{background:var(--surface);border:1px solid var(--line);border-radius:4px;min-width:0}
 .lbl{font:500 11px/16px var(--mono);letter-spacing:.09em;text-transform:uppercase;color:var(--muted)}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -19,17 +21,17 @@ button{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 
 /* roster */
-.roster{display:flex;flex-direction:column}
-.rhead{display:flex;justify-content:space-between;align-items:center;padding:12px 16px;border-bottom:1px solid var(--line)}
+.roster{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+.rhead{display:flex;justify-content:space-between;align-items:center;padding:8px 16px;border-bottom:1px solid var(--line)}
 .rhead b{font:600 14px/20px var(--display);letter-spacing:.06em;text-transform:uppercase}
-.grp{display:flex;justify-content:space-between;padding:12px 16px 8px}
-.cards{display:flex;flex-direction:column;gap:6px;padding:0 8px 8px}
+.grp{display:flex;justify-content:space-between;padding:8px 16px 4px}
+.cards{display:flex;flex-direction:column;gap:4px;padding:0 8px 8px;flex:1;min-height:0;overflow-y:auto}
 .card{display:grid;grid-template-columns:4px minmax(0,1fr);gap:0 12px;background:var(--surface-2);border:1px solid var(--line);border-radius:4px;padding:0;text-align:left;cursor:pointer;overflow:hidden}
 .card[aria-current="true"]{border-color:var(--accent);background:#14212b;box-shadow:0 0 0 1px var(--accent)}
 .card .bar{grid-row:1/5}
-.card .in{padding:10px 12px 10px 0;display:grid;gap:6px;min-width:0}
+.card{flex:0 0 auto}.card .in{padding:6px 12px 6px 0;display:grid;gap:2px;min-width:0}
 .r1{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0}.r1>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
-.name{font:600 16px/20px var(--display);letter-spacing:.04em}
+.name{font:600 15px/20px var(--display);letter-spacing:.04em}
 .role{color:var(--muted);font-size:12px;line-height:16px}
 .pill{font:500 11px/16px var(--mono);padding:2px 8px;border-radius:10px;white-space:nowrap;display:inline-flex;gap:6px;align-items:center}
 .pill i{width:6px;height:6px;border-radius:50%;background:currentColor}
@@ -37,18 +39,18 @@ button{font:inherit;color:inherit}
 .work{color:var(--fg-2);font-size:12px;line-height:16px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
 .work .tk{color:var(--accent);font-family:var(--mono)}
 .inst{display:grid;grid-template-columns:26px 64px 32px 22px minmax(0,1fr);gap:8px;align-items:center}
-.inst .lbl{letter-spacing:.04em}.meter u{position:absolute;left:75%;top:0;bottom:0;width:1px;background:var(--fg)}.legend{display:flex;gap:12px;padding:0 16px 8px;flex-wrap:wrap}.legend span{font:11px/16px var(--mono);color:var(--muted);display:inline-flex;gap:5px;align-items:center}.legend i{width:8px;height:8px;border-radius:1px}.open{color:var(--warn)}
+.inst .lbl{letter-spacing:.04em}.meter u{position:absolute;left:75%;top:0;bottom:0;width:1px;background:var(--fg)}.legend{display:flex;gap:8px;flex-wrap:nowrap}.grp>.lbl{white-space:nowrap}.grp{align-items:center;gap:8px}.legend span{font:11px/16px var(--mono);color:var(--muted);display:inline-flex;gap:5px;align-items:center}.legend i{width:8px;height:8px;border-radius:1px}.open{color:var(--warn)}
 .meter{height:6px;background:#0a0f15;border-radius:3px;position:relative;overflow:hidden}
 .meter b{position:absolute;inset:0 auto 0 0;border-radius:3px}
 .strip{height:10px;background:#0a0f15;border-radius:2px;position:relative;overflow:hidden}
 .strip i{position:absolute;top:0;bottom:0}
 .inst .v{font:11px/16px var(--mono);color:var(--fg-2);text-align:right}
-.slot{margin:0 8px 12px;border:1px dashed var(--line-2);border-radius:4px;padding:12px 16px;color:var(--muted);font-size:12px;line-height:16px;display:flex;justify-content:space-between;align-items:center;gap:12px}
+.slot{margin:4px 8px 8px;border:1px dashed var(--line-2);border-radius:4px;padding:6px 12px;color:var(--muted);font-size:12px;line-height:16px;display:flex;justify-content:space-between;align-items:center;gap:12px}
 .ghost{background:none;border:1px solid var(--line-2);border-radius:3px;padding:4px 12px;cursor:pointer;white-space:nowrap}
 
 /* seat */
-.seat{display:flex;flex-direction:column;gap:16px;min-width:0}
-.ident{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 24px;padding:16px 20px;align-items:center}
+.seat{display:grid;grid-template-rows:auto auto minmax(0,1fr);gap:12px;min-width:0;min-height:0}
+.ident{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 24px;padding:12px 20px;align-items:center}
 .idl{display:flex;align-items:center;gap:12px;flex-wrap:wrap;min-width:0}
 .sw{width:12px;height:28px;border-radius:2px}
 .big{font:600 28px/32px var(--display);letter-spacing:.04em}
@@ -57,11 +59,11 @@ button{font:inherit;color:inherit}
 .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}.btn.stop{border-color:var(--warn);color:var(--warn)}
 .meta{grid-column:1/3;display:flex;flex-wrap:wrap;gap:4px 24px;color:var(--fg-2)}.meta .num{color:var(--fg);font-size:12px;overflow-wrap:anywhere}
 .say{grid-column:1/3;display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 12px;border-top:1px solid var(--line);padding-top:12px}
-.say .t{font-size:14px;line-height:20px}.say .s{color:var(--fg-2);max-width:120ch}
+.say .t{font-size:14px;line-height:20px}.say .s{color:var(--fg-2);max-width:120ch;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .chip{font:12px/16px var(--mono);color:var(--accent);background:var(--accent-soft);border-radius:3px;padding:2px 8px;white-space:nowrap}
 .instr{display:grid;grid-template-columns:232px minmax(0,1fr) 472px}
-@media(max-width:1500px){.instr{grid-template-columns:minmax(0,1fr)}}
-.cell{padding:16px 20px;border-right:1px solid var(--line);min-width:0;display:flex;flex-direction:column;gap:12px}.cell:last-child{border-right:0}
+@media(max-width:1100px){.instr{grid-template-columns:minmax(0,1fr)}}
+.cell{padding:12px 20px;border-right:1px solid var(--line);min-width:0;display:flex;flex-direction:column;gap:12px}.cell:last-child{border-right:0}
 .dial{display:flex;align-items:center;gap:16px}
 .dial .n{font:500 22px/24px var(--mono)}.dial small{display:block;color:var(--muted);font:12px/16px var(--sans)}
 .track{display:flex;align-items:center}
@@ -78,8 +80,9 @@ button{font:inherit;color:inherit}
 .seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
 .stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px}
 .stat .n{font:500 18px/24px var(--mono)}.stat .n.flag{color:var(--warn)}.stat small{display:block;color:var(--muted);font:12px/16px var(--sans)}
-.cols{display:grid;grid-template-columns:minmax(0,1fr) 392px;gap:16px;align-items:start}
-@media(max-width:1300px){.cols{grid-template-columns:minmax(0,1fr)}}
+.cols{display:grid;grid-template-columns:minmax(0,1fr) 392px;gap:12px;align-items:stretch;min-height:0}
+#live{display:flex;flex-direction:column;min-height:0}.feed{flex:1;min-height:0;overflow-y:auto}
+@media(max-width:1100px){html,body,main{height:auto}main{display:flex;flex-direction:column}.app,.cols{grid-template-columns:minmax(0,1fr)}.seat{display:flex;flex-direction:column}.feed,.tbody,.cards{overflow:visible}}
 .ph{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .ph b{font:600 14px/20px var(--sans)}
 .tabs{display:flex;gap:4px}.tabs span{font:12px/16px var(--mono);padding:3px 10px;border-radius:3px;color:var(--fg-2);border:1px solid transparent}.tabs span.on{border-color:var(--accent);color:var(--accent)}
@@ -91,18 +94,16 @@ button{font:inherit;color:inherit}
 .compose{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:8px;padding:12px 16px}
 .compose input{background:var(--bg);border:1px solid var(--line-2);border-radius:3px;color:var(--fg);padding:8px 12px;font:13px/20px var(--sans);min-width:0}
 .hint{padding:0 16px 12px;color:var(--muted);font-size:12px;line-height:16px}
-.side{display:flex;flex-direction:column;gap:16px}
-.box{padding:12px 16px;display:flex;flex-direction:column;gap:8px}
+.side{display:flex;flex-direction:column;gap:12px;min-height:0;overflow:hidden}.side>.panel:first-child{flex:0 1 auto;min-height:56px;overflow-y:auto}.tabbed{flex:1;min-height:0;display:flex;flex-direction:column}.tbody{flex:1;min-height:0;overflow-y:auto}
+.box{padding:10px 16px;display:flex;flex-direction:column;gap:6px}
 .hrow{display:grid;grid-template-columns:52px minmax(0,1fr) auto 48px;gap:8px;align-items:baseline;color:var(--fg-2)}.hrow span:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.hrow .num{font-size:12px;color:var(--accent)}.hrow .num:last-child{color:var(--muted);text-align:right}
 .todo{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;color:var(--fg-2)}.todo.c{color:var(--fg)}.todo.d{color:var(--muted)}
 .todo i{font-style:normal;font-family:var(--mono)}
 dl{display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 12px;margin:0;padding:12px 16px}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}dd a,.ph a{color:var(--accent)}
 </style>
 <main>
-  <div class="intro">
-    <h1>Agents page, reviewed</h1>
-    <p><b>For:</b> you. <b>Decision:</b> is this the control room you meant? <b>Real, read 9 November 2026, 23:37:</b> seats, states, tickets, each seat's own summary, loop steps, last-hour strips, commits, refusals, run tokens and all-time figures. The seat list fits one screen in the app; this note takes its top rows here. <b>Placeholder:</b> context percentages, activity rows and plan items, which show shape only.</p>
-  </div>
+  <div class="top"><b>MISSION CONTROL</b><span>OVERVIEW</span><span>NEEDS YOU</span><span>FLIGHT</span><span>BOARD</span><span class="on">AGENTS</span><span>COMMS</span><span>QA</span><span>TELEMETRY</span><span>AUDIT</span></div>
+  <div class="intro"><p><b>Prototype.</b> One screen; lists scroll inside their own frame. Real, read 9 November 2026, 23:37: seats, states, tickets, summaries, loop steps, last hour, runs. Placeholder: context %, activity rows, plan items.</p></div>
   <div class="app">
     <div class="panel roster" id="roster"></div>
     <div class="seat">
@@ -129,12 +130,12 @@ const tk=s=>s.ticket?s.ticket.replace("mission-control",""):"";
 const k=n=>n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?Math.round(n/1e3)+"k":String(n);
 const held=s=>s.hist.filter(h=>h.status==="running"&&h.ticket!==tk(s));
 const silent=s=>s.state==="running"&&D.now-s.lastOut>10*60000;
-let cur=(seats.find(s=>s.state==="running")||seats[0]).id,mode="run";
+let cur=(seats.find(s=>s.state==="running")||seats[0]).id,mode="run",tab=null;
 function roster(){const r=document.getElementById("roster");r.textContent="";
   const h=el("div","rhead");h.append(el("b","","Crew"),el("span","lbl",seats.filter(s=>s.state!=="idle").length+" active · "+seats.length+" seats"));r.append(h);
-  const g=el("div","grp");g.append(el("span","lbl","mission-control"),el("span","lbl","last hour →"));r.append(g);const lg=el("div","legend");for(const [n,c] of [["turn","#56d8e6"],["checks","#45c486"],["review","#b8a8f7"],["waiting","#f2b53a"]]){const s=el("span");const i=el("i");i.style.background=c;s.append(i,document.createTextNode(n));lg.append(s);}r.append(lg);
+  const g=el("div","grp");const lg=el("div","legend");g.append(el("span","lbl","mission-control"),lg);g.title="Colours of the last-hour strip";r.append(g);for(const [n,c] of [["turn","#56d8e6"],["check","#45c486"],["review","#b8a8f7"],["wait","#f2b53a"]]){const s=el("span");const i=el("i");i.style.background=c;s.append(i,document.createTextNode(n));lg.append(s);}
   const cs=el("div","cards");
-  for(const s of seats){const c=el("button","card");c.setAttribute("aria-current",s.id===cur);c.onclick=()=>{cur=s.id;roster();seat();};
+  for(const s of seats){const c=el("button","card");c.setAttribute("aria-current",s.id===cur);c.onclick=()=>{cur=s.id;tab=null;roster();seat();};
     const bar=el("span","bar");bar.style.background=HUE[s.id];const inn=el("span","in");
     const r1=el("span","r1");const nm=el("span");nm.append(el("span","name",s.id.toUpperCase()),el("span","role"," "+s.short));r1.append(nm,pill(s));
     const w=el("span","work");if(s.roleKey==="FLIGHT")w.textContent="Watching the crew";else if(s.state==="idle"){w.textContent="Free";const o=held(s).length;if(o)w.append(el("span","open"," · "+o+(o===1?" ticket":" tickets")+" waiting"));}else{if(s.ticket)w.append(el("span","tk",tk(s)+" "));w.append(document.createTextNode(s.title||(s.roleKey==="FLIGHT"?"Running the crew":"Reviewing")));}
@@ -142,8 +143,7 @@ function roster(){const r=document.getElementById("roster");r.textContent="";
     const st=el("span","strip");for(const [a,z,kd] of s.spans){const i=el("i"),wd=D.now-D.from;i.style.left=(a-D.from)/wd*100+"%";i.style.width=Math.max(.7,(z-a)/wd*100)+"%";i.style.background=KIND[kd]||"#56d8e6";st.append(i);}
     ins.append(el("span","lbl","CTX"),m,el("span","v",live?s.ctx+"%":"—"),el("span","lbl","1 H"),st);
     inn.append(r1,w,ins);c.append(bar,inn);cs.append(c);}
-  r.append(cs);const g2=el("div","grp");g2.append(el("span","lbl","Standby · not assigned"),el("span","lbl","0"));r.append(g2);
-  const slot=el("div","slot");slot.append(el("span","","No spare seats. A seat with no repo waits here."),el("button","ghost","Add seat"));r.append(slot);}
+  r.append(cs);const slot=el("div","slot");slot.append(el("span","lbl","Standby · 0 spare seats"),el("button","ghost","Add seat"));r.append(slot);}
 function ring(p){const R=26,C=2*Math.PI*R,ns="http://www.w3.org/2000/svg",s=document.createElementNS(ns,"svg");s.setAttribute("width",68);s.setAttribute("height",68);s.setAttribute("viewBox","0 0 68 68");s.setAttribute("role","img");s.setAttribute("aria-label","Context "+p+" percent used");
   const mk=(st,da,off)=>{const c=document.createElementNS(ns,"circle");c.setAttribute("cx",34);c.setAttribute("cy",34);c.setAttribute("r",R);c.setAttribute("fill","none");c.setAttribute("stroke",st);c.setAttribute("stroke-width",7);c.setAttribute("transform","rotate(-90 34 34)");if(da){c.setAttribute("stroke-dasharray",da);c.setAttribute("stroke-linecap","butt");}if(off!=null)c.setAttribute("stroke-dashoffset",off);return c;};
   s.append(mk("#1b2430"),mk(p>=75?"#f2b53a":"#56d8e6",(C*p/100)+" "+C));const t=mk("#e7eaef","2 "+C,-(C*.75));s.append(t);return s;}
@@ -171,21 +171,23 @@ function seat(){const s=seats.find(x=>x.id===cur);
     else if(s.rev){add((s.rev[1]/s.rev[0]).toFixed(1),"blocking per review",s.rev[1]/s.rev[0]>=2);add((s.rev[2]/s.rev[0]).toFixed(1),"minor per review");}
     else{add(L.hours.toLocaleString(),"hours in runs");add(L.cost==null?"—":"$"+L.cost.toLocaleString(),"cost, all time");}}
   c3.append(st);const more=el("a","","Open this seat in Audit ›");more.href="#";more.style.cssText="color:var(--accent);font-size:12px";c3.append(more);ins.append(c1,c2,c3);
-  const lv=document.getElementById("live");lv.textContent="";const ph=el("div","ph");ph.append(el("b","","Live activity"));const tb=el("div","tabs");["All","Messages","Thinking","Tools","Guard"].forEach((t,i)=>tb.append(el("span",i?"":"on",t)));const fl=el("span","pill run");fl.append(el("i"),document.createTextNode("Following"));ph.append(tb,fl);lv.append(ph);
+  const lv=document.getElementById("live");lv.textContent="";const ph=el("div","ph");ph.append(el("b","","Live activity"));const tb=el("div","tabs");["All","Messages","Thinking","Tools","Guard"].forEach((t,i)=>tb.append(el("span",i?"":"on",t)));const fl=el("span","pill run");fl.append(el("i"),document.createTextNode("Following"));ph.append(tb,fl);lv.append(ph);const feed=el("div","feed");feed.tabIndex=0;feed.setAttribute("aria-label","Live activity");lv.append(feed);
   const rows=s.state==="idle"?[]:[["23:42","tool","Read","the file it is about to change","70ms"],["23:43","thinking","","weighing two ways to do it",""],["23:44","to FLIGHT","msg","A short question, shown in full, never cut.",""],["23:44","from FLIGHT","msg","The answer, in full.",""],["23:46","tool","Bash","the check command · passed","31 s"],["23:47","to you","msg","What it did and what is next, in one or two lines.",""],["23:49","guard","grd","A refusal, with the reason in plain words.",""],["23:50","tool","Edit","the file · 12 lines changed","40ms"],["23:51","tool","Bash","running the tests it touched…","live"]];
-  if(!rows.length){const e=el("div","box");e.append(el("span","","No run in progress."),el("span","role","Its last runs are listed on the right; each opens its full trace."));lv.append(e);}
-  for(const [tm,kd,c,x,du] of rows){const r=el("div","row"+(du==="live"?" live":""));const kk=el("span","k"+(c==="msg"?" msg":c==="grd"?" grd":kd==="thinking"?" thk":""),kd);const xx=el("span","x");if(kd==="tool"){const cd=el("code","",c+"  ");xx.append(cd);}xx.append(document.createTextNode(x));r.append(el("span","tm",tm),kk,xx,el("span","du",du==="live"?"…":du));lv.append(r);}
+  if(!rows.length){const e=el("div","box");e.append(el("span","","No run in progress."),el("span","role","Its last runs are listed on the right; each opens its full trace."));feed.append(e);}
+  for(const [tm,kd,c,x,du] of rows){const r=el("div","row"+(du==="live"?" live":""));const kk=el("span","k"+(c==="msg"?" msg":c==="grd"?" grd":kd==="thinking"?" thk":""),kd);const xx=el("span","x");if(kd==="tool"){const cd=el("code","",c+"  ");xx.append(cd);}xx.append(document.createTextNode(x));r.append(el("span","tm",tm),kk,xx,el("span","du",du==="live"?"…":du));feed.append(r);}
   const cp=el("div","compose");const inp=el("input");inp.id="msg";inp.placeholder="Message "+s.id.toUpperCase()+"…";inp.setAttribute("aria-label","Message "+s.id);cp.append(inp,el("button","btn pri","Send"),el("button","btn","Interrupt and send"));lv.append(cp,el("div","hint",s.state==="idle"?"Starts "+s.id.toUpperCase()+"'s next turn.":"Send reaches "+s.id.toUpperCase()+" at its next step. Interrupt and send stops the current step first."));
   const sd=document.getElementById("side");sd.textContent="";
   const w=el("div","panel");const wh=el("div","ph");wh.append(el("b","","Waiting on"));w.append(wh);const wb=el("div","box");
   if(silent(s))wb.append(el("span","open","Silent: no output for "+age(D.now-s.lastOut)+". It may be stuck."));
   if(s.state==="waiting")wb.append(el("span","","CI and review on its pushed commit"),el("span","role","Since "+age(D.now-s.since)+" ago. The seat is free to take other work meanwhile."));else if(!silent(s))wb.append(el("span","role",s.state==="idle"?"Nothing. It is free to take the next Ready ticket in its area.":"Nothing. It is working."));w.append(wb);
   const hl=held(s);if(hl.length){const hb=el("div","box");hb.style.borderTop="1px solid var(--line)";hb.append(el("span","lbl","Tickets it has open and is not working on"));for(const h of hl){const r=el("div","todo");r.append(el("i","open","‖"),el("span","",h.ticket+"  "+h.title));hb.append(r);}hb.append(el("span","role","A waiting ticket should not hold the seat. Each needs its reason and what frees it."));w.append(hb);}sd.append(w);
-  if(s.state!=="idle"&&s.steps.length){const p=el("div","panel");const h2=el("div","ph");h2.append(el("b","","Plan"));p.append(h2);const b=el("div","box");[["d","✓","Reproduce the failure in a test"],["d","✓","Find where the review refuses to install"],["d","✓","Write the read-only review path"],["d","✓","Record the narrowed review with its reason"],["c","●","Run lint, typecheck and the tests it touched"],["","○","Open the draft PR"],["","○","Answer the review"]].forEach(([c,i,t])=>{const r=el("div","todo "+c);r.append(el("i","",i),el("span","",t));b.append(r);});p.append(b);sd.append(p);}
-  const hp=el("div","panel");const hh=el("div","ph");hh.append(el("b","","Recent runs"),el("span","lbl","newest first"));hp.append(hh);const hbx=el("div","box");if(!s.hist.length)hbx.append(el("span","role","None recorded for this seat."));for(const h of s.hist){const r=el("div","hrow");const out=h.status==="running"?(h.ticket===tk(s)?"now":"open"):h.by==="operator"?"ended by you":"finished";r.append(el("span","num",h.ticket||"review"),el("span","",h.title||"—"),el("span","lbl"+(out==="open"?" open":""),out),el("span","num",h.status==="running"?"":age(h.mins*60000)));hbx.append(r);}hp.append(hbx);sd.append(hp);
-  const su=el("div","panel");const sh=el("div","ph");sh.append(el("b","","Setup"));const ed=el("a","","Edit in Setup ›");ed.href="#";ed.style.fontSize="12px";sh.append(ed);su.append(sh);const dl=el("dl");
+  const hasPlan=s.state!=="idle"&&s.steps.length>0;if(!tab||(tab==="Plan"&&!hasPlan))tab=hasPlan?"Plan":"Recent runs";
+  const tp=el("div","panel tabbed");const th2=el("div","ph");const sg2=el("span","seg");for(const n of ["Plan","Recent runs","Setup"]){if(n==="Plan"&&!hasPlan)continue;const b=el("button","",n);b.setAttribute("aria-pressed",tab===n);b.onclick=()=>{tab=n;seat();};sg2.append(b);}th2.append(sg2);if(tab==="Setup"){const ed=el("a","","Edit in Setup ›");ed.href="#";ed.style.fontSize="12px";th2.append(ed);}tp.append(th2);const tbody=el("div","tbody");tp.append(tbody);sd.append(tp);
+  if(tab==="Plan"){const p=tbody;const b=el("div","box");[["d","✓","Reproduce the failure in a test"],["d","✓","Find where the review refuses to install"],["d","✓","Write the read-only review path"],["d","✓","Record the narrowed review with its reason"],["c","●","Run lint, typecheck and the tests it touched"],["","○","Open the draft PR"],["","○","Answer the review"]].forEach(([c,i,t])=>{const r=el("div","todo "+c);r.append(el("i","",i),el("span","",t));b.append(r);});p.append(b);}
+  if(tab==="Recent runs"){const hp=tbody;const hbx=el("div","box");if(!s.hist.length)hbx.append(el("span","role","None recorded for this seat."));for(const h of s.hist){const r=el("div","hrow");const out=h.status==="running"?(h.ticket===tk(s)?"now":"open"):h.by==="operator"?"ended by you":"finished";r.append(el("span","num",h.ticket||"review"),el("span","",h.title||"—"),el("span","lbl"+(out==="open"?" open":""),out),el("span","num",h.status==="running"?"":age(h.mins*60000)));hbx.append(r);}hp.append(hbx);}
+  if(tab==="Setup"){const su=tbody;const dl=el("dl");
   const dd=(a,b,href)=>{dl.append(el("dt","",a));const d=el("dd");if(href){const x=el("a","",b);x.href="#";d.append(x);}else d.textContent=b;dl.append(d);};
-  dd("Assigned to",s.repo);dd("Role",s.role);dd("May change",s.area.length?s.area.join(", "):s.mode==="writer"?"anything in the repo":"nothing; read only");dd("Role prompt","Open the "+s.roleKey+" prompt ›",1);su.append(dl);sd.append(su);}
+  dd("Assigned to",s.repo);dd("Role",s.role);dd("May change",s.area.length?s.area.join(", "):s.mode==="writer"?"anything in the repo":"nothing; read only");dd("Model",(s.model||"—")+(s.effort?" · "+s.effort:""));dd("Account",s.account);dd("Role prompt","Open the "+s.roleKey+" prompt ›",1);su.append(dl);}}
 roster();seat();
 </script>
 </body></html>
