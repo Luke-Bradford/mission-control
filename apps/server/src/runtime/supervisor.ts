@@ -46,6 +46,7 @@ import {
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
+  COMMS_MC,
   type ContextUsage,
   CREW_CLI_ENV,
   CREW_DISABLED,
@@ -4426,6 +4427,21 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reviewId,
       };
       store.upsertRun(run);
+      if (scratch.installNote !== undefined) {
+        const flight = config.crew?.sessions
+          .flatMap((session) => session.seats)
+          .find((seat) => seatDef(seat).loop === "watch");
+        if (flight !== undefined)
+          store.addComms({
+            at: now(),
+            from: COMMS_MC,
+            senderKind: "hub",
+            to: flight.id,
+            ticket: run.ticket,
+            ref: run.ticket,
+            text: `PR #${review.prNumber} is reviewed without an install. ${scratch.installNote}`,
+          });
+      }
       if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
       // A web PR's review gets a preview of its head, built in the background: the review does not
       // wait for it, and one that cannot start does not stop the review.
