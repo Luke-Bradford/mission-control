@@ -386,19 +386,60 @@ describe("Telemetry mockup", () => {
     for (const tab of Object.keys(TABS)) {
       for (const view of ["", "&view=table"]) {
         const document = render(`?tab=${tab}${view}`);
-        const numbers = [...document.querySelectorAll(".rows .vl, td.num")];
-        // Escaped defects has no numeric column; Machine draws only line charts.
-        if (!(tab === "quality" && view) && !(tab === "machine" && !view))
+        const numbers = [...document.querySelectorAll(".rows .vl, .readout .vl, td.num")];
+        // Escaped defects has no numeric column; blank legend keys are not values.
+        if (!(tab === "quality" && view))
           expect(numbers.length, `${tab}${view}`).toBeGreaterThan(0);
-        for (const number of numbers)
+        for (const number of numbers) {
+          if (!/\d/.test(number.textContent ?? "")) continue;
+          const drill = number.matches("[data-drill]")
+            ? number
+            : number.querySelector("[data-drill]");
           expect(["exists", "needs-build"], `${tab}${view} ${number.textContent}`).toContain(
-            (number.matches("[data-drill]")
-              ? number
-              : number.querySelector("[data-drill]")
-            )?.getAttribute("data-drill"),
+            drill?.getAttribute("data-drill"),
           );
+          expect(drill?.tagName, `${tab} ${number.textContent}`).toBe("BUTTON");
+          expect(drill?.getAttribute("data-target")?.trim().length).toBeGreaterThan(0);
+          expect(drill?.getAttribute("data-label")?.trim().length).toBeGreaterThan(0);
+          expect((drill as HTMLButtonElement)?.tabIndex).toBe(0);
+        }
       }
     }
+  });
+
+  it("keeps each readout drill while the cursor changes its displayed value or crosses a gap", () => {
+    const document = render("?tab=cost");
+    const window = document.defaultView as unknown as Window & typeof globalThis;
+    const plot = document.querySelector<HTMLElement>('[data-panel="tpm"] .plot');
+    const value = document.querySelector<HTMLElement>('[data-panel="tpm"] .readout .vl');
+    const button = value?.querySelector<HTMLButtonElement>("button");
+    expect(plot).not.toBeNull();
+    expect(button).not.toBeNull();
+    if (!plot || !value || !button) throw new Error("Missing token-rate readout");
+    const latest = button.textContent;
+    plot.getBoundingClientRect = () => ({ left: 0, width: 710 }) as DOMRect;
+    button.focus();
+    plot.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 0 }));
+    expect(value.querySelector("button")).toBe(button);
+    expect(document.activeElement).toBe(button);
+    expect(button.textContent).not.toBe(latest);
+    expect(button.dataset.shown).toBe(button.textContent);
+    const sampled = button.textContent;
+    button.click();
+    expect(document.querySelector("#dlg-what")?.textContent).toContain(sampled);
+    document.querySelector<HTMLButtonElement>("#dlg-close")?.click();
+    plot.dispatchEvent(new window.MouseEvent("mousemove", { bubbles: true, clientX: 300 }));
+    expect(button.textContent).toBe("—");
+    expect(button.disabled).toBe(true);
+    button.click();
+    expect(document.querySelector<HTMLElement>("#dlg")?.hidden).toBe(true);
+    plot.dispatchEvent(
+      new window.MouseEvent("mouseout", { bubbles: true, relatedTarget: document.body }),
+    );
+    expect(value.querySelector("button")).toBe(button);
+    expect(button.textContent).toBe(latest);
+    expect(button.dataset.shown).toBe(latest);
+    expect(button.disabled).toBe(false);
   });
 
   it("draws state with shapes in both seat panels, and lets a title be focused", () => {

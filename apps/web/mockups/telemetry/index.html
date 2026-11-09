@@ -120,7 +120,8 @@ h1{font-size:20px;line-height:28px;margin:0 4px 0 0;white-space:nowrap}
 .xax span{position:absolute;top:4px;transform:translateX(-50%);font:11px/16px var(--mono);color:var(--muted);white-space:nowrap}
 .xax span.first{transform:none}.xax span.last{transform:translateX(-100%)}
 .readout{flex:0 0 148px;margin:0;padding:0;list-style:none;overflow:auto;font-size:12px;line-height:16px;min-height:0}
-.readout li{display:flex;align-items:center;gap:4px;min-height:20px}
+.readout li{display:flex;align-items:center;gap:4px;min-height:24px}
+.readout .cell{min-width:24px;margin:0}
 .readout .sw.st{width:16px;height:10px;border-radius:2px}
 .readout .sw{flex:none;width:12px;height:4px;border-radius:2px;background:var(--c,var(--accent))}
 .readout .sw.dash{background:none;border-top:2px dashed var(--c,var(--think));height:0;border-radius:0}
@@ -476,9 +477,207 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
     }
     return wrap("bars", o, flat.some(function (v) { return v === null; }) ? gapBands(flat, n, "bars") : "", svg);
   }
-  function readoutHtml(items, evts) {
+  var READOUT_DRILLS = {
+  "crew-state": {
+    "Running": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Running seats now"
+    },
+    "Waiting": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Waiting seats now"
+    },
+    "Parked": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Parked seats now"
+    },
+    "Idle": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Idle seats now"
+    }
+  },
+  "spend": {
+    "plan": {
+      "drill": "needs-build",
+      "target": "the runs contributing to plan spend",
+      "label": "Plan spend"
+    },
+    "build": {
+      "drill": "needs-build",
+      "target": "the runs contributing to build spend",
+      "label": "Build spend"
+    },
+    "review": {
+      "drill": "needs-build",
+      "target": "the runs contributing to review spend",
+      "label": "Review spend"
+    },
+    "Total": {
+      "drill": "needs-build",
+      "target": "the runs contributing to Total spend",
+      "label": "Total spend"
+    }
+  },
+  "tpm": {
+    "Total": {
+      "drill": "needs-build",
+      "target": "all runs contributing to token rate",
+      "label": "Total tokens per minute"
+    },
+    "Other": {
+      "drill": "needs-build",
+      "target": "the other seats contributing to token rate",
+      "label": "Other tokens per minute"
+    },
+    "dev-1": {
+      "drill": "exists",
+      "target": "the Agent page for dev-1",
+      "label": "dev-1 tokens per minute"
+    },
+    "dev-2": {
+      "drill": "exists",
+      "target": "the Agent page for dev-2",
+      "label": "dev-2 tokens per minute"
+    },
+    "dev-3": {
+      "drill": "exists",
+      "target": "the Agent page for dev-3",
+      "label": "dev-3 tokens per minute"
+    }
+  },
+  "merged": {
+    "Today": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Today merged PRs"
+    },
+    "14-day mean": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "14-day mean merged PRs"
+    },
+    "Best day": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Best day merged PRs"
+    }
+  },
+  "cycle": {
+    "Ticket": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Tickets in the cycle-time plot"
+    },
+    "p50": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "p50 cycle time"
+    },
+    "p85": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "p85 cycle time"
+    }
+  },
+  "wip": {
+    "Now": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Now tickets in progress"
+    },
+    "Peak": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Peak tickets in progress"
+    }
+  },
+  "ci": {
+    "Latest": {
+      "drill": "needs-build",
+      "target": "the PRs behind CI first-push results",
+      "label": "Latest CI first-push result"
+    },
+    "Mean": {
+      "drill": "needs-build",
+      "target": "the PRs behind CI first-push results",
+      "label": "Mean CI first-push result"
+    }
+  },
+  "first-pass": {
+    "Last recorded": {
+      "drill": "needs-build",
+      "target": "the PRs behind first-pass review results",
+      "label": "Last recorded first-pass review result"
+    },
+    "Mean": {
+      "drill": "needs-build",
+      "target": "the PRs behind first-pass review results",
+      "label": "Mean first-pass review result"
+    }
+  },
+  "rounds": {
+    "Last recorded": {
+      "drill": "needs-build",
+      "target": "the PRs behind review rounds",
+      "label": "Last recorded review rounds"
+    }
+  },
+  "cpu-mem": {
+    "CPU": {
+      "drill": "needs-build",
+      "target": "the runs using the most CPU",
+      "label": "CPU in use"
+    },
+    "Memory free": {
+      "drill": "needs-build",
+      "target": "the runs using the most memory",
+      "label": "Memory free"
+    },
+    "Lock held": {
+      "drill": "exists",
+      "target": "the test-lock history",
+      "label": "Runs holding the test lock"
+    }
+  },
+  "pressure": {
+    "Memory pressure": {
+      "drill": "needs-build",
+      "target": "the runs active during memory pressure",
+      "label": "Memory pressure"
+    },
+    "Swap used": {
+      "drill": "needs-build",
+      "target": "the runs using swap",
+      "label": "Swap used"
+    }
+  },
+  "agent-mem": {
+    "Agents": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Agent memory"
+    },
+    "Test runs": {
+      "drill": "exists",
+      "target": "the test-lock history",
+      "label": "Test-run memory"
+    },
+    "Other": {
+      "drill": "needs-build",
+      "target": "the runs active during other memory use",
+      "label": "Other memory"
+    }
+  }
+};
+  function readoutHtml(panel, items, evts) {
     return '<ul class="readout" data-scroll tabindex="0" aria-label="Legend and values">' + items.map(function (it, i) {
-      return '<li data-i="' + i + '"><i class="sw ' + (it.dash ? "dash " : "") + (it.cls || "") + '" style="--c:' + it.color + '"></i><span class="nm" title="' + esc(it.name) + '">' + esc(it.name) + '</span><b class="vl">' + esc(it.value) + "</b></li>";
+      var meta = (READOUT_DRILLS[panel] || {})[it.name];
+      if (it.value !== "" && !meta) throw new Error("Missing readout target: " + panel + " / " + it.name);
+      return '<li data-i="' + i + '"><i class="sw ' + (it.dash ? "dash " : "") + (it.cls || "") + '" style="--c:' + it.color + '"></i><span class="nm" title="' + esc(it.name) + '">' + esc(it.name) + '</span><b class="vl">' + (it.value === "" ? "" : D(it.value, meta.drill, meta.target, meta.label)) + "</b></li>";
     }).join("") + (evts || []).map(function (e) { return '<li><i class="sw dash" style="--c:var(--think)"></i><span class="nm" title="' + esc(e.label) + '">' + esc(e.label) + "</span></li>"; }).join("") + "</ul>";
   }
   function D(text, drill, target, label) { return '<button type="button" class="num cell" data-drill="' + drill + '" data-target="' + esc(target) + '" data-label="' + esc(label) + '" data-shown="' + esc(text) + '">' + esc(text) + "</button>"; }
@@ -514,21 +713,21 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
         return '<div class="lane"><span class="seat" style="--c:' + l.color + '">' + esc(l.id) + '</span><div class="tr" aria-label="' + esc(l.id + ", now " + l.now) + '">' + l.spans.map(function (s) { return '<i class="sp ' + s.st + '" style="left:' + s.from * 100 + "%;width:" + (s.to - s.from) * 100 + '%" title="' + esc(s.st) + '"></i>'; }).join("") + "</div></div>";
       }).join("") + "</div>";
       var lanesAx = '<div class="xax" style="grid-column:auto;height:20px;margin-left:80px;flex:none">' + XT.map(function (l, i, a) { return '<span class="' + (i === 0 ? "first" : i === a.length - 1 ? "last" : "") + '" style="left:' + l[0] / 71 * 100 + '%">' + l[1] + "</span>"; }).join("") + "</div>";
-      out.push(P("crew-state", "Crew state", "running, waiting, parked and idle · last 24 h", '<div class="chart" data-kind="lanes" style="display:flex;flex-direction:column;gap:4px">' + lanes + lanesAx + "</div>" + readoutHtml([{ name: "Running", cls: "st st-running", color: "var(--ok)", value: counts.running + " now" }, { name: "Waiting", cls: "st st-waiting", color: "var(--warn)", value: counts.waiting + " now" }, { name: "Parked", cls: "st st-parked", color: "var(--line-2)", value: counts.parked + " now" }, { name: "Idle", cls: "st st-idle", color: "var(--muted)", value: counts.idle + " now" }], F.events),
+      out.push(P("crew-state", "Crew state", "running, waiting, parked and idle · last 24 h", '<div class="chart" data-kind="lanes" style="display:flex;flex-direction:column;gap:4px">' + lanes + lanesAx + "</div>" + readoutHtml("crew-state", [{ name: "Running", cls: "st st-running", color: "var(--ok)", value: counts.running + " now" }, { name: "Waiting", cls: "st st-waiting", color: "var(--warn)", value: counts.waiting + " now" }, { name: "Parked", cls: "st st-parked", color: "var(--line-2)", value: counts.parked + " now" }, { name: "Idle", cls: "st st-idle", color: "var(--muted)", value: counts.idle + " now" }], F.events),
         ["Running is solid, Waiting is hatched, Parked is dotted and Idle is an underline, so a state never rests on colour alone."]));
       out.push(P("agent-time", "Where agent time goes", "share of today, per seat", rowsOf("Agent time by seat", "", F.time.map(function (t) {
         return '<div class="r"><span class="seat lb" style="--c:' + t.color + '">' + esc(t.id) + '</span><div class="tr" tabindex="0" data-tip="' + esc(timeTip(t)) + '" aria-label="' + esc(timeTip(t)) + '"><i class="s-running" style="width:' + t.working + '%"></i><i class="s-waiting" style="width:' + t.waiting + '%"></i><i class="s-parked" style="width:' + t.parked + '%"></i><i class="s-idle" style="width:' + t.idle + '%"></i></div><span class="vl">' + D(t.working + "% working", "exists", "that seat's Agent page", t.id + " working share") + "</span></div>";
-      })) + readoutHtml([{ name: "Working", cls: "st st-running", color: "var(--ok)", value: "" }, { name: "Waiting", cls: "st st-waiting", color: "var(--warn)", value: "" }, { name: "Parked", cls: "st st-parked", color: "var(--fg-2)", value: "" }, { name: "Idle", cls: "st st-idle", color: "var(--muted)", value: "" }]), ["Same shapes as Crew state. Each bar sums to 100% of the seat's day; focus a bar for its four shares."]));
+      })) + readoutHtml("agent-time", [{ name: "Working", cls: "st st-running", color: "var(--ok)", value: "" }, { name: "Waiting", cls: "st st-waiting", color: "var(--warn)", value: "" }, { name: "Parked", cls: "st st-parked", color: "var(--fg-2)", value: "" }, { name: "Idle", cls: "st st-idle", color: "var(--muted)", value: "" }]), ["Same shapes as Crew state. Each bar sums to 100% of the seat's day; focus a bar for its four shares."]));
       tables.push(T("tools", "Tool latency", "p50 and p95 per tool · today", ["Tool", "Calls", "p50", "p95", "Failed"], F.tools.map(function (t) { return [t[0], t[1], fmtMs(t[2]), fmtMs(t[3]), t[4]]; }), [1, 2, 3, 4], ["needs-build", "the calls of that tool"]));
       tables.push(T("subagents", "Subagents", "spawned by the crew today", ["Seat", "Kind", "Started", "Took", "Tokens", "Outcome"], F.subagents, [3, 4], ["exists", "that run's trace"]));
     }
     if (tab === "cost") {
       var stack = [{ name: "plan", color: "var(--think)", vals: F.spend.map(function (b) { return b ? b.plan : null; }) }, { name: "build", color: "var(--accent)", vals: F.spend.map(function (b) { return b ? b.build : null; }) }, { name: "review", color: "var(--ok)", vals: F.spend.map(function (b) { return b ? b.review : null; }) }];
-      out.push(P("spend", "Spend per hour, by step", "~USD, API-equivalent · last 24 h", barChart({ n: 24, stack: stack, ymax: 6, ticks: [0, 2, 4, 6], fmt: function (v) { return "$" + v; }, label: "~Cost per hour by step", time: true, xl: [[0, "14:30"], [6, "20:30"], [12, "02:30"], [18, "08:30"], [23, "now"]], events: F.events }) + readoutHtml(stack.map(function (s) { return { name: s.name, color: s.color, value: "$" + sum(s.vals).toFixed(2) }; }).concat([{ name: "Total", color: "var(--fg)", value: money(F.cost24h) }]), F.events), [NOTE.cost], { n: 24, stack: stack, fmt: function (v) { return "$" + v.toFixed(2); } }));
+      out.push(P("spend", "Spend per hour, by step", "~USD, API-equivalent · last 24 h", barChart({ n: 24, stack: stack, ymax: 6, ticks: [0, 2, 4, 6], fmt: function (v) { return "$" + v; }, label: "~Cost per hour by step", time: true, xl: [[0, "14:30"], [6, "20:30"], [12, "02:30"], [18, "08:30"], [23, "now"]], events: F.events }) + readoutHtml("spend", stack.map(function (s) { return { name: s.name, color: s.color, value: "$" + sum(s.vals).toFixed(2) }; }).concat([{ name: "Total", color: "var(--fg)", value: money(F.cost24h) }]), F.events), [NOTE.cost], { n: 24, stack: stack, fmt: function (v) { return "$" + v.toFixed(2); } }));
       var maxT = F.byTicket[0][2];
       out.push(P("by-ticket", "Cost by ticket", "~USD, ranked · last 24 h", rowsOf("Cost by ticket", "", F.byTicket.map(function (t) { return '<div class="r"><span class="lb" tabindex="0" data-tip="' + esc(t[0] + " · " + t[1]) + '" aria-label="' + esc(t[0] + " · " + t[1]) + '">' + esc(t[0]) + " " + esc(t[1]) + '</span><div class="tr"><i style="width:' + t[2] / maxT * 100 + '%"></i></div><span class="vl">' + D(money(t[2]), "exists", "that ticket's timeline", t[0] + " cost") + "</span></div>"; })), ["Every run on the ticket counts: plan, build and review. Hover or focus a title for the full text."]));
       var tpm = [{ name: "Total", color: "var(--fg)", vals: F.tpm.total }, { name: SEATS[1], color: seatColor(1), vals: F.tpm.top[0] }, { name: SEATS[2], color: seatColor(2), vals: F.tpm.top[1] }, { name: SEATS[3], color: seatColor(3), vals: F.tpm.top[2] }, { name: "Other", color: "var(--muted)", vals: F.tpm.other, dash: true }];
-      out.push(P("tpm", "Tokens per minute", "thousands · total, top 3 seats, other", lineChart({ n: N, series: tpm, ymax: 600, ticks: [0, 200, 400, 600], fmt: function (v) { return v + "k"; }, label: "Tokens per minute", time: true, xl: XT, events: F.events }) + readoutHtml(lineReadout(tpm, function (v) { return Math.round(v) + "k"; }), F.events), [NOTE.tokens], { n: N, series: tpm, fmt: function (v) { return Math.round(v) + "k"; } }));
+      out.push(P("tpm", "Tokens per minute", "thousands · total, top 3 seats, other", lineChart({ n: N, series: tpm, ymax: 600, ticks: [0, 200, 400, 600], fmt: function (v) { return v + "k"; }, label: "Tokens per minute", time: true, xl: XT, events: F.events }) + readoutHtml("tpm", lineReadout(tpm, function (v) { return Math.round(v) + "k"; }), F.events), [NOTE.tokens], { n: N, series: tpm, fmt: function (v) { return Math.round(v) + "k"; } }));
       out.push(P("quota", "Quota used", "each account window · history ends now", rowsOf("Quota used by window", "few", F.quota.map(function (q) {
         var hist = '<svg class="hist" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="' + pathOf(q.hist, 100, function (i) { return i / (N - 1) * 100; }).d + '" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>';
         return '<div class="r q"><span class="lb">' + esc(q.name) + '</span><div class="tr"><i style="width:' + q.pct + '%;--c:' + (q.pct >= q.stopAt ? "var(--crit)" : q.pct >= q.alertAt ? "var(--warn)" : "var(--accent)") + '"></i><span class="tick" style="left:' + q.alertAt + '%"></span><span class="tick stop" style="left:' + q.stopAt + '%"></span></div>' + hist + '<span class="vl">' + D(q.pct + "% used", "needs-build", "the runs using that window", q.name) + " · " + esc(q.reset) + "</span></div>";
@@ -537,21 +736,21 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
       tables.push(T("cost-by-ticket", "Cost by ticket", "~USD, ranked · last 24 h", ["Ticket", "Title", "~Cost"], F.byTicket.map(function (t) { return [t[0], t[1], money(t[2])]; }), [2], ["exists", "that ticket's timeline"]));
     }
     if (tab === "throughput") {
-      out.push(P("merged", "Merged per day", "PRs · last 14 days", barChart({ n: 14, vals: F.merged, ymax: 12, ticks: [0, 4, 8, 12], label: "PRs merged per day", xl: X14, mean: F.mergedMean }) + readoutHtml([{ name: "Today", color: "var(--accent)", value: String(F.merged[13]) }, { name: "14-day mean", color: "var(--warn)", value: F.mergedMean.toFixed(1) }, { name: "Best day", color: "var(--fg-2)", value: String(Math.max.apply(null, F.merged)) }]), ["Dashed line is the 14-day daily mean."]));
+      out.push(P("merged", "Merged per day", "PRs · last 14 days", barChart({ n: 14, vals: F.merged, ymax: 12, ticks: [0, 4, 8, 12], label: "PRs merged per day", xl: X14, mean: F.mergedMean }) + readoutHtml("merged", [{ name: "Today", color: "var(--accent)", value: String(F.merged[13]) }, { name: "14-day mean", color: "var(--warn)", value: F.mergedMean.toFixed(1) }, { name: "Best day", color: "var(--fg-2)", value: String(Math.max.apply(null, F.merged)) }]), ["Dashed line is the 14-day daily mean."]));
       var dotD = F.cycleDots.map(function (p) { return "M" + (p.day / 13 * 100).toFixed(2) + " " + (100 - p.h / 72 * 100).toFixed(2) + "h0"; }).join("");
       var dotsSvg = '<path d="' + dotD + '" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" data-series="Ticket" data-v="' + F.cycleDots.map(function (p) { return p.h; }).join(",") + '"/>';
       var cyc = [{ name: "p50", color: "var(--ok)", vals: F.cycleP50 }, { name: "p85", color: "var(--warn)", vals: F.cycleP85 }];
-      out.push(P("cycle", "Cycle time per ticket", "hours, Ready to Done · last 14 days", lineChart({ n: 14, series: cyc, ymax: 72, ticks: [0, 24, 48, 72], fmt: function (v) { return v + " h"; }, label: "Cycle time per ticket", xl: X14, extraSvg: dotsSvg }) + readoutHtml([{ name: "Ticket", color: "var(--accent)", value: F.cycleDots.length + " dots" }, { name: "p50", color: "var(--ok)", value: "14.2 h" }, { name: "p85", color: "var(--warn)", value: "31.8 h" }]), [NOTE.since("24 Oct")]));
+      out.push(P("cycle", "Cycle time per ticket", "hours, Ready to Done · last 14 days", lineChart({ n: 14, series: cyc, ymax: 72, ticks: [0, 24, 48, 72], fmt: function (v) { return v + " h"; }, label: "Cycle time per ticket", xl: X14, extraSvg: dotsSvg }) + readoutHtml("cycle", [{ name: "Ticket", color: "var(--accent)", value: F.cycleDots.length + " dots" }, { name: "p50", color: "var(--ok)", value: "14.2 h" }, { name: "p85", color: "var(--warn)", value: "31.8 h" }]), [NOTE.since("24 Oct")]));
       out.push(P("by-size", "Cycle time by size", "p50 to p85, hours · last 14 days", rowsOf("Cycle time by size", "few", F.bySize.map(function (s) { return '<div class="r"><span class="lb">' + s[0] + " · " + s[3] + ' tickets</span><div class="tr"><i class="rng" style="left:' + s[1] / 72 * 100 + "%;width:" + (s[2] - s[1]) / 72 * 100 + '%"></i><b style="left:' + s[1] / 72 * 100 + '%"></b></div><span class="vl">' + D(s[1] + "–" + s[2] + " h", "exists", "the tickets of that size on the Board", s[0] + " cycle time") + "</span></div>"; })), ["Each bar runs from p50 to p85; the white mark is p50. The axis is 0 to 72 hours."]));
       var wip = [{ name: "In progress", color: "var(--accent)", vals: F.inProgress }];
-      out.push(P("wip", "Tickets in progress", "step per day · last 14 days", stepD(lineChart({ n: 14, series: wip, ymax: 12, ticks: [0, 4, 8, 12], label: "Tickets in progress", xl: X14 })) + readoutHtml([{ name: "Now", color: "var(--accent)", value: String(F.inProgress[13]) }, { name: "Peak", color: "var(--muted)", value: String(Math.max.apply(null, F.inProgress)) }]), [NOTE.since("24 Oct")]));
+      out.push(P("wip", "Tickets in progress", "step per day · last 14 days", stepD(lineChart({ n: 14, series: wip, ymax: 12, ticks: [0, 4, 8, 12], label: "Tickets in progress", xl: X14 })) + readoutHtml("wip", [{ name: "Now", color: "var(--accent)", value: String(F.inProgress[13]) }, { name: "Peak", color: "var(--muted)", value: String(Math.max.apply(null, F.inProgress)) }]), [NOTE.since("24 Oct")]));
       tables.push(T("tickets", "Tickets", "merged in the last 14 days", ["Ticket", "Title", "Size", "Merged", "Cycle", "~Cost"], F.tickets, [4, 5], ["exists", "that ticket's timeline"]));
     }
     if (tab === "quality") {
       var ci = [{ name: "CI green first push", color: "var(--ok)", vals: F.ci }], fp = [{ name: "First-pass review", color: "var(--accent)", vals: F.firstPass }];
-      out.push(P("ci", "CI green first push", "% of merged PRs · last 14 days", lineChart({ n: 14, series: ci, ymax: 100, ticks: [0, 50, 100], fmt: function (v) { return v + "%"; }, label: "CI green on first push", xl: X14 }) + readoutHtml([{ name: "Latest", color: "var(--ok)", value: F.ci[13] + "%" }, { name: "Mean", color: "var(--muted)", value: F.ciNow + "%" }]), [NOTE.since("29 Oct")]));
-      out.push(P("first-pass", "First-pass review", "% of reviewed PRs · last 14 days", lineChart({ n: 14, series: fp, ymax: 100, ticks: [0, 50, 100], fmt: function (v) { return v + "%"; }, label: "First-pass review", xl: X14 }) + readoutHtml([{ name: "Last recorded", color: "var(--accent)", value: F.firstPass[10] + "%" }, { name: "Mean", color: "var(--muted)", value: F.fpNow + "%" }]), [NOTE.review]));
-      out.push(P("rounds", "Rounds per PR", "rounds, up to 4 · last 14 days", barChart({ n: 14, vals: F.rounds, ymax: 4, ticks: [0, 2, 4], label: "Review rounds per PR", xl: X14 }) + readoutHtml([{ name: "Last recorded", color: "var(--accent)", value: String(F.rounds[10]) }]), [NOTE.review, NOTE.attempts]));
+      out.push(P("ci", "CI green first push", "% of merged PRs · last 14 days", lineChart({ n: 14, series: ci, ymax: 100, ticks: [0, 50, 100], fmt: function (v) { return v + "%"; }, label: "CI green on first push", xl: X14 }) + readoutHtml("ci", [{ name: "Latest", color: "var(--ok)", value: F.ci[13] + "%" }, { name: "Mean", color: "var(--muted)", value: F.ciNow + "%" }]), [NOTE.since("29 Oct")]));
+      out.push(P("first-pass", "First-pass review", "% of reviewed PRs · last 14 days", lineChart({ n: 14, series: fp, ymax: 100, ticks: [0, 50, 100], fmt: function (v) { return v + "%"; }, label: "First-pass review", xl: X14 }) + readoutHtml("first-pass", [{ name: "Last recorded", color: "var(--accent)", value: F.firstPass[10] + "%" }, { name: "Mean", color: "var(--muted)", value: F.fpNow + "%" }]), [NOTE.review]));
+      out.push(P("rounds", "Rounds per PR", "rounds, up to 4 · last 14 days", barChart({ n: 14, vals: F.rounds, ymax: 4, ticks: [0, 2, 4], label: "Review rounds per PR", xl: X14 }) + readoutHtml("rounds", [{ name: "Last recorded", color: "var(--accent)", value: String(F.rounds[10]) }]), [NOTE.review, NOTE.attempts]));
       var gmax = F.guard[0][1];
       out.push(P("guard", "Guard blocks by rule", "blocks · last 14 days", rowsOf("Guard blocks by rule", "", F.guard.map(function (g) { return '<div class="r"><span class="lb">' + esc(g[0]) + '</span><div class="tr"><i style="width:' + g[1] / gmax * 100 + '%;--c:var(--think)"></i></div><span class="vl">' + D(String(g[1]), "exists", "the Guard drawer", g[0]) + "</span></div>"; })), ["A block is a guard rule stopping an action; it is not a failure of the seat."]));
       tables.push(T("escaped", "Escaped defects", "found after merge", ["Ticket", "Title", "How found", "Severity", "Found"], F.escaped, []));
@@ -559,12 +758,12 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
     if (tab === "machine") {
       var ms = [{ name: "CPU", color: "var(--accent)", vals: F.cpuS }, { name: "Memory free", color: "var(--think)", vals: F.memFreeS }];
       var pct = function (v) { return v + "%"; };
-      out.push(P("cpu-mem", "CPU and memory", "% of capacity · last 24 h", lineChart({ n: N, series: ms, ymax: 100, ticks: [0, 50, 100], fmt: pct, label: "CPU and memory free", time: true, xl: XT, bands: F.holds, events: F.events }) + readoutHtml(lineReadout(ms, pct).concat([{ name: "Lock held", color: "var(--warn)", value: F.holds.length + " runs" }]), F.events), ["Shaded bands are full-suite runs under the test lock."], { n: N, series: ms, fmt: pct }));
+      out.push(P("cpu-mem", "CPU and memory", "% of capacity · last 24 h", lineChart({ n: N, series: ms, ymax: 100, ticks: [0, 50, 100], fmt: pct, label: "CPU and memory free", time: true, xl: XT, bands: F.holds, events: F.events }) + readoutHtml("cpu-mem", lineReadout(ms, pct).concat([{ name: "Lock held", color: "var(--warn)", value: F.holds.length + " runs" }]), F.events), ["Shaded bands are full-suite runs under the test lock."], { n: N, series: ms, fmt: pct }));
       var ps = [{ name: "Memory pressure", color: "var(--warn)", vals: F.pressure }, { name: "Swap used", color: "var(--fg-2)", vals: F.swapS }];
-      out.push(P("pressure", "Memory pressure and swap", "% · last 24 h", lineChart({ n: N, series: ps, ymax: 100, ticks: [0, 50, 100], fmt: pct, label: "Memory pressure and swap", time: true, xl: XT, events: F.events }) + readoutHtml(lineReadout(ps, pct), F.events), [], { n: N, series: ps, fmt: pct }));
+      out.push(P("pressure", "Memory pressure and swap", "% · last 24 h", lineChart({ n: N, series: ps, ymax: 100, ticks: [0, 50, 100], fmt: pct, label: "Memory pressure and swap", time: true, xl: XT, events: F.events }) + readoutHtml("pressure", lineReadout(ps, pct), F.events), [], { n: N, series: ps, fmt: pct }));
       var as = [{ name: "Agents", color: "var(--accent)", vals: F.memAgents }, { name: "Test runs", color: "var(--think)", vals: F.memTests }, { name: "Other", color: "var(--muted)", vals: F.memOther }];
       var gb = function (v) { return round1(v) + " GB"; };
-      out.push(P("agent-mem", "Agent and test-run memory", "GB, stacked · last 24 h", lineChart({ n: N, series: as, area: true, ymax: 32, ticks: [0, 16, 32], fmt: function (v) { return v + " GB"; }, label: "Agent and test-run memory", time: true, xl: XT, events: F.events }) + readoutHtml(lineReadout(as, gb), F.events), [], { n: N, series: as, fmt: gb }));
+      out.push(P("agent-mem", "Agent and test-run memory", "GB, stacked · last 24 h", lineChart({ n: N, series: as, area: true, ymax: 32, ticks: [0, 16, 32], fmt: function (v) { return v + " GB"; }, label: "Agent and test-run memory", time: true, xl: XT, events: F.events }) + readoutHtml("agent-mem", lineReadout(as, gb), F.events), [], { n: N, series: as, fmt: gb }));
       tables.push(T("lock", "Test lock", "full-suite runs today", ["Seat", "Started", "Waited", "Held", "Outcome"], F.lockRows, [2, 3], ["exists", "that run's trace"]));
     }
     return { charts: out, tables: tables };
@@ -651,7 +850,15 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
     } else {
       tp.innerHTML = '<div class="grid' + (state.state === "normal" ? "" : " dim") + '" data-n="' + set.charts.length + '" data-view="charts">' + set.charts.map(function (p) { if (p.model) models.push({ id: p.id, model: p.model }); return panelHtml(p, p.body); }).join("") + "</div>";
     }
-    [].forEach.call(document.querySelectorAll(".readout .vl"), function (v) { v.setAttribute("data-last", v.textContent); });
+    [].forEach.call(document.querySelectorAll(".readout .vl"), function (v) { v.setAttribute("data-last", v.textContent); updateReadout(v, v.textContent); });
+  }
+  function updateReadout(value, text) {
+    var button = value.querySelector("button[data-drill]");
+    if (!button) return;
+    button.textContent = text;
+    button.setAttribute("data-shown", text);
+    button.setAttribute("aria-label", button.getAttribute("data-label") + ": " + text);
+    button.disabled = text === "—";
   }
   function setTab(id, focus) { state.tab = id; writeState(); render(); if (focus) $("tab-" + id).focus(); }
 
@@ -669,13 +876,13 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
       var list = m.model.series || m.model.stack || [];
       [].forEach.call(panel.querySelectorAll(".readout li[data-i]"), function (li, i) {
         var s = list[i], v = li.querySelector(".vl");
-        if (s) v.textContent = s.vals[idx] === null || s.vals[idx] === undefined ? "—" : m.model.fmt(s.vals[idx]);
+        if (s) updateReadout(v, s.vals[idx] === null || s.vals[idx] === undefined ? "—" : m.model.fmt(s.vals[idx]));
       });
     });
   }
   function cursorOff() {
     [].forEach.call(document.querySelectorAll(".cur"), function (c) { c.style.display = "none"; });
-    [].forEach.call(document.querySelectorAll(".readout .vl"), function (v) { if (v.hasAttribute("data-last")) v.textContent = v.getAttribute("data-last"); });
+    [].forEach.call(document.querySelectorAll(".readout .vl"), function (v) { if (v.hasAttribute("data-last")) updateReadout(v, v.getAttribute("data-last")); });
   }
 
   /* ---------- notice, dialog ---------- */

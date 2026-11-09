@@ -355,3 +355,62 @@ describeRendered("Telemetry mockup in a browser", () => {
     }
   });
 });
+
+describeRendered("Telemetry readout actions", () => {
+  it(
+    "reaches and activates a named readout target with the keyboard on every tab",
+    async () => {
+      for (const tab of TABS) {
+        const page = await renderAt({
+          page: PAGE,
+          width: 1600,
+          height: 1000,
+          search: `?tab=${tab}`,
+        });
+        try {
+          await page.evaluate(
+            () => document.querySelector<HTMLElement>(".readout")?.focus(),
+            undefined,
+          );
+          await page.press("Tab");
+          const focused = await page.evaluate(() => {
+            const button = document.activeElement as HTMLButtonElement;
+            return {
+              readout: !!button.closest(".readout"),
+              tag: button.tagName,
+              target: button.dataset.target,
+              drill: button.dataset.drill,
+            };
+          }, undefined);
+          expect(focused.readout, tab).toBe(true);
+          expect(focused.tag).toBe("BUTTON");
+          expect(focused.target?.length).toBeGreaterThan(0);
+          const box = await page.box(".readout button:focus");
+          expect(box.width).toBeGreaterThanOrEqual(24);
+          expect(box.height).toBeGreaterThanOrEqual(24);
+          await page.press("Enter");
+          if (focused.drill === "needs-build") {
+            expect(
+              await page.evaluate(
+                () => !document.querySelector<HTMLElement>("#dlg")?.hidden,
+                undefined,
+              ),
+            ).toBe(true);
+            await page.press("Escape");
+            expect(
+              await page.evaluate(() => !!document.activeElement?.closest(".readout"), undefined),
+            ).toBe(true);
+          } else {
+            expect(
+              await page.evaluate(() => document.querySelector("#notice")?.textContent, undefined),
+            ).toContain(focused.target);
+          }
+          expect(page.errors()).toEqual([]);
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+});
