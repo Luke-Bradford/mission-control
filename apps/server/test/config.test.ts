@@ -164,6 +164,22 @@ describe("loadConfig", () => {
     expect(() => loadConfig(bad)).toThrow(ConfigError);
   });
 
+  it("reads the Audit thresholds, leaving unset ones to the defaults", () => {
+    const set = tmpConfig(
+      (y) =>
+        `${y}\naudit:\n  question_wait_minutes: 30\n  controller_wait_minutes: 60\n  ticket_text_factor: 2.5\n  notice_repeats: 4\n`,
+    );
+    expect(loadConfig(set).audit).toEqual({
+      controllerSessions: false,
+      thresholds: {
+        questionWaitMs: 30 * 60_000,
+        controllerWaitMs: 60 * 60_000,
+        ticketTextFactor: 2.5,
+        noticeRepeats: 4,
+      },
+    });
+  });
+
   it("reads updates.cli, defaulting to off", () => {
     expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off", cli: "off" });
     const on = tmpConfig((y) => `${y}\nupdates:\n  cli: between_runs\n`);

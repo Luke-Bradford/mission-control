@@ -1137,6 +1137,7 @@ describe("POST /api/guard/check", () => {
         lockedBy: async (_run, c) => CONFIGURED.find((x) => x === c) ?? null,
         dropRun: () => {},
         drops: () => [],
+        pending: () => [],
       };
       return { calls, checks, options };
     };
@@ -1271,6 +1272,7 @@ describe("POST /api/guard/check", () => {
         lockedBy: async () => null,
         dropRun: () => {},
         drops: () => [],
+        pending: () => [],
       },
     });
     await check(tokA, bash("a1", "pnpm -s test"));
@@ -1296,6 +1298,7 @@ describe("POST /api/guard/check", () => {
         lockedBy: async () => null,
         dropRun: () => {},
         drops: () => [],
+        pending: () => [],
       },
     });
     const command = "pnpm -s test";

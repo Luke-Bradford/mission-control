@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   type AccountId,
   type AgentId,
+  type AuditThresholds,
   BUILTIN_ROLES,
   COMMS_CREW,
   CONFIG_SEAT_MODES,
@@ -234,7 +235,12 @@ export interface CcConfig {
    * Token audit options. `controllerSessions` (default off): read usage numbers of controller
    * sessions from the operator's Claude Code folder for `controllerCheckout` (default: the hub's own checkout).
    */
-  audit?: { controllerSessions: boolean; controllerCheckout?: string };
+  audit?: {
+    controllerSessions: boolean;
+    controllerCheckout?: string;
+    /** Message-problem thresholds for Audit; each left out takes `AUDIT_THRESHOLD_DEFAULTS`. */
+    thresholds?: Partial<AuditThresholds>;
+  };
   operator: { id: string; timezone: string; githubLogins?: string[] };
   accounts: {
     id: AccountId;
@@ -305,6 +311,26 @@ export const HUB_UPDATES = ["off", "auto"] as const;
 export type HubUpdates = (typeof HUB_UPDATES)[number];
 
 /** A repo's current `flight_powers`; `standard` for a repo the config does not list. */
+/** The Audit thresholds a config file sets; those it leaves out stay out, so the defaults apply. */
+function auditThresholdsOf(a: {
+  question_wait_minutes?: number;
+  controller_wait_minutes?: number;
+  ticket_text_factor?: number;
+  notice_repeats?: number;
+}): { thresholds?: Partial<AuditThresholds> } {
+  const t: Partial<AuditThresholds> = {
+    ...(a.question_wait_minutes === undefined
+      ? {}
+      : { questionWaitMs: a.question_wait_minutes * 60_000 }),
+    ...(a.controller_wait_minutes === undefined
+      ? {}
+      : { controllerWaitMs: a.controller_wait_minutes * 60_000 }),
+    ...(a.ticket_text_factor === undefined ? {} : { ticketTextFactor: a.ticket_text_factor }),
+    ...(a.notice_repeats === undefined ? {} : { noticeRepeats: a.notice_repeats }),
+  };
+  return Object.keys(t).length === 0 ? {} : { thresholds: t };
+}
+
 export function flightPowersOf(config: CcConfig, repoId: RepoId): FlightPowers {
   return config.repos.find((r) => r.id === repoId)?.flightPowers ?? "standard";
 }
@@ -577,6 +603,10 @@ const fileSchema = z
       .strictObject({
         controller_sessions: z.boolean().default(false),
         controller_checkout: nonEmpty.optional(),
+        question_wait_minutes: z.number().int().min(1).max(10_080).optional(),
+        controller_wait_minutes: z.number().int().min(1).max(10_080).optional(),
+        ticket_text_factor: z.number().min(1.1).max(100).optional(),
+        notice_repeats: z.number().int().min(2).max(100).optional(),
       })
       .default({ controller_sessions: false }),
     updates: z
@@ -770,6 +800,7 @@ const fileSchema = z
         ...(f.audit.controller_checkout === undefined
           ? {}
           : { controllerCheckout: f.audit.controller_checkout }),
+        ...auditThresholdsOf(f.audit),
       },
       updates: { hub: f.updates.hub, cli: f.updates.cli },
       ...(f.crew === undefined

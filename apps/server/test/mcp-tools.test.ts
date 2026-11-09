@@ -117,6 +117,7 @@ import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { PreviewRefused } from "../src/design-previews.ts";
 import { externalReviewKey } from "../src/external-review-key.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
+import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
@@ -4308,6 +4309,33 @@ describe("report_evidence", () => {
     clock += 1000;
     expect((await rm(["apps/a.ts"], "chore: drop a", ev)).text).toMatch(/^Removed .*\nCommitted /);
     expect(await report("done")).toEqual({ text: EVIDENCE_RECORDED });
+  });
+
+  it("refuses a handoff while a check is running, then accepts its completed receipt", async () => {
+    const sha = await committed();
+    const command = "pnpm -s test:related";
+    const checks = createCheckRecorder({
+      store,
+      checks: async () => [command],
+      state: async () => ({ head: head(), clean: true }),
+    });
+    ev = make({
+      pendingChecks: (runId) => checks.pending(runId),
+      onEvidence: (s, r) => told.push([s, r]),
+    });
+    // An older passing attempt must not hide a new, still-running attempt on the same head.
+    store.addCheckRun({ runId: RUN, command, headSha: sha, ok: true, exitCode: 0, at: clock });
+    const key = { runId: RUN, toolUseId: "codex-item" };
+    await checks.begin(key, command);
+    const result = await report("Checks passed; ready to push.");
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(command);
+    expect(result.text).toContain("poll");
+    expect(store.latestEvidence(RUN)).toBeNull();
+    expect(told).toEqual([]);
+    await checks.end(key, true, 0);
+    expect(await report("Checks completed with exit code 0.")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(told).toEqual([[CTX.seatId, CTX.runId]]);
   });
 
   it("records build-seat test runs and tests added", async () => {
