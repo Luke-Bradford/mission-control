@@ -257,6 +257,9 @@ it("keeps ordinary guidance current when the target commits and applies its defa
   now += DECISION_DEFAULT_WAIT_MS;
   expect(await applyDecisionDefaults({ config, store, now, choices: deps })).toBe(1);
   expect(await applyDecisionDefaults({ config, store, now, choices: deps })).toBe(0);
+  expect(
+    store.commsForPair("FLIGHT-1", "GUIDO-1").filter((m) => m.from === "FLIGHT-1"),
+  ).toContainEqual(expect.objectContaining({ senderKind: "flight", to: "GUIDO-1" }));
 });
 
 it("applies authorized guidance on its own aged question after forty minutes", async () => {

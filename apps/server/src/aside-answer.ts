@@ -37,6 +37,7 @@ export async function answerAsideQuestion(
   await sendComms(
     {
       ...deps,
+      senderKind: deps.senderKind,
       beforeWrite: () => {
         target();
       },
