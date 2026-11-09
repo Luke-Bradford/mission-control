@@ -173,9 +173,9 @@ it("shows a waiting link by dashes and its wait in words, not by colour alone", 
   expect(waiting?.querySelector(".comms-wait-mark")?.textContent).toContain("12m");
   expect(waiting?.getAttribute("aria-label")).toMatch(/waiting 12m/i);
   expect(document.querySelectorAll(".comms-edge.waiting")).toHaveLength(1);
-  // The asker's seat carries a dashed ring as well.
+  // The recipient carries the reply ring.
   expect(
-    document.querySelector(".comms-node[data-id='dev-1']")?.classList.contains("waiting"),
+    document.querySelector(".comms-node[data-id='dev-2']")?.classList.contains("waiting"),
   ).toBe(true);
 });
 

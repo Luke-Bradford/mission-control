@@ -32,7 +32,14 @@ export type OpenItem = {
 export type FeedMessage = { id: string; from: string; to: string; at: number; text: string };
 
 /** What is waiting on one link: how many, the longest wait, who asked, and the oldest question. */
-export type Waiting = { n: number; ms: number; asker: string; question: string | null };
+export type Waiting = {
+  n: number;
+  ms: number;
+  asker: string;
+  /** The addressee of the oldest unanswered ask: this is the seat that owes the reply. */
+  owed?: string;
+  question: string | null;
+};
 
 /** `<1m`, `12m`, `2h 5m`, `3d`: a wait in words, so it is read and not only seen. */
 export function waitWord(ms: number): string {

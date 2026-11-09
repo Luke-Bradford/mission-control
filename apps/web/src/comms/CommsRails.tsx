@@ -19,16 +19,13 @@ import {
 } from "./chartTypes.ts";
 import { type ChartFilter, filterKeeps, filterLabel, pairFilter } from "./commsFilter.ts";
 import {
-  FULL_MAX_ROW,
   fitName,
   HUB_W,
   linkPath,
-  MAX_ROW,
   type Point,
   placeWaitMarks,
   type RailGroup,
   type RailLayout,
-  railLayout,
   WAIT_H,
   waitMarkWidth,
 } from "./rails.ts";
@@ -77,9 +74,6 @@ const LIVE_MS = 1_800;
 /** The chart's size before it is measured (and in tests, where nothing is laid out). */
 const DEFAULT_SIZE = { w: 360, h: 420 };
 const TIP_W = 240;
-/** Names get this many characters of room in the panel; the full-size view gives them all they need. */
-const PANEL_NAME_CHARS = 10;
-
 /** Where a link meets a seat: a hub's pill edge facing the other end, else the seat's dot. */
 function meetAt(layout: RailLayout, id: string, other: string): Point | undefined {
   const where = (x: string) => layout.seats.get(x) ?? layout.hubs.get(x);
@@ -97,6 +91,84 @@ type Tip = { kind: "seat" | "edge"; id: string } | null;
 const waitLabel = (w: Waiting) => `⧖ ${waitWord(w.ms)}`;
 
 const keyOf = (a: string, b: string) => (a < b ? `${a}\0${b}` : `${b}\0${a}`);
+
+/** A small, deterministic force pass keeps frequent correspondents close without a simulation loop. */
+function organicLayout(
+  seats: readonly RailSeatView[],
+  edges: readonly RailEdgeView[],
+  size: { w: number; h: number },
+): RailLayout {
+  const w = Math.max(300, size.w);
+  const h = Math.max(260, size.h);
+  const positions = new Map<string, Point>();
+  const hash = (id: string) => [...id].reduce((n, char) => (n * 31 + char.charCodeAt(0)) >>> 0, 7);
+  seats.forEach((seat, index) => {
+    const angle = ((hash(seat.id) % 360) * Math.PI) / 180;
+    const radius = Math.min(w, h) * (0.18 + (index % 4) * 0.045);
+    positions.set(seat.id, {
+      x: w / 2 + Math.cos(angle) * radius,
+      y: h / 2 + Math.sin(angle) * radius,
+    });
+  });
+  for (let pass = 0; pass < 90; pass++) {
+    const delta = new Map(seats.map((seat) => [seat.id, { x: 0, y: 0 }]));
+    for (let left = 0; left < seats.length; left++)
+      for (let right = left + 1; right < seats.length; right++) {
+        const a = positions.get(seats[left]?.id ?? "") as Point;
+        const b = positions.get(seats[right]?.id ?? "") as Point;
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const distance = Math.max(16, Math.hypot(dx, dy));
+        const push = 900 / (distance * distance);
+        const da = delta.get(seats[left]?.id ?? "") as Point;
+        const db = delta.get(seats[right]?.id ?? "") as Point;
+        da.x += (dx / distance) * push;
+        da.y += (dy / distance) * push;
+        db.x -= (dx / distance) * push;
+        db.y -= (dy / distance) * push;
+      }
+    for (const edge of edges) {
+      const a = positions.get(edge.a);
+      const b = positions.get(edge.b);
+      if (!a || !b) continue;
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const pull = (distance - 80) * (0.004 + edge.weight * 0.012);
+      const da = delta.get(edge.a) as Point;
+      const db = delta.get(edge.b) as Point;
+      da.x += (dx / distance) * pull;
+      da.y += (dy / distance) * pull;
+      db.x -= (dx / distance) * pull;
+      db.y -= (dy / distance) * pull;
+    }
+    for (const seat of seats) {
+      const p = positions.get(seat.id) as Point;
+      const d = delta.get(seat.id) as Point;
+      p.x = Math.min(w - 52, Math.max(52, p.x + d.x + (w / 2 - p.x) * 0.008));
+      p.y = Math.min(h - 28, Math.max(28, p.y + d.y + (h / 2 - p.y) * 0.008));
+    }
+  }
+  const regular = new Map<string, Point & { side: "left" | "right" }>();
+  const hubs = new Map<string, Point>();
+  for (const seat of seats) {
+    const p = positions.get(seat.id) as Point;
+    if (seat.hub) hubs.set(seat.id, p);
+    else regular.set(seat.id, { ...p, side: p.x < w / 2 ? "left" : "right" });
+  }
+  return {
+    w,
+    h,
+    cx: w / 2,
+    leftX: 0,
+    rightX: w,
+    nameRoom: 80,
+    rowH: 28,
+    seats: regular,
+    hubs,
+    headers: [],
+  };
+}
 
 /** The All / Open switch, in the panel's title row and the full-screen view's. */
 export function ChartModeSwitch({
@@ -168,6 +240,8 @@ export function CommsRails({
   onPickLink: (a: string, b: string) => void;
   onClear: () => void;
 }) {
+  // Kept in the public chart contract while the organic layout derives its own topology from edges.
+  void groups;
   const uid = useId();
   const root = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState(DEFAULT_SIZE);
@@ -193,18 +267,7 @@ export function CommsRails({
 
   const byId = useMemo(() => new Map(seats.map((s) => [s.id, s])), [seats]);
   const nameOf = (id: string) => byId.get(id)?.name ?? id;
-  const longest = Math.max(4, ...seats.filter((s) => !s.hub).map((s) => s.name.length));
-  const layout = useMemo(
-    () =>
-      railLayout(
-        groups,
-        size,
-        hubIds as readonly [string, string, string],
-        full ? longest : Math.min(longest, PANEL_NAME_CHARS),
-        full ? FULL_MAX_ROW : MAX_ROW,
-      ),
-    [groups, size, hubIds, full, longest],
-  );
+  const layout = useMemo(() => organicLayout(seats, edges, size), [seats, edges, size]);
   const point = (id: string): Point | undefined => layout.seats.get(id) ?? layout.hubs.get(id);
 
   const shown = useMemo(
@@ -222,7 +285,7 @@ export function CommsRails({
     [shown, layout],
   );
 
-  // Wait marks sit near the asker's end of their link, longest wait first, clear of each other and
+  // Wait marks sit near the seat owing the reply, longest wait first, clear of each other and
   // the hub pills. A mark with no room is left off its link and counted in the note instead.
   const waitSpots = useMemo(() => {
     const waiting = drawn
@@ -232,7 +295,8 @@ export function CommsRails({
       waiting.map(({ edge, path }) => ({
         key: edge.key,
         at: path.at,
-        askerFirst: edge.waiting?.asker === edge.a,
+        askerFirst:
+          (edge.waiting?.owed ?? (edge.waiting?.asker === edge.a ? edge.b : edge.a)) === edge.a,
         width: waitMarkWidth(waitLabel(edge.waiting as Waiting)),
       })),
       [...layout.hubs.values()],
@@ -255,7 +319,12 @@ export function CommsRails({
     return ids;
   }, [filter, drawn]);
   const waitingSeats = useMemo(
-    () => new Set(shown.flatMap((e) => (e.waiting ? [e.waiting.asker] : []))),
+    () =>
+      new Set(
+        shown.flatMap((e) =>
+          e.waiting ? [e.waiting.owed ?? (e.waiting.asker === e.a ? e.b : e.a)] : [],
+        ),
+      ),
     [shown],
   );
 
@@ -394,7 +463,7 @@ export function CommsRails({
     }. Narrow the chart to this conversation`;
   const seatLabel = (s: RailSeatView) =>
     `${s.name}, ${[s.role, s.state].filter(Boolean).join(", ") || "channel"}, sent ${s.sent}, received ${s.received}${
-      waitingSeats.has(s.id) ? ", waiting on an answer" : ""
+      waitingSeats.has(s.id) ? ", owes a reply" : ""
     }. Narrow the chart to ${s.name}`;
 
   const sideOf = (id: string) => layout.seats.get(id)?.side;
@@ -523,6 +592,15 @@ export function CommsRails({
               onMouseEnter={() => setTip({ kind: "seat", id: seat.id })}
               onMouseLeave={() => setTip(null)}
             >
+              {!reduced && (
+                <animateTransform
+                  attributeName="transform"
+                  type="translate"
+                  values={`0 0; ${(hashSeat(seat.id) % 5) - 2} ${((hashSeat(seat.id) >> 3) % 5) - 2}; 0 0`}
+                  dur={`${12 + (hashSeat(seat.id) % 7)}s`}
+                  repeatCount="indefinite"
+                />
+              )}
               {hub ? (
                 <>
                   <rect
@@ -627,25 +705,6 @@ export function CommsRails({
             aria-label={label}
           >
             <title>{label}</title>
-            <line
-              className="comms-centre-line"
-              x1={layout.cx}
-              x2={layout.cx}
-              y1={0}
-              y2={layout.h}
-            />
-            {layout.headers.map((h) => (
-              <text
-                key={`${h.side}-${h.key}`}
-                className="comms-rail-head"
-                x={h.side === "left" ? layout.leftX - 10 : layout.rightX + 10}
-                y={h.y}
-                dy="0.34em"
-                textAnchor={h.side === "left" ? "end" : "start"}
-              >
-                {fitName(h.key, layout.nameRoom)}
-              </text>
-            ))}
             {edgeMarks}
             {nodeMarks}
           </svg>
@@ -702,6 +761,10 @@ export function CommsRails({
   );
 }
 
+function hashSeat(id: string): number {
+  return [...id].reduce((n, char) => (n * 31 + char.charCodeAt(0)) >>> 0, 7);
+}
+
 function SeatTip({
   seat,
   waiting,
@@ -733,7 +796,9 @@ function SeatTip({
         e.waiting ? (
           <p key={e.key} className="tip-wait">
             <b>
-              {nameOf(e.waiting.asker)} waiting {waitWord(e.waiting.ms)}
+              {nameOf(e.waiting.asker)} is waiting on{" "}
+              {nameOf(e.waiting.owed ?? (e.waiting.asker === e.a ? e.b : e.a))} ·{" "}
+              {waitWord(e.waiting.ms)}
             </b>
             {e.waiting.question && <q>{e.waiting.question}</q>}
           </p>
@@ -760,7 +825,9 @@ function EdgeTip({ edge, nameOf }: { edge: RailEdgeView; nameOf: (id: string) =>
       {edge.waiting && (
         <p className="tip-wait">
           <b>
-            {nameOf(edge.waiting.asker)} waiting {waitWord(edge.waiting.ms)}
+            {nameOf(edge.waiting.asker)} is waiting on{" "}
+            {nameOf(edge.waiting.owed ?? (edge.waiting.asker === edge.a ? edge.b : edge.a))} ·{" "}
+            {waitWord(edge.waiting.ms)}
             {edge.waiting.n > 1 ? ` · ${edge.waiting.n} open` : ""}
           </b>
           {edge.waiting.question && <q>{edge.waiting.question}</q>}
