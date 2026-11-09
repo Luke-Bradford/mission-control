@@ -369,6 +369,28 @@ invalidate them immediately. Live ownership and waits are read fresh on every re
 FLIGHT wakes after five unowned minutes, a stage's seven-day p90, or fifteen minutes waiting for
 the controller or operator. Repeated polls do not reset stage clocks or repeat the same wake fact.
 
+## Dependency chains API
+
+`GET /api/dependencies?repoId=<configured repository>` uses the same operator-token check as
+PR flow. It returns `DependencyChain[]`; omit `repoId` for all configured repositories.
+An unknown repository returns 404 and an invalid query returns 400. This is the approved server
+contract for the Dependencies Board, FLIGHT and QA builds. Those web readers ship separately.
+
+The read joins stored ticket dependencies, stacked PRs, active holds, PR ownership and seat queues.
+A PR reference continues through its carried ticket's waits. All open waits participate; work
+with multiple roots appears under each, with its other roots in `alsoWaitsOn`. Cycles return
+`stuck` with their refs. Unread or out-of-repository roots remain `unknown`.
+The response retains all dependents; the web applies its five-dependent disclosure.
+
+`waitedMs` and `longestWaitMs` use observed wait, hold or queue-transition times. An older run's
+start is not evidence of when it entered a queue. Unknown ages stay null. Sort is longest wait
+first, unknown last, then stuck first and ref. `frees` names only dependents whose last direct
+wait ends with the root; grandchildren still waiting on intervening work stay in `stillWaiting`.
+Ownership comes from PR flow or an active author; operator holds remain visible. A root without
+an owner, closed without merging, or past its seven-day stage p90 is stuck.
+
+Page reads never observe waits, change settings, release holds, call GitHub or write decisions.
+
 ### As a launchd job (optional; nothing loads it for you)
 
 `ops/com.missioncontrol.server.plist.tmpl` runs
