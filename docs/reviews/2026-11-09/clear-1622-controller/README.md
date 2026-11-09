@@ -15,3 +15,7 @@ The four states show: an internal FLIGHT reminder omitted from the operator list
 Clear is invoked through the real backend route while building the isolated fixture. These images do not claim a web Clear-button click: ticket #1625 owns that control. The selected-route closed state and re-raised question are actual production App renders. Both final capture phases pass. An earlier capture expected an answered Update to remain counted; that assertion was corrected to the intended FLIGHT-owned projection before the retained final run.
 
 Manual inspection of the short dark viewport confirms readable selected-question content and visible discussion controls. The answered and cleared states retain a visible next-item route. Images cover projection and selected-state behavior, not a redesign of the page.
+
+## CI route inventory correction
+
+CI found that the scoped parser wrapper separated Clear's reader comment from the route declaration. The declaration now has the comment immediately beside it and uses the scanner-supported api name and literal route. All eight route-inventory tests and all 24 Clear cases pass; lint and workspace typecheck pass. This is a registration-spelling/documentation correction with the same endpoint and scoped parser behavior. Fresh pushed-head CI and QA are still required.

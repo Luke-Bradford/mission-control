@@ -6249,12 +6249,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      // Reader: docs/runbook.md#clearing-a-needs-you-item (#1625 supplies the web control)
-      api.register(async (clearApi) => {
+      api.register(async (api) => {
         // Only Clear accepts an empty JSON stream; other routes keep the standard parser.
-        const parseJson = clearApi.getDefaultJsonParser("error", "error");
-        clearApi.removeContentTypeParser("application/json");
-        clearApi.addContentTypeParser<string>(
+        const parseJson = api.getDefaultJsonParser("error", "error");
+        api.removeContentTypeParser("application/json");
+        api.addContentTypeParser<string>(
           "application/json",
           { parseAs: "string" },
           (req, body, done) => {
@@ -6262,7 +6261,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             else parseJson(req, body, done);
           },
         );
-        clearApi.post<{ Params: { key: string } }>(CLEAR_ATTENTION_ROUTE, async (req, reply) => {
+        // Reader: docs/runbook.md#clearing-a-needs-you-item (#1625 supplies the web control)
+        api.post<{ Params: { key: string } }>("/attention/:key/clear", async (req, reply) => {
           if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined)
             return reply.code(403).send({ error: "Only the operator can clear an item." });
           if (!NoBody.safeParse(req.body === undefined ? {} : req.body).success)
