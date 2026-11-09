@@ -63,6 +63,7 @@ import {
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildApp } from "../src/api.ts";
 import { budgetBrake } from "../src/budget-brake.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms.ts";
@@ -233,7 +234,7 @@ const noFlight = () => {
   store.setSeatSession(row("flight-1", null));
 };
 
-const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors" | "log"> = {}) => {
+const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked"> = {}) => {
   watch = createFlightWatch({
     ...over,
     config,
@@ -1929,6 +1930,160 @@ describe("the FLIGHT watcher", () => {
     }
     await watch.check();
     expect(startCalls).toEqual([]);
+  });
+
+  it.each([
+    ["5h", COMMS_CAPCOM, 0],
+    ["7d", COMMS_CONTROLLER, 8 * 60 * MIN],
+  ] as const)(
+    "starts for an unread %s operator message at the account stop, including an outage-old message",
+    async (window, from, age) => {
+      store.addUsage({
+        accountId: "claude-main",
+        window,
+        at: T0 - 1000,
+        pct: 95,
+        resetAt: T0 + 60 * MIN,
+        source: "test",
+      });
+      const message = store.addComms({
+        at: T0 - age,
+        from,
+        senderKind: from === COMMS_CAPCOM ? "operator" : "controller",
+        to: "flight-1",
+        ticket: null,
+        text: "Have you seen my messages?",
+      });
+      await watch.check();
+      expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
+      expect(startCalls[0]?.first).toContain("operator");
+      expect(flightState({ config, store, busy: [], now: nowMs }).wake?.operator).toContain(
+        message?.id.replace("comms:", ""),
+      );
+      expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual([]);
+    },
+  );
+
+  it("does not let a crew message bypass the account stop", async () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    store.addComms({ at: T0, from: "guido-1", to: "flight-1", ticket: null, text: "Please work." });
+    await watch.check();
+    expect(startCalls).toEqual([]);
+  });
+
+  it("keeps the operator's Stop when an unread message waits at the account stop", async () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    store.setSeatSession(row("flight-1", null, "stopped"));
+    store.addComms({ at: T0, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "Status?" });
+    await watch.check();
+    expect(startCalls).toEqual([]);
+  });
+
+  it("keeps one safe outage alert when an operator-message start fails", async () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    store.addComms({ at: T0, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "Status?" });
+    startFails = "private provider failure detail";
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    const down = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    expect(down).toHaveLength(1);
+    expect(down[0]?.text).toContain("message is saved");
+    expect(down[0]?.text).not.toContain(startFails);
+  });
+
+  it("keeps one outage alert when an operator request is held by a pending change", async () => {
+    let held = true;
+    makeWatch({ blocked: () => held });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    await watch.check();
+    const beforeRequest = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    expect(beforeRequest).toHaveLength(1);
+    expect(beforeRequest[0]?.text).toContain("usage stop line");
+    nowMs += MIN;
+    store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "Status?",
+    });
+    await watch.check();
+    expect(startCalls).toEqual([]);
+    const down = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    expect(down).toHaveLength(1);
+    expect(down[0]?.text).toContain("message is saved");
+    nowMs += MIN;
+    await watch.check();
+    expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual(down);
+    held = false;
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual([]);
+  });
+
+  it("an operator POST starts FLIGHT within a minute at the usage stop", async () => {
+    // Fastify's injection uses real immediates; only the watch's timers and clock are controlled.
+    vi.useRealTimers();
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    vi.setSystemTime(T0);
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    const app = buildApp({ config, store, bus, now: () => nowMs });
+    try {
+      watch.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(startCalls).toEqual([]);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/comms",
+        payload: { to: "flight-1", text: "Please answer my messages." },
+      });
+      expect(response.statusCode).toBe(200);
+      nowMs += FLIGHT_DEBOUNCE_MS;
+      await vi.advanceTimersByTimeAsync(FLIGHT_DEBOUNCE_MS);
+      expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
+      expect(nowMs - T0).toBeLessThan(60_000);
+      expect(startCalls[0]?.first).toContain("operator");
+      expect(startCalls[0]?.first).not.toContain("is at its usage stop line");
+    } finally {
+      await app.close();
+    }
   });
 
   it("keeps starting FLIGHT while the budget brake is on its account", async () => {
@@ -5246,6 +5401,27 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls).toHaveLength(1);
     store.addComms({ at: nowMs, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "hello" });
     nowMs += FLIGHT_MIN_WAKE_GAP_MS + 1;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("operator");
+  });
+
+  it("wakes for an operator message in under a minute despite the ordinary wake gap", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 1;
+    store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "Please answer.",
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + 45_000;
     await watch.check();
     expect(sendCalls).toHaveLength(2);
     expect(sendCalls[1]?.text.split("\n")[0]).toContain("operator");
