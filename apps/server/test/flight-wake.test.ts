@@ -12,6 +12,7 @@ import {
   FLIGHT_MEMORY_TITLES_MAX,
   FLIGHT_MEMORY_TOPICS_MAX,
   FLIGHT_NOTE_SECTIONS,
+  FLIGHT_OWED_MS,
   FLIGHT_RECENT_LISTED,
   FLIGHT_REWAKE_MS,
   FLIGHT_TICKETS_LISTED,
@@ -710,5 +711,65 @@ describe("wake facts that name a seat or tickets", () => {
   it("clears fresh items from the delivered baseline", () => {
     const s = { ...busyBoard(), wake: { fit: {}, fresh: ["note:b"] } };
     expect(JSON.parse(deliveredFacts(s)).items).toEqual([]);
+  });
+});
+
+describe("operator messages FLIGHT owes an answer", () => {
+  const seat = "flight-1";
+  const send = (store: Store, id: number, at = 1000) =>
+    store.addComms({
+      at,
+      from: "CAPCOM",
+      to: seat,
+      ticket: null,
+      text: `message ${id}`,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+    });
+
+  it("lists a message FLIGHT read and has not answered, until a reply names it", () => {
+    const store = new Store(":memory:");
+    const first = send(store, 1);
+    const second = send(store, 2);
+    if (first === null || second === null) throw new Error("not stored");
+    // unread is not owed: it is delivered, not owed
+    expect(store.owedCommsFrom("CAPCOM", seat, 0)).toEqual([]);
+    store.markCommsInboxRead(seat, [first.id, second.id]);
+    expect(store.owedCommsFrom("CAPCOM", seat, 0)).toEqual([first.id.slice(6), second.id.slice(6)]);
+    store.addComms({
+      at: 2000,
+      from: seat,
+      to: "CAPCOM",
+      ticket: null,
+      text: "answered the first",
+      label: null,
+      ref: null,
+      replyTo: first.id,
+      mentions: [],
+    });
+    expect(store.owedCommsFrom("CAPCOM", seat, 0)).toEqual([second.id.slice(6)]);
+    store.close();
+  });
+
+  it("keeps a message owed past the six hours an unread one wakes for, and drops a settled one", () => {
+    const store = new Store(":memory:");
+    const kept = send(store, 1, 1000);
+    const settled = send(store, 2, 1000);
+    if (kept === null || settled === null) throw new Error("not stored");
+    store.markCommsInboxRead(seat, [kept.id, settled.id]);
+    store.settleCommsItem(settled.id, "CAPCOM", "handled", 1500);
+    const sevenHours = 1000 + 7 * 60 * 60_000;
+    expect(store.owedCommsFrom("CAPCOM", seat, sevenHours - FLIGHT_OWED_MS)).toEqual([
+      kept.id.slice(6),
+    ]);
+    store.close();
+  });
+
+  it("puts the owed ids in the wake facts, and a lone owed message keeps FLIGHT's wake pending", () => {
+    const s = { ...busyBoard(), wake: { fit: {}, fresh: [], owed: ["7"] } };
+    expect((JSON.parse(wakeFacts(s)) as Record<string, unknown[]>).owed).toEqual(["7"]);
+    expect(wakeFacts({ ...busyBoard(), wake: { fit: {}, fresh: [] } })).not.toBe(wakeFacts(s));
   });
 });

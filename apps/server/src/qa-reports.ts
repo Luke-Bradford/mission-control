@@ -999,15 +999,22 @@ export function qaReportMarkdown(report: QaReport): string {
   return `${lines.join("\n")}\n`;
 }
 
+/** A compact index for GitHub comments; detailed notes stay in the retained report. */
+export function qaReportGitIndex(report: QaReport, baseUrl = ""): string {
+  return [
+    "## Saved QA report",
+    "",
+    `[Immutable QA report](${baseUrl}/api/qa-reports/${report.id}) · [Markdown export](${baseUrl}/api/qa-reports/${report.id}/markdown)`,
+    `Head ${report.headSha}; reviewer ${report.reviewer.label}; source ${report.source}; registered ${new Date(report.registeredAt).toISOString()}; evidence ${report.completeness.state}.`,
+    "This snapshot is not current merge approval.",
+  ].join("\n");
+}
+
 /** Kept inside the existing review-comment/PR-body write; the full export remains immutable. */
 export function qaReportGitSummary(report: QaReport, baseUrl = ""): string {
   const short = (text: string, limit = 800) => Array.from(text).slice(0, limit).join("");
   const lines = [
-    "## Saved QA report",
-    "",
-    `[Immutable QA report](${baseUrl}${report.permalink}) · [Markdown export](${baseUrl}/api/qa-reports/${report.id}/markdown)`,
-    `Head ${report.headSha}; reviewer ${report.reviewer.label}; source ${report.source}; registered ${new Date(report.registeredAt).toISOString()}; evidence ${report.completeness.state}.`,
-    "This snapshot is not current merge approval.",
+    qaReportGitIndex(report, baseUrl),
     "",
     "Works well:",
     ...(report.worksWell.length

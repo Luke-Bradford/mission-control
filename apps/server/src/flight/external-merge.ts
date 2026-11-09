@@ -1,4 +1,4 @@
-/** The controller merge path for a PR with no unfinished crew run. No synthetic run or gate waiver. */
+/** The merge path for a PR with no unfinished crew run. No synthetic run or gate waiver. */
 import { Buffer } from "node:buffer";
 import type { RepoRules } from "@mc/core";
 import {
@@ -37,7 +37,7 @@ export async function mergeExternalPr(i: {
   rules: () => Promise<RepoRules | Error>;
   now: () => number;
   fetchTicket(repo: CcConfig["repos"][number], number: number): Promise<TicketView | null>;
-}): Promise<{ text: string; isError?: boolean }> {
+}): Promise<{ text: string; isError?: boolean; paths?: string[]; ticket?: number }> {
   const fail = (text: string) => ({ text, isError: true as const });
   const { repo, store, number } = i;
   const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
@@ -222,12 +222,31 @@ export async function mergeExternalPr(i: {
         (await section(sha, claude.status === "removed"));
     }
     const hard = matches(effectiveHardRules(rules, flightPowersOf(i.config, repo.id)), paths);
-    const approvalRequired =
-      floor || matches(rules.alwaysAsk, labels) || (hard && rules.hardRulesBy === "operator");
+    // the protected paths this PR changes: what FLIGHT's own call covered
+    const protectedPaths = [
+      ...new Set(
+        paths.filter((path) =>
+          [
+            ...effectiveHardRules(rules, flightPowersOf(i.config, repo.id)),
+            ...FLIGHT_FLOOR_PATHS.filter((p) => p !== "CLAUDE.md"),
+            ...FLIGHT_CONTROLLER_CHECK_PATHS,
+          ].some((pattern) => globMatches(pattern, path, true)),
+        ),
+      ),
+    ];
+    if (floor && claude && !protectedPaths.includes("CLAUDE.md")) protectedPaths.push("CLAUDE.md");
+    const superuser = flightPowersOf(i.config, repo.id) === "superuser";
+    // protected paths need a hub review row on this head, not only an external mc/review status
+    if (superuser && protectedPaths.length > 0 && review === null)
+      return fail("An independent clean QA report is required on this exact head.");
+    // a superuser repo's FLIGHT clears the floor and hard-rule paths itself; always_ask stays
+    const approvalRequired = superuser
+      ? matches(rules.alwaysAsk, labels)
+      : floor || matches(rules.alwaysAsk, labels) || (hard && rules.hardRulesBy === "operator");
     const approval = approvalRequired ? mergeFloorApproval(store, number, sha, i.now()) : undefined;
     if (approvalRequired && !approval)
       return fail(
-        `The repository requires controller approval for this head. Record merge-floor approval for ${mergeFloorScope(number, sha)}.`,
+        `The repository requires the operator's approval for this head. Record merge-floor approval for ${mergeFloorScope(number, sha)}.`,
       );
     const current = externalPrControl(store, repo.id, number, sha);
     const control = {
@@ -236,8 +255,8 @@ export async function mergeExternalPr(i: {
       uatAccepted: current?.uatAccepted ?? false,
       controllerRequired:
         tickets.some((ticket) => ticketControllerCheck(ticket) !== null) ||
-        matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
-      protectedController: matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
+        (!superuser && matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths)),
+      protectedController: !superuser && matches(FLIGHT_CONTROLLER_CHECK_PATHS, paths),
       controllerPassed: current?.controllerPassed ?? false,
       note: current?.note ?? null,
     };
@@ -277,7 +296,7 @@ export async function mergeExternalPr(i: {
       latestReview?.id !== review?.id ||
       (approvalRequired && !mergeFloorApproval(store, number, sha, i.now()))
     )
-      return fail("The repository rules, review or controller approval changed before merge.");
+      return fail("The repository rules, review or recorded approval changed before merge.");
     if (
       !finalSubject ||
       finalSubject.branch !== subject.branch ||
@@ -332,7 +351,13 @@ export async function mergeExternalPr(i: {
       return fail("The merge result is not confirmed; refresh GitHub before retrying.");
     i.bus.emit("boards");
     return {
-      text: `Merged external PR #${number} at ${sha}.${approval ? " Used the controller's recorded approval." : ""}`,
+      text: `Merged external PR #${number} at ${sha}.${approval ? " Used the recorded approval." : ""}`,
+      ...(superuser && protectedPaths.length > 0
+        ? {
+            paths: protectedPaths,
+            ...(tickets[0] ? { ticket: tickets[0].number } : {}),
+          }
+        : {}),
     };
   } catch {
     return fail(

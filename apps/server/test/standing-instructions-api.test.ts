@@ -256,6 +256,7 @@ it("stores a short durable notice before a live notification failure, without du
   const inbox = store.commsInbox("builder");
   expect(inbox).toHaveLength(1);
   expect(inbox[0].text.length).toBeLessThan(1200);
+  expect(inbox[0]).toMatchObject({ from: "MC", senderKind: "hub" });
 });
 
 it("reports each concurrent mutation's own recipient delivery while draining a shared flush", async () => {

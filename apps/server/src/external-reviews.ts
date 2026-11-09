@@ -10,16 +10,19 @@ import {
   type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "./config.ts";
+import { externalReviewAsked } from "./external-pr-control.ts";
+import { externalReviewKey, isExternalReview } from "./external-review-key.ts";
 import type { GhRunner } from "./mcp/gh.ts";
+import { ownsPr } from "./ownership.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
 import { postPrEvidence } from "./pr-evidence/sweep.ts";
-import { qaReportGitSummary } from "./qa-reports.ts";
+import { qaReportGitIndex } from "./qa-reports.ts";
 import type { Store } from "./store.ts";
 
-/** A review subject identity, deliberately not the id of a stored build run. */
-export const externalReviewKey = (repo: string, pr: number): string => `external-pr:${repo}#${pr}`;
-export const isExternalReview = (row: ReviewRow): boolean =>
-  row.authorRunId === externalReviewKey(row.repoId, row.prNumber);
+export { externalReviewKey, isExternalReview } from "./external-review-key.ts";
+
+/** Only fixed, non-sensitive publication failure messages use this class. */
+class ExternalReviewPublicationError extends Error {}
 
 /**
  * A branch the crew or an observed loop still owns: a build run that has not ended, any run of a
@@ -65,7 +68,8 @@ export async function readExternalSubject(
 ): Promise<ExternalReviewSubject | null> {
   if (!Number.isSafeInteger(number) || number < 1 || !/^[a-f0-9]{40}$/.test(sha)) return null;
   const result = await gh(["api", `repos/${repo.github}/pulls/${number}`], { cwd });
-  if (result.code !== 0) throw new Error("external review PR could not be read");
+  if (result.code !== 0)
+    throw new ExternalReviewPublicationError("external review PR could not be read");
   const value: unknown = JSON.parse(result.stdout);
   if (value === null || typeof value !== "object") return null;
   const pr = value as {
@@ -144,22 +148,51 @@ export function createExternalReviews(deps: {
 }): ExternalReviews {
   const { store } = deps;
   let syncing = false;
-  function wanted(row: ReviewRow): boolean {
+  /** A review is this hub's work: its branch has a run here, or someone asked it to review this head. */
+  const mine = (repoId: string, pr: Pick<PullRequestView, "number" | "branch" | "headSha">) =>
+    ownsPr(store, repoId, pr) ||
+    (pr.headSha != null && externalReviewAsked(store, repoId, pr.number, pr.headSha, true));
+  /**
+   * A review that reported on a head after its author run ended (or went away) has no crew loop
+   * left to post it, so this hub posts it as it does an external one.
+   */
+  const orphaned = (row: ReviewRow) => {
+    if (isExternalReview(row) || row.state !== "reported") return false;
+    const author = store.run(row.authorRunId);
+    return author === null || author.endedAt !== null;
+  };
+  /** Why this row is not posted now, or null when it is. */
+  function notWanted(row: ReviewRow): string | null {
     const repo = deps.config.repos.find((r) => r.id === row.repoId);
     const pr = store.pullRequests(row.repoId).find((p) => p.number === row.prNumber);
-    return (
-      isExternalReview(row) &&
-      (deps.enabled?.() ?? true) &&
-      repo?.autonomy === "merge" &&
-      pr?.state === "open" &&
-      !pr.isDraft &&
-      pr.headSha === row.sha &&
-      !branchOwned(deps.config, store, row.repoId, pr.branch, pr.ticket)
-    );
+    if (!isExternalReview(row) && !orphaned(row)) return "a crew run still owns the review";
+    if (!(deps.enabled?.() ?? true)) return "the engine is off";
+    if (repo?.autonomy !== "merge") return "the repo is not on merge autonomy";
+    if (pr?.state !== "open") return "the PR is not open";
+    if (pr.isDraft) return "the PR is a draft";
+    if (pr.headSha !== row.sha) return "the PR head has moved";
+    if (branchOwned(deps.config, store, row.repoId, pr.branch, pr.ticket))
+      return "a crew run or claim still owns the branch";
+    if (!mine(row.repoId, pr)) return "this hub neither ran the branch nor was asked to review it";
+    return null;
+  }
+  const wanted = (row: ReviewRow): boolean => notWanted(row) === null;
+  const GITHUB_HOLD =
+    "GitHub shows the PR closed, draft, labelled skip-review, on another head, or not based on the default branch";
+  /** One line per row and reason: a final result left unposted on purpose says so, once. */
+  const said = new Set<string>();
+  function skipped(pr: PullRequestView, row: ReviewRow, why: string): void {
+    if (row.state !== "reported" && row.state !== "failed") return;
+    const key = `${row.id}:${why}`;
+    if (said.has(key)) return;
+    said.add(key);
+    deps.log(`External QA for ${row.repoId}#${pr.number} is not posted to GitHub: ${why}.`);
   }
 
   async function publish(pr: PullRequestView, row: ReviewRow): Promise<void> {
-    if (!wanted(row) || row.state === "superseded") return;
+    if (row.state === "superseded") return;
+    const why = notWanted(row);
+    if (why !== null) return skipped(pr, row, why);
     const repo = deps.config.repos.find((r) => r.id === row.repoId);
     if (!repo) return;
     const state =
@@ -185,9 +218,10 @@ export function createExternalReviews(deps: {
     const commentKey = `external-review-comment:${row.id}`;
     const needsComment = row.state === "reported" && store.getSetting(commentKey) === null;
     if (store.getSetting(statusKey) === fingerprint && !needsComment) return;
-    if (!(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha))) return;
+    if (!(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)))
+      return skipped(pr, row, GITHUB_HOLD);
     // A crew run may have claimed the branch during the read.
-    if (!wanted(row)) return;
+    if (!wanted(row)) return skipped(pr, row, notWanted(row) ?? "it is no longer wanted");
     if (needsComment) {
       const marker = `<!-- mission-control-review:${row.id}:${row.sha} -->`;
       const findings = store.findingsOf(row.id);
@@ -199,7 +233,7 @@ export function createExternalReviews(deps: {
         `Reviewer: ${row.seatId}. Round ${row.round}. ${row.blocking} blocking, ${row.minor} minor findings.`,
         row.summary ?? "No summary was recorded.",
         ...(report
-          ? [qaReportGitSummary(report, deps.reportBaseUrl ?? deps.evidence?.baseUrl ?? "")]
+          ? [qaReportGitIndex(report, deps.reportBaseUrl ?? deps.evidence?.baseUrl ?? "")]
           : []),
         ...findings.map(
           (finding) =>
@@ -220,15 +254,18 @@ export function createExternalReviews(deps: {
         "This verdict records a scratch review. It does not waive CI, acceptance or repository merge rules.",
       ].join("\n\n");
       if (body.length > 60_000 || !(await deps.textAllowed(body, repo.github, pr.number)))
-        throw new Error("external review comment was withheld by the text check");
+        throw new ExternalReviewPublicationError(
+          "external review comment was withheld by the text check",
+        );
       const endpoint = `repos/${repo.github}/issues/${pr.number}/comments`;
       const existing = await deps.gh(["api", `${endpoint}?per_page=100`, "--paginate", "--slurp"], {
         cwd: deps.cwd,
       });
-      if (existing.code !== 0) throw new Error("external review comments could not be checked");
+      if (existing.code !== 0)
+        throw new ExternalReviewPublicationError("external review comments could not be checked");
       const pages: unknown = JSON.parse(existing.stdout);
       if (!Array.isArray(pages) || !pages.every(Array.isArray))
-        throw new Error("external review comments were unreadable");
+        throw new ExternalReviewPublicationError("external review comments were unreadable");
       const comments: unknown[] = pages.flat();
       if (
         !comments.some(
@@ -240,25 +277,22 @@ export function createExternalReviews(deps: {
             comment.body.includes(marker),
         )
       ) {
-        if (
-          !(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)) ||
-          !wanted(row)
-        )
-          return;
+        if (!(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)))
+          return skipped(pr, row, GITHUB_HOLD);
+        if (!wanted(row)) return skipped(pr, row, notWanted(row) ?? "it is no longer wanted");
         const posted = await deps.gh(["api", "--method", "POST", endpoint, "--input", "-"], {
           cwd: deps.cwd,
           input: JSON.stringify({ body }),
         });
-        if (posted.code !== 0) throw new Error("external review comment could not be posted");
+        if (posted.code !== 0)
+          throw new ExternalReviewPublicationError("external review comment could not be posted");
       }
       store.setSetting(commentKey, "posted");
     }
     if (store.getSetting(statusKey) !== fingerprint) {
-      if (
-        !(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)) ||
-        !wanted(row)
-      )
-        return;
+      if (!(await readExternalSubject(deps.gh, deps.cwd, repo, row.prNumber, row.sha)))
+        return skipped(pr, row, GITHUB_HOLD);
+      if (!wanted(row)) return skipped(pr, row, notWanted(row) ?? "it is no longer wanted");
       const posted = await deps.gh(
         ["api", "--method", "POST", `repos/${repo.github}/statuses/${row.sha}`, "--input", "-"],
         {
@@ -271,7 +305,8 @@ export function createExternalReviews(deps: {
           }),
         },
       );
-      if (posted.code !== 0) throw new Error("external review status could not be posted");
+      if (posted.code !== 0)
+        throw new ExternalReviewPublicationError("external review status could not be posted");
       store.setSetting(statusKey, fingerprint);
     }
   }
@@ -285,8 +320,32 @@ export function createExternalReviews(deps: {
         for (const repo of deps.config.repos) {
           if (repo.autonomy !== "merge") continue;
           for (const pr of store.pullRequests(repo.id)) {
-            if (pr.state !== "open" || pr.isDraft || !pr.headSha) continue;
-            if (branchOwned(deps.config, store, repo.id, pr.branch, pr.ticket)) continue;
+            if (pr.state !== "open" || !pr.headSha) continue;
+            // a result this hub holds for the head that these filters leave unposted says why
+            const holds = (why: string) => {
+              const held = store
+                .reviewsOfPr(repo.id, pr.number)
+                .findLast(
+                  (r) =>
+                    r.sha === pr.headSha &&
+                    r.state === "reported" &&
+                    (isExternalReview(r) || orphaned(r)),
+                );
+              if (held) skipped(pr, held, why);
+            };
+            if (pr.isDraft) {
+              holds("the PR is a draft");
+              continue;
+            }
+            if (branchOwned(deps.config, store, repo.id, pr.branch, pr.ticket)) {
+              holds("a crew run or claim still owns the branch");
+              continue;
+            }
+            // a review is this hub's work: a run here made the branch, or someone asked for this head
+            if (!mine(repo.id, pr)) {
+              holds("this hub neither ran the branch nor was asked to review it");
+              continue;
+            }
             try {
               const identity = externalReviewKey(repo.id, pr.number);
               const reviews = store.reviewsOfRun(identity);
@@ -305,6 +364,22 @@ export function createExternalReviews(deps: {
                   .map((review) => review.seatId),
               );
               const retry = row?.state === "failed" && failedSeats.has(row.seatId);
+              if (row === undefined || row.state === "queued" || row.state === "running") {
+                // a crew review of this head reported after its author's run ended: post it, and
+                // do not review the head again. An external review of the head still under way
+                // gives way to it, or its pending status would hold the PR for good.
+                const crew = store
+                  .reviewsOfPr(repo.id, pr.number)
+                  .findLast((r) => r.sha === pr.headSha && orphaned(r));
+                if (crew) {
+                  if (row !== undefined)
+                    store.setReviewState(row.id, ["queued", "running"], "superseded", {
+                      at: deps.now(),
+                    });
+                  await publish(pr, crew);
+                  continue;
+                }
+              }
               if ((row === undefined || retry) && pr.ci === "passing") {
                 if (
                   reviews.length === 0 &&
@@ -384,10 +459,12 @@ export function createExternalReviews(deps: {
                 row = id === null ? undefined : (store.review(id) ?? undefined);
               }
               if (row) await publish(pr, row);
-            } catch {
+            } catch (error) {
               // PR text, credentials and command output never enter this log.
+              const reason =
+                error instanceof ExternalReviewPublicationError ? ` ${error.message}.` : "";
               deps.log(
-                `External QA for ${repo.id}#${pr.number} could not complete its queue/status update; it will retry.`,
+                `External QA for ${repo.id}#${pr.number} could not complete its queue/status update; it will retry.${reason}`,
               );
             }
           }

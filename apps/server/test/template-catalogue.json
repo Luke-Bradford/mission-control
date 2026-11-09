@@ -127,7 +127,56 @@
     ]
   },
   "small-change": {
-    "trigger": "chore, test or docs ticket",
+    "trigger": "chore or test ticket",
+    "rounds": 2,
+    "budget": "120k",
+    "rules": {
+      "verify": "fail → back to implement · max 2",
+      "review": "Critical or Important findings → implement → verify"
+    },
+    "path": ["implement", "verify", "review", "draft PR"],
+    "nodes": [
+      {
+        "id": "implement",
+        "role": "GUIDO or INCO",
+        "checks": [
+          ["rule", "Only the paths this ticket type allows changed (tests for test, docs for docs)"]
+        ]
+      },
+      {
+        "id": "verify",
+        "role": "Mission Control runs it",
+        "max": 2,
+        "checks": [
+          ["cmd", "Full test suite passes (takes the test lock)"],
+          ["rule", "No existing test weakened, skipped or deleted"]
+        ]
+      },
+      {
+        "id": "review",
+        "role": "RETRO, fresh eyes",
+        "checks": [
+          [
+            "review",
+            "Spec verdict: does what the ticket asks; every acceptance criterion has evidence"
+          ],
+          [
+            "review",
+            "Quality verdict: no Critical or Important findings (Minor ones are logged, not looped)"
+          ],
+          ["rule", "Blast radius: callers and shared code listed by Mission Control were checked"],
+          ["review", "Pages it touches opened in a real browser, with screenshots"]
+        ]
+      },
+      {
+        "id": "draft PR",
+        "role": "GUIDO or INCO",
+        "checks": [["rule", "PR is open as a draft"]]
+      }
+    ]
+  },
+  "docs": {
+    "trigger": "docs ticket",
     "rounds": 2,
     "budget": "120k",
     "rules": {

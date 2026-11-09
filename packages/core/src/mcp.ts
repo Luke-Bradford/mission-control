@@ -65,6 +65,8 @@ export const MC_TOOL_NAMES = {
   recall: "recall",
   holdItem: "hold_item",
   releaseHold: "release_hold",
+  returnQuestion: "return_question",
+  withdrawQuestion: "withdraw_question",
   screenshotHud: "screenshot_hud",
   previewBrowser: "preview_browser",
   editIssue: "edit_issue",
@@ -139,6 +141,8 @@ export const MC_TOOLS = {
   recall: mcTool(MC_TOOL_NAMES.recall),
   holdItem: mcTool(MC_TOOL_NAMES.holdItem),
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
+  returnQuestion: mcTool(MC_TOOL_NAMES.returnQuestion),
+  withdrawQuestion: mcTool(MC_TOOL_NAMES.withdrawQuestion),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
   previewBrowser: mcTool(MC_TOOL_NAMES.previewBrowser),
   editIssue: mcTool(MC_TOOL_NAMES.editIssue),
@@ -289,7 +293,7 @@ export const COMMS_QUESTION_TO_FLIGHT =
   "Not sent: a seat's question goes to FLIGHT, not straight to CAPCOM. Ask it with mc ask_flight; FLIGHT answers, or takes it to the operator with its brief.";
 /** ask_flight from FLIGHT itself: it takes decisions to the operator with a brief, never a bare question. */
 export const ASK_FLIGHT_SELF =
-  'Not asked: you are FLIGHT. Take a decision to the operator with mc brief_item { for: "operator" } on its Needs-you item, or an @CAPCOM question in your reply.';
+  'Not asked: you are FLIGHT. Take a decision to the operator with mc brief_item { for: "operator" } on its Needs-you item; for one with no item, ask an @CAPCOM question, then brief the item it raises.';
 
 /** The hub's address: loopback only. The guard hook sends its token nowhere else. */
 export const LOOPBACK_HOST = "127.0.0.1";
@@ -297,6 +301,8 @@ export const LOOPBACK_HOST = "127.0.0.1";
 export const API_PREFIX = "/api";
 /** The header carrying the per-boot operator token on every mutating /api request. */
 export const OPERATOR_HEADER = "x-mc-operator";
+/** The header carrying the per-boot controller token: the controller's own key, labelling what it sends. */
+export const CONTROLLER_HEADER = "x-mc-controller";
 /** Where the HUD reads the operator token at page load. */
 export const OPERATOR_BOOTSTRAP_PATH = "/api/operator/bootstrap";
 /** Set by the HUD screenshot browser on every request; the bootstrap route refuses it. */

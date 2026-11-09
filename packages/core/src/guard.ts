@@ -24,7 +24,7 @@ export const GUARD_RULES = {
   "read-only": READ_ONLY_CANNOT_WRITE,
   network: "No network from a crew's commands",
   "repo-rules":
-    "FLIGHT must keep this repository's protected paths and Mission Control rules; ask a controller to approve an override",
+    "FLIGHT must keep this repository's protected paths and Mission Control rules; on a standard repo ask a controller to approve an override; on a superuser repo change them through a seat's PR and mc merge_pr",
   unreadable: "Commands the guard cannot read to the end are refused",
   secret: "No secrets in a push",
 } as const;
@@ -92,11 +92,14 @@ export const MC_SUPERUSER_TOOLS: readonly McToolName[] = [
 export const needsSuperuserText = (repo: string): string =>
   `${repo} has flight_powers: standard; this needs flight_powers: superuser in config.yaml`;
 
+/** What `flightGitBranch` answers for a detached HEAD: its commits move no branch, main included. */
+export const DETACHED_HEAD = "HEAD";
+
 export interface GuardContext {
   mode: CrewMode;
   /** FLIGHT's controller-equivalent watch profile. */
   fullAccess?: boolean;
-  /** Resolve the checkout a FLIGHT git command will use; null is detached or unreadable. */
+  /** Resolve the checkout a FLIGHT git command will use: its branch, DETACHED_HEAD when detached, null when unreadable. */
   flightGitBranch?: (directories: readonly string[], global: readonly string[]) => string | null;
   flightGitAlias?: (
     name: string,

@@ -267,6 +267,16 @@ export class LocalNotifications {
     const quiet = quietAt(p, this.now());
     for (const item of items) {
       const category = categoryOf(item);
+      // A late spell (FLIGHT's own watch) inside an outage keeps the episode: down again is no new alert.
+      if (
+        item.key === FLIGHT_NOT_TRIAGING_KEY &&
+        item.owner !== undefined &&
+        item.owner !== "operator"
+      ) {
+        const kept = this.state.seen[item.key];
+        if (kept !== undefined) seen[item.key] = kept;
+        continue;
+      }
       if (category === null || (item.owner !== undefined && item.owner !== "operator")) continue;
       const version = versionOf(category, item);
       const previous = this.state.seen[item.key];

@@ -37,8 +37,8 @@ export const DEFAULT_HARD_RULES: string[] = Object.freeze([
 ]) as string[];
 
 /**
- * Paths whose change FLIGHT never clears on a `superuser` repo, whatever its `hard_rules_by`: the
- * operator or the delegate does (floor 7). CLAUDE.md is held unless the engine verifies
- * that its `## Mission Control` block is unchanged.
+ * The repo's own rules: CLAUDE.md (its `## Mission Control` block) and `.github/**`. On a
+ * `superuser` repo FLIGHT clears a change to them itself, with a logged decision; a standard repo
+ * still needs an approval. They are named first in a clearance's reasons.
  */
 export const FLIGHT_FLOOR_PATHS: readonly string[] = Object.freeze(["CLAUDE.md", ".github/**"]);

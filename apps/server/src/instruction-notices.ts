@@ -1,10 +1,13 @@
-import { COMMS_CAPCOM, type InstructionMutation, seatDef } from "@mc/core";
+import { COMMS_MC, type InstructionMutation, seatDef } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
 import { sendComms } from "./comms.ts";
 import type { CcConfig } from "./config.ts";
 import { messageUnpausedSeat } from "./crew-pause.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
+
+/** The note key prefix of a seat's failed focus import; hud.ts lists it as a hub stop. */
+export const INSTRUCTION_FOCUS_NOTE_PREFIX = "instruction-focus";
 
 interface NoticeDeps {
   config: CcConfig;
@@ -41,7 +44,8 @@ export function flushInstructionNotices(deps: NoticeDeps): Promise<Map<string, D
           .flatMap((s) => s.seats)
           .find((s) => seatDef(s).loop === "watch");
         if (notice.by === "flight" && !flight) continue;
-        const from = notice.by === "flight" && flight ? flight.id : COMMS_CAPCOM;
+        // The hub records the change; FLIGHT's own change is attributed to FLIGHT.
+        const from = notice.by === "flight" && flight ? flight.id : COMMS_MC;
         try {
           const message = await sendComms(
             {
@@ -50,6 +54,7 @@ export function flushInstructionNotices(deps: NoticeDeps): Promise<Map<string, D
               knownSecrets: async () => [],
               now: deps.now,
               seatSender: false,
+              senderKind: notice.by === "flight" ? "flight" : "hub",
             },
             from,
             {
@@ -106,7 +111,7 @@ export function importInstructionFocus(
   let attentionChanged = false;
   for (const session of deps.config.crew?.sessions ?? [])
     for (const seat of session.seats) {
-      const key = `instruction-focus:${seat.id}`;
+      const key = `${INSTRUCTION_FOCUS_NOTE_PREFIX}:${seat.id}`;
       try {
         deps.store.instructions.syncFocus(seat, now());
         if (open.has(key)) {

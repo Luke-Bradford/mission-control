@@ -1,4 +1,5 @@
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
+import type { PaceView } from "./pace.ts";
 
 export {
   CATCH_UP_KINDS,
@@ -30,6 +31,7 @@ export const watchCheckoutName = (seatId: string): string => `${seatId}-watch`;
 /** The canonical top-level HUD route catalogue, shared by the web router and product pass. */
 export const HUD_PAGE_PATHS = {
   overview: "/",
+  needs: "/needs-you",
   flight: "/flight",
   board: "/board",
   agent: "/agent",
@@ -53,6 +55,8 @@ export const watchOrPlanToolText = (t: string): string => `${t} is only for a wa
 export const FLIGHT_DECISION_KINDS = [
   "answer",
   "pass",
+  "return",
+  "withdraw",
   "start",
   "message",
   "unpark",
@@ -94,6 +98,8 @@ export const FLIGHT_RUN_TOOLS_SETTING = "flight.run-tools";
 
 export interface FlightDecision {
   orderId?: number;
+  /** The wake FLIGHT was in when it decided (see `flightWakeId`); absent when none was recorded. */
+  wakeId?: string;
   id: number;
   at: number;
   kind: FlightDecisionKind;
@@ -177,6 +183,8 @@ export interface FlightWakeRecord {
   runId: string;
   at: number;
   reasons: string[];
+  /** `flightWakeId(runId, n)`; absent on a wake stored before ids were kept. */
+  wakeId?: string;
 }
 
 /** The last day's wakes: counted by reason, and by hour (oldest hour first, the last one ends now). */
@@ -282,7 +290,70 @@ export const FLIGHT_HEADLINE_TITLE = "Headline";
 export const FLIGHT_NOTE_SECTIONS = ["project", "crew", "operator", "lessons"] as const;
 export const FOR_THE_CONTROLLER = "For the controller:";
 
+/** What a ledger entry can point at; the hub marks the pointer when that thing changes. */
+export const FLIGHT_POINTER_KINDS = ["pr", "ticket", "seat", "repo", "person", "metric"] as const;
+export type FlightPointerKind = (typeof FLIGHT_POINTER_KINDS)[number];
+export const FLIGHT_POINTERS_MAX = 10;
+/** The kinds a hub event marks today; `track` refuses the rest rather than hold a pointer that never moves. */
+export const FLIGHT_POINTER_FED_KINDS: readonly FlightPointerKind[] = ["pr", "ticket"];
+/**
+ * The changes to a PR that the digest's own `prs` entry shows (it opens, its state, its head). A
+ * PR pointer moved by one of these is covered by `prs`; CI, review and draft changes are not in
+ * that entry, so those stay in `moved`.
+ */
+export const FLIGHT_PR_ENTRY_CHANGES: readonly string[] = [
+  "opened",
+  "open",
+  "merged",
+  "closed",
+  "new commit",
+];
+/** The most moved pointers one digest lists; the rest stay unread for the next wake. */
+export const FLIGHT_MOVED_LISTED = 20;
+export const FLIGHT_POINTER_TARGET_MAX = 100;
+export const FLIGHT_POINTER_CHANGE_MAX = 120;
+/** A pointer as FLIGHT names it on `track`: what it watches. */
+export interface FlightPointerRef {
+  kind: FlightPointerKind;
+  /** A PR or ticket as `repo#n`, a seat id, a repo id, a person's login or a metric id. */
+  target: string;
+}
+export const ledgerPointerUnfedText = (kind: FlightPointerKind): string =>
+  `Not tracked: no hub event moves a ${kind} pointer yet, so it would never change. Point at a ${FLIGHT_POINTER_FED_KINDS.join(" or ")}.`;
+export const ledgerPointerText = (kind: FlightPointerKind, target: string): string => {
+  const form: Record<FlightPointerKind, string> = {
+    pr: "<repo id>#<number>, e.g. mc#7",
+    ticket: "<repo id>#<number>, e.g. mc#7",
+    seat: "a seat id in your session",
+    repo: "a configured repo id",
+    person: "a GitHub login",
+    metric: "a metric id from the registry",
+  };
+  return `Not tracked: a ${kind} pointer is ${form[kind]}; "${target}" is not.`;
+};
+/** A pointer as stored: when the hub last saw its target change, and when FLIGHT last read that. */
+export interface FlightPointer extends FlightPointerRef {
+  changedAt: number | null;
+  /** One line on what changed, as the hub saw it. */
+  change: string | null;
+  readAt: number | null;
+}
+/** A pointer that moved since FLIGHT last read it, as the wake digest lists it. */
+export interface FlightMovedPointer extends FlightPointerRef {
+  /** The key of the ledger entry that holds the pointer. */
+  entry: string;
+  change: string;
+  at: number;
+}
+/** A wake's id: its run and its turn (0 is the start brief, k the k-th wake after it). */
+export const flightWakeId = (runId: string, n: number): string => `${runId}:${n}`;
+
+/** Whether a message from FLIGHT is addressed to the controller, not the operator (until #1508's own address). */
+export const isForTheController = (text: string): boolean =>
+  text.trimStart().toLowerCase().startsWith(FOR_THE_CONTROLLER.toLowerCase());
+
 export interface FlightLedgerEntry {
+  pointers?: FlightPointer[];
   kind: FlightLedgerKind;
   key: string;
   title: string;
@@ -392,7 +463,7 @@ export const headlineText = (n: number): string =>
 export const headlineSavedText = (n: number): string =>
   `Saved your headline (${n} of ${FLIGHT_HEADLINE_MAX} characters).`;
 export const TRACK_DESCRIPTION =
-  "Create or update an open ledger entry by key, keeping its kind. Use untrack to mark it done or dropped. A field left out keeps its value; null clears it.";
+  "Create or update an open ledger entry by key, keeping its kind. Use untrack to mark it done or dropped. A field left out keeps its value; null clears it. pointers names what the entry watches (a pr or ticket as repo#n): the hub marks a pointer when that thing changes, and your next wake lists the pointers that moved. Only pr and ticket pointers are accepted today: the hub has no event for the other kinds. A new pointers list replaces the old one.";
 export const UNTRACK_DESCRIPTION =
   "Close a ledger entry by key with its outcome and status done (default) or dropped.";
 export const LEDGER_DESCRIPTION =
@@ -553,6 +624,33 @@ export const answerMessageText = (answer: string): string => `FLIGHT answers: ${
 export const notSentText = (why: string): string => `Not sent: ${why}`;
 export const answeredText = (call: string): string => `Answered ${call}.`;
 
+/** The label on a ticket the operator set aside from Needs you; FLIGHT does not promote it. */
+export const WAITING_OPERATOR_LABEL = "waiting:operator";
+export const PROTECTED_ITEM_REFUSED =
+  "Refused: this item is protected and always reaches the operator. Add a brief; you cannot hold, return or withdraw it.";
+export const RETURN_NOT_SEAT_QUESTION = "Refused: only a seat's question can be returned.";
+export const WITHDRAW_NOT_YOURS =
+  "Refused: you can withdraw only a question you wrote for the operator.";
+export const WITHDRAW_SEAT_QUESTION =
+  "Refused: this is a seat's question. Answer it with mc answer_question, or send it back with mc return_question.";
+/** The longest `missing` of return_question and `reason` of withdraw_question. */
+export const QUESTION_REASON_MAX = 300;
+export const returnedQuestionText = (missing: string): string =>
+  `FLIGHT sent your question back: ${missing}\nAsk again with mc ask_flight once you can add it, or decide as FLIGHT says.`;
+export const returnedText = (call: string): string => `Returned to ${call}.`;
+export const withdrawnText = (key: string): string => `Withdrew ${key}.`;
+export const questionClosedText = (question: string, reason: string): string =>
+  `Your question was closed without an answer. ${reason}\nQuestion: ${question}`;
+export const waitingOperatorPromoteText = (ref: string): string =>
+  `Not moved: ${ref} is labelled waiting:operator. It moves when the operator answers its question or moves the card.`;
+export const waitingOperatorStartText = (ref: string): string =>
+  `Not started: ${ref} is labelled waiting:operator. It starts when the operator answers its question or moves the card.`;
+/** Why the hub closed a question on a recorded fact. */
+export const ticketClosedReason = (ticket: string): string => `${ticket} was closed.`;
+export const prMergedReason = (n: number): string => `PR ${n} merged.`;
+export const prClosedReason = (n: number): string => `PR ${n} was closed without merging.`;
+export const ASKING_RUN_ENDED_REASON = "The asking run ended.";
+
 export const notStartableSeatText = (call: string): string =>
   `Not started: ${call} is not a developer or planner seat.`;
 export const planAlreadyText = (ref: string): string =>
@@ -617,7 +715,7 @@ export const PROMOTE_ENGINE_OFF =
   "Not moved: the loop engine is off on this server, so no card moves.";
 export const PROMOTE_NO_RULES = "Not moved: the repo's rules could not be read.";
 export const promoteOffText = (repoId: string): string =>
-  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.`;
+  `Not moved: ${repoId}'s rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question, then brief the item it raises with mc brief_item.`;
 export const moveNotOnBoardText = (ref: string): string => `Not moved: ${ref} is not on the board.`;
 export const moveWrongColumnText = (ref: string, column: string): string =>
   `Not moved: ${ref} is in ${column}; promote moves Backlog to Ready or Refinement, Refinement to Ready, and Ready or Refinement to Backlog.`;
@@ -980,6 +1078,11 @@ export const FLIGHT_CHAIN_STALL_MS = 30 * 60_000;
 export const FLIGHT_GITHUB_LOW_FRACTION = 0.25;
 export const FLIGHT_SIGNALS_SETTING = "flight.signals";
 export const FLIGHT_LOOPS_SETTING = "flight.loops";
+/**
+ * The handover guard's cooldown, kept in the store so a hub restart does not lose it: when the hub
+ * starts FLIGHT again (`retryAt`) and when it last did (`restartedAt`), each a time or null.
+ */
+export const FLIGHT_GUARD_SETTING = "flight.guard";
 export const FLIGHT_MAIN_SETTING = "flight.main";
 export const FLIGHT_SIGNAL_KINDS = [
   "flaky_test",
@@ -998,6 +1101,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "controller_unanswered",
   "wait_over",
   "seat_call",
+  "question_changed",
 ] as const;
 export interface FlightSignal {
   checks?: string[];
@@ -1016,6 +1120,8 @@ export interface FlightTriage {
 
 /** The full crew state returned by the `flight_state` tool. */
 export interface FlightState {
+  /** The operator's slow pace while it is on; absent at normal pace. Starts outside it are refused. */
+  pace?: PaceView;
   /** Every open PR, unowned first. FLIGHT starts each wake by reading this flow. */
   prFlow?: FlightPrFlow;
   memory?: FlightMemoryTitle[];
@@ -1098,6 +1204,11 @@ export interface FlightState {
     triageRemainingMs: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
+    /**
+     * Set when the Needs you entry check sent the item back (#1543): what it lacks before it may
+     * reach the operator. Fix the brief with brief_item, or keep the item (brief it for FLIGHT).
+     */
+    returned?: string[];
   }[];
   /**
    * The cards FLIGHT holds in Backlog behind an open PR, oldest first. `prState` is the state of
@@ -1119,7 +1230,15 @@ export interface FlightState {
     running: number;
     /** Minutes the oldest queued review has waited; 0 with none queued. */
     waitMin?: number;
-    seats: { seat: string; queued: number; running: number; idle: boolean }[];
+    seats: {
+      seat: string;
+      queued: number;
+      running: number;
+      /** Minutes this seat's oldest queued review has waited. */
+      waitMin?: number;
+      /** Free to start a review: not paused, stopped, busy or at its quota stop. */
+      idle: boolean;
+    }[];
   };
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
   mergeQueue?: { pr: number; waitsOn: string[] }[];
@@ -1146,6 +1265,8 @@ export interface FlightState {
   breaker: { tripped: boolean; reason: string | null };
   /** Pending scheduled work; only due entries prompt a wake. */
   planned?: FlightScheduleEntry[];
+  /** Pointers whose target changed since FLIGHT last read them (at most FLIGHT_MOVED_LISTED, and not a PR already in `prs`); absent when none did. */
+  moved?: FlightMovedPointer[];
   /** Your brief, only FLIGHT_NOTE_SECTIONS in order; `text` is "" for a section never written. */
   brief: { section: FlightBriefSectionKey; title: string; text: string; ageMin: number | null }[];
   /** What the wake facts read that FLIGHT is not shown; the digest and `flight_state` drop it. */
@@ -1158,6 +1279,8 @@ export interface FlightWakeInputs {
   fit: Record<string, string[]>;
   /** The wake ids of the items FLIGHT has not seen (same key and text). */
   fresh: string[];
+  /** FLIGHT has a live `wait_on` for the idle-reviewers fault. */
+  reviewsWaited?: boolean;
   /**
    * Free build seats with open tickets near their area and no FLIGHT wait on them, and how long
    * that has stood. Absent when no seat is in that state.
@@ -1165,6 +1288,10 @@ export interface FlightWakeInputs {
   idle?: FlightIdleSeats;
   /** Ids of the operator's messages to FLIGHT that its inbox has not read; they wake it at once. */
   operator?: string[];
+  /** Ids of the operator's messages FLIGHT has read and not yet answered (a reply naming them); they stay in the wake until it does. */
+  owed?: string[];
+  /** Moved PR pointers the digest leaves out because `prs` lists that PR: stamped read with `moved`. */
+  movedCovered?: FlightMovedPointer[];
 }
 
 /** Free build seats that sit idle while tickets are open near them. */
@@ -1188,6 +1315,9 @@ export const idleLong = (idle: FlightIdleSeats | undefined): FlightIdleSeats["se
   idle?.seats.filter((x) => idlePeriod(x.ms) !== null) ?? [];
 
 /** The sentence FLIGHT is told when seats idle with tickets open: act, never wait on a person. */
+/** What the wake says on every wake while the operator's messages are owed an answer. */
+export const owedAsk = (ids: readonly string[]): string =>
+  `You owe the operator an answer to Comms message ${ids.join(", ")}: reply with mc comms_send { replyTo: "comms:<id>" }, or react to it with mc comms_react when it needs no answer. It stays owed until you do.`;
 export const IDLE_SEAT_ASK =
   "A free seat has stood idle while tickets are open. Do not report that you are waiting. Promote a ticket to Ready and start it, triage the tickets with no board status, or log with wait_on why none can start. A wait on a person is never the answer: go round it, take other work, or decide it yourself. Only money, direction, irreversible actions and security exceptions go to the operator, and those are parked with a brief while the seat takes the next ticket.";
 
@@ -1261,12 +1391,38 @@ export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
 export const FLIGHT_BATCH_MS = 15 * 60_000;
 /** An operator message to FLIGHT unread this long after it was sent no longer wakes it. */
 export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
+/** An operator message FLIGHT read and has not answered stays owed this long. */
+export const FLIGHT_OWED_MS = 7 * 24 * 60 * 60_000;
 /** How many days back the cost and wait telemetry looks. */
 export const FLIGHT_COST_DAYS = 14;
 /** Wakes of one FLIGHT run before it gets a fresh session. */
 export const FLIGHT_MAX_WAKES = 40;
 /** A run whose context passes this many tokens writes its handover and gets a fresh session. */
 export const FLIGHT_CONTEXT_ROTATE_TOKENS = 150_000;
+/**
+ * ...but only once it has grown this much since the session's first turn. A fresh session that
+ * starts above the line would otherwise hand over on every first turn: on 7 November FLIGHT
+ * started at 157K and handed over 300 times in five hours.
+ */
+export const FLIGHT_CONTEXT_GROWTH_TOKENS = 50_000;
+/** Handovers (rotations) in an hour before the watch stops restarting FLIGHT and says why. */
+export const FLIGHT_ROTATIONS_MAX = 4;
+/** After the handover guard stops FLIGHT, the hub starts it again on its own this long after. */
+export const FLIGHT_GUARD_COOLDOWN_MS = 30 * 60_000;
+/**
+ * The guard's note. The first trip says when FLIGHT comes back on its own; a trip right after that
+ * restart stays stopped until the operator starts it.
+ */
+export const flightRotationLoopText = (
+  n: number,
+  startTokens: number | null,
+  again = false,
+): string =>
+  `FLIGHT handed over ${n} times in an hour, so the hub stopped restarting it${startTokens === null ? "" : `: a fresh session starts at ${Math.round(startTokens / 1000)}K tokens of context`}. Each handover costs a full session start. ${
+    again
+      ? "It has done this twice in a row, so it stays stopped until you start it. Your messages are kept and reach it when it starts."
+      : `The hub starts it again in ${FLIGHT_GUARD_COOLDOWN_MS / 60_000} minutes. Your messages are kept until then.`
+  }`;
 /** The repo memory topic FLIGHT writes its handover to (with `remember`). */
 export const FLIGHT_HANDOVER_TOPIC = "handover";
 export const FLIGHT_HANDOVER_ASK = `[Mission Control] Handover: your context is past ${FLIGHT_CONTEXT_ROTATE_TOKENS / 1000}K tokens, so a fresh session takes over after this turn. Write your handover with \`track\` / \`remember\` (topic "${FLIGHT_HANDOVER_TOPIC}"): what you are in the middle of, what you promised, what you are waiting on. Then end your turn.`;
@@ -1367,7 +1523,9 @@ export const flightStartFailedText = (reason: string): string =>
 export const WAKE_ASK =
   "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary for the operator.";
 
-const counted = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+/** "1 change", "2 changes". */
+export const counted = (n: number, one: string, many: string): string =>
+  `${n} ${n === 1 ? one : many}`;
 
 /** "2 questions · 1 free seat · 1 parked · 1 PR in review", with singulars; "nothing new" when all are 0. */
 export function wakeSummary(s: FlightState): string {
@@ -1395,6 +1553,21 @@ export function wakeSummary(s: FlightState): string {
   return parts.length === 0 ? "nothing new" : parts.join(" · ");
 }
 
+/**
+ * Whether queued reviews stand still while a review seat could take work. Two cases, each past
+ * FLIGHT_IDLE_MS: an idle seat's own queued review (the engine only moves a review off a seat that
+ * is busy or at its stop, not off a free one that has not started it), or a review queued on a seat
+ * that is neither idle nor running a review (unavailable or paused) while another review seat is
+ * idle. A review waiting behind a seat that is running one is routine.
+ */
+export function reviewFaultStands(q: FlightState["reviewQueue"]): boolean {
+  const seats = (q?.seats ?? []).filter(
+    (x) => x.queued > 0 && (x.waitMin ?? 0) * 60_000 >= FLIGHT_IDLE_MS,
+  );
+  const anyIdle = q?.seats.some((x) => x.idle) === true;
+  return seats.some((x) => x.idle || (anyIdle && x.running === 0));
+}
+
 export function wakeLine(
   s: FlightState,
   digest: FlightWake | FlightState = s,
@@ -1404,12 +1577,12 @@ export function wakeLine(
   const productPass = s.prs.some((p) => p.state === "merged")
     ? " A merged PR is listed: inspect its paths; if it touches apps/web, render the affected HUD page at 1600×1000, compare it with the mockup, direction and repo memory, then file or fold any gap, citing the `Reference: hud-shot:<id>` line the tool returned."
     : "";
-  const idleReviewFault =
-    (s.reviewQueue?.queued ?? 0) > 0 && s.reviewQueue?.seats.some((seat) => seat.idle)
-      ? " Queued reviews with idle review seats are a fault: name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
-      : "";
+  const idleReviewFault = reviewFaultStands(s.reviewQueue)
+    ? " Queued reviews with idle review seats are a fault (wait_on target `idle-reviewers`): name the hold and feedback loop (the hold blocks reviews, and reviews cannot merge), then act or report the fix you need."
+    : "";
   const idleSeats = idleLong(s.wake?.idle).length > 0 ? ` ${IDLE_SEAT_ASK}` : "";
-  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
+  const owed = s.wake?.owed?.length ? ` ${owedAsk(s.wake.owed)}` : "";
+  return `${FLIGHT_WAKE_HEAD} ${wakeSummary(s)} · woke on: ${causes.join(", ").slice(0, 700) || FLIGHT_WAKE_REMINDER}\n${WAKE_ASK}${idleSeats}${owed}${idleReviewFault}${productPass}${preface === "" ? "" : ` ${preface}`}\n${JSON.stringify(digest)}`;
 }
 
 /** A reply prepared by FLIGHT; only the HUD may post it. */

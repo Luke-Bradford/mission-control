@@ -13,6 +13,7 @@ import { type Gql, GqlError, isObj, isTransient } from "./collectors/github.ts";
 import type { CcConfig } from "./config.ts";
 import { singleSelectField } from "./github-fields.ts";
 import { readStatusField } from "./github-setup.ts";
+import { ownsPr } from "./ownership.ts";
 import { reworkReview } from "./rework.ts";
 import type { Store } from "./store.ts";
 
@@ -77,10 +78,10 @@ const BEFORE_REVIEW: readonly HudColumn[] = [
 
 /**
  * Moves each ticket's card to follow its closing PRs, falling back to the PR's branch-first ticket.
- * All hubs follow PRs for every lane: there is one hub per repo today.
+ * Only PRs this hub owns are followed (`ownsPr`): another hub's PRs on the repo are left alone.
  * An open, ready PR puts an earlier card In review, unless its newest review found blocking problems on its head; a merged closing PR puts it Done.
- * A branch-only match needs the issue itself closed. PRs all closed
- * unmerged send an In review card back to Ready. Live runs belong to the engine; planner cards
+ * A branch-only match needs the issue itself closed. A PR closed unmerged moves
+ * nothing: the agent or FLIGHT decides. Live runs belong to the engine; planner cards
  * stay put. A successful move to a column happens once per PR, leaving later hand moves alone.
  * Each attempt is a `board_moves` row under `pr:<repo>#<number>`; failures wait five minutes.
  * True when a card moved. `moveCard` skips a card already in the target column.
@@ -102,6 +103,7 @@ export async function followPrs(deps: MoveDeps, repoId: RepoId): Promise<boolean
 
   const byTicket = new Map<number, PullRequestView[]>();
   for (const pr of store.pullRequests(repoId)) {
+    if (!ownsPr(store, repoId, pr)) continue;
     const ticket = /^(.+)#(\d+)$/.exec(pr.ticket ?? "");
     const issues = pr.closingIssues?.length
       ? pr.closingIssues
@@ -145,8 +147,6 @@ export async function followPrs(deps: MoveDeps, repoId: RepoId): Promise<boolean
       // (or its next seat) moves the card when the next push is pending review.
       if (!open.isDraft && BEFORE_REVIEW.includes(column) && reworkReview(store, open) === null)
         target = "In review";
-    } else if (!merged && column === "In review") {
-      target = "Ready";
     }
     if (!target || !by) continue;
     const runId = `pr:${repoId}#${by.number}`;

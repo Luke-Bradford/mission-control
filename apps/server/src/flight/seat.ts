@@ -6,6 +6,10 @@ import {
   seatUnavailable,
 } from "../config.ts";
 
+/** The ids of every configured seat; their call signs differ only in case. */
+export const crewSeatIds = (config: CcConfig): string[] =>
+  config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [];
+
 /**
  * The watch seat (the first seat that is not retiring and whose seatDef loop is "watch") and its
  * session, else null. Kept apart from state.ts so the mc tools can name FLIGHT without importing

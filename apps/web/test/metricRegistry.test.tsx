@@ -13,6 +13,7 @@ import { Comms } from "../src/pages/Comms.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
+import { Header } from "../src/shell/Header.tsx";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
 import {
@@ -90,19 +91,20 @@ const PAGES: { name: string; page: () => ReactElement; shows: MetricId[] }[] = [
   },
   // Only the open tab is mounted, so each tab that shows a figure is opened by its link.
   {
-    name: "FLIGHT",
-    page: () => flightAt("#askP"),
-    shows: ["needsYou"],
-  },
-  {
     name: "FLIGHT Crew & board",
     page: () => flightAt("#wifP"),
-    shows: ["inProgress", "blocked", "needsYou"],
+    shows: ["inProgress", "blocked"],
   },
   {
     name: "FLIGHT What FLIGHT did",
     page: () => flightAt("#outcomesP"),
-    shows: ["cost", "needsYou"],
+    shows: ["cost"],
+  },
+  // Needs you has one home: the header tab.
+  {
+    name: "Header",
+    page: () => <Header page="board" />,
+    shows: ["needsYou"],
   },
   {
     name: "Telemetry",

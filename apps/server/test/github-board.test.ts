@@ -6,6 +6,7 @@ import { type BoardItem, NEW_LOOP, type PullRequestView, type Run } from "@mc/co
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Gql, GqlError, GqlTransportError } from "../src/collectors/github.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
+import { askExternalReview } from "../src/external-pr-control.ts";
 import {
   BOARD_IDS_TTL_MS,
   checkCardFieldOptions,
@@ -15,8 +16,10 @@ import {
   moveCard,
 } from "../src/github-board.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const NOW = 1_000_000_000;
+const SHA40 = "a".repeat(40);
 
 const STATUS_OPTIONS = [
   { id: "O_todo", name: "Todo" },
@@ -413,7 +416,7 @@ describe("followPrs", () => {
     createdAt: 1,
     updatedAt: 1,
     mergedAt: null,
-    headSha: null,
+    headSha: SHA40,
     mergeable: null,
     ...over,
   });
@@ -444,20 +447,36 @@ describe("followPrs", () => {
     prs: PullRequestView[],
     cfg = config,
     closed = false,
+    owned = true,
   ) {
     const b = fakeBoard({ itemStatus: optionId });
     store.replaceBoard("mc", [{ ...card(status), closed }]);
     store.upsertPullRequests("mc", prs, NOW);
+    // a hub follows only the PRs it owns; asking for a review is how a hand-opened PR becomes one
+    if (owned)
+      for (const p of prs) askExternalReview(store, "mc", p.number, "CAPCOM", NOW, p.headSha ?? "");
     await followPrs({ gql: b.gql, store, config: cfg, now: () => now }, "mc");
     return b;
   }
 
-  it("moves a Backlog card to In review for an open PR no run owns", async () => {
+  it("moves a Backlog card to In review for an open PR this hub was asked to review", async () => {
     const b = await follow("", "O_todo", [pr()]);
     expect(b.state.card).toBe("O_review");
     expect(store.boardMoves(0)).toMatchObject([
       { runId: "pr:mc#91", issue: 7, column: "In review", state: "done" },
     ]);
+  });
+
+  it("leaves the card of a PR no run here made and nobody asked about", async () => {
+    const b = await follow("", "O_todo", [pr()], config, false, false);
+    expect(b.mutations()).toHaveLength(0);
+    expect(store.boardMoves(0)).toEqual([]);
+  });
+
+  it("moves the card of a PR this hub's run made, with no ask", async () => {
+    store.upsertRun(run({ branch: "work/7-x", status: "ok", endedAt: NOW }));
+    const b = await follow("", "O_todo", [pr()], config, false, false);
+    expect(b.state.card).toBe("O_review");
   });
 
   /** A reported review of PR 91's head `sha` with `blocking` Important findings. */
@@ -621,9 +640,9 @@ describe("followPrs", () => {
     expect(again.mutations()).toHaveLength(0);
   });
 
-  it("moves an In review card back to Ready when the PR closed unmerged", async () => {
+  it("leaves an In review card where it is when the PR closed unmerged", async () => {
     const b = await follow("In Review", "O_review", [pr({ state: "closed" })]);
-    expect(b.state.card).toBe("O_todo");
+    expect(b.mutations()).toHaveLength(0);
     const other = await follow("Blocked", "O_blocked", [pr({ state: "closed" })]);
     expect(other.mutations()).toHaveLength(0);
   });
@@ -645,13 +664,16 @@ describe("followPrs", () => {
   it.each([
     ["open", "", "O_todo", "O_review"],
     ["merged", "In Review", "O_review", "O_done"],
-    ["closed", "In Review", "O_review", "O_todo"],
+    ["closed", "In Review", "O_review", "O_review"],
   ] as const)(
     "follows closing references for a %s PR, independent of its branch",
     async (state, status, from, to) => {
       const b = await follow(status, from, [pr({ state, ticket: "mc#99", closingIssues: [6, 7] })]);
       expect(b.state.card).toBe(to);
-      expect(store.boardMoves(0)).toMatchObject([{ issue: 7, state: "done" }]);
+      // a closed PR starts no move
+      expect(store.boardMoves(0)).toMatchObject(
+        state === "closed" ? [] : [{ issue: 7, state: "done" }],
+      );
     },
   );
 
@@ -665,10 +687,8 @@ describe("followPrs", () => {
         config,
         state === "merged",
       );
-      expect(b.state.card).toBe(
-        state === "open" ? "O_review" : state === "merged" ? "O_done" : "O_todo",
-      );
-      expect(b.mutations()).toHaveLength(1);
+      expect(b.state.card).toBe(state === "merged" ? "O_done" : "O_review");
+      expect(b.mutations()).toHaveLength(state === "closed" ? 0 : 1);
     },
   );
 
@@ -689,6 +709,13 @@ describe("followPrs", () => {
     expect(store.pullRequests("mc")[0]).toMatchObject({ closingIssues: [], ticket: "mc#7" });
     const b = fakeBoard({ itemStatus: "O_review" });
     store.replaceBoard("mc", [{ ...card("In Review"), closed: true }]);
+    // an old row has no head yet; the next poll gives it one, and the ask binds to that head
+    store.upsertPullRequests(
+      "mc",
+      [{ ...defined(store.pullRequests("mc")[0]), headSha: SHA40 }],
+      NOW,
+    );
+    askExternalReview(store, "mc", 91, "CAPCOM", NOW, SHA40);
     expect(await followPrs({ gql: b.gql, store, config, now: () => now }, "mc")).toBe(true);
     expect(b.state.card).toBe("O_done");
   });
@@ -741,6 +768,7 @@ describe("followPrs", () => {
     b.state.mutationFailures = [new GqlTransportError("github: HTTP 403", 403)];
     store.replaceBoard("mc", [card("Todo")]);
     store.upsertPullRequests("mc", [pr()], NOW);
+    askExternalReview(store, "mc", 91, "CAPCOM", NOW, SHA40);
     const deps = { gql: b.gql, store, config, now: () => now };
     expect(await followPrs(deps, "mc")).toBe(false);
     expect(store.boardMovesOfRun("pr:mc#91")).toMatchObject([{ state: "failed", at: NOW }]);

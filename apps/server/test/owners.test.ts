@@ -178,12 +178,17 @@ describe("Needs-you owners", () => {
     // a bare pass (before #758) does not hand it over; FLIGHT's brief does
     store.passQuestion(id, NOW);
     expect(owners(c)[key]).toBe("flight");
+    // the entry check (#1543): the question's run names the ticket, and the brief is complete
+    store.upsertRun(run({ id: "c1", ticket: "shop-app#1" }));
     store.addBrief({
       key,
-      context: "c",
+      context: "The crew asked a question and waits for an answer.",
       ask: "Q?",
       recommendation: "r",
-      options: [],
+      options: [
+        { label: "Yes", answer: "yes" },
+        { label: "No", answer: "no" },
+      ],
       basis: "b",
       at: NOW,
       for: "operator",

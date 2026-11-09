@@ -61,13 +61,22 @@ it("keeps an ended run's old question resolved after its sender starts another r
 });
 
 it("keeps a qualified PR question and its reply in the same repository thread", async () => {
-  const deps = { store, crew: () => ["seat", "other"], knownSecrets: async () => [] };
-  const question = await sendComms({ ...deps, ticket: "repo#42" }, "CAPCOM", {
-    to: "seat",
-    ref: "PR 7",
-    label: "question",
-    text: "What did QA test?",
-  });
+  const deps = {
+    store,
+    crew: () => ["seat", "other"],
+    knownSecrets: async () => [],
+    senderKind: "seat" as const,
+  };
+  const question = await sendComms(
+    { ...deps, ticket: "repo#42", senderKind: "operator" },
+    "CAPCOM",
+    {
+      to: "seat",
+      ref: "PR 7",
+      label: "question",
+      text: "What did QA test?",
+    },
+  );
   const reply = await sendComms(deps, "seat", {
     to: "CAPCOM",
     ref: "PR 7",
@@ -118,6 +127,7 @@ it("stores labels, reply mentions and reactions without waking for a reaction", 
       store,
       crew: () => ["seat", "other"],
       knownSecrets: async () => [],
+      senderKind: "seat" as const,
       now: () => 10,
       notify,
       seatSender: true,
@@ -130,6 +140,7 @@ it("stores labels, reply mentions and reactions without waking for a reaction", 
       store,
       crew: () => ["seat", "other"],
       knownSecrets: async () => [],
+      senderKind: "seat" as const,
       now: () => 11,
       notify,
       seatSender: true,
@@ -153,6 +164,7 @@ it("notifies direct recipients, mentions and reply authors once each", async () 
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     now: () => 10,
     notify,
     seatSender: true,
@@ -180,11 +192,17 @@ it("wakes for labelled CAPCOM direct Comms but not FYI, channel posts or reactio
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     notify,
     seatSender: false,
   };
-  const direct = await sendComms(deps, "CAPCOM", { to: "seat", text: "direct", label: "handoff" });
-  await sendComms(deps, "CAPCOM", { to: "seat", text: "FYI" });
+  const asOperator = { ...deps, senderKind: "operator" as const };
+  const direct = await sendComms(asOperator, "CAPCOM", {
+    to: "seat",
+    text: "direct",
+    label: "handoff",
+  });
+  await sendComms(asOperator, "CAPCOM", { to: "seat", text: "FYI" });
   await sendComms(deps, "seat", { to: "CAPCOM", text: "channel" });
   reactComms(store, "seat", direct.id, "seen", undefined, 12);
 
@@ -208,6 +226,7 @@ it.each(["seat", "other"])(
           }),
         notify,
         seatSender: true,
+        senderKind: "seat",
       },
       "seat",
       { to: "other", text: "hello" },
@@ -227,6 +246,7 @@ it("refuses guessed private messages for reactions and replies", async () => {
     store,
     crew: () => ["seat", "other", "third"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     seatSender: true,
   };
   const privateMessage = await sendComms(deps, "seat", { to: "other", text: "private" });
@@ -248,6 +268,7 @@ it("builds an inbox from direct, mention, reply and pinned messages without dupl
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     now: () => at++,
     seatSender: true,
   };
@@ -328,11 +349,95 @@ it("keeps the newest oversized inbox row and marks delivered rows read", () => {
   expect(delivered.length).toBeLessThanOrEqual(COMMS_INBOX_PROMPT_MAX);
   expect(delivered).toContain(newest.id);
   expect(delivered).toContain("stored text cut");
-  expect(delivered).toContain('"unread":true');
   store.markCommsInboxRead("seat", inbox.messageIds);
 
+  // delivered once: the next line does not carry it again
   const later = commsInboxPrompt(store, "seat", "r");
-  expect(later).toContain('"unread":false');
+  expect(later).not.toContain(newest.id);
+  expect(later).not.toContain('"unread":false');
+});
+
+it("does not attach a message already sent to a seat to its next delivered line", () => {
+  const first = store.addComms({
+    at: 1,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "first",
+    targetRunId: "r",
+  });
+  if (first === null) throw new Error("expected stored Comms row");
+  const start = commsInboxContext(store, "seat", "r");
+  expect(start.text).toContain("first");
+  store.markCommsInboxRead("seat", start.messageIds);
+  const second = store.addComms({
+    at: 2,
+    from: "other",
+    to: "seat",
+    ticket: null,
+    text: "second",
+    targetRunId: "r",
+  });
+  if (second === null) throw new Error("expected stored Comms row");
+  const next = commsInboxContext(store, "seat", "r");
+  expect(next.messageIds).toEqual([second.id]);
+  expect(next.text).toContain("second");
+  expect(next.text).not.toContain("first");
+  store.markCommsInboxRead("seat", next.messageIds);
+  expect(commsInboxContext(store, "seat", "r").messageIds).toEqual([]);
+});
+
+it("stores a seat message with the sender's run ticket in repo#n form", async () => {
+  const deps = {
+    store,
+    crew: () => ["seat", "other"],
+    knownSecrets: async () => [],
+    senderKind: "seat" as const,
+    now: () => 10,
+    seatSender: true,
+    senderTicket: "mc#42",
+  };
+  const plain = await sendComms(deps, "seat", { to: "other", text: "no ticket given" });
+  expect(plain.ticket).toBe("mc#42");
+  // a short-form ref is stored in the one long form, not as #7
+  const named = await sendComms(deps, "seat", { to: "other", text: "about seven", ref: "#7" });
+  expect(named.ticket).toBe("mc#7");
+  // a reply inherits the ticket of the message it answers, in the one form
+  const old = store.addComms({ at: 1, from: "other", to: "seat", ticket: "#9", text: "old" });
+  if (old === null) throw new Error("expected stored Comms row");
+  const reply = await sendComms(deps, "seat", { to: "other", text: "reply", replyTo: old.id });
+  expect(reply.ticket).toBe("mc#9");
+});
+
+it("stores an identical message sent again within a minute once, and counts the repeat", async () => {
+  let at = 1_000;
+  const notify = vi.fn();
+  const deps = {
+    store,
+    crew: () => ["seat", "other"],
+    knownSecrets: async () => [],
+    senderKind: "seat" as const,
+    now: () => at,
+    seatSender: true,
+    notify,
+  };
+  const input = { to: "other", text: "same words", label: "handoff" as const };
+  const first = await sendComms(deps, "seat", input);
+  expect(first.repeat).toBeUndefined();
+  at += 3_000;
+  const again = await sendComms(deps, "seat", input);
+  expect(again.id).toBe(first.id);
+  expect(again.repeat).toBe(true);
+  expect(store.comms(0)).toHaveLength(1);
+  expect(store.commsRepeatCount(0)).toBe(1);
+  // the recipient is woken by the first copy only
+  expect(notify).toHaveBeenCalledTimes(1);
+  // a different recipient or text is not a repeat; the same text after the window is stored
+  await sendComms(deps, "seat", { ...input, to: "crew" });
+  at += 61_000;
+  const later = await sendComms(deps, "seat", input);
+  expect(later.id).not.toBe(first.id);
+  expect(store.comms(0)).toHaveLength(3);
 });
 
 it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", async () => {
@@ -341,6 +446,7 @@ it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", asy
     store,
     crew: () => ["seat", "other"],
     knownSecrets: async () => [],
+    senderKind: "seat" as const,
     now: () => at++,
     seatSender: true,
   };
@@ -414,3 +520,19 @@ it.each([false, true])(
     expect(stream.readStream).toHaveBeenCalledTimes(130);
   },
 );
+
+it("closes an open question on the addressee's seen reaction, not anyone else's", () => {
+  const m = store.addComms({
+    at: 4,
+    from: "seat",
+    to: "other",
+    ticket: null,
+    text: "Which option?",
+    label: "question",
+  });
+  if (!m) throw new Error("missing message");
+  store.addCommsReaction(m.id, "third", "seen", undefined, 5);
+  expect(store.openCommsItems().map((i) => i.id)).toEqual([m.id]);
+  reactComms(store, "other", m.id, "seen", undefined, 6);
+  expect(store.openCommsItems()).toEqual([]);
+});

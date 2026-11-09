@@ -10,7 +10,7 @@ import {
   describeRendered,
   type RenderedPage,
 } from "./browserRunner.ts";
-import { demoSeed } from "./overviewDensityFixtures.ts";
+import { demoSeed, overviewDensityFixture } from "./overviewDensityFixtures.ts";
 
 const { renderAt } = browserSession();
 const HARNESS = "test/demoBrowser.html";
@@ -169,9 +169,11 @@ describeRendered("Demo, rendered", () => {
       // One write, from the Away modal.
       await page.click("button[title^='Away mode']");
       await page.click(".awaypanel .sw input");
+      // a change is only a draft: Save sends it, and the demo refuses it in the form's summary
+      await page.click(".awaypanel button[type=submit]");
       await eventually(
         page,
-        async () => (await text(page, "#toast")).includes(DEMO_REFUSED),
+        async () => (await text(page, ".awaypanel .fsum")).includes(DEMO_REFUSED),
         "the refusal on screen",
       );
       // One click on a same-origin /api/ link.
@@ -245,6 +247,41 @@ describeRendered("Demo, rendered", () => {
       expect(back).toContain("/api/stream");
       expect(back).toContain("/api/crew?shape=summary");
       expect(await page.evaluate(() => window.__noReload, undefined)).toBe(true);
+      expect(page.errors()).toEqual([]);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "plays Demo when the hub has no runs",
+    async () => {
+      // The live API answers as an empty hub: no runs, no seats working.
+      const empty = overviewDensityFixture("empty");
+      expect(empty.rows).toEqual([]);
+      const page = await renderAt({
+        page: HARNESS,
+        width: 1600,
+        height: 900,
+        search: "?demo=1&at=%2F",
+        api: empty.api,
+      });
+      await page.box(".demo-marker");
+      expect(await text(page, ".demo-marker")).toBe("DEMO");
+      await eventually(
+        page,
+        async () => (await count(page, "#agentsList .trow:not(.head)")) >= 10,
+        "the Demo crew",
+      );
+      expect(apiRequests(page)).toEqual([]);
+      await page.click(".demo-switch");
+      await eventually(
+        page,
+        async () => (await count(page, ".demo-marker")) === 0,
+        "the marker to go",
+      );
+      await page.evaluate(() => new Promise((r) => setTimeout(r, 800)), undefined);
+      expect(await count(page, "[role=alert]")).toBe(0);
       expect(page.errors()).toEqual([]);
       await page.close();
     },

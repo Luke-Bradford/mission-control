@@ -142,8 +142,8 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
       );
       if (unfit !== null) return fail(unfit);
       if (a.body !== undefined) {
-        // the Controller check section is the controller's: FLIGHT may add an item (add_controller_check)
-        // but a whole-body edit may not drop or change it, and an unreadable ticket is not edited
+        // the Controller check section changes only with add_controller_check, and an unreadable
+        // ticket is not edited
         const current = await stateOf(repo, a.issue);
         if (current === null || current.bodyTruncated)
           return fail("Refused: the ticket's current body could not be read whole.");
@@ -152,7 +152,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
           ticketControllerCheck({ body: a.body, bodyTruncated: false })
         )
           return fail(
-            "The Controller check section is the controller's; use add_controller_check to add an item.",
+            "The Controller check section changes only through add_controller_check; use it to add an item.",
           );
       }
       if (away()) return fail(AWAY_WRITES_REFUSED);
@@ -249,13 +249,9 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
         });
         if (!r.ok) return stop(r.reason);
         // its own kind, not promote's
-        store.addFlightDecision({
-          at: now(),
+        h.record(now(), {
           kind: "status",
-          seatId: null,
-          targetRunId: null,
           ref,
-          questionId: null,
           about: `${ref}: ${found.title}`,
           decision: `Set status to ${a.status}`,
           basis: a.basis,

@@ -612,3 +612,15 @@ it("never says no conflicts when some branches went unchecked", () => {
   value.conflictsUnchecked = [];
   expect(conflictSummary(value)).toBe("No merge conflicts found between open branches");
 });
+
+it("shows each area's file count and no size figure, since a tile's weight is not a line count", () => {
+  const value = ownershipSnapshot();
+  value.tree = value.tree.map((file) => ({ ...file, lines: 9_448_933 }));
+  render(<OwnershipLens snapshot={value} onFocus={noop} />);
+  expect(ownership().textContent).not.toContain("lines");
+  expect(ownership().textContent).not.toContain("9,448,933");
+  const none = [...ownership().querySelectorAll(".map-lens-row")].find((row) =>
+    row.textContent?.startsWith("none"),
+  );
+  expect(none?.textContent).toMatch(/everything else\d+$/);
+});

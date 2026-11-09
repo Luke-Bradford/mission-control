@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   type AccountId,
   type AgentId,
+  type AuditThresholds,
   BUILTIN_ROLES,
   COMMS_CREW,
   CONFIG_SEAT_MODES,
@@ -75,7 +76,12 @@ export interface AdoptedLoop {
   worktree: string;
   launchdLabel: string;
   logsDir?: string;
+  /** How the loop is paused besides a TA loop's PAUSE file: a stop file, or the issue that pauses it. */
+  pausedBy?: LoopPausedBy;
 }
+
+/** A watched loop's configured pause: the stop file it checks, or the issue that pauses it. */
+export type LoopPausedBy = { stopFile: string } | { issue: { repoId: RepoId; number: number } };
 
 /** Editable display metadata stays separate from the seat's stable identity. */
 export interface ConfigSeatInput extends SeatInput {
@@ -225,12 +231,24 @@ export type TeamsConfig = z.infer<typeof TeamsConfig>;
 
 export interface CcConfig {
   sources?: { teams?: TeamsConfig };
+  /**
+   * Token audit options. `controllerSessions` (default off): read usage numbers of controller
+   * sessions from the operator's Claude Code folder for `controllerCheckout` (default: the hub's own checkout).
+   */
+  audit?: {
+    controllerSessions: boolean;
+    controllerCheckout?: string;
+    /** Message-problem thresholds for Audit; each left out takes `AUDIT_THRESHOLD_DEFAULTS`. */
+    thresholds?: Partial<AuditThresholds>;
+  };
   operator: { id: string; timezone: string; githubLogins?: string[] };
   accounts: {
     id: AccountId;
     vendor: "claude" | "codex";
     alertAt: number;
     stopAt: number;
+    /** false: no budget brake on this account; stop_at alone limits it. Unset: the brake applies. */
+    brake?: boolean;
     cliProfile?: string;
     /** Input + output tokens one review run on this account may use; unset: the vendor's default (reviewTokenBudgetOf). */
     reviewTokenBudget?: number;
@@ -293,6 +311,26 @@ export const HUB_UPDATES = ["off", "auto"] as const;
 export type HubUpdates = (typeof HUB_UPDATES)[number];
 
 /** A repo's current `flight_powers`; `standard` for a repo the config does not list. */
+/** The Audit thresholds a config file sets; those it leaves out stay out, so the defaults apply. */
+function auditThresholdsOf(a: {
+  question_wait_minutes?: number;
+  controller_wait_minutes?: number;
+  ticket_text_factor?: number;
+  notice_repeats?: number;
+}): { thresholds?: Partial<AuditThresholds> } {
+  const t: Partial<AuditThresholds> = {
+    ...(a.question_wait_minutes === undefined
+      ? {}
+      : { questionWaitMs: a.question_wait_minutes * 60_000 }),
+    ...(a.controller_wait_minutes === undefined
+      ? {}
+      : { controllerWaitMs: a.controller_wait_minutes * 60_000 }),
+    ...(a.ticket_text_factor === undefined ? {} : { ticketTextFactor: a.ticket_text_factor }),
+    ...(a.notice_repeats === undefined ? {} : { noticeRepeats: a.notice_repeats }),
+  };
+  return Object.keys(t).length === 0 ? {} : { thresholds: t };
+}
+
 export function flightPowersOf(config: CcConfig, repoId: RepoId): FlightPowers {
   return config.repos.find((r) => r.id === repoId)?.flightPowers ?? "standard";
 }
@@ -492,6 +530,7 @@ const fileSchema = z
         vendor: z.enum(["claude", "codex"]),
         alert_at: percent,
         stop_at: percent,
+        brake: z.boolean().optional(),
         cli_profile: nonEmpty.optional(),
         review_token_budget: z.number().int().positive().optional(),
       }),
@@ -544,6 +583,15 @@ const fileSchema = z
         worktree: nonEmpty,
         launchd_label: z.string().regex(LAUNCHD_LABEL, "letters, digits, dot, underscore, hyphen"),
         logs_dir: nonEmpty.optional(),
+        // read-only: how the loop is paused, so its card says so and its issues stay on it
+        paused_by: z
+          .union([
+            z.strictObject({ stop_file: nonEmpty }),
+            z.strictObject({
+              issue: z.string().regex(/^[^#\s]+#\d+$/, "a repo id and issue number: repo#123"),
+            }),
+          ])
+          .optional(),
       }),
     ),
     poll: z.strictObject({
@@ -551,6 +599,16 @@ const fileSchema = z
       github_seconds: z.number().min(30).max(3600),
       board_minutes: z.number().min(5).max(60).default(15),
     }),
+    audit: z
+      .strictObject({
+        controller_sessions: z.boolean().default(false),
+        controller_checkout: nonEmpty.optional(),
+        question_wait_minutes: z.number().int().min(1).max(10_080).optional(),
+        controller_wait_minutes: z.number().int().min(1).max(10_080).optional(),
+        ticket_text_factor: z.number().min(1.1).max(100).optional(),
+        notice_repeats: z.number().int().min(2).max(100).optional(),
+      })
+      .default({ controller_sessions: false }),
     updates: z
       .strictObject({
         hub: z.enum(HUB_UPDATES).default("off"),
@@ -672,6 +730,7 @@ const fileSchema = z
         vendor: a.vendor,
         alertAt: a.alert_at,
         stopAt: a.stop_at,
+        ...(a.brake === undefined ? {} : { brake: a.brake }),
         ...(a.cli_profile === undefined ? {} : { cliProfile: a.cli_profile }),
         ...(a.review_token_budget === undefined
           ? {}
@@ -715,11 +774,33 @@ const fileSchema = z
         worktree: expandHome(l.worktree),
         launchdLabel: l.launchd_label,
         ...(l.logs_dir === undefined ? {} : { logsDir: expandHome(l.logs_dir) }),
+        ...(l.paused_by === undefined
+          ? {}
+          : {
+              pausedBy:
+                "stop_file" in l.paused_by
+                  ? { stopFile: expandHome(l.paused_by.stop_file) }
+                  : {
+                      issue: {
+                        repoId: l.paused_by.issue.slice(0, l.paused_by.issue.lastIndexOf("#")),
+                        number: Number(
+                          l.paused_by.issue.slice(l.paused_by.issue.lastIndexOf("#") + 1),
+                        ),
+                      },
+                    },
+            }),
       })),
       poll: {
         usageMinutes: f.poll.usage_minutes,
         githubSeconds: f.poll.github_seconds,
         boardMinutes: f.poll.board_minutes,
+      },
+      audit: {
+        controllerSessions: f.audit.controller_sessions,
+        ...(f.audit.controller_checkout === undefined
+          ? {}
+          : { controllerCheckout: f.audit.controller_checkout }),
+        ...auditThresholdsOf(f.audit),
       },
       updates: { hub: f.updates.hub, cli: f.updates.cli },
       ...(f.crew === undefined

@@ -15,6 +15,7 @@ import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { CcConfig } from "./config.ts";
 import type { GhRunner } from "./mcp/gh.ts";
+import { ownsBranch } from "./ownership.ts";
 import { CREW_GIT_SLOW_MS } from "./runtime/checkouts.ts";
 import { crewGit } from "./runtime/git.ts";
 import { crewDir, type Store } from "./store.ts";
@@ -210,10 +211,9 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
         }
         const live = liveBranches(repo.id);
         // another hub on this repo has runs this store cannot see: only a branch our own run made is ours
-        const ours = deps.store.runBranches(repo.id);
         for (const b of listed.branches) {
           if (
-            !ours.has(b.name) ||
+            !ownsBranch(deps.store, repo.id, b.name) ||
             isKept(b.name, listed.defaultBranch, repo.keepBranches ?? []) ||
             open.has(b.name) ||
             live.has(b.name) ||

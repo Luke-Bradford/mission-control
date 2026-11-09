@@ -19,6 +19,7 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
+import { useOperatorUnread } from "./operatorMessages.ts";
 import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
@@ -39,7 +40,7 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
 export function Header({ page }: { page: Page }) {
-  const waiting = useNeedsCount().items.length;
+  const unread = useOperatorUnread().length;
   const demo = useDemo();
   return (
     <header className="top">
@@ -64,7 +65,7 @@ export function Header({ page }: { page: Page }) {
         <AwayButton />
         <ThemeButton />
         <SetupButton on={page === "setup"} />
-        <DockButton page={page} waiting={waiting} />
+        <DockButton page={page} unread={unread} />
       </div>
       <span className="sr-only">
         <LiveIndicator />
@@ -302,7 +303,7 @@ function NeedsTab({ on }: { on: boolean }) {
       ) : (
         <Lamp kind="off" label="nothing needs you" title={false} />
       )}
-      Needs you <b>{shown}</b>
+      Needs you <b data-metric="needsYou">{shown}</b>
     </a>
   );
 }
@@ -394,10 +395,10 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
 }
 
 /**
- * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Its badge is the
- * Needs-you count, which the chat's "Waiting on you" lists.
+ * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Its badge counts the
+ * unread messages addressed to the operator (CAPCOM); the Needs you tab owns the waiting count.
  */
-function DockButton({ page, waiting }: { page: Page; waiting: number }) {
+function DockButton({ page, unread }: { page: Page; unread: number }) {
   const dock = useDock();
   const inComms = page === "comms";
   const fullWidth = FULL_WIDTH_PAGES.has(page);
@@ -411,7 +412,7 @@ function DockButton({ page, waiting }: { page: Page; waiting: number }) {
       type="button"
       className={`iconbtn${inComms || (!fullWidth && dock.visible && !dock.collapsed) ? " on" : ""}`}
       title={title}
-      aria-label={waiting > 0 ? `FLIGHT chat, ${waiting} waiting on you` : "FLIGHT chat"}
+      aria-label={unread > 0 ? `FLIGHT chat, ${unread} unread to you` : "FLIGHT chat"}
       aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible && !dock.collapsed}
       onClick={() => {
         if (fullWidth) navigate(PAGE_PATHS.comms);
@@ -428,7 +429,7 @@ function DockButton({ page, waiting }: { page: Page; waiting: number }) {
           strokeLinejoin="round"
         />
       </svg>
-      {waiting > 0 && <span className="dock-unread">{waiting}</span>}
+      {unread > 0 && <span className="dock-unread">{unread}</span>}
     </button>
   );
 }

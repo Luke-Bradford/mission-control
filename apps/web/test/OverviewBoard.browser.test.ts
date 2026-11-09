@@ -2,10 +2,11 @@
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import type { OverviewSummary } from "@mc/core";
+import type { AttentionItem, CrewRow, OverviewSummary } from "@mc/core";
 import { expect, it } from "vitest";
 import { SCROLL_SLACK_PX } from "../src/overview/useListFit.ts";
 import { browserSession, describeRendered, type RenderedPage } from "./browserRunner.ts";
+import { item } from "./fixtures.ts";
 import { overviewDensityFixture } from "./overviewDensityFixtures.ts";
 
 const { renderAt } = browserSession();
@@ -21,10 +22,51 @@ async function capture(page: RenderedPage, name: string) {
 async function open(
   width: number,
   height: number,
-  options: { dark?: boolean; scenario?: "busy" | "empty"; wideBusy?: boolean } = {},
+  options: {
+    dark?: boolean;
+    scenario?: "busy" | "empty";
+    wideBusy?: boolean;
+    /** A row paused by this issue; `decision` adds a loop-owned decision to its card. */
+    pausedBy?: { by: string; decision: boolean };
+  } = {},
 ) {
   const fixture = overviewDensityFixture(options.scenario ?? "busy");
   let api: Record<string, unknown> = fixture.api;
+  if (options.pausedBy) {
+    const { by, decision } = options.pausedBy;
+    const crew = api["/api/crew?shape=summary"] as { rows: CrewRow[] };
+    const target = crew.rows.find((r) => r.id === "dev-1");
+    if (!target) throw new Error("the density fixture has no dev-1 row");
+    const paused: CrewRow = {
+      ...target,
+      hudState: "parked",
+      paused: true,
+      pausedBy: by,
+      pausedByUrl: `https://github.com/acme/${by.replace("#", "/issues/")}`,
+    };
+    const attention = (api["/api/attention"] as AttentionItem[]).filter(
+      (entry) => entry.agentId !== target.id,
+    );
+    if (decision)
+      attention.push(
+        item({
+          key: `esc:${by}`,
+          escalationId: by,
+          ticket: by,
+          owner: "loop",
+          kind: "decision",
+          agentId: target.id,
+        }),
+      );
+    api = {
+      ...api,
+      "/api/crew?shape=summary": {
+        ...crew,
+        rows: crew.rows.map((r) => (r === target ? paused : r)),
+      },
+      "/api/attention": attention,
+    };
+  }
   if (options.wideBusy) {
     // In review holds 8 tickets and Merging 3: the case that used to leave review no card.
     const base = fixture.api["/api/overview"] as OverviewSummary;
@@ -236,5 +278,79 @@ describeRendered("Overview Board at the real sizes", () => {
       }
     },
     120_000,
+  );
+
+  const LONG_REPO = `${"long-repository-name-".repeat(6)}x`.slice(0, 114);
+  it.each([
+    ["a short repo", "shop-app#4321", false],
+    ["a 120-character repo", `${LONG_REPO}#4321`, false],
+    ["a loop-owned decision on the card", "shop-app#4321", true],
+  ] as const)(
+    "shows the pause line for %s as a 24 px link, clipped with its full text in the title",
+    async (name, by, decision) => {
+      for (const width of [1280, 1600])
+        for (const dark of [false, true]) {
+          const page = await open(width, 900, { dark, pausedBy: { by, decision } });
+          const found = await page.evaluate((ref) => {
+            const link = document.querySelector<HTMLElement>(
+              `#agentsList .work-cell a[href$="/issues/4321"]`,
+            );
+            if (!link) return null;
+            link.scrollIntoView({ block: "center" });
+            const line = link.closest<HTMLElement>("span.ellip");
+            const cell = link.closest<HTMLElement>(".work-cell");
+            const box = link.getBoundingClientRect();
+            const room = cell?.getBoundingClientRect();
+            // A part is visible when it has width and sits inside the cell, so no clip hides it.
+            const shown = (part: Element | null | undefined) => {
+              const rect = part?.getBoundingClientRect();
+              return (
+                !!rect &&
+                !!room &&
+                rect.width > 0 &&
+                rect.left >= room.left &&
+                rect.right <= room.right + 0.5
+              );
+            };
+            const parts = [...(line?.children ?? [])];
+            const pauseLabel = parts.find((part) => part.textContent?.trim() === "Paused by");
+            const last = parts.find((part) => part.textContent?.includes("last #"));
+            return {
+              labelShown: shown(pauseLabel),
+              lastShown: shown(last),
+              lastText: last?.textContent ?? "",
+              width: box.width,
+              height: box.height,
+              startsInside: !!room && box.left >= room.left && box.left < room.right,
+              clipped: !!line && line.scrollWidth > line.clientWidth,
+              title: line?.title ?? "",
+              cell: cell?.textContent ?? "",
+              href: link.getAttribute("href"),
+              target: link.getAttribute("target"),
+              ref,
+            };
+          }, by);
+          const label = `${name} at ${width} ${dark ? "dark" : "light"}`;
+          expect(found, label).not.toBeNull();
+          expect(found?.width, label).toBeGreaterThanOrEqual(24);
+          expect(found?.height, label).toBeGreaterThanOrEqual(24);
+          expect(found?.startsInside, label).toBe(true);
+          expect(found?.target, label).toBe("_blank");
+          expect(found?.cell, label).toContain("Paused by");
+          // The long reference shortens by itself; "Paused by" and "· last #N" stay whole.
+          expect(found?.labelShown, label).toBe(true);
+          expect(found?.lastShown, label).toBe(true);
+          expect(found?.lastText, label).toMatch(/last #\d+/);
+          // When the line is cut with an ellipsis, the tooltip still holds the whole reference.
+          if (found?.clipped) expect(found.title, label).toContain(by);
+          if (decision) expect(found?.cell, label).toContain("Decision for");
+          await capture(
+            page,
+            `overview-paused-by-${name.replace(/[^a-z0-9]+/gi, "-")}-${width}-${dark ? "dark" : "light"}`,
+          );
+          expect(page.errors(), label).toEqual([]);
+        }
+    },
+    180_000,
   );
 });

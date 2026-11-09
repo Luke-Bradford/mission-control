@@ -1,5 +1,6 @@
 import type { EvidenceManifest, PullRequestView } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
+import { askExternalReview } from "../src/external-pr-control.ts";
 import type { EvidenceTarget } from "../src/pr-evidence/capture.ts";
 import {
   createEvidenceSweep,
@@ -38,9 +39,11 @@ const manifest: EvidenceManifest = {
 };
 const result = (value: unknown) => ({ code: 0, stdout: JSON.stringify(value), stderr: "" });
 describe("open PR evidence sweep", () => {
-  it("captures a trusted controller PR without a crew run and skips forks", async () => {
+  it("captures a trusted controller PR it was asked to review and skips forks", async () => {
     const store = new Store(":memory:");
     store.upsertPullRequests("mc", [pr(), pr(8)], 1);
+    askExternalReview(store, "mc", 7, "CAPCOM", 1, SHA);
+    askExternalReview(store, "mc", 8, "CAPCOM", 1, SHA);
     const ensure = vi.fn(async (_target: EvidenceTarget) => {});
     const sweep = createEvidenceSweep({
       store,
@@ -60,6 +63,41 @@ describe("open PR evidence sweep", () => {
     sweep.stop();
     await sweep.tick();
     expect(ensure).toHaveBeenCalledTimes(1);
+    store.close();
+  });
+  it("builds nothing and checks nothing for a PR this hub does not own", async () => {
+    const store = new Store(":memory:");
+    store.upsertPullRequests("mc", [pr()], 1);
+    const ensure = vi.fn(async (_target: EvidenceTarget) => {});
+    const trusted = vi.fn(async () => true);
+    const sweep = createEvidenceSweep({
+      store,
+      repoId: "mc",
+      evidence: { baseUrl: "http://localhost", ensure, gate: () => null, stop: async () => {} },
+      trusted,
+      post: async () => {},
+      log: () => {},
+    });
+    await sweep.tick();
+    expect(ensure).not.toHaveBeenCalled();
+    expect(trusted).not.toHaveBeenCalled();
+    store.close();
+  });
+  it("stops at a new head: the ask binds the head it was made for", async () => {
+    const store = new Store(":memory:");
+    store.upsertPullRequests("mc", [pr()], 1);
+    askExternalReview(store, "mc", 7, "CAPCOM", 1, "c".repeat(40));
+    const ensure = vi.fn(async (_target: EvidenceTarget) => {});
+    const sweep = createEvidenceSweep({
+      store,
+      repoId: "mc",
+      evidence: { baseUrl: "http://localhost", ensure, gate: () => null, stop: async () => {} },
+      trusted: async () => true,
+      post: async () => {},
+      log: () => {},
+    });
+    await sweep.tick();
+    expect(ensure).not.toHaveBeenCalled();
     store.close();
   });
   it("requires a fresh same-repository head before executing PR code", async () => {
