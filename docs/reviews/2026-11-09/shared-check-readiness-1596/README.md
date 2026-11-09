@@ -13,10 +13,24 @@ the visible scroll extent was 1,090 px instead of the required 1,391 px. This de
 fixed delay can read an unfinished keyboard scroll; it does not establish that every historical
 failure had the same timing.
 
-The test now waits, with a two-second deadline, for the actual scroll endpoint. It asserts that
-endpoint and retains the original exact text, horizontal containment and full vertical visibility
-assertions. No code sets scrollTop or forces the target into view. If native End does not work, the
-same assertions still fail. All four evidence-dialog browser cases pass after correction.
+The test waits, with a two-second deadline, for the actual scroll endpoint and asserts that endpoint.
+CI then exposed a second assumption: reaching the record bottom does not guarantee its middle
+Environment field is still visible. That head failed CI with 6,494 passing browser/core tests and
+one failed visibility assertion, despite passing the new endpoint assertion. The original local full
+pass is not relabelled as a CI pass.
+
+A realistic long cause-evidence field after Environment reproduces the problem locally, with fonts
+loaded: Environment spans y=68–132, above the body's y=139–650, while scrollTop 957 plus clientHeight
+511 equals the full 1,468 px scroll height. The corrected inspection keeps the End proof, then follows the normal Tab path into the expanded
+record and uses bounded native PageUp/PageDown steps. Each key waits for the browser's native
+`scrollend` signal before the next inspection. Merely reaching the first rounded endpoint did not
+reliably prepare the next key: diagnostic probes observed no movement even while a record control
+held focus. No claim is made about an unmeasured compositor cause. It first checks
+that the complete field can fit in the body. The original exact text, horizontal containment and
+full vertical visibility assertions remain intact. No code sets scrollTop or calls scrollIntoView.
+A broken End, a non-moving scroll region or an unreachable field still fails. Detailed geometry is
+retained on failure. The exact Linux geometry was not retained by the old CI assertion, so no
+unmeasured font-specific cause is claimed.
 
 ## Relay setup
 
@@ -48,3 +62,23 @@ The original crew worktree, native run, check receipts and push evidence are not
 controller checkout. After this shared correction is merged, the preserved author still needs its
 configured checks and real push. This partial fix closes neither #1596 nor #1626 and supplies no
 approval, review waiver, quota override, install exception or source-ownership exception.
+
+
+## Validation after the first CI result
+
+Head `3e26e6573595dd9cca3cb4e17cbd9f8fa6264876` passed its second full local run:
+14,665 tests across 534 files and the production build. It then failed CI on the Environment
+visibility assumption above. The added long trailing evidence reproduces that same visibility
+failure before the native-paging correction. The source now tests both real End behavior and
+keyboard inspection of a middle field. Final affected checks, a new full local run and fresh
+exact-head CI/review are recorded as they complete. No historical passing result clears a new head.
+
+All 54 affected cases pass after native scroll-completion handling: four real-browser cases, 23
+relay cases and 27 publisher cases. Repeated targeted inspection and the new full run are recorded
+separately; a focused pass does not clear the failed published-head CI.
+
+The corrected long-record inspection also passes all ten separate targeted invocations. Each
+invocation exercises the same six theme/count scenarios; these are repetitions, not ten additional
+unique tests. Earlier unsuccessful geometry/paging probes remain diagnostic history. The native
+`scrollend` preparation is used for both End and subsequent paging keys, with bounded waits and
+listener cleanup. No input, visibility assertion or failed published-head result is waived.
