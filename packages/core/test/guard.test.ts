@@ -19,6 +19,7 @@ import {
   type GuardContext,
   type GuardEvent,
   guardDecision,
+  inertNegatedClosingRefs,
   isFullSuite,
   MC_WRITER_TOOLS,
   REREAD_MIN_BYTES,
@@ -1907,6 +1908,44 @@ describe("guard targeted fix 3 (Plan 7a review): vitest arguments after --", () 
   it("matches isFullSuite", () => {
     expect(isFullSuite(["pnpm", "-s", "vitest", "run", "--", "x.test.ts"], FULL)).toBe(true);
     expect(isFullSuite(["pnpm", "-s", "vitest", "run", "x.test.ts"], FULL)).toBe(false);
+  });
+});
+
+describe("negated closing references in review prose", () => {
+  it.each([
+    ["This does not close #933.", "This does not close issue 933."],
+    ["This never fixes #933.", "This never fixes issue 933."],
+    ["This cannot resolve #933.", "This cannot resolve issue 933."],
+    ["This doesn't close #933.", "This doesn't close issue 933."],
+    ["This isn’t fixed #933.", "This isn’t fixed issue 933."],
+    ["NOT\nCLOSES: **#933**", "NOT\nCLOSES: **issue 933**"],
+  ])("renders %s without a closing command", (original, rendered) => {
+    expect(inertNegatedClosingRefs(original)).toBe(rendered);
+    expect(
+      firstPrNotifier(original, { repo: "o/mc", issue: 7, allowOwnRepoRefs: true }),
+    ).not.toBeNull();
+    expect(
+      firstPrNotifier(rendered, { repo: "o/mc", issue: 7, allowOwnRepoRefs: true }),
+    ).toBeNull();
+    expect(firstPrNotifier(rendered, { repo: "o/mc", issue: 7 })).toBeNull();
+  });
+
+  it.each([
+    "Closes #933",
+    "This not only fixes #933",
+    "Not: this closes #933",
+    "This does not close #933; fixes #934",
+    "This does not close other/repo#933",
+    "This does not close https://github.com/other/repo/issues/933",
+    "This does not close #933. @someone",
+  ])("retains the ordinary refusal for %s", (text) => {
+    expect(
+      firstPrNotifier(inertNegatedClosingRefs(text), {
+        repo: "o/mc",
+        issue: 7,
+        allowOwnRepoRefs: true,
+      }),
+    ).not.toBeNull();
   });
 });
 

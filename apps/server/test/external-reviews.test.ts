@@ -874,36 +874,44 @@ describe("external PR review subjects", () => {
     );
   });
 
-  it.each(["@someone", "&#64;someone", "fixture-sensitive-key"])(
-    "keeps a disallowed review summary private: %s",
-    async (summary) => {
-      const h = harness();
-      await createExternalReviews(h.deps).sync();
-      const row = store.reviewsIn(["queued"])[0]!;
-      store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
-      store.recordFindings(row.id, "retro:review", {
-        verdict: { spec: "pass", quality: "pass" },
-        summary,
-        findings: [],
-        at: 102,
-      });
-      await createExternalReviews({
-        ...h.deps,
-        textAllowed: async (text) =>
-          prTextProblem(text, {
-            repo: "example/sample",
-            issue: 7,
-            known: ["fixture-sensitive-key"],
-            label: "QA review",
-            allowOwnRepoRefs: true,
-          }) === null,
-      }).sync();
-      expect(h.comments).toEqual([]);
-      expect(h.writes).toHaveLength(1);
-      expect(h.writes[0]?.body.state).toBe("pending");
-      expect(h.deps.log).toHaveBeenCalledWith(expect.not.stringContaining(summary));
-    },
-  );
+  it.each([
+    "@someone",
+    "&#64;someone",
+    "fixture-sensitive-key",
+    "Closes #933",
+    "Fixes #933",
+    "This does not close other/repo#933.",
+    "This does not close https://github.com/other/repo/issues/933.",
+    "This does not close #933; closes #934.",
+    "This does not close #933. @someone",
+    "This does not close #933. fixture-sensitive-key",
+  ])("keeps a disallowed review summary private: %s", async (summary) => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = store.reviewsIn(["queued"])[0]!;
+    store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    store.recordFindings(row.id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary,
+      findings: [],
+      at: 102,
+    });
+    await createExternalReviews({
+      ...h.deps,
+      textAllowed: async (text) =>
+        prTextProblem(text, {
+          repo: "example/sample",
+          issue: 7,
+          known: ["fixture-sensitive-key"],
+          label: "QA review",
+          allowOwnRepoRefs: true,
+        }) === null,
+    }).sync();
+    expect(h.comments).toEqual([]);
+    expect(h.writes).toHaveLength(1);
+    expect(h.writes[0]?.body.state).toBe("pending");
+    expect(h.deps.log).toHaveBeenCalledWith(expect.not.stringContaining(summary));
+  });
 
   it("keeps an unexpected publication exception out of the log", async () => {
     const h = harness();
@@ -922,50 +930,116 @@ describe("external PR review subjects", () => {
     expect(h.writes).toEqual([]);
   });
 
-  it("publishes a retained QA report through the real GitHub text check", async () => {
+  it.each(["Checked.", "This continuation does not close #933."])(
+    "publishes a retained QA report through the real GitHub text check: %s",
+    async (summary) => {
+      const h = harness();
+      await createExternalReviews(h.deps).sync();
+      const row = store.reviewsIn(["queued"])[0]!;
+      store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+      store.recordFindings(row.id, "retro:review", {
+        verdict: { spec: "pass", quality: "pass" },
+        summary,
+        findings: [],
+        at: 102,
+      });
+      const report: QaReport = {
+        schemaVersion: 1,
+        id: "c".repeat(64),
+        repoId: "sample",
+        github: "example/sample",
+        prNumber: 7,
+        headSha: SHA,
+        prTitle: "Sample change",
+        prUrl: "https://github.com/example/sample/pull/7",
+        branch: "feature/sample",
+        source: "native",
+        reviewer: { id: "retro", label: "retro" },
+        reviewedAt: 102,
+        registeredAt: 102,
+        nativeReviewId: row.id,
+        nativeRunId: "retro:review",
+        verdict: { spec: "pass", quality: "pass" },
+        summary,
+        worksWell: [],
+        coverage: [{ check: "scope", result: "pass", note: "A saved note names @someone." }],
+        findings: [],
+        resolutions: [],
+        tests: [],
+        limitations: [],
+        followUps: [],
+        visual: { applicability: "not_applicable", reason: "Backend only.", pairs: [] },
+        ci: { observedAt: 102, headSha: SHA, source: "github", checks: [] },
+        completeness: { state: "complete", missing: [] },
+        permalink: `/qa?repo=sample&pr=7&report=${"c".repeat(64)}`,
+      };
+      expect(store.putQaReport(report)).toBe(true);
+      const textAllowed = vi.fn(
+        async (text: string) =>
+          prTextProblem(text, {
+            repo: "example/sample",
+            issue: 7,
+            known: [],
+            label: "QA review",
+            allowOwnRepoRefs: true,
+          }) === null,
+      );
+      const publication = {
+        ...h.deps,
+        reportBaseUrl: "http://127.0.0.1:7431",
+        textAllowed,
+      };
+      await createExternalReviews(publication).sync();
+      await createExternalReviews(publication).sync();
+      expect(h.comments).toHaveLength(1);
+      expect(h.comments[0]?.body).toContain(`/api/qa-reports/${report.id}/markdown`);
+      expect(h.comments[0]?.body).not.toContain("@someone");
+      expect(report.coverage[0]?.note).toContain("@someone");
+      expect(store.qaReportForReview(row.id)).toEqual(report);
+      expect(store.review(row.id)?.summary).toBe(summary);
+      if (summary.includes("does not close")) {
+        expect(h.comments[0]?.body).toContain("does not close issue 933.");
+        expect(h.comments[0]?.body).not.toContain("does not close #933.");
+        // Ordinary PR bodies still refuse the original closing syntax; only the review's
+        // GitHub display text changes, while the retained native report stays verbatim.
+        expect(
+          prTextProblem(summary, {
+            repo: "example/sample",
+            issue: 7,
+            known: [],
+            label: "QA review",
+            allowOwnRepoRefs: true,
+          }),
+        ).toMatchObject({ problem: "notify" });
+      }
+      expect(h.writes.at(-1)?.body.state).toBe("success");
+      expect(textAllowed).toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a blocking review red after rendering its negated prose", async () => {
     const h = harness();
     await createExternalReviews(h.deps).sync();
-    const row = store.reviewsIn(["queued"])[0]!;
+    const row = store.reviewsIn(["queued"])[0];
+    if (!row) throw new Error("Review was not queued");
     store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    const finding = {
+      severity: "Important" as const,
+      file: "example.ts",
+      line: 12,
+      summary: "This does not fix #933.",
+      scenario: "This cannot resolve #933.",
+      fix: "Keep the parent open until the behavior works.",
+    };
     store.recordFindings(row.id, "retro:review", {
-      verdict: { spec: "pass", quality: "pass" },
-      summary: "Checked.",
-      findings: [],
+      verdict: { spec: "fail", quality: "fail" },
+      summary: "This does not close #933.",
+      findings: [finding],
       at: 102,
     });
-    const report: QaReport = {
-      schemaVersion: 1,
-      id: "c".repeat(64),
-      repoId: "sample",
-      github: "example/sample",
-      prNumber: 7,
-      headSha: SHA,
-      prTitle: "Sample change",
-      prUrl: "https://github.com/example/sample/pull/7",
-      branch: "feature/sample",
-      source: "native",
-      reviewer: { id: "retro", label: "retro" },
-      reviewedAt: 102,
-      registeredAt: 102,
-      nativeReviewId: row.id,
-      nativeRunId: "retro:review",
-      verdict: { spec: "pass", quality: "pass" },
-      summary: "Checked.",
-      worksWell: [],
-      coverage: [{ check: "scope", result: "pass", note: "A saved note names @someone." }],
-      findings: [],
-      resolutions: [],
-      tests: [],
-      limitations: [],
-      followUps: [],
-      visual: { applicability: "not_applicable", reason: "Backend only.", pairs: [] },
-      ci: { observedAt: 102, headSha: SHA, source: "github", checks: [] },
-      completeness: { state: "complete", missing: [] },
-      permalink: `/qa?repo=sample&pr=7&report=${"c".repeat(64)}`,
-    };
-    vi.spyOn(store, "qaReportForReview").mockReturnValue(report);
-    const textAllowed = vi.fn(
-      async (text: string) =>
+    await createExternalReviews({
+      ...h.deps,
+      textAllowed: async (text) =>
         prTextProblem(text, {
           repo: "example/sample",
           issue: 7,
@@ -973,18 +1047,48 @@ describe("external PR review subjects", () => {
           label: "QA review",
           allowOwnRepoRefs: true,
         }) === null,
-    );
-    await createExternalReviews({
-      ...h.deps,
-      reportBaseUrl: "http://127.0.0.1:7431",
-      textAllowed,
     }).sync();
     expect(h.comments).toHaveLength(1);
-    expect(h.comments[0]?.body).toContain(`/api/qa-reports/${report.id}/markdown`);
-    expect(h.comments[0]?.body).not.toContain("@someone");
-    expect(report.coverage[0]?.note).toContain("@someone");
-    expect(h.writes.at(-1)?.body.state).toBe("success");
+    expect(h.comments[0]?.body).toContain("**Important** example.ts:12");
+    expect(h.comments[0]?.body).toContain("does not fix issue 933");
+    expect(h.comments[0]?.body).toContain("cannot resolve issue 933");
+    expect(store.findingsOf(row.id)[0]).toMatchObject(finding);
+    expect(h.writes.at(-1)?.body.state).toBe("failure");
+    expect(store.review(row.id)?.blocking).toBe(1);
+  });
+
+  it("never rewrites a reported command to make its text pass", async () => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = store.reviewsIn(["queued"])[0];
+    if (!row) throw new Error("Review was not queued");
+    store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    const command = 'pnpm test -t "does not close #933"';
+    store.recordFindings(row.id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked.",
+      findings: [],
+      tests: [{ command, passed: 1, failed: 0, skipped: 0, duration: 1 }],
+      at: 102,
+    });
+    const textAllowed = vi.fn(async (text: string) => {
+      expect(text).toContain(command);
+      return (
+        prTextProblem(text, {
+          repo: "example/sample",
+          issue: 7,
+          known: [],
+          label: "QA review",
+          allowOwnRepoRefs: true,
+        }) === null
+      );
+    });
+    await createExternalReviews({ ...h.deps, textAllowed }).sync();
     expect(textAllowed).toHaveBeenCalled();
+    expect(store.reviewTests(row.id)[0]?.command).toBe(command);
+    expect(h.comments).toEqual([]);
+    expect(h.writes).toHaveLength(1);
+    expect(h.writes[0]?.body.state).toBe("pending");
   });
 
   it("keeps a failed review red and does not repeatedly start paid retries", async () => {
