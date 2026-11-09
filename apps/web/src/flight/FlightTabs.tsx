@@ -89,7 +89,7 @@ export function FlightTabs({ records = false }: { records?: boolean } = {}) {
       const target = document.getElementById(hash.slice(1));
       if (!target) return false;
       // A section folded in a collapsed disclosure (working context) opens to show the link's target.
-      for (let d = target?.closest("details"); d; d = d.parentElement?.closest("details")) {
+      for (let d = target?.closest("details"); d; d = d.parentElement?.closest("details") ?? null) {
         d.open = true;
       }
       target?.scrollIntoView?.({ block: "nearest" });
