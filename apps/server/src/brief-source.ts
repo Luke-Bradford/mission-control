@@ -87,10 +87,6 @@ export function briefSourceRevision(
       /* The unreadable original proposal still participates in the fingerprint below. */
     }
   }
-  for (const seatId of seatIds) {
-    const run = store.seatRun(seatId);
-    if (run) runIds.add(run.id);
-  }
   // Run delivery follows the same run through ordinary commits and an exact-question set-aside.
   // Head-targeting actions keep the complete head/review/gate fingerprint below.
   const deliveryOnly =
@@ -100,6 +96,18 @@ export function briefSourceRevision(
       ),
     ) &&
     actions.some((action) => action.kind === "answer" || action.kind === "ordinary-run-guidance");
+  const questionRun = question ? store.run(question.runId) : null;
+  const exactQuestionAside = (seatId: string): boolean =>
+    question !== null &&
+    question.agentId === seatId &&
+    questionRun?.endedAt === null &&
+    questionRun.loop?.aside?.ask === question.id;
+  for (const seatId of seatIds) {
+    // An exact answer remains bound to its preserved run, not replacement work on the seat.
+    if (deliveryOnly && exactQuestionAside(seatId)) continue;
+    const run = store.seatRun(seatId);
+    if (run) runIds.add(run.id);
+  }
   const runs = [...runIds].sort().map((id) => {
     const run = store.run(id);
     if (run && deliveryOnly)
@@ -167,17 +175,12 @@ export function briefSourceRevision(
     );
     const configured = session?.seats.find((seat) => seat.id === id);
     const row = store.seatSession(id);
-    const asideTarget =
-      question &&
-      question.agentId === id &&
-      store.run(question.runId)?.endedAt === null &&
-      store.run(question.runId)?.loop?.aside?.ask === question.id;
     return {
       id,
       configured,
       current: row
         ? {
-            runId: deliveryOnly && asideTarget && row.runId === null ? question.runId : row.runId,
+            runId: deliveryOnly && exactQuestionAside(id) ? question?.runId : row.runId,
             stopped: row.state === "stopped",
           }
         : null,

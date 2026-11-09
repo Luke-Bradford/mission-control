@@ -509,44 +509,106 @@ it("keeps an uncertain effect unknown but lets an explicit acknowledgement clear
   expect(attentionItems(config, store, AT + 1).find((i) => i.key === KEY)?.acked).toBe(true);
 });
 
-it("answers the exact passed question after its run is set aside without messaging a replacement", async () => {
-  const id = store.addQuestion({
-    agentId: "GUIDO-1",
-    runId: "target",
-    text: "The displayed question",
-    at: AT,
-  });
-  store.passQuestion(id, AT);
-  const key = `ask:${id}`;
-  const request = await brief(
-    { kind: "answer", seatId: "GUIDO-1", runId: "target", text: "Use the approved path." },
-    key,
-  );
-  store.setRunLoop("target", {
-    ...NEW_LOOP,
-    aside: { worktree: "/fixture", wake: false, ask: id },
-  });
-  const old = required(store.seatSession("GUIDO-1"));
-  store.setSeatSession({ ...old, runId: null });
-  const message = vi.fn(async () => {});
-  const reconcileRun = vi.fn(async () => {});
-  const a = app({
-    supervisor: {
-      status: () => ({ enabled: true, note: null }),
-      message,
-    } as unknown as AppDeps["supervisor"],
-    engine: { status: () => ({ on: true, note: null }), onOperatorMessage: vi.fn(), reconcileRun },
-  });
-  const response = await post(a, request, key);
-  expect(response.statusCode, response.body).toBe(200);
-  expect(response.json()).toMatchObject({ state: "applied" });
-  expect(message).not.toHaveBeenCalled();
-  expect(store.question(id)?.answeredAt).toBe(AT);
-  expect(store.commsInboxRun("GUIDO-1", "target").map((m) => m.text)).toContain(
-    "Use the approved path.",
-  );
-  expect(reconcileRun).toHaveBeenCalledExactlyOnceWith("target");
-});
+it.each([false, true])(
+  "answers the exact set-aside question with replacement=%s",
+  async (replacement) => {
+    const id = store.addQuestion({
+      agentId: "GUIDO-1",
+      runId: "target",
+      text: "The displayed question",
+      at: AT,
+    });
+    store.passQuestion(id, AT);
+    const key = `ask:${id}`;
+    const request = await brief(
+      { kind: "answer", seatId: "GUIDO-1", runId: "target", text: "Use the approved path." },
+      key,
+    );
+    store.setRunLoop("target", {
+      ...NEW_LOOP,
+      aside: { worktree: "/fixture", wake: false, ask: id },
+    });
+    const old = required(store.seatSession("GUIDO-1"));
+    store.setSeatSession({ ...old, runId: null });
+    if (replacement) liveBriefSeat(store, "GUIDO-1", "replacement", AT + 1);
+    const replacementBefore = store.run("replacement");
+    const message = vi.fn(async () => {});
+    const reconcileRun = vi.fn(async () => {});
+    const a = app({
+      supervisor: {
+        status: () => ({ enabled: true, note: null }),
+        message,
+      } as unknown as AppDeps["supervisor"],
+      engine: {
+        status: () => ({ on: true, note: null }),
+        onOperatorMessage: vi.fn(),
+        reconcileRun,
+      },
+    });
+    const response = await post(a, request, key);
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({ state: "applied" });
+    expect(message).not.toHaveBeenCalled();
+    expect(store.question(id)?.answeredAt).toBe(AT);
+    expect(store.commsInboxRun("GUIDO-1", "target").map((m) => m.text)).toContain(
+      "Use the approved path.",
+    );
+    expect(reconcileRun).toHaveBeenCalledExactlyOnceWith("target");
+    expect(store.commsInboxRun("GUIDO-1", "replacement")).toEqual([]);
+    expect(store.run("replacement")).toEqual(replacementBefore);
+    expect(store.seatSession("GUIDO-1")?.runId).toBe(replacement ? "replacement" : null);
+  },
+);
+
+it.each(["preserved-run hold", "seat stop"])(
+  "keeps %s in the source binding while replacement work occupies the seat",
+  async (guard) => {
+    const id = store.addQuestion({
+      agentId: "GUIDO-1",
+      runId: "target",
+      text: "The displayed question",
+      at: AT,
+    });
+    store.passQuestion(id, AT);
+    const key = `ask:${id}`;
+    const request = await brief(
+      { kind: "answer", seatId: "GUIDO-1", runId: "target", text: "Use the approved path." },
+      key,
+    );
+    store.setRunLoop("target", {
+      ...NEW_LOOP,
+      aside: { worktree: "/fixture", wake: false, ask: id },
+    });
+    liveBriefSeat(store, "GUIDO-1", "replacement", AT + 1);
+    if (guard === "preserved-run hold") {
+      store.setRunLoop("target", {
+        ...required(store.run("target")?.loop),
+        mergeHold: { by: "CAPCOM", reason: "Keep the original hold", at: AT + 1 },
+      });
+    } else {
+      store.setSeatSession({ ...required(store.seatSession("GUIDO-1")), state: "stopped" });
+    }
+    const message = vi.fn();
+    const reconcileRun = vi.fn();
+    const a = app({
+      supervisor: {
+        status: () => ({ enabled: true, note: null }),
+        message,
+      } as unknown as AppDeps["supervisor"],
+      engine: {
+        status: () => ({ on: true, note: null }),
+        onOperatorMessage: vi.fn(),
+        reconcileRun,
+      },
+    });
+    expect((await post(a, request, key)).statusCode).toBe(409);
+    expect(store.question(id)?.answeredAt).toBeNull();
+    expect(store.commsInboxRun("GUIDO-1", "target")).toEqual([]);
+    expect(store.commsInboxRun("GUIDO-1", "replacement")).toEqual([]);
+    expect(message).not.toHaveBeenCalled();
+    expect(reconcileRun).not.toHaveBeenCalled();
+  },
+);
 
 it("retains uncertainty after an aside answer is stored but run reconciliation fails", async () => {
   const id = store.addQuestion({
