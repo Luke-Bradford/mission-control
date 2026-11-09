@@ -413,6 +413,12 @@ for `is not posted` (the launchd files under `~/Library/Logs/mission-control/` d
 GitHub's own read of the PR too: closed, draft, labelled skip-review, another head, or a base that
 is not the default branch.
 
+External QA comments carry a compact index linking the immutable JSON and Markdown report.
+Detailed checklist notes and dispositions stay in that retained report. The generated comment
+still passes the secret, notifier and HTML-reference checks before its status is published.
+Publication errors log a fixed, non-sensitive reason after `could not complete its queue/status
+update`; unexpected exceptions keep their content private and log only the generic failure.
+
 ### Budget brake
 
 When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
