@@ -2,11 +2,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  DECISION_DEFAULT_WAIT_MS,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
-  DECISION_DEFAULT_WAIT_MS,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { routineBriefChoices } from "../src/brief-routine.ts";
@@ -73,7 +73,7 @@ afterEach(() => {
 });
 
 describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => {
-  it("is raised once, at 45 minutes, with a recommended option and a default", () => {
+  it("is raised once, at 45 minutes, with a recommended option and no timed default", () => {
     const { id } = send();
     expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED - 1 })).toBe(0);
     expect(store.briefs().has(keyOf(id))).toBe(false);
@@ -82,9 +82,11 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     const brief = store.briefs().get(keyOf(id));
     expect(brief).toMatchObject({
       for: "operator",
+      by: "hub",
       recommendedOptionId: "proceed",
-      defaultAt: STALLED + DECISION_DEFAULT_WAIT_MS,
     });
+    expect(brief).not.toHaveProperty("defaultAt");
+    expect(brief?.options.map((o) => o.description ?? "").join(" ")).not.toMatch(/on its own/);
     expect(brief?.options.map((o) => o.id)).toEqual(["proceed", "hold"]);
     expect(find(id, STALLED)).toMatchObject({ owner: "operator", kind: "question" });
 
@@ -93,12 +95,78 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     expect(store.briefs().get(keyOf(id))?.at).toBe(STALLED);
   });
 
+  it.each([
+    "`packages/core/src/x.ts` lets ids through",
+    "Follow-up to #1543: tidy the sweep",
+    "x".repeat(200),
+    "A plain title for the sweep",
+  ])("reaches the operator whatever the ticket title is: %s", (title) => {
+    store.replaceBoard("repo", [
+      {
+        repoId: "repo",
+        issueNumber: 906,
+        title,
+        status: "In progress",
+        state: "in progress",
+        labels: [],
+        priority: null,
+        updatedAt: SENT,
+        url: "https://github.com/o/repo/issues/906",
+        stage: null,
+        owner: null,
+        parent: null,
+        subIssues: null,
+        blockedBy: [],
+        milestone: null,
+        size: null,
+        closed: false,
+        prioritySource: null,
+        createdAt: 1,
+        itemId: null,
+        projectId: null,
+      },
+    ]);
+    const { id } = send();
+    expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED })).toBe(1);
+    const got = find(id, STALLED);
+    expect(got?.owner).toBe("operator");
+    expect(got?.returned).toBeUndefined();
+    expect(got?.brief?.ask?.length).toBeLessThan(300);
+  });
+
+  it("rewrites a hub brief the entry check returned, once, and leaves FLIGHT's own brief alone", () => {
+    const { id } = send();
+    const stale = {
+      key: keyOf(id),
+      for: "operator" as const,
+      by: "hub" as const,
+      ask: "GUIDO-1 has waited on FLIGHT-1 about repo#906: proceed, or hold?",
+      context: "GUIDO-1 sent FLIGHT-1 a question on repo#906 and nobody has settled it.",
+      recommendation: "Proceed.",
+      options: [
+        { id: "proceed", label: "Proceed", answer: "Go on." },
+        { id: "hold", label: "Hold", answer: "Wait." },
+      ],
+      basis: "b",
+      at: STALLED - 1,
+    };
+    store.addBrief(stale);
+    expect(find(id, STALLED)).toMatchObject({ owner: "flight" });
+    expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED })).toBe(1);
+    expect(find(id, STALLED)).toMatchObject({ owner: "operator" });
+    expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED + 1 })).toBe(0);
+    // a brief FLIGHT wrote for the operator is never overwritten, even if it fails the check
+    const other = send();
+    store.addBrief({ ...stale, key: keyOf(other.id), by: "flight" });
+    expect(raiseStalledCommsDecisions({ config: config(), store, now: STALLED })).toBe(0);
+  });
+
   it("carries FLIGHT's recommendation when it has briefed the item for itself", () => {
     const { id } = send("blocker");
     store.addBrief({
       key: keyOf(id),
       for: "flight",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Keep the newer behaviour.",
       options: [],
       basis: "b",
@@ -114,7 +182,7 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     store.addBrief({
       key: keyOf(id),
       for: "flight",
-      context: "c",
+      context: "The crew asked a question and waits for your answer.",
       recommendation: "Still looking.",
       options: [],
       basis: "b",
@@ -190,7 +258,7 @@ describe("a stalled Comms question or blocker becomes a CAPCOM decision", () => 
     expect(store.briefs().has(keyOf(budget.id))).toBe(false);
   });
 
-  it("applies its default through the sweep only after the operator's wait", async () => {
+  it("an operator question never carries a timed default", async () => {
     const { id } = send("blocker");
     store.setSeatSession({
       seatId: "GUIDO-1",

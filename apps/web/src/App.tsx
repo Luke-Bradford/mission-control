@@ -56,6 +56,9 @@ const BoardPage = lazy(() =>
   import("./pages/BoardPage.tsx").then((m) => ({ default: m.BoardPage })),
 );
 const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
+const CommsChartPage = lazy(() =>
+  import("./pages/CommsChartPage.tsx").then((m) => ({ default: m.CommsChartPage })),
+);
 const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
 const Needs = lazy(() => import("./pages/Needs.tsx").then((m) => ({ default: m.Needs })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
@@ -151,7 +154,7 @@ function Shell({
   const overviewOverlay = useOverviewDockOverlay(overview, dock);
   // The approved rail is site-wide. Comms already has the conversation; the full FLIGHT view
   // keeps its own workspace instead of duplicating it beside the page.
-  const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
+  const showDock = tabOf(shown) !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -318,6 +321,9 @@ function PageView({ route: r }: { route: Route }) {
     case "comms":
       page = <Comms item={r.item} view={r.view} />;
       break;
+    case "commsChart":
+      page = <CommsChartPage />;
+      break;
     case "telemetry":
       page = <Telemetry />;
       break;
@@ -375,7 +381,7 @@ function useShellKeys(current: Route, popout: boolean) {
         const { current: on, popout: isPopout } = latest.current;
         // The full FLIGHT page opens the conversation in Comms. Comms and pop-outs already own
         // their workspace; every other page has the same site-wide rail.
-        if (isPopout || on.page === "comms") return;
+        if (isPopout || tabOf(on) === "comms") return;
         if (FULL_WIDTH_PAGES.has(tabOf(on))) navigate(PAGE_PATHS.comms);
         else toggleDock();
       },

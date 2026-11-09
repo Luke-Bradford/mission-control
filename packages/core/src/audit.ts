@@ -1,3 +1,4 @@
+import { MC_TOOL_NAMES } from "./mcp.ts";
 import type { FindingCategory } from "./review.ts";
 import type { LoopKind } from "./runtime-model.ts";
 
@@ -62,6 +63,66 @@ export interface AuditChange {
   after: AuditMetrics;
 }
 
+/** Thresholds for the message-problem rows; `config.yaml` `audit:` can change each one. */
+export interface AuditThresholds {
+  /** A question that waited longer than this before it was answered or closed. */
+  questionWaitMs: number;
+  /** A request for the controller that waited longer than this. */
+  controllerWaitMs: number;
+  /** A ticket whose message text is at least this many times the median ticket's. */
+  ticketTextFactor: number;
+  /** The same hub notice on one PR this many times. */
+  noticeRepeats: number;
+}
+export const AUDIT_THRESHOLD_DEFAULTS: Readonly<AuditThresholds> = Object.freeze({
+  questionWaitMs: 120 * 60_000,
+  controllerWaitMs: 240 * 60_000,
+  ticketTextFactor: 3,
+  noticeRepeats: 3,
+});
+/** A ticket with less message text than this is never "far more than usual". */
+export const AUDIT_TICKET_TEXT_FLOOR = 5_000;
+/** The tool rows cover this long before the end of the range. */
+export const AUDIT_TOOL_WINDOW_MS = 86_400_000;
+/** The tools the design measured, by the name the hub's `/mcp` endpoint serves. */
+export const AUDIT_MEASURED_TOOLS = [
+  MC_TOOL_NAMES.reportFindings,
+  MC_TOOL_NAMES.reportEvidence,
+  MC_TOOL_NAMES.readTicket,
+  MC_TOOL_NAMES.previewBrowser,
+] as const;
+
+/** What a row in Audit's list of things to improve is about. */
+export const AUDIT_IMPROVEMENT_KINDS = [
+  "question-asked-back",
+  "question-waited",
+  "delivered-after-run-ended",
+  "chatter",
+  "repeat-message",
+  "repeat-notice",
+  "controller-request-waited",
+  "ticket-message-volume",
+  "tool-usage",
+] as const;
+export type AuditImprovementKind = (typeof AUDIT_IMPROVEMENT_KINDS)[number];
+
+/** One row in Audit's list of things to improve, worked out by hub code from its own records. */
+export interface AuditImprovement {
+  kind: AuditImprovementKind;
+  /** What the row is about; one row per kind and subject. */
+  subject: string;
+  /** The ticket it links to (`repo#n`, or `#n` as stored), null for a tool row. */
+  ticket: string | null;
+  /** The PR it links to, when it is about one. */
+  pr: number | null;
+  /** One plain line. */
+  detail: string;
+  at: number;
+  /** A tool row's figures for the 24 hours up to the range end. */
+  calls?: number;
+  chars?: number;
+}
+
 /** The `/api/audit` response for one range. */
 export interface AuditView {
   range: { since: number; until: number };
@@ -122,10 +183,50 @@ export interface AuditView {
     prs: { rounds: number; count: number }[];
     late: { seatId: string; model: string | null; findings: number; late: number }[];
   };
+  /** Items recorded in range, each with its risk tier. The server always sets it; optional so web fixtures built before it type-check. */
+  items?: AuditItem[];
+  /**
+   * Message problems and the four measured report tools, each linked to its ticket or PR. The
+   * server always sets it; optional so web fixtures built before it type-check.
+   */
+  improvements?: AuditImprovement[];
   /** Empty, in its final shape, until SURGEON proposals are stored. */
   surgeonProposals: { id: string; at: number; summary: string }[];
   /** Lists the server cut to AUDIT_LIST_CAP, by name, with how many each held; absent when none was cut. */
   capped?: Record<string, number>;
+}
+
+/** Who may act on an Audit item: nobody (the hub does), FLIGHT, an operator acknowledgement, or an operator go-ahead. */
+export const AUDIT_TIERS = ["auto", "flight", "acknowledge", "go-ahead"] as const;
+export type AuditTier = (typeof AUDIT_TIERS)[number];
+
+/** The fixed tier of each item kind. Only a patch or minor CLI update is Auto. */
+export const AUDIT_KIND_TIERS: Readonly<Record<string, AuditTier>> = Object.freeze({
+  "cli-update": "auto",
+  "cli-update-failed": "flight",
+  "cli-update-major": "go-ahead",
+  "code-health-proposal": "acknowledge",
+  "audit-finding": "acknowledge",
+  flake: "flight",
+  "pr-size-outlier": "flight",
+});
+
+/** The tier of an item kind; a kind not listed is Go-ahead, never Auto. */
+export function auditTier(kind: string): AuditTier {
+  return Object.hasOwn(AUDIT_KIND_TIERS, kind) ? AUDIT_KIND_TIERS[kind] : "go-ahead";
+}
+
+/** A stored Audit item: something the hub did or needs decided, with the tier that says who acts on it. */
+export interface AuditItem {
+  id: number;
+  kind: string;
+  /** What the item is about, e.g. `claude@2.1.5`; one item per kind and subject. */
+  subject: string;
+  tier: AuditTier;
+  /** `done` when the hub finished it (an applied update), `open` while someone must act. */
+  state: "done" | "open";
+  detail: string;
+  at: number;
 }
 
 /** A list in the audit response holds at most this many rows (until the Audit page is redesigned). */
@@ -158,6 +259,10 @@ export function capAudit(audit: AuditView): AuditView {
     flakes: cut("flakes", audit.flakes),
     changes: cut("changes", audit.changes),
     surgeonProposals: cut("surgeonProposals", audit.surgeonProposals),
+    ...(audit.items === undefined ? {} : { items: cut("items", audit.items) }),
+    ...(audit.improvements === undefined
+      ? {}
+      : { improvements: cut("improvements", audit.improvements) }),
   };
   return Object.keys(capped).length === 0 ? audit : { ...out, capped };
 }

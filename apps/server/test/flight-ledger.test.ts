@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type BoardItem,
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_ITEMS_LISTED,
@@ -10,9 +11,12 @@ import {
   FLIGHT_LEDGER_KEEP_MS,
   FLIGHT_LIST_MAX,
   FLIGHT_METRICS_DAY_MS,
+  FLIGHT_MOVED_LISTED,
+  FLIGHT_POINTER_KINDS,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_VIEW_LIMIT,
   type FlightLedgerEntry,
+  type FlightPointerKind,
   FOR_THE_CONTROLLER,
   NEW_LOOP,
   orderLedger,
@@ -32,7 +36,7 @@ import {
   prepareRetrospective,
 } from "../src/flight/retrospective.ts";
 import { observeFlightMain } from "../src/flight/signals.ts";
-import { flightState, flightView, flightWake } from "../src/flight/state.ts";
+import { flightState, flightView, flightWake, markPointersShown } from "../src/flight/state.ts";
 import * as gitRuntime from "../src/runtime/git.ts";
 import { Store } from "../src/store.ts";
 
@@ -640,6 +644,7 @@ describe("retrospective measures", () => {
       productPass: {
         pages: [
           "/",
+          "/needs-you",
           "/flight",
           "/board",
           "/map",
@@ -822,4 +827,182 @@ it("reads real git batches with pinned git dirs and UTF-8 blobs", async () => {
   await expect(
     git(["cat-file", "--invalid-batch-mode"], "x".repeat(1_000_000)),
   ).rejects.toBeDefined();
+});
+
+describe("ledger pointers", () => {
+  const pointed = (key: string, ...pointers: { kind: FlightPointerKind; target: string }[]) =>
+    entry(key, {
+      pointers: pointers.map((p) => ({ ...p, changedAt: null, change: null, readAt: null })),
+    });
+
+  it("stores a pointer of each kind, and keeps them across a hub restart", () => {
+    const six = FLIGHT_POINTER_KINDS.map((kind) => ({ kind, target: `${kind}-1` }));
+    expect([...FLIGHT_POINTER_KINDS]).toEqual(["pr", "ticket", "seat", "repo", "person", "metric"]);
+    store.putFlightLedgerEntry("s1", pointed("work-1", ...six), 0);
+    store.close();
+    store = new Store(join(dir, "mc.sqlite"));
+    expect(store.flightLedger("s1")[0]?.pointers).toEqual(
+      six.map((p) => ({ ...p, changedAt: null, change: null, readAt: null })),
+    );
+  });
+
+  it("marks the pointer on a PR whose state moved, and leaves a pointer on another PR", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "pr", target: "mc#7" }), 0);
+    store.putFlightLedgerEntry("s1", pointed("b", { kind: "pr", target: "mc#8" }), 0);
+    const open = (n: number, over: Partial<PullRequestView> = {}) =>
+      pr(n, { state: "open", mergedAt: null, ci: "pending", ...over });
+    store.upsertPullRequests("mc", [open(7), open(8)], NOW);
+    store.markFlightPointersRead("s1", store.movedFlightPointers("s1"), NOW + 1);
+    store.upsertPullRequests("mc", [open(7, { ci: "failing" }), open(8)], NOW + MIN);
+    const by = (key: string) => store.flightLedger("s1").find((e) => e.key === key)?.pointers?.[0];
+    expect(by("a")).toMatchObject({ changedAt: NOW + MIN, change: "CI failing" });
+    expect(by("b")?.changedAt).not.toBeGreaterThan(NOW);
+    expect(store.movedFlightPointers("s1").map((m) => m.entry)).toEqual(["a"]);
+  });
+
+  it("lists a change the poll stamped with a time before FLIGHT's last read", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "pr", target: "mc#7" }), 0);
+    const open = (over: Partial<PullRequestView> = {}) =>
+      pr(7, { state: "open", mergedAt: null, ci: "pending", ...over });
+    store.upsertPullRequests("mc", [open()], NOW);
+    // a wake reads the pointer while the next poll's fetch is still in flight
+    store.markFlightPointersRead("s1", store.movedFlightPointers("s1"), NOW + MIN + 5000);
+    store.upsertPullRequests("mc", [open({ ci: "failing" })], NOW + MIN);
+    expect(store.movedFlightPointers("s1").map((m) => m.change)).toEqual(["CI failing"]);
+  });
+
+  it("marks a ticket pointer when a card moves column or closes, and no other", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "ticket", target: "mc#5" }), 0);
+    store.putFlightLedgerEntry("s1", pointed("b", { kind: "ticket", target: "mc#6" }), 0);
+    const card = (n: number, status: string, closed = false): BoardItem => ({
+      repoId: "mc",
+      issueNumber: n,
+      title: `T${n}`,
+      status,
+      state: closed ? "done" : "in progress",
+      labels: [],
+      priority: null,
+      updatedAt: NOW,
+      url: "",
+      stage: null,
+      owner: null,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed,
+      prioritySource: null,
+      createdAt: NOW,
+      itemId: null,
+      projectId: null,
+    });
+    store.replaceBoard("mc", [card(5, "Ready"), card(6, "Ready")]);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+    store.replaceBoard("mc", [card(5, "In progress"), card(6, "Ready")]);
+    expect(store.movedFlightPointers("s1")).toMatchObject([
+      { entry: "a", kind: "ticket", target: "mc#5", change: "moved to In progress" },
+    ]);
+    store.replaceBoard("mc", [card(5, "In progress", true), card(6, "Ready")]);
+    expect(store.movedFlightPointers("s1").map((m) => m.change)).toEqual(["closed"]);
+  });
+
+  it("keeps a change made after the digest was built unread when the shown one is stamped", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "pr", target: "mc#7" }), 0);
+    store.markFlightPointers("pr", "mc#7", "CI failing", NOW);
+    const shown = store.movedFlightPointers("s1");
+    store.markFlightPointers("pr", "mc#7", "merged", NOW + MIN);
+    store.markFlightPointersRead("s1", shown, NOW + 2 * MIN);
+    expect(store.movedFlightPointers("s1").map((m) => m.change)).toEqual(["merged"]);
+  });
+
+  it("keeps a pointer's marks when the entry is saved again with the same pointer", () => {
+    store.putFlightLedgerEntry("s1", pointed("a", { kind: "seat", target: "guido-1" }), 0);
+    store.markFlightPointers("seat", "guido-1", "parked", NOW);
+    store.putFlightLedgerEntry(
+      "s1",
+      { ...(store.flightLedger("s1")[0] as FlightLedgerEntry), title: "new" },
+      0,
+    );
+    expect(store.movedFlightPointers("s1")).toHaveLength(1);
+  });
+});
+
+describe("the wake digest's moved pointers", () => {
+  it("keeps a CI change on a PR the digest lists, which the PR entry does not show", () => {
+    store.putFlightLedgerEntry(
+      "s1",
+      entry("w", {
+        pointers: [{ kind: "pr", target: "mc#7", changedAt: null, change: null, readAt: null }],
+      }),
+      0,
+    );
+    const open = (ci: PullRequestView["ci"]) =>
+      pr(7, { state: "open", mergedAt: null, ci, headSha: "abc" });
+    store.upsertPullRequests("mc", [open("pending")], NOW);
+    const w1 = flightWake(flightState({ config, store, busy: [], now: NOW + 1 }));
+    markPointersShown(
+      store,
+      config,
+      flightState({ config, store, busy: [], now: NOW + 1 }),
+      NOW + 1,
+    );
+    store.upsertPullRequests("mc", [open("passing")], NOW + MIN);
+    const w2 = flightWake(
+      flightState({ config, store, busy: [], now: NOW + 2 * MIN }),
+      w1.snapshot,
+    );
+    expect(w2.digest.moved).toMatchObject([{ target: "mc#7", change: "CI passing" }]);
+  });
+
+  it("caps the list, and leaves out a PR the digest's prs already lists, reading both", () => {
+    const targets = Array.from({ length: FLIGHT_MOVED_LISTED + 5 }, (_, n) => `mc#${100 + n}`);
+    store.putFlightLedgerEntry(
+      "s1",
+      entry("w", {
+        pointers: [...targets, "mc#7"].map((target) => ({
+          kind: "pr" as const,
+          target,
+          changedAt: null,
+          change: null,
+          readAt: null,
+        })),
+      }),
+      0,
+    );
+    store.upsertPullRequests("mc", [pr(7, { state: "open", mergedAt: null })], NOW);
+    for (const t of targets) store.markFlightPointers("pr", t, "CI failing", NOW + MIN);
+    store.markFlightPointers("pr", "mc#7", "new commit", NOW + MIN);
+    const state = flightState({ config, store, busy: [], now: NOW + 2 * MIN });
+    expect(state.moved).toHaveLength(FLIGHT_MOVED_LISTED);
+    expect(state.moved?.some((m) => m.target === "mc#7")).toBe(false);
+    markPointersShown(store, config, state, NOW + 3 * MIN);
+    // the PR's pointer was covered and is read; the five past the cap wait for the next wake
+    expect(store.movedFlightPointers("s1")).toHaveLength(5);
+  });
+
+  it("lists a moved pointer once, and not again after FLIGHT has read it", () => {
+    store.putFlightLedgerEntry(
+      "s1",
+      entry("w", {
+        pointers: [
+          { kind: "pr", target: "mc#7", changedAt: null, change: null, readAt: null },
+          { kind: "pr", target: "mc#8", changedAt: null, change: null, readAt: null },
+        ],
+      }),
+      0,
+    );
+    const read = (at: number) => flightState({ config, store, busy: [], now: at });
+    expect(flightWake(read(NOW)).digest.moved).toBeUndefined();
+    store.markFlightPointers("pr", "mc#7", "CI failing", NOW + MIN);
+    const state = read(NOW + 2 * MIN);
+    expect(flightWake(state).digest.moved).toEqual([
+      { entry: "w", kind: "pr", target: "mc#7", change: "CI failing", at: NOW + MIN },
+    ]);
+    markPointersShown(store, config, state, NOW + 3 * MIN);
+    expect(flightWake(read(NOW + 4 * MIN)).digest.moved).toBeUndefined();
+    expect(store.flightLedger("s1")[0]?.pointers?.[0]?.readAt).toBe(NOW + 3 * MIN);
+    store.markFlightPointers("pr", "mc#7", "merged", NOW + 5 * MIN);
+    expect(flightWake(read(NOW + 6 * MIN)).digest.moved).toHaveLength(1);
+  });
 });

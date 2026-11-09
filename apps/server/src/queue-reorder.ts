@@ -44,7 +44,7 @@ export interface QueueReorderDeps {
 
 export class QueueReorderError extends Error {}
 
-const PREFIX = "queue-reorder:";
+export const PREFIX = "queue-reorder:";
 interface Proposal {
   seat: string;
   repoId: string;
@@ -221,6 +221,7 @@ function approvalItem(
     owner: "operator",
     brief: {
       for: "operator",
+      by: "hub",
       original: text,
       context: text,
       ask: text,

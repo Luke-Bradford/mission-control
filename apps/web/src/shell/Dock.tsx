@@ -1,13 +1,6 @@
-import {
-  type AgentStream,
-  ATTENTION_LABEL,
-  type AttentionItem,
-  type Crew,
-  flightTurnText,
-} from "@mc/core";
+import { type AgentStream, type Crew, flightTurnText } from "@mc/core";
 import { type FormEvent, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { needsYouItems, openNeed, sortNeeds, useNeedsYou } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
@@ -30,7 +23,6 @@ import {
   flightOffText,
 } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
-import { Pill } from "../hud/Pill.tsx";
 import { BuildChips } from "./buildStatus.tsx";
 import { DockSummary } from "./DockSummary.tsx";
 import { useOlderEvents } from "./olderEvents.ts";
@@ -208,10 +200,6 @@ export function FlightChat({
   const stream = olderEvents.stream;
   const tz = useTz();
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
-  const attentionResource = useResource<AttentionItem[]>(RESOURCES.attention);
-  const attention = attentionResource.data;
-  const crew = useResource<Crew>(RESOURCES.crew).data;
-  const asks = useMemo(() => sortNeeds(needsYouItems(attention)), [attention]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -229,7 +217,7 @@ export function FlightChat({
   useEffect(() => {
     const el = msgs.current;
     if (active && el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [count, asks.length, active]);
+  }, [count, active]);
   // Older events arrive above the reader: keep what they were reading where it was.
   const firstRow = shown[0]?.id;
   const heightBefore = useRef<{ first: string | undefined; height: number } | null>(null);
@@ -270,47 +258,7 @@ export function FlightChat({
 
   return (
     <>
-      {where === "dock" && (
-        <DockSummary
-          asks={asks}
-          attention={attentionResource}
-          crew={crew}
-          canMessage={seat?.live === true}
-        />
-      )}
-      {where !== "dock" && asks.length > 0 && (
-        <div className="dwait" id={`${ID_PREFIX[where]}Waiting`}>
-          <div className="dwh">Waiting on you · {asks.length}</div>
-          {asks.map((i) => {
-            const agent = crew?.rows.find((r) => r.id === i.agentId);
-            return (
-              <div className="dask" key={i.key} data-testid="waiting-ask">
-                <Pill tone={i.kind === "decision" ? "warn" : "plain"}>
-                  {/* the not-triaging item is about FLIGHT, not a blocked seat */}
-                  {i.notTriaging ? "FLIGHT" : ATTENTION_LABEL[i.kind]}
-                </Pill>
-                <span className="min0 ellip" title={i.text}>
-                  {i.text}
-                </span>
-                {agent ? (
-                  <AgentTag bare sm id={agent.id} index={agent.index} />
-                ) : (
-                  <span>{i.agentId}</span>
-                )}
-                <span className="spacer" />
-                <button
-                  type="button"
-                  className="sm"
-                  // "FLIGHT is not triaging" lists its items on Needs you's home
-                  onClick={() => openNeed(i)}
-                >
-                  {i.notTriaging ? "Show them" : "Open"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {where === "dock" && <DockSummary canMessage={seat?.live === true} />}
       <div
         className="dmsgs"
         id={`${ID_PREFIX[where]}Msgs`}
@@ -406,8 +354,6 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
   const rail = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const drawer = visible && !wide;
-  const waitingItems = useResource<AttentionItem[]>(RESOURCES.attention);
-  const waiting = useNeedsYou().length;
   const fold = () => setDockCollapsed(!collapsed);
   useReturnFocus(drawer);
   useEffect(() => {
@@ -481,22 +427,12 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
             <button
               type="button"
               ref={rail}
-              aria-label={`Expand FLIGHT: ${waitingItems.data === undefined ? (waitingItems.error ? "waiting items unavailable" : "waiting items loading") : `${waiting} waiting on you${waitingItems.error ? ", last received count" : ""}`}`}
+              aria-label="Expand FLIGHT"
               aria-expanded="false"
               aria-controls="dockBody"
               onClick={fold}
             >
               <span className="dockrail-name">FLIGHT</span>
-              <span className={waiting ? "warn-t" : "fg2"} aria-hidden="true">
-                {waitingItems.data === undefined ? "…" : `◆ ${waiting}`}
-              </span>
-              <span className="dockrail-caption">
-                {waitingItems.error
-                  ? "Error"
-                  : waitingItems.data === undefined
-                    ? "Loading"
-                    : "waiting"}
-              </span>
             </button>
           </div>
           <div className="dh" id="dockHead">
@@ -515,7 +451,6 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
                 Start FLIGHT
               </button>
             )}
-            {collapsed && waiting > 0 && <Pill tone="warn">{`Waiting on you · ${waiting}`}</Pill>}
             {wide && !collapsed && (
               <button
                 type="button"

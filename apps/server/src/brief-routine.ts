@@ -73,6 +73,8 @@ export async function dispatchRoutineBriefAction(
         knownSecrets: deps.knownSecrets,
         now: deps.now,
         seatSender: false,
+        senderKind: "seatId" in context.actor ? "seat" : "operator",
+        ...("runId" in context.actor ? { senderRunId: context.actor.runId } : {}),
       },
       from,
       {

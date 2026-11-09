@@ -1,6 +1,7 @@
 import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
+  COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
   COMMS_MESSAGE_MAX,
@@ -9,7 +10,9 @@ import {
   type CommsMessage,
   type CommsReaction,
   type CommsReactionKind,
+  type CommsSenderKind,
   type CommsSendInput,
+  type CommsSendState,
   type CommsThreadMessage,
   commsCutMarker,
   commsTooLongText,
@@ -23,6 +26,11 @@ import { transcriptFilePath } from "./transcript-file.ts";
 
 export const COMMS_INBOX_PROMPT_MAX = 8_000;
 export const COMMS_INBOX_PROMPT_ROWS = 40;
+/** The per-message feed returns this many messages unless asked for fewer, and never more than the max. */
+export const COMMS_FEED_DEFAULT = 100;
+export const COMMS_FEED_MAX = 200;
+/** An open item carries at most this much of its message text. */
+export const COMMS_OPEN_TEXT_MAX = 280;
 
 export interface CommsServiceDeps {
   /** A PR-scoped thread resolved and validated by the operator API. */
@@ -36,6 +44,31 @@ export interface CommsServiceDeps {
   seatSender?: boolean;
   /** Internal final dispatch precondition; never accepted from message input. */
   beforeWrite?: () => void;
+  /** Wake the recipient for an unlabelled message too (the operator's own message or answer). */
+  wakeUnlabelled?: boolean;
+  /** False: a reply does not mention (or wake) the author of the message it answers. */
+  replyAuthorMention?: boolean;
+  /** Who is sending, set by the hub from how the request was made, never from the text. */
+  senderKind: CommsSenderKind;
+  /** The sender's run ticket in `repo#n` form: the ticket of a message that names none. */
+  senderTicket?: string;
+  /** The sender's run and its newest open PR, which the hub stamps on the stored message. */
+  senderRunId?: string;
+  senderPr?: number;
+}
+
+/** An exact repeat within this long is not stored again. */
+export const COMMS_REPEAT_WINDOW_MS = 60_000;
+
+/** A message `sendComms` stored, or, flagged `repeat`, the identical one it already had. */
+export type SentComms = CommsMessage & { repeat?: true };
+
+/** The one stored ticket form, `repo#n`; a bare `#n` takes the repo of `like`, when it has one. */
+export function commsTicketForm(ticket: string | null | undefined, like?: string): string | null {
+  if (ticket === null || ticket === undefined) return null;
+  if (!/^#\d+$/.test(ticket)) return ticket;
+  const repo = like === undefined ? "" : like.slice(0, like.lastIndexOf("#"));
+  return repo === "" ? ticket : `${repo}${ticket}`;
 }
 
 const message = (row: ReturnType<Store["commsMessage"]>): CommsMessage => {
@@ -59,35 +92,41 @@ export async function sendComms(
   deps: CommsServiceDeps,
   from: string,
   input: CommsSendInput,
-): Promise<CommsMessage> {
+): Promise<SentComms> {
   if (Array.from(input.text).length > COMMS_MESSAGE_MAX) throw new Error(commsTooLongText);
   const now = deps.now?.() ?? Date.now();
   let crew = deps.crew();
-  let members = new Set([...crew, COMMS_CAPCOM]);
+  let members = new Set([...crew, COMMS_CAPCOM, COMMS_CONTROLLER]);
   if (input.to !== COMMS_CREW && !members.has(input.to))
     throw new Error("Unknown Comms destination.");
-  if (!members.has(from)) throw new Error("Unknown Comms sender.");
+  if (!members.has(from) && !(deps.senderKind === "hub" && from === COMMS_MC))
+    throw new Error("Unknown Comms sender.");
   await validateCommsText(deps.knownSecrets, input.text);
   let replyFrom: string | undefined;
   let replyTicket: string | null | undefined;
   if (input.replyTo !== undefined) {
     const original = deps.store.commsMessage(input.replyTo);
     if (original === null) throw new Error("Unknown reply message.");
-    if (from !== COMMS_CAPCOM && !canReadComms(deps.store, from, original))
+    if (
+      from !== COMMS_CAPCOM &&
+      from !== COMMS_CONTROLLER &&
+      !canReadComms(deps.store, from, original)
+    )
       throw new Error("You cannot reply to that Comms message.");
     replyFrom = original.from;
     if (input.ref === undefined || input.ref === original.ref) replyTicket = original.ticket;
   }
   crew = deps.crew();
-  members = new Set([...crew, COMMS_CAPCOM]);
+  members = new Set([...crew, COMMS_CAPCOM, COMMS_CONTROLLER]);
   if (input.to !== COMMS_CREW && !members.has(input.to))
     throw new Error("Unknown Comms destination.");
-  if (!members.has(from)) throw new Error("Unknown Comms sender.");
+  if (!members.has(from) && !(deps.senderKind === "hub" && from === COMMS_MC))
+    throw new Error("Unknown Comms sender.");
   const mentions = new Set<string>();
   for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
     if (members.has(found[2])) mentions.add(found[2]);
   }
-  if (replyFrom !== undefined) mentions.add(replyFrom);
+  if (replyFrom !== undefined && deps.replyAuthorMention !== false) mentions.add(replyFrom);
   const notify = new Set<string>();
   if (crew.includes(input.to)) notify.add(input.to);
   for (const to of mentions) if (crew.includes(to)) notify.add(to);
@@ -96,18 +135,30 @@ export async function sendComms(
       {
         at: now,
         from,
+        senderKind: deps.senderKind,
         to: input.to,
-        ticket: deps.ticket ?? replyTicket ?? input.ref ?? null,
+        ticket: commsTicketForm(
+          deps.ticket ??
+            replyTicket ??
+            (input.ref?.startsWith("#") ? input.ref : undefined) ??
+            deps.senderTicket ??
+            input.ref,
+          deps.senderTicket,
+        ),
         text: input.text,
         label: input.label,
         ref: input.ref,
         replyTo: input.replyTo,
         targetRunId: input.targetRunId,
+        fromRunId: deps.senderRunId ?? null,
+        pr: deps.senderPr ?? null,
         mentions: [...mentions],
       },
       deps.seatSender
         ? { since: now - COMMS_RATE_LIMIT_WINDOW_MS, limit: COMMS_RATE_LIMIT_COUNT }
         : undefined,
+      // an exact repeat is stored once, whoever sends it
+      now - COMMS_REPEAT_WINDOW_MS,
     );
   deps.beforeWrite?.();
   // A seat's rate limit is enforced atomically before it can wake anyone.
@@ -116,9 +167,24 @@ export async function sendComms(
     throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
   if (!deps.seatSender) stored = storeMessage();
   if (stored === null) throw new Error("Comms rate limit reached: 30 messages per 10 minutes.");
-  const sent = message(stored);
-  // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat.
-  if (sent.label !== null) for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
+  const sent: SentComms = message(stored);
+  // An exact repeat was stored once already. It wakes no one a second time, unless the first wake
+  // failed: then the retry wakes them now.
+  if (stored.repeat && !deps.store.commsWakeFailed(sent.id)) return { ...sent, repeat: true };
+  // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat, and
+  // what the operator sends does too.
+  if (sent.label !== null || deps.wakeUnlabelled === true) {
+    try {
+      for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
+    } catch (e) {
+      deps.store.markCommsWakeFailed(sent.id, now);
+      throw e;
+    }
+  }
+  if (stored.repeat) {
+    deps.store.clearCommsWakeFailed(sent.id);
+    return { ...sent, repeat: true };
+  }
   return sent;
 }
 
@@ -131,7 +197,10 @@ export function commsInboxContext(
   const pins = new Set(store.commsPins().map((row) => row.id));
   const rows = store
     .commsInboxRun(seatId, runId)
-    .filter((row) => canReadComms(store, seatId, row, pins))
+    // a seat is pushed each message once: what it has been given stays in comms_inbox
+    .filter(
+      (row) => !store.commsInboxRead(seatId, row.id) && canReadComms(store, seatId, row, pins),
+    )
     .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)));
   let omitted = Math.max(0, rows.length - COMMS_INBOX_PROMPT_ROWS);
   const lines = rows.slice(-COMMS_INBOX_PROMPT_ROWS).map((row) => ({
@@ -145,16 +214,17 @@ export function commsInboxContext(
     replyTo: row.replyTo,
     mentions: row.mentions,
     pinned: pins.has(row.id),
-    unread: !store.commsInboxRead(seatId, row.id),
   }));
   const heading =
     "Comms inbox (messages addressed to you, tags, replies to your messages and pins):";
   const render = () =>
-    [
-      heading,
-      omitted === 0 ? "" : `${omitted} older: use comms_inbox`,
-      ...lines.map((line) => JSON.stringify(line)),
-    ].join("\n");
+    rows.length === 0
+      ? ""
+      : [
+          heading,
+          omitted === 0 ? "" : `${omitted} older: use comms_inbox`,
+          ...lines.map((line) => JSON.stringify(line)),
+        ].join("\n");
   while (lines.length > 0 && render().length > COMMS_INBOX_PROMPT_MAX) {
     if (lines.length === 1) {
       const line = lines[0];
@@ -207,6 +277,8 @@ export function reactComms(
   reaction: CommsReactionKind,
   reason: string | undefined,
   at: number,
+  /** The request came with the operator's credential (FLIGHT's operator tool): reach as the operator does. */
+  operatorLevel = false,
 ): CommsReaction {
   if (
     reaction === "cant" &&
@@ -217,13 +289,27 @@ export function reactComms(
     throw new Error("Only cant may include a reason.");
   const message = store.commsMessage(id);
   if (message === null) throw new Error("Unknown Comms message.");
-  if (actor !== COMMS_CAPCOM && !canReadComms(store, actor, message))
+  if (
+    !operatorLevel &&
+    actor !== COMMS_CAPCOM &&
+    actor !== COMMS_CONTROLLER &&
+    !canReadComms(store, actor, message)
+  )
     throw new Error("You cannot react to that Comms message.");
   const added = store.addCommsReaction(id, actor, reaction, reason, at);
   if (added === null) throw new Error("Unknown Comms message.");
-  if (actor === COMMS_CAPCOM && reaction === "done") {
-    store.settleCommsItem(id, COMMS_CAPCOM, "Marked done by the operator", at);
-    store.addHubEvent(`Comms ${id} marked done by the operator.`, at);
+  if (
+    (operatorLevel || actor === COMMS_CAPCOM || actor === COMMS_CONTROLLER) &&
+    reaction === "done"
+  ) {
+    const who =
+      actor === COMMS_CAPCOM
+        ? "the operator"
+        : actor === COMMS_CONTROLLER
+          ? "the controller"
+          : "FLIGHT";
+    store.settleCommsItem(id, actor, `Marked done by ${who}`, at);
+    store.addHubEvent(`Comms ${id} marked done by ${who}.`, at);
   }
   return added;
 }
@@ -465,4 +551,20 @@ export function flightQuestion(text: string): boolean {
   return /\?|\b(please confirm|let me know|should I|which (one|option)|need (your|a) (decision|approval)|waiting (on|for) you)\b/i.test(
     prose,
   );
+}
+
+/** The state line of a stored message: kept by the hub, or taken by its recipient. */
+export function commsSendState(
+  store: Store,
+  id: string,
+  alreadySent: boolean,
+  redirectedTo?: string,
+): CommsSendState {
+  const deliveredAt = store.commsMessage(id)?.deliveredAt ?? null;
+  return {
+    state: deliveredAt === null ? "stored" : "delivered",
+    deliveredAt,
+    alreadySent,
+    ...(redirectedTo === undefined ? {} : { redirectedTo }),
+  };
 }

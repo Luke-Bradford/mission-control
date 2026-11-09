@@ -11,14 +11,19 @@ import "../src/hud.css";
 import "../src/agent/Overview.css";
 import { createRoot } from "react-dom/client";
 import { AgentHeaderActions } from "../src/agent/Header.tsx";
+import { CrewPauseControl } from "../src/components/CrewPause.tsx";
 import { RESOURCES, streamStatus } from "../src/data.ts";
 import { Setup } from "../src/pages/Setup.tsx";
+import { AwayModal } from "../src/shell/AwayModal.tsx";
+import { openAway } from "../src/shell/overlays.ts";
 import { NOW, seatRow } from "./fixtures.ts";
 
 // One harness for the repo, seat and account-switch forms: `?form=F06` is the Agent page header
-// that holds Switch account; anything else is Setup's Repos & seats tab. `?state=` is how the
+// that holds Switch account; `loops` and `sources` are Setup's Loops and Sources tabs (the template
+// editor and the Teams feeds); anything else is Setup's Repos & seats tab. `?state=` is how the
 // data arrives: loading (never), error (refused), status-loading (accounts load, their login state does not) or
-// disconnected (the live stream is down). F06 is drawn as the Agent page draws it: the More menu.
+// disconnected (the live stream is down). `pause` is the crew pause control and `away` the Away
+// mode modal, opened as the shell opens it. F06 is drawn as the Agent page draws it: the More menu.
 const root = document.getElementById("root");
 if (!root) throw new Error("#root missing");
 const params = new URLSearchParams(location.search);
@@ -44,11 +49,22 @@ window.fetch = (input, init) => {
   }
   return fixture(input, init);
 };
+if (params.get("form") === "away") openAway();
 createRoot(root).render(
   <div className="app">
     <div className="shell shell-full">
       <main>
-        {params.get("form") === "F06" ? (
+        {params.get("form") === "loops" ? (
+          <Setup tab="loops" />
+        ) : params.get("form") === "sources" ? (
+          <Setup tab="sources" />
+        ) : params.get("form") === "pause" ? (
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <CrewPauseControl />
+          </div>
+        ) : params.get("form") === "away" ? (
+          <AwayModal />
+        ) : params.get("form") === "F06" ? (
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <AgentHeaderActions
               row={seatRow({ accountId: params.get("account") ?? "codex-main" })}

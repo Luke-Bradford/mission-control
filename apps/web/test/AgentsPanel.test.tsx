@@ -257,6 +257,66 @@ it("keeps a long latest message clipped inside its Crew Work cell", async () => 
   ).toHaveLength(11);
 });
 
+it("links the issue that pauses a watched loop, and shows no pause line without one", async () => {
+  stub([
+    seatRow({
+      id: "watched",
+      hudState: "parked",
+      paused: true,
+      pausedBy: "shop-app#7",
+      pausedByUrl: "https://github.com/acme/shop-app/issues/7",
+    }),
+    seatRow({ id: "free", index: 2, hudState: "parked", paused: true }),
+  ]);
+  const { container } = render(<AgentsPanel />);
+
+  await screen.findByText("watched");
+  const link = screen.getByRole("link", { name: "shop-app#7 on GitHub" });
+  expect(link.getAttribute("href")).toBe("https://github.com/acme/shop-app/issues/7");
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.getAttribute("rel")).toContain("noopener");
+  expect(link.closest(".work-cell")?.textContent).toContain("Paused by shop-app#7");
+  const rows = rowsIn(container);
+  const free = rows.find((r) => r.textContent?.includes("free"));
+  expect(rows.find((r) => r.textContent?.includes("watched"))?.textContent).not.toContain(
+    "Paused by you",
+  );
+  expect(free?.textContent).not.toContain("shop-app#7");
+  expect(free?.querySelector("a[target=_blank]")).toBeNull();
+});
+
+it("keeps the pause line beside a loop-owned decision on the same card", async () => {
+  stub(
+    [
+      seatRow({
+        id: "watched",
+        hudState: "parked",
+        paused: true,
+        pausedBy: "shop-app#7",
+        pausedByUrl: "https://github.com/acme/shop-app/issues/7",
+      }),
+    ],
+    true,
+    [
+      item({
+        key: "esc:shop-app#7",
+        escalationId: "shop-app#7",
+        ticket: "shop-app#7",
+        owner: "loop",
+        kind: "decision",
+        agentId: "watched",
+      }),
+    ],
+  );
+  render(<AgentsPanel />);
+
+  await screen.findByText("watched");
+  const link = screen.getByRole("link", { name: "shop-app#7 on GitHub" });
+  expect(link.getAttribute("href")).toBe("https://github.com/acme/shop-app/issues/7");
+  expect(link.getAttribute("target")).toBe("_blank");
+  expect(link.closest(".work-cell")?.textContent).toContain("Decision for");
+});
+
 it("names and confirms the waiver for a review-parked seat", async () => {
   const loop = {
     phase: "parked" as const,
@@ -1170,4 +1230,37 @@ describe("the Work line of an idle seat with an open run", () => {
   it("keeps the idle line of a seat with no loop", async () => {
     expect(await work({ loop: null })).not.toContain("Run open");
   });
+});
+
+it("folds several free seats into one row that opens into full rows, and keeps busy seats full size", async () => {
+  stub(
+    [
+      seatRow({ id: "free-a", hudState: "idle", run: null }),
+      seatRow({ id: "free-b", hudState: "idle", run: null }),
+      seatRow({ id: "free-c", hudState: "idle", run: null }),
+    ],
+    true,
+    [],
+  );
+  const { container } = render(<AgentsPanel />);
+  const toggle = await screen.findByRole("button", { name: /3 free/ });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(container.querySelector(".free-seats")?.textContent).toContain("FREE-A");
+  expect(container.querySelectorAll(".trow:not(.head):not(.flight):not(.free-seats)")).toHaveLength(
+    0,
+  );
+  fireEvent.click(toggle);
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(container.querySelectorAll(".trow:not(.head):not(.flight):not(.free-seats)")).toHaveLength(
+    3,
+  );
+});
+
+it("does not fold a single free seat", async () => {
+  stub([seatRow({ id: "free-a", hudState: "idle", run: null })], true, []);
+  const { container } = render(<AgentsPanel />);
+  await waitFor(() =>
+    expect(container.querySelectorAll(".trow:not(.head)").length).toBeGreaterThan(1),
+  );
+  expect(container.querySelector(".free-seats")).toBeNull();
 });

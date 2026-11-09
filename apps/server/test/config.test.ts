@@ -149,6 +149,37 @@ describe("loadConfig", () => {
     expect(c.poll).toEqual({ usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 });
   });
 
+  it("reads audit.controller_sessions, defaulting to off, and refuses unknown audit keys", () => {
+    expect(loadConfig(EXAMPLE).audit).toEqual({ controllerSessions: false });
+    const on = tmpConfig((y) => `${y}\naudit:\n  controller_sessions: true\n`);
+    expect(loadConfig(on).audit).toEqual({ controllerSessions: true });
+    const where = tmpConfig(
+      (y) => `${y}\naudit:\n  controller_sessions: true\n  controller_checkout: /Users/op/repo\n`,
+    );
+    expect(loadConfig(where).audit).toEqual({
+      controllerSessions: true,
+      controllerCheckout: "/Users/op/repo",
+    });
+    const bad = tmpConfig((y) => `${y}\naudit:\n  other: 1\n`);
+    expect(() => loadConfig(bad)).toThrow(ConfigError);
+  });
+
+  it("reads the Audit thresholds, leaving unset ones to the defaults", () => {
+    const set = tmpConfig(
+      (y) =>
+        `${y}\naudit:\n  question_wait_minutes: 30\n  controller_wait_minutes: 60\n  ticket_text_factor: 2.5\n  notice_repeats: 4\n`,
+    );
+    expect(loadConfig(set).audit).toEqual({
+      controllerSessions: false,
+      thresholds: {
+        questionWaitMs: 30 * 60_000,
+        controllerWaitMs: 60 * 60_000,
+        ticketTextFactor: 2.5,
+        noticeRepeats: 4,
+      },
+    });
+  });
+
   it("reads updates.cli, defaulting to off", () => {
     expect(loadConfig(EXAMPLE).updates).toEqual({ hub: "off", cli: "off" });
     const on = tmpConfig((y) => `${y}\nupdates:\n  cli: between_runs\n`);
@@ -251,6 +282,29 @@ describe("loadConfig", () => {
     );
     for (const bad of ["com shop-app", "a/b", "gui/501/x", "x;y", "é"])
       expect(errorOf(() => loadConfig(label(bad))).path).toBe("loops[0].launchdLabel");
+  });
+
+  it("reads a loop's paused_by: an issue, or a stop file with ~ expanded", () => {
+    const withPause = (line: string) =>
+      tmpConfig((y) =>
+        y.replace(
+          "    launchd_label: com.shop-app.ta-loop\n",
+          `    launchd_label: com.shop-app.ta-loop\n    paused_by: ${line}\n`,
+        ),
+      );
+    expect(loadConfig(withPause("{ issue: autonomy-engine#1818 }")).loops[0]?.pausedBy).toEqual({
+      issue: { repoId: "autonomy-engine", number: 1818 },
+    });
+    expect(loadConfig(withPause("{ stop_file: ~/STOP }")).loops[0]?.pausedBy).toEqual({
+      stopFile: join(homedir(), "STOP"),
+    });
+    expect(loadConfig(EXAMPLE).loops[0]?.pausedBy).toBeUndefined();
+    for (const bad of [
+      "{ issue: x#1, stop_file: ~/STOP }",
+      "{ issue: nohash }",
+      "{ issue: x#1, extra: 1 }",
+    ])
+      expect(() => loadConfig(withPause(bad))).toThrow(ConfigError);
   });
 
   it("expands ~ to the home directory", () => {

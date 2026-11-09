@@ -276,10 +276,62 @@ describe("release on merge", () => {
       card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
     ]);
     store.upsertPullRequests(REPO, [pr(900)], T0);
+    store.upsertRun(run("r-50", "mc#50", 901));
     await release(T0);
     store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 + MIN })], T0 + MIN);
     await release(T0 + 2 * MIN);
     expect(moves).toEqual([{ runId: "dep:mc#50", repoId: REPO, issue: 50, column: "Ready" }]);
+  });
+
+  /** A Blocked card 50 with no run on its ticket, waiting on PR 900 that then merges. */
+  const waitOnMerged900 = async () => {
+    store.replaceBoard(REPO, [
+      card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
+    ]);
+    store.upsertPullRequests(REPO, [pr(900)], T0);
+    await release(T0);
+    store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 + MIN })], T0 + MIN);
+    await release(T0 + 2 * MIN);
+  };
+  const boardMove = (runId: string, state: "done" | "failed") =>
+    store.addBoardMove({
+      runId,
+      repoId: REPO,
+      issue: 50,
+      column: "Blocked",
+      state,
+      detail: null,
+      at: T0,
+    });
+
+  it("releases a card a run here moved, though no run has its ticket", async () => {
+    store.upsertRun(run("r-flight", "mc#99", 901));
+    boardMove("r-flight", "done");
+    await waitOnMerged900();
+    expect(moves).toEqual([{ runId: "dep:mc#50", repoId: REPO, issue: 50, column: "Ready" }]);
+  });
+
+  it("does not count another hub's pr: and dep: rows, or a failed move, as ownership", async () => {
+    store.upsertRun(run("r-flight", "mc#99", 901));
+    boardMove("pr:mc#900", "done");
+    boardMove("dep:mc#50", "done");
+    boardMove("r-flight", "failed");
+    await waitOnMerged900();
+    expect(moves).toEqual([]);
+  });
+
+  it("leaves a Blocked card no run here touched, and does not mark it released", async () => {
+    store.replaceBoard(REPO, [
+      card(50, { status: "Blocked", state: "blocked", after: { issues: [], prs: [900] } }),
+    ]);
+    store.upsertPullRequests(REPO, [pr(900)], T0);
+    await release(T0);
+    store.upsertPullRequests(REPO, [pr(900, { state: "merged", mergedAt: T0 + MIN })], T0 + MIN);
+    await release(T0 + 2 * MIN);
+    expect(moves).toEqual([]);
+    expect(observeWaits(store, REPO, T0 + 3 * MIN).released.every((r) => r.moved !== true)).toBe(
+      true,
+    );
   });
 
   it("leaves an incomplete dependent in Blocked", async () => {
@@ -362,7 +414,27 @@ describe("what the hub tells FLIGHT", () => {
     ]);
     const next = flightState({ config, store, busy: [], now: T0 + MIN });
     expect(next.blocked).toEqual([]);
-    expect(next.triage.map((t) => t.evidence)).toEqual(["mc#1 closed: mc#2 unblocked"]);
+    // no run of this hub touched mc#2, so the hub does not release it and says so
+    expect(next.triage.map((t) => t.evidence)).toEqual([
+      "mc#1 closed: mc#2 stays Blocked: no run of this hub has touched it, so the hub does not release it",
+    ]);
+  });
+
+  it("says unblocked only for a card a run of this hub touched", () => {
+    const released = [
+      { ref: "mc#2", resolved: ["mc#1"], at: T0 },
+      { ref: "mc#3", resolved: ["mc#1"], at: T0 },
+    ];
+    expect(
+      releasedLines(
+        released,
+        () => "closed",
+        (ref) => ref === "mc#2",
+      ).map((l) => l.text),
+    ).toEqual([
+      "mc#1 closed: mc#2 unblocked",
+      "mc#1 closed: mc#3 stays Blocked: no run of this hub has touched it, so the hub does not release it",
+    ]);
   });
 
   it("says which work merged and which tickets it unblocked", () => {

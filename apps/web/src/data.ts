@@ -168,6 +168,11 @@ export const RESOURCES = {
     path: `/api/code-health/recommendations?repo=${enc(repo)}&cursor=${enc(cursor)}`,
     topic: ["agents", "flight"],
   }),
+  /** Where each run's tokens went; read on opening and on Refresh, not on every crew event. */
+  tokenAudit: (days: number): ResourceRef => ({
+    path: `/api/audit/tokens?days=${days}`,
+    topic: null,
+  }),
   audit: (range: string): ResourceRef => ({
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",
@@ -200,6 +205,10 @@ export const RESOURCES = {
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
   commsMetrics: { path: "/api/comms/metrics", topic: "agents" },
   commsChatter: { path: "/api/comms/chatter", topic: "agents" },
+  /** Unanswered questions and blockers, with their text; waiting is drawn from these. */
+  commsOpen: { path: "/api/comms/open", topic: "agents" },
+  /** The last 24h's messages one by one (the chart's side pane); an older hub answers 404. */
+  commsFeed: { path: "/api/comms/feed", topic: "agents" },
   stream: (agentId: string): ResourceRef => ({
     path: dockStreamPath(agentId),
     topic: "agents",
@@ -225,6 +234,8 @@ export const RESOURCES = {
     topic: null,
   }),
   escalations: { path: "/api/escalations", topic: "escalations" },
+  /** The branch builds the hub keeps to show; the server drops one when its PR closes. Read once per visit. */
+  designPreviews: { path: "/api/design-previews", topic: null },
   /** Who holds the full-suite lock and who waits; the server emits "guard" when that changes. */
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
@@ -449,7 +460,9 @@ const readResource = async <T>(path: string): Promise<T> => {
     mapSnapshots.set(path, next);
     return next as T;
   }
-  return path === RESOURCES.prFlow.path || path.startsWith("/api/code-health")
+  return path === RESOURCES.prFlow.path ||
+    path === RESOURCES.designPreviews.path ||
+    path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)
     : apiGet<T>(path);
 };

@@ -117,24 +117,6 @@ describeRendered("Run Trace, rendered", () => {
         );
       }
       expect(tabs.x + tabs.width, "tabs run under the meters").toBeLessThanOrEqual(status.x + 0.5);
-      // The dock's Open buttons are whole: inside their row, which is inside the Waiting block.
-      const waiting = await page.box(".dock-waiting");
-      const rows = await page.boxes(".dock-summary-item");
-      for (const [index, button] of (await page.boxes(".dock-summary-item > button")).entries()) {
-        const edge = button.x + button.width;
-        expect(edge, "Open is cut by its row").toBeLessThanOrEqual(
-          rows[index].x + rows[index].width + 0.5,
-        );
-        // The action stays inside its waiting block at every viewport.
-        expect(edge, "Open is cut by the block").toBeLessThanOrEqual(
-          waiting.x + waiting.width + 0.5,
-        );
-      }
-      // ...and so are their words: a button squeezed narrower than its label spills it out.
-      expect(
-        await page.unclipped(".dock-summary-item > button"),
-        "an Open label is cut",
-      ).not.toContain(false);
       expect(await page.unclipped(".top .tabs"), "the tabs scroll sideways").not.toContain(false);
       // The trace uses the panel: its grid reaches the panel body's right edge to within a gutter.
       if (width >= 1600) {

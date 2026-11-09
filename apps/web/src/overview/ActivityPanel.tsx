@@ -1,7 +1,6 @@
 import {
   type ActivityEvent,
   type ActivityRow,
-  type AttentionItem,
   type ConfigView,
   type Crew,
   HUD_STATE_LABEL,
@@ -9,7 +8,6 @@ import {
   SEAT_TURN_START_TEXT,
 } from "@mc/core";
 import { useLayoutEffect, useRef, useState } from "react";
-import { needsYouItems } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import { CommsEnd, isComms, MentionText } from "../comms/messages.tsx";
 import { Expandable } from "../components/Expandable.tsx";
@@ -21,28 +19,27 @@ import { Panel } from "../hud/Panel.tsx";
 import { PrChip } from "../hud/PrChip.tsx";
 import { parseTicket, RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { Seg } from "../hud/Seg.tsx";
-import { agentPath, commsAgentPath, commsFlightPath, followLink, itemPath } from "../router.ts";
+import { agentPath, commsAgentPath, commsFlightPath, followLink } from "../router.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { ACTIVITY_FILTER_KEY, readKey, writeKey } from "../storage.ts";
 import { logLine } from "./logLine.ts";
+import { useListFit } from "./useListFit.ts";
 
-type LogRow = ActivityRow & { attentionKey?: string; escalationRef?: string | null };
+type LogRow = ActivityRow;
 
-type Filter = "steps" | "comms" | "all" | "reviews" | "merges" | "guard" | "needs";
+type Filter = "steps" | "comms" | "all" | "reviews" | "merges" | "guard";
 const FILTERS: { value: Filter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "steps", label: "Steps" },
   { value: "reviews", label: "Reviews" },
   { value: "merges", label: "Merges" },
   { value: "guard", label: "Guard" },
-  { value: "needs", label: "Needs you" },
   { value: "comms", label: "Messages" },
 ];
 const SUB: Record<Filter, string> = {
   reviews: "reviews and pull requests",
   merges: "merge activity",
   guard: "guard activity",
-  needs: "open items needing you",
   steps: "high-level steps from every agent",
   comms: "what agents said to each other",
   all: "every event",
@@ -147,13 +144,11 @@ function ActivityText({
   prRepoId,
   split,
   red,
-  attentionKey,
 }: {
   event: ActivityEvent;
   prRepoId: string | null;
   split: [string, string] | null;
   red: boolean;
-  attentionKey?: string;
 }) {
   const pr = e.kind === "pr-opened" || e.kind === "pr-merged" ? PR_EVENT.exec(e.text) : null;
   return (
@@ -169,14 +164,6 @@ function ActivityText({
           <TicketRef ticket={e.ref} url={e.kind === "escalation" ? e.url : null} />
           {split[1]}
         </>
-      ) : attentionKey && !e.ref ? (
-        <a
-          href={e.url ?? itemPath(attentionKey)}
-          target={e.url ? "_blank" : undefined}
-          rel={e.url ? "noreferrer" : undefined}
-        >
-          {e.text}
-        </a>
       ) : (
         <MarkdownInline text={e.text} />
       )}
@@ -189,7 +176,6 @@ export function ActivityPanel() {
   const events = useResource<ActivityRow[]>(RESOURCES.activity);
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const config = useResource<ConfigView>(RESOURCES.config).data;
-  const attention = useResource<AttentionItem[]>(RESOURCES.attention);
   const tz = useTz();
   const now = useNow();
   const { session, inView, inRepo } = useSessionScope();
@@ -207,41 +193,11 @@ export function ActivityPanel() {
   const repoOf = (who: string): string | null =>
     agents.get(who)?.repoId ?? [who, ...who.split(":")].find((p) => repoIds.has(p)) ?? null;
 
-  // The Needs-you set, as the header counts it: one row per item, and no session filter below.
-  const needs: LogRow[] = needsYouItems(attention.data).map((i) => ({
-    attentionKey: i.key,
-    escalationRef: i.escalationId ? i.ticket : null,
-    at: i.messageAt ?? i.at,
-    who: i.agentId ?? i.repoId ?? "Needs you",
-    kind: "escalation",
-    text: i.text,
-    ref: i.ticket,
-    url: i.url,
-    status: null,
-    prs: [],
-    summary: null,
-  }));
-  const escalationRefs = new Set(
-    (events.data ?? []).filter((e) => e.kind === "escalation").map((e) => e.ref),
-  );
-  const usesAttention = filter === "needs" || filter === "all";
-  const resources = [
-    ...(filter === "needs" ? [] : [{ name: "activity", ...events }]),
-    ...(usesAttention ? [{ name: "attention", ...attention }] : []),
-  ];
-  const source: LogRow[] =
-    frozen ??
-    (filter === "needs"
-      ? needs
-      : filter === "all"
-        ? [
-            ...(events.data ?? []),
-            ...needs.filter((i) => !i.escalationRef || !escalationRefs.has(i.escalationRef)),
-          ]
-        : (events.data ?? []));
+  const resources = [{ name: "activity", ...events }];
+  const source: LogRow[] = frozen ?? events.data ?? [];
   const rows = source
     .filter((e) => {
-      if (filter === "all" || filter === "needs") return true;
+      if (filter === "all") return true;
       if (filter === "guard") return e.kind === "guard";
       if (filter === "reviews")
         return (
@@ -264,8 +220,6 @@ export function ActivityPanel() {
       );
     })
     .filter((e) => {
-      // Needs you is the operator's whole inbox: the session filter never hides it.
-      if (e.attentionKey !== undefined) return true;
       if (isComms(e)) {
         const ends = [e.who, e.to].flatMap((id) => agents.get(id) ?? []);
         return ends.length === 0 || ends.some(inView);
@@ -278,7 +232,7 @@ export function ActivityPanel() {
     .sort(compareActivity)
     .slice(0, SHOWN);
   const held = reading?.session === session ? reading.rows : null;
-  const rowKey = (row: LogRow) => row.attentionKey ?? activityKey(row);
+  const rowKey = (row: LogRow) => activityKey(row);
   const current = new Map<string, LogRow[]>();
   for (const row of rows) {
     const key = rowKey(row);
@@ -304,7 +258,7 @@ export function ActivityPanel() {
   // Number identical source rows so both remain visible.
   const seen = new Map<string, number>();
   const keyed = displayed.map((e) => {
-    const base = e.attentionKey ?? activityKey(e);
+    const base = activityKey(e);
     const n = seen.get(base) ?? 0;
     seen.set(base, n + 1);
     return { e, key: `${base}#${n}` };
@@ -314,6 +268,8 @@ export function ActivityPanel() {
     if (!held && list.current) list.current.scrollTop = 0;
   }, [held]);
 
+  // Whole rows at the foot, and no scrollbar for a sliver of overflow.
+  useListFit(list, ".arow", keyed.map((row) => row.key).join("|"));
   return (
     <Panel
       id="actP"
@@ -439,7 +395,6 @@ export function ActivityPanel() {
                     prRepoId={prRepo(e, config, repoIds, repoOf(e.who))}
                     split={split}
                     red={red}
-                    attentionKey={e.attentionKey}
                   />
                 </span>
               </Expandable>

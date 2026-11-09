@@ -9,11 +9,20 @@ import {
   type RunLoop,
   type TestLockState,
 } from "@mc/core";
-import { type FocusEvent, type ReactNode, type RefObject, useEffect, useId, useRef } from "react";
+import {
+  type FocusEvent,
+  type ReactNode,
+  type RefObject,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from "react";
 import { SeatControls } from "../agent/Header.tsx";
 import { reviewPark, WaiveReviewFindings, WaiveReviewMenu } from "../agent/reviewPark.tsx";
 import { useNow, useSecond, useSecondWhile, useTz } from "../clock.ts";
 import { CrewPauseControl } from "../components/CrewPause.tsx";
+import { ExternalLink } from "../components/ExternalLink.tsx";
 import { useTestLock } from "../components/LockLines.tsx";
 import { MarkdownInline } from "../components/Markdown.tsx";
 import { NeedButton } from "../components/NeedButton.tsx";
@@ -56,6 +65,7 @@ import { CrewLane, LANE_KINDS, laneTokens } from "./CrewLane.tsx";
 import { CrewOverflowNote } from "./CrewOverflowNote.tsx";
 import { LoopStep } from "./LoopStep.tsx";
 import { configuredAgents, OVERVIEW_LOADING_ROWS } from "./loading.ts";
+import { useListFit } from "./useListFit.ts";
 
 const DASH = "—";
 /** Wide columns join when the table has room; the rest always show. */
@@ -97,6 +107,24 @@ function revealCrewFocus(event: FocusEvent<HTMLDivElement>) {
 }
 
 const OPEN_RUN_LINE = "Run open, not in a turn";
+
+/** The issue that pauses a watched loop; a link when the server knows its GitHub page, else plain text. */
+function PausedBy({ by, url }: { by: string; url: string | null }) {
+  return (
+    <>
+      <span className="pause-label">Paused by</span>{" "}
+      <span className="rref">
+        {url ? (
+          <ExternalLink url={url} label={`${by} on GitHub`}>
+            {by}
+          </ExternalLink>
+        ) : (
+          by
+        )}
+      </span>
+    </>
+  );
+}
 
 function WorkCell({
   row,
@@ -149,15 +177,28 @@ function WorkCell({
     const refs = [row?.ticket?.replace(/^.*#/, "#"), prNumber ? `PR #${prNumber}` : null]
       .filter(Boolean)
       .join(" · ");
+    // An issue-paused loop leads with the pause; the doing line ("Paused by you") would contradict it.
+    const second =
+      note ??
+      (!row?.pausedBy && (line || !refs) ? (
+        <span className="ellip xs muted" title={line}>
+          {line || DASH}
+        </span>
+      ) : null);
     return (
       <span role="cell" className="ellip s ticket-cell work-cell muted">
-        {refs && <span className="ellip">last {refs}</span>}
-        {note ??
-          (line || !refs ? (
-            <span className="ellip xs muted" title={line}>
-              {line || DASH}
-            </span>
-          ) : null)}
+        {row?.pausedBy ? (
+          <span
+            className="ellip pause-line"
+            title={`Paused by ${row.pausedBy}${refs ? ` · last ${refs}` : ""}`}
+          >
+            <PausedBy by={row.pausedBy} url={row.pausedByUrl ?? null} />
+            {refs && <span className="pause-last">{` · last ${refs}`}</span>}
+          </span>
+        ) : (
+          refs && <span className="ellip">last {refs}</span>
+        )}
+        {second}
         {actions}
       </span>
     );
@@ -738,6 +779,41 @@ function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
   );
 }
 
+/** From this many free seats the roster folds them into one row. */
+export const FREE_SEATS_COLLAPSE_FROM = 2;
+
+/** The folded free seats: how many, who, and a button that unfolds them into full rows. */
+function FreeSeatsRow({
+  rows,
+  open,
+  onToggle,
+}: {
+  rows: Crew["rows"];
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const names = rows.map((row) => callSign(row)).join(", ");
+  return (
+    // biome-ignore lint/a11y/useFocusableInteractive: the toggle button inside is the focus target
+    <div role="row" className="trow free-seats">
+      <span role="cell">
+        <button
+          type="button"
+          className="sm"
+          aria-expanded={open}
+          title={open ? "Fold the free seats" : "Show each free seat"}
+          onClick={onToggle}
+        >
+          {rows.length} free {open ? "▴" : "▾"}
+        </button>
+      </span>
+      <span role="cell" className="ellip muted" title={names}>
+        {names}
+      </span>
+    </div>
+  );
+}
+
 /** FLIGHT heads the crew, observed loops and stopped seats. */
 export function AgentsPanel() {
   const scrollHint = useId();
@@ -783,6 +859,29 @@ export function AgentsPanel() {
         .filter((r) => r.accountId === account)
         .flatMap((r) => laneTokens(r.digest, now, laneOf(r.id))),
     );
+  // A free seat has nothing to act on, so with several the roster folds them into one row. Seats that
+  // work, wait, are blocked, carry a need or are selected stay full size.
+  const [freeOpen, setFreeOpen] = useState(false);
+  const isFree = (row: Crew["rows"][number]) =>
+    row.kind === "crew" &&
+    row.id !== selected &&
+    seatStatus(row).label === "Free" &&
+    seatItems(row, items).length === 0;
+  const freeRows = rows?.filter(isFree) ?? [];
+  const busyRows = rows?.filter((row) => !isFree(row));
+  const renderRow = (row: Crew["rows"][number]) => (
+    <AgentRow
+      key={row.id}
+      row={row}
+      items={items}
+      max={maxOf(row.accountId)}
+      tz={tz}
+      selected={row.id === selected}
+      lock={lock}
+      lane={laneOf(row.id)}
+    />
+  );
+  useListFit(rosterElement, ".trow", `${rows?.length ?? -1}:${freeRows.length}:${freeOpen}`);
   const placeholders = config
     ? configuredAgents(config).filter((agent) => agent.id !== flightId && matchesSession(agent))
     : Array.from({ length: OVERVIEW_LOADING_ROWS - 1 }, (_, i) => ({ id: `loading-${i}` }));
@@ -894,18 +993,15 @@ export function AgentsPanel() {
           lock={lock}
           lane={flight ? laneOf(flight.id) : undefined}
         />
-        {rows?.map((row) => (
-          <AgentRow
-            key={row.id}
-            row={row}
-            items={items}
-            max={maxOf(row.accountId)}
-            tz={tz}
-            selected={row.id === selected}
-            lock={lock}
-            lane={laneOf(row.id)}
+        {busyRows?.map(renderRow)}
+        {freeRows.length >= FREE_SEATS_COLLAPSE_FROM && (
+          <FreeSeatsRow
+            rows={freeRows}
+            open={freeOpen}
+            onToggle={() => setFreeOpen((open) => !open)}
           />
-        ))}
+        )}
+        {freeOpen || freeRows.length < FREE_SEATS_COLLAPSE_FROM ? freeRows.map(renderRow) : null}
         {crew.error && !rows && <div className="pb crit-t">Could not load the crew.</div>}
         {seatRows?.length === 0 && !flight && (
           <p className="pb">

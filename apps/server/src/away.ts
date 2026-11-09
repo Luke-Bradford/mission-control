@@ -91,6 +91,8 @@ export function awayDigest(
         items: attention.filter(
           (i) =>
             !i.acked &&
+            // what the Needs you entry check sent back to FLIGHT is not the operator's (#1543)
+            i.returned === undefined &&
             (i.owner === undefined || i.owner === OWNER_OPERATOR || i.flightTriage !== undefined),
         ),
       },

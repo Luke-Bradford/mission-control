@@ -800,7 +800,13 @@ describe("supervisor events (Plan 7a)", () => {
           payload: { text: "fix it" },
         });
         expect(response.statusCode).toBe(200);
-        expect(response.json()).toEqual({ ok: true });
+        // stored for the seat's next turn, and the response says so
+        expect(response.json()).toEqual({
+          ok: true,
+          state: "stored",
+          deliveredAt: null,
+          alreadySent: false,
+        });
         expect(store.seatSession("guido-1")?.runId).toBe(runId);
         expect(prep.sessions).toHaveLength(1);
         expect(store.comms(0).map((message) => message.text)).toEqual(["fix it"]);
