@@ -1,6 +1,7 @@
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { NeedBanner } from "../src/agent/NeedBanner.tsx";
+import { sortNeeds } from "../src/attention.ts";
 import { hub } from "../src/data.ts";
 import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
 import { stubFetch } from "./fetchStub.ts";
@@ -10,6 +11,17 @@ afterEach(() => {
   cleanup();
   hub.clear();
   vi.unstubAllGlobals();
+});
+it("puts FLIGHT down before normally higher-priority asks without changing their order", () => {
+  const source = [
+    item({ key: "decision", kind: "decision" }),
+    item({ key: "error", kind: "error" }),
+    item({ key: "down", kind: "blocked", notTriaging: { cause: "down", keys: [], since: null } }),
+    item({ key: "question", kind: "question" }),
+  ];
+  const normal = sortNeeds(source.filter((i) => !i.notTriaging));
+  expect(sortNeeds(source).map((i) => i.key)).toEqual(["down", ...normal.map((i) => i.key)]);
+  expect(source.map((i) => i.key)).toEqual(["decision", "error", "down", "question"]);
 });
 it("names the loop owner in Overview and Agent, with one reachable action for fifty asks", async () => {
   const row = crewRow({

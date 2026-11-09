@@ -258,7 +258,7 @@ export const BRIEF_KEY_MAX = 500;
 export const briefNoItemText = (key: string): string =>
   `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
 export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
-export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items: for operator passes it up, for flight keeps it as FLIGHT is handling until FLIGHT changes the brief or records a wait condition. Operator-only calls (approvals, decisions, update holds, flags, budget/account parks and rate limits) must be passed up with a brief. The hub supplies original up to ${BRIEF_INPUT_MAX} characters. Give assessment (two or three sentences), did (actions with refs, or []), ask (a required non-empty question when for operator), recommendation, and two to four options when it is a choice. Otherwise omit options and use the item's discussion. context is a legacy alias for assessment. A new brief replaces the old one. When your recommendation is to wait, add hold { condition } (a date, a ticket merge, a PR's CI passing or failing, another item resolving, or the crew resuming): the item leaves Needs you, and when the condition is met it returns and wakes you to refresh the brief. Texts accept ${BRIEF_INPUT_MAX} characters without truncation.`;
+export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items. for flight remains lightweight: give assessment/context and recommendation while FLIGHT handles it. Every for operator brief requires assessment, did[] (actions and refs, or []), checked[] (source and finding, or []), nonempty ask, decision { consulted[] (who/finding/ref, or []), costOfDelay, whyOperator?: { kind, explanation }, waiting? }, two to four options with unique IDs, label, answer, consequence, reversibility { kind, detail }, typed action, and recommendedOptionId plus recommendation rationale. whyOperator.kind is money, product-direction, security-exception, irreversible or floor-approval; these always need an explicit waiting condition and never default. Otherwise only a server-validated ordinary-run-guidance or direct-queue-priority-swap action can establish FYI eligibility. Labels, prose, reversibility and caller claims never grant authority. Copy actual target/run/head/scope facts from flight_state; unknown or changed facts require refresh. Use the strict action schema for answers, explicit run-park recovery, review rework/resume, queue proposals, source-bound person replies, controller checks, UAT, exact scoped floor grants, merge holds, breaker recovery or honest external decision recording. Do not substitute navigation for an action. The server retains full original source and rechecks source/run/holds/authentication at final dispatch. Text input accepts ${BRIEF_INPUT_MAX} characters. For an actual wait, hold { condition } supports date, merge, CI, another item, crew or manual conditions; releasing it requires a refreshed choice.`;
 
 export const FLIGHT_LEDGER_KINDS = ["work", "watch", "commitment", "incoming"] as const;
 export type FlightLedgerKind = (typeof FLIGHT_LEDGER_KINDS)[number];
@@ -1384,12 +1384,14 @@ export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
  * second or two. A wake due sooner waits for the gap.
  */
 export const FLIGHT_MIN_WAKE_GAP_MS = 2 * 60_000;
+/** An unread operator request is delivered within a minute, even just after another wake. */
+export const FLIGHT_OPERATOR_WAKE_GAP_MS = 30_000;
 /**
  * Routine wake facts (a free seat, a PR moving) wait this long after the last wake and are sent
  * together. Anything else wakes at once.
  */
 export const FLIGHT_BATCH_MS = 15 * 60_000;
-/** An operator message to FLIGHT unread this long after it was sent no longer wakes it. */
+/** @deprecated Unread operator requests no longer expire from FLIGHT's wake inputs. */
 export const FLIGHT_OPERATOR_UNREAD_MS = 6 * 60 * 60_000;
 /** An operator message FLIGHT read and has not answered stays owed this long. */
 export const FLIGHT_OWED_MS = 7 * 24 * 60 * 60_000;

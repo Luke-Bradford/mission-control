@@ -1,9 +1,9 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
 import { hub } from "../src/data.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { MIN, NOW } from "./fixtures.ts";
+import { CONFIG, MIN, NOW } from "./fixtures.ts";
 
 const message = (n: number, from: string, to: string) => ({
   id: `comms:${n}`,
@@ -49,6 +49,32 @@ afterEach(() => {
 });
 
 describe("opening a Comms conversation marks it read", () => {
+  it("renders undated turn text honestly and reads its source id without offering stored-message actions", async () => {
+    const id = "stream:flight-run:123:0";
+    const fetch = stubFetch({
+      ...routes,
+      "/api/config": CONFIG,
+      "/api/comms/flight": {
+        ...FLIGHT_PAGE,
+        messages: [{ ...message(2, "flight-1", "CAPCOM"), id, at: null }],
+      },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<CommsConversation view={{ kind: "flight" }} row={null} />);
+    const text = await screen.findByText("Message 2");
+    const bubble = text.closest("article");
+    expect(bubble).not.toBeNull();
+    if (!bubble) throw new Error("Missing conversation line");
+    expect(within(bubble).getByText("—")).toBeTruthy();
+    expect(within(bubble).queryByRole("button", { name: "Pin" })).toBeNull();
+    expect(within(bubble).queryByRole("button", { name: /Reply|Ack/ })).toBeNull();
+    await waitFor(() => {
+      const call = fetch.mock.calls.find(([path]) => path === "/api/comms/read");
+      expect(JSON.parse(String(call?.[1]?.body))).toEqual({ scope: "flight", messageId: id });
+    });
+    expect(screen.queryByText(READ_ERROR)).toBeNull();
+  });
+
   it("posts the server's read body for the newest message, and shows no error", async () => {
     const fetch = stubFetch({ ...routes, "POST /api/comms/read": { ok: true } });
     render(<CommsConversation view={{ kind: "flight" }} row={null} />);

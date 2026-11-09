@@ -1,0 +1,91 @@
+{
+  "baselineCommit": "03ef6b5212e0fff0193f20e6bff3d226eabca2c7",
+  "sourceCommit": "3975c9adbf5a70a4db0504fbd12ca6d94e67d0c5",
+  "fixture": "apps/web/test/FlightConversationSource.browser.test.ts",
+  "baselineCaptureDriver": "/tmp/mc-1620-baseline-capture-driver.ts",
+  "notes": "Production harness with identical synthetic API fixtures in both captures. Baseline capture drops ONLY three assertions for unavailable behavior; it does not alter the product. Not a live deployment or independent QA verdict. No source changes during full test.",
+  "pairs": [
+    {
+      "before": {
+        "path": "before/flight-source-1280x1000-dark.png",
+        "sha256": "99d5fc875af7d7025d3e6c9dcc703fb5698c2567fa1055453c9bacf688328bcb"
+      },
+      "after": {
+        "path": "after/flight-source-1280x1000-dark.png",
+        "sha256": "875a20f38c9d3884653f8cf603654d7c34b07bce3a39983376096e6d515d0ae6"
+      }
+    },
+    {
+      "before": {
+        "path": "before/flight-source-1280x1000-light.png",
+        "sha256": "4ad2885be8dfbc12722ce6bab367c7118bf3aa7ade55c829080be4480a2ac938"
+      },
+      "after": {
+        "path": "after/flight-source-1280x1000-light.png",
+        "sha256": "78beca89a04e352e6fbeed63226f3d551156aa800798a28b56541d129c427fe6"
+      }
+    },
+    {
+      "before": {
+        "path": "before/flight-source-1600x1000-dark.png",
+        "sha256": "b1feb64fce7d3f24a4c8db98a99dbd2004399f9cc2d9a33ec56655f9f8ea41d6"
+      },
+      "after": {
+        "path": "after/flight-source-1600x1000-dark.png",
+        "sha256": "714400c8da9dcdc103ca3ba57e10d2ca44ebee97a6fd584997d3c1ddd6eb0541"
+      }
+    },
+    {
+      "before": {
+        "path": "before/flight-source-1600x1000-light.png",
+        "sha256": "89f01243f9a7aba0061573bad76d1f920108cfe9310628c5902e4268f5b4fcc1"
+      },
+      "after": {
+        "path": "after/flight-source-1600x1000-light.png",
+        "sha256": "f1d7438a5ee9e24abb69caf8ea982ee612f146aef614a63a9a8a0a7842df74ce"
+      }
+    },
+    {
+      "before": {
+        "path": "before/flight-source-1600x700-dark.png",
+        "sha256": "6ad9f899eb0d3aa4cf5f6967805a89f5d16c0bc3aed43719898865e003794fe8"
+      },
+      "after": {
+        "path": "after/flight-source-1600x700-dark.png",
+        "sha256": "88f184394c2dcdc1005d238757c3890486e6043d98b890249515e7cb653ec35d"
+      }
+    },
+    {
+      "before": {
+        "path": "before/flight-source-1600x700-light.png",
+        "sha256": "d6d2cfefe0732df9ea79bab2d4ed776088da4afb759fb8963da541da0de4b8ac"
+      },
+      "after": {
+        "path": "after/flight-source-1600x700-light.png",
+        "sha256": "91b1a21895175103586d363a0718b2669386bd1bea2b6b6ecc66c2a34e3eceba"
+      }
+    },
+    {
+      "before": {
+        "path": "before/flight-source-1920x1000-dark.png",
+        "sha256": "9ac0ae102b0a8e84890a8ac42e87889fca19896919227b22625cfa4bacf2c345"
+      },
+      "after": {
+        "path": "after/flight-source-1920x1000-dark.png",
+        "sha256": "eeca5ae51fd150aa27ae47fc8925c9b9bc13dd272095c18367e243769d8786e6"
+      }
+    },
+    {
+      "before": {
+        "path": "before/flight-source-1920x1000-light.png",
+        "sha256": "aca14f3393fdfe0c2fadc182e21e64d704578672edfcea6fa68d235a8e8815cd"
+      },
+      "after": {
+        "path": "after/flight-source-1920x1000-light.png",
+        "sha256": "34c54ff624b49c90b8b04f9aa6847efa5e32f17742d5f559048833cfe936c865"
+      }
+    }
+  ],
+  "baselineWebTree": "0992d2940b9d13d29a36bf5c1ae3da9886d0a9b9",
+  "sourceWebTree": "a2aee3d5eea4f0a9aa9432058a4eec4c091c85c5"
+}
