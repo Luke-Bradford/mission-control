@@ -34,6 +34,19 @@ export function canonicalFlightQuestionKey(
   return keys[1];
 }
 
+/** A durable receipt closes either legacy projection without treating an acknowledgement as consent. */
+export function flightQuestionChoice(store: Store, messageId: string, flightId: string) {
+  const briefs = store.briefs();
+  for (const key of flightQuestionKeys(messageId, flightId)) {
+    const brief = briefs.get(key);
+    if (brief) {
+      const choice = store.choice(key, brief.at);
+      if (choice) return choice;
+    }
+  }
+  return null;
+}
+
 /** Whether this stored line is FLIGHT's labelled question to the operator. */
 export function isFlightOperatorQuestion(
   store: Store,

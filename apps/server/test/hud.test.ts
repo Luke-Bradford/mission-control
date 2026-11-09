@@ -3110,6 +3110,10 @@ describe("messages are not Needs you", () => {
     });
     if (message === null) throw new Error("message was not stored");
 
+    expect(
+      attentionItems(c, store, at - 1, NO_LOCK, []).filter((item) => item.text === message.text),
+    ).toEqual([expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" })]);
+    store.markCommsInboxRead("flight-1", [message.id]);
     const items = attentionItems(c, store, at, NO_LOCK, []);
     expect(items.filter((item) => item.text === message.text)).toEqual([
       expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" }),
@@ -3145,6 +3149,80 @@ describe("messages are not Needs you", () => {
     expect(
       attentionItems(c, store, at, NO_LOCK, []).filter((item) => item.text === message.text),
     ).toEqual([expect.objectContaining({ key: legacyKey })]);
+  });
+
+  it("closes a legacy tagged duplicate only when it has a real choice", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve?",
+      context: "Ready.",
+      recommendation: "Approve.",
+      basis: "Legacy.",
+      options: TWO_OPTIONS,
+    });
+    store.claimChoice({
+      key,
+      briefAt: message.at,
+      optionId: "yes",
+      label: "Yes",
+      answer: "Go ahead.",
+      question: "Approve?",
+      ticket: "shop-app#5",
+      target: "FLIGHT-1",
+      targetKind: "flight",
+      messageId: null,
+      chosenAt: at,
+      chosenBy: "operator",
+    });
+    store.ack([key], at);
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).find((item) => item.key === key),
+    ).toBeUndefined();
+  });
+
+  it("keeps an ack-only legacy tagged duplicate answerable", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve?",
+      context: "Ready.",
+      recommendation: "Approve.",
+      basis: "Legacy.",
+      options: TWO_OPTIONS,
+    });
+    store.ack([key], at);
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).find((item) => item.key === key),
+    ).toMatchObject({ acked: false });
   });
 
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {

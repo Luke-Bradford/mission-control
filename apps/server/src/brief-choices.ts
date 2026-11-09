@@ -314,7 +314,7 @@ export async function chooseBrief(
         ref: item.ticket,
         questionId: null,
         about: `Brief choice ${key}`,
-        decision: text,
+        decision: current.options.find((option) => option.id === request.optionId)?.answer ?? text,
         basis: `brief ${request.briefId}; source ${request.sourceRevision}; epoch ${binding.epoch}; option ${request.optionId}; ${mode}`,
       });
       if (mode === "default") {
