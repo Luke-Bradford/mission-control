@@ -282,6 +282,13 @@ same way, and the head is not reviewed a second time. When the hub holds a repor
 not post (a draft PR, a branch still owned, a PR it was never asked to review), it logs one line
 saying why, once per review.
 
+Review setup installs with lifecycle scripts disabled. A scripts-only `package.json` change is safe
+to install. A types-only bump is also safe when every changed manifest dependency and lockfile
+package record is under `@types/` and neither old nor new record declares `requiresBuild`. All other
+manifest or lockfile changes start a read-only review without installing the PR's packages. The
+review brief records `Reviewed, not installed` and tells the reviewer not to run commands that need
+those packages; this is a review limitation, not a failed review.
+
 These PRs do not enter the crew's merge or board-completion path. Their controller still applies CI,
 review, acceptance and repository merge rules. A failed review remains failed rather than repeatedly
 starting paid retries. A new push creates a new review opportunity.

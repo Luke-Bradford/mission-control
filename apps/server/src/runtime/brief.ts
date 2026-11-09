@@ -288,6 +288,8 @@ export interface ReviewBriefInput {
   second?: { reason: string; findings: readonly StoredFinding[] };
   /** True for a web PR: its preview is starting in the background. */
   preview?: boolean;
+  /** The PR changed untrusted dependency inputs, so this review has no installed branch packages. */
+  installNote?: string;
   /** An ended run's PR: blocking findings still open from the PR's earlier reviews. */
   olderFindings?: readonly { reviewId: number; sha: string; finding: StoredFinding }[];
 }
@@ -343,6 +345,11 @@ export function reviewBrief(i: ReviewBriefInput): string {
         ]
       : []),
     `- CI: every check passed on ${sha7}.`,
+    ...(i.installNote
+      ? [
+          `- ${i.installNote} Do not run commands that need packages from this PR; inspect the diff and use only the base environment.`,
+        ]
+      : []),
     ...(i.evidence
       ? [
           `- ${i.evidence.dir}/: screenshots of the HUD pages this PR changes, main against this head, with a pixel diff. Read them (the Read tool shows an image); the list is below.`,

@@ -4474,6 +4474,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
         ...(screenshots === undefined ? {} : { evidence: screenshots }),
+        ...(scratch.installNote === undefined ? {} : { installNote: scratch.installNote }),
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
         ...(previewStarting ? { preview: true } : {}),

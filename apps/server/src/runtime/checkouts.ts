@@ -839,6 +839,112 @@ async function refuseChangedInputs(
 }
 
 /**
+ * Review-only exception for changes that cannot add executable package code. A manifest may only
+ * change scripts, or versions of DefinitelyTyped packages. A matching lockfile may only change
+ * DefinitelyTyped package records which do not declare a build. Every other install input keeps
+ * the normal byte-for-byte origin check.
+ */
+async function safeReviewPnpmChanges(
+  s: InstallVerification,
+  read: ReadObject,
+  base: string,
+): Promise<boolean> {
+  let changed: string[];
+  try {
+    changed = (
+      await s.inClone(["diff", "--name-only", "--no-renames", "-z", `${base}...${s.rev}`, "--"])
+    )
+      .split("\0")
+      .filter(Boolean);
+  } catch {
+    return false;
+  }
+  if (
+    changed.length === 0 ||
+    changed.some((file) => basename(file) !== "package.json" && file !== PNPM_TOOL.lockfile)
+  )
+    return false;
+
+  let typesOnly = false;
+  for (const file of changed.filter((file) => basename(file) === "package.json")) {
+    const entry = await baseEntry(read, base, file);
+    if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return false;
+    try {
+      const before = JSON.parse((await read("blob", entry.id, file)).toString("utf8")) as Record<
+        string,
+        unknown
+      >;
+      const after = JSON.parse(await readFile(join(s.path, file), "utf8")) as Record<
+        string,
+        unknown
+      >;
+      const beforeRest = { ...before };
+      const afterRest = { ...after };
+      delete beforeRest.scripts;
+      delete afterRest.scripts;
+      for (const field of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+      ]) {
+        delete beforeRest[field];
+        delete afterRest[field];
+      }
+      if (JSON.stringify(beforeRest) !== JSON.stringify(afterRest)) return false;
+      const names = new Set<string>();
+      for (const field of [
+        "dependencies",
+        "devDependencies",
+        "optionalDependencies",
+        "peerDependencies",
+      ]) {
+        const left = before[field] as Record<string, unknown> | undefined;
+        const right = after[field] as Record<string, unknown> | undefined;
+        if (JSON.stringify(left) === JSON.stringify(right)) continue;
+        for (const name of new Set([...Object.keys(left ?? {}), ...Object.keys(right ?? {})])) {
+          if (left?.[name] !== right?.[name]) names.add(name);
+        }
+      }
+      if (names.size > 0) {
+        if ([...names].some((name) => !name.startsWith("@types/"))) return false;
+        typesOnly = true;
+      }
+    } catch {
+      return false;
+    }
+  }
+  if (!changed.includes(PNPM_TOOL.lockfile)) return true;
+  if (!typesOnly) return false;
+  try {
+    const entry = await baseEntry(read, base, PNPM_TOOL.lockfile);
+    if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return false;
+    const before = parseYaml(
+      (await read("blob", entry.id, PNPM_TOOL.lockfile)).toString("utf8"),
+    ) as {
+      packages?: Record<string, { requiresBuild?: unknown }>;
+    };
+    const after = parseYaml(
+      await readFile(join(s.path, PNPM_TOOL.lockfile), "utf8"),
+    ) as typeof before;
+    const keys = new Set([
+      ...Object.keys(before.packages ?? {}),
+      ...Object.keys(after.packages ?? {}),
+    ]);
+    return [...keys].every((key) => {
+      const left = before.packages?.[key];
+      const right = after.packages?.[key];
+      if (JSON.stringify(left) === JSON.stringify(right)) return true;
+      return (
+        key.startsWith("@types/") && left?.requiresBuild !== true && right?.requiresBuild !== true
+      );
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
  * pnpm's environment for an install in `worktree`: the server's, without git's or a parent pnpm
  * run's settings and without CI markers, plus `CI=false` (ci-info then reports not-CI whatever
  * else is set; under CI pnpm purges a mismatched node_modules without asking), a server-controlled
@@ -1032,12 +1138,15 @@ async function verifyInstall(
 ): Promise<string[]> {
   await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
   const base = s.compare ? await branchBase(s.inClone, s.base, s.rev, s.subject) : s.base;
-  if (s.compare) await refuseInstallInputs(s.inClone, base, s.rev, s.subject, tool.inputs);
   const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
   if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
   const read = verifiedObjects((args, maxBuffer) =>
     crewGitBytes(s.checkout, args, s.common, { gitDir: s.common, maxBuffer }),
   );
+  const safeReviewChange =
+    s.compare && tool === PNPM_TOOL && (await safeReviewPnpmChanges(s, read, base));
+  if (s.compare && !safeReviewChange)
+    await refuseInstallInputs(s.inClone, base, s.rev, s.subject, tool.inputs);
   const found: string[] = [];
   const allowedInstallDirs = new Set<string>();
   const unsafe = await inspectDisk(
@@ -1051,7 +1160,7 @@ async function verifyInstall(
     read,
   );
   if (unsafe !== null) throw refuse(s.subject, unsafe);
-  await refuseChangedInputs(s.path, tool, found, read, base, s.subject);
+  if (!safeReviewChange) await refuseChangedInputs(s.path, tool, found, read, base, s.subject);
   for (const file of tool.required) {
     if (!found.includes(file)) throw refuse(s.subject, `has no ${file}`);
   }
@@ -1914,6 +2023,8 @@ export interface Scratch {
   /** origin's default tip */
   baseSha: string;
   mergeBase: string;
+  /** Present when this review reads the PR without installing its changed dependencies. */
+  installNote?: string;
 }
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
@@ -1984,22 +2095,37 @@ export async function prepareScratch(
     if (!COMMIT_SHA.test(mergeBase)) {
       throw new CheckoutError("base", "the PR head has no merge base with origin's default branch");
     }
-    await installAll(
-      {
-        checkout: i.checkout,
-        common,
-        inClone,
-        path,
-        rev: i.sha,
-        base: mergeBase,
-        compare: true,
-        subject,
-        name: subject,
-        worktreesRoot: i.worktreesRoot,
-      },
-      runInstall,
-    );
-    return { path, gitDir, baseSha, mergeBase };
+    let installNote: string | undefined;
+    try {
+      await installAll(
+        {
+          checkout: i.checkout,
+          common,
+          inClone,
+          path,
+          rev: i.sha,
+          base: mergeBase,
+          compare: true,
+          subject,
+          name: subject,
+          worktreesRoot: i.worktreesRoot,
+        },
+        runInstall,
+      );
+    } catch (e) {
+      if (
+        e instanceof CheckoutError &&
+        e.code === "protected" &&
+        / changes (?:.+\/)?(?:package\.json|pnpm-lock\.yaml); Mission Control won't install from it$/.test(
+          e.message,
+        )
+      ) {
+        installNote = `Reviewed, not installed: ${e.message}`;
+      } else {
+        throw e;
+      }
+    }
+    return { path, gitDir, baseSha, mergeBase, ...(installNote ? { installNote } : {}) };
   } catch (e) {
     await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch(() => {});
     throw e;
