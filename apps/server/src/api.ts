@@ -666,6 +666,7 @@ const MessageBody = z.strictObject({
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
 const NoBody = z.strictObject({});
+const CLEAR_ATTENTION_ROUTE = "/attention/:key/clear";
 /** `POST /api/runs/:id/merge-hold`: the controller holds a run's merge (with a reason) or releases it. */
 const MergeHoldBody = z.discriminatedUnion("action", [
   z.strictObject({ action: z.literal("hold"), reason: z.string().trim().min(1).max(300) }),
@@ -1281,10 +1282,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       Number(req.headers["content-length"] ?? 0) > 0 ||
       req.headers["transfer-encoding"] !== undefined;
     const previewActivity = req.routeOptions.url === "/api/previews/:pr/activity";
+    const emptyClear =
+      req.method === "POST" &&
+      req.routeOptions.url === `${API_PREFIX}${CLEAR_ATTENTION_ROUTE}` &&
+      !hasBody;
     if (
       mutating &&
       (req.method !== "DELETE" || hasBody) &&
       !previewActivity &&
+      !emptyClear &&
       mediaType(req.headers["content-type"]) !== "application/json"
     ) {
       return reply
@@ -6244,41 +6250,54 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: docs/runbook.md#clearing-a-needs-you-item (#1625 supplies the web control)
-      api.post<{ Params: { key: string } }>("/attention/:key/clear", async (req, reply) => {
-        if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined)
-          return reply.code(403).send({ error: "Only the operator can clear an item." });
-        if (!NoBody.safeParse(req.body).success)
-          return reply.code(400).send({ error: "Clear takes an empty body." });
-        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
-        const { key } = req.params;
-        if (key === `note:${FLIGHT_RUNAWAY_NOTE_KEY}`)
-          return reply.code(409).send({ error: "Use Lift to release the runaway flag." });
-        const item = attentionItems(
-          config,
-          store,
-          now(),
-          deps.lock?.state() ?? NO_LOCK,
-          sharedCrew().rows,
-          deps.hubLogin?.() ?? null,
-          true,
-        ).find((i) => i.key === key);
-        if (!item) return reply.code(404).send({ error: "That item is no longer waiting." });
-        const sender = commsSender(req);
-        const cleared = await clearAttentionItem(
-          {
+      api.register(async (clearApi) => {
+        // Only Clear accepts an empty JSON stream; other routes keep the standard parser.
+        const parseJson = clearApi.getDefaultJsonParser("error", "error");
+        clearApi.removeContentTypeParser("application/json");
+        clearApi.addContentTypeParser<string>(
+          "application/json",
+          { parseAs: "string" },
+          (req, body, done) => {
+            if (body.length === 0) done(null, {});
+            else parseJson(req, body, done);
+          },
+        );
+        clearApi.post<{ Params: { key: string } }>(CLEAR_ATTENTION_ROUTE, async (req, reply) => {
+          if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined)
+            return reply.code(403).send({ error: "Only the operator can clear an item." });
+          if (!NoBody.safeParse(req.body === undefined ? {} : req.body).success)
+            return reply.code(400).send({ error: "Clear takes an empty body." });
+          if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+          const { key } = req.params;
+          if (key === `note:${FLIGHT_RUNAWAY_NOTE_KEY}`)
+            return reply.code(409).send({ error: "Use Lift to release the runaway flag." });
+          const item = attentionItems(
             config,
             store,
-            bus,
-            now,
-            by: sender.from,
-            actorName: sender.kind === "controller" ? "The controller" : "The operator",
-            reconcileRun: deps.engine?.reconcileRun?.bind(deps.engine),
-          },
-          item,
-        );
-        return cleared
-          ? { cleared: key }
-          : reply.code(404).send({ error: "That item is no longer waiting." });
+            now(),
+            deps.lock?.state() ?? NO_LOCK,
+            sharedCrew().rows,
+            deps.hubLogin?.() ?? null,
+            true,
+          ).find((i) => i.key === key);
+          if (!item) return reply.code(404).send({ error: "That item is no longer waiting." });
+          const sender = commsSender(req);
+          const cleared = await clearAttentionItem(
+            {
+              config,
+              store,
+              bus,
+              now,
+              by: sender.from,
+              actorName: sender.kind === "controller" ? "The controller" : "The operator",
+              reconcileRun: deps.engine?.reconcileRun?.bind(deps.engine),
+            },
+            item,
+          );
+          return cleared
+            ? { cleared: key }
+            : reply.code(404).send({ error: "That item is no longer waiting." });
+        });
       });
 
       const ChooseBody = z.strictObject({

@@ -1,0 +1,675 @@
+{
+  "baseline": "03ef6b5212e0fff0193f20e6bff3d226eabca2c7",
+  "now": 1794225600000,
+  "fixture": "Fictional actual in-memory Store, attention projection and API; no provider or live data.",
+  "phases": {
+    "before": {
+      "left": {
+        "attention": [
+          {
+            "owner": "operator",
+            "key": "note:decision:cache",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "Choose the cache policy for the next run.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Which cache policy should the next run use?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:flight:left",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "FLIGHT left two work items unsettled.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:hub-update-held",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "The update waits for the crew to finish.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Should the update wait until the current work finishes?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          }
+        ],
+        "clearStatus": null,
+        "closures": [],
+        "selectedKey": "note:hub-update-held",
+        "now": 1794225600000
+      },
+      "answered": {
+        "attention": [
+          {
+            "owner": "operator",
+            "key": "note:decision:cache",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "Choose the cache policy for the next run.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Which cache policy should the next run use?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:flight:left",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "FLIGHT left two work items unsettled.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:hub-update-held",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "The update waits for the crew to finish.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Should the update wait until the current work finishes?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          }
+        ],
+        "clearStatus": null,
+        "closures": [],
+        "selectedKey": "note:hub-update-held",
+        "now": 1794225600000
+      },
+      "cleared": {
+        "attention": [
+          {
+            "owner": "operator",
+            "key": "note:decision:cache",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "Choose the cache policy for the next run.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Which cache policy should the next run use?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:flight:left",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "FLIGHT left two work items unsettled.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:hub-update-held",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "The update waits for the crew to finish.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Should the update wait until the current work finishes?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          }
+        ],
+        "clearStatus": 415,
+        "closures": [],
+        "selectedKey": "note:hub-update-held",
+        "now": 1794225600000
+      },
+      "reraised": {
+        "attention": [
+          {
+            "owner": "operator",
+            "key": "note:decision:cache",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "Choose the cache policy for the next run.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Which cache policy should the next run use?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:flight:left",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "FLIGHT left two work items unsettled.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:hub-update-held",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "A new update is waiting for the current work to finish.",
+            "tool": null,
+            "at": 1794225600002,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Should the new update wait for the current work to finish?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600002
+            },
+            "acked": false
+          }
+        ],
+        "clearStatus": 415,
+        "closures": [],
+        "selectedKey": "note:hub-update-held",
+        "now": 1794225600002
+      }
+    },
+    "after": {
+      "left": {
+        "attention": [
+          {
+            "owner": "operator",
+            "key": "note:decision:cache",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "Choose the cache policy for the next run.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Which cache policy should the next run use?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:hub-update-held",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "The update waits for the crew to finish.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Should the update wait until the current work finishes?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          }
+        ],
+        "clearStatus": null,
+        "closures": [],
+        "selectedKey": "note:hub-update-held",
+        "now": 1794225600000
+      },
+      "answered": {
+        "attention": [
+          {
+            "owner": "operator",
+            "key": "note:decision:cache",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "Choose the cache policy for the next run.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Which cache policy should the next run use?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          },
+          {
+            "owner": "flight",
+            "key": "note:hub-update-held",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "The update waits for the crew to finish.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "acked": false,
+            "flightTriage": "waiting",
+            "triageDueAt": 1794226800000
+          }
+        ],
+        "clearStatus": null,
+        "closures": [],
+        "selectedKey": "note:hub-update-held",
+        "now": 1794225600000
+      },
+      "cleared": {
+        "attention": [
+          {
+            "owner": "operator",
+            "key": "note:decision:cache",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "Choose the cache policy for the next run.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Which cache policy should the next run use?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          }
+        ],
+        "clearStatus": 200,
+        "closures": [
+          {
+            "key": "note:hub-update-held",
+            "askAt": 1794225600000,
+            "kind": "cleared",
+            "reason": "The operator cleared this item without an answer.",
+            "by": "CAPCOM",
+            "question": "The update waits for the crew to finish.",
+            "ticket": null,
+            "operator": true,
+            "at": 1794225600000
+          }
+        ],
+        "selectedKey": "note:hub-update-held",
+        "now": 1794225600000
+      },
+      "reraised": {
+        "attention": [
+          {
+            "owner": "operator",
+            "key": "note:decision:cache",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "Choose the cache policy for the next run.",
+            "tool": null,
+            "at": 1794225600000,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Which cache policy should the next run use?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600000
+            },
+            "acked": false
+          },
+          {
+            "owner": "operator",
+            "key": "note:hub-update-held",
+            "kind": "blocked",
+            "agentId": null,
+            "repoId": "shop-app",
+            "text": "A new update is waiting for the current work to finish.",
+            "tool": null,
+            "at": 1794225600002,
+            "url": null,
+            "escalationId": null,
+            "ticket": null,
+            "brief": {
+              "ticket": "shop-app#101",
+              "for": "operator",
+              "by": "flight",
+              "ask": "Should the new update wait for the current work to finish?",
+              "context": "Two supported choices fit the current work. The crew needs your decision.",
+              "recommendation": "Keep the current policy.",
+              "options": [
+                {
+                  "id": "keep",
+                  "label": "Keep the current policy",
+                  "answer": "Keep the current policy."
+                },
+                {
+                  "id": "change",
+                  "label": "Use the alternative",
+                  "answer": "Use the alternative policy."
+                }
+              ],
+              "basis": "The current policy preserves the existing result.",
+              "at": 1794225600002
+            },
+            "acked": false
+          }
+        ],
+        "clearStatus": 200,
+        "closures": [
+          {
+            "key": "note:hub-update-held",
+            "askAt": 1794225600000,
+            "kind": "cleared",
+            "reason": "The operator cleared this item without an answer.",
+            "by": "CAPCOM",
+            "question": "The update waits for the crew to finish.",
+            "ticket": null,
+            "operator": true,
+            "at": 1794225600000
+          }
+        ],
+        "selectedKey": "note:hub-update-held",
+        "now": 1794225600002
+      }
+    }
+  }
+}

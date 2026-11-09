@@ -77,6 +77,112 @@ const clear = (key: string, headers: Record<string, string> = {}) =>
     payload: {},
   });
 
+it.each([undefined, "application/json"])(
+  "clears with a bodyless POST, content-type=%s",
+  async (contentType) => {
+    raise();
+    const key = "note:hub-update-held";
+    const result = await app.inject({
+      method: "POST",
+      url: `/api/attention/${encodeURIComponent(key)}/clear`,
+      headers: {
+        [OPERATOR_HEADER]: "fixture",
+        ...(contentType ? { "content-type": contentType } : {}),
+      },
+    });
+    expect(result.statusCode, result.body).toBe(200);
+    expect(result.json()).toEqual({ cleared: key });
+    expect(attentionItems(config, store, now).some((i) => i.key === key)).toBe(false);
+    expect(store.questionClosures(0, 10)).toContainEqual(
+      expect.objectContaining({ key, kind: "cleared" }),
+    );
+  },
+);
+it.each(["null", "[]", '{"unexpected":true}', "not-json"])(
+  "refuses a non-empty invalid Clear body: %s",
+  async (payload) => {
+    raise();
+    const result = await app.inject({
+      method: "POST",
+      url: "/api/attention/note%3Ahub-update-held/clear",
+      headers: { [OPERATOR_HEADER]: "fixture", "content-type": "application/json" },
+      payload,
+    });
+    expect(result.statusCode).toBe(400);
+    expect(store.questionClosures(0, 10)).toEqual([]);
+    expect(store.notes()).toHaveLength(1);
+  },
+);
+it("retains the JSON media-type guard for other writes and non-empty Clear bodies", async () => {
+  raise();
+  const other = await app.inject({
+    method: "POST",
+    url: "/api/settings/crew-pause",
+    headers: { [OPERATOR_HEADER]: "fixture" },
+  });
+  expect(other.statusCode).toBe(415);
+  const otherJson = await app.inject({
+    method: "POST",
+    url: "/api/settings/crew-pause",
+    headers: { [OPERATOR_HEADER]: "fixture", "content-type": "application/json" },
+  });
+  expect(otherJson.statusCode).toBe(400);
+  expect(otherJson.json().code).toBe("FST_ERR_CTP_EMPTY_JSON_BODY");
+  const wrongType = await app.inject({
+    method: "POST",
+    url: "/api/attention/note%3Ahub-update-held/clear",
+    headers: { [OPERATOR_HEADER]: "fixture", "content-type": "text/plain" },
+    payload: "{}",
+  });
+  expect(wrongType.statusCode).toBe(415);
+  expect(store.questionClosures(0, 10)).toEqual([]);
+});
+
+it("accepts an empty JSON stream with transfer encoding", async () => {
+  raise();
+  const result = await app.inject({
+    method: "POST",
+    url: "/api/attention/note%3Ahub-update-held/clear",
+    headers: {
+      [OPERATOR_HEADER]: "fixture",
+      "content-type": "application/json",
+      "transfer-encoding": "chunked",
+    },
+  });
+  expect(result.statusCode, result.body).toBe(200);
+  expect(store.questionClosures(0, 10)).toContainEqual(
+    expect.objectContaining({ kind: "cleared" }),
+  );
+});
+it.each([
+  { name: "missing operator key", headers: {}, status: 401 },
+  {
+    name: "delegated actor",
+    headers: { [OPERATOR_HEADER]: "fixture", [FLIGHT_OPERATOR_ACTOR_HEADER]: "invalid" },
+    status: 403,
+  },
+  {
+    name: "foreign Origin",
+    headers: { [OPERATOR_HEADER]: "fixture", origin: "https://foreign.invalid" },
+    status: 403,
+  },
+  {
+    name: "cross-site metadata",
+    headers: { [OPERATOR_HEADER]: "fixture", "sec-fetch-site": "cross-site" },
+    status: 403,
+  },
+])("refuses a bodyless Clear with $name", async ({ headers, status }) => {
+  raise();
+  const result = await app.inject({
+    method: "POST",
+    url: "/api/attention/note%3Ahub-update-held/clear",
+    headers,
+  });
+  expect(result.statusCode).toBe(status);
+  expect(store.questionClosures(0, 10)).toEqual([]);
+  expect(store.notes()).toHaveLength(1);
+});
+
 it("keeps FLIGHT's unfinished-wake reminder out of attention while retaining its source", () => {
   raise(FLIGHT_LEFT_NOTE_KEY);
   expect(
