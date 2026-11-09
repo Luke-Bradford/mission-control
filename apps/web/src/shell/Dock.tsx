@@ -24,6 +24,7 @@ import {
   withPending,
 } from "../flight/conversation.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
+import { FlightThread } from "../flight/FlightThread.tsx";
 import {
   FLIGHT_NO_SEAT,
   type FlightDecision,
@@ -477,7 +478,7 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
             <DockMeta flight={flight} />
           </div>
           <div className="dockbody" id="dockBody">
-            <FlightChat where="dock" active={looking} />
+            <FlightThread />
           </div>
         </div>
       </aside>
