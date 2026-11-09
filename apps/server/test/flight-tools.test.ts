@@ -851,6 +851,7 @@ describe("move_review", () => {
         })
       ).isError,
     ).toBe(true);
+    expect(store.review(id)?.seatId).toBe("retro-1");
     expect(
       (
         await call("move_review", {
