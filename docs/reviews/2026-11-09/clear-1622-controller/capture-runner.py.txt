@@ -1,11 +1,11 @@
 from pathlib import Path
 import subprocess,os,json,hashlib
-base=Path('/private/tmp/mc-review-fix-1622');core=base/'packages/core/src/needs-you-entry.ts';after=core.read_bytes();before=subprocess.check_output(['git','show','03ef6b5212e0fff0193f20e6bff3d226eabca2c7:packages/core/src/needs-you-entry.ts'],cwd=base);receipts=[]
+base=Path('/private/tmp/mc-review-fix-1622');core=base/'packages/core/src/needs-you-entry.ts';after=core.read_bytes();before=subprocess.check_output(['git','show','d3b32b4f9199596005a9e81d6b3bcfd6b0f5dce6:packages/core/src/needs-you-entry.ts'],cwd=base);receipts=[]
 try:
  core.write_bytes(before)
- with open('/tmp/mc-1622-clear-before-capture.log','w') as log:r=subprocess.run(['pnpm','-s','vitest','apps/web/test/ClearAttentionEvidence.browser.test.ts','--run'],cwd=base,env={**os.environ,'MC_CLEAR_CAPTURE_PHASE':'before'},stdout=log,stderr=subprocess.STDOUT)
+ with open('/tmp/mc-1622-r1352-before-capture.log','w') as log:r=subprocess.run(['pnpm','-s','vitest','apps/web/test/ClearAttentionEvidence.browser.test.ts','--run'],cwd=base,env={**os.environ,'MC_CLEAR_CAPTURE_PHASE':'before'},stdout=log,stderr=subprocess.STDOUT)
  receipts.append({'phase':'before','exit':r.returncode,'coreSha256':hashlib.sha256(before).hexdigest(),'source':'Exact baseline needs-you-entry.ts; browser web source identical; actual baseline server/API projection in fixture JSON'})
 finally:core.write_bytes(after)
-with open('/tmp/mc-1622-clear-after-capture.log','w') as log:r=subprocess.run(['pnpm','-s','vitest','apps/web/test/ClearAttentionEvidence.browser.test.ts','--run'],cwd=base,env={**os.environ,'MC_CLEAR_CAPTURE_PHASE':'after'},stdout=log,stderr=subprocess.STDOUT)
+with open('/tmp/mc-1622-r1352-after-capture.log','w') as log:r=subprocess.run(['pnpm','-s','vitest','apps/web/test/ClearAttentionEvidence.browser.test.ts','--run'],cwd=base,env={**os.environ,'MC_CLEAR_CAPTURE_PHASE':'after'},stdout=log,stderr=subprocess.STDOUT)
 receipts.append({'phase':'after','exit':r.returncode,'coreSha256':hashlib.sha256(after).hexdigest(),'source':'Current Clear PR with scoped empty-body correction; actual current server/API projection in fixture JSON'})
-Path('/tmp/mc-1622-clear-capture-receipt.json').write_text(json.dumps(receipts,indent=2));print(json.dumps(receipts))
+Path('/tmp/mc-1622-r1352-capture-receipt.json').write_text(json.dumps(receipts,indent=2));print(json.dumps(receipts))

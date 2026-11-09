@@ -6,8 +6,8 @@ import {browserSession,describeRendered} from "./browserRunner.ts";
 import {desktopFixture} from "./desktopFixtures.ts";
 const {renderAt}=browserSession();
 const phase=process.env.MC_CLEAR_CAPTURE_PHASE??"after";
-const fixture=JSON.parse(readFileSync("/tmp/mc-1622-clear-fixtures.json","utf8"));
-const out=`/tmp/mc-1622-clear-evidence-${phase}`;mkdirSync(out,{recursive:true});const captures:unknown[]=[];
+const fixture=JSON.parse(readFileSync("/tmp/mc-1622-r1352-fixtures.json","utf8"));
+const out=`/tmp/mc-1622-r1352-evidence-${phase}`;mkdirSync(out,{recursive:true});const captures:unknown[]=[];
 describeRendered("Clear attention evidence",()=>{
  for(const theme of ["light","dark"] as const) it(`${phase} ${theme}`,async()=>{
   for(const scenario of ["left","answered","cleared","reraised"]) for(const [width,height] of [[1280,900],[1600,1000],[1600,700],[1920,940]]){
