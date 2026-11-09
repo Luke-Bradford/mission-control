@@ -38,7 +38,6 @@ import {
   FLIGHT_MOVED_LISTED,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
-  FLIGHT_OPERATOR_UNREAD_MS,
   FLIGHT_OWED_MS,
   FLIGHT_PR_ENTRY_CHANGES,
   FLIGHT_RECENT_LISTED,
@@ -707,6 +706,13 @@ function withCovered(inputs: FlightWakeInputs, covered: FlightMovedPointer[]): F
   return covered.length === 0 ? inputs : { ...inputs, movedCovered: covered };
 }
 
+/** Unread operator requests stay pending through an outage; only reading them retires this wake. */
+export function unreadOperatorComms(store: Store, flightId: string): string[] {
+  return [COMMS_CAPCOM, COMMS_CONTROLLER]
+    .flatMap((from) => store.unreadCommsFrom(from, flightId, 0))
+    .sort((a, b) => Number(a) - Number(b));
+}
+
 function wakeInputs(i: {
   /** The slow pace's check while it is on: tickets it refuses are not startable, so wake no one. */
   pace?: PaceCheck | undefined;
@@ -750,15 +756,7 @@ function wakeInputs(i: {
     .filter((x) => seen[itemFactId(x)] !== itemHash(x))
     .map(itemFactId);
   const flightId = i.flightId;
-  const operator =
-    flightId === null
-      ? []
-      : // the controller's lines wake FLIGHT as the operator's do
-        [COMMS_CAPCOM, COMMS_CONTROLLER]
-          .flatMap((from) =>
-            i.store.unreadCommsFrom(from, flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS),
-          )
-          .sort((a, b) => Number(a) - Number(b));
+  const operator = flightId === null ? [] : unreadOperatorComms(i.store, flightId);
   // read by FLIGHT and still unanswered after its turn: owed until it replies
   const owed =
     flightId === null

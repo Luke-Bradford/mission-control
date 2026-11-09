@@ -488,6 +488,31 @@ pages reusable; it does not shrink the database file on disk.
 
 ### Ticket history
 
+The response also carries `questions` and `questionsNextBefore`. These are a separate question
+page, newest ask first (id breaks timestamp ties). The same `limit` applies; pass the returned
+cursor as `questionsBefore` to read older questions. This leaves the existing timeline's `before`
+and `nextBefore` unchanged. Question records include run, seat, text, ask/pass/set-aside times,
+`closedAt`, and the latest recorded `answer`, `answerAt` and `answerBasis`. A run can close a
+question without answering it: the answer fields then stay null. `asideAt` retains the stored
+set-aside time, including Not now; it does not itself prove a question has an answer. Each Comms
+timeline entry carries its recorded `senderKind`, or null for legacy unknown provenance.
+
+`GET /api/comms/ticket-counts` returns `{ tickets: [{ ticket, count }], unassignedCount }` across
+all recorded structured references, without the feed's 100-message or time window. Retention
+preserves reference totals transactionally when deleting message bodies, without preserving
+their text. Totals survive a database reopen and repeated retention sweeps. Already deleted
+messages from before this migration cannot be reconstructed. Tickets with
+no attributed messages have no row. Qualified ticket identity takes precedence over a PR/short
+reference. Legacy short references use the sender's configured repository, or the single
+configured repository; ambiguous multi-repository messages stay in `unassignedCount`. PR
+references resolve from stored primary and closing tickets, counting a message once per ticket.
+Counts do not infer references from free-form message text or invent missing repository context.
+
+The stored Comms agent and pair reads accept the hub id `MC` and the controller id `CONTROLLER`.
+Contact summaries include `hasMessages` from their all-time count. The configured FLIGHT and
+controller pair appears even before its first message, with count zero and `hasMessages: false`.
+Unknown agent ids still answer 404; existing paging and read cursors are unchanged.
+
 `GET /api/tickets/<repo id>/<number>` returns everything Mission Control knows about one ticket:
 its fields (title, outcome, done-when items with their ticked state, size, priority, status,
 labels, GitHub URL), every run on it (seat, phase, times, tokens), its PRs with each review round's
@@ -602,12 +627,12 @@ What each seat's process starts with:
   from the addressee closes an item, as a reply does; a `seen` from anyone else does not.
   `GET /api/comms/feed` lists recent messages (id, time, from, to, label, ref, and the first 280 characters of text) newest
   first. `since=comms:<n>` returns only newer ones; `limit` defaults to 100 and is at most 200.
-  If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
-  on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
-  and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
-  decision-default sweep 40 minutes later unless you answer, delivered to the sending seat. A
-  message to CAPCOM, one before the rollout boundary, and one whose sender's run is held
-  (budget park, stopped seat, account at its stop) never get a decision. The Comms graph also reports 24-hour run-token totals per link and flags a pair
+  An overdue crew question stays with FLIGHT. The hub does not write a Proceed/Hold brief or
+  answer it for the operator. Only FLIGHT's complete brief makes it an operator question.
+  Old hub-written Comms briefs remain in history but are ignored by the attention projection.
+  When FLIGHT is down, waiting crew messages count under one FLIGHT-down/not-triaging alert.
+  Protected operator approvals, account and budget holds, and the runaway alert keep their own rules.
+  The Comms graph also reports 24-hour run-token totals per link and flags a pair
   that exceeds six reciprocal rounds on one ticket, including when FLIGHT stepped in.
 - **Short Comms.** Messages are limited to 1,200 characters. Put complete findings, plans and
   evidence in `report_findings`, `report_plan` or `report_evidence`, then send Comms a short
@@ -2629,11 +2654,21 @@ The live check starts the new version the way a real seat does (`checkCli` in `a
 - If no build seat of that vendor is configured, no run can break on that tool, and the old bare check applies instead (`claude -p --allowedTools=Read` or `codex exec --sandbox read-only` in an empty temp dir, same nonce read).
 A pass keeps the version, clears the pending record and records a `cli-update` item; the next seat run uses it. A failure (install, wrong version or check) puts the previous version back (skipped when the failed install changed nothing), holds the failed version until a newer one appears, records a `cli-update-failed` item and raises one Needs-you note (`cli-auto:<tool>:<version>`). If the previous version is not back, new runs stay held and the update stays pending: the next pass (or the hub after a restart, which re-holds runs at start) re-checks and retries the rollback. Each step writes a server log line starting `cli update <tool>:`. The job never touches the guard, the safety floor, CI workflows or the Mission Control block.
 
-**Batching.** A wake whose only new facts are routine (a free seat, a startable ticket, a hold to release, an idle reviewer, a PR moving through its steps) waits until `FLIGHT_BATCH_MS` (15 minutes) after the last wake and goes out together with whatever else has built up. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. Everything else wakes at once, under the 2-minute gap: an unread plain message from the operator (the `operator` wake fact, cleared once FLIGHT's inbox reads it), operator holds in force, discussions, questions, triage, blockers and parks, signals, planned entries, stopped seats, instruction changes and the breaker. The safety floor is never held back.
+**Batching.** A wake whose only new facts are routine (a free seat, a startable ticket, a hold to release, an idle reviewer, a PR moving through its steps) waits until `FLIGHT_BATCH_MS` (15 minutes) after the last wake and goes out together with whatever else has built up. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. An unread plain message from the operator or controller uses a 30-second gap so an idle FLIGHT wakes within a minute. It stays in the `operator` wake fact until FLIGHT reads it, including through an outage longer than six hours. Other non-routine facts keep the 2-minute gap: operator holds in force, discussions, questions, triage, blockers and parks, signals, planned entries, stopped seats, instruction changes and the breaker. The safety floor is never held back.
 
 **Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list. An item FLIGHT has a live `wait_on` for (its full key) raises no `item_stale` signal until the wait ends. A `wait_on` whose target is a reason's whole key (an item's full key, or a `repeat_park` key with spaces) counts as handling that reason, including an `item_stale` signal for the item.
 
 **What FLIGHT costs.** `GET /api/flight` `wakeCost` has the last 14 days: `totalUsd` (FLIGHT), `crewUsd`, `share` (0..1, the whole 14 days) and `weekShare` (the last 7 days only; read this one against the 0.2 target after a week of live work), `byDay`, and `byReason` (a run's cost spread over its messages by tokens, each message given to the latest wake before it, a wake's cost split over its reasons; `start` is the turn before a run's first wake). `wakeWaits` has the median milliseconds an operator message, a blocker to FLIGHT and a seat's `call_flight` waited, per day and overall. A wait ends at the first recorded wake after it or the first message FLIGHT's run produced after it, whichever is earlier; seat calls come from the signal record, which keeps them for the 14 days the figures cover. Compare the days before and after a change to see that decisions did not slow down.
+
+## FLIGHT's operator messages at an account stop
+
+An unread message from the operator or controller asks the watch to start FLIGHT even when its
+account is at the configured usage stop. Background starts still wait at that stop. Developer and
+reviewer starts keep their existing account and budget checks. The watch uses the normal start
+path: an explicit operator Stop, a parked run, unavailable seats and runtime guards still hold.
+If that requested start fails, one outage alert says the message is saved; provider error details
+stay out of that alert. Waiting crew questions stay with FLIGHT rather than becoming extra
+operator questions.
 
 ## FLIGHT's fresh session
 

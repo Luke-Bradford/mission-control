@@ -1,18 +1,18 @@
-import type { CommsMessage } from "@mc/core";
+import type { FlightConversationMessage } from "@mc/core";
 import { useMemo, useState } from "react";
 import { apiGet } from "../api.ts";
 
 /** A Comms read that pages: `hasMore` says older messages remain (`inboxHasMore` for the inbox). */
 export interface CommsPage {
-  messages?: CommsMessage[];
-  inbox?: CommsMessage[];
+  messages?: FlightConversationMessage[];
+  inbox?: FlightConversationMessage[];
   hasMore?: boolean;
   inboxHasMore?: boolean;
 }
 
 interface Paging {
   path: string | null;
-  older: CommsMessage[];
+  older: FlightConversationMessage[];
   /** What the last older page said; null before any page was loaded. */
   hasMore: boolean | null;
   loading: boolean;
@@ -23,7 +23,7 @@ const NONE: Paging = { path: null, older: [], hasMore: null, loading: false, err
 
 export interface OlderMessages {
   /** The older pages loaded so far, then the live newest page. */
-  messages: CommsMessage[];
+  messages: FlightConversationMessage[];
   hasMore: boolean;
   loading: boolean;
   error: string | null;
@@ -41,7 +41,7 @@ export function olderPath(path: string, before: string): string {
  */
 export function useOlderMessages(
   path: string | null,
-  live: CommsMessage[],
+  live: FlightConversationMessage[],
   liveHasMore: boolean,
   field: "messages" | "inbox",
 ): OlderMessages {

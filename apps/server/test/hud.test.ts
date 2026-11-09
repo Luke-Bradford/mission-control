@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   ATTENTION_LABEL,
   type BoardItem,
@@ -1086,6 +1087,87 @@ describe("crew seats in the rows", () => {
   const crewRun = (over: Partial<Run> = {}): Run =>
     run({ id: "c1", agentId: "GUIDO-1", repoId: "shop-app", ...over });
   const rowOf = (c: CcConfig, id: string) => crew(c, store, NOW).rows.find((r) => r.id === id);
+
+  it.each([false, true])(
+    "retains a referenced closed PR through the crew cache (held outside recent window: %s)",
+    (oldHeld) => {
+      const c = withCrew();
+      store.upsertRun(
+        crewRun({
+          startedAt: NOW - 3 * HOUR,
+          ticket: null,
+          prs: [{ repo: "O/SHOP-APP", number: 73 }],
+        }),
+      );
+      if (oldHeld) {
+        for (let i = 0; i < 51; i++)
+          store.upsertRun(
+            crewRun({
+              id: `newer-${i}`,
+              seq: i + 2,
+              startedAt: NOW - HOUR + i,
+              endedAt: NOW - MIN,
+              status: "ok",
+            }),
+          );
+      }
+      store.setSeatSession(seat({ state: "idle" }));
+      const referenced: PullRequestView = {
+        repoId: "shop-app",
+        number: 73,
+        title: "Preserved closed change",
+        url: "https://github.com/o/shop-app/pull/73",
+        branch: "historical/73",
+        ticket: "shop-app#91",
+        state: "closed",
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: NOW - 4 * HOUR,
+        updatedAt: NOW - MIN,
+        mergedAt: null,
+        headSha: null,
+        mergeable: null,
+      };
+      store.upsertPullRequests(
+        "shop-app",
+        [
+          referenced,
+          {
+            ...referenced,
+            number: 99,
+            branch: "unrelated/99",
+            title: "Unrelated historical change",
+          },
+        ],
+        NOW,
+      );
+      const db = new DatabaseSync(join(dir, "mc.sqlite"));
+      try {
+        db.prepare("UPDATE pull_requests SET checks = ? WHERE repo_id = ? AND number = ?").run(
+          "unreadable unrelated checks",
+          "shop-app",
+          99,
+        );
+      } finally {
+        db.close();
+      }
+      // First projection builds its own empty PR cache from the real Store.
+      const row = rowOf(c, "GUIDO-1");
+      expect(row?.run?.id).toBe("c1");
+      expect(row?.ticket).toBe("shop-app#91");
+      expect(row?.prs).toEqual([
+        {
+          repoId: "shop-app",
+          number: 73,
+          title: "Preserved closed change",
+          url: "https://github.com/o/shop-app/pull/73",
+          state: "closed",
+          ticket: "shop-app#91",
+        },
+      ]);
+    },
+  );
 
   it("shows a transferred run's binding without changing another seat or observed loop", () => {
     const c = withCrew();
@@ -2617,6 +2699,56 @@ describe("the engine's notes in Needs you", () => {
     pr12("open");
     expect(keys()).toEqual([KEY]);
     pr12("merged");
+    expect(keys()).toEqual([]);
+  });
+
+  it("does not decode an unrelated closed PR's historical check payload to show an active park", () => {
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    endedRun();
+    note("blocked:r1:0", "blocked");
+    pr12("open");
+    const current = store.pullRequest("shop-app", 12);
+    if (!current) throw new Error("Missing fixture PR");
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 99, branch: "historical/99", state: "closed" }],
+      NOW,
+    );
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.prepare("UPDATE pull_requests SET checks = ? WHERE repo_id = ? AND number = ?").run(
+        "unreadable historical checks",
+        "shop-app",
+        99,
+      );
+    } finally {
+      db.close();
+    }
+    expect(keys()).toEqual([KEY]);
+    expect(noteItems()[0]).toMatchObject({
+      ticket: "shop-app#7",
+      url: "https://github.com/o/shop-app/pull/12",
+    });
+  });
+
+  it("ignores older uses of a branch but takes the newest PR created for the ended run", () => {
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    endedRun({}, { prNumber: null });
+    note("blocked:r1:0", "blocked");
+    pr12("open");
+    const current = store.pullRequest("shop-app", 12);
+    if (!current) throw new Error("Missing fixture PR");
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 13, createdAt: NOW - 2 * HOUR, state: "closed" }],
+      NOW,
+    );
+    expect(keys()).toEqual([KEY]);
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 14, createdAt: NOW - MIN, state: "closed" }],
+      NOW,
+    );
     expect(keys()).toEqual([]);
   });
 

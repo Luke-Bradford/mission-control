@@ -220,6 +220,7 @@ import {
   validateCommsText,
 } from "./comms.ts";
 import { replyRoute } from "./comms-reply.ts";
+import { commsTicketCounts } from "./comms-ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -298,6 +299,11 @@ import {
   prFlow,
 } from "./flight/state.ts";
 import { FLIGHT_APPROVAL_MAX_MS, grantApproval } from "./flight-approvals.ts";
+import {
+  FlightConversationCursorError,
+  flightConversation,
+  readFlightConversation,
+} from "./flight-conversation.ts";
 import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
@@ -1876,6 +1882,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         repoId: z.string().optional(),
         to: z.string().min(1),
         text: z.string().min(1).max(COMMS_MESSAGE_MAX),
+        itemKey: z.string().max(200).optional(),
         label: z.enum(COMMS_LABELS).optional(),
         ref: z.string().regex(COMMS_REF).optional(),
         replyTo: z
@@ -1923,6 +1930,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               seatSender: false,
               senderKind: sender.kind,
               wakeUnlabelled: true,
+              ...(sender.from === COMMS_CAPCOM &&
+              input.itemKey !== undefined &&
+              input.to === flightSeat(config)?.seat.id
+                ? {
+                    flightItem: {
+                      to: input.to,
+                      title:
+                        attentionItems(config, store, now(), deps.lock?.state() ?? NO_LOCK).find(
+                          (item) => item.key === input.itemKey,
+                        )?.text ?? "This Needs-you item is no longer waiting.",
+                    },
+                  }
+                : {}),
               // redirected away from the ended run: its seat is not told of the reply
               ...(redirectedTo === undefined ? {} : { replyAuthorMention: false }),
               ...(prThread === undefined ? {} : { ticket: prThread }),
@@ -2019,10 +2039,20 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const pins = new Set(store.commsPins().map((pin) => pin.id));
         return rows.map((row) => storedCommsMessage(row, pins));
       };
-      const knownCommsAgent = (id: string) => commsCrew().includes(id) || id === COMMS_CAPCOM;
+      const knownCommsAgent = (id: string) =>
+        commsCrew().includes(id) ||
+        id === COMMS_CAPCOM ||
+        id === COMMS_CONTROLLER ||
+        id === COMMS_MC;
       /** The agents an agent has talked with, as its conversation list names them. */
-      const commsContacts = (id: string) =>
-        store.commsContactIds(id).filter((contact) => contact !== id && contact !== COMMS_CREW);
+      const commsContacts = (id: string) => {
+        const flight = flightSeat(config)?.seat.id;
+        const pair =
+          id === flight ? COMMS_CONTROLLER : id === COMMS_CONTROLLER ? flight : undefined;
+        return [
+          ...new Set([...store.commsContactIds(id), ...(pair === undefined ? [] : [pair])]),
+        ].filter((contact) => contact !== id && contact !== COMMS_CREW);
+      };
       /** Direct-line replies not yet seen. Needs you no longer counts them; the thread does (#757). */
       const directUnreadOf = (id: string) =>
         id === COMMS_CAPCOM
@@ -2122,13 +2152,30 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
       api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
         "/comms/flight",
-        (req, reply) => {
-          const paging = commsPaging(req.query);
-          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        async (req, reply) => {
+          const limit = parseLimit(req.query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
+          const before = req.query.before;
+          if (
+            limit === null ||
+            (before !== undefined &&
+              (typeof before !== "string" || before.length === 0 || before.length > 300))
+          )
+            return reply.code(400).send({ error: COMMS_PAGING_ERROR });
           const flight = flightSeat(config)?.seat.id;
           if (flight === undefined)
             return { messages: [], hasMore: false, cursor: null, unread: 0 };
-          return commsScopePage({ pair: [COMMS_CAPCOM, flight] }, "flight", paging);
+          try {
+            return await flightConversation(
+              store,
+              flight,
+              flightSeat(config)?.session.seats.map((s) => s.id) ?? [],
+              { limit, before },
+            );
+          } catch (error) {
+            if (error instanceof FlightConversationCursorError)
+              return reply.code(400).send({ error: error.message });
+            throw error;
+          }
         },
       );
       // Reader: apps/web/src/App.tsx#App (agent Comms)
@@ -2158,6 +2205,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             id: contact,
             lastMessage: last === undefined ? null : storedCommsMessage(last),
             count: counts.count,
+            hasMessages: counts.count > 0,
             unread: counts.unread,
           };
         });
@@ -2180,6 +2228,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           ...agentCommsCounts(id),
         }));
       });
+      // Reader: docs/runbook.md#ticket-history (all-time counts for the later Comms ticket list).
+      api.get("/comms/ticket-counts", () => commsTicketCounts(config, store));
       // Reader: apps/web/src/App.tsx#App (agent contact Comms)
       api.get<{
         Params: { id: string; contact: string };
@@ -2307,14 +2357,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ),
       }));
       // Reader: apps/web/src/App.tsx#App (Comms read cursors)
-      api.post("/comms/read", (req, reply) => {
+      api.post("/comms/read", async (req, reply) => {
         const body = z
           .strictObject({
             scope: z.string().min(1).max(200),
-            messageId: z.string().regex(/^comms:\d+$/),
+            messageId: z.string().min(1).max(300),
           })
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        if (body.data.scope === "flight") {
+          const flight = flightSeat(config);
+          if (!flight) return reply.code(400).send({ error: "invalid Comms read cursor" });
+          try {
+            await readFlightConversation(
+              store,
+              flight.seat.id,
+              flight.session.seats.map((s) => s.id),
+              body.data.messageId,
+            );
+            bus.emit("attention");
+            return { ok: true };
+          } catch (error) {
+            if (error instanceof FlightConversationCursorError)
+              return reply.code(400).send({ error: "invalid Comms read cursor" });
+            throw error;
+          }
+        }
+        if (!/^comms:\d+$/.test(body.data.messageId))
+          return reply.code(400).send({ error: "invalid Comms read cursor" });
         const scope = commsScope(body.data.scope);
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
@@ -3737,7 +3807,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: docs/runbook.md#ticket-history (the ticket page is a later web ticket)
       api.get<{
         Params: { repoId: string; number: string };
-        Querystring: { before?: string; limit?: string };
+        Querystring: { before?: string; limit?: string; questionsBefore?: string };
       }>("/tickets/:repoId/:number", async (req, reply) => {
         const repo = config.repos.find((r) => r.id === req.params.repoId);
         if (!repo) return reply.code(404).send({ error: "unknown repo" });
@@ -3748,6 +3818,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const before = rawBefore === undefined ? null : decodeCursor(rawBefore);
         if (rawBefore !== undefined && before === null)
           return reply.code(400).send({ error: "before: not a cursor from this endpoint" });
+        const rawQuestionsBefore = req.query.questionsBefore;
+        const questionCursor =
+          rawQuestionsBefore === undefined ? null : decodeCursor(rawQuestionsBefore);
+        if (
+          rawQuestionsBefore !== undefined &&
+          (questionCursor === null ||
+            !/^question:[1-9]\d*$/.test(questionCursor.key) ||
+            !Number.isSafeInteger(Number(questionCursor.key.slice("question:".length))))
+        )
+          return reply
+            .code(400)
+            .send({ error: "questionsBefore: not a question cursor from this endpoint" });
         const limit = rawLimit === undefined ? TICKET_PAGE_DEFAULT : Number(rawLimit);
         if (!Number.isInteger(limit) || limit < 1 || limit > TICKET_PAGE_MAX)
           return reply
@@ -3772,6 +3854,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           repoOfSender: (from) => seatPlace(config, from)?.session.repoId ?? null,
           before,
           limit,
+          questionsBefore:
+            questionCursor === null
+              ? null
+              : { at: questionCursor.at, id: Number(questionCursor.key.slice("question:".length)) },
         });
         return history ?? reply.code(404).send({ error: "unknown issue" });
       });

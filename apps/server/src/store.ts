@@ -15,6 +15,7 @@ import type {
   QaReport,
   RunHandoff,
   RunTokenAudit,
+  TicketQuestion,
   TokenCall,
   TokenCounts,
   TokenSourceAdd,
@@ -373,6 +374,7 @@ CREATE TABLE IF NOT EXISTS question_choices (
   PRIMARY KEY (key, brief_at)
 );
 CREATE INDEX IF NOT EXISTS question_choices_ticket ON question_choices(ticket);
+CREATE INDEX IF NOT EXISTS question_choices_message ON question_choices(message_id);
 -- Status moves of a run's card (pending, then done or failed); the Activity page's board rows.
 CREATE TABLE IF NOT EXISTS board_moves (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
@@ -978,6 +980,7 @@ export interface CommsRow {
   senderKind: CommsSenderKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt: number | null;
+  itemKey?: string;
 }
 /** The operator's choice on a question, as stored. */
 export interface QuestionChoiceRow {
@@ -1008,6 +1011,7 @@ export interface NewCommsRow {
   to: string;
   ticket: string | null;
   text: string;
+  itemKey?: string;
   label?: CommsLabel | null;
   ref?: string | null;
   replyTo?: string | null;
@@ -1140,6 +1144,8 @@ export const MAX_OPEN_RUN_AGE_MS = 30 * 24 * 60 * 60_000;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
+const DIGEST_CONTEXT_WINDOW_SQL =
+  "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
 const toSample = (r: Row): UsageSample => ({
   accountId: r.account_id as string,
@@ -1958,9 +1964,12 @@ export class Store {
       CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
       CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
+      CREATE INDEX IF NOT EXISTS runs_agent_recent ON runs(agent_id, started_at DESC, seq DESC, id);
+      CREATE INDEX IF NOT EXISTS run_digests_context_window ON run_digests(run_id, ${DIGEST_CONTEXT_WINDOW_SQL});
       CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
       CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
       CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
+      CREATE INDEX IF NOT EXISTS pull_requests_branch ON pull_requests(repo_id, branch, number DESC);
       CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
       CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
       CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
@@ -1968,11 +1977,14 @@ export class Store {
       CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
       CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
+      CREATE INDEX IF NOT EXISTS seat_questions_run_time ON seat_questions(run_id, at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS flight_decisions_question_answer ON flight_decisions(question_id, kind, at DESC, id DESC);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
+    this.addColumn("comms", "item_key", "TEXT");
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
     // Turns in a row that ended with no new commit; the resume line reads it.
@@ -2080,6 +2092,22 @@ export class Store {
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
       CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
+      CREATE INDEX IF NOT EXISTS comms_ticket_count_refs ON comms(ticket, ref, from_id);
+      -- Preserve reference totals when retention removes bodies. Null flags avoid sentinel collisions.
+      CREATE TABLE IF NOT EXISTS comms_ticket_archived_counts (
+        ticket TEXT NOT NULL, ref TEXT NOT NULL, from_id TEXT NOT NULL,
+        ticket_null INTEGER NOT NULL, ref_null INTEGER NOT NULL, count INTEGER NOT NULL,
+        PRIMARY KEY (ticket, ref, from_id, ticket_null, ref_null)
+      );
+      CREATE TRIGGER IF NOT EXISTS comms_archive_ticket_count BEFORE DELETE ON comms
+      WHEN OLD.ticket IS NOT NULL OR OLD.ref IS NOT NULL
+      BEGIN
+        INSERT INTO comms_ticket_archived_counts (ticket, ref, from_id, ticket_null, ref_null, count)
+        VALUES (COALESCE(OLD.ticket, ''), COALESCE(OLD.ref, ''), OLD.from_id,
+          OLD.ticket IS NULL, OLD.ref IS NULL, 1)
+        ON CONFLICT(ticket, ref, from_id, ticket_null, ref_null)
+        DO UPDATE SET count = comms_ticket_archived_counts.count + 1;
+      END;
       CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
       CREATE TABLE IF NOT EXISTS comms_mentions (
         message_id INTEGER NOT NULL, mentioned_id TEXT NOT NULL, seen_at INTEGER,
@@ -2637,7 +2665,7 @@ export class Store {
     return rows.map(toRun);
   }
 
-  /** Recent runs for many HUD rows, ranked in SQLite so the runs table is read once. */
+  /** Indexed recent-run bounds for each HUD agent, with older held runs retained. */
   runsForAgents(
     agentIds: readonly AgentId[],
     limit: number,
@@ -2646,20 +2674,30 @@ export class Store {
     const out = new Map<AgentId, Run[]>();
     if (agentIds.length === 0) return out;
     for (const agentId of agentIds) out.set(agentId, []);
-    const held = [...new Set(heldRunIds)];
-    const rows = this.statement(
-      `SELECT runs.* FROM runs JOIN (
-         SELECT id, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
-         FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}
-       ) recent ON recent.id = runs.id
-       WHERE recent.row_number <= ?${held.length > 0 ? ` OR runs.id IN (${held.map(() => "?").join(", ")})` : ""}
-       ORDER BY runs.agent_id, runs.started_at DESC, runs.seq DESC`,
-    ).all(...agentIds, ...held, limit, ...held) as Row[];
-    for (const run of rows.map(toRun)) {
+    const seen = new Set<string>();
+    const take = (row: Row) => {
+      if (seen.has(row.id as string)) return;
+      seen.add(row.id as string);
+      const run = toRun(row);
       const runs = out.get(run.agentId) ?? [];
       runs.push(run);
       out.set(run.agentId, runs);
+    };
+    const recent = this.statement(`SELECT * FROM runs WHERE agent_id = ?
+      ORDER BY started_at DESC, seq DESC
+      LIMIT CASE WHEN ? > 0 THEN CAST(? AS INTEGER) ELSE 0 END`);
+    for (const agentId of out.keys()) {
+      for (const row of recent.all(agentId, limit, limit) as Row[]) take(row);
     }
+    const held = [...new Set(heldRunIds)];
+    if (held.length > 0)
+      for (const row of this.statement(
+        `SELECT * FROM runs WHERE id IN (${held.map(() => "?").join(", ")})
+        ORDER BY agent_id, started_at DESC, seq DESC`,
+      ).all(...held) as Row[])
+        take(row);
+    for (const runs of out.values())
+      runs.sort((a, b) => b.startedAt - a.startedAt || b.seq - a.seq);
     return out;
   }
 
@@ -3167,12 +3205,12 @@ export class Store {
     const out = new Map<string, number>();
     for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
       const ids = runIds.slice(i, i + DIGEST_BATCH);
-      const rows =
-        this.statement(`SELECT run_id, json_extract(digest, '$.contextWindow') AS context_window
-        FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
-          run_id: string;
-          context_window: number | null;
-        }[];
+      const rows = this.statement(`SELECT run_id, ${DIGEST_CONTEXT_WINDOW_SQL} AS context_window
+        FROM run_digests INDEXED BY run_digests_context_window
+        WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
+        run_id: string;
+        context_window: number | null;
+      }[];
       for (const row of rows)
         if (row.context_window !== null) out.set(row.run_id, row.context_window);
     }
@@ -4582,11 +4620,37 @@ export class Store {
   pullRequestOfBranch(
     repoId: RepoId,
     branch: string,
+    createdSince?: number,
   ): { number: number; state: PullRequestView["state"] } | null {
-    const row = this.statement(
-      "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1",
-    ).get(repoId, branch) as { number: number; state: PullRequestView["state"] } | undefined;
+    const statement = this.statement(
+      createdSince === undefined
+        ? "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? ORDER BY number DESC LIMIT 1"
+        : "SELECT number, state FROM pull_requests WHERE repo_id = ? AND branch = ? AND created_at >= ? ORDER BY number DESC LIMIT 1",
+    );
+    const row = statement.get(
+      repoId,
+      branch,
+      ...(createdSince === undefined ? [] : [createdSince]),
+    ) as { number: number; state: PullRequestView["state"] } | undefined;
     return row ?? null;
+  }
+
+  /** A pinned link needs no historical checks, review metadata or escaped-defect hydration. */
+  pullRequestLink(
+    repoId: RepoId,
+    ref: { number: number } | { ticket: string },
+  ): Pick<PullRequestView, "repoId" | "number" | "title" | "url"> | null {
+    const row =
+      "number" in ref
+        ? this.statement(
+            "SELECT number, title, url FROM pull_requests WHERE repo_id = ? AND number = ?",
+          ).get(repoId, ref.number)
+        : this.statement(
+            "SELECT number, title, url FROM pull_requests WHERE repo_id = ? AND ticket = ? AND state = 'open' ORDER BY number DESC LIMIT 1",
+          ).get(repoId, ref.ticket);
+    return row === undefined
+      ? null
+      : { repoId, ...(row as { number: number; title: string; url: string }) };
   }
 
   /** The queue needs only open PRs, without decoding historical checks and bodies. */
@@ -4666,6 +4730,87 @@ export class Store {
     return rows.map((r) => this.commsRow(r));
   }
 
+  /** Counts retained and retired reference metadata; never reads text or limits by time. */
+  commsTicketReferenceCounts(): {
+    ticket: string | null;
+    ref: string | null;
+    from: string;
+    count: number;
+  }[] {
+    return (
+      this.statement(`SELECT ticket, ref, sender, SUM(count) AS count FROM (
+        SELECT ticket, ref, from_id AS sender, COUNT(*) AS count
+        FROM comms WHERE ticket IS NOT NULL OR ref IS NOT NULL
+        GROUP BY ticket, ref, from_id
+        UNION ALL
+        SELECT CASE WHEN ticket_null THEN NULL ELSE ticket END,
+          CASE WHEN ref_null THEN NULL ELSE ref END, from_id AS sender, count
+        FROM comms_ticket_archived_counts
+      ) GROUP BY ticket, ref, sender`).all() as Row[]
+    ).map((r) => ({
+      ticket: r.ticket as string | null,
+      ref: r.ref as string | null,
+      from: r.sender as string,
+      count: r.count as number,
+    }));
+  }
+
+  /** Lightweight links for referenced PR numbers, without parsing unrelated checks or history. */
+  commsPrTicketLinks(
+    numbers: readonly number[],
+  ): { repoId: string; number: number; ticket: string | null; closingIssues: number[] }[] {
+    const rows: Row[] = [];
+    const unique = [...new Set(numbers)];
+    for (let start = 0; start < unique.length; start += 400) {
+      const batch = unique.slice(start, start + 400);
+      rows.push(
+        ...(this.statement(`SELECT repo_id, number, ticket, closing_issues FROM pull_requests
+        WHERE number IN (${batch.map(() => "?").join(",")})`).all(...batch) as Row[]),
+      );
+    }
+    return rows.map((r) => ({
+      repoId: r.repo_id as string,
+      number: r.number as number,
+      ticket: r.ticket as string | null,
+      closingIssues: JSON.parse(r.closing_issues as string) as number[],
+    }));
+  }
+
+  /** A separate indexed question page; ending a run alone does not provide answer text. */
+  ticketQuestions(
+    repoId: string,
+    ticket: string,
+    limit: number,
+    before: { at: number; id: number } | null = null,
+  ): TicketQuestion[] {
+    const rows =
+      this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis
+      FROM seat_questions q JOIN runs r ON r.id = q.run_id
+      LEFT JOIN flight_decisions d ON d.id = (SELECT a.id FROM flight_decisions a
+        WHERE a.question_id = q.id AND a.kind = 'answer' ORDER BY a.at DESC, a.id DESC LIMIT 1)
+      WHERE r.repo_id = ? AND r.ticket = ?
+      ${before === null ? "" : "AND (q.at < ? OR (q.at = ? AND q.id < ?))"}
+      ORDER BY q.at DESC, q.id DESC LIMIT ?`).all(
+        repoId,
+        ticket,
+        ...(before === null ? [] : [before.at, before.at, before.id]),
+        limit,
+      ) as Row[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      runId: r.run_id as string,
+      seat: r.agent_id as string,
+      text: r.text as string,
+      at: r.at as number,
+      passedAt: r.passed_at as number | null,
+      asideAt: r.aside_at as number | null,
+      closedAt: r.answered_at as number | null,
+      answer: r.answer as string | null,
+      answerAt: r.answer_at as number | null,
+      answerBasis: r.answer_basis as string | null,
+    }));
+  }
+
   /** The newest `limit` FLIGHT decisions that name the ticket by ref or target one of its runs. */
   flightDecisionsOnTicket(ref: string, runIds: readonly string[], limit: number): FlightDecision[] {
     const byRef = this.db
@@ -4715,6 +4860,25 @@ export class Store {
       prs.push(pr);
       out.set(pr.repoId, prs);
     }
+    return out;
+  }
+
+  /** The HUD retains every open PR and the historical PRs its displayed runs actually name. */
+  openAndReferencedPullRequests(
+    repoIds: readonly RepoId[],
+    referenced: readonly Pick<PullRequestView, "repoId" | "number">[],
+  ): Map<RepoId, PullRequestView[]> {
+    const out = new Map<RepoId, PullRequestView[]>(repoIds.map((repoId) => [repoId, []]));
+    if (repoIds.length === 0) return out;
+    const rows = this.statement(`WITH referenced AS (
+      SELECT json_extract(value, '$.repoId') AS repo_id, json_extract(value, '$.number') AS number
+      FROM json_each(?)
+    ) SELECT p.* FROM pull_requests p
+      WHERE p.repo_id IN (${repoIds.map(() => "?").join(", ")})
+      AND (p.state = 'open' OR (p.repo_id, p.number) IN (
+        SELECT repo_id, number FROM referenced
+      )) ORDER BY p.number DESC`).all(JSON.stringify(referenced), ...repoIds) as Row[];
+    for (const pr of this.pullRequestRows(rows)) out.get(pr.repoId)?.push(pr);
     return out;
   }
 
@@ -6189,6 +6353,8 @@ export class Store {
     rate?: { since: number; limit: number },
     /** An identical message stored at or after this time is returned, flagged, not stored again. */
     repeatSince?: number,
+    /** Server-resolved title for one internal context line accompanying an operator item send. */
+    flightContextTitle?: string,
   ): (CommsRow & { repeat?: true }) | null {
     const text = cutCommsText(row.text);
     const replyTo =
@@ -6202,7 +6368,7 @@ export class Store {
         const same = this.db
           .prepare(
             `SELECT id FROM comms WHERE from_id = ? AND to_id = ? AND text = ? AND at >= ?
-               AND ticket IS ? AND label IS ? AND reply_to IS ? AND target_run_id IS ?
+               AND ticket IS ? AND label IS ? AND reply_to IS ? AND target_run_id IS ? AND item_key IS ?
              ORDER BY id DESC LIMIT 1`,
           )
           .get(
@@ -6214,6 +6380,7 @@ export class Store {
             row.label ?? null,
             replyTo,
             row.targetRunId ?? null,
+            row.itemKey ?? null,
           ) as { id: number } | undefined;
         if (same !== undefined) {
           id = same.id;
@@ -6231,6 +6398,25 @@ export class Store {
         if (count.n >= rate.limit) return;
       }
       id = this.insertComms(row, text, replyTo);
+      if (
+        row.from === COMMS_CAPCOM &&
+        row.itemKey !== undefined &&
+        flightContextTitle !== undefined
+      ) {
+        const context: NewCommsRow = {
+          from: COMMS_MC,
+          to: row.to,
+          senderKind: "hub",
+          at: row.at,
+          ticket: row.ticket,
+          text: `[Mission Control] Needs-you context ${JSON.stringify({
+            messageId: `comms:${id}`,
+            itemKey: row.itemKey,
+            title: flightContextTitle,
+          })}`,
+        };
+        this.insertComms(context, cutCommsText(context.text), null);
+      }
       this.raiseChatterNote(row);
     }, true);
     const stored = id === null ? null : this.commsMessage(`comms:${id}`);
@@ -6284,7 +6470,7 @@ export class Store {
       throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, item_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -6299,6 +6485,7 @@ export class Store {
         row.fromRunId ?? null,
         row.pr ?? null,
         row.senderKind ?? null,
+        row.itemKey ?? null,
       );
     const id = Number(inserted.lastInsertRowid);
     const mention = this.db.prepare(
@@ -6327,6 +6514,7 @@ export class Store {
       mentions,
       deliveredAt: (r.delivered_at as number | null | undefined) ?? null,
       senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
+      ...(typeof r.item_key === "string" ? { itemKey: r.item_key } : {}),
     };
   }
 
@@ -6664,6 +6852,119 @@ export class Store {
   }
   commsForPair(a: string, b: string): CommsRow[] {
     return this.commsForWhere("(from_id=? AND to_id=?) OR (from_id=? AND to_id=?)", a, b, b, a);
+  }
+
+  /** Lightweight retained transcript sources; conversation paging is not limited to recent runs. */
+  flightConversationRuns(
+    agentId: string,
+  ): Pick<Run, "id" | "startedAt" | "endedAt" | "transcriptPath" | "vendor" | "ticket">[] {
+    const rows = this.db
+      .prepare(`SELECT id, started_at, ended_at, transcript_path, vendor, ticket FROM runs
+      WHERE agent_id = ? ORDER BY COALESCE(ended_at, 9223372036854775807) DESC, started_at DESC, seq DESC`)
+      .all(agentId) as Row[];
+    return rows.map((r) => ({
+      id: r.id as string,
+      startedAt: r.started_at as number,
+      endedAt: r.ended_at as number | null,
+      transcriptPath: r.transcript_path as string,
+      ticket: r.ticket as string | null,
+      ...(r.vendor ? { vendor: r.vendor as Run["vendor"] } : {}),
+    }));
+  }
+
+  private flightConversationScope(
+    flightId: string,
+    seats: readonly string[],
+  ): { sql: string; args: SQLInputValue[] } {
+    const targets = [...new Set([flightId, ...seats])];
+    return {
+      sql: `(((c.from_id = ? AND c.to_id = ?) OR (c.from_id = ? AND c.to_id = ?))
+      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")})))
+      AND c.sender_kind IS NOT 'hub'
+      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`,
+      args: [COMMS_CAPCOM, flightId, flightId, COMMS_CAPCOM, COMMS_CAPCOM, ...targets],
+    };
+  }
+
+  /** A choice is projected from its durable receipt, never inferred from its rendered text. */
+  flightConversationStored(
+    flightId: string,
+    seats: readonly string[],
+    limit: number,
+    before?: { at: number; id: number },
+    exactId?: string,
+  ): (CommsRow & { choice?: { label: string } })[] {
+    const scope = this.flightConversationScope(flightId, seats);
+    const id = exactId === undefined ? null : commsMessageNumber(exactId);
+    if (exactId !== undefined && id === null) return [];
+    const rows = this.db
+      .prepare(`SELECT c.*, q.key AS choice_key, q.label AS choice_label FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql}${id === null ? "" : " AND c.id = ?"}${before ? " AND (c.at, c.id) < (?, ?)" : ""}
+      ORDER BY c.at DESC, c.id DESC LIMIT ?`)
+      .all(
+        ...scope.args,
+        ...(id === null ? [] : [id]),
+        ...(before ? [before.at, before.id] : []),
+        limit,
+      ) as Row[];
+    return rows.reverse().map((r) => ({
+      ...this.commsRow(r),
+      ...(typeof r.choice_label === "string"
+        ? { choice: { label: r.choice_label }, itemKey: (r.item_key ?? r.choice_key) as string }
+        : {}),
+    }));
+  }
+
+  latestFlightStoredReplyAt(flightId: string): number | null {
+    const row = this.db
+      .prepare(`SELECT MAX(at) AS at FROM comms WHERE from_id = ? AND to_id = ? AND sender_kind IS NOT 'hub'
+      AND LTRIM(text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`)
+      .get(flightId, COMMS_CAPCOM) as Row;
+    return row.at as number | null;
+  }
+
+  flightConversationUnread(
+    flightId: string,
+    seats: readonly string[],
+    cursor: string | null,
+    bound?: { at: number; source: string; offset: number },
+  ): number {
+    const scope = this.flightConversationScope(flightId, seats);
+    const after = bound
+      ? bound.source === "comms"
+        ? "(c.at, c.id) > (?, ?)"
+        : "c.at > ?"
+      : "c.id > ?";
+    const args = bound
+      ? bound.source === "comms"
+        ? [bound.at, bound.offset]
+        : [bound.at]
+      : [cursor ? (commsMessageNumber(cursor) ?? 0) : 0];
+    const row = this.db
+      .prepare(`SELECT COUNT(*) AS n FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql} AND ${after}`)
+      .get(...scope.args, ...args) as Row;
+    return row.n as number;
+  }
+
+  flightConversationStoredReadThrough(
+    flightId: string,
+    seats: readonly string[],
+    bound: { at: number; source: string; offset: number },
+  ): number | null {
+    const scope = this.flightConversationScope(flightId, seats);
+    const through = bound.source === "comms" ? "(c.at, c.id) <= (?, ?)" : "c.at <= ?";
+    const row = this.db
+      .prepare(`SELECT MAX(c.id) AS id FROM comms c
+      LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
+      WHERE ${scope.sql} AND ${through}`)
+      .get(
+        ...scope.args,
+        ...[bound.at, ...(bound.source === "comms" ? [bound.offset] : [])],
+      ) as Row;
+    return row.id as number | null;
   }
   private commsScopeWhere(scope: CommsReadScope): { where: string; args: SQLInputValue[] } {
     if ("crew" in scope) return { where: "to_id = 'crew'", args: [] };
