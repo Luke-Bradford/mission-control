@@ -1,7 +1,7 @@
 import {writeFileSync} from 'node:fs';import {pathToFileURL} from 'node:url';
-const BASE='/Users/lukebradford/Dev/mission-control',AFTER='/tmp/mc-review-fix-1622';const AT=Date.UTC(2026,10,9,12);const UPDATE='note:hub-update-held';
+const BASE='/tmp/mc-1622-projection-before',AFTER='/tmp/mc-review-fix-1622';const AT=Date.UTC(2026,10,9,12);const UPDATE='note:hub-update-held';
 const config={operator:{id:'operator',timezone:'UTC'},accounts:[{id:'fixture',vendor:'claude',alertAt:85,stopAt:95}],repos:[{id:'shop-app',github:'fictional/shop-app',project:1,statusMap:{},autonomy:'draft'}],loops:[],poll:{usageMinutes:30,githubSeconds:60},crew:{worktrees:'/fictional',maxSeats:1,sessions:[{id:'fixture',repoId:'shop-app',checkout:'/fictional',seats:[{id:'flight-1',role:'FLIGHT',accountId:'fixture',model:'fixture',area:[]}]}]}};
-const result={baseline:'d3b32b4f9199596005a9e81d6b3bcfd6b0f5dce6',now:AT,fixture:'Fictional actual in-memory Store, attention projection and API; no provider or live data.',phases:{}};
+const result={baseline:'51f827e675e5ed1fe4ecfaf5d2f00428e4addbff',now:AT,fixture:'Fictional actual in-memory Store, attention projection and API; no provider or live data.',phases:{}};
 for(const [phase,root] of [['before',BASE],['after',AFTER]]){
  const {Store}=await import(pathToFileURL(root+'/apps/server/src/store.ts'));const {ChangeBus}=await import(pathToFileURL(root+'/apps/server/src/bus.ts'));const {buildApp}=await import(pathToFileURL(root+'/apps/server/src/api.ts'));const {attentionItems}=await import(pathToFileURL(root+'/apps/server/src/hud.ts'));result.phases[phase]={};
  for(const scenario of ['left','answered','cleared','reraised']){
@@ -27,4 +27,4 @@ for(const [phase,root] of [['before',BASE],['after',AFTER]]){
   }finally{await app.close();store.close()}
  }
 }
-writeFileSync('/tmp/mc-1622-r1352-fixtures.json',JSON.stringify(result,null,2));console.log(JSON.stringify(Object.fromEntries(Object.entries(result.phases).map(([p,v])=>[p,Object.fromEntries(Object.entries(v).map(([s,d])=>[s,{keys:d.attention.map(i=>i.key),clearStatus:d.clearStatus}]))]))));
+writeFileSync('/tmp/mc-1622-r1352-final-fixtures.json',JSON.stringify(result,null,2));console.log(JSON.stringify(Object.fromEntries(Object.entries(result.phases).map(([p,v])=>[p,Object.fromEntries(Object.entries(v).map(([s,d])=>[s,{keys:d.attention.map(i=>i.key),clearStatus:d.clearStatus}]))]))));
