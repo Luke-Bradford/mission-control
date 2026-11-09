@@ -656,12 +656,7 @@ describe("log_decision", () => {
     live("guido-1", "r-guido");
     const r = await tool.call(ctx("guido-1", "r-guido"), args());
     expect(r).toEqual({ text: MC_FLIGHT_ONLY, isError: true });
-    expect(store.flightDecisions(0, 10)).toEqual([
-      expect.objectContaining({
-        about: "move_review",
-        decision: "Not started: RETRO-CX's account codex-main is at its usage stop.",
-      }),
-    ]);
+    expect(store.flightDecisions(0, 10)).toEqual([]);
   });
 
   it("refuses an ended or foreign run", async () => {
@@ -1412,6 +1407,7 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
+      "move_review",
       "resume_seat",
       "merge_pr",
       "settle_park",

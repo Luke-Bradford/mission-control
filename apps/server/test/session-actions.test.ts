@@ -15,8 +15,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseDocument } from "yaml";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { loadConfig, managedSessionPath } from "../src/config.ts";
-import { closeSession, createSession, setSessionSeats } from "../src/config-write.ts";
+import { managedSessionPath, parseConfig } from "../src/config.ts";
+import {
+  closeSession as closeSessionForFixture,
+  createSession as createSessionForFixture,
+  setSessionSeats as setSessionSeatsForFixture,
+} from "../src/config-write.ts";
 import { createCrewReloader } from "../src/crew-apply.ts";
 import { removeSessionCheckout } from "../src/runtime/checkouts.ts";
 import { Store } from "../src/store.ts";
@@ -45,6 +49,7 @@ let source: string;
 let path: string;
 let worktrees: string;
 const now = Date.parse("2026-10-24T12:00:00Z");
+const fixtureHubRoot = "/mc-session-actions-hub";
 const git = (cwd: string, ...args: string[]) =>
   execFileSync(
     "git",
@@ -62,7 +67,29 @@ const required = <T>(value: T | null | undefined): T => {
   if (value == null) throw new Error("missing fixture");
   return value;
 };
-const session = (id: string) => required(loadConfig(path).crew?.sessions.find((s) => s.id === id));
+const fixtureConfig = (configPath: string) =>
+  parseConfig(readFileSync(configPath, "utf8"), configPath, { hubRoot: fixtureHubRoot });
+const createSession = (
+  configPath: string,
+  newSession: Parameters<typeof createSessionForFixture>[1],
+  at: number,
+  applied?: Parameters<typeof createSessionForFixture>[3],
+) => createSessionForFixture(configPath, newSession, at, applied, fixtureHubRoot);
+const closeSession = (
+  configPath: string,
+  id: string,
+  stopped: Parameters<typeof closeSessionForFixture>[2],
+  at: number,
+  expected: Parameters<typeof closeSessionForFixture>[4],
+) => closeSessionForFixture(configPath, id, stopped, at, expected, fixtureHubRoot);
+const setSessionSeats = (
+  configPath: string,
+  id: string,
+  base: Parameters<typeof setSessionSeatsForFixture>[2],
+  seats: Parameters<typeof setSessionSeatsForFixture>[3],
+  at: number,
+) => setSessionSeatsForFixture(configPath, id, base, seats, at, fixtureHubRoot);
+const session = (id: string) => required(fixtureConfig(path).crew?.sessions.find((s) => s.id === id));
 const close = async (id: string) => {
   const result = await closeSession(path, id, () => true, now, session(id));
   return removeSessionCheckout(result.session, result.worktrees);
@@ -101,14 +128,14 @@ describe("session actions", () => {
     const first = await createSession(path, input("harbor-one"), now);
     await createSession(path, input("harbor-two"), now);
     expect(first.folders).toEqual([".github", "src"]);
-    expect(loadConfig(path).crew?.sessions.map((s) => s.id)).toEqual(["harbor-one", "harbor-two"]);
+    expect(fixtureConfig(path).crew?.sessions.map((s) => s.id)).toEqual(["harbor-one", "harbor-two"]);
     expect(session("harbor-one").checkout).not.toBe(session("harbor-two").checkout);
     expect(readFileSync(join(source, ".git", "config"), "utf8")).toBe(before);
     expect(git(source, "status", "--porcelain")).toBe("");
   });
 
   it("refuses a session when crew.allow_read changed on disk since it was applied", async () => {
-    const applied = loadConfig(path);
+    const applied = fixtureConfig(path);
     if (applied.crew === undefined) throw new Error("no crew");
     applied.crew.allowRead = ["/x"];
     await expect(createSession(path, input("harbor-one"), now, applied)).rejects.toMatchObject({
@@ -298,7 +325,7 @@ describe("session actions", () => {
       "destination already exists",
     );
     expect(readFileSync(join(destination, "keep.txt"), "utf8")).toBe("keep");
-    expect(loadConfig(path).crew?.sessions).toEqual([]);
+    expect(fixtureConfig(path).crew?.sessions).toEqual([]);
   });
 
   it("closes stopped seats, but refuses idle seats and concurrent config changes", async () => {
@@ -310,7 +337,7 @@ describe("session actions", () => {
       [{ id: "pilot", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] }],
       now,
     );
-    const config = loadConfig(path);
+    const config = fixtureConfig(path);
     const store = new Store(":memory:");
     const bus = new ChangeBus();
     const reloader = createCrewReloader({
@@ -318,6 +345,7 @@ describe("session actions", () => {
       config,
       store,
       bus,
+      load: fixtureConfig,
       supervisor: { on: () => () => {}, seatBusy: () => false },
     });
     const row = {
@@ -363,7 +391,7 @@ describe("session actions", () => {
 
   it("refuses active agents and restores live membership after a failed save", async () => {
     await createSession(path, input("harbor-one", "shared"), now);
-    const config = loadConfig(path);
+    const config = fixtureConfig(path);
     const store = new Store(":memory:");
     const bus = new ChangeBus();
     const reloader = createCrewReloader({
@@ -371,6 +399,7 @@ describe("session actions", () => {
       config,
       store,
       bus,
+      load: fixtureConfig,
       supervisor: { on: () => () => {}, seatBusy: () => false },
     });
     try {
@@ -416,13 +445,14 @@ describe("session actions", () => {
         [{ id: "pilot", role: "GUIDO", accountId: "claude-main", model: "sonnet", area: [] }],
         now,
       );
-      const config = loadConfig(path);
+      const config = fixtureConfig(path);
       const store = new Store(":memory:");
       const reloader = createCrewReloader({
         configPath: path,
         config,
         store,
         bus: new ChangeBus(),
+        load: fixtureConfig,
         supervisor: { on: () => () => {}, seatBusy: () => kind === "process" },
       });
       const run = vi
@@ -448,7 +478,7 @@ describe("session actions", () => {
   );
 
   it("adds and closes through the routes, applying membership live without sockets", async () => {
-    const config = loadConfig(path);
+    const config = fixtureConfig(path);
     const store = new Store(":memory:");
     const bus = new ChangeBus();
     const crewReloader = createCrewReloader({
@@ -456,9 +486,18 @@ describe("session actions", () => {
       config,
       store,
       bus,
+      load: fixtureConfig,
       supervisor: { on: () => () => {}, seatBusy: () => false },
     });
-    const app = buildApp({ config, store, bus, configPath: path, crewReloader, seatWrites: true });
+    const app = buildApp({
+      config,
+      store,
+      bus,
+      configPath: path,
+      configHubRoot: fixtureHubRoot,
+      crewReloader,
+      seatWrites: true,
+    });
     const post = (url: string, payload: object) =>
       app.inject({ method: "POST", url, payload, headers: { "content-type": "application/json" } });
     try {

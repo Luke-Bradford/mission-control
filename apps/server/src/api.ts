@@ -561,6 +561,8 @@ export interface AppDeps {
   noLoopWrites?: boolean;
   /** The config.yaml the server loaded, which `POST /api/repos` appends to; absent: no config writes. */
   configPath?: string;
+  /** Trusted embedded hosts may override the path used to validate crew path containment. */
+  configHubRoot?: string | null;
   /** Applies seat and role changes from config.yaml live; absent: no reload route. */
   crewReloader?: CrewReloader;
   /** True when this server may write crew seats to `configPath` (not a preview on the live file). */
@@ -4070,7 +4072,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = NewSessionBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         try {
-          const result = await createSession(configPath, body.data, now(), config);
+          const result = await createSession(configPath, body.data, now(), config, deps.configHubRoot);
           const changes = await crewReloader.reload();
           return {
             id: body.data.id,
@@ -4097,7 +4099,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         try {
           const result = await crewReloader.removeSession(req.params.id, (stopped, session) =>
-            closeSession(configPath, req.params.id, stopped, now(), session),
+            closeSession(configPath, req.params.id, stopped, now(), session, deps.configHubRoot),
           );
           const checkout = await removeSessionCheckout(result.session, result.worktrees);
           return {
@@ -4202,6 +4204,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               body.data.base,
               body.data.seats,
               now(),
+              deps.configHubRoot,
             );
           } catch (e) {
             captureError(reply, e);

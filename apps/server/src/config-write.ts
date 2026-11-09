@@ -394,6 +394,7 @@ async function onboard(
  */
 async function readCurrent(
   path: string,
+  hubRoot?: string | null,
 ): Promise<{ bytes: Buffer; text: string; current: CcConfig }> {
   let isLink: boolean;
   try {
@@ -408,7 +409,10 @@ async function readCurrent(
     return {
       bytes,
       text,
-      current: parseConfig(text, "config.yaml", { hubRoot: findHubRoot(), deferModels: true }),
+      current: parseConfig(text, "config.yaml", {
+        hubRoot: hubRoot === undefined ? findHubRoot() : hubRoot,
+        deferModels: true,
+      }),
     };
   } catch {
     throw new ConfigWriteError("current", "the current config.yaml does not load");
@@ -422,8 +426,9 @@ export function setSessionSeats(
   base: ConfigSeatInput[],
   seats: z.infer<typeof SeatsBody>["seats"],
   now: number,
+  hubRoot?: string | null,
 ): Promise<{ config: CcConfig; backup: string }> {
-  const run = queue.then(() => setSeats(path, sessionId, base, seats, now));
+  const run = queue.then(() => setSeats(path, sessionId, base, seats, now, hubRoot));
   queue = run.catch(() => undefined);
   return run;
 }
@@ -524,10 +529,11 @@ async function setSeats(
   base: ConfigSeatInput[],
   seats: z.infer<typeof SeatsBody>["seats"],
   now: number,
+  hubRoot?: string | null,
 ): Promise<{ config: CcConfig; backup: string }> {
   const parsed = SeatsBody.safeParse({ base, seats });
   if (!parsed.success) throw new ConfigWriteError("invalid", "invalid session seats");
-  const { bytes, text, current } = await readCurrent(path);
+  const { bytes, text, current } = await readCurrent(path, hubRoot);
   const i = current.crew?.sessions.findIndex((s) => s.id === sessionId) ?? -1;
   const session = current.crew?.sessions[i];
   if (!session) throw new ConfigWriteError("missing", noSessionText(sessionId));
@@ -585,7 +591,11 @@ async function setSeats(
 
   let next: CcConfig;
   try {
-    next = parseConfig(newText, "the new config.yaml");
+    next = parseConfig(
+      newText,
+      "the new config.yaml",
+      hubRoot === undefined ? undefined : { hubRoot },
+    );
   } catch (e) {
     if (e instanceof ConfigError) throw new ConfigWriteError("invalid", e.message);
     throw new ConfigWriteError("write", "the new config.yaml would not load");
@@ -993,9 +1003,13 @@ export const NewSessionBody = z.strictObject({
 export const sessionActiveText = (id: string, n: number): string =>
   `Stop or remove the ${n} agent(s) in s/${id} first.`;
 
-function sessionConfig(text: string): CcConfig {
+function sessionConfig(text: string, hubRoot?: string | null): CcConfig {
   try {
-    return parseConfig(text, "the new config.yaml");
+    return parseConfig(
+      text,
+      "the new config.yaml",
+      hubRoot === undefined ? undefined : { hubRoot },
+    );
   } catch (e) {
     throw new ConfigWriteError(
       "invalid",
@@ -1009,10 +1023,11 @@ export async function createSession(
   input: NewCrewSession,
   now: number,
   applied?: CcConfig,
+  hubRoot?: string | null,
 ) {
   const parsed = NewSessionBody.safeParse(input);
   if (!parsed.success) throw new ConfigWriteError("invalid", "invalid session");
-  const { bytes, text, current } = await readCurrent(path);
+  const { bytes, text, current } = await readCurrent(path, hubRoot);
   const crew = current.crew;
   if (!crew) throw new ConfigWriteError("conflict", "configure crew before adding sessions");
   const membership = (c: CcConfig) => c.crew?.sessions.map((s) => [s.id, s.repoId, s.checkout]);
@@ -1049,7 +1064,7 @@ export async function createSession(
   sessions.add(node);
   sessions.flow = false;
   // Confinement, deny_read and every other config invariant are checked before creating anything.
-  sessionConfig(doc.toString({ lineWidth: 0 }));
+  sessionConfig(doc.toString({ lineWidth: 0 }), hubRoot);
   const peers = current.loops.map((l) => ({ label: `loop ${l.id} worktree`, dir: l.worktree }));
   let owned: CrewSessionConfig | undefined;
   try {
@@ -1084,7 +1099,7 @@ export async function createSession(
       node.set("managed_checkout", doc.createNode(proof));
     }
     const newText = doc.toString({ lineWidth: 0 });
-    const next = sessionConfig(newText);
+    const next = sessionConfig(newText, hubRoot);
     const added = next.crew?.sessions.at(-1);
     if (
       !added ||
@@ -1103,7 +1118,7 @@ export async function createSession(
       .map((e) => e.name)
       .sort();
     const run = queue.then(async () => {
-      const latest = await readCurrent(path);
+      const latest = await readCurrent(path, hubRoot);
       if (latest.current.crew?.sessions.some((s) => s.id === input.id)) {
         throw new ConfigWriteError("duplicate", `s/${input.id} already exists.`);
       }
@@ -1150,9 +1165,10 @@ export function closeSession(
   stopped: (seatId: string) => boolean,
   now: number,
   expected: CrewSessionConfig,
+  hubRoot?: string | null,
 ) {
   const run = queue.then(async () => {
-    const { bytes, text, current } = await readCurrent(path);
+    const { bytes, text, current } = await readCurrent(path, hubRoot);
     const crew = current.crew;
     const index = crew?.sessions.findIndex((s) => s.id === id) ?? -1;
     const session = crew?.sessions[index];
@@ -1168,7 +1184,7 @@ export function closeSession(
     const doc = parseDocument(text);
     doc.deleteIn(["crew", "sessions", index]);
     const newText = doc.toString({ lineWidth: 0 });
-    const next = sessionConfig(newText);
+    const next = sessionConfig(newText, hubRoot);
     if (
       !isDeepStrictEqual(next, {
         ...current,
