@@ -108,7 +108,6 @@ import {
   writerSyncConflictText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { writeCrewPause } from "../src/crew-pause.ts";
@@ -151,12 +150,12 @@ import {
   type SeatBusy,
   type SeatFacts,
   type SendResult,
-  type Supervisor,
   SupervisorError,
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { activity } from "../src/views.ts";
+import { defined } from "./defined.ts";
 
 const START = Date.parse("2026-10-21T10:00:00Z");
 const HUB = START + 30 * 60_000;
@@ -857,17 +856,19 @@ describe("controller PR scratch reviews", () => {
       mergeable: null,
     };
     store.upsertPullRequests(REPO, [pr], clock);
-    const id = store.requestReview({
-      authorRunId: identity,
-      repoId: REPO,
-      seatId: RETRO,
-      prNumber: 77,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: clock,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: identity,
+        repoId: REPO,
+        seatId: RETRO,
+        prNumber: 77,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: clock,
+      }),
+    );
     h.engine = h.make({
       externalReviews: {
         sync: async () => {},

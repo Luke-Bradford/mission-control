@@ -120,6 +120,11 @@
   cursor: pointer;
   overflow-wrap: anywhere;
 }
+.qa-history-limits p,
+.qa-history-native p,
+.qa-history-native h2 {
+  margin: 0;
+}
 .qa-history-table details p {
   margin: var(--sp-1) 0;
   overflow-wrap: anywhere;
@@ -130,11 +135,6 @@
   color: var(--muted);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-}
-.qa-history-limits p,
-.qa-history-native p,
-.qa-history-native h2 {
-  margin: 0;
 }
 .qa-history-native {
   display: grid;

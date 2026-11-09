@@ -196,7 +196,9 @@ describe("wake deltas", () => {
     state.signals = [{ kind: "hub_error", key: "episode", since: 1, evidence: "old", told: true }];
     const first = flightWake(state);
     expect(first.digest.signals.entries).toEqual([]);
-    state.signals[0] = { ...state.signals[0]!, evidence: "new actionable reason", told: false };
+    const previous = state.signals[0];
+    if (!previous) throw new Error("Missing handled signal fixture");
+    state.signals[0] = { ...previous, evidence: "new actionable reason", told: false };
     expect(flightWake(state, first.snapshot).digest.signals.entries).toEqual(state.signals);
   });
 
