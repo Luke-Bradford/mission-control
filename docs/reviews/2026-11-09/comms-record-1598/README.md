@@ -9,3 +9,7 @@ The live read-only date check found 2,838 messages, from 23 October 2026 at 06:3
 Acceptance checks cover hub paging, empty/nonempty FLIGHT/controller pairs, more than the feed's last 100 messages, qualified/short/PR references, duplicate closing-issue references, ambiguous multi-repo legacy references, recorded sender kinds and unknown legacy provenance, question/answer/set-aside fields, closure without an answer, tied-time question paging and cross-repo exclusion. An additional acceptance check reproduced shrinking totals after actual retention; totals now survive repeated sweeps and a database reopen, including both ordinary and question-message retention paths.
 
 The existing web rendering and timeline kinds are unchanged. New question fields and sender metadata are additive. Full local tests, exact-head CI, independent most-capable review and merge remain separate gates; this receipt does not claim them.
+
+## Shared contact contract: review 1344
+
+CommsContact now declares optional hasMessages, matching the additive server response and preserving older callers. The controller-pair route test reads both empty and populated summaries through CommsAgentResponse and accesses the flag through that shared type. Before the contract correction, server typecheck fails at both accesses because the field is absent. Afterward, 35 Comms and record tests pass, along with lint, all workspace typechecks and build. Production response behavior is unchanged. Fresh pushed-head CI and independent review remain required.

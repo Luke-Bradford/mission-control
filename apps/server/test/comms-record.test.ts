@@ -1,7 +1,14 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { COMMS_CAPCOM, COMMS_CONTROLLER, COMMS_MC, type PullRequestView, type Run } from "@mc/core";
+import {
+  COMMS_CAPCOM,
+  COMMS_CONTROLLER,
+  COMMS_MC,
+  type CommsAgentResponse,
+  type PullRequestView,
+  type Run,
+} from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
@@ -129,8 +136,10 @@ describe("Comms record reads", () => {
   });
 
   it("lists the Flight/controller pair truthfully before and after its first message", async () => {
-    const empty = await get("/api/comms/agents/flight-1?summary=1");
-    expect(empty.contacts.find((c: { id: string }) => c.id === COMMS_CONTROLLER)).toMatchObject({
+    const empty: CommsAgentResponse = await get("/api/comms/agents/flight-1?summary=1");
+    const emptyContact = empty.contacts.find((c) => c.id === COMMS_CONTROLLER);
+    expect(emptyContact?.hasMessages).toBe(false);
+    expect(emptyContact).toMatchObject({
       count: 0,
       hasMessages: false,
     });
@@ -144,8 +153,10 @@ describe("Comms record reads", () => {
     });
     const pair = await get(`/api/comms/pairs/flight-1/${COMMS_CONTROLLER}`);
     expect(pair.messages.map((m: { text: string }) => m.text)).toEqual(["controller note"]);
-    const list = await get(`/api/comms/agents/${COMMS_CONTROLLER}?summary=1`);
-    expect(list.contacts.find((c: { id: string }) => c.id === "flight-1")).toMatchObject({
+    const list: CommsAgentResponse = await get(`/api/comms/agents/${COMMS_CONTROLLER}?summary=1`);
+    const storedContact = list.contacts.find((c) => c.id === "flight-1");
+    expect(storedContact?.hasMessages).toBe(true);
+    expect(storedContact).toMatchObject({
       count: 1,
       hasMessages: true,
     });

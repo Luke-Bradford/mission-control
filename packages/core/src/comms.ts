@@ -153,6 +153,8 @@ export interface CommsCount {
 }
 export interface CommsContact {
   id: string;
+  /** Whether this contact has any stored messages; omitted by older servers. */
+  hasMessages?: boolean;
   lastMessage: CommsMessage | null;
   count: number;
   unread: number;
