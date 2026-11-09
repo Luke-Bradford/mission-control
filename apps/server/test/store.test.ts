@@ -4493,6 +4493,37 @@ it("keeps an out-of-window held run without disturbing the newest-first order", 
   expect(grouped.get("a")?.map((r) => r.id)).toEqual(["r4", "r0"]);
   expect(grouped.get("missing")).toEqual([]);
 });
+it("preserves timestamp and sequence order, duplicate agents and held runs outside the requested agents", () => {
+  store.upsertRun(run({ id: "older", agentId: "a", seq: 1, startedAt: 1 }));
+  store.upsertRun(run({ id: "tie-low", agentId: "a", seq: 2, startedAt: 2 }));
+  store.upsertRun(run({ id: "tie-high", agentId: "a", seq: 3, startedAt: 2 }));
+  store.upsertRun(run({ id: "foreign", agentId: "b", seq: 1, startedAt: 3 }));
+  const held = ["older", "older", "tie-high", "foreign", "absent"];
+  const grouped = store.runsForAgents(["a", "a", "empty"], 1, held);
+  expect(grouped.get("a")?.map((r) => r.id)).toEqual(["tie-high", "older"]);
+  expect(grouped.get("b")?.map((r) => r.id)).toEqual(["foreign"]);
+  expect(grouped.get("empty")).toEqual([]);
+  expect(store.runsForAgents([], 1, held)).toEqual(new Map());
+  expect(
+    store
+      .runsForAgents(["a"], 0, ["older"])
+      .get("a")
+      ?.map((r) => r.id),
+  ).toEqual(["older"]);
+  expect(store.runsForAgents(["a"], -1).get("a")).toEqual([]);
+  expect(
+    store
+      .runsForAgents(["a"], 1.5)
+      .get("a")
+      ?.map((r) => r.id),
+  ).toEqual(["tie-high"]);
+});
+it("handles a large list of empty agents without dropping their entries", () => {
+  const agents = Array.from({ length: 600 }, (_, i) => `agent-${i}`);
+  const grouped = store.runsForAgents(agents, 50);
+  expect([...grouped.keys()]).toEqual(agents);
+  expect([...grouped.values()].every((runs) => runs.length === 0)).toBe(true);
+});
 it("projects historical context windows without inventing missing measurements", () => {
   store.setDigest("zero", digest({ contextWindow: 0 }));
   store.setDigest("unknown", digest({ contextWindow: null }));
@@ -4503,6 +4534,26 @@ it("projects historical context windows without inventing missing measurements",
       ["known", 200000],
     ]),
   );
+});
+it("updates cached historical context measurements and removes a value when it becomes unknown", () => {
+  store.setDigest("changing", digest({ contextWindow: null }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map());
+  store.setDigest("changing", digest({ contextWindow: 200000 }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map([["changing", 200000]]));
+  store.setDigest("changing", digest({ contextWindow: 1000000 }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map([["changing", 1000000]]));
+  store.setDigest("changing", digest({ contextWindow: null }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map());
+});
+it("reopens a legacy digest cache with malformed history while keeping its window unknown", () => {
+  store.setDigest("known", digest({ contextWindow: 200000 }));
+  store.close();
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  db.exec("DROP INDEX run_digests_context_window");
+  db.prepare("INSERT INTO run_digests (run_id, digest) VALUES (?, ?)").run("malformed", "{");
+  db.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(store.digestContextWindows(["known", "malformed"])).toEqual(new Map([["known", 200000]]));
 });
 it("looks up canonical and closingIssues-only ticket links within their repository", () => {
   const pr = (number: number, patch: Partial<PullRequestView> = {}): PullRequestView => ({

@@ -1140,6 +1140,8 @@ export const MAX_OPEN_RUN_AGE_MS = 30 * 24 * 60 * 60_000;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
+const DIGEST_CONTEXT_WINDOW_SQL =
+  "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
 const toSample = (r: Row): UsageSample => ({
   accountId: r.account_id as string,
@@ -1958,6 +1960,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
       CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
       CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
+      CREATE INDEX IF NOT EXISTS runs_agent_recent ON runs(agent_id, started_at DESC, seq DESC, id);
+      CREATE INDEX IF NOT EXISTS run_digests_context_window ON run_digests(run_id, ${DIGEST_CONTEXT_WINDOW_SQL});
       CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
       CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
       CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
@@ -2638,7 +2642,7 @@ export class Store {
     return rows.map(toRun);
   }
 
-  /** Recent runs for many HUD rows, ranked in SQLite so the runs table is read once. */
+  /** Indexed recent-run bounds for each HUD agent, with older held runs retained. */
   runsForAgents(
     agentIds: readonly AgentId[],
     limit: number,
@@ -2647,20 +2651,30 @@ export class Store {
     const out = new Map<AgentId, Run[]>();
     if (agentIds.length === 0) return out;
     for (const agentId of agentIds) out.set(agentId, []);
-    const held = [...new Set(heldRunIds)];
-    const rows = this.statement(
-      `SELECT runs.* FROM runs JOIN (
-         SELECT id, ROW_NUMBER() OVER (PARTITION BY agent_id ORDER BY started_at DESC, seq DESC) AS row_number
-         FROM runs WHERE agent_id IN (${agentIds.map(() => "?").join(", ")})${held.length > 0 ? ` OR id IN (${held.map(() => "?").join(", ")})` : ""}
-       ) recent ON recent.id = runs.id
-       WHERE recent.row_number <= ?${held.length > 0 ? ` OR runs.id IN (${held.map(() => "?").join(", ")})` : ""}
-       ORDER BY runs.agent_id, runs.started_at DESC, runs.seq DESC`,
-    ).all(...agentIds, ...held, limit, ...held) as Row[];
-    for (const run of rows.map(toRun)) {
+    const seen = new Set<string>();
+    const take = (row: Row) => {
+      if (seen.has(row.id as string)) return;
+      seen.add(row.id as string);
+      const run = toRun(row);
       const runs = out.get(run.agentId) ?? [];
       runs.push(run);
       out.set(run.agentId, runs);
+    };
+    const recent = this.statement(`SELECT * FROM runs WHERE agent_id = ?
+      ORDER BY started_at DESC, seq DESC
+      LIMIT CASE WHEN ? > 0 THEN CAST(? AS INTEGER) ELSE 0 END`);
+    for (const agentId of out.keys()) {
+      for (const row of recent.all(agentId, limit, limit) as Row[]) take(row);
     }
+    const held = [...new Set(heldRunIds)];
+    if (held.length > 0)
+      for (const row of this.statement(
+        `SELECT * FROM runs WHERE id IN (${held.map(() => "?").join(", ")})
+        ORDER BY agent_id, started_at DESC, seq DESC`,
+      ).all(...held) as Row[])
+        take(row);
+    for (const runs of out.values())
+      runs.sort((a, b) => b.startedAt - a.startedAt || b.seq - a.seq);
     return out;
   }
 
@@ -3168,12 +3182,12 @@ export class Store {
     const out = new Map<string, number>();
     for (let i = 0; i < runIds.length; i += DIGEST_BATCH) {
       const ids = runIds.slice(i, i + DIGEST_BATCH);
-      const rows =
-        this.statement(`SELECT run_id, json_extract(digest, '$.contextWindow') AS context_window
-        FROM run_digests WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
-          run_id: string;
-          context_window: number | null;
-        }[];
+      const rows = this.statement(`SELECT run_id, ${DIGEST_CONTEXT_WINDOW_SQL} AS context_window
+        FROM run_digests INDEXED BY run_digests_context_window
+        WHERE run_id IN (${ids.map(() => "?").join(", ")})`).all(...ids) as {
+        run_id: string;
+        context_window: number | null;
+      }[];
       for (const row of rows)
         if (row.context_window !== null) out.set(row.run_id, row.context_window);
     }
