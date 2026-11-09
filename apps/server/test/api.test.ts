@@ -1600,6 +1600,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/comms:1/reply-route"],
   ["GET", "/api/comms/comms:1/state"],
   ["POST", "/api/attention/unknown/choose", { optionId: "yes", briefAt: 1 }],
+  ["POST", "/api/attention/unknown/clear", {}],
   ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
   ["DELETE", "/api/comms/comms:1/pin", {}],
@@ -2714,7 +2715,11 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
-      if (url === "/api/attention/unknown" || /^\/api\/attention\/unknown\/choo?[si]/.test(url)) {
+      if (
+        url === "/api/attention/unknown" ||
+        url === "/api/attention/unknown/clear" ||
+        /^\/api\/attention\/unknown\/choo?[si]/.test(url)
+      ) {
         expect(r.statusCode).toBe(404);
         continue;
       }

@@ -2937,3 +2937,22 @@ keep their permission checks.
 - **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,
   FLIGHT's `answer` and `pass` decisions, question messages (label `question`) and the replies to
   them keep 365.
+
+
+### Clearing a Needs-you item
+
+`POST /api/attention/:key/clear` with an empty body returns `{ cleared: key }`. The operator or
+independent controller can clear an acknowledged item too. A delegated FLIGHT actor is refused
+with 403; a missing item returns 404, `That item is no longer waiting.` The runaway flag directs
+the operator to Lift and stays in force.
+
+Clear records a `cleared` closure, closes the displayed source and stores its notices atomically.
+A waiting seat receives a notice for its exact preserved run. FLIGHT receives one hub line.
+Existing approvals, budget stops and run holds remain in force. A new ask can appear again;
+refreshing the presentation cannot reopen the cleared ask. A queued legacy default for it stays
+undelivered and is excluded from new delivery attempts.
+
+FLIGHT can withdraw its own brief from a protected item. This retains the underlying question,
+source and protections; the original brief remains in history. Its unfinished-wake reminder stays
+in FLIGHT's wake and is omitted from operator attention. Answered and superseded note briefs
+are excluded from the current projection.

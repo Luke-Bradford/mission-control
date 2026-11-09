@@ -1507,8 +1507,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const { key, reason, basis } = c.args;
     const item = itemByKey(key);
     const at = now();
-    if (item !== undefined && protectedDecisionItem(store, item, config, at))
-      return fail(PROTECTED_ITEM_REFUSED);
+    if (item !== undefined && protectedDecisionItem(store, item, config, at)) {
+      if (item.brief?.by !== "flight" || !store.withdrawFlightBrief(key))
+        return fail(PROTECTED_ITEM_REFUSED);
+      bus.emit("attention");
+      record(at, {
+        kind: "withdraw",
+        ref: item.ticket,
+        about: item.brief.ask || item.text,
+        decision: reason,
+        basis,
+      });
+      bus.emit("flight");
+      return { text: "Brief withdrawn. The underlying question and its protections remain." };
+    }
     if (key.startsWith("ask:")) return fail(WITHDRAW_SEAT_QUESTION);
     if (item === undefined) return fail("Not withdrawn: that question is no longer open.");
     const wrote =
