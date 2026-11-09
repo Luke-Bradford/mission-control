@@ -61,6 +61,7 @@ export function registerBriefChoiceRoutes(
             queue,
             knownSecrets: deps.knownSecrets ?? (async () => []),
             bus: deps.bus,
+            reconcileRun: deps.engine?.reconcileRun?.bind(deps.engine),
           },
           action,
           input,
@@ -95,7 +96,7 @@ export function registerBriefChoiceRoutes(
         } catch {
           /* An unreadable result is not a successful receipt. */
         }
-        if (response.statusCode === 401 || response.statusCode === 403)
+        if ([400, 401, 403, 404, 409].includes(response.statusCode))
           throw new BriefActionRefused(
             response.statusCode,
             body.error ?? "The original route refused this actor.",

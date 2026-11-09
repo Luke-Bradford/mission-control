@@ -589,7 +589,7 @@ it("1389 refuses a source edited remotely during bound reply dispatch without po
       payload: request,
     });
     expect(response.json()).toMatchObject({
-      state: "unknown",
+      state: "refused",
       text: expect.stringContaining("Source changed"),
     });
     expect(gh).not.toHaveBeenCalled();

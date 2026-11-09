@@ -283,6 +283,8 @@ export async function chooseBrief(
     };
     try {
       check();
+      if ("seatId" in actor && current.decision?.whyOperator)
+        throw new BriefActionRefused(403, "This decision requires the operator's explicit choice.");
       save("dispatching", "The action started; completion is not yet confirmed.");
       const text = await deps.dispatch(action.action, request.input, {
         actor,
@@ -324,7 +326,10 @@ export async function chooseBrief(
     } catch (error) {
       const text =
         error instanceof Error ? error.message : "Action completion could not be verified.";
-      if (error instanceof BriefActionRefused) {
+      if (
+        error instanceof BriefActionRefused ||
+        (error instanceof BriefError && record.receipt.state === "pending")
+      ) {
         record.receipt = { ...record.receipt, state: "refused", status: error.status, text };
         deps.store.refuseBriefChoice(
           binding.epoch,

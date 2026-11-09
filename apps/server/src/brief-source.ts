@@ -8,6 +8,7 @@ import {
   CREW_PAUSE_SETTING,
   hudColumnOf,
 } from "@mc/core";
+import { pendingRunApproval } from "./attention-subjects.ts";
 import type { CcConfig } from "./config.ts";
 import { externalMergeHold, externalPrControl } from "./external-pr-control.ts";
 import type { Store } from "./store.ts";
@@ -90,8 +91,32 @@ export function briefSourceRevision(
     const run = store.seatRun(seatId);
     if (run) runIds.add(run.id);
   }
+  // Run delivery follows the same run through ordinary commits and an exact-question set-aside.
+  // Head-targeting actions keep the complete head/review/gate fingerprint below.
+  const deliveryOnly =
+    actions.every((action) =>
+      ["answer", "ordinary-run-guidance", "attention-hold", "record-decision"].includes(
+        action.kind,
+      ),
+    ) &&
+    actions.some((action) => action.kind === "answer" || action.kind === "ordinary-run-guidance");
   const runs = [...runIds].sort().map((id) => {
     const run = store.run(id);
+    if (run && deliveryOnly)
+      return {
+        id: run.id,
+        agentId: run.agentId,
+        repoId: run.repoId,
+        ticket: run.ticket,
+        status: run.status,
+        endedAt: run.endedAt,
+        parked: run.loop?.parked ?? null,
+        mergeHold: run.loop?.mergeHold ?? null,
+        controllerCheckRequired: run.loop?.controllerCheckRequired ?? false,
+        controllerCheck: run.loop?.controllerCheck ?? null,
+        uat: run.loop?.uat ?? null,
+        approvalPending: pendingRunApproval(store, run),
+      };
     return run
       ? {
           id: run.id,
@@ -142,10 +167,20 @@ export function briefSourceRevision(
     );
     const configured = session?.seats.find((seat) => seat.id === id);
     const row = store.seatSession(id);
+    const asideTarget =
+      question &&
+      question.agentId === id &&
+      store.run(question.runId)?.endedAt === null &&
+      store.run(question.runId)?.loop?.aside?.ask === question.id;
     return {
       id,
       configured,
-      current: row ? { runId: row.runId, stopped: row.state === "stopped" } : null,
+      current: row
+        ? {
+            runId: deliveryOnly && asideTarget && row.runId === null ? question.runId : row.runId,
+            stopped: row.state === "stopped",
+          }
+        : null,
       instructions: store.instructions.active(id),
       queue: actions.some(
         (action) =>

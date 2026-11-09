@@ -489,6 +489,7 @@ it("1389 defaults only FLIGHT's own validated direct queue judgment through real
     for: "operator",
     at: 100,
     context: "Swap these two adjacent eligible cards.",
+    ticket: "demo#2",
     ask: "Use this reversible order?",
     did: [],
     checked: [],
@@ -578,6 +579,43 @@ it("1389 executes a bound explicit queue proposal through the actual serialized 
     await app.close();
   }
 });
+it("keeps a partial bound queue swap uncertain and never repeats its external writes", async () => {
+  const { item } = await propose();
+  vi.mocked(deps.edit)
+    .mockResolvedValueOnce({ ok: true, changed: true })
+    .mockResolvedValueOnce({ ok: false, reason: "Second write unconfirmed" });
+  const app = buildApp({
+    config,
+    store,
+    bus: new ChangeBus(),
+    queueReorder: deps,
+    now: deps.now,
+    operatorToken: "fixture-operator",
+  });
+  try {
+    const request = {
+      briefId: item.brief?.id,
+      sourceRevision: item.brief?.binding?.sourceRevision,
+      optionId: "approve",
+      requestId: "partial-queue",
+    };
+    const dispatch = () =>
+      app.inject({
+        method: "POST",
+        url: `/api/attention/${encodeURIComponent(item.key)}/choice`,
+        headers: { [OPERATOR_HEADER]: "fixture-operator" },
+        payload: request,
+      });
+    expect((await dispatch()).json()).toMatchObject({ state: "unknown" });
+    expect(deps.edit).toHaveBeenCalledTimes(2);
+    expect((await dispatch()).json()).toMatchObject({ state: "unknown" });
+    expect(deps.edit).toHaveBeenCalledTimes(2);
+    expect(store.notes().some((note) => note.key.endsWith(":recovery"))).toBe(true);
+  } finally {
+    await app.close();
+  }
+});
+
 it("1389 projects prepared queue freshness on GET without preparing remote actions or writing state", async () => {
   const { item } = await propose();
   const boardRead = vi.spyOn(deps, "readBoard"),

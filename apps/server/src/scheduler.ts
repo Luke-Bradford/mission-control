@@ -103,7 +103,6 @@ import {
   latestTranscriptLimits,
   UsageRateLimited,
 } from "./collectors/usage-sources.ts";
-import { raiseStalledCommsDecisions } from "./comms-decisions.ts";
 import type { CcConfig } from "./config.ts";
 import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
 import { applyDecisionDefaults } from "./decision-defaults.ts";
@@ -312,7 +311,7 @@ export interface SchedulerDeps {
   cliHold?: CliHold;
   /** The live check of an automatic CLI update, run on a seat (the supervisor's, built after the scheduler). */
   seatCheck?: SeatCheck;
-  /** Hands an applied default to the seat that asked it. */
+  /** Legacy settled-question delivery; bound defaults use defaultChoices instead. */
   deliverDefault?: (seatId: string, text: string) => Promise<void>;
   defaultChoices?: () => BriefChoiceDeps;
   /** Takes `waiting:operator` off cards that left the Backlog; returns how many it freed. Absent: none. */
@@ -581,8 +580,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         deliver: deps.deliverDefault,
       });
       if (closed > 0) bus.emit("attention");
-      const raised = raiseStalledCommsDecisions({ config, store, now: now() });
-      if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,

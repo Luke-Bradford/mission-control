@@ -1506,7 +1506,11 @@ function buildAttentionItems(
     }
     const saved = briefs.get(i.key);
     // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
-    const retained = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
+    // Automatic hub Comms briefs remain history; FLIGHT must prepare an actual operator choice.
+    const legacyCommsBrief =
+      i.key.startsWith(COMMS_OPEN_PREFIX) && saved?.by === "hub" && saved.for !== "flight";
+    const retained =
+      legacyCommsBrief || (saved?.for === "flight" && saved.at < i.at) ? undefined : saved;
     const brief = retained
       ? {
           ...retained,
@@ -1528,7 +1532,9 @@ function buildAttentionItems(
         ackAt >= Math.max(i.at, askAt) &&
         (!brief?.binding ||
           (store.getSetting(`brief-ack:${i.key}`) === brief.binding.epoch &&
-            ((brief.choice === undefined && brief.state?.freshness === "current") ||
+            (((brief.choice === undefined ||
+              ["refused", "unknown", "stale", "canceled"].includes(brief.choice.state)) &&
+              brief.state?.freshness === "current") ||
               (brief.choice?.state === "applied" &&
                 brief.choice.settledSourceRevision ===
                   briefSourceRevision(

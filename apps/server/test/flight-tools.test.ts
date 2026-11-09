@@ -149,7 +149,6 @@ import { evaluateHolds, holds } from "../src/attention-holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
-import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -5199,7 +5198,7 @@ describe("brief_item", () => {
       | undefined;
     return {
       key: KEY,
-      context: "mc#7 is parked since 11:00.",
+      context: "The seat is parked since 11:00 and waits for you.",
       ask: "Should I un-park it?",
       recommendation: "Un-park it.",
       basis: "read the park",
@@ -5285,7 +5284,7 @@ describe("brief_item", () => {
       text: "A genuine operator decision?",
       at: NOW,
     });
-    const payload: Record<string, unknown> = B({ key: `ask:${id}` });
+    const payload: Record<string, unknown> = B({ key: `ask:${id}`, ticket: "mc#7" });
     payload.person = { source: { kind: "github", messageId: "missing", revision: "missing" } };
     payload.hold = { condition: { kind: "date", at: NOW + 1000 } };
     const result = await call("brief_item", payload);
@@ -5750,7 +5749,10 @@ describe("brief_item", () => {
   it("keeps context uncut, allows no options for FLIGHT's own brief, and rejects oversized text", async () => {
     const long = "x".repeat(BRIEF_INPUT_MAX);
     // #1543: an operator brief with no options is refused; a brief FLIGHT keeps may have none
-    const none = await call("brief_item", B({ context: long, options: undefined }));
+    const none = await call(
+      "brief_item",
+      B({ context: long, options: undefined, recommendedOptionId: "option-0" }),
+    );
     expect(none.isError).toBe(true);
     expect(none.text).toContain("options");
     expect(store.briefs().size).toBe(0);
@@ -7828,13 +7830,8 @@ describe("superuser housekeeping", () => {
     });
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
-    expect(raiseStalledCommsDecisions({ config: cfg, store, now: nowMs })).toBe(1);
-    // the hub's fallback brief is a complete question on the ticket, so it passes the entry check
     expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
-      owner: "operator",
-      brief: {
-        ask: "A crew member has waited 45 minutes for another's answer about a ticket: should it go ahead on its best judgment, or hold?",
-      },
+      owner: "flight",
     });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
       "isError",
@@ -11038,6 +11035,7 @@ describe("return_question and withdraw_question (#1532)", () => {
       [
         "brief_item",
         {
+          ...operatorDecisionFields({ kind: "record-decision" }),
           key,
           assessment: "Nothing yet.",
           ask: "Leave it?",

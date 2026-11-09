@@ -172,6 +172,21 @@ it("records a displayed floor grant only through the authenticated existing oper
     expect.objectContaining({ kind: "approval", basis: "Explicit fixture grant" }),
   );
 });
+it("requires the operator for a genuine decision even when its action only records a local decision", async () => {
+  const request = await brief({ kind: "record-decision" });
+  const a = app();
+  const response = await post(a, request, KEY, {
+    [FLIGHT_OPERATOR_ACTOR_HEADER]: JSON.stringify({ seatId: "FLIGHT-1", runId: "flight" }),
+  });
+  expect(response.statusCode).toBe(403);
+  expect(response.json()).toMatchObject({ state: "refused" });
+  expect(store.acks().has(KEY)).toBe(false);
+  expect(store.flightDecisions(0, 10)).toEqual([]);
+  expect((await post(a, { ...request, requestId: "operator-answer" })).json()).toMatchObject({
+    state: "applied",
+  });
+});
+
 it("keeps delegated FLIGHT provenance on protected grants, while the direct operator route remains usable", async () => {
   const action = {
     kind: "floor-grant" as const,
@@ -235,6 +250,29 @@ it.each(["review-resume", "review-rework"] as const)(
       ).toBe(true);
   },
 );
+it("does not release a choice for replay after a rework message was stored but waking was refused", async () => {
+  store.setRunLoop("target", {
+    ...NEW_LOOP,
+    phase: "parked",
+    parked: { kind: "review", reason: "Findings", ended: false },
+  });
+  const request = await brief({
+    kind: "review-rework",
+    runId: "target",
+    sha: SHA,
+    text: "Address the displayed findings.",
+  });
+  const onOperatorMessage = vi.fn(async (_run, _by, options) => {
+    await options?.beforeLift?.();
+    return { lifted: false as const, reason: "held" as const };
+  });
+  const a = app({ engine: { status: () => ({ on: true, note: null }), onOperatorMessage } });
+  expect((await post(a, request)).json()).toMatchObject({ state: "unknown" });
+  expect(store.comms(0, "target")).toHaveLength(1);
+  expect((await post(a, request)).json()).toMatchObject({ state: "unknown" });
+  expect(onOperatorMessage).toHaveBeenCalledOnce();
+});
+
 it("dispatches a run controller verdict with exact head and evidence, preserving independence", async () => {
   store.setRunLoop("target", {
     ...NEW_LOOP,
@@ -427,6 +465,122 @@ it("1389 keeps explicit budget recovery bound to the displayed park and never de
   const response = await post(a, request);
   expect(response.statusCode, response.body).toBe(200);
   expect(onOperatorMessage).toHaveBeenCalledWith("target", "CAPCOM");
+});
+
+it("releases a no-effect refusal so a new request can retry the same decision", async () => {
+  store.setRunLoop("target", {
+    ...NEW_LOOP,
+    phase: "parked",
+    parked: { kind: "budget", reason: "Fixture budget exhausted", ended: false },
+  });
+  const request = await brief({ kind: "run-resume", runId: "target", parkKind: "budget" });
+  let on = false;
+  const onOperatorMessage = vi.fn(async () => ({ lifted: true as const }));
+  const a = app({ engine: { status: () => ({ on, note: null }), onOperatorMessage } });
+  const denied = await post(a, request);
+  expect(denied.statusCode).toBe(409);
+  expect(denied.json()).toMatchObject({ state: "refused" });
+  expect(onOperatorMessage).not.toHaveBeenCalled();
+  on = true;
+  const retried = await post(a, { ...request, requestId: "retry-after-service-recovers" });
+  expect(retried.statusCode, retried.body).toBe(200);
+  expect(retried.json()).toMatchObject({ state: "applied" });
+  expect(onOperatorMessage).toHaveBeenCalledOnce();
+});
+
+it("keeps an uncertain effect unknown but lets an explicit acknowledgement clear its unchanged item", async () => {
+  store.setRunLoop("target", {
+    ...NEW_LOOP,
+    phase: "parked",
+    parked: { kind: "budget", reason: "Fixture budget exhausted", ended: false },
+  });
+  const request = await brief({ kind: "run-resume", runId: "target", parkKind: "budget" });
+  const a = app({
+    engine: {
+      status: () => ({ on: true, note: null }),
+      onOperatorMessage: async () => {
+        throw new Error("Effect cannot be confirmed");
+      },
+    },
+  });
+  const uncertain = await post(a, request);
+  expect(uncertain.json()).toMatchObject({ state: "unknown" });
+  store.ack([KEY], AT + 1);
+  expect(attentionItems(config, store, AT + 1).find((i) => i.key === KEY)?.acked).toBe(true);
+});
+
+it("answers the exact passed question after its run is set aside without messaging a replacement", async () => {
+  const id = store.addQuestion({
+    agentId: "GUIDO-1",
+    runId: "target",
+    text: "The displayed question",
+    at: AT,
+  });
+  store.passQuestion(id, AT);
+  const key = `ask:${id}`;
+  const request = await brief(
+    { kind: "answer", seatId: "GUIDO-1", runId: "target", text: "Use the approved path." },
+    key,
+  );
+  store.setRunLoop("target", {
+    ...NEW_LOOP,
+    aside: { worktree: "/fixture", wake: false, ask: id },
+  });
+  const old = required(store.seatSession("GUIDO-1"));
+  store.setSeatSession({ ...old, runId: null });
+  const message = vi.fn(async () => {});
+  const reconcileRun = vi.fn(async () => {});
+  const a = app({
+    supervisor: {
+      status: () => ({ enabled: true, note: null }),
+      message,
+    } as unknown as AppDeps["supervisor"],
+    engine: { status: () => ({ on: true, note: null }), onOperatorMessage: vi.fn(), reconcileRun },
+  });
+  const response = await post(a, request, key);
+  expect(response.statusCode, response.body).toBe(200);
+  expect(response.json()).toMatchObject({ state: "applied" });
+  expect(message).not.toHaveBeenCalled();
+  expect(store.question(id)?.answeredAt).toBe(AT);
+  expect(store.commsInboxRun("GUIDO-1", "target").map((m) => m.text)).toContain(
+    "Use the approved path.",
+  );
+  expect(reconcileRun).toHaveBeenCalledExactlyOnceWith("target");
+});
+
+it("retains uncertainty after an aside answer is stored but run reconciliation fails", async () => {
+  const id = store.addQuestion({
+    agentId: "GUIDO-1",
+    runId: "target",
+    text: "The displayed question",
+    at: AT,
+  });
+  store.passQuestion(id, AT);
+  const key = `ask:${id}`;
+  const request = await brief(
+    { kind: "answer", seatId: "GUIDO-1", runId: "target", text: "Use the approved path." },
+    key,
+  );
+  store.setRunLoop("target", {
+    ...NEW_LOOP,
+    aside: { worktree: "/fixture", wake: false, ask: id },
+  });
+  store.setSeatSession({ ...required(store.seatSession("GUIDO-1")), runId: null });
+  const reconcileRun = vi.fn(async () => {
+    throw new Error("Wake outcome unavailable");
+  });
+  const a = app({
+    engine: { status: () => ({ on: true, note: null }), onOperatorMessage: vi.fn(), reconcileRun },
+  });
+  const response = await post(a, request, key);
+  expect(response.json()).toMatchObject({ state: "unknown" });
+  expect(store.question(id)?.answeredAt).toBe(AT);
+  expect(store.commsInboxRun("GUIDO-1", "target").map((m) => m.text)).toEqual([
+    "Use the approved path.",
+  ]);
+  expect((await post(a, request, key)).json()).toMatchObject({ state: "unknown" });
+  expect(store.commsInboxRun("GUIDO-1", "target")).toHaveLength(1);
+  expect(reconcileRun).toHaveBeenCalledExactlyOnceWith("target");
 });
 
 it("1389 sends an explicit ordinary answer to the displayed run without an unpark", async () => {

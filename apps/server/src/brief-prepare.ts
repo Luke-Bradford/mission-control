@@ -30,7 +30,7 @@ export class BriefError extends Error {
   }
 }
 export class BriefDeferred extends BriefError {}
-/** A route authentication/floor rejection confirmed before any action handler ran. */
+/** A confirmed refusal before any action took effect. */
 export class BriefActionRefused extends BriefError {}
 export interface BriefPreparationDeps {
   config: CcConfig;
@@ -105,7 +105,8 @@ export function checkBriefRun(
     run.agentId !== seatId ||
     run.status !== "running" ||
     run.endedAt !== null ||
-    store.seatSession(seatId)?.runId !== runId
+    (store.seatSession(seatId)?.runId !== runId &&
+      !(explicitQuestionId !== undefined && run.loop?.aside?.ask === explicitQuestionId))
   )
     throw new BriefError(409, "The intended seat/run changed or ended; refresh the brief.");
   if (
@@ -130,8 +131,8 @@ export function prepareOrdinaryGuidance(
   const at = deps.now();
   if (item.agentId !== action.seatId)
     throw new BriefError(409, "The FYI recipient differs from its source.");
-  checkBriefRun(deps, action.seatId, action.runId);
   const qid = /^ask:(\d+)$/.exec(item.key)?.[1];
+  checkBriefRun(deps, action.seatId, action.runId, qid === undefined ? undefined : Number(qid));
   const question = qid ? store.question(Number(qid)) : null;
   if (
     isOperatorCall(item, store) ||
@@ -265,9 +266,7 @@ export async function prepareBriefActions(
           deps,
           action.seatId,
           action.runId,
-          action.kind === "answer"
-            ? Number(/^ask:(\d+)$/.exec(item.key)?.[1]) || undefined
-            : undefined,
+          Number(/^ask:(\d+)$/.exec(item.key)?.[1]) || undefined,
         );
         if (action.kind === "ordinary-run-guidance") {
           proof = prepareOrdinaryGuidance(deps, item, action).proof;

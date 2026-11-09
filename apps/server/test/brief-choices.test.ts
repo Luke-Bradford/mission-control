@@ -14,14 +14,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { chooseBrief, retainedBriefChoice } from "../src/brief-choices.ts";
 import { bindCompleteBrief } from "../src/brief-prepare.ts";
 import { routineBriefChoices } from "../src/brief-routine.ts";
-import { briefSourceRevision } from "../src/brief-source.ts";
+import { briefReadState, briefSourceRevision } from "../src/brief-source.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import type { CcConfig } from "../src/config.ts";
 import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { recordWrite, runawayTrip } from "../src/flight/runaway.ts";
 import { attentionItems } from "../src/hud.ts";
 import { Store } from "../src/store.ts";
+import { prepareFixtureGuidance } from "./brief-fixture.ts";
 
 const required = <T>(value: T | null | undefined): T => {
   if (value == null) throw new Error("Missing fixture value");
@@ -106,8 +106,9 @@ function source() {
     label: "question",
   });
   if (!message) throw new Error("missing message");
-  expect(raiseStalledCommsDecisions({ config, store, now })).toBe(1);
-  return `comms-open:${message.id}`;
+  const key = `comms-open:${message.id}`;
+  prepareFixtureGuidance(config, store, now, key);
+  return key;
 }
 function request(key: string, requestId = "choice-one"): BriefChoiceRequest {
   const brief = store.briefs().get(key);
@@ -239,6 +240,49 @@ it("keeps read metadata out of source identity", () => {
       required(brief.binding).actions.map((entry) => entry.action),
     ),
   ).toBe(revision);
+});
+
+it("keeps ordinary guidance current when the target commits and applies its default once", async () => {
+  const key = source();
+  const bound = required(store.briefs().get(key));
+  store.addRunCommit({
+    runId: "target-run",
+    repoId: "repo",
+    branch: "feature/1",
+    sha: "b".repeat(40),
+    at: now + 1,
+  });
+  const deps = choices();
+  expect(briefReadState(config, store, required(deps.item(key)), bound).freshness).toBe("current");
+  now += DECISION_DEFAULT_WAIT_MS;
+  expect(await applyDecisionDefaults({ config, store, now, choices: deps })).toBe(1);
+  expect(await applyDecisionDefaults({ config, store, now, choices: deps })).toBe(0);
+});
+
+it("applies authorized guidance on its own aged question after forty minutes", async () => {
+  const id = store.addQuestion({
+    agentId: "GUIDO-1",
+    runId: "target-run",
+    text: "Which reversible detail?",
+    at: now,
+  });
+  const key = `ask:${id}`;
+  const original = source();
+  const content = required(store.briefs().get(original));
+  store.ack([original], now);
+  const item = required(attentionItems(config, store, now).find((i) => i.key === key));
+  const bound = await bindCompleteBrief(
+    { config, store, now: () => now },
+    item,
+    { ...content, id: undefined, binding: undefined, state: undefined, choice: undefined },
+    { seatId: "FLIGHT-1", runId: "flight-run" },
+  );
+  store.addBrief({ key, ...bound });
+  now += DECISION_DEFAULT_WAIT_MS;
+  const delivery = vi.fn(async () => {});
+  expect(await applyDecisionDefaults({ config, store, now, choices: choices(delivery) })).toBe(1);
+  expect(delivery).toHaveBeenCalledOnce();
+  expect(await applyDecisionDefaults({ config, store, now, choices: choices(delivery) })).toBe(0);
 });
 it("defaults only after the server deadline through the exact-run guarded adapter", async () => {
   const key = source(),
@@ -537,7 +581,7 @@ it("resolves the actual same-session FLIGHT actor for a second session's default
       label: "question",
     }),
   );
-  expect(raiseStalledCommsDecisions({ config: cfg, store, now })).toBe(1);
+  prepareFixtureGuidance(cfg, store, now, `comms-open:${message.id}`);
   const key = `comms-open:${message.id}`,
     delivery = vi.fn(async () => {});
   const deps = routineBriefChoices({

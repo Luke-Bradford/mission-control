@@ -59,7 +59,12 @@ export async function applyDecisionDefaults(d: DecisionDefaultsDeps): Promise<nu
         const executionActor = actor ?? (prior?.state === "dispatching" ? prior.actor : null);
         if (!executionActor) continue;
         if (prior?.state === "pending" && action?.kind === "ordinary-run-guidance")
-          checkBriefRun(choices, action.seatId, action.runId);
+          checkBriefRun(
+            choices,
+            action.seatId,
+            action.runId,
+            Number(/^ask:(\d+)$/.exec(pending.key)?.[1]) || undefined,
+          );
         const receipt = await chooseBrief(
           choices,
           pending.key,

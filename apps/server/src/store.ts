@@ -21,7 +21,6 @@ import type {
   TokenSourceAdd,
 } from "@mc/core";
 import {
-  DECISION_DEFAULT_WAIT_MS,
   type AccountId,
   type AgentId,
   ASKING_RUN_ENDED_REASON,
@@ -63,6 +62,7 @@ import {
   type CommsSenderKind,
   classifyOveruse,
   commsCutMarker,
+  DECISION_DEFAULT_WAIT_MS,
   type DefectRefs,
   type DefectVia,
   type DoneWhenEntry,
@@ -4926,13 +4926,14 @@ export class Store {
   /** Acknowledges attention item keys at `at` (a re-ack moves the time; absence is kept). */
   ack(keys: string[], at: number): void {
     this.transaction(() => {
+      const briefs = this.briefs();
       const ins = this.db.prepare(
         `INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
          ON CONFLICT(key) DO UPDATE SET at = excluded.at`,
       );
       for (const k of keys) {
         ins.run(k, at);
-        const epoch = this.briefs().get(k)?.binding?.epoch;
+        const epoch = briefs.get(k)?.binding?.epoch;
         if (epoch) {
           this.setSetting(`brief-ack:${k}`, epoch);
           this.setSetting(`brief-default-cancel:${epoch}`, String(at));

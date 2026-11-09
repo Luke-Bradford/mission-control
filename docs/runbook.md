@@ -599,12 +599,11 @@ What each seat's process starts with:
   from the addressee closes an item, as a reply does; a `seen` from anyone else does not.
   `GET /api/comms/feed` lists recent messages (id, time, from, to, label, ref, and the first 280 characters of text) newest
   first. `since=comms:<n>` returns only newer ones; `limit` defaults to 100 and is at most 200.
-  If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
-  on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
-  and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
-  decision-default sweep 40 minutes later unless you answer, delivered to the sending seat. A
-  message to CAPCOM, one before the rollout boundary, and one whose sender's run is held
-  (budget park, stopped seat, account at its stop) never get a decision. The Comms graph also reports 24-hour run-token totals per link and flags a pair
+  Crew questions stay with FLIGHT until it prepares a complete operator brief. The scheduler
+  never generates an automatic Proceed/Hold question. Stored hub-generated Comms briefs remain
+  in history and are excluded from the operator-question projection. FLIGHT's actual operator
+  briefs and protected outage/runaway alerts retain their existing routing.
+  The Comms graph also reports 24-hour run-token totals per link and flags a pair
   that exceeds six reciprocal rounds on one ticket, including when FLIGHT stepped in.
 - **Short Comms.** Messages are limited to 1,200 characters. Put complete findings, plans and
   evidence in `report_findings`, `report_plan` or `report_evidence`, then send Comms a short
@@ -1945,10 +1944,14 @@ theme, Setup, and the dock toggle.
 | **Telemetry** (`/telemetry`) | KPIs, flow of work (throughput, cycle time, quality, you as CAPCOM), agents (tokens per minute, per turn, time), capacity and cost, for 1h/6h/24h/7d, by agent or account. Its read-only payload also carries bounded raw chart series: observed crew-state spans (open spans stop at their last observation), quota samples with configured alert/stop lines and reset causes, open and completed ticket Ready/start/merge/Done facts, timestamped range-bounded throughput, daily quality points (null means no evidence), and crew-pause, hub-Update and quota-reset annotations. Ticket cost retains both range-prorated cost and all-run cost for tickets merged in range. Charts take focus: ←/→ step the crosshair, Home/End jump. |
 | **Setup** (`/setup/<tab>`) | Read-only: sessions, loops, accounts, roles/guard/test lock, sources (each collector's last poll) with the glossary, access and notifications. |
 
-For a reversible operator decision, FLIGHT may brief a recommended option with a stored deadline.
-When that deadline passes, the hub records and delivers that recommendation once. Update holds,
-approvals, budget/account parks, guard acknowledgements, hard-rule flags, protected dismissal rows,
-observed-loop escalations, and briefs written before deadlines were stored are never defaulted.
+Operator briefs require complete decision context and typed, source-bound options. Genuine operator
+decisions wait for an explicit operator choice. A validated reversible action within FLIGHT's existing
+authority can receive a server-owned forty-minute FYI deadline. Its dispatch rechecks the current actor,
+exact target and existing holds; grants, approvals, review waivers and hold releases never default.
+Ordinary guidance follows its run across commits, while head-specific actions retain exact-head checks.
+An answer to a passed question set aside on that exact question is stored for its preserved run.
+Confirmed refusals release their choice claim for a new request. Uncertain outcomes retain their receipt
+and never replay automatically, including partial queue writes or a stored answer whose wake failed.
 
 **Overlays.** FLIGHT's dock is a column at 1200 px and wider, and a drawer with a scrim below
 that. The Item panel flies out from the right for one item; Away mode and Keys and lamps (`?`) are

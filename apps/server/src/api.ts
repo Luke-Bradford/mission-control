@@ -170,6 +170,7 @@ import Fastify, {
 import { z } from "zod";
 import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
+import { AsideAnswerChanged, AsideAnswerUnconfirmed, answerAsideQuestion } from "./aside-answer.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -4188,9 +4189,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           bus.emit("attention");
           bus.emit("boards");
           bus.emit("agents");
-          return reply.code(result.ok ? 200 : 409).send(result);
+          return reply.code(result.ok ? 200 : 502).send(result);
         } catch (e) {
-          return reply.code(409).send({
+          return reply.code(e instanceof QueueReorderError ? 409 : 502).send({
             error:
               e instanceof QueueReorderError ? e.message : "Queue changed; refresh and try again.",
           });
@@ -4522,33 +4523,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               ? named
               : undefined;
           if (parked !== undefined) {
-            const asideRun = store.run(parked.runId);
             try {
-              await sendComms(
+              await answerAsideQuestion(
                 {
                   store,
                   crew: commsCrew,
                   knownSecrets: deps.knownSecrets ?? (async () => []),
                   now,
+                  bus,
                   senderKind: sender.kind,
+                  beforeWrite: checkBriefDispatch,
+                  reconcileRun: deps.engine?.reconcileRun?.bind(deps.engine),
                 },
+                parked.id,
                 sender.from,
-                {
-                  to: id,
-                  text: b.text,
-                  ref: asideRun?.ticket ?? undefined,
-                  targetRunId: parked.runId,
-                },
+                b.text,
               );
             } catch (e) {
               throw new SupervisorError(
-                400,
+                e instanceof AsideAnswerChanged
+                  ? 409
+                  : e instanceof AsideAnswerUnconfirmed
+                    ? 502
+                    : 400,
                 e instanceof Error ? e.message : "Comms message refused.",
               );
             }
-            store.answerQuestion(parked.id, now());
-            bus.emit("attention");
-            await deps.engine?.reconcileRun?.(parked.runId);
             return { ok: true };
           }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
@@ -5736,6 +5736,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             );
           }
           let commsError: unknown = null;
+          let commsStored = false;
           checkBriefDispatch();
           const sender = commsSender(req);
           const result = await deps.engine.onOperatorMessage(run.id, "CAPCOM", {
@@ -5760,6 +5761,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                     targetRunId: run.id,
                   },
                 );
+                commsStored = true;
                 return true;
               } catch (e) {
                 commsError = e;
@@ -5776,7 +5778,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               reply,
             );
           if (!result.lifted)
-            return reply.code(409).send({
+            return reply.code(commsStored ? 502 : 409).send({
               error: `the review park could not be resumed for rework: ${operatorRefusalText(result.reason)}`,
             });
           return { ok: true };

@@ -1,7 +1,9 @@
 import type { TestLockState } from "@mc/core";
 import { COMMS_CAPCOM, COMMS_MC } from "@mc/core";
+import { AsideAnswerChanged, answerAsideQuestion } from "./aside-answer.ts";
 import type { BriefChoiceDeps } from "./brief-choices.ts";
 import {
+  BriefActionRefused,
   BriefError,
   type BriefPreparationDeps,
   checkBriefRun,
@@ -23,6 +25,7 @@ export interface BriefRoutineDeps extends BriefPreparationDeps {
   queue?: QueueReorderDeps;
   knownSecrets: () => Promise<readonly string[]>;
   bus?: ChangeBus;
+  reconcileRun?: (runId: string) => Promise<void>;
 }
 
 /** Shared real-service actions used by explicit choice and the existing default sweep. */
@@ -36,7 +39,6 @@ export async function dispatchRoutineBriefAction(
   const from = "seatId" in context.actor ? context.actor.seatId : COMMS_CAPCOM;
   const option = context.brief.options.find((entry) => entry.id === context.optionId);
   if (action.kind === "answer" || action.kind === "ordinary-run-guidance") {
-    if (!deps.supervisor) throw new BriefError(503, "Message delivery is unavailable.");
     const text =
       action.kind === "ordinary-run-guidance" ? ORDINARY_GUIDANCE : (input?.text ?? action.text);
     await validateCommsText(deps.knownSecrets, text);
@@ -46,12 +48,41 @@ export async function dispatchRoutineBriefAction(
         deps,
         action.seatId,
         action.runId,
-        action.kind === "answer"
-          ? Number(/^ask:(\d+)$/.exec(context.item.key)?.[1]) || undefined
-          : undefined,
+        Number(/^ask:(\d+)$/.exec(context.item.key)?.[1]) || undefined,
       );
     };
     check();
+    const questionId = Number(/^ask:(\d+)$/.exec(context.item.key)?.[1]) || undefined;
+    if (
+      action.kind === "answer" &&
+      questionId !== undefined &&
+      store.run(action.runId)?.loop?.aside?.ask === questionId
+    ) {
+      if (!deps.bus) throw new BriefActionRefused(503, "Answer storage is unavailable.");
+      try {
+        await answerAsideQuestion(
+          {
+            store,
+            crew: () => config.crew?.sessions.flatMap((s) => s.seats.map((seat) => seat.id)) ?? [],
+            knownSecrets: deps.knownSecrets,
+            now: deps.now,
+            bus: deps.bus,
+            senderKind: "seatId" in context.actor ? "seat" : "operator",
+            senderRunId: "seatId" in context.actor ? context.actor.runId : undefined,
+            reconcileRun: deps.reconcileRun,
+            beforeWrite: check,
+          },
+          questionId,
+          from,
+          text,
+        );
+      } catch (error) {
+        if (error instanceof AsideAnswerChanged) throw new BriefActionRefused(409, error.message);
+        throw error;
+      }
+      return "Answer stored for the displayed set-aside run.";
+    }
+    if (!deps.supervisor) throw new BriefActionRefused(503, "Message delivery is unavailable.");
     await deps.supervisor.message(action.seatId, text, {
       interrupt: false,
       questions: "none",
@@ -59,10 +90,10 @@ export async function dispatchRoutineBriefAction(
       expectedRunId: action.runId,
       beforeWrite: check,
     });
-    const questionId =
+    const answeredQuestionId =
       action.kind === "answer" ? Number(/^ask:(\d+)$/.exec(context.item.key)?.[1]) : 0;
-    if (questionId && store.question(questionId)?.runId === action.runId)
-      store.answerQuestion(questionId, deps.now());
+    if (answeredQuestionId && store.question(answeredQuestionId)?.runId === action.runId)
+      store.answerQuestion(answeredQuestionId, deps.now());
     // Record a confirmed provider delivery afterwards; never leave a stale pre-dispatch inbox line
     // that a later turn could mistake for authority. This line is already read by this exact run.
     const message = await sendComms(
