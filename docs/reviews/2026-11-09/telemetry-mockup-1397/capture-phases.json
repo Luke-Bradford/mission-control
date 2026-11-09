@@ -1,0 +1,21 @@
+{
+  "before": {
+    "passed": true,
+    "captures": 31,
+    "source": "e82f389016273b4cb26866d584341cc04dfcc058",
+    "executedAt": "2026-11-09T14:19:13.358Z"
+  },
+  "after": {
+    "passed": true,
+    "captures": 70,
+    "source": "e16054b0375c3fb29659336df7edf71f14457096",
+    "executedAt": "2026-11-09T14:30:17.115Z",
+    "checks": "zero page errors; no horizontal overflow; panel bounds inside workspace at1600x1000 and4K"
+  },
+  "currentPage": {
+    "passed": true,
+    "captures": 6,
+    "source": "51f827e675e5ed1fe4ecfaf5d2f00428e4addbff",
+    "executedAt": "2026-11-09T14:21:02.738Z"
+  }
+}

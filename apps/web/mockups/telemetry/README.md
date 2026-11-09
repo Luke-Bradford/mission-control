@@ -152,4 +152,4 @@ Shared by all five: the health band, its verdict rule, the tab query string, the
 
 ## Evidence
 
-`screenshots/manifest.md` records what was captured and what was not. The seat that built this mockup could not start a browser (the sandbox refuses Chrome's profile and socket directories), so no image was captured and the layout was not seen rendered by the author. `apps/web/test/TelemetryMockup.browser.test.ts` renders every tab at 1280x900, 1600x1000 and 1920x940 in both themes and runs in CI. The captures listed in the manifest are still to be taken by a seat with a browser.
+The controller has now rendered the proposal and the current production page with fictional fixtures. [The retained review account](../../../../docs/reviews/2026-11-09/telemetry-mockup-1397/README.md) links the actual manifests and source-bound checks. It includes matched proposal iterations, all five tabs at the required sizes/themes, drawer, stress, short and 4K cases, and six current-page comparisons. Operator design approval remains outstanding; no build tickets are started.

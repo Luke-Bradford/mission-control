@@ -1,16 +1,7 @@
 # Screenshot manifest
 
-Status: none captured yet.
+Current evidence: [controller capture manifest](../../../../../docs/reviews/2026-11-09/telemetry-mockup-1397/manifest.json).
 
-Reason: the building seat's sandbox cannot launch Chrome, so nothing was rendered by the author. CI renders the mockup in `TelemetryMockup.browser.test.ts`.
+The retained account has 31 earlier proposal images, 70 current proposal images and six actual current-page fixture comparisons. Every image is a viewport capture. The manifest records the final product commit, exact HTML hash and each image hash. Phase manifests record browser, CSS dimensions, DPR, zoom, theme, scroll, clock and rendered text. These are fictional fixtures, not private operational data.
 
-To capture, with a browser available and the fictional data as shipped:
-
-| Image | Source | Size | Theme |
-| --- | --- | --- | --- |
-| Each tab | `index.html?tab=<tab>` | 1280x900, 1600x1000, 1920x940 | dark and light |
-| Each tab | `index.html?tab=<tab>` | 2560x1145 | dark |
-| Each state | `index.html?state=<state>` | 1600x1000 | dark |
-| Today's page, fixture data | `apps/web/test/desktopBrowser.html` at c2bea393 | 1280, 1600, 1920 wide | dark |
-
-Record for each: PR, head, source file, baseline, capture time, image hash, CSS size, device scale, zoom, theme, rail (48 px), browser and OS, fixture, clock, scroll, and whether it is a viewport, full-page or crop capture.
+The original author could not launch Chrome. The controller captured this evidence later using the repository browser harness. Independent review and the operator design approval remain required before any new product build.
