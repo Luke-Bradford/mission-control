@@ -33,6 +33,7 @@ describeRendered("FLIGHT page in a browser", () => {
               api: flightPageApi(state),
             });
             await page.box("#decisions li");
+            expect(page.errors()).toEqual([]);
             const r = await page.evaluate(() => {
               const doc = document.documentElement;
               const visible = (el: Element) => el.getClientRects().length > 0;
@@ -154,6 +155,7 @@ describeRendered("FLIGHT page in a browser", () => {
             api: flightPageApi("busy"),
           });
           await page.box("#blockers .fp-brow");
+          expect(page.errors()).toEqual([]);
           const r = await page.evaluate(() => {
             const doc = document.documentElement;
             const scroller = document.querySelector<HTMLElement>(".fp-brows");
@@ -272,6 +274,7 @@ describeRendered("FLIGHT page in a browser", () => {
             },
           });
           await page.box("#page-flight #blockers .fp-brow");
+          expect(page.errors()).toEqual([]);
           const r = await page.evaluate(() => {
             const doc = document.documentElement;
             const box = (sel: string) =>

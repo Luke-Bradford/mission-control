@@ -11,6 +11,10 @@ import "../src/hud.css";
 import { createRoot } from "react-dom/client";
 import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import { Flight } from "../src/pages/Flight.tsx";
+import { NOW } from "./fixtures.ts";
+
+// Match the API fixtures so wait times and the last wake are stable in retained screenshots.
+Date.now = () => NOW;
 
 const params = new URLSearchParams(location.search);
 // ?at=/flight#wifP opens the tabbed page on that fragment.
