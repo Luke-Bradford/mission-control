@@ -233,7 +233,7 @@ const noFlight = () => {
   store.setSeatSession(row("flight-1", null));
 };
 
-const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors" | "log"> = {}) => {
+const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked"> = {}) => {
   watch = createFlightWatch({
     ...over,
     config,
@@ -2009,6 +2009,32 @@ describe("the FLIGHT watcher", () => {
     expect(down).toHaveLength(1);
     expect(down[0]?.text).toContain("message is saved");
     expect(down[0]?.text).not.toContain(startFails);
+  });
+
+  it("keeps one outage alert when an operator request is held by a pending change", async () => {
+    let held = true;
+    makeWatch({ blocked: () => held });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    store.addComms({ at: T0, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "Status?" });
+    await watch.check();
+    expect(startCalls).toEqual([]);
+    const down = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    expect(down).toHaveLength(1);
+    expect(down[0]?.text).toContain("message is saved");
+    nowMs += MIN;
+    await watch.check();
+    expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual(down);
+    held = false;
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual([]);
   });
 
   it("an operator POST starts FLIGHT within a minute at the usage stop", async () => {

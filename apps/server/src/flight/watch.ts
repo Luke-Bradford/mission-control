@@ -480,12 +480,20 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       const accountId = runAccountId(store, row?.runId ?? null, found.seat.accountId);
       const atStop = accountAtStop(config, store, accountId, t);
       const operatorWaiting = unreadOperatorComms(store, id).length > 0;
+      const startHeld = deps.blocked?.(id) === true;
       // Parked or held at a stop line is an outage; the operator's own Stop is not, and a failed
       // start already says so. Once its reason passes, FLIGHT is restarting, not down.
       if (row?.state === "parked" && !noteOpen())
         raiseDown(id, found.session.repoId, "it is parked", t);
       else if (atStop && !operatorWaiting && row?.state !== "stopped" && !noteOpen())
         raiseDown(id, found.session.repoId, `account ${accountId} is at its usage stop line`, t);
+      else if (operatorWaiting && startHeld && row?.state !== "stopped" && !noteOpen())
+        raiseDown(
+          id,
+          found.session.repoId,
+          "a pending change holds its start. Your message is saved",
+          t,
+        );
       else clearDown(t);
       // A usage stop holds background work, not an answer the operator explicitly requested.
       // The same start path still enforces operator Stop, unavailable seats and runtime guards.
@@ -544,7 +552,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         bus.emit("attention");
         return;
       }
-      if (deps.blocked?.(id) === true) return;
+      if (startHeld) return;
       prepareDaily(t);
       const state = flightState({
         config,
