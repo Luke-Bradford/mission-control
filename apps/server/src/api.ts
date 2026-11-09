@@ -3263,28 +3263,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             ? { github: liveRepo.github, project: liveRepo.project }
             : undefined;
         try {
-          const result = await onboardRepo(configPath, body.data, now(), async (repo) => {
-            if (
-              conversionIdentity &&
-              (repo.github !== conversionIdentity.github ||
-                repo.project !== conversionIdentity.project)
-            )
-              throw new ConfigWriteError(
-                "conflict",
-                "the repo identity changed in config.yaml; refresh and try again",
+          const result = await onboardRepo(
+            configPath,
+            body.data,
+            now(),
+            async (repo) => {
+              if (
+                conversionIdentity &&
+                (repo.github !== conversionIdentity.github ||
+                  repo.project !== conversionIdentity.project)
+              )
+                throw new ConfigWriteError(
+                  "conflict",
+                  "the repo identity changed in config.yaml; refresh and try again",
+                );
+              const preview = await repoPreview(
+                await githubGql(),
+                { github: repo.github, project: repo.project },
+                config,
+                store,
               );
-            const preview = await repoPreview(
-              await githubGql(),
-              { github: repo.github, project: repo.project },
-              config,
-              store,
-            );
-            if (body.data.checkout.branch !== preview.defaultBranch)
-              throw new ConfigWriteError(
-                "invalid",
-                "the checkout branch must match GitHub's default branch",
-              );
-          });
+              if (body.data.checkout.branch !== preview.defaultBranch)
+                throw new ConfigWriteError(
+                  "invalid",
+                  "the checkout branch must match GitHub's default branch",
+                );
+            },
+            deps.configHubRoot,
+          );
           const onboarded = result.config.repos.find((repo) => repo.id === body.data.repoId);
           if (!onboarded)
             throw new ConfigWriteError("write", "the new config.yaml has no added repo");

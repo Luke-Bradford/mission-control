@@ -207,8 +207,9 @@ export function onboardRepo(
   input: z.infer<typeof RepoOnboardBody>,
   now: number,
   validateRepo?: (repo: Pick<CcConfig["repos"][number], "github" | "project">) => Promise<void>,
+  hubRoot?: string | null,
 ): Promise<{ config: CcConfig; backup: string }> {
-  const run = queue.then(() => onboard(path, input, now, validateRepo));
+  const run = queue.then(() => onboard(path, input, now, validateRepo, hubRoot));
   queue = run.catch(() => undefined);
   return run;
 }
@@ -218,6 +219,7 @@ async function onboard(
   input: z.infer<typeof RepoOnboardBody>,
   now: number,
   validateRepo?: (repo: Pick<CcConfig["repos"][number], "github" | "project">) => Promise<void>,
+  hubRoot?: string | null,
 ): Promise<{ config: CcConfig; backup: string }> {
   const parsed = RepoOnboardBody.safeParse(input);
   if (!parsed.success) throw new ConfigWriteError("invalid", "invalid repo onboarding request");
@@ -227,7 +229,7 @@ async function onboard(
   if (body.session && body.session.id !== body.repoId)
     throw new ConfigWriteError("invalid", "session id must match the repo id");
 
-  const { bytes, text, current } = await readCurrent(path);
+  const { bytes, text, current } = await readCurrent(path, hubRoot);
   if (
     body.defaultAccountId !== null &&
     !current.accounts.some((account) => account.id === body.defaultAccountId)
@@ -341,7 +343,7 @@ async function onboard(
     sessions.flow = false;
   }
   const newText = doc.toString({ lineWidth: 0 });
-  const next = sessionConfig(newText);
+  const next = sessionConfig(newText, hubRoot);
   const nextRepo = next.repos[repoIndex];
   if (!nextRepo) throw new ConfigWriteError("write", "the new config.yaml has no added repo");
   const expectedRepo = {

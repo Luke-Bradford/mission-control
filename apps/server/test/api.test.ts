@@ -2223,6 +2223,7 @@ describe("repo onboarding (POST /api/repos/onboard)", () => {
       store,
       bus,
       configPath,
+      configHubRoot: "/mc-api-fixture-hub",
       crewReloader: reloader,
       seatWrites: true,
       githubGql: async () => gql,
