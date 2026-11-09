@@ -85,7 +85,7 @@ export const EVIDENCE_NO_LOOP =
 export const EVIDENCE_PARKED =
   "Not recorded: this run is parked and waiting on the operator; Mission Control will message you when it resumes.";
 /** Parks a new committed report can clear without weakening an operator or budget hold. */
-export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused", "conflict"] as const;
+export const EVIDENCE_UNPARK_KINDS = ["review", "silent", "refused", "conflict", "stuck"] as const;
 
 /** Whether a report of newly committed work is allowed to resume this park. */
 export function evidenceCanUnpark(
