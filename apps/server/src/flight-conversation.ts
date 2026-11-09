@@ -239,9 +239,17 @@ export async function flightConversation(
   candidates.sort(compare);
   const bound = readBound(store, flightId);
   const legacyCursor = store.commsScopeCursor("flight");
+  // An upgrade retains the old read baseline without marking history during GET.
+  const legacyRow =
+    !bound && legacyCursor
+      ? store.flightConversationStored(flightId, seats, 1, undefined, legacyCursor)[0]
+      : undefined;
+  const legacyPosition = legacyRow && commsPosition(legacyRow.id);
+  const legacyBound = legacyRow && legacyPosition ? { at: legacyRow.at, ...legacyPosition } : null;
   const thread = store.threadReadCursors(flightId);
   const streamUnread = streams.filter((line) => {
     if (bound) return compare(line, bound) > 0;
+    if (legacyBound && compare(line, legacyBound) <= 0) return false;
     const read = thread.get(line.source);
     return (
       !read || line.offset > read.offset || (line.offset === read.offset && line.block > read.block)

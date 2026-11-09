@@ -35,6 +35,8 @@ export const COMMS_OPEN_TEXT_MAX = 280;
 export interface CommsServiceDeps {
   /** A PR-scoped thread resolved and validated by the operator API. */
   ticket?: string;
+  /** Item title resolved by the operator API for a direct message to FLIGHT. Context only. */
+  flightItem?: { to: string; title: string };
   store: Store;
   crew: () => readonly string[];
   knownSecrets: () => Promise<readonly string[]>;
@@ -163,6 +165,7 @@ export async function sendComms(
         : undefined,
       // an exact repeat is stored once, whoever sends it
       now - COMMS_REPEAT_WINDOW_MS,
+      from === COMMS_CAPCOM && deps.flightItem?.to === input.to ? deps.flightItem.title : undefined,
     );
   // A seat's rate limit is enforced atomically before it can wake anyone.
   let stored = deps.seatSender ? storeMessage() : null;

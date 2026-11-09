@@ -22,7 +22,11 @@ const line = (id: string, text: string, from = "flight-1", at: number | null = N
   operator: from === "CAPCOM",
 });
 const messages = [
-  line("comms:1", "What needs acting on?", "CAPCOM"),
+  {
+    ...line("comms:1", "What needs acting on?", "CAPCOM"),
+    state: "stored",
+    deliveredAt: null as number | null,
+  },
   line("stream:flight-run:100:0", "The conversation fix is being checked."),
   line("comms:2", "The stored reply is in the same conversation."),
   line("stream:flight-run:300:0", "This continuation has no recorded time.", "flight-1", null),
@@ -60,13 +64,20 @@ describeRendered("the joined FLIGHT source in Comms", () => {
       for (const theme of ["light", "dark"] as const) {
         const page = await renderAt({
           page: "test/commsBrowser.html",
-          search: "?at=/comms",
+          search: "?at=/",
           width,
           height,
           colorScheme: theme,
           api,
         });
         try {
+          expect(
+            await page.evaluate(() => {
+              const link = document.querySelector<HTMLAnchorElement>('a[href="/comms"]');
+              link?.click();
+              return !!link;
+            }, undefined),
+          ).toBe(true);
           await page.box(".comms-bubble");
           const rows = await page.evaluate(
             () =>
@@ -83,6 +94,25 @@ describeRendered("the joined FLIGHT source in Comms", () => {
           expect(rows[3]?.actions).toBe(0);
           expect(rows[0]?.actions).toBeGreaterThan(0);
           expect(await page.unclipped("#chatP")).toEqual([true]);
+          const labels = () =>
+            page.evaluate(
+              () =>
+                [...document.querySelectorAll(".comms-delivery-state")].map((el) => el.textContent),
+              undefined,
+            );
+          await expect.poll(labels).toEqual(["Stored"]);
+          await page.screenshot(join(SHOTS, `flight-state-stored-${width}x${height}-${theme}.png`));
+          for (const state of ["delivered", "answered"] as const) {
+            Object.assign(messages[0] ?? {}, { state, deliveredAt: NOW });
+            await page.evaluate(() => Reflect.get(window, "__refetchAgents")(), undefined);
+            await expect
+              .poll(labels)
+              .toEqual([state === "answered" ? "Answered" : "Delivered 13:00"]);
+            await page.screenshot(
+              join(SHOTS, `flight-state-${state}-${width}x${height}-${theme}.png`),
+            );
+          }
+          Object.assign(messages[0] ?? {}, { state: "stored", deliveredAt: null });
           expect(page.errors()).toEqual([]);
           await page.screenshot(join(SHOTS, `flight-source-${width}x${height}-${theme}.png`));
         } finally {

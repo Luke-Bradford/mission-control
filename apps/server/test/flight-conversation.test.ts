@@ -1,10 +1,12 @@
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { OPERATOR_HEADER, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { commsInboxContext } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
@@ -37,7 +39,7 @@ let store: Store;
 let app: ReturnType<typeof buildApp>;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "mc-flight-conversation-"));
-  store = new Store(":memory:");
+  store = new Store(join(dir, "mc.sqlite"));
   app = buildApp({
     config,
     store,
@@ -187,6 +189,53 @@ it("retains item links and derives Stored, Delivered and Answered from actual de
     state: "answered",
   });
 });
+it("delivers one internal item context to FLIGHT while retaining only the operator words in the conversation", async () => {
+  store.raiseNote({
+    key: "question",
+    kind: "blocked",
+    runId: null,
+    seatId: null,
+    repoId: "repo",
+    text: "Which storage option should remain?",
+    at: AT,
+  });
+  const response = await send("note:question");
+  expect(response.statusCode).toBe(200);
+  expect(response.json().message).toMatchObject({
+    itemKey: "note:question",
+    text: "Explain this item.",
+  });
+  expect((await send("note:question")).statusCode).toBe(200);
+  const inbox = commsInboxContext(store, FLIGHT, "fixture-run");
+  const internal = store
+    .commsForPair("MC", FLIGHT)
+    .filter((m) => m.text.startsWith("[Mission Control] Needs-you context"));
+  expect(internal).toHaveLength(1);
+  expect(internal[0]?.text).toContain("note:question");
+  expect(internal[0]?.text).toContain("Which storage option should remain?");
+  expect(inbox.text).toContain("Needs-you context");
+  expect((await page()).messages.map((m: { text: string }) => m.text)).toEqual([
+    "Explain this item.",
+  ]);
+});
+
+it("rolls back the operator line if its internal context cannot be stored", async () => {
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  try {
+    db.exec(
+      "CREATE TRIGGER reject_context BEFORE INSERT ON comms WHEN NEW.from_id = 'MC' BEGIN SELECT RAISE(ABORT, 'fixture context failure'); END;",
+    );
+    const response = await send("note:question");
+    expect(response.statusCode).toBe(400);
+    expect(response.json().error).toContain("fixture context failure");
+    expect((await page()).messages).toEqual([]);
+    expect(store.commsForPair("MC", FLIGHT)).toEqual([]);
+    expect(commsInboxContext(store, FLIGHT, "fixture-run").messageIds).toEqual([]);
+  } finally {
+    db.close();
+  }
+});
+
 it("does not deduplicate equal text sent about different items and rejects an oversized item key", async () => {
   expect((await send("note:first")).statusCode).toBe(200);
   expect((await send("note:second")).statusCode).toBe(200);
@@ -282,6 +331,26 @@ it("marks through a displayed turn, preserves newer unread lines and never moves
   expect((await read(ids[1])).statusCode).toBe(200);
   expect(await page()).toMatchObject({ cursor: ids[1], unread: 0 });
   expect(store.commsScopeCursor("flight")).toMatch(/^comms:\d+$/);
+});
+
+it("upgrades legacy reads without reviving transcript history or hiding newer mixed replies", async () => {
+  const legacy = stored("Legacy read reply", AT + 20, FLIGHT, "CAPCOM");
+  store.markCommsScopeRead("flight", legacy.id);
+  const historical = run("historical", [text("Previously visible history", AT + 10)]);
+  const newer = run(
+    "newer",
+    [text("First new turn", AT + 30), text("Second new turn", AT + 40)],
+    2,
+  );
+  store.markThreadRead(FLIGHT, [newer[0] ?? ""]);
+  stored("New stored reply", AT + 50, FLIGHT, "CAPCOM");
+  const settings = vi.spyOn(store, "setSetting");
+  const scopes = vi.spyOn(store, "markCommsScopeRead");
+  const threads = vi.spyOn(store, "markThreadRead");
+  expect(await page()).toMatchObject({ cursor: legacy.id, unread: 2 });
+  expect((await page(1)).unread).toBe(2);
+  for (const spy of [settings, scopes, threads]) expect(spy).not.toHaveBeenCalled();
+  expect((await page()).messages.map((m: { id: string }) => m.id)).toContain(historical[0]);
 });
 
 it("rejects fabricated and other-scope read positions without marking anything read", async () => {

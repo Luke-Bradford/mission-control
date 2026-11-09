@@ -6193,6 +6193,8 @@ export class Store {
     rate?: { since: number; limit: number },
     /** An identical message stored at or after this time is returned, flagged, not stored again. */
     repeatSince?: number,
+    /** Server-resolved title for one internal context line accompanying an operator item send. */
+    flightContextTitle?: string,
   ): (CommsRow & { repeat?: true }) | null {
     const text = cutCommsText(row.text);
     const replyTo =
@@ -6236,6 +6238,25 @@ export class Store {
         if (count.n >= rate.limit) return;
       }
       id = this.insertComms(row, text, replyTo);
+      if (
+        row.from === COMMS_CAPCOM &&
+        row.itemKey !== undefined &&
+        flightContextTitle !== undefined
+      ) {
+        const context: NewCommsRow = {
+          from: COMMS_MC,
+          to: row.to,
+          senderKind: "hub",
+          at: row.at,
+          ticket: row.ticket,
+          text: `[Mission Control] Needs-you context ${JSON.stringify({
+            messageId: `comms:${id}`,
+            itemKey: row.itemKey,
+            title: flightContextTitle,
+          })}`,
+        };
+        this.insertComms(context, cutCommsText(context.text), null);
+      }
       this.raiseChatterNote(row);
     }, true);
     const stored = id === null ? null : this.commsMessage(`comms:${id}`);

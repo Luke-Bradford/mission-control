@@ -384,6 +384,15 @@ function MessagePane({
               <div className="comms-message-meta">
                 <span>{time(message.at)}</span>
                 <CommsEnd id={message.from} />
+                {message.from === COMMS_CAPCOM && message.state && (
+                  <span className="comms-delivery-state">
+                    {message.state === "stored"
+                      ? "Stored"
+                      : message.state === "answered"
+                        ? "Answered"
+                        : `Delivered ${message.deliveredAt == null ? "—" : hhmm(message.deliveredAt, "Europe/London")}`}
+                  </span>
+                )}
                 {message.label && (
                   <Pill tone={message.label === "blocker" ? "crit" : "neutral"}>
                     {message.label}

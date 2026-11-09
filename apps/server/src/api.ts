@@ -1936,6 +1936,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               seatSender: false,
               senderKind: sender.kind,
               wakeUnlabelled: true,
+              ...(sender.from === COMMS_CAPCOM &&
+              input.itemKey !== undefined &&
+              input.to === flightSeat(config)?.seat.id
+                ? {
+                    flightItem: {
+                      to: input.to,
+                      title:
+                        attentionItems(config, store, now(), deps.lock?.state() ?? NO_LOCK).find(
+                          (item) => item.key === input.itemKey,
+                        )?.text ?? "This Needs-you item is no longer waiting.",
+                    },
+                  }
+                : {}),
               // redirected away from the ended run: its seat is not told of the reply
               ...(redirectedTo === undefined ? {} : { replyAuthorMention: false }),
               ...(prThread === undefined ? {} : { ticket: prThread }),
