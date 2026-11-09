@@ -201,6 +201,17 @@ describe("controller recovery of a preserved crew PR", () => {
     expect((await post(undefined, { sha: SHA })).statusCode).toBe(409);
     expect(adopt).not.toHaveBeenCalled();
   });
+  it("keeps the existing unknown-run response", async () => {
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/runs/missing/pr-head",
+      headers: { [CONTROLLER_HEADER]: "controller" },
+      payload: { sha: NEXT },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual({ error: "unknown run" });
+    expect(adopt).not.toHaveBeenCalled();
+  });
   it.each(["foreign", "moved", "draft", "branch"])("rejects %s GitHub provenance", async (kind) => {
     if (kind === "foreign") current.head.repo.full_name = "someone/else";
     if (kind === "moved") current.head.sha = SHA;

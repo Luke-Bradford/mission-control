@@ -5321,6 +5321,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: "invalid published head" });
         const run = store.run(req.params.id);
+        if (run === null) return reply.code(404).send({ error: "unknown run" });
         const repo = config.repos.find((value) => value.id === run?.repoId);
         const pr =
           repo && store.pullRequests(repo.id).find((value) => value.number === run?.loop?.prNumber);
