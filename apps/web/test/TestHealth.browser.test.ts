@@ -374,9 +374,24 @@ describeRendered("Test health measured layout", () => {
                 );
                 await page.press("Enter");
                 await page.press("End");
-                await page.evaluate(
-                  () => new Promise((resolve) => setTimeout(resolve, 100)),
-                  undefined,
+                // Native End scrolls over several frames; wait for the endpoint, not 100 ms.
+                const scrollEndpoint = await page.evaluate(async () => {
+                  const body = document.querySelector(".ch-dialog-body");
+                  if (!body) throw new Error("Evidence scroll body is missing");
+                  const deadline = performance.now() + 2000;
+                  while (
+                    body.scrollTop + body.clientHeight < body.scrollHeight - 1 &&
+                    performance.now() < deadline
+                  )
+                    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+                  return {
+                    top: body.scrollTop,
+                    height: body.clientHeight,
+                    total: body.scrollHeight,
+                  };
+                }, undefined);
+                expect(scrollEndpoint.top + scrollEndpoint.height).toBeGreaterThanOrEqual(
+                  scrollEndpoint.total - 1,
                 );
                 const fullEnvironment = await page.evaluate((expected) => {
                   const value = [
