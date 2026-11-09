@@ -64,3 +64,9 @@ test-only fix. Production source is unchanged since the full run on 32152993. Ex
 and a fresh independent most-capable review are still required. Further profiling and a
 passing copied-preview observation remain, followed by actual live verification after an
 authorized deployment. No clean full-local test result or completion of #933 is claimed.
+
+## Closed-PR HUD cache regression: review 1343
+
+Two real HUD projections begin with an empty request cache and a run naming a closed PR through differently cased repository text. The second binds the seat to an old run behind 51 newer completed runs, outside the ordinary 50-run window. Both include an unrelated closed PR with deliberately malformed historical checks. They assert that projection succeeds and retains the exact named PR's title, URL, closed state and ticket; the row resolves its ticket from that PR.
+
+Both cases pass. A temporary mutation removing reference collection makes both fail, proving the assertions exercise the actual HUD cache wiring. The production source was restored immediately. The complete Store, HUD and run-view suites pass 383 cases after correcting the new fixture's completed status to the real ok enum. Lint and workspace typecheck pass. This is test-only rework: production source and the earlier performance measurements are unchanged. Fresh pushed-head full CI and independent QA remain required. The parent performance ticket remains open for the unmet CPU, memory and post-deployment targets.
