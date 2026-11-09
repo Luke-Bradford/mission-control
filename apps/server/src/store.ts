@@ -6615,12 +6615,16 @@ export class Store {
     return id;
   }
 
-  private commsRow(r: Row): CommsRow {
+  private commsRow(r: Row, knownMentions?: string[]): CommsRow {
     const id = Number(r.id);
-    const mentions = this.db
-      .prepare("SELECT mentioned_id FROM comms_mentions WHERE message_id = ? ORDER BY mentioned_id")
-      .all(id)
-      .map((m) => m.mentioned_id as string);
+    const mentions =
+      knownMentions ??
+      this.db
+        .prepare(
+          "SELECT mentioned_id FROM comms_mentions WHERE message_id = ? ORDER BY mentioned_id",
+        )
+        .all(id)
+        .map((m) => m.mentioned_id as string);
     return {
       id: `comms:${id}`,
       at: r.at as number,
@@ -6636,6 +6640,28 @@ export class Store {
       senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
       ...(typeof r.item_key === "string" ? { itemKey: r.item_key } : {}),
     };
+  }
+
+  /** Bound mention reads per snapshot; retain no message or mention cache between calls. */
+  private commsRows(rows: Row[]): CommsRow[] {
+    const mentions = new Map<number, string[]>();
+    // Stay below even SQLite's older 999-variable limit if the snapshot limit grows.
+    const batchSize = 400;
+    for (let start = 0; start < rows.length; start += batchSize) {
+      const ids = rows.slice(start, start + batchSize).map((row) => Number(row.id));
+      const found = this.db
+        .prepare(
+          `SELECT message_id, mentioned_id FROM comms_mentions WHERE message_id IN (${ids.map(() => "?").join(",")}) ORDER BY message_id, mentioned_id`,
+        )
+        .all(...ids);
+      for (const row of found) {
+        const id = Number(row.message_id);
+        const names = mentions.get(id) ?? [];
+        names.push(row.mentioned_id as string);
+        mentions.set(id, names);
+      }
+    }
+    return rows.map((row) => this.commsRow(row, mentions.get(Number(row.id))?.slice() ?? []));
   }
 
   /** Records that the recipient took a message; the first time wins. */
@@ -7646,7 +7672,7 @@ export class Store {
         THREAD_COMMS_LIMIT,
         THREAD_COMMS_LIMIT,
       ) as Row[];
-    return rows.reverse().map((r) => this.commsRow(r));
+    return this.commsRows(rows.reverse());
   }
 
   /** Prompt metadata remains available even after its body has been read. */

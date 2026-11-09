@@ -3335,6 +3335,44 @@ describe("comms", () => {
     expect(store.commsPins()).toEqual([]);
   });
 
+  it("reads a full thread with bounded mention queries and unchanged complete rows", () => {
+    const expected: ReturnType<Store["threadComms"]> = [];
+    for (let index = 0; index < 520; index++) {
+      if (index % 10 === 0)
+        store.addComms({ ...row(`unrelated ${index}`, index), from: "x", to: "y" });
+      const message = store.addComms({
+        ...row(`thread ${index}`, 1000 - index),
+        from: index % 2 || index === 260 ? "reader" : "other",
+        to: index % 2 && index !== 260 ? "other" : "reader",
+        mentions: index % 3 === 0 ? ["zulu", "alpha", "alpha"] : [],
+        senderKind: "controller",
+        label: "handoff",
+        ref: "#933",
+        itemKey: `message:${index}`,
+        replyTo: expected.at(-1)?.id,
+      });
+      if (message === null) throw new Error("Fixture message was not stored");
+      expected.push(message);
+    }
+    const queries = vi.spyOn(store as unknown as { statement(sql: string): unknown }, "statement");
+    const actual = store.threadComms("reader");
+    expect(actual).toEqual(expected.slice(-500));
+    const mentionReads = queries.mock.calls.filter(([sql]) =>
+      /SELECT.*FROM comms_mentions/i.test(sql),
+    );
+    expect(mentionReads.length).toBeGreaterThan(0);
+    expect(mentionReads.length).toBeLessThanOrEqual(3);
+    queries.mockRestore();
+
+    const cursor = Number(actual[110].id.slice("comms:".length));
+    expect(store.threadComms("reader", cursor)).toEqual(
+      expected.filter((message) => Number(message.id.slice("comms:".length)) > cursor),
+    );
+    actual[0].mentions.push("not-stored");
+    expect(store.threadComms("reader")[0]).toEqual(expected.at(-500));
+    expect(store.threadComms("missing")).toEqual([]);
+  });
+
   it("enforces SQL reaction and label constraints", () => {
     const db = (store as unknown as { db: DatabaseSync }).db;
     const inserted = db
