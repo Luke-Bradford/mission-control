@@ -447,6 +447,12 @@ describe("Telemetry mockup", () => {
   });
   it("keeps selected-tab focus and filter choices across a view change", () => {
     const document = render("?tab=cost");
+    const descriptions = [...document.querySelectorAll(".stat-value")].map((value) =>
+      value.getAttribute("aria-describedby"),
+    );
+    expect(new Set(descriptions).size).toBe(descriptions.length);
+    for (const description of descriptions)
+      expect(document.getElementById(description ?? "")?.getAttribute("role")).toBe("tooltip");
     const window = document.defaultView as unknown as Window & typeof globalThis;
     const select = document.querySelector<HTMLSelectElement>('[data-filter="agent"]');
     if (!select) throw new Error("Missing agent filter");

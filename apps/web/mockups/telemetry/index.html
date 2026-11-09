@@ -590,12 +590,14 @@ th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
     Q.set("theme", state.theme);
     try { history.replaceState(null, "", location.pathname + "?" + Q.toString()); } catch (e) { /* a sandboxed frame may refuse; the page still works */ }
   }
+  var definitionSerial = 0;
   function statHtml(s, blank) {
+    var definitionId = "definition-" + s.id + "-" + definitionSerial++;
     var shown = blank ? "—" : s.value, cls = "";
     var unavailable = blank ? ' disabled aria-disabled="true"' : '';
     if (s.id === "health" && !blank) cls = " v-" + (s.value === "Healthy" ? "healthy" : s.value === "Watch" ? "watch" : "attention");
     var name = s.label + ": " + shown + " " + s.unit + ", " + s.window + ". " + (s.drill === "exists" ? "Opens " : "Needs a build: ") + s.target + (s.cmp && !blank ? ". " + s.cmp : "");
-    return '<div class="stat' + cls + '" data-stat="' + s.id + '"><span class="stat-label" title="' + esc(s.label) + '">' + esc(s.label) + '</span><div class="stat-main"><button type="button" class="num stat-value"' + unavailable + ' aria-describedby="def-' + s.id + '" data-drill="' + s.drill + '" data-target="' + esc(s.target) + '" data-label="' + esc(s.label) + '" data-shown="' + esc(shown) + '" aria-label="' + esc(name) + '">' + esc(shown) + '</button><span class="stat-unit" title="' + esc(s.unit) + '">' + esc(s.unit) + '</span></div><div class="stat-sub" title="' + esc(blank ? "" : s.window + (s.cmp ? " · " + s.cmp : "")) + '"><span class="stat-window">' + esc(s.window) + '</span><span class="stat-cmp">' + (s.cmp && !blank ? " · " + esc(s.cmp) : "") + '</span></div><span class="stat-def" role="tooltip" id="def-' + s.id + '">' + esc(s.def + " Unit: " + s.unit + ".") + "</span></div>";
+    return '<div class="stat' + cls + '" data-stat="' + s.id + '"><span class="stat-label" title="' + esc(s.label) + '">' + esc(s.label) + '</span><div class="stat-main"><button type="button" class="num stat-value"' + unavailable + ' aria-describedby="' + definitionId + '" data-drill="' + s.drill + '" data-target="' + esc(s.target) + '" data-label="' + esc(s.label) + '" data-shown="' + esc(shown) + '" aria-label="' + esc(name) + '">' + esc(shown) + '</button><span class="stat-unit" title="' + esc(s.unit) + '">' + esc(s.unit) + '</span></div><div class="stat-sub" title="' + esc(blank ? "" : s.window + (s.cmp ? " · " + s.cmp : "")) + '"><span class="stat-window">' + esc(s.window) + '</span><span class="stat-cmp">' + (s.cmp && !blank ? " · " + esc(s.cmp) : "") + '</span></div><span class="stat-def" role="tooltip" id="' + definitionId + '">' + esc(s.def + " Unit: " + s.unit + ".") + "</span></div>";
   }
   function cellHtml(t, c, i) {
     if (c === null || c === undefined) return "—";
