@@ -741,7 +741,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
     const since = Math.max(lastWakeAt, lastTurnEndAt);
     const wakeGap =
-      (state.wake?.operator?.length ?? 0) > 0 ? FLIGHT_OPERATOR_WAKE_GAP_MS : FLIGHT_MIN_WAKE_GAP_MS;
+      (state.wake?.operator?.length ?? 0) > 0
+        ? FLIGHT_OPERATOR_WAKE_GAP_MS
+        : FLIGHT_MIN_WAKE_GAP_MS;
     if (due && t - since < wakeGap) {
       later(since + wakeGap - t);
       return;
