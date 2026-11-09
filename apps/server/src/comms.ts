@@ -474,11 +474,19 @@ export function attentionChatter(
     asked ??= store.questionTimes(agentId);
     return asked.has(m.at);
   };
+  const labelledFlightQuestion = (m: CommsThreadMessage) => {
+    if (!own) return false;
+    const stored = store.commsMessage(m.id);
+    return stored?.to === COMMS_CAPCOM && stored.label === "question";
+  };
   const lines = threadMessages(store, agentId, crew, "attention").filter(
     (m) =>
       !m.seen &&
       m.from === agentId &&
       !mirrored(m) &&
+      // A stored labelled FLIGHT-to-operator question has the durable `comms-open:` projection.
+      // Do not let its `@CAPCOM` text also join the grouped tag projection.
+      !labelledFlightQuestion(m) &&
       ((m.tagged && (!own || flightQuestion(m.text))) ||
         (!own && m.direct && flightQuestion(m.text))) &&
       resolvedCommsReason(store, m, crew && !own) === null,

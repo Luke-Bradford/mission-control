@@ -110,6 +110,20 @@ function source() {
   prepareFixtureGuidance(config, store, now, key);
   return key;
 }
+function flightSource() {
+  const message = store.addComms({
+    at: SENT,
+    from: "FLIGHT-1",
+    to: "CAPCOM",
+    ticket: "repo#1",
+    text: "@CAPCOM approve this direction?",
+    label: "question",
+  });
+  if (!message) throw new Error("missing message");
+  const key = `comms-open:${message.id}`;
+  prepareFixtureGuidance(config, store, now, key);
+  return { key, message };
+}
 function request(key: string, requestId = "choice-one"): BriefChoiceRequest {
   const brief = store.briefs().get(key);
   if (!brief?.binding || !brief.id) throw new Error("missing bound brief");
@@ -150,6 +164,14 @@ it("dispatches a displayed exact-run choice once and retains the real receipt", 
   await expect(
     chooseBrief(deps, key, { ...req, optionId: "hold" }, { operator: true }),
   ).rejects.toThrow(/different choice/);
+});
+it("settles FLIGHT's labelled Comms question when its canonical choice is applied", async () => {
+  const { key, message } = flightSource();
+  expect(await chooseBrief(choices(), key, request(key), { operator: true })).toMatchObject({
+    state: "applied",
+  });
+  expect(store.commsSettlement(message.id)).toMatchObject({ settledBy: "CAPCOM" });
+  expect(attentionItems(config, store, now).find((item) => item.key === key)).toBeUndefined();
 });
 it("refuses replacement runs before any provider delivery or acknowledgment", async () => {
   const key = source(),

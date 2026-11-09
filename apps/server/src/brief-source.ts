@@ -9,6 +9,7 @@ import {
   hudColumnOf,
 } from "@mc/core";
 import { pendingRunApproval } from "./attention-subjects.ts";
+import { flightQuestionMessageId } from "./comms-question.ts";
 import type { CcConfig } from "./config.ts";
 import { externalMergeHold, externalPrControl } from "./external-pr-control.ts";
 import type { Store } from "./store.ts";
@@ -221,9 +222,12 @@ export function briefSourceRevision(
   }
   const person = /^person:(\d+):(\d+)$/.exec(item.key);
   const notification = person ? store.notification(person[1] ?? "") : null;
-  const sourceComms = item.key.startsWith("comms-open:")
-    ? store.commsMessage(item.key.slice("comms-open:".length))
-    : null;
+  const sourceCommsId = item.agentId
+    ? flightQuestionMessageId(item.key, item.agentId)
+    : item.key.startsWith("comms-open:")
+      ? item.key.slice("comms-open:".length)
+      : null;
+  const sourceComms = sourceCommsId ? store.commsMessage(sourceCommsId) : null;
   return briefHash({
     item: {
       key: item.key,

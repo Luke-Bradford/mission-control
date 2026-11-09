@@ -98,6 +98,7 @@ import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
 import { attentionChatter, resolvedCommsReason } from "./comms.ts";
+import { canonicalFlightQuestionKey } from "./comms-question.ts";
 import {
   agentIds,
   type CcConfig,
@@ -1305,7 +1306,10 @@ function buildAttentionItems(
     const forController = message.from === flight?.seat.id && isForTheController(message.text);
     items.push({
       owner: forController ? OWNER_CONTROLLER : OWNER_OPERATOR,
-      key: `${COMMS_OPEN_PREFIX}${message.id}`,
+      key:
+        message.from === flight?.seat.id && message.to === COMMS_CAPCOM
+          ? canonicalFlightQuestionKey(store, message.id, flight.seat.id)
+          : `${COMMS_OPEN_PREFIX}${message.id}`,
       kind: message.label === "blocker" && !forController ? "blocked" : "question",
       agentId: message.from,
       repoId: repoId ?? null,

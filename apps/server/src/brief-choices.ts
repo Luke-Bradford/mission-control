@@ -17,6 +17,11 @@ import {
 } from "./brief-prepare.ts";
 import { briefHash, briefReadState, briefSourceRevision } from "./brief-source.ts";
 import type { ChangeBus } from "./bus.ts";
+import {
+  flightQuestionKeys,
+  flightQuestionMessageId,
+  isFlightOperatorQuestion,
+} from "./comms-question.ts";
 import { recordWrite, runawayTrip, watchRunaway } from "./flight/runaway.ts";
 
 export interface BriefChoiceDeps extends BriefPreparationDeps {
@@ -321,7 +326,16 @@ export async function chooseBrief(
         });
         if (deps.bus) watchRunaway(deps.store, deps.bus, deps.now());
       }
-      deps.store.ack([key], deps.now());
+      const sourceMessageId = item.agentId ? flightQuestionMessageId(key, item.agentId) : null;
+      const aliases: string[] =
+        sourceMessageId !== null && item.agentId !== null
+          ? isFlightOperatorQuestion(deps.store, sourceMessageId, item.agentId)
+            ? [...flightQuestionKeys(sourceMessageId, item.agentId)]
+            : [key]
+          : [key];
+      if (sourceMessageId !== null && item.agentId !== null && aliases.length === 2)
+        deps.store.settleCommsItem(sourceMessageId, "CAPCOM", "Chosen in Needs you", deps.now());
+      deps.store.ack(aliases, deps.now());
       return save("applied", text);
     } catch (error) {
       const text =

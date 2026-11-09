@@ -3088,6 +3088,64 @@ describe("messages are not Needs you", () => {
     ]);
   });
 
+  it("projects a labelled FLIGHT question to CAPCOM once after its escalation delay", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const earlier = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#4",
+      text: "@CAPCOM should the earlier work wait?",
+    });
+    if (earlier === null) throw new Error("earlier message was not stored");
+    const message = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+
+    const items = attentionItems(c, store, at, NO_LOCK, []);
+    expect(items.filter((item) => item.text === message.text)).toEqual([
+      expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" }),
+    ]);
+    expect(items).toContainEqual(expect.objectContaining({ key: `tag:flight-1:${earlier.id}` }));
+  });
+
+  it("keeps an existing tagged brief as the single canonical projection", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const legacyKey = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key: legacyKey,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve the dependencies design?",
+      context: "The design is ready for a decision.",
+      recommendation: "Approve it.",
+      basis: "The retained legacy brief.",
+      options: TWO_OPTIONS,
+    });
+
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).filter((item) => item.text === message.text),
+    ).toEqual([expect.objectContaining({ key: legacyKey })]);
+  });
+
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {
     up("flight-1");
     say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "How is it going?");
