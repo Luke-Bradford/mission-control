@@ -93,6 +93,8 @@ export interface McpDeps {
   seatGrants?: (seatId: string) => readonly string[];
   /** The extra tools this authenticated run holds; default: none. */
   runGrants?: (who: RunIdentity) => readonly string[];
+  /** Told of each finished call: the tool, its run, and the characters sent and returned. */
+  onToolCall?: (call: { runId: string; tool: string; written: number; returned: number }) => void;
 }
 
 const Message = z.looseObject({
@@ -186,6 +188,16 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         "mc tool threw",
       );
       result = { text: "the tool failed", isError: true };
+    }
+    try {
+      deps.onToolCall?.({
+        runId: who.runId,
+        tool: tool.name,
+        written: JSON.stringify(p.data.arguments ?? {}).length,
+        returned: result.text.length,
+      });
+    } catch {
+      // measuring a call never fails it
     }
     return {
       jsonrpc: "2.0",

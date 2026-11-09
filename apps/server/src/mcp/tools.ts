@@ -289,6 +289,8 @@ export interface McToolsDeps {
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's check calls the hub saw start and did not count, with the reasons; none when unset. */
   checkDrops?: (runId: string) => readonly CheckDrop[];
+  /** Configured checks still executing or validating their completion. */
+  pendingChecks?: (runId: string) => readonly string[];
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -2688,6 +2690,13 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           bus.emit("guard");
         }
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
+      }
+      const pending = deps.pendingChecks?.(currentRun.id) ?? [];
+      if (pending.length > 0) {
+        return {
+          text: `Evidence not recorded: these checks have no completed receipt yet: ${pending.join(", ")}. A yielded session is still running. Continue polling that session until it reports a final numeric exit code before reporting evidence or ending your turn. If polling is refused, report the blocker; do not claim a pass.`,
+          isError: true,
+        };
       }
       store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
