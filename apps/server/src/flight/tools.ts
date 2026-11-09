@@ -3120,7 +3120,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       known,
     );
     if (problem) return fail(problem);
-    if (held(store.run(run.id) ?? run)) return fail("Run is held.");
+    if (held(store.run(run.id) ?? run, "merge")) return fail("Run is held.");
     if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
     if (!(await deps.engine.adoptPrHead(run.id, head)))
       return fail("The merge gates changed; refresh the PR.");
@@ -3616,8 +3616,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     };
   }
 
-  function held(run: Run): boolean {
-    return heldRun(store, config, now(), run, repoOf()?.id);
+  function held(run: Run, action: "work" | "merge" = "work"): boolean {
+    return heldRun(store, config, now(), run, repoOf()?.id, action);
   }
   function prRun(pr: number): Run | null {
     const repo = repoOf();
@@ -3633,7 +3633,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           r.loop?.prNumber === pr &&
           r.branch === row?.branch,
       );
-    if (!run || !row || isRefusal(devRun(run.id)) || held(run)) return null;
+    if (!run || !row || isRefusal(devRun(run.id)) || held(run, "merge")) return null;
     return inRunLane(run) ? run : null;
   }
   function inRunLane(run: Run): boolean {
@@ -3864,7 +3864,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           known,
         );
         if (problem) return fail(problem);
-        if (held(store.run(run.id) ?? run)) return fail("Run is held.");
+        if (held(store.run(run.id) ?? run, "merge")) return fail("Run is held.");
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         if (!(await deps.engine.clearFlight(run.id, sha)))
           return fail("The merge gates changed; refresh the PR.");

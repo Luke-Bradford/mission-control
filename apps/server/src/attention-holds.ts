@@ -182,13 +182,17 @@ export function attentionHoldError(e: z.ZodError): string {
   return path === "" ? issue.message : `${path}: ${issue.message}`;
 }
 
-/** Items whose authority belongs to the operator and which a timer must never settle. */
+/**
+ * Items whose authority belongs to the operator and which a timer must never settle. A merge
+ * spends no author quota; every explicit stop, budget park and operator question still holds it.
+ */
 export function heldRun(
   store: Store,
   config: CcConfig,
   at: number,
   run: NonNullable<ReturnType<Store["run"]>>,
   repoId?: string,
+  action: "work" | "merge" = "work",
 ): boolean {
   const seat = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === run.agentId);
   return (
@@ -199,7 +203,8 @@ export function heldRun(
     store
       .openQuestions()
       .some((q) => q.runId === run.id && (q.passedAt !== null || at - q.at >= 20 * 60_000)) ||
-    accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), at)
+    (action === "work" &&
+      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), at))
   );
 }
 

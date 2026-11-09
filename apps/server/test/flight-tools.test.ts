@@ -7135,6 +7135,27 @@ describe("superuser housekeeping", () => {
     // the refused call is on the ledger, as any other tool's refusal
     expect(decisions().filter((d) => d.about === "merge_pr")).toHaveLength(1);
   });
+  it("merge_pr keeps a quota-stopped author's reviewed PR on its crew merge path", async () => {
+    elevated();
+    runPr();
+    store.setRunLoop("r-pr", {
+      ...need(store.run("r-pr")?.loop),
+      aside: { worktree: "/tmp/preserved", wake: false },
+    });
+    const row = need(store.seatSession("guido-1"));
+    store.setSeatSession({ ...row, runId: null });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: NOW,
+      pct: 96,
+      resetAt: NOW + 3_600_000,
+      source: "test",
+    });
+    expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([["r-pr", SHA]]);
+    expect(adoptCalls).toEqual([]);
+  });
   it("merge_pr adopts a head that came from outside the run, once, and refuses otherwise", async () => {
     elevated();
     runPr();

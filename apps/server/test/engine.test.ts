@@ -4448,6 +4448,74 @@ describe("the engine runs reviews", () => {
     }
 
     describe("FLIGHT adopts a head from outside the run", () => {
+      it("the controller adopts an inactive working run's published head at the author account stop", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        seatIdle(null);
+        setLoop({
+          phase: "working",
+          aside: { worktree: "/tmp/preserved-work", wake: false },
+          flightClearedSha: SHA,
+          reviewWaivedSha: SHA,
+          carry: { from: SHA, to: SHA },
+        });
+        setPr({ ci: "pending", headSha: SHA_B });
+        store.addUsage({
+          accountId: "claude-main",
+          window: "7d",
+          at: clock,
+          pct: 96,
+          resetAt: clock + 60 * MIN,
+          source: "test",
+        });
+        expect(await h.engine.adoptPrHead(RUN, SHA_B, "Controller")).toBe(true);
+        expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+        expect(loopOf()).toMatchObject({
+          phase: "ci",
+          adopted: true,
+          reviewWaivedSha: null,
+          flightClearedSha: null,
+          carry: null,
+        });
+        expect(h.wakes).toEqual([]);
+        expect(store.qaCheckReceipts(RUN, SHA_B)).toEqual([]);
+        expect(h.steps).not.toContain("merge");
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        expect(store.reviewsOfRun(RUN)).toContainEqual(
+          expect.objectContaining({ sha: SHA_B, state: "queued" }),
+        );
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it.each(["active", "dirty", "unreadable", "stopped", "parked", "merge hold"])(
+        "controller adoption preserves an %s author's work or hold",
+        async (reason) => {
+          need(config.repos[0]).flightPowers = "superuser";
+          await toReview();
+          await h.engine.reconcileRun(RUN);
+          if (reason !== "active") seatIdle(null);
+          else h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+          setLoop({ phase: "working", aside: { worktree: "/tmp/preserved-work", wake: false } });
+          setPr({ ci: "pending", headSha: SHA_B });
+          if (reason === "dirty") h.changes = ["unsaved.ts"];
+          if (reason === "unreadable")
+            h.changes = { ok: false, text: "unreadable", transient: false };
+          if (reason === "stopped") {
+            const row = need(store.seatSession(SEAT));
+            store.setSeatSession({ ...row, state: "stopped", reason: "operator stop" });
+          }
+          if (reason === "parked")
+            setLoop({ parked: { kind: "budget", reason: "budget stop", ended: false } });
+          if (reason === "merge hold")
+            setLoop({ mergeHold: { by: "CAPCOM", reason: "operator hold", at: clock } });
+          expect(await h.engine.adoptPrHead(RUN, SHA_B, "Controller")).toBe(false);
+          expect(store.runPush(RUN)?.sha).toBe(SHA);
+          expect(h.wakes).toEqual([]);
+        },
+      );
+
       it("adoptPrHead moves the run to ci on the new head, and refuses a working run", async () => {
         need(config.repos[0]).flightPowers = "superuser";
         await toReview();
@@ -5627,6 +5695,28 @@ describe("the engine runs reviews", () => {
       setLoop({ controllerCheck: { sha: SHA, from: "review", pass: false } });
       expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
       expect(loopOf().controllerCheck).toMatchObject({ sha: SHA, pass: true });
+    });
+
+    it("clears a reviewed hard-rule PR at the author's account stop without waking the author", async () => {
+      flightSeatConfig();
+      h.touches = ["apps/server/src/api.ts"];
+      h.gate = { ...need(h.gate), strays: [] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      await h.engine.reconcileRun(RUN);
+      seatIdle(null);
+      setLoop({ aside: { worktree: "/tmp/preserved-reviewed-work", wake: false } });
+      store.addUsage({
+        accountId: "claude-main",
+        window: "7d",
+        at: clock,
+        pct: 96,
+        resetAt: clock + 60 * MIN,
+        source: "test",
+      });
+      expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
+      expect(h.steps).toContain("merge");
+      expect(h.wakes).toEqual([]);
     });
 
     it("a commit from outside the run and stray files wait for FLIGHT, then merge", async () => {
