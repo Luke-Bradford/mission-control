@@ -925,7 +925,12 @@ Every writer run started while the engine is on (not a preview, `MC_NO_LOOP_WRIT
 hub holding the crew lock) carries a loop. A writer run started without one cannot publish: its
 `report_evidence` answers that Mission Control is not driving the run.
 
-- **Report.** The seat commits, then calls `report_evidence` with a note and one `doneWhen`
+- **Report.** A shell response with a session id is a yielded command, not a completed check.
+  Poll that session until it supplies a final numeric exit code. `report_evidence` refuses while
+  a configured check is still running or its completion receipt is being validated, without
+  saving evidence or starting a push. If polling is refused, report the blocker rather than a pass.
+  The push gate still requires passing checks on the clean current commit.
+  The seat commits, then calls `report_evidence` with a note and one `doneWhen`
   entry for each line of the ticket's `## Done when`: `met` with its evidence (a test name, a file,
   a measurement) or `not_met` with the reason. The hub took those lines from the ticket when the
   run started, and refuses a report that leaves one out, quoting it (a run started before this

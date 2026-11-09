@@ -211,6 +211,11 @@ export function ticketBrief(i: BriefInput): string {
     ...decisionsSection(i.decisions),
     ...(i.loop === "build" && i.planless ? [SELF_PLAN, ""] : []),
     ran,
+    ...(writer
+      ? [
+          "A shell call that returns a session id is still running. Poll that session until it reports a final numeric exit code. Do not report evidence or end your turn while a required check is running. If polling is refused, report the blocker instead of claiming a pass.",
+        ]
+      : []),
     last,
     ...(i.role === "FAO" && i.loop === "plan" && i.fileContext
       ? [
