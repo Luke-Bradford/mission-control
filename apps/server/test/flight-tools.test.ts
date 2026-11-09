@@ -856,6 +856,37 @@ describe("move_review", () => {
       ).isError,
     ).toBeUndefined();
     expect(store.review(id)?.seatId).toBe("retro-cx");
+    expect(store.reviewBudgetBrakeOverride(id)).toBe(true);
+  });
+
+  it.each([
+    ["retiring", { retiring: true }, "RETRO-CX is retiring."],
+    ["unavailable", { modelVendor: "codex" as const, model: "unknown" }, "RETRO-CX is unavailable."],
+    ["non-scratch", { mode: "writer" as const }, "RETRO-CX is not a review seat."],
+  ])("refuses a %s target review seat", async (_kind, extra, text) => {
+    const id = queuedReview();
+    Object.assign(need(cfg.crew?.sessions[0]).seats.at(-1), extra);
+
+    await expect(
+      call("move_review", {
+        reviewId: id,
+        seat: "retro-cx",
+        basis: "mc#7 P0 needs the available reviewer",
+      }),
+    ).resolves.toEqual({ text, isError: true });
+    expect(store.review(id)?.seatId).toBe("retro-1");
+  });
+
+  it("refuses the review's current seat", async () => {
+    const id = queuedReview();
+
+    await expect(
+      call("move_review", {
+        reviewId: id,
+        seat: "retro-1",
+        basis: "mc#7 P0 needs the available reviewer",
+      }),
+    ).resolves.toEqual({ text: "RETRO-1 already has this review.", isError: true });
   });
 });
 

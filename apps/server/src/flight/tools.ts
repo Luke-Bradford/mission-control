@@ -343,7 +343,7 @@ import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
-import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID } from "../config.ts";
+import { type CcConfig, crewSeatDef, flightPowersOf, seatUnavailable, SEAT_ID } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
@@ -3755,17 +3755,19 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (review.state !== "queued") return fail("Review is no longer queued.");
         const target = seatCfg(a.seat);
         if (target === undefined) return fail(notInSessionText(a.seat));
-        if (seatDef(target).loop !== "review")
+        if (target.id === review.seatId)
+          return fail(`${seatCallSign(target.id)} already has this review.`);
+        if (seatDef(target).loop !== "review" || modeOfSeat(target) !== "scratch")
           return fail(`${seatCallSign(a.seat)} is not a review seat.`);
+        if (target.retiring) return fail(`${seatCallSign(target.id)} is retiring.`);
+        if (seatUnavailable(target)) return fail(`${seatCallSign(target.id)} is unavailable.`);
         const at = now();
         if (accountAtStop(config, store, target.accountId, at))
           return fail(accountStoppedText(seatCallSign(a.seat), target.accountId));
-        if (
-          budgetBrake(config, store, target.accountId, at) !== null &&
-          !P0_TICKET_BASIS.test(a.basis)
-        )
+        const brakeOverride = budgetBrake(config, store, target.accountId, at) !== null;
+        if (brakeOverride && !P0_TICKET_BASIS.test(a.basis))
           return fail("The target account's budget brake needs a basis that names a P0 ticket.");
-        if (!store.moveQueuedReview(review.id, target.id, at))
+        if (!store.moveQueuedReview(review.id, target.id, at, brakeOverride))
           return fail("Review is no longer queued.");
         return { text: `Moved queued review ${review.id} to ${seatCallSign(target.id)}.` };
       },
