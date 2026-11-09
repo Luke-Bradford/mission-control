@@ -4072,7 +4072,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const body = NewSessionBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
         try {
-          const result = await createSession(configPath, body.data, now(), config, deps.configHubRoot);
+          const result = await createSession(
+            configPath,
+            body.data,
+            now(),
+            config,
+            deps.configHubRoot,
+          );
           const changes = await crewReloader.reload();
           return {
             id: body.data.id,
