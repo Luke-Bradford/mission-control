@@ -4567,7 +4567,7 @@ describe("every wake ends with each reason handled", () => {
     expect(sendCalls.at(-1)?.text.split("\n")[0]).toContain(`${FLIGHT_LEFT_HEAD} q 2`);
   });
 
-  it("keeps the operator item while the reason it lists is still undecided", async () => {
+  it("keeps the internal reminder while the reason it lists is still undecided", async () => {
     await wokeOnAQuestion();
     const q2 = ask("inco-1", "r-inco", nowMs);
     await watch.check();
@@ -4589,7 +4589,7 @@ describe("every wake ends with each reason handled", () => {
     expect(leftNotes()).toEqual([]);
   });
 
-  it("raises one operator item when the second wake leaves them again, and none before", async () => {
+  it("retains one internal reminder after the second miss and keeps it off operator attention", async () => {
     await wokeOnAQuestion();
     await watch.check();
     expect(leftNotes()).toEqual([]);
@@ -4600,12 +4600,12 @@ describe("every wake ends with each reason handled", () => {
     expect(leftNotes()).toHaveLength(1);
     expect(leftNotes()[0]).toMatchObject({ kind: "blocked", seatId: "flight-1" });
     expect(leftNotes()[0]?.text).toContain("1 question waiting for an answer");
-    // the operator sees it as itself, not as an item FLIGHT triages
+    // FLIGHT keeps its reminder, while operator attention contains only operator work.
     const item = attentionItems(config, store, nowMs).find((i) =>
       i.key.endsWith(FLIGHT_LEFT_NOTE_KEY),
     );
-    expect(item).toMatchObject({ owner: "operator" });
-    expect(item?.flightTriage).toBeUndefined();
+    expect(item).toBeUndefined();
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain(FLIGHT_LEFT_HEAD);
   });
 
   it("clears the item once a later wake's reasons are all handled", async () => {

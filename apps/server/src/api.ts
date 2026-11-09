@@ -188,6 +188,7 @@ import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
+import { clearAttentionItem } from "./clear-attention.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -6240,6 +6241,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         } finally {
           discussionSends.delete(sendKey);
         }
+      });
+
+      // Reader: docs/runbook.md#clearing-a-needs-you-item (#1625 supplies the web control)
+      api.post<{ Params: { key: string } }>("/attention/:key/clear", async (req, reply) => {
+        if (req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined)
+          return reply.code(403).send({ error: "Only the operator can clear an item." });
+        if (!NoBody.safeParse(req.body).success)
+          return reply.code(400).send({ error: "Clear takes an empty body." });
+        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+        const { key } = req.params;
+        if (key === `note:${FLIGHT_RUNAWAY_NOTE_KEY}`)
+          return reply.code(409).send({ error: "Use Lift to release the runaway flag." });
+        const item = attentionItems(
+          config,
+          store,
+          now(),
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew().rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ).find((i) => i.key === key);
+        if (!item) return reply.code(404).send({ error: "That item is no longer waiting." });
+        const sender = commsSender(req);
+        const cleared = await clearAttentionItem(
+          {
+            config,
+            store,
+            bus,
+            now,
+            by: sender.from,
+            actorName: sender.kind === "controller" ? "The controller" : "The operator",
+            reconcileRun: deps.engine?.reconcileRun?.bind(deps.engine),
+          },
+          item,
+        );
+        return cleared
+          ? { cleared: key }
+          : reply.code(404).send({ error: "That item is no longer waiting." });
       });
 
       const ChooseBody = z.strictObject({

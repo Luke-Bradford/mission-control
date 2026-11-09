@@ -847,7 +847,7 @@ const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k
 
 /** The watch's FLIGHT-down notes as items: folded into the one "FLIGHT is not triaging" item. */
 const FLIGHT_DOWN_ITEMS: ReadonlySet<string> = new Set(
-  FLIGHT_DOWN_NOTES.map((k) => `${NOTE_KEY}${k}`),
+  [...FLIGHT_DOWN_NOTES, FLIGHT_LEFT_NOTE_KEY].map((k) => `${NOTE_KEY}${k}`),
 );
 
 /**
@@ -1484,11 +1484,18 @@ function buildAttentionItems(
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
   const closures = store.closedItemKeys();
+  const currentBrief = (i: OwnedItem) => {
+    const saved = briefs.get(i.key);
+    return (saved && store.choice(i.key, saved.at)) ||
+      (i.key.startsWith(NOTE_KEY) && saved && saved.at < i.at)
+      ? undefined
+      : saved;
+  };
   /** The item's ask was closed without an answer: FLIGHT's own tag leaves, the rest is FLIGHT's. */
   const closedAsk = (i: OwnedItem): boolean => {
     const list = closures.get(i.key);
     if (list === undefined) return false;
-    const at = questionAskAt(i, briefs.get(i.key));
+    const at = questionAskAt(i, currentBrief(i));
     // a closure covers the item as it stood: one raised again after it is a new item
     return list.some((c) => c.askAt === at && c.at >= i.at);
   };
@@ -1503,9 +1510,8 @@ function buildAttentionItems(
         ? { ...rest, owner: OWNER_FLIGHT, flightTriage: "handling" }
         : { ...rest, owner: OWNER_FLIGHT, flightTriage: "down" };
     }
-    const saved = briefs.get(i.key);
-    // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
-    const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
+    // A new note is a new ask; a stored answer retires the old brief.
+    const brief = currentBrief(i);
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
     const ackAt = acks.get(i.key);
@@ -1550,8 +1556,6 @@ function buildAttentionItems(
     if (brief?.for === "flight" && !protectedDecisionItem(store, item, config, now))
       return { ...item, owner: OWNER_FLIGHT, flightTriage: triaging ? "handling" : "down" };
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
-    // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
-    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
     // FLIGHT's review queue, even when FLIGHT is not triaging: the count item carries it
     if (unownedReviews.has(i.key) && (!live || !triaging))
@@ -1629,6 +1633,13 @@ function buildAttentionItems(
   const result: AttentionItem[] = items
     // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
     .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
+    // A presentation refresh cannot reopen an operator-cleared ask. A new ask has its own time.
+    .filter(
+      (i) =>
+        !closures
+          .get(i.key)
+          ?.some((c) => c.kind === "cleared" && c.askAt === questionAskAt(i, currentBrief(i))),
+    )
     // FLIGHT withdrew its own question to the operator, or the hub closed it: it has left
     .filter((i) => !(i.kind === "tag" && ownReply(i, flightId) && closedAsk(i)))
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)

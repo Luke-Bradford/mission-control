@@ -54,6 +54,7 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
+  COMMS_OPEN_PREFIX,
   COMMS_TEXT_MAX,
   type CommsLabel,
   type CommsReaction,
@@ -4966,8 +4967,10 @@ export class Store {
   pendingDecisionDeliveries(): { key: string; briefAt: number; target: string; answer: string }[] {
     return (
       this.db
-        .prepare(`SELECT key, brief_at, target, answer FROM decision_defaults
-      WHERE delivered_at IS NULL AND target IS NOT NULL ORDER BY applied_at, key`)
+        .prepare(`SELECT key, brief_at, target, answer FROM decision_defaults d
+      WHERE delivered_at IS NULL AND target IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM question_closures c WHERE c.key = d.key AND c.kind = 'cleared' AND c.at >= d.applied_at)
+      ORDER BY applied_at, key`)
         .all() as Row[]
     ).map((r) => ({
       key: r.key as string,
@@ -8339,6 +8342,45 @@ export class Store {
     return stored;
   }
 
+  /** Operator Clear closes the displayed source and records its closure in the same transaction. */
+  clearAttention(c: QuestionClosure, notices: NewCommsRow[] = []): boolean {
+    let stored = false;
+    this.transaction(() => {
+      stored = this.insertClosure(c);
+      if (!stored) return;
+      if (c.key.startsWith("note:")) this.dismissNote(c.key.slice("note:".length), c.at);
+      else if (c.key.startsWith("crew-error:")) {
+        const id = Number(c.key.slice("crew-error:".length));
+        if (Number.isSafeInteger(id) && id > 0) this.ackCrewError(id);
+      } else if (c.key.startsWith(COMMS_OPEN_PREFIX))
+        this.settleCommsItem(c.key.slice(COMMS_OPEN_PREFIX.length), c.by, c.reason, c.at);
+      this.db
+        .prepare(`INSERT INTO acks (key, at, absent_since) VALUES (?, ?, NULL)
+        ON CONFLICT(key) DO UPDATE SET at = excluded.at`)
+        .run(c.key, c.at);
+      for (const notice of notices) this.insertComms(notice, cutCommsText(notice.text), null);
+    }, true);
+    return stored;
+  }
+
+  /** Hide only FLIGHT's latest brief; retain its history and the underlying question or hold. */
+  withdrawFlightBrief(key: string): boolean {
+    let withdrawn = false;
+    this.transaction(() => {
+      const row = this.db
+        .prepare("SELECT id, structured FROM briefs WHERE key = ? ORDER BY id DESC LIMIT 1")
+        .get(key) as Row | undefined;
+      if (
+        !row?.structured ||
+        (JSON.parse(row.structured as string) as AttentionBrief).by !== "flight"
+      )
+        return;
+      this.setSetting(`withdrawn-brief:${key}`, String(row.id));
+      withdrawn = true;
+    }, true);
+    return withdrawn;
+  }
+
   /** `closeQuestion` without its own transaction, for a caller already in one. */
   private insertClosure(c: QuestionClosure): boolean {
     const r = this.db
@@ -9290,7 +9332,8 @@ export class Store {
   /** The newest brief on each attention key. */
   briefs(): Map<string, AttentionBrief> {
     const rows = this.db
-      .prepare("SELECT * FROM briefs WHERE id IN (SELECT MAX(id) FROM briefs GROUP BY key)")
+      .prepare(`SELECT b.* FROM briefs b WHERE b.id IN (SELECT MAX(id) FROM briefs GROUP BY key)
+        AND NOT EXISTS (SELECT 1 FROM settings s WHERE s.key = 'withdrawn-brief:' || b.key AND s.value = CAST(b.id AS TEXT))`)
       .all() as Row[];
     return new Map(
       rows

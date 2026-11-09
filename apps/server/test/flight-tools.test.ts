@@ -10898,6 +10898,49 @@ describe("return_question and withdraw_question (#1532)", () => {
       });
     });
     const key = "note:blocked:prot";
+    it("withdraws only FLIGHT's protected brief without answering a passed seat question", async () => {
+      live("guido-1", "r-protected-question", { ticket: "mc#7" });
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "r-protected-question",
+        text: "Choose the required approval.",
+        at: NOW,
+      });
+      store.passQuestion(id, NOW);
+      const questionKey = key;
+      store.addBrief({
+        key: questionKey,
+        for: "operator",
+        by: "flight",
+        at: NOW,
+        context: "The operator must choose.",
+        ask: "Approve this direction?",
+        recommendation: "Keep waiting.",
+        basis: "Existing authority.",
+        options: [],
+      });
+      const result = await call("withdraw_question", W(questionKey));
+      expect(result.isError, result.text).toBeUndefined();
+      expect(store.briefs().has(questionKey)).toBe(false);
+      expect(store.question(id)?.answeredAt).toBeNull();
+      expect(store.question(id)?.passedAt).toBe(NOW);
+      expect(store.questionClosures(0, 10)).toEqual([]);
+      expect(store.acks().has(questionKey)).toBe(false);
+      expect(messageCalls).toEqual([]);
+      store.addBrief({
+        key: questionKey,
+        for: "operator",
+        by: "flight",
+        at: NOW + 1,
+        context: "The operator still must choose.",
+        ask: "Approve this direction?",
+        recommendation: "Keep waiting.",
+        basis: "Refreshed context.",
+        options: [],
+      });
+      expect(store.briefs().has(questionKey)).toBe(true);
+      expect(store.question(id)?.answeredAt).toBeNull();
+    });
     it.each([
       ["hold_item", { key, reason: "Waiting", condition: { kind: "manual" } }],
       [

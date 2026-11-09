@@ -1232,6 +1232,7 @@ export interface BriefOption {
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
 /** How a question left Needs you without an answer. */
 export type QuestionClosureKind =
+  | "cleared"
   | "returned"
   | "withdrawn"
   | "ticket-closed"

@@ -168,7 +168,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   /**
    * The last wake's reasons, checked when FLIGHT's turn ends: each needs a decision on its target
    * (or to be settled). Each reason has its own round: round 2 is a reason already re-woken for
-   * with "You left these", so a miss there is its second and reaches the operator; a reason new to
+   * with "You left these", so a second miss retains an internal reminder; a reason new to
    * that re-wake is on round 1.
    */
   let audit: { wokeAt: number; reasons: AuditedReason[] } | null = null;
