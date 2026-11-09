@@ -2084,6 +2084,9 @@ export class Store {
     this.addColumn("comms", "sender_kind", "TEXT");
     // `notice` on a line the hub wrote; NULL on any other message.
     this.addColumn("comms", "kind", "TEXT");
+    this.db
+      .prepare("UPDATE comms SET kind = ? WHERE sender_kind = ? AND kind IS NULL")
+      .run(COMMS_NOTICE, "hub");
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);

@@ -2114,8 +2114,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const page = commsScopePage({ crew: true }, "crew", paging, false, since);
         const hidden =
           !history &&
-          store.commsCounts({ crew: true }, null).count >
-            store.commsCounts({ crew: true }, null, since).count;
+          store.commsCounts({ crew: true }, null, undefined, paging.hideNotices).count >
+            store.commsCounts({ crew: true }, null, since, paging.hideNotices).count;
         return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
       });
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)

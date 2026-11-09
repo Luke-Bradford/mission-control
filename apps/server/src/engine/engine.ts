@@ -197,9 +197,15 @@ export const TIP_MOVED = "the branch's tip is not the pushed commit, or could no
 /** The jobs an excerpt names, in order, once each: its `[job]` and `[job: tier]` headings. */
 export function ciExcerptJobs(excerpt: string): string[] {
   const jobs: string[] = [];
-  for (const m of excerpt.matchAll(/^\[([^\]:\n]+?)(?:: [^\]\n]*)?\]$/gm)) {
-    const job = m[1]?.trim() ?? "";
-    // the "[N more failing lines in JOB not shown; ...]" notes are not headings
+  const lines = excerpt.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i]?.match(/^\[([^\]\n]+?)\]$/);
+    if (!match?.[1]) continue;
+    const heading = match[1];
+    const tier = /: (?:console|last lines)$/.test(heading);
+    // Plain bracketed log tags are not job headings. ciLogBody labels a failure block or tier.
+    if (!tier && !/^\s*(?:FAIL\b|×|❯)/.test(lines[i + 1] ?? "")) continue;
+    const job = heading.replace(/: (?:console|last lines)$/, "").trim();
     if (job !== "" && !/ more failing lines in /.test(job) && !jobs.includes(job)) jobs.push(job);
   }
   return jobs;

@@ -1337,10 +1337,22 @@ describe("CI and review", () => {
     expect(row?.text).not.toContain("\n");
   });
 
+  it("a CI notice ignores bracketed log tags and keeps colons in job names", async () => {
+    await inCi();
+    await failCi();
+    h.excerptTexts = ["CI:\n[lint: web]\nFAIL test.ts\n[error]\nSome output\n[vite]\nMore output"];
+    await h.engine.reconcileRun(RUN);
+    expect(store.commsPage({ agent: SEAT }, 10).rows[0]?.text).toMatch(
+      /^CI failed on aaaaaaa in job lint: web\. https:/,
+    );
+  });
+
   it("a CI notice names every failing job once", async () => {
     await inCi();
     await failCi();
-    h.excerptTexts = ["CI:\n[web-core: console]\nboom\n\n[server]\nbang\n[web-core]\nagain"];
+    h.excerptTexts = [
+      "CI:\n[web-core: console]\nboom\n\n[server]\nFAIL server.test.ts\n[web-core]\nFAIL repeated.test.ts",
+    ];
     await h.engine.reconcileRun(RUN);
     expect(store.commsPage({ agent: SEAT }, 10).rows[0]?.text).toMatch(
       /^CI failed on aaaaaaa in jobs web-core, server\. https:/,

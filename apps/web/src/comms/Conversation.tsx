@@ -1,6 +1,7 @@
 import {
   COMMS_CAPCOM,
   COMMS_CREW,
+  COMMS_NOTICE,
   COMMS_TICKET,
   type CommsAgentResponse,
   type CommsMention,
@@ -38,7 +39,7 @@ import {
 } from "../router.ts";
 import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
-import { type CommsView, ticketForRef } from "./model.ts";
+import { type CommsView, noticeResource, ticketForRef } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
 
 const NO_MESSAGES: CommsMessage[] = [];
@@ -673,6 +674,7 @@ function PinnedMessage({ message }: { message: CommsMessage }) {
 
 function ModernConversation({
   view,
+  hideNotices,
   jumpId,
   onJumped,
   onOpenMessage,
@@ -680,6 +682,7 @@ function ModernConversation({
   onPrefillConsumed,
 }: {
   view: CommsView;
+  hideNotices: boolean;
   jumpId: string | null;
   onJumped: () => void;
   onOpenMessage: OpenMessage;
@@ -690,9 +693,10 @@ function ModernConversation({
   useEffect(() => {
     if (view.kind !== "crew") setCrewEarlier(false);
   }, [view.kind]);
-  const crewRef = crewEarlier
+  const crewBase = crewEarlier
     ? { ...RESOURCES.commsCrew, path: `${RESOURCES.commsCrew.path}?history=1` }
     : RESOURCES.commsCrew;
+  const crewRef = noticeResource(crewBase, hideNotices);
   const crew = useResource<CommsMessagesResponse>(view.kind === "crew" ? crewRef : null);
   useEffect(() => {
     if (
@@ -705,19 +709,21 @@ function ModernConversation({
       setCrewEarlier(true);
   }, [view.kind, jumpId, crewEarlier, crew.data]);
   const flight = useResource<CommsMessagesResponse>(
-    view.kind === "flight" ? RESOURCES.commsFlight : null,
+    view.kind === "flight" ? noticeResource(RESOURCES.commsFlight, hideNotices) : null,
   );
   const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat;
   // A contact's view needs the agent's conversation list and counts, not its messages too.
   const agent = useResource<CommsAgentResponse>(
     "agentId" in view
       ? view.kind === "contact"
-        ? RESOURCES.commsNav(view.agentId)
-        : RESOURCES.commsAgent(view.agentId)
+        ? noticeResource(RESOURCES.commsNav(view.agentId), hideNotices)
+        : noticeResource(RESOURCES.commsAgent(view.agentId), hideNotices)
       : null,
   );
   const contact = useResource<CommsMessagesResponse>(
-    view.kind === "contact" ? RESOURCES.commsContact(view.agentId, view.contactId) : null,
+    view.kind === "contact"
+      ? noticeResource(RESOURCES.commsContact(view.agentId, view.contactId), hideNotices)
+      : null,
   );
   const ticket = useResource<CommsTicketResponse>(
     view.kind === "ticket"
@@ -731,9 +737,9 @@ function ModernConversation({
   );
   const pins = useResource<CommsPinsResponse>(RESOURCES.commsPins).data?.messages ?? [];
   // The route this view pages, and the newest page it sent.
-  const pageRef =
+  const pageBase =
     view.kind === "crew"
-      ? crewRef
+      ? crewBase
       : view.kind === "flight"
         ? RESOURCES.commsFlight
         : view.kind === "contact"
@@ -741,6 +747,7 @@ function ModernConversation({
           : "agentId" in view
             ? RESOURCES.commsAgent(view.agentId)
             : null;
+  const pageRef = pageBase ? noticeResource(pageBase, hideNotices) : null;
   const page: CommsPage | undefined =
     view.kind === "crew"
       ? crew.data
@@ -759,10 +766,13 @@ function ModernConversation({
     !currentCrew && ((field === "inbox" ? page?.inboxHasMore : page?.hasMore) ?? false),
     field,
   );
-  const messages =
+  const visibleMessages =
     view.kind === "ticket"
       ? [...(ticket.data?.messages ?? [])].sort((a, b) => a.at - b.at)
       : olderMessages.messages;
+  const messages = hideNotices
+    ? visibleMessages.filter((message) => message.kind !== COMMS_NOTICE)
+    : visibleMessages;
   const lookupMessages = [...(agent.data?.messages ?? []), ...messages];
   const [reply, setReply] = useState<CommsMessage | null>(null);
   const [sent, setSent] = useState(0);
@@ -848,9 +858,11 @@ function ModernConversation({
       {showPins && pins.length > 0 && (
         <div className="comms-pins">
           <b>Pinned</b>
-          {pins.map((pin) => (
-            <PinnedMessage key={pin.id} message={pin} />
-          ))}
+          {pins
+            .filter((pin) => !hideNotices || pin.kind !== COMMS_NOTICE)
+            .map((pin) => (
+              <PinnedMessage key={pin.id} message={pin} />
+            ))}
         </div>
       )}
       {view.kind === "crew" && (crewEarlier || crew.data?.hasEarlier || page?.hasMore) && (
@@ -939,6 +951,7 @@ function ModernConversation({
 /** The route-driven Comms view uses the stored Comms API rather than transcript-derived threads. */
 export function CommsConversation({
   view,
+  hideNotices = false,
   row,
   prefill,
   onPrefillConsumed,
@@ -947,6 +960,7 @@ export function CommsConversation({
   onOpenMessage = () => {},
 }: {
   view: CommsView;
+  hideNotices?: boolean;
   row: CrewRow | null;
   prefill?: import("./model.ts").ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
@@ -967,6 +981,7 @@ export function CommsConversation({
     <ModernConversation
       key={conversationScope}
       view={view}
+      hideNotices={hideNotices}
       jumpId={jumpId}
       onJumped={onJumped}
       onOpenMessage={onOpenMessage}

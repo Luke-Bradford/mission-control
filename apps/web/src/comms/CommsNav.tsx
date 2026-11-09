@@ -12,6 +12,7 @@ import { plural } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { type CommsView, commsAgentPath, commsCrewPath, commsFlightPath } from "../router.ts";
+import { noticeResource } from "./model.ts";
 
 /** The short area label belongs in the compact nav; path globs belong in seat detail. */
 export function commsAgentRole(row: CrewRow): string {
@@ -24,13 +25,17 @@ export function AgentNavRow({
   view,
   mentions,
   onNavigate,
+  hideNotices = false,
 }: {
   row: CrewRow;
   view: CommsView;
   mentions: number;
+  hideNotices?: boolean;
   onNavigate: (path: string) => void;
 }) {
-  const data = useResource<CommsAgentResponse>(RESOURCES.commsNav(row.id)).data;
+  const data = useResource<CommsAgentResponse>(
+    noticeResource(RESOURCES.commsNav(row.id), hideNotices),
+  ).data;
   // The nav row reads counts, not messages: what its contact conversations hold (the crew
   // channel is not among them).
   const total = (data?.contacts ?? []).reduce((n, c) => n + c.count, 0);
@@ -124,14 +129,20 @@ export function CommsNav({
   flightId,
   view,
   onNavigate,
+  hideNotices = false,
 }: {
   rows: CrewRow[];
   flightId: string | undefined;
   view: CommsView;
   onNavigate: (path: string) => void;
+  hideNotices?: boolean;
 }) {
-  const crew = useResource<CommsMessagesResponse>(RESOURCES.commsCrew).data;
-  const flight = useResource<CommsMessagesResponse>(RESOURCES.commsFlight).data;
+  const crew = useResource<CommsMessagesResponse>(
+    noticeResource(RESOURCES.commsCrew, hideNotices),
+  ).data;
+  const flight = useResource<CommsMessagesResponse>(
+    noticeResource(RESOURCES.commsFlight, hideNotices),
+  ).data;
   const mentions =
     useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions).data?.mentions ?? [];
   // Observed loops appear in `/api/crew` too, but are not stored-Comms agents.  In particular,
@@ -191,6 +202,7 @@ export function CommsNav({
         <AgentNavRow
           key={row.id}
           row={row}
+          hideNotices={hideNotices}
           view={view}
           mentions={unseenMentionsFor(mentions, "agent", row.id)}
           onNavigate={onNavigate}

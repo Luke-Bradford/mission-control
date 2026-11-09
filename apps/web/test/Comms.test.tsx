@@ -26,6 +26,58 @@ afterEach(() => {
 });
 
 describe("Comms routes", () => {
+  it("hides hub notices through one switch while preserving crew messages and the draft", async () => {
+    const message = {
+      id: "comms:1",
+      at: NOW,
+      from: "alpha",
+      to: "crew",
+      text: "A real crew message",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const notice = {
+      ...message,
+      id: "comms:2",
+      from: "MC",
+      text: "CI failed. Read the check.",
+      kind: "notice",
+    };
+    const fetch = stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [message, notice] },
+      "/api/comms/crew?notices=hide": { messages: [message] },
+      "/api/comms/flight": { messages: [] },
+      "/api/comms/flight?notices=hide": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    await screen.findByText(notice.text);
+    const input = screen.getByLabelText(
+      "Post to #crew as CAPCOM · @name pings one agent",
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Keep my draft" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/crew?notices=hide", expect.anything()),
+    );
+    await waitFor(() => expect(screen.queryByText(notice.text)).toBeNull());
+    expect(screen.getByText(message.text)).toBeTruthy();
+    expect(input.value).toBe("Keep my draft");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await screen.findByText(notice.text);
+  });
   it("keeps the reader's place when the conversation rerenders", async () => {
     const message = {
       id: "comms:older",

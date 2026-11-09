@@ -1,5 +1,13 @@
 import { COMMS_TICKET, type CommsThreadMessage } from "@mc/core";
+import type { ResourceRef } from "../data.ts";
 import type { CommsView } from "../router.ts";
+
+/** Keep the notice filter on both the newest page and its older-page requests. */
+export function noticeResource(ref: ResourceRef, hidden: boolean): ResourceRef {
+  return hidden
+    ? { ...ref, path: `${ref.path}${ref.path.includes("?") ? "&" : "?"}notices=hide` }
+    : ref;
+}
 
 export type { CommsView } from "../router.ts";
 export type ComposerPrefill = { token: number; text: string };
