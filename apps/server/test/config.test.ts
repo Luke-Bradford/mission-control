@@ -101,7 +101,10 @@ const withNode = (yaml: string) =>
     // The sandbox can put TMPDIR below this checkout. The fixture must not turn that into a crew
     // worktree path, because production correctly rejects a worktree nested in the hub.
     .replace("worktrees: ~/code/mc-crew/worktrees", "worktrees: /mc-test-nowhere/worktrees")
-    .replace("checkout: ~/code/mc-crew/mission-control", "checkout: /mc-test-nowhere/mission-control");
+    .replace(
+      "checkout: ~/code/mc-crew/mission-control",
+      "checkout: /mc-test-nowhere/mission-control",
+    );
 /** The example config, pointed at this machine's node. */
 const EXAMPLE = join(mkdtempSync(join(tmpdir(), "mc-example-")), "config.yaml");
 writeFileSync(EXAMPLE, withNode(readFileSync(EXAMPLE_SOURCE, "utf8")));

@@ -89,7 +89,8 @@ const setSessionSeats = (
   seats: Parameters<typeof setSessionSeatsForFixture>[3],
   at: number,
 ) => setSessionSeatsForFixture(configPath, id, base, seats, at, fixtureHubRoot);
-const session = (id: string) => required(fixtureConfig(path).crew?.sessions.find((s) => s.id === id));
+const session = (id: string) =>
+  required(fixtureConfig(path).crew?.sessions.find((s) => s.id === id));
 const close = async (id: string) => {
   const result = await closeSession(path, id, () => true, now, session(id));
   return removeSessionCheckout(result.session, result.worktrees);
@@ -128,7 +129,10 @@ describe("session actions", () => {
     const first = await createSession(path, input("harbor-one"), now);
     await createSession(path, input("harbor-two"), now);
     expect(first.folders).toEqual([".github", "src"]);
-    expect(fixtureConfig(path).crew?.sessions.map((s) => s.id)).toEqual(["harbor-one", "harbor-two"]);
+    expect(fixtureConfig(path).crew?.sessions.map((s) => s.id)).toEqual([
+      "harbor-one",
+      "harbor-two",
+    ]);
     expect(session("harbor-one").checkout).not.toBe(session("harbor-two").checkout);
     expect(readFileSync(join(source, ".git", "config"), "utf8")).toBe(before);
     expect(git(source, "status", "--porcelain")).toBe("");
