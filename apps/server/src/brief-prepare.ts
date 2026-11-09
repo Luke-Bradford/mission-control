@@ -364,7 +364,7 @@ export async function prepareBriefActions(
           )
             throw new BriefError(409, "The configured approval repo changed.");
           const pr = store.pullRequest(target.repoId, target.number);
-          if (!pr || pr.state !== "open" || pr.headSha !== target.sha)
+          if (pr?.state !== "open" || pr.headSha !== target.sha)
             throw new BriefError(409, "The approval PR/head changed.");
         }
         break;
@@ -421,8 +421,7 @@ export async function prepareBriefActions(
       case "run-resume": {
         const loop = store.run(action.runId)?.loop;
         if (
-          !loop ||
-          loop.phase !== "parked" ||
+          loop?.phase !== "parked" ||
           loop.parked?.kind !== action.parkKind ||
           loop.parked.ended ||
           [

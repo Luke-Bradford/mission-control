@@ -384,8 +384,7 @@ export function createQaReports(i: {
     )
       missing.push("Before/after evidence or a visual applicability reason is missing.");
     if (
-      base.visual.manifest &&
-      base.visual.manifest.pairs.some(
+      base.visual.manifest?.pairs.some(
         (pair) =>
           !base.visual.pairs.some(
             (saved) =>
@@ -592,7 +591,7 @@ export function createQaReports(i: {
       } catch {
         throw new QaReportError(400, "Give the source review or comment permalink on this PR.");
       }
-      const sourcePath = `/` + repo.github + `/pull/${input.prNumber}`;
+      const sourcePath = `/${repo.github}/pull/${input.prNumber}`;
       if (
         source.origin !== "https://github.com" ||
         source.username ||
