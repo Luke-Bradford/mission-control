@@ -1742,6 +1742,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
+  ["POST", "/api/runs/shop-app-ta/pr-head", { sha: "a".repeat(40) }],
   ["POST", "/api/prs/shop-app/12/uat", { action: "accept", sha: "a".repeat(40) }],
   ["POST", "/api/prs/shop-app/12/controller-check", { verdict: "pass", sha: "a".repeat(40) }],
   ["POST", "/api/prs/shop-app/12/merge-hold", { action: "release", sha: "a".repeat(40) }],

@@ -380,8 +380,10 @@ export interface Engine {
    * FLIGHT takes in a PR head that came from outside the run: it is recorded as the run's push
    * and the run goes back to CI on it. False when the run is not in review or ci on an open PR
    * whose head is this one, or when it already is the push.
+   * The independent controller may also recover an inactive, clean working run preserved aside.
+   * This creates no author checks and retains every explicit stop and merge hold.
    */
-  adoptPrHead(runId: string, head: string): Promise<boolean>;
+  adoptPrHead(runId: string, head: string, by?: "Controller"): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
   acceptRuling(runId: string): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
@@ -630,7 +632,7 @@ export function createEngine(deps: EngineDeps): Engine {
     return loop.aside?.worktree ?? (seatRow?.runId === run.id ? (seatRow.worktree ?? null) : null);
   }
 
-  function flightHeld(run: Run): boolean {
+  function flightHeld(run: Run, action: "work" | "merge" = "work"): boolean {
     const seat = seatConfig(run.agentId);
     return (
       store.seatSession(run.agentId)?.state === "stopped" ||
@@ -642,7 +644,8 @@ export function createEngine(deps: EngineDeps): Engine {
             q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
         ) ||
       seat === undefined ||
-      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
+      (action === "work" &&
+        accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now()))
     );
   }
 
@@ -972,7 +975,7 @@ export function createEngine(deps: EngineDeps): Engine {
         repo?.autonomy === "merge" && activeAway(store, at, config.operator.timezone) === null,
       hardRulesSet: mergeAllowed,
       flightPowers: flightPowersOf(config, run.repoId),
-      flightHeld: flightHeld(run),
+      flightHeld: flightHeld(run, "merge"),
       floorApproved:
         pr !== null && mergeFloorApproval(store, pr.number, pr.headSha, at) !== undefined,
       card: item === undefined ? null : hudColumnOf(item),
@@ -1380,7 +1383,7 @@ export function createEngine(deps: EngineDeps): Engine {
       flightPowersOf(config, run.repoId) === "superuser"
     ) {
       const current = store.run(run.id);
-      if (current === null || flightHeld(current)) return;
+      if (current === null || flightHeld(current, "merge")) return;
       const snap = snapshot(current, cur, now(), hardRulesSet.get(run.repoId) === true);
       if (snap === null || !gateView(snap, cur).passes) return;
     }
@@ -3345,7 +3348,13 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!live()) return false;
         await pass(runId);
         const run = store.run(runId);
-        if (!run?.loop || run.endedAt !== null || flightHeld(run)) return false;
+        if (
+          !run?.loop ||
+          run.endedAt !== null ||
+          flightHeld(run, "merge") ||
+          pausedSeat(store, run.agentId, run.id)
+        )
+          return false;
         const sha = run.loop.awaitingFlight;
         if (
           !sha ||
@@ -3368,17 +3377,20 @@ export function createEngine(deps: EngineDeps): Engine {
       });
     },
 
-    adoptPrHead(runId, head) {
+    adoptPrHead(runId, head, by) {
       return onChainResult(runId, false, async () => {
         if (!live()) return false;
         const run = store.run(runId);
-        const loop = run?.loop;
+        let loop = run?.loop;
         if (
           !run ||
           !loop ||
           run.endedAt !== null ||
-          flightHeld(run) ||
-          (loop.phase !== "review" && loop.phase !== "ci") ||
+          flightHeld(run, "merge") ||
+          pausedSeat(store, run.agentId, run.id) ||
+          (loop.phase !== "review" &&
+            loop.phase !== "ci" &&
+            !(by === "Controller" && loop.phase === "working" && loop.aside)) ||
           run.branch === null ||
           flightPowersOf(config, run.repoId) !== "superuser"
         )
@@ -3386,6 +3398,34 @@ export function createEngine(deps: EngineDeps): Engine {
         const pr = findPr(run, loop);
         if (pr?.state !== "open" || pr.headSha !== head || store.runPush(runId)?.sha === head)
           return false;
+        if (by === "Controller") {
+          // Recovery changes no checkout and starts no author. Preserve its unpublished work and
+          // explicit holds; a working run is eligible only from its preserved, inactive worktree.
+          const activeAuthor = () =>
+            supervisor.seat(run.agentId)?.runId === run.id &&
+            (supervisor.seatFacts(run.agentId)?.inTurn !== false ||
+              supervisor.busy().some((seat) => seat.seatId === run.agentId));
+          if (loop.parked || loop.mergeHold || activeAuthor()) return false;
+          const worktree = worktreeOf(run, loop);
+          if (worktree === null) return false;
+          const changes = await publisher.worktreeChanges(run, worktree);
+          const current = store.run(runId);
+          if (
+            !Array.isArray(changes) ||
+            changes.length > 0 ||
+            current?.endedAt !== null ||
+            current.loop?.phase !== loop.phase ||
+            current.branch !== run.branch ||
+            current.loop?.parked ||
+            current.loop?.mergeHold ||
+            activeAuthor() ||
+            flightHeld(current, "merge") ||
+            pausedSeat(store, current.agentId, current.id) ||
+            findPr(current, current.loop)?.headSha !== head
+          )
+            return false;
+          loop = current.loop;
+        }
         const at = now();
         store.addRunCommit({ runId, repoId: run.repoId, branch: run.branch, sha: head, at });
         store.setRunPush({ runId, sha: head, at });
@@ -3406,7 +3446,7 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${runId}:${loop.epoch}:adopted:${head}`,
           runId,
-          `FLIGHT adopted head ${head.slice(0, 7)} from outside the run`,
+          `${by ?? "FLIGHT"} adopted head ${head.slice(0, 7)} from outside the run`,
           at,
         );
         lastTransient.delete(runId);

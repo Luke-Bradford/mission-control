@@ -1244,6 +1244,26 @@ The text waits for that run (it is not sent to a newer run on the same seat). Th
 `review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
 refused; use the explicitly named resume route above only when accepting a review waiver is intended.
 
+### Recover a preserved crew PR
+
+An author at its account stop starts no more work. Its already green, independently reviewed PR
+can still receive FLIGHT's clearance and merge without waking the author. Explicit operator Stop,
+crew pause, budget parks, operator questions, merge holds and the ordinary QA and CI gates remain.
+
+When the controller has continued a crew PR on its preserved branch, the controller or operator
+can adopt its actual published head with
+`POST /api/runs/:id/pr-head { "sha": "<full published SHA>" }`. The ordinary operator or controller
+credential is required; seat tokens and FLIGHT's operator tool cannot make this recovery. It applies
+only to a same-repository, open, non-draft PR in a superuser merge workspace, at the freshly verified
+GitHub head and original branch. It refuses an active author, a dirty or unreadable worktree, a
+paused or explicitly stopped run, any park and any merge hold. A working run must be preserved aside.
+
+Adoption records the source as the run's push, clears old-head waivers and clearance, and returns the
+run to CI. It creates no check receipts, changes no checkout and starts no author. Fresh CI and
+independent QA on that head are required; FLIGHT then gives its normal head-bound merge clearance.
+An account stop still prevents the author from waking if rework is needed. The controller action
+is logged as a sync decision. A repeated request for the same adopted head makes no second adoption.
+
 ### Accept or send back a PR at UAT
 
 A repo whose rules set `uat` (labels, paths or both) keeps the engine from merging a matching PR until

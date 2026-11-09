@@ -570,7 +570,15 @@ export interface AppDeps {
   /** The first loop's engine: told of the operator's messages, and says why it is off. Absent: none. */
   engine?: Pick<Engine, "onOperatorMessage" | "status"> &
     Partial<
-      Pick<Engine, "controllerCheck" | "uat" | "holdMerge" | "releaseMergeHold" | "reconcileRun">
+      Pick<
+        Engine,
+        | "controllerCheck"
+        | "uat"
+        | "holdMerge"
+        | "releaseMergeHold"
+        | "reconcileRun"
+        | "adoptPrHead"
+      >
     >;
   /** The Update button (`update.ts`); absent: version says why, and update answers 409. */
   updater?: Updater;
@@ -5299,6 +5307,81 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
+      // Reader: docs/runbook.md#recover-a-preserved-crew-pr (controller recovery, never a waiver).
+      api.post<{ Params: { id: string } }>("/runs/:id/pr-head", async (req, reply) => {
+        if (
+          req.headers[FLIGHT_OPERATOR_ACTOR_HEADER] !== undefined ||
+          deps.tokens?.resolve(bearer(req))
+        )
+          return reply
+            .code(403)
+            .send({ error: "This action belongs to the operator or independent controller." });
+        const body = z
+          .strictObject({ sha: z.string().regex(/^[a-f0-9]{40}$/) })
+          .safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: "invalid published head" });
+        const run = store.run(req.params.id);
+        const repo = config.repos.find((value) => value.id === run?.repoId);
+        const pr =
+          repo && store.pullRequests(repo.id).find((value) => value.number === run?.loop?.prNumber);
+        if (
+          !run?.loop ||
+          run.endedAt !== null ||
+          !repo ||
+          repo.autonomy !== "merge" ||
+          flightPowersOf(config, repo.id) !== "superuser" ||
+          !pr ||
+          pr.state !== "open" ||
+          pr.branch !== run.branch ||
+          pr.headSha !== body.data.sha
+        )
+          return reply.code(409).send({ error: "no matching preserved crew PR" });
+        if (!crewGate(run.agentId, reply)) return reply;
+        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+        if (crewSeatDef(config, run.agentId).loop !== "build" || run.reviewId != null)
+          return reply.code(409).send({ error: "only a preserved build run can adopt a PR head" });
+        if (deps.engine?.status().on !== true || !deps.engine.adoptPrHead)
+          return reply.code(409).send({ error: "the loop engine is off" });
+        try {
+          const subject = await readExternalSubject(
+            deps.gh ?? createGh(),
+            crewDir(store.path),
+            repo,
+            pr.number,
+            body.data.sha,
+          );
+          if (
+            !subject ||
+            subject.branch !== run.branch ||
+            store.pullRequest(repo.id, pr.number)?.headSha !== body.data.sha
+          )
+            return reply
+              .code(409)
+              .send({ error: "the current PR head and provenance could not be verified" });
+        } catch {
+          return reply.code(502).send({ error: "the current PR could not be read" });
+        }
+        if (store.runPush(run.id)?.sha === body.data.sha && store.run(run.id)?.loop?.adopted)
+          return { ok: true };
+        if (!(await deps.engine.adoptPrHead(run.id, body.data.sha, "Controller")))
+          return reply
+            .code(409)
+            .send({ error: "the author is active, its worktree is not clean, or the run is held" });
+        store.addFlightDecision({
+          at: now(),
+          kind: "sync",
+          seatId: null,
+          targetRunId: run.id,
+          ref: run.ticket,
+          questionId: null,
+          about: `Controller adopted PR ${pr.number}`,
+          decision: `Adopted published head ${body.data.sha}; fresh CI and independent QA are required.`,
+          basis:
+            "Explicit controller recovery of an inactive preserved crew PR. No author checks, waiver or clearance are carried over.",
+        });
+        bus.emit("agents");
+        return { ok: true };
+      });
       const externalTarget = async (
         repoId: string,
         number: number,
