@@ -1486,8 +1486,12 @@ function buildAttentionItems(
   const closures = store.closedItemKeys();
   const currentBrief = (i: OwnedItem) => {
     const saved = briefs.get(i.key);
-    return (saved && store.choice(i.key, saved.at)) ||
-      (i.key.startsWith(NOTE_KEY) && saved && saved.at < i.at)
+    // Retain automatic hub briefs as history, without exposing them as operator questions.
+    const legacyCommsBrief =
+      i.key.startsWith(COMMS_OPEN_PREFIX) && saved?.by === "hub" && saved.for !== "flight";
+    return legacyCommsBrief ||
+      (saved && store.choice(i.key, saved.at)) ||
+      (saved && saved.at < i.at && (i.key.startsWith(NOTE_KEY) || saved.for === "flight"))
       ? undefined
       : saved;
   };

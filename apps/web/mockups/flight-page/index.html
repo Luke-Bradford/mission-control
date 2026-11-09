@@ -215,7 +215,14 @@
         const rows = [...list.children];
         for (const li of rows) { li.hidden = false; li.style.borderBottom = ""; }
         let n = rows.length;
-        while (n > 3 && list.scrollHeight > list.clientHeight + 1) rows[--n].hidden = true;
+        while (n > 3) {
+          // Measure the candidate as the final visible row, with no trailing divider. Keeping
+          // its divider during the fit check can discard a whole row that would otherwise fit.
+          rows[n - 1].style.borderBottom = "0";
+          if (list.scrollHeight <= list.clientHeight + 1) break;
+          rows[n - 1].style.borderBottom = "";
+          rows[--n].hidden = true;
+        }
         if (rows[n - 1]) rows[n - 1].style.borderBottom = "0";
         document.getElementById("decSub").textContent = `last ${n} · newest first`;
       }

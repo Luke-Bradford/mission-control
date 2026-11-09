@@ -9,8 +9,8 @@ import { act, cleanup, render, waitFor } from "@testing-library/react";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
+import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
-import { Flight } from "../src/pages/Flight.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { Telemetry } from "../src/pages/Telemetry.tsx";
 import { Header } from "../src/shell/Header.tsx";
@@ -79,7 +79,7 @@ const EXPECTED: Record<MetricId, string> = {
 /** The FLIGHT page opened on the tab a `#fragment` link names. */
 function flightAt(hash: string): ReactElement {
   window.history.replaceState(null, "", `/flight${hash}`);
-  return <Flight />;
+  return <FlightTabs />;
 }
 
 /** Where each page shows a figure; every figure appears on at least one. */

@@ -149,7 +149,6 @@ import { evaluateHolds, holds } from "../src/attention-holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
-import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -7720,13 +7719,23 @@ describe("superuser housekeeping", () => {
     });
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
-    expect(raiseStalledCommsDecisions({ config: cfg, store, now: nowMs })).toBe(1);
-    // the hub's fallback brief is a complete question on the ticket, so it passes the entry check
+    // Preserve an already-stored fallback as history; it no longer makes this the operator's.
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "hub",
+      at: nowMs,
+      ask: "Should the crew proceed, or hold?",
+      context: "A crew member has waited for another's answer.",
+      recommendation: "Keep the work reversible.",
+      basis: "Legacy fallback.",
+      options: [
+        { id: "proceed", label: "Proceed", answer: "Proceed." },
+        { id: "hold", label: "Hold", answer: "Hold." },
+      ],
+    });
     expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
-      owner: "operator",
-      brief: {
-        ask: "A crew member has waited 45 minutes for another's answer about a ticket: should it go ahead on its best judgment, or hold?",
-      },
+      owner: "flight",
     });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
       "isError",

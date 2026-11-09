@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { EvidenceManifest } from "@mc/core";
+import { EVIDENCE_KINDS, EVIDENCE_SCHEMES, type EvidenceManifest } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createPrEvidence,
@@ -94,7 +94,119 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
 
 const WEB = ["apps/web/src/board/Card.tsx"];
 
+it("keeps draft when a graph-only page failed and only folder-page pairs were saved", async () => {
+  const t = setup({
+    webGraph: async () => ({ "apps/web/src/comms/ItemBrief.tsx": ["needs", "comms"] }),
+    render: async (origin, path, scheme) => {
+      if (path.startsWith("/needs-you")) throw new Error("Needs unavailable");
+      return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+    },
+  });
+  const target = { repoId: "mc", pr: 7, sha: HEAD, paths: ["apps/web/src/comms/ItemBrief.tsx"] };
+  await t.evidence.ensure(target);
+  t.store.save(
+    {
+      repoId: "mc",
+      pr: 7,
+      sha: HEAD,
+      mainSha: MAIN,
+      capturedAt: 5000,
+      pairs: EVIDENCE_SCHEMES.map((scheme) => ({
+        page: "comms" as const,
+        scheme,
+        changedPixels: 0,
+        changedPercent: 0,
+        regions: [],
+      })),
+    },
+    EVIDENCE_SCHEMES.flatMap((scheme) =>
+      EVIDENCE_KINDS.map((kind) => ({
+        name: `comms-${scheme}-${kind}.png`,
+        png: encodePng(pageBox(HEAD, scheme)),
+      })),
+    ),
+  );
+  expect(t.evidence.gate(target)).toContain("missing pages: needs");
+  expect(t.evidence.gate(target)).not.toContain("missing pages: needs, comms");
+});
+
+it("shares an in-flight graph read and retries after a transient failure", async () => {
+  let release!: () => void;
+  let calls = 0;
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const t = setup({
+    webGraph: async () => {
+      calls++;
+      if (calls === 1) {
+        await blocked;
+        throw new Error("temporary graph failure");
+      }
+      return { "apps/web/src/comms/ItemBrief.tsx": ["needs", "comms"] };
+    },
+  });
+  const target = { pr: 7, sha: HEAD, paths: ["apps/web/src/comms/ItemBrief.tsx"] };
+  const a = t.evidence.ensure(target),
+    b = t.evidence.ensure(target);
+  await vi.waitFor(() => expect(calls).toBe(1));
+  release();
+  await Promise.all([a, b]);
+  await t.evidence.ensure(target);
+  expect(calls).toBe(2);
+  expect(t.store.manifest("mc", 7, HEAD)?.pairs.some((p) => p.page === "needs")).toBe(true);
+});
+
+it("aborts and waits for an in-flight graph read on stop", async () => {
+  let signal: AbortSignal | undefined;
+  const t = setup({
+    webGraph: async (_sha, s) => {
+      signal = s;
+      return new Promise((_resolve, reject) =>
+        s.addEventListener("abort", () => reject(s.reason), { once: true }),
+      );
+    },
+  });
+  const reading = t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+  await vi.waitFor(() => expect(signal).toBeDefined());
+  await t.evidence.stop();
+  expect(signal?.aborted).toBe(true);
+  await reading;
+  expect(t.started).toEqual([]);
+});
+
 describe("PrEvidence capture", () => {
+  it("photographs the pages the head's import graph names, not the folder's", async () => {
+    const seen: string[] = [];
+    const t = setup({
+      webGraph: async (sha) => {
+        seen.push(sha);
+        return { "apps/web/src/comms/ItemBrief.tsx": ["needs", "comms"] };
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: ["apps/web/src/comms/ItemBrief.tsx"] });
+    expect(seen).toEqual([HEAD]);
+    expect([...new Set(t.rendered.map((r) => r.path))]).toEqual(["/needs-you", "/comms"]);
+    expect(
+      t.evidence.gate({
+        repoId: "mc",
+        pr: 7,
+        sha: HEAD,
+        paths: ["apps/web/src/comms/ItemBrief.tsx"],
+      }),
+    ).toBeNull();
+  });
+
+  it("keeps the folder rule when the import graph cannot be read", async () => {
+    const t = setup({
+      webGraph: async () => {
+        throw new Error("no checkout");
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: ["apps/web/src/comms/ItemBrief.tsx"] });
+    expect([...new Set(t.rendered.map((r) => r.path))]).toEqual(["/comms"]);
+  });
+
   it("renders each affected page in light and dark on main and head from one snapshot", async () => {
     const t = setup();
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
