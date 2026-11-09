@@ -56,6 +56,31 @@ describe("prEvidenceAffectedPages", () => {
     expect(prEvidenceAffectedPages(["apps/web/src/components/Markdown.tsx"])).toEqual(ALL);
   });
 
+  it("uses the import graph: a file maps to the pages that reach it, else the folder rule", () => {
+    const graph = {
+      "apps/web/src/comms/ItemBrief.tsx": ["comms", "needs"],
+      "apps/web/src/setup/Accounts.tsx": ["setup"],
+      "apps/web/src/shell/Header.tsx": [...ALL],
+    } as never;
+    expect(prEvidenceAffectedPages(["apps/web/src/comms/ItemBrief.tsx"], graph)).toEqual([
+      "needs",
+      "comms",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/setup/Accounts.tsx"], graph)).toEqual([
+      "setup",
+      "setup_repos",
+      "setup_loops",
+      "setup_accounts",
+      "setup_roles",
+      "setup_sources",
+      "setup_access",
+    ]);
+    expect(prEvidenceAffectedPages(["apps/web/src/shell/Header.tsx"], graph)).toEqual(ALL);
+    // not in the graph: today's folder rule
+    expect(prEvidenceAffectedPages(["apps/web/src/board/Card.tsx"], graph)).toEqual(["board"]);
+    expect(prEvidenceAffectedPages(["apps/web/src/comms/ItemBrief.tsx"])).toEqual(["comms"]);
+  });
+
   it("treats a file it cannot place as the whole app, and a test-only change as none", () => {
     expect(prEvidenceAffectedPages(["apps/web/src/palette/Palette.tsx"])).toEqual(ALL);
     expect(prEvidenceAffectedPages(["apps/web/package.json"])).toEqual(ALL);

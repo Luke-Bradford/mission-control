@@ -61,11 +61,14 @@ describe("Demo sub-views", () => {
     clean();
   });
 
-  it("Flight: what FLIGHT knows", async () => {
+  it("Flight: status, doing now, blockers and recent decisions on one page", async () => {
     await at("/flight");
-    await clickText(/what flight knows/i);
+    await waitFor(() => {
+      for (const name of ["Doing now", "Blockers", "Recent decisions"]) {
+        if (!document.body.textContent?.includes(name)) throw new Error(`nothing says ${name}`);
+      }
+    });
     clean();
-    expect(document.body.textContent).toMatch(/checkout cache/i);
   });
 
   it("Telemetry with a seat filter", async () => {

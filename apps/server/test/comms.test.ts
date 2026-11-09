@@ -463,6 +463,28 @@ it("keeps CAPCOM mentions newest first and finds boundary-safe ticket refs", asy
   expect(store.commsForTicket("#703").rows.map((row) => row.id)).not.toContain(falseMatch.id);
 });
 
+it.each(["The checks passed.", "@CAPCOM The checks passed. @CAPCOM"])(
+  "counts a direct message to CAPCOM once, whether tagged or not: %s",
+  async (text) => {
+    const deps = {
+      store,
+      crew: () => ["seat", "other"],
+      knownSecrets: async () => [],
+      senderKind: "seat" as const,
+      now: () => 10,
+      seatSender: true,
+    };
+    const sent = await sendComms(deps, "seat", { to: "CAPCOM", text });
+    expect(sent.mentions).toEqual(["CAPCOM"]);
+    expect(store.commsMentions("CAPCOM").map((row) => row.id)).toEqual([sent.id]);
+    expect(store.commsMentionSeen("CAPCOM", sent.id)).toBe(false);
+    store.markCommsMentionsSeen("CAPCOM", [sent.id], 11);
+    expect(store.commsMentionSeen("CAPCOM", sent.id)).toBe(true);
+    await sendComms(deps, "seat", { to: "other", text: "Private peer message" });
+    expect(store.commsMentions("CAPCOM").map((row) => row.id)).toEqual([sent.id]);
+  },
+);
+
 it("reuses parsed transcripts across thread and attention reads", () => {
   expect(messages()[0]?.text).toBe("first");
   expect(threadMessages(store, "seat", true, "attention")).toEqual(messages());

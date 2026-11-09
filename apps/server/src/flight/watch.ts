@@ -555,7 +555,13 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       rotating = false;
       rotationRequested = false; // the fresh session already sees the current config
       try {
-        const { digest, snapshot } = flightWake(state, undefined, store.flightMemory(state.repo));
+        const { digest, snapshot } = flightWake(
+          state,
+          undefined,
+          store.flightMemory(state.repo),
+          false,
+          t,
+        );
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
         const reasons = wakeReasons(lastFacts, wakeFacts(state), state.items);
         const left = leftOf(state);
@@ -741,6 +747,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         state,
         delivered?.runId === runId ? delivered.snapshot : undefined,
         store.flightMemory(state.repo),
+        false,
+        t,
       );
       const changed = changedWakeFacts(lastFacts, wake);
       const causes = left === null ? changed : [leftLine(left), ...changed];
@@ -859,6 +867,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           delivered?.runId === runId ? delivered.snapshot : undefined,
           [],
           true,
+          now(),
         ).snapshot,
       };
     },
