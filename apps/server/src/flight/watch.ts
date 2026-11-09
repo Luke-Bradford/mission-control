@@ -236,15 +236,23 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   const noteOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_NOTE_KEY);
   const downOpen = (): boolean => store.notes().some((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
   /** Says FLIGHT is down (parked, at a stop line, silent mid-turn) until it is back. */
-  const raiseDown = (seatId: string, repoId: string, reason: string, t: number): void => {
-    if (downOpen()) return;
-    store.raiseNote({
+  const raiseDown = (
+    seatId: string,
+    repoId: string,
+    reason: string,
+    t: number,
+    refresh = false,
+  ): void => {
+    const text = flightDownText(reason);
+    const current = store.notes().find((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    if (current !== undefined && (!refresh || current.text === text)) return;
+    store.refreshNote({
       key: FLIGHT_DOWN_NOTE_KEY,
       kind: "blocked",
       runId: null,
       seatId,
       repoId,
-      text: flightDownText(reason),
+      text,
       at: t,
     });
     bus.emit("attention");
@@ -493,6 +501,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           found.session.repoId,
           "a pending change holds its start. Your message is saved",
           t,
+          true,
         );
       else clearDown(t);
       // A usage stop holds background work, not an answer the operator explicitly requested.

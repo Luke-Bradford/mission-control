@@ -2022,7 +2022,18 @@ describe("the FLIGHT watcher", () => {
       resetAt: T0 + 60 * MIN,
       source: "test",
     });
-    store.addComms({ at: T0, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "Status?" });
+    await watch.check();
+    const beforeRequest = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    expect(beforeRequest).toHaveLength(1);
+    expect(beforeRequest[0]?.text).toContain("usage stop line");
+    nowMs += MIN;
+    store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "Status?",
+    });
     await watch.check();
     expect(startCalls).toEqual([]);
     const down = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
