@@ -26,6 +26,8 @@ interface Probe {
   height: number;
   bandHeight: number;
   gridTop: number;
+  lastPanelBottom: number;
+  workBottom: number;
   tileMin: number;
   tilesClipped: string[];
   valueSpill: string[];
@@ -71,6 +73,10 @@ const probe = (page: RenderedPage): Promise<Probe> =>
       height: root.scrollHeight,
       bandHeight: document.querySelector(".band")?.getBoundingClientRect().height ?? 0,
       gridTop: document.querySelector(".grid")?.getBoundingClientRect().top ?? 0,
+      lastPanelBottom: Math.max(
+        ...[...document.querySelectorAll(".panel")].map((p) => p.getBoundingClientRect().bottom),
+      ),
+      workBottom: document.querySelector(".work")?.getBoundingClientRect().bottom ?? 0,
       tileMin: Math.min(
         ...[...document.querySelectorAll<HTMLElement>(".band .stat")].map(
           (t) => t.getBoundingClientRect().width,
@@ -124,8 +130,10 @@ describeRendered("Telemetry mockup in a browser", () => {
               theme,
             );
             expect(result.tileMin, where).toBeGreaterThanOrEqual(width >= 1600 ? 180 : 140);
-            if (width === 1600 && height === 1000)
+            if (width === 1600 && height === 1000) {
               expect(result.height, where).toBeLessThanOrEqual(1000);
+              expect(result.lastPanelBottom, where).toBeLessThanOrEqual(result.workBottom + 1);
+            }
             await page.close();
           }
         }
@@ -239,7 +247,10 @@ describeRendered("Telemetry mockup in a browser", () => {
           const result = await probe(page);
           expect(page.errors(), where).toEqual([]);
           expectSound(result, where);
-          if (width === 1600) expect(result.height, where).toBeLessThanOrEqual(height);
+          if (width === 1600) {
+            expect(result.height, where).toBeLessThanOrEqual(height);
+            expect(result.lastPanelBottom, where).toBeLessThanOrEqual(result.workBottom + 1);
+          }
           await page.click('#view [data-view="table"]');
           await page.box(".panel table");
           expectSound(await probe(page), `${where} table`);
