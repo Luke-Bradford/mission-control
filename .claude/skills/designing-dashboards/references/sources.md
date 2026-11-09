@@ -24,8 +24,8 @@ before a large piece of work, since vendor guidance changes. Compiled 9 November
 | --- | --- |
 | [Web Content Accessibility Guidelines 2.2](https://www.w3.org/TR/WCAG22/) | Contrast (1.4.3, 1.4.11), use of colour (1.4.1), text alternatives (1.1.1), structure (1.3.1), keyboard (2.1.1), focus visible (2.4.7), target size (2.5.8), content on hover (1.4.13), resize text (1.4.4), reflow (1.4.10), flashing (2.3.1), status messages (4.1.3), reduced motion (2.3.3, level AAA) |
 | [International Business Communication Standards](https://www.ibcs.com/) | Consistent notation for actual, previous period, plan and forecast; red and green kept for variances |
-| [ISA-101](https://www.isa.org/standards-and-publications/isa-standards/isa-101-standards), human-machine interfaces for process automation, and the "high performance HMI" practice built on it | Control-room screens stay grey and calm in normal running, with colour kept for abnormal conditions ([operational-consoles](operational-consoles.md)) |
-| EEMUA Publication 191, alarm systems | An operator can handle only a few alerts an hour; it is usually summarised as about one per ten minutes in steady running. Read the document before quoting a figure to a client |
+| [ISA-101](https://www.isa.org/standards-and-publications/isa-standards/isa-101-standards), human-machine interfaces for process automation, and the "high performance HMI" practice that influenced it | Restrained use of colour on operator screens; in the high-performance practice, screens stay grey and calm in normal running with colour kept for abnormal conditions ([operational-consoles](operational-consoles.md)) |
+| EEMUA Publication 191, alarm systems, and the related standard ISA-18.2 | An operator can handle only a few alerts an hour. The long-standing rule of thumb is about one per ten minutes in steady running; the documents give more detail. Read them before quoting a figure to a client |
 
 ## Design systems and vendor guidance
 
@@ -37,14 +37,14 @@ before a large piece of work, since vendor guidance changes. Compiled 9 November
 | [Google, *Site Reliability Engineering*, "Monitoring Distributed Systems"](https://sre.google/sre-book/monitoring-distributed-systems/) | Latency, traffic, errors and saturation |
 | [Financial Times Visual Vocabulary](https://github.com/Financial-Times/chart-doctor/tree/main/visual-vocabulary) and the [EU data visualisation guide](https://data.europa.eu/apps/data-visualisation-guide/) | Choosing a chart from the relationship to be shown |
 | [UK Government Analysis Function: data visualisation guidance](https://analysisfunction.civilservice.gov.uk/policy-store/data-visualisation-colours-in-charts/) | Add colour only where it shows a useful difference; accessible category palettes; every chart needs a text alternative |
-| Datawrapper blog: [which colour scale to use](https://blog.datawrapper.de/which-color-scale-to-use-in-data-vis/), [why not to use two axes](https://blog.datawrapper.de/dualaxis/) | Sequential against diverging scales; the case against dual axes |
+| Datawrapper blog: [which colour scale to use](https://www.datawrapper.de/blog/which-color-scale-to-use-in-data-vis), [why not to use two axes](https://www.datawrapper.de/blog/dualaxis) | Sequential against diverging scales; the case against dual axes |
 | Nielsen Norman Group: [dashboards and preattentive attributes](https://www.nngroup.com/articles/dashboards-preattentive/), [skeleton screens](https://www.nngroup.com/articles/skeleton-screens/), [visibility of system status](https://www.nngroup.com/articles/visibility-system-status/) | Which chart attributes are read at a glance; loading placeholders; always showing the reader what the system is doing |
 
 ## Other published agent skills surveyed
 
 Read on 9 November 2026 to see what ground a skill of this kind usually covers. This skill shares their
-subject and the common literature above, so some advice overlaps, most of all with the first: check the
-numbers before the pixels, design every state, review from a screenshot. The wording, structure and
+subject and the common literature above, so some advice overlaps, most of all with the first: reconcile
+figures to their source first, design every state, review from a screenshot. The wording, structure and
 examples here are our own, and none of their code, case studies or house styles are used.
 
 - `abdiraimov-otabek/dashboard-design-skill` (MIT): strong on component patterns and a screenshot review

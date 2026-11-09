@@ -93,7 +93,7 @@ If the reader acts on the page or it shows live things, add the checks at the en
 | Everything flagged the same | No severity | Order by size of miss; give the worst the strongest treatment and the rest a quieter one |
 | The eye goes to the logo, a header bar or a gradient | Chrome is louder than data | Mute the chrome; remove fills and shadows |
 | A chart nobody can summarise in a sentence | Built from available data, not from a question | Write the question; choose the form again or delete the chart |
-| A legend with ten entries | Too many series | Small multiples, top five plus "Other", or highlight one and grey the rest |
+| A legend with ten entries | Too many series | Small multiples, the largest few plus "Other", or highlight one and grey the rest |
 | Rotated or overlapping axis labels | Wrong orientation or too many ticks | Horizontal bars; fewer ticks; shorter date formats |
 | A label far from its value in a wide table | Table stretched to fill the screen | Size columns to content; cap the table; give spare width to another panel |
 | Two measures in one cell ("19 / 8") | Columns saved at the reader's expense | One column per measure, or value plus a signed change |

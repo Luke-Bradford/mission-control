@@ -10,7 +10,9 @@ short that loop is, and on whether the reader can trust what it says while they 
 
 ## Status and liveness
 
-Each thing on the page is in a state. Design the states before the screen.
+Each thing on the page is in a state. Design the states before the screen. These are states of the
+things shown; the states of a panel's data (loading, stale, partial) are in
+[states-and-interaction](states-and-interaction.md).
 
 - **One vocabulary.** A short, closed list of states (for example running, waiting, blocked, failed,
   done, unknown), with one word, one shape and one colour each, used on every page. Two words for one
@@ -43,12 +45,12 @@ easiest to ruin.
 - **Each item has an exit**: answer, approve, dismiss, hand over. Say what happens next, and remove it
   when it is done.
 - **The count is honest.** A badge counts items that need action, and matches the list.
-- **Empty is the goal.** Say "Nothing needs you" plainly, with when that was last checked.
+- **Empty is the goal.** Say "Nothing is waiting for you" plainly, with when that was last checked.
 - **Cap it on overview pages**: the top few, with the total and a link to the rest.
 
 ## Actions
 
-- **Put the action beside the thing it acts on**, labelled with a verb and an object: "Pause seat",
+- **Put the action beside the thing it acts on**, labelled with a verb and an object: "Pause job",
   not "OK" or an unlabelled icon.
 - **Acknowledge at once, confirm when true.** On click, show that the request was sent. Change the state
   only when the system confirms it. If you show the new state early, mark it as pending and put it back
@@ -70,7 +72,7 @@ Charts of figures are in [chart-selection](chart-selection.md). Consoles also ne
 | Form | Use it for | Rules |
 | --- | --- | --- |
 | **Activity lanes** (one row per worker, time across) | Who was doing what, when; gaps and overlaps | All lanes share one clock; now is marked; states use the page's status colours; a lane's label opens that worker |
-| **Event log or stream** | What happened, in order | One line per event: time, who, what, to what; newest position consistent; filter by source and severity; repeats grouped with a count; each line links to its subject |
+| **Event log or stream** | What happened, in order | One line per event: time, who, what, to what; newest at the top or at the bottom, the same on every log; filter by source and severity; repeats grouped with a count; each line links to its subject |
 | **Board** (columns are stages) | Work moving through a process | Stages in order, count in each header, each column scrolls by itself; cards show only what decides the next move; mark cards that are stuck |
 | **Node and link map** | Dependencies; what flows where | Only when the structure is the question; keep positions stable between refreshes; labels readable without hover; offer a list of the same data |
 | **Progress** | A known amount of work | Done of total, with units; a rate or time left only if it is reliable; an indeterminate indicator when the total is unknown |
