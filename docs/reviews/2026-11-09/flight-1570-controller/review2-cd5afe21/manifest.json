@@ -1,0 +1,118 @@
+{
+  "head": "cd5afe21b06f2e722d07fc8affacd054c123ac5f",
+  "method": "Committed-head FlightPage.browser.test.ts with MC_FLIGHT_PAGE_SHOTS; real App browser harness, fixed public fixtures and fixture clock.26casesPASS.",
+  "changes": "Formats live-shaped decision references and hashes in both row/Basis; page is read-only; stopped status has one period.",
+  "browser": "Google Chrome 156.0.8078.80",
+  "deviceScaleFactor": 1,
+  "images": [
+    {
+      "file": "flight-page-1920x940-blocked-dark.png",
+      "sha256": "49de2f1aa9a8f1eb32b24ae89d3c37b650acd250c9fa3574d17fd1a11e1ae356"
+    },
+    {
+      "file": "flight-page-1920x940-blocked-light.png",
+      "sha256": "5b68ffcd019dc8a840755efe940d6b27a8e426f95ef72ebec4584e176e16b2bd"
+    },
+    {
+      "file": "flight-page-1920x940-busy-dark.png",
+      "sha256": "c41bb0ed5cb351fc7a737eb3bfb5e2db7a6992130f6a4bc267c39c019abe0ef3"
+    },
+    {
+      "file": "flight-page-1920x940-busy-light.png",
+      "sha256": "e6a4f55a508db964f6670db07e3b1d781dfca3b8d84dbe87a21c8790ef206aca"
+    },
+    {
+      "file": "flight-page-1920x940-running-dark.png",
+      "sha256": "5189c535edca0b9473f0b3ca244d9909041f734677e75016099ff290d8954713"
+    },
+    {
+      "file": "flight-page-1920x940-running-light.png",
+      "sha256": "e54fbd41cdd0d630e17bb2695f7616cae51514eaf04dd12770675ba89b3c5985"
+    },
+    {
+      "file": "flight-page-1920x940-stopped-dark.png",
+      "sha256": "c06b5af40e11aeafb60b86b7b02e429a7ba250eb82a9e8859409cb00f16b5b4c"
+    },
+    {
+      "file": "flight-page-1920x940-stopped-light.png",
+      "sha256": "4d4802c05a4e5477b5eb13ba3516d07fa1c68b7afaa610111935be5f848f98ea"
+    },
+    {
+      "file": "flight-page-2560x1200-blocked-dark.png",
+      "sha256": "f8f5b0bde8ed6692b0a7e7c1527318b842c8c823c3bb6c77cf72d605614b63ee"
+    },
+    {
+      "file": "flight-page-2560x1200-blocked-light.png",
+      "sha256": "22f0aadbeaed7ed43978c8a5574a819e232427e5ea9434384d3663fc369e32ba"
+    },
+    {
+      "file": "flight-page-2560x1200-busy-dark.png",
+      "sha256": "cc6e5f8bdd0b1791d91580b28157f42c36e1da14bef715382c4204577ec9ecad"
+    },
+    {
+      "file": "flight-page-2560x1200-busy-light.png",
+      "sha256": "363aa58d64ac3309365d02607ae2493bfa0a8bd039dc067671d907f404e4fad5"
+    },
+    {
+      "file": "flight-page-2560x1200-running-dark.png",
+      "sha256": "65b9895fd018f29625770332f28653b85e2d2e1f23e86aba8a6f6b68a07ca5ce"
+    },
+    {
+      "file": "flight-page-2560x1200-running-light.png",
+      "sha256": "9b509043400c3c0b7f6e9bbd2ecb20b7148c11577e45baae5bdb804d5e0af2cb"
+    },
+    {
+      "file": "flight-page-2560x1200-stopped-dark.png",
+      "sha256": "4dc5400ef4fd9dbc483f51eafa529f666c3106feb183f814d23ed3dbc67b599e"
+    },
+    {
+      "file": "flight-page-2560x1200-stopped-light.png",
+      "sha256": "4bf34d7747285218a4cc34e639b2caabb1340348e7f6e844bca37c7a8a7617fc"
+    },
+    {
+      "file": "flight-page-shell-1280x800-busy-dark.png",
+      "sha256": "d648ae9fccd5b695fd245eede6f662eec0e51991e3211f8f23555d30414c5735"
+    },
+    {
+      "file": "flight-page-shell-1280x800-busy-light.png",
+      "sha256": "a1d1c7660e6f4ebe0aa59be54fd63ebd8c702b9eec76e4fb533c6f6b44eb3217"
+    },
+    {
+      "file": "flight-page-shell-1600x1000-busy-dark.png",
+      "sha256": "3e7bc4a9b5f3df7c41def4b69dd6c1b19e9fb19d79c51932d77a68cd73e68eb2"
+    },
+    {
+      "file": "flight-page-shell-1600x1000-busy-light.png",
+      "sha256": "8c63b8013d3613140d559febd6aca82f0920ea5b10bacc7ac202561ee00d5802"
+    },
+    {
+      "file": "flight-page-shell-1600x700-busy-dark.png",
+      "sha256": "5e5516bb4dd73795be0b7734fdca97efc29c0d92527e01eabb7b338377af96b8"
+    },
+    {
+      "file": "flight-page-shell-1600x700-busy-light.png",
+      "sha256": "93c137191e413a5b23121a64cf7b1fe9af7979c9264130f71cef287d878db8db"
+    },
+    {
+      "file": "flight-page-shell-1920x940-busy-dark.png",
+      "sha256": "d7ba8211fc76238665a1dbb8511dc0a9f11954fbd426331da14a2f03f8557aab"
+    },
+    {
+      "file": "flight-page-shell-1920x940-busy-light.png",
+      "sha256": "2cbf001daa0af0f85af0fc55231f449fe11ec83667dd5d1081eb7333e0652954"
+    },
+    {
+      "file": "flight-page-shell-2560x1200-busy-dark.png",
+      "sha256": "c978422b54ab01ee569caf8140fcf5a555c14d66f86b92e7f99e3bae499366df"
+    },
+    {
+      "file": "flight-page-shell-2560x1200-busy-light.png",
+      "sha256": "3aacd3664d0de02c18f57283b5076108cef2944f6fb44517c8e2e5313b509e2b"
+    }
+  ],
+  "limits": [
+    "These are current-head renders, not matched code-baseline pairs. Earlier matched2f4357ba images remain historical.",
+    "The exact live raw-reference values are covered by a red/green component render regression; these public browser fixtures do not claim a live-data capture.",
+    "Independent whole-branch review and its design verdict remain required."
+  ]
+}
