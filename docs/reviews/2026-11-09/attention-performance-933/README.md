@@ -74,3 +74,56 @@ Both cases pass. A temporary mutation removing reference collection makes both f
 ## Resolve the main-branch browser-test conflict
 
 Main now contains the stronger per-render Chrome-profile ownership helper from the merged screenshot PR. It supersedes this branch's earlier descendant-PID startup synchronization. The conflict keeps main's complete test file, including frozen cleanup and concurrent-render isolation. The two new HUD cache regressions remain. All 398 HUD, Store, run-view and real-browser checks pass after the merge, including all15 browser cases. Lint, workspace typecheck and build pass. Performance source is unchanged; the parent CPU/memory and deployment criteria remain unmet. Fresh CI and independent QA are required on the merged head.
+
+## Current continuation: batched thread mentions
+
+The baseline is main at `9be5cf23363368109b22e83b690e766ba2fc1d48`. A new 70-second copied-data
+profile finds repeated Comms mention hydration in Needs you: its per-message native SQL
+reads account for 284.89 ms of sampled time. This continuation batches mentions for the
+existing bounded thread snapshot. It keeps all message fields, stable IDs, sender and delivery
+facts, reply links, mention sorting, insertion order, the 500-row limit and read-cursor behavior.
+Each call returns fresh arrays; there is no message cache across calls. No guard, quota,
+provider, observed-loop setting or GitHub-writing service changes.
+
+The regression first fails on baseline with 500 mention lookups for one full thread. It seeds
+520 messages, unrelated ID gaps, both directions, a self-addressed message, multiple/empty
+mentions, reply links and sender/item metadata. Complete rows, the newest-500 limit, cursor
+filtering and independent returned arrays remain asserted. The initial instrumentation
+attempt was discarded because the database proxy bypassed that spy; the retained failing
+execution instruments the Store's actual prepared-statement lookup and observes all 500.
+
+The committed executable correction is `fef587386285136eea3ab5a407838d69f66c7b24`. The retained benchmark was
+then actually executed on that source. Five alternating-order pairs use separate Store
+instances and one frozen copied database. They read all configured agents plus CAPCOM,
+with complete history and actual read-cursor variants. Every execution returns the same
+7,321 rows and 7,897,714 JSON bytes, SHA-256
+`a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1`. Actual mention SELECT executions, including
+prepared-statement reuse, fall from 7,321 to 30. Median read time is
+45.70 ms before and 22.02 ms after. The host also
+runs the preserved native author's affected-test check. These timings do not prove the
+whole-app CPU target. `thread-read-pairs.json` retains all ten measured executions.
+
+`thread-read-benchmark.mjs.txt` is the harness that produced that receipt. Copy it to an
+`.mjs` file and run with Node 26: `node --experimental-strip-types /tmp/thread-read-benchmark.mjs
+<before-checkout> <after-checkout> <copied-db> <output-json> <config-yaml>`. Use a copied
+database only: Store initialization may migrate it. The harness saves hashes and aggregate
+counts, not private message content.
+
+A following 70-second candidate profile reduces sampled native mention-read time to
+14.97 ms; sampled inclusive attention time is 1,658.53 ms before and 1,408.08 ms after.
+The observation periods contain different periodic work: the latter also samples 745.53 ms
+in the existing quota rollout-directory scan and 335.10 ms in rate-limit bookkeeping SQL.
+Both preview processes exit cleanly. These are hotspot diagnostics, not a controlled
+whole-process CPU comparison or a 30-minute idle acceptance sample. The profile aggregates
+retain their source commits, durations and scope; the raw profiles and database stay private.
+
+All 398 Store, Comms and HUD checks pass. Lint, workspace typecheck and production build
+pass; lint still reports 103 existing warnings and seven infos. Full local validation is
+still required after the existing native heavy check finishes, followed by exact-head CI
+and fresh independent review. This continuation is not published or merged yet.
+
+The required under-2%/steady-memory preview observation and post-Update live verification
+remain unmet. The last actual live observation on `73fc96ee` measured 7.51% CPU over
+1,807 seconds, with RSS 231,808 to 293,616 KiB and descriptive fitted slope +56.30 KiB/min.
+It includes eight samples with native review activity; its no-crew subintervals do not form a
+separate 30-minute idle pass. #933 stays open.
