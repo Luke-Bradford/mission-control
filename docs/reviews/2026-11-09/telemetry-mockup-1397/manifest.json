@@ -1,19 +1,20 @@
 {
-  "capturedAt": "2026-11-09T15:43:09.462727+00:00",
+  "capturedAt": "2026-11-09T16:43:39.769185+00:00",
   "proposalBefore": "e82f389016273b4cb26866d584341cc04dfcc058",
-  "proposalAfter": "650315a4c9ffeeb380befdd3e7c1617e3b4cd4fb",
-  "proposalHtmlSha256": "3ea3c67e71f5cf318d98cc92fa59eb4c8f236d3786894b38cb8209082b1b1018",
+  "proposalAfter": "bbbcb87249c0471d458f90ef156a62f2caeecf12",
+  "proposalHtmlSha256": "de6ef825bc7b8b8e41a6558217ead8afd8e09e16305aff11c6858efb5d942845",
   "currentPageSource": "51f827e675e5ed1fe4ecfaf5d2f00428e4addbff",
   "currentPageComparison": "Actual production App with existing fictional telemetry fixture. Structural comparison, not a numerical before/after measurement. Its web product files are unchanged in deployed main58d73a26.",
   "counts": {
     "proposalBefore": 31,
-    "proposalAfter": 80,
+    "proposalAfter": 92,
     "currentPage": 6,
-    "historicalProposalAfter": 70
+    "historicalProposalAfter": 70,
+    "uniquePngPaths": 199
   },
   "checks": {
     "proposalBefore": "31-image case PASS",
-    "proposalAfter": "80-image case PASS; original70before-readoutimages retained separately; currentphaseincludes keyboardfocus/activation screenshots on allfive tabs",
+    "proposalAfter": "92 actual fresh captures PASS. All prior80matriximages re-rendered andbyte-identical;12newgapstates inboth themes. Historicalmanifestretained, not relabelledasnewexecution.",
     "currentPage": "6-image case PASS; real Overview -> Telemetry navigation; initial invalid test-lock fixture was corrected to production response shape before these successful captures"
   },
   "os": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
@@ -21,6 +22,7 @@
   "files": {
     "TelemetryCapture.browser.test.ts.txt": "a7c2f765580c71b35e6ee28a188de21e318d0d8e1e3cc5d24f07dfa508a742d7",
     "TelemetryCurrentCapture.browser.test.ts.txt": "05b0113a4e12953001448e23ff8cbb5d23e1343a189bbd98bfc354e02c890be8",
+    "TelemetryGapCapture.browser.test.ts.txt": "f53b57ef9020f408a3cd65a781bf8b30957106583149470231f63ed189a628c2",
     "TelemetryReadoutCapture.browser.test.ts.txt": "dc80afcf10486f883882dce74c58691ea39de8785ca9d37922413c0d4a5bf95d",
     "after/4k-cost-3840x2160-dark.png": "04094bcd2b865153d735b2397a4e0cfe69ed7c8f549df9507dd633a3bfbd1741",
     "after/4k-crew-3840x2160-dark.png": "d2b14a9a44121959cade7047b8fdecdc05d71a1e9bc0a143ac5f26652ce0e470",
@@ -124,7 +126,7 @@
     "before/normal-throughput-1920x940-dark.png": "54b88d38a3f0bc1bef488f45f8f79faaf049b4974827b301d55c8bba7c1bf609",
     "before/normal-throughput-1920x940-light.png": "69fa695d5171524998df077de4ae9413db3addb63b67e4a77876e1bcfbb5b36a",
     "capture-matched.py.txt": "396a9b53ce19967c9ccdbee45adce0a20a54c0ce88c4bf1df9417377f3534de7",
-    "capture-phases.json": "704a6c460837d4a0147d5998aedf7f0465ead7ccff718f655290155eb908f9b1",
+    "capture-phases.json": "7ad4e9e3656030672f18af9dd1ccd5182ca58ed2a778845b6324a1ef6c0cd4db",
     "current-page/current-telemetry-1280x900-dark.png": "e171881e423a8ede412fc5310981fc865c1f7e200395b708e8ffecebf0d6d076",
     "current-page/current-telemetry-1280x900-light.png": "507eaba7f55079ba9f159e36159d97f63b6642d27505f3ba9ba7db4fe4562b34",
     "current-page/current-telemetry-1600x1000-dark.png": "33637f357b2335de9d80bca22c974a1dc5bf0870970742969801b1d78fd9842b",
@@ -132,6 +134,8 @@
     "current-page/current-telemetry-1920x940-dark.png": "02ea5bddc1a029f3cbb1e6a9d1113c3c7bfa86c4c9de9107e2c476fdd3fa1978",
     "current-page/current-telemetry-1920x940-light.png": "90df9d4337f4588962581bdd579e5601a38c73efbe2c455f1fd253da0886cce7",
     "current-page-fixture.json": "b4604e29cb2dbec4faa147907e8fc9174e7ca45c3028eb26ec9257900f32f5fe",
+    "history/readout-before-gap-manifest.json": "65fad33dff996bf1c7cdca9745353a34b3ceeba021e59d7094cecb188950a42f",
+    "history/root-before-gap-manifest.json": "23094cb661e6c2e590cdc1a652f559b06fb8ba3bf62cf2d3334dd5cf1e588136",
     "readout-after/4k-cost-3840x2160-dark.png": "cc1a5d47340706b6a12ed75ac2863c723ace4ff58eabe2e8ebb81f8f24b30fb5",
     "readout-after/4k-crew-3840x2160-dark.png": "89da4611bca9234a6f69842347776a61c95609e17a554533818125d6e058baec",
     "readout-after/4k-machine-3840x2160-dark.png": "478242de566881a215780738c6fa5d3e1a348b71a89cbae9195f6cca23fd796f",
@@ -155,6 +159,18 @@
     "readout-after/dock-throughput-2560x1145-dark.png": "3f77fda03f689931c7977d2a30c4a90bc794acc7a26571d52ea66eda5e6b790b",
     "readout-after/empty-crew-1600x1000-dark.png": "d19545972b3ec7814d7b7b5e90c3edd013b81d6f339536cf50f496fc84d477f9",
     "readout-after/error-crew-1600x1000-dark.png": "9c00ac54ab9ee192165572c84df8507cc2285afbc43ce6ded913c8343b361e02",
+    "readout-after/gap-assistive-click-cost-1600x1000-dark.png": "74bb51e9e179770d20349151c8b2dc5fdd5b9f15caaf9471ef8f43e566916fc4",
+    "readout-after/gap-assistive-click-cost-1600x1000-light.png": "c367510e13d2aaaa9d230847888f232a85c46c35b702363c24736fcb11639702",
+    "readout-after/gap-before-cost-1600x1000-dark.png": "9b02d63b507e0e2e33056bddee8e8a9f95e47465127dd6d6c30e980573cf33fc",
+    "readout-after/gap-before-cost-1600x1000-light.png": "d3e92c44d8b7e45b6d09e4e4637617989c7f1add354bab901868dfd68dfab029",
+    "readout-after/gap-enter-cost-1600x1000-dark.png": "74bb51e9e179770d20349151c8b2dc5fdd5b9f15caaf9471ef8f43e566916fc4",
+    "readout-after/gap-enter-cost-1600x1000-light.png": "c367510e13d2aaaa9d230847888f232a85c46c35b702363c24736fcb11639702",
+    "readout-after/gap-focus-cost-1600x1000-dark.png": "74bb51e9e179770d20349151c8b2dc5fdd5b9f15caaf9471ef8f43e566916fc4",
+    "readout-after/gap-focus-cost-1600x1000-light.png": "c367510e13d2aaaa9d230847888f232a85c46c35b702363c24736fcb11639702",
+    "readout-after/gap-restored-action-cost-1600x1000-dark.png": "a8aaf34d6d05186901060e3488ca27c7a3a997fa8cdfa0920101c28ca37e95ef",
+    "readout-after/gap-restored-action-cost-1600x1000-light.png": "e4afb0a170dbe12511330eb8fdce2825edfa6da13d91bda113fbde01a73c0d84",
+    "readout-after/gap-return-cost-1600x1000-dark.png": "c99d52ee1ae1ac3d14b83baeb2dd435cf24f28c860a4ce96e6fbdc49b3c572fc",
+    "readout-after/gap-return-cost-1600x1000-light.png": "9cf5eb0f7b5d8935cf65ac97058132c1a2d38afcdfab7d2a7938b843c43e335f",
     "readout-after/loading-crew-1600x1000-dark.png": "ccfc6118bec173975565e30a23947ec4ccc46fc7e552e291e355e63cbca68037",
     "readout-after/normal-cost-1280x900-dark.png": "5d17e0eb69791a1b9d3ed378e219b3696d9c7e1fcb41bbc75b540c865595b0f0",
     "readout-after/normal-cost-1280x900-light.png": "3f1216910021f095c7aef60efc5bf36a3a5c79cebb2455ade7a8a45930d2e7b1",
@@ -211,7 +227,8 @@
     "readout-after/worst-crew-1600x1000-dark.png": "12bbfe017935896476d37287ba113f9f86738a5690f9a530f4e517c16328819d",
     "readout-after/worst-machine-1600x1000-dark.png": "37b7009bd22fe2ca798fe8fc24755fad0329deac4c33aa5c480dd94ad42aaf9e",
     "readout-after/worst-quality-1600x1000-dark.png": "7f042b3b6be6364ebe87f9da0a475d1ae17b8724f8700919e37d5d0cac55f592",
-    "readout-after/worst-throughput-1600x1000-dark.png": "b20e1327889d5eb3b63114300a63798291fb8a02ab33c4fa02320e3e98c73ff4"
+    "readout-after/worst-throughput-1600x1000-dark.png": "b20e1327889d5eb3b63114300a63798291fb8a02ab33c4fa02320e3e98c73ff4",
+    "ticket-1397-source.md": "724b3577cb653e60f896232190fdfb515ab7fa9cc7e809d996e8de0ac151cdc8"
   },
   "runtimeCompatibilityMerge": {
     "source": "b9c0b9ee911ea105822745808017562ea36a901b",
@@ -225,5 +242,12 @@
     "path": "after/",
     "disposition": "superseded by review1358; retained source-bound historical proposal phase"
   },
-  "latestProposalPath": "readout-after/"
+  "latestProposalPath": "readout-after/",
+  "historicalReadoutAfter": {
+    "source": "650315a4c9ffeeb380befdd3e7c1617e3b4cd4fb",
+    "htmlSha256": "3ea3c67e71f5cf318d98cc92fa59eb4c8f236d3786894b38cb8209082b1b1018",
+    "images": 80,
+    "immutableCommit": "8ef531b11f09b1c03a5fe03a984aa1cfa58840df",
+    "manifest": "history/readout-before-gap-manifest.json"
+  }
 }
