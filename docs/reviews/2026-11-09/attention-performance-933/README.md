@@ -56,7 +56,11 @@ passed and three failed across 520 files. Two are main's existing FlightPageMock
 decision-gap failures, covered by PR #1586. The daemon's unsigned-removal reconnect case
 timed out, then passed a direct named recheck. The full command exited 1.
 
-These receipts are a documentation-only addition after the full source run. Exact-head CI
+CI later exposed an existing screenshot-test startup race: another worker could raise the
+machine-wide Chrome count before this worker launched its own browser. The same failure
+reproduced locally. The two abort-test startup waits now use newly owned descendant PIDs;
+the global cleanup assertions remain unchanged. All 14 real-browser cases passed after the
+test-only fix. Production source is unchanged since the full run on 32152993. Exact-head CI
 and a fresh independent most-capable review are still required. Further profiling and a
 passing copied-preview observation remain, followed by actual live verification after an
 authorized deployment. No clean full-local test result or completion of #933 is claimed.

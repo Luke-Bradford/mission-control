@@ -350,6 +350,7 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
 
     it("leaves no Chrome behind when a render is stopped in the owned helper", async () => {
       const baseline = chromeCount();
+      const ownedBefore = new Set(ownChrome());
       const guard = hudRenderRequest(hub.origin);
       const stop = new AbortController();
       const job = renderHudInHelper(guard.page("/setup"), guard, {
@@ -362,7 +363,9 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
         (e: unknown) => (e instanceof Error ? e.message : String(e)),
       );
       // /setup never answers, so the render is parked on a running Chrome until it is stopped
-      await expect.poll(chromeCount, { timeout: 30_000 }).toBeGreaterThan(baseline);
+      await expect
+        .poll(() => ownChrome().filter((pid) => !ownedBefore.has(pid)).length, { timeout: 30_000 })
+        .toBeGreaterThan(0);
       stop.abort(new Error("stopped by the test"));
       expect(await settled).toBe("stopped by the test");
       // the call settles only after the helper is stopped; Chrome goes with it
@@ -371,6 +374,7 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
 
     it("leaves no Chrome behind when the render is stopped while Chrome is frozen", async () => {
       const baseline = chromeCount();
+      const ownedBefore = new Set(ownChrome());
       const guard = hudRenderRequest(hub.origin);
       const stop = new AbortController();
       const settled = renderHudInHelper(guard.page("/setup"), guard, {
@@ -381,10 +385,17 @@ describe.skipIf(CHROME === undefined || (await blockedHere("listen")))(
         () => "rendered",
         (e: unknown) => (e instanceof Error ? e.message : String(e)),
       );
-      await expect.poll(chromeCount, { timeout: 30_000 }).toBeGreaterThan(baseline);
       // freeze this test's own Chrome only (our descendants), so its graceful close cannot run
-      const mine = ownChrome();
-      expect(mine.length).toBeGreaterThan(0);
+      let mine: number[] = [];
+      await expect
+        .poll(
+          () => {
+            mine = ownChrome().filter((pid) => !ownedBefore.has(pid));
+            return mine.length;
+          },
+          { timeout: 30_000 },
+        )
+        .toBeGreaterThan(0);
       for (const pid of mine)
         try {
           process.kill(pid, "SIGSTOP");
