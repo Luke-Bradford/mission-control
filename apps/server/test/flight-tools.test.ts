@@ -7830,6 +7830,22 @@ describe("superuser housekeeping", () => {
     });
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
+    // Preserve an already-stored fallback as history; it no longer makes this the operator's.
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "hub",
+      at: nowMs,
+      ask: "Should the crew proceed, or hold?",
+      context: "A crew member has waited for another's answer.",
+      recommendation: "Keep the work reversible.",
+      basis: "Legacy fallback.",
+      options: [
+        { id: "proceed", label: "Proceed", answer: "Proceed." },
+        { id: "hold", label: "Hold", answer: "Hold." },
+      ],
+    });
+
     expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
       owner: "flight",
     });
