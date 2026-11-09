@@ -59,7 +59,7 @@ single table of figures against target. Do not add a headline row because dashbo
 
 **Write the vertical budget** before building, for each reference viewport: page header + headline row +
 each panel's header and content height + the gaps between them, against the viewport height. Do the same
-across for each row. Name the panels that must be whole on the first screen. A panel cut off by the fold
+for widths across each row. Name the panels that must be whole on the first screen. A panel cut off by the fold
 is worse than one placed clearly below it, so when the sum does not fit, decide which panel moves down.
 Caveats, method notes and definitions rank as detail: they go below the panels that carry data, or behind
 a control.
@@ -78,8 +78,8 @@ a control.
 ## Wide, narrow and small screens
 
 - **Wider screen**: first let the primary and the lists that gain from space take it; then add columns;
-  cap text and table widths at a readable measure. A narrow column floating in an empty page and a
-  table stretched to 3000 px are both failures. On very large, low-scaling displays, scale the whole
+  cap text and table widths at a readable measure. Content stranded in the middle of unused
+  screen and a table stretched to 3000 px are both failures. On very large, low-scaling displays, scale the whole
   page up before adding more content.
 - **Narrower screen**: recompose (supporting column moves below, tiles wrap to two rows) before
   shrinking anything. Keep the primary and the items needing attention on the first screen.

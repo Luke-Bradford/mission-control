@@ -78,6 +78,7 @@ underused on dashboards.
 | Negative | A real minus sign `−`, or the locale's convention; state it once if using brackets | Red alone |
 | Change | Signed, with unit: `+1,260`, `−2.4 pts`, `+4.8%` | An unsigned number beside an arrow |
 | Ratios | State both sides if the base is small: `3 of 7` | `43%` of seven |
+| Shares of a whole | Round so the parts still add to the total shown, or note that rounding means they may not | Parts that visibly sum to 99% or 101% with no note |
 | Missing | `—` with a reason on hover or beside it | `0`, blank, `null`, `N/A` with no reason |
 | Estimates | Mark them: `~`, "est.", or a lighter style, and say how they were made | An estimate styled as a measured figure |
 | Units | Space or convention per the client's style; one way throughout | `ms` in one panel, `s` in the next |

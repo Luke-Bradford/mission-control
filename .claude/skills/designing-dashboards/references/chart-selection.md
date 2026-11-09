@@ -19,10 +19,11 @@ From most to least accurate, per the perception research in [sources](sources.md
 
 1. Position on a shared scale (dot plot, line chart, aligned bars)
 2. Position on separate but identical scales (small multiples)
-3. Length (bars)
-4. Angle and slope (pie, slope chart)
-5. Area (bubbles, treemap)
-6. Colour intensity (heatmap, choropleth)
+3. Length, angle and slope (unaligned bars, pie, slope chart). The original study ranks these together;
+   later replications find length read somewhat better than angle
+4. Area (bubbles, treemap)
+5. Volume and curvature
+6. Shading and colour intensity (heatmap, choropleth)
 
 Use the highest one that fits. Go lower only when it buys something specific, such as a heatmap showing a
 whole grid at once, and accept that readers will see pattern, not values.
@@ -31,13 +32,14 @@ whole grid at once, and accept that readers will see pattern, not values.
 
 | Relationship | Good defaults | Avoid |
 | --- | --- | --- |
-| **Change over time** | Line; columns for a few discrete periods; area only for a single total | More than about five lines on one plot; stacked areas where the layers matter |
+| **Change over time** | Line; columns for a few discrete periods; area only for a single total | More than about six lines on one plot; stacked areas where the layers matter |
 | **Comparison between items** | Horizontal bars, sorted; dot plot when zero is not meaningful | Unsorted bars; vertical bars with long labels |
 | **Ranking** | Sorted horizontal bars; a ranked table with in-row bars | Pie or donut |
 | **Part of a whole** | One stacked bar; sorted bars with share labelled; pie or donut for two or three parts only | Pies with many slices; several pies side by side |
 | **Against a target** | Bullet graph; bar with a target mark; number with gap to target | Gauges and dials |
 | **Deviation from a reference** | Diverging bars from a zero line; line with a reference band | Two separate charts the reader must subtract |
 | **Distribution** | Histogram; box plot or strip plot for groups; percentiles as lines over time | An average alone when the spread is the story |
+| **Forecast or estimate** | The measured line solid, the projection dashed from the last real point, with a shaded band for its range | A projection drawn like a measurement; a band with no statement of what it covers |
 | **Relationship between two measures** | Scatter plot, with a trend line if useful | Dual-axis line charts |
 | **Many series, same measure** | Small multiples on identical axes | A tangle of lines with a twelve-item legend |
 | **Two-way grid** (hour by weekday, cohort by month) | Heatmap with one hue | Rainbow scales |
@@ -108,7 +110,7 @@ fifty items. See [tiles-tables-numbers](tiles-tables-numbers.md).
 
 | Avoid | Why | Use |
 | --- | --- | --- |
-| Gauge, dial, speedometer | Large area for one value; hard to compare several | Number with target, or bullet graph |
+| Gauge, dial, speedometer | Large area for one value; hard to compare several | Number with target, or bullet graph. If the client's tool or house style requires a gauge, print the value and target beside it |
 | 3D of any kind | Distorts length and hides marks | The flat version |
 | Dual-axis lines | The crossing point is an artefact of scaling | Two stacked charts on one time axis, or index both to 100 |
 | Donut with many slices | Angles and areas compare poorly | Sorted bars |

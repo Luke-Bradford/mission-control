@@ -1,6 +1,6 @@
 ---
 name: designing-dashboards
-description: Use when planning, building, redesigning or reviewing a dashboard, report, scorecard, status board, KPI or metrics page, or any screen or document whose job is to show figures, in any stack and for any client. Also use when choosing a chart, laying out stat tiles, picking chart colours, or asked whether a data page is any good.
+description: Use when planning, building, redesigning or reviewing a dashboard, report, scorecard, status board, KPI or metrics page, or any screen or document whose job is to show figures; and for an admin panel, ops console, queue or control-room page where the reader watches live things and acts on them. Also use when choosing a chart, laying out stat tiles, picking chart colours, or asked whether a data page is any good.
 ---
 
 # Designing dashboards and data pages
@@ -29,14 +29,19 @@ Each step has an output. Write the outputs down in the plan, ticket or PR; they 
 
 A report, slide or PDF follows the same steps with the differences in [reports](references/reports.md).
 
+If the reader acts on the page, or it shows things with a life of their own (jobs, agents, orders,
+machines, tickets), also read [operational-consoles](references/operational-consoles.md): status and
+liveness, the attention queue, actions, timelines and logs, noise.
+
 Do not start at step 3. Most weak dashboards are a set of charts chosen before anyone wrote down the
 question, and no amount of styling repairs that.
 
 ## Rules that hold on every data page
 
 1. **One question per page.** If you cannot write it in a sentence, the page is two pages.
-2. **Every figure is compared with something**: a target, the previous period, a normal range or its own
-   history. A lone number tells the reader nothing about whether to act.
+2. **Every headline figure is compared with something**: a target, the previous period, a normal range
+   or its own history. A lone number tells the reader nothing about whether to act. Rows in a lookup
+   table or a record's detail are exempt.
 3. **Every figure is defined**: label, value, unit, time window and, within one interaction, how it is
    calculated and when it was last updated.
 4. **The same figure is the same number everywhere** it appears, to the same rounding.
@@ -49,30 +54,32 @@ question, and no amount of styling repairs that.
 8. **What needs attention is visible without interaction**, with the route to act on it beside it.
 9. **Missing is not zero.** Unknown, not applicable, still loading and stale each look different from a
    real `0`.
-10. **Nothing is decoration.** No 3D, gauges drawn for effect, gradients, shadows or icons that carry no
-    information. If removing it loses nothing, remove it.
+10. **Nothing is decoration.** No 3D, gradients, shadows or icons that carry no information. If removing
+    it loses nothing, remove it.
 11. **Judge the render, not the code.** Look at it at the reader's real viewport with busy, awkward data
     before saying it is done.
 12. **Never drop content silently.** If something has to move or go, list it and say where it went.
 
 ## Reviewing or critiquing a data page
 
-Look at the rendered page first. Report in this order, because an earlier failure makes later ones moot:
+Look at the rendered page first. Work through these six in order. A page that is wrong about its numbers
+or its purpose is not rescued by good spacing, so later sections matter less until earlier ones pass.
 
 1. **Truth**: figures that disagree, misleading scales, deltas on tiny bases, estimates shown as facts.
-2. **Purpose**: can you state the page's question, and does the first screen answer it?
-3. **Attention**: does the eye land on what needs action, or on the biggest, brightest harmless thing?
-4. **Form**: is each figure in a form that suits it?
-5. **Composition**: hierarchy, grouping, panel sizes, wasted or crushed space.
-6. **States, access and interaction**: empty, error, stale; contrast, keyboard, non-colour cues.
-7. **Polish**: alignment, spacing, wording.
+2. **Purpose and attention**: can you state the page's question, does the first screen answer it, and
+   is the most prominent thing the one that needs action?
+3. **Form**: is each figure in a form that suits it?
+4. **Composition**: hierarchy, grouping, panel sizes, wasted or crushed space.
+5. **States, access and interaction**: empty, error, stale; contrast, keyboard, non-colour cues.
+6. **Polish**: alignment, spacing, wording.
 
-For each finding name the element, what the reader sees, and the change. Report everything you find, then
-give each a severity. The full list and a symptom-to-fix table are in [review](references/review.md).
+Write each finding so the builder can act without asking: which part of the page, the problem as a
+reader meets it, and what to do. Report everything you find, then give each a severity. The checks and
+a symptom-to-fix table are in [review](references/review.md).
 
-## Default taste
+## Fallback look
 
-Use this only where the reader and the project give no direction. Calm and plain: a neutral background,
+For when neither the reader nor the project has a visual direction. Calm and plain: a neutral background,
 flat panels separated by space or a hairline, one text family with tabular figures, dark grey text, a
 single accent colour, and the status colours kept for status. Dense enough to compare without scrolling,
 loose enough that groups are obvious. It should look like a tool someone uses every day, not a poster.

@@ -10,7 +10,7 @@ Decide the roles before picking hues. A colour with no role does not go on the p
 | --- | --- | --- |
 | **Neutral** | Text, axes, gridlines, panel surfaces, context series, previous periods | Most of the page. Several greys of clearly different lightness |
 | **Accent** | The main series, the selected item, links | One hue |
-| **Category** | Distinguishing unordered groups (products, regions, teams) | Distinct hues of similar weight; six or fewer, beyond that group the rest as "Other" or use small multiples |
+| **Category** | Distinguishing unordered groups (products, regions, teams) | Distinct hues of similar weight; about six at most, beyond that group the rest as "Other" or use small multiples |
 | **Sequential** | Low to high of one measure (heatmap) | One hue, light to dark; darker means more |
 | **Diverging** | Either side of a meaningful midpoint (zero, target) | Two hues meeting at a neutral middle |
 | **Status** | Good, warning, problem, unknown | Reserved for status alone, used sparingly, always with a second cue |
@@ -43,16 +43,17 @@ Rules:
 Where the project has no palette, start from a published one that was designed for colour-blind readers,
 and check it against your background:
 
-- **Categories**: the Okabe–Ito set (orange `#E69F00`, sky blue `#56B4E9`, bluish green `#009E73`,
+- **Categories**: the Okabe–Ito set, with hex values as commonly published (orange `#E69F00`, sky blue `#56B4E9`, bluish green `#009E73`,
   yellow `#F0E442`, blue `#0072B2`, vermilion `#D55E00`, reddish purple `#CC79A7`, black). Its yellow and
   sky blue are too light for thin marks on a white background; skip them or outline them.
-- **Sequential and diverging**: ColorBrewer schemes marked colour-blind safe, or a perceptually even
-  scale such as viridis.
+- **Sequential and diverging**: ColorBrewer schemes marked colour-blind safe. Use a single-hue scheme
+  for sequential data so that darker reads as more.
 
 ## Accessibility: the minimum
 
-These are the Web Content Accessibility Guidelines 2.2 at level AA as they apply to data pages. Treat
-them as the floor for client work.
+These are the Web Content Accessibility Guidelines 2.2 as they apply to data pages, at level A and AA
+except where a row says otherwise. Treat them as the floor for client work. Criterion numbers are in
+[sources](sources.md).
 
 | Requirement | Number | Applies to |
 | --- | --- | --- |
@@ -62,10 +63,14 @@ them as the floor for client work.
 | Text alternative | — | Every chart: a short description of what it shows, plus the data available as a table or download |
 | Keyboard | — | Every control, filter, sortable header, tab and any chart interaction that reveals information |
 | Visible focus | — | Everything focusable |
-| Target size | 24×24 CSS px minimum | Buttons, toggles, legend items that filter |
+| Target size | 24×24 CSS px minimum, or smaller with enough clear space around it; links inside a sentence are exempt | Buttons, toggles, legend items that filter |
 | Hover content | Dismissible, hoverable, stays until dismissed | Tooltips |
-| Reflow and zoom | Usable at 200% zoom; no two-way scrolling at 320 px wide, except for data tables and charts that need two dimensions | Whole page |
-| Motion | Respect the reduced-motion setting; nothing flashes | Transitions, live updates |
+| Text resize | Text can be enlarged to 200% without losing content or function | Whole page |
+| Reflow | No two-way scrolling at 320 CSS px wide, except for data tables and charts that need two dimensions | Whole page |
+| Structure | Tables are real tables with header cells; headings are headings | Tables, panel titles |
+| Status messages | A change of status is announced to assistive technology without moving focus | Live updates, alerts, "saved" notices |
+| Flashing | Nothing flashes more than three times a second | Alerts, live updates |
+| Motion (good practice; level AAA) | Respect the reduced-motion setting | Transitions, animated charts |
 
 In practice:
 

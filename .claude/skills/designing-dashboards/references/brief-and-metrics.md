@@ -35,8 +35,10 @@ detail one click below that: overview first, then filter, then detail on request
 
 - **Start from the decision, not from the data that exists.** For each candidate ask: if this moved 20%
   tomorrow, would the reader do something? If not, it is detail, not a headline.
-- **Keep headline figures few.** Common guidance is five to seven at most on one view. Treat it as a
-  ceiling. Three well-chosen figures beat nine.
+- **Keep headline figures few.** About six on one view is a working ceiling, not a target. Three
+  well-chosen figures beat nine.
+- **Choose the summary to suit the spread.** Where a few large values pull the average (durations,
+  order values, response times), show the median and a high percentile, and say which.
 - **Pair outcome with driver.** An outcome figure (revenue, on-time rate) tells the reader what happened;
   a driver (pipeline, vehicles available) tells them what is about to. A page of outcomes only is a
   rear-view mirror.

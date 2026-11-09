@@ -74,6 +74,9 @@ the fold are found on screen and almost never on paper.
 - [ ] Current filters and time range are visible; reset works; the view survives a reload.
 - [ ] Live updates do not move the layout, lose scroll position or steal focus.
 
+If the reader acts on the page or it shows live things, add the checks at the end of
+[operational-consoles](operational-consoles.md).
+
 ### 6. Polish
 
 - [ ] One term per concept; labels in the reader's words; no internal names, codes or raw timestamps.
@@ -107,8 +110,11 @@ the fold are found on screen and almost never on paper.
 
 - Lead with a one-line verdict.
 - Say what works, specifically, so it is kept.
-- List findings in the order above. For each: the element, what the reader sees, why it matters, the
-  change. Report everything you found; then mark each as blocking, should fix or minor.
+- List findings in the order above. Each one says which part of the page, the problem as a reader meets
+  it, why it matters and what to do. Report everything you found; then mark each as blocking, should fix
+  or minor.
+- Where you can, put the page in front of someone like its reader, say nothing, and ask what it tells
+  them. One such look outweighs most of this list.
 - Attach the screenshots you judged from, with viewport, theme and dataset noted. Keep evidence small
   enough that someone will read it.
 - State what you did not check.
