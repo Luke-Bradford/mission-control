@@ -4,8 +4,6 @@ import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
 import { toggleDock } from "../shell/overlays.ts";
 
-const ASK_PREFIX = "ask:";
-
 /** Where an answer to a Needs-you item goes. */
 export type AnswerTarget =
   | { to: "github"; url: string | null }
