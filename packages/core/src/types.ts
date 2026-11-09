@@ -1,4 +1,19 @@
+import type { AttentionHold } from "./attention-model.ts";
 import type { Owner, Stage } from "./board-model.ts";
+
+export type {
+  AttentionHold,
+  AttentionHoldCondition,
+  AttentionWaitCondition,
+} from "./attention-model.ts";
+
+import type {
+  BriefAction,
+  BriefBinding,
+  BriefChoiceReceipt,
+  BriefDecisionContext,
+  BriefReadState,
+} from "./briefs.ts";
 import type { CrewPause } from "./crew-pause.ts";
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 import type { FlightPowers } from "./guard-model.ts";
@@ -1227,6 +1242,9 @@ export interface BriefOption {
   description?: string;
   label: string;
   answer: string;
+  consequence?: string;
+  reversibility?: { kind: "reversible" | "partly-reversible" | "irreversible"; detail: string };
+  action?: BriefAction;
 }
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
@@ -1255,6 +1273,12 @@ export interface QuestionClosure {
 }
 
 export interface AttentionBrief {
+  /** Server-owned identity and binding; absent on historical/unbound records. */
+  id?: number;
+  decision?: BriefDecisionContext;
+  binding?: BriefBinding;
+  state?: BriefReadState;
+  choice?: BriefChoiceReceipt;
   /** Missing on briefs written before triage routing was introduced. */
   for?: "operator" | "flight";
   /**
@@ -1575,25 +1599,6 @@ export interface PipelineCard {
    * `seat` is the seat running the ticket now, else the reviewed run's author; `seatBusy` is true while that seat is running.
    */
   rework?: { round: number; blockers: number; seat: string | null; seatBusy: boolean };
-}
-
-export type AttentionHoldCondition =
-  | { readonly kind: "date"; readonly at: number }
-  | { readonly kind: "ticket"; readonly ticket: string }
-  | { readonly kind: "crew" }
-  | { readonly kind: "manual" };
-
-/** Conditions only FLIGHT files (with `brief_item`'s hold): a PR's CI reaching a state, or another item resolving. */
-export type AttentionWaitCondition =
-  | { readonly kind: "ci"; readonly pr: string; readonly state: "passing" | "failing" }
-  | { readonly kind: "item"; readonly key: string };
-
-export interface AttentionHold {
-  reason: string;
-  condition: AttentionHoldCondition | AttentionWaitCondition;
-  by: string;
-  at: number;
-  releasedAt?: number;
 }
 
 /** One finished engine tick, as `/api/health` serves it. */

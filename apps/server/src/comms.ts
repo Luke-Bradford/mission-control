@@ -44,6 +44,8 @@ export interface CommsServiceDeps {
   /** Labelled direct or tagged delivery wakes a worker; reactions never use it. */
   notify?: (to: string, text: string, from: string) => void | Promise<void>;
   seatSender?: boolean;
+  /** Internal final dispatch precondition; never accepted from message input. */
+  beforeWrite?: () => void;
   /** Wake the recipient for an unlabelled message too (the operator's own message or answer). */
   wakeUnlabelled?: boolean;
   /** False: a reply does not mention (or wake) the author of the message it answers. */
@@ -169,6 +171,7 @@ export async function sendComms(
       now - COMMS_REPEAT_WINDOW_MS,
       from === COMMS_CAPCOM && deps.flightItem?.to === input.to ? deps.flightItem.title : undefined,
     );
+  deps.beforeWrite?.();
   // A seat's rate limit is enforced atomically before it can wake anyone.
   let stored = deps.seatSender ? storeMessage() : null;
   if (deps.seatSender && stored === null)
