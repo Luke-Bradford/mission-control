@@ -4,6 +4,7 @@ import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { Comms } from "../src/pages/Comms.tsx";
+import { Flight } from "../src/pages/Flight.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { Dock } from "../src/shell/Dock.tsx";
@@ -178,7 +179,7 @@ describe("Needs you shows once", () => {
 });
 
 describe("Needs you shows once on the FLIGHT and Board pages", () => {
-  it("the FLIGHT page's status strip has no Needs you counter", async () => {
+  it("the FLIGHT page counts Needs you only in the header", async () => {
     stub();
     render(
       <>
@@ -187,7 +188,7 @@ describe("Needs you shows once on the FLIGHT and Board pages", () => {
       </>,
     );
     await screen.findByRole("link", { name: `Needs you: ${N} waiting` });
-    await screen.findByText(/FLIGHT handling/);
+    await screen.findByRole("heading", { name: "Doing now" });
     expect(screen.queryByRole("button", { name: /^Needs you: \d+$/ })).toBeNull();
   });
 
