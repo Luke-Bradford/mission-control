@@ -15,6 +15,7 @@ import type {
   QaReport,
   RunHandoff,
   RunTokenAudit,
+  TicketQuestion,
   TokenCall,
   TokenCounts,
   TokenSourceAdd,
@@ -1968,6 +1969,8 @@ export class Store {
       CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
       CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
       CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
+      CREATE INDEX IF NOT EXISTS seat_questions_run_time ON seat_questions(run_id, at DESC, id DESC);
+      CREATE INDEX IF NOT EXISTS flight_decisions_question_answer ON flight_decisions(question_id, kind, at DESC, id DESC);
     `);
     // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
     this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
@@ -2080,6 +2083,22 @@ export class Store {
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
       CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
+      CREATE INDEX IF NOT EXISTS comms_ticket_count_refs ON comms(ticket, ref, from_id);
+      -- Preserve reference totals when retention removes bodies. Null flags avoid sentinel collisions.
+      CREATE TABLE IF NOT EXISTS comms_ticket_archived_counts (
+        ticket TEXT NOT NULL, ref TEXT NOT NULL, from_id TEXT NOT NULL,
+        ticket_null INTEGER NOT NULL, ref_null INTEGER NOT NULL, count INTEGER NOT NULL,
+        PRIMARY KEY (ticket, ref, from_id, ticket_null, ref_null)
+      );
+      CREATE TRIGGER IF NOT EXISTS comms_archive_ticket_count BEFORE DELETE ON comms
+      WHEN OLD.ticket IS NOT NULL OR OLD.ref IS NOT NULL
+      BEGIN
+        INSERT INTO comms_ticket_archived_counts (ticket, ref, from_id, ticket_null, ref_null, count)
+        VALUES (COALESCE(OLD.ticket, ''), COALESCE(OLD.ref, ''), OLD.from_id,
+          OLD.ticket IS NULL, OLD.ref IS NULL, 1)
+        ON CONFLICT(ticket, ref, from_id, ticket_null, ref_null)
+        DO UPDATE SET count = comms_ticket_archived_counts.count + 1;
+      END;
       CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
       CREATE TABLE IF NOT EXISTS comms_mentions (
         message_id INTEGER NOT NULL, mentioned_id TEXT NOT NULL, seen_at INTEGER,
@@ -4664,6 +4683,87 @@ export class Store {
       )
       .all(ticket, shortRef, limit, ...prRefs) as Row[];
     return rows.map((r) => this.commsRow(r));
+  }
+
+  /** Counts retained and retired reference metadata; never reads text or limits by time. */
+  commsTicketReferenceCounts(): {
+    ticket: string | null;
+    ref: string | null;
+    from: string;
+    count: number;
+  }[] {
+    return (
+      this.statement(`SELECT ticket, ref, sender, SUM(count) AS count FROM (
+        SELECT ticket, ref, from_id AS sender, COUNT(*) AS count
+        FROM comms WHERE ticket IS NOT NULL OR ref IS NOT NULL
+        GROUP BY ticket, ref, from_id
+        UNION ALL
+        SELECT CASE WHEN ticket_null THEN NULL ELSE ticket END,
+          CASE WHEN ref_null THEN NULL ELSE ref END, from_id AS sender, count
+        FROM comms_ticket_archived_counts
+      ) GROUP BY ticket, ref, sender`).all() as Row[]
+    ).map((r) => ({
+      ticket: r.ticket as string | null,
+      ref: r.ref as string | null,
+      from: r.sender as string,
+      count: r.count as number,
+    }));
+  }
+
+  /** Lightweight links for referenced PR numbers, without parsing unrelated checks or history. */
+  commsPrTicketLinks(
+    numbers: readonly number[],
+  ): { repoId: string; number: number; ticket: string | null; closingIssues: number[] }[] {
+    const rows: Row[] = [];
+    const unique = [...new Set(numbers)];
+    for (let start = 0; start < unique.length; start += 400) {
+      const batch = unique.slice(start, start + 400);
+      rows.push(
+        ...(this.statement(`SELECT repo_id, number, ticket, closing_issues FROM pull_requests
+        WHERE number IN (${batch.map(() => "?").join(",")})`).all(...batch) as Row[]),
+      );
+    }
+    return rows.map((r) => ({
+      repoId: r.repo_id as string,
+      number: r.number as number,
+      ticket: r.ticket as string | null,
+      closingIssues: JSON.parse(r.closing_issues as string) as number[],
+    }));
+  }
+
+  /** A separate indexed question page; ending a run alone does not provide answer text. */
+  ticketQuestions(
+    repoId: string,
+    ticket: string,
+    limit: number,
+    before: { at: number; id: number } | null = null,
+  ): TicketQuestion[] {
+    const rows =
+      this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis
+      FROM seat_questions q JOIN runs r ON r.id = q.run_id
+      LEFT JOIN flight_decisions d ON d.id = (SELECT a.id FROM flight_decisions a
+        WHERE a.question_id = q.id AND a.kind = 'answer' ORDER BY a.at DESC, a.id DESC LIMIT 1)
+      WHERE r.repo_id = ? AND r.ticket = ?
+      ${before === null ? "" : "AND (q.at < ? OR (q.at = ? AND q.id < ?))"}
+      ORDER BY q.at DESC, q.id DESC LIMIT ?`).all(
+        repoId,
+        ticket,
+        ...(before === null ? [] : [before.at, before.at, before.id]),
+        limit,
+      ) as Row[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      runId: r.run_id as string,
+      seat: r.agent_id as string,
+      text: r.text as string,
+      at: r.at as number,
+      passedAt: r.passed_at as number | null,
+      asideAt: r.aside_at as number | null,
+      closedAt: r.answered_at as number | null,
+      answer: r.answer as string | null,
+      answerAt: r.answer_at as number | null,
+      answerBasis: r.answer_basis as string | null,
+    }));
   }
 
   /** The newest `limit` FLIGHT decisions that name the ticket by ref or target one of its runs. */

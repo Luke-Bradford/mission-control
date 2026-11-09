@@ -485,6 +485,31 @@ pages reusable; it does not shrink the database file on disk.
 
 ### Ticket history
 
+The response also carries `questions` and `questionsNextBefore`. These are a separate question
+page, newest ask first (id breaks timestamp ties). The same `limit` applies; pass the returned
+cursor as `questionsBefore` to read older questions. This leaves the existing timeline's `before`
+and `nextBefore` unchanged. Question records include run, seat, text, ask/pass/set-aside times,
+`closedAt`, and the latest recorded `answer`, `answerAt` and `answerBasis`. A run can close a
+question without answering it: the answer fields then stay null. `asideAt` retains the stored
+set-aside time, including Not now; it does not itself prove a question has an answer. Each Comms
+timeline entry carries its recorded `senderKind`, or null for legacy unknown provenance.
+
+`GET /api/comms/ticket-counts` returns `{ tickets: [{ ticket, count }], unassignedCount }` across
+all recorded structured references, without the feed's 100-message or time window. Retention
+preserves reference totals transactionally when deleting message bodies, without preserving
+their text. Totals survive a database reopen and repeated retention sweeps. Already deleted
+messages from before this migration cannot be reconstructed. Tickets with
+no attributed messages have no row. Qualified ticket identity takes precedence over a PR/short
+reference. Legacy short references use the sender's configured repository, or the single
+configured repository; ambiguous multi-repository messages stay in `unassignedCount`. PR
+references resolve from stored primary and closing tickets, counting a message once per ticket.
+Counts do not infer references from free-form message text or invent missing repository context.
+
+The stored Comms agent and pair reads accept the hub id `MC` and the controller id `CONTROLLER`.
+Contact summaries include `hasMessages` from their all-time count. The configured FLIGHT and
+controller pair appears even before its first message, with count zero and `hasMessages: false`.
+Unknown agent ids still answer 404; existing paging and read cursors are unchanged.
+
 `GET /api/tickets/<repo id>/<number>` returns everything Mission Control knows about one ticket:
 its fields (title, outcome, done-when items with their ticked state, size, priority, status,
 labels, GitHub URL), every run on it (seat, phase, times, tokens), its PRs with each review round's

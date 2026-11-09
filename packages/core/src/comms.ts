@@ -60,6 +60,12 @@ export interface CommsReaction {
 /** Who a stored message came from, set by the hub from how the request was made, never from the text. */
 export const COMMS_SENDER_KINDS = ["operator", "controller", "flight", "seat", "hub"] as const;
 export type CommsSenderKind = (typeof COMMS_SENDER_KINDS)[number];
+/** Recorded ticket-reference totals, preserved across message retention rather than feed-limited. */
+export interface CommsTicketCounts {
+  tickets: { ticket: string; count: number }[];
+  /** Referenced messages whose repository or ticket cannot be established without guessing. */
+  unassignedCount: number;
+}
 export interface CommsMessage {
   id: string;
   at: number;
