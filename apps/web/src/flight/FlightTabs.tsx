@@ -84,14 +84,24 @@ export function FlightTabs({ records = false }: { records?: boolean } = {}) {
     }
     setTab(tabForHash(hash));
     // The target was hidden while its tab was, so the browser could not scroll to it.
-    requestAnimationFrame(() => {
+    let observer: MutationObserver | undefined;
+    const reveal = () => {
       const target = document.getElementById(hash.slice(1));
+      if (!target) return false;
       // A section folded in a collapsed disclosure (working context) opens to show the link's target.
       for (let d = target?.closest("details"); d; d = d.parentElement?.closest("details")) {
         d.open = true;
       }
       target?.scrollIntoView?.({ block: "nearest" });
+      observer?.disconnect();
+      return true;
+    };
+    requestAnimationFrame(() => {
+      if (reveal()) return;
+      observer = new MutationObserver(() => reveal());
+      observer.observe(document.body, { childList: true, subtree: true });
     });
+    return () => observer?.disconnect();
   }, [hash]);
   // A tab chosen by hand drops a section link the page no longer shows, so following it again
   // switches back.
