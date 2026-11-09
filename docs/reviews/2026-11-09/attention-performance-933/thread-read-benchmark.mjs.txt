@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 
 const [beforeRoot, afterRoot, copiedDb, output, configPath] = process.argv.slice(2);
 if (!configPath) throw new Error('Expected before-root, after-root, copied-db, output, config-path. Never use the live database.');
+if (!existsSync(copiedDb) || !statSync(copiedDb).isFile() || statSync(copiedDb).size < 16_384)
+  throw new Error('The copied database is missing or empty. Restore its archive first; do not let Store create an empty database.');
 const hash = value => createHash('sha256').update(value).digest('hex');
 const head = root => execFileSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 const storeFile = root => join(root, 'apps/server/src/store.ts');

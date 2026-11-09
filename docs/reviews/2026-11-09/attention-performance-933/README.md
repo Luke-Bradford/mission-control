@@ -103,8 +103,10 @@ prepared-statement reuse, fall from 7,321 to 30. Median read time is
 runs the preserved native author's affected-test check. These timings do not prove the
 whole-app CPU target. `thread-read-pairs.json` retains all ten measured executions.
 
-`thread-read-benchmark.mjs.txt` is the harness that produced that receipt. Copy it to an
-`.mjs` file and run with Node 26: `node --experimental-strip-types /tmp/thread-read-benchmark.mjs
+`thread-read-benchmark.mjs.txt` retains the measured algorithm. It now refuses a missing or
+empty copied database before opening Store; the executed missing-copy check exits nonzero
+without creating a database or report. Restore an archived database first. Copy the harness
+to an `.mjs` file and run with Node 26: `node --experimental-strip-types /tmp/thread-read-benchmark.mjs
 <before-checkout> <after-checkout> <copied-db> <output-json> <config-yaml>`. Use a copied
 database only: Store initialization may migrate it. The harness saves hashes and aggregate
 counts, not private message content.
