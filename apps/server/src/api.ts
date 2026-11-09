@@ -264,6 +264,7 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
+import { readDependencyChains } from "./dependency-chains.ts";
 import type { DesignPreviews } from "./design-previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
@@ -4679,6 +4680,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           })),
           generatedAt: now(),
         };
+      });
+      // Reader: docs/runbook.md#dependency-chains-api (approved Dependencies build contract).
+      api.get<{ Querystring: { repoId?: string } }>("/dependencies", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const query = z
+          .strictObject({ repoId: z.string().trim().min(1).optional() })
+          .safeParse(req.query);
+        if (!query.success) return reply.code(400).send({ error: "Invalid dependency query" });
+        const repos = config.repos.filter(
+          (r) => query.data.repoId === undefined || r.id === query.data.repoId,
+        );
+        if (repos.length === 0) return reply.code(404).send({ error: "Repository not found" });
+        const at = now();
+        return repos.flatMap((repo) => readDependencyChains(store, repo.id, at));
       });
       const CodeHealthQuery = z.strictObject({
         repo: z.string().trim().min(1).max(128),
