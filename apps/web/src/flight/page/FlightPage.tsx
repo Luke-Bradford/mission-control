@@ -1,8 +1,7 @@
 import type { AttentionItem, CrewPause, FlightSummaryView } from "@mc/core";
-import { useCallback, useRef, useState } from "react";
-import { apiPost, errorNote } from "../../api.ts";
+import { useCallback, useState } from "react";
 import { useNow } from "../../clock.ts";
-import { ACTIONS, hub, RESOURCES, useResource } from "../../data.ts";
+import { RESOURCES, useResource } from "../../data.ts";
 import { followLink, PAGE_PATHS } from "../../router.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flightTypes.ts";
 import { Pending } from "../Pending.tsx";
@@ -27,32 +26,12 @@ export function FlightPage() {
   const pause = useResource<CrewPause | null>(RESOURCES.crewPause).data;
   const now = useNow();
   const [shown, setShown] = useState<number | null>(null);
-  const [startError, setStartError] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
-  // A second click lands before React has re-rendered the disabled button, so a ref holds the lock.
-  const startLock = useRef(false);
   const onShown = useCallback((n: number) => setShown(n), []);
   const view = flight.data;
   const run = flightRun(view, pause);
   const blockers = buildBlockers(attention.data, view, run, now);
   const decisions = newestFirst(view?.decisions ?? []);
   const board = PAGE_PATHS.board;
-  const start = async () => {
-    if (!view?.seat || startLock.current) return;
-    startLock.current = true;
-    setStarting(true);
-    setStartError(null);
-    try {
-      await apiPost(ACTIONS.seatStart(view.seat.id), {});
-      hub.refetch(RESOURCES.flight.path);
-    } catch (e) {
-      const err = e instanceof Error ? e : new Error(String(e));
-      setStartError(errorNote(err) ?? err.message);
-    } finally {
-      startLock.current = false;
-      setStarting(false);
-    }
-  };
   return (
     <section id="page-flight" className="fp">
       <div className="fp-title">
@@ -64,13 +43,8 @@ export function FlightPage() {
           </a>
           .
         </span>
-        {startError && (
-          <span role="alert" className="fp-err">
-            Could not start FLIGHT: {startError}
-          </span>
-        )}
       </div>
-      <StatusBand run={run} view={view} now={now} onStart={start} starting={starting} />
+      <StatusBand run={run} view={view} now={now} />
       <div className="fp-mid">
         <section className="fp-panel fp-self-start" id="doingP" aria-labelledby="doingH">
           <h2 className="fp-head" id="doingH">

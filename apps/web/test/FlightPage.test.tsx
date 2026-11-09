@@ -1,5 +1,5 @@
 import type { FlightView } from "@mc/core";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { buildBlockers, waitOwner } from "../src/flight/page/blockers.ts";
@@ -110,10 +110,12 @@ describe("the FLIGHT page", () => {
     expect(text).toContain("37%");
   });
 
-  it("shows Stopped with Start FLIGHT when the seat is not live", async () => {
+  it("shows a punctuated stopped sentence on the read-only page", async () => {
     show("stopped");
-    expect(await screen.findByRole("button", { name: "Start FLIGHT" })).toBeTruthy();
-    expect(screen.getByLabelText("FLIGHT status").textContent).toContain("Stopped");
+    const band = await screen.findByLabelText("FLIGHT status");
+    await waitFor(() => expect(band.textContent).toContain("FLIGHT is stopped. Last woke"));
+    expect(band.textContent).not.toContain("stopped..");
+    expect(screen.queryByRole("button", { name: "Start FLIGHT" })).toBeNull();
   });
 
   it("lists the blockers longest wait first, each with owner, wait and what FLIGHT is doing", async () => {
@@ -277,6 +279,30 @@ describe("the FLIGHT page", () => {
       expect(decisionLine(withId, NOW, "Europe/London").rest).not.toMatch(/comms:\d+/);
     });
 
+    it("formats live controller references in the closed row and expanded basis", async () => {
+      const report = "b07f8730c520a469751233d540086a17c03f314dc42ccf592b011e1c9ad6c9f8";
+      const live = {
+        ...wait,
+        kind: "note" as const,
+        about: "Controller clears PR1635 on head25e3622c",
+        decision: "Independent review1326 passed before closing1631.",
+        basis: `Immutable QA report ${report}; review1326 passed on head25e3622c.`,
+      };
+      const api = flightPageApi("running");
+      api["/api/flight"] = { ...api["/api/flight"], decisions: [live] };
+      stubFetch(api);
+      render(<Flight />);
+      const row = await screen.findByRole("button", { name: /Controller clears/ });
+      expect(row.textContent).toContain("PR 1635");
+      fireEvent.click(row);
+      const text = document.querySelector("#decisions")?.textContent ?? "";
+      expect(text).toContain("head 25e3622c");
+      expect(text).toContain("review 1326");
+      expect(text).toContain("closing #1631");
+      expect(text).toContain("the review report");
+      expect(text).not.toMatch(/PR1635|head25e|review1326|closing1631|\b[a-f0-9]{64}\b/);
+    });
+
     it("renders on the page without the key or the epoch digits", async () => {
       const api = flightPageApi("running");
       api["/api/flight"] = { ...api["/api/flight"], decisions: [wait] };
@@ -289,60 +315,6 @@ describe("the FLIGHT page", () => {
       const text = document.querySelector("#decisions")?.textContent ?? "";
       expect(text).not.toContain("1794072257157");
       expect(text).not.toContain("T11:45:00.000Z");
-    });
-  });
-
-  describe("Start FLIGHT", () => {
-    const START = "/api/seats/flight-1/start";
-
-    it("posts once, waits on the request and refuses a second click while it is pending", async () => {
-      stubFetch(flightPageApi("stopped"));
-      const inner = globalThis.fetch;
-      const posts: string[] = [];
-      let release: () => void = () => {};
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(async (input: string, init?: RequestInit) => {
-          if (init?.method === "POST") {
-            posts.push(input);
-            await new Promise<void>((resolve) => {
-              release = resolve;
-            });
-            return new Response("{}", { status: 200 });
-          }
-          return inner(input, init);
-        }),
-      );
-      render(<Flight />);
-      const button = await screen.findByRole("button", { name: "Start FLIGHT" });
-      fireEvent.click(button);
-      fireEvent.click(button);
-      await waitFor(() => expect(button.textContent).toBe("Starting…"));
-      expect((button as HTMLButtonElement).disabled).toBe(true);
-      expect(posts).toEqual([START]);
-      await act(async () => {
-        release();
-      });
-      await waitFor(() => expect(button.textContent).toBe("Start FLIGHT"));
-      expect(posts).toHaveLength(1);
-    });
-
-    it("says why it could not start, in an alert, and lets the operator try again", async () => {
-      stubFetch(
-        flightPageApi("stopped", {
-          [`POST ${START}`]: () => ({
-            status: 409,
-            body: { error: "conflict", note: "FLIGHT is already starting." },
-          }),
-        }),
-      );
-      render(<Flight />);
-      fireEvent.click(await screen.findByRole("button", { name: "Start FLIGHT" }));
-      const alert = await screen.findByRole("alert");
-      expect(alert.textContent).toBe("Could not start FLIGHT: FLIGHT is already starting.");
-      expect(
-        (screen.getByRole("button", { name: "Start FLIGHT" }) as HTMLButtonElement).disabled,
-      ).toBe(false);
     });
   });
 });

@@ -56,21 +56,17 @@ export function StatusBand({
   run,
   view,
   now,
-  onStart,
-  starting = false,
 }: {
   run: FlightRun;
   view: FlightView | undefined;
   now: number;
-  onStart?: () => void;
-  /** The start request is in flight: the button waits for it. */
-  starting?: boolean;
 }) {
   const tz = useTz();
   const ctx = contextReading(view);
   const last = view?.wake?.lastWakeAt ?? null;
   const lastWake =
     last !== null && tz !== null ? `Last woke ${hhmm(last, tz)} · ${rel(last, now, tz)}.` : "";
+  const why = run.kind === "loading" ? "" : run.why.replace(/[.!?]+\s*$/, "");
   const state =
     run.kind === "loading" ? null : (
       <span className={`fp-state ${RUN_TONE[run.kind]}`}>{RUN_WORD[run.kind]}</span>
@@ -82,15 +78,10 @@ export function StatusBand({
         definition={
           run.kind === "loading"
             ? "Loading FLIGHT's state."
-            : `${run.why.charAt(0).toUpperCase()}${run.why.slice(1)}. ${lastWake} Run start not recorded yet.`
+            : `${why.charAt(0).toUpperCase()}${why.slice(1)}. ${lastWake} Run start not recorded yet.`
         }
       >
         {state ?? <span className="fp-muted">…</span>}
-        {run.kind === "down" && view?.seat && onStart && (
-          <button type="button" className="fp-start" onClick={onStart} disabled={starting}>
-            {starting ? "Starting…" : "Start FLIGHT"}
-          </button>
-        )}
       </Stat>
       <Stat
         label="Cost per hour"

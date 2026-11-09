@@ -18,6 +18,13 @@ const COMMS_ID = /\bcomms:\d+\b/g;
 export function readableText(text: string, now: number, tz: string): string {
   const at = (ms: number, raw: string) => (Number.isFinite(ms) ? whenLabel(ms, now, tz) : raw);
   return text
+    .replace(/\b(?:immutable\s+)?(?:QA\s+)?report\s+[a-f0-9]{64}\b/gi, "the review report")
+    .replace(/\b[a-f0-9]{64}\b/gi, "the review report")
+    .replace(/\bPR(\d+)\b/g, "PR $1")
+    .replace(/\bhead\s*([a-f0-9]{7,40})\b/gi, (_raw, sha: string) => `head ${sha.slice(0, 8)}`)
+    .replace(/\breview(\d+)\b/gi, "review $1")
+    .replace(/\b(closing|closed|issue|ticket)(\d+)\b/gi, "$1 #$2")
+    .replace(/\b[a-f0-9]{40}\b/gi, (sha) => `commit ${sha.slice(0, 8)}`)
     .replace(ISO, (raw) => at(Date.parse(raw), raw))
     .replace(COMPACT, (raw, y, mo, d, h, mi, s) => at(Date.UTC(+y, +mo - 1, +d, +h, +mi, +s), raw))
     .replace(EPOCH_MS, (raw) => at(Number(raw), raw))
