@@ -1,0 +1,438 @@
+{
+  "kind": "required controller observation, not an independent QA verdict",
+  "pr": 1675,
+  "renderedHead": "60b407503b1896a3ff0ecc1bb1df69bf6c8496ef",
+  "beforeSource": "4d9938e984cec81c3282318d94bcee603eae187f",
+  "beforeEvidenceCommit": "a0bfb2aadd1a7310ad5e30d9f3f1ef23301aa3ef",
+  "prototypeHead": "1c37236f743e95cc7195219ca60f0f4f9da99d18",
+  "prototypeSHA256": "c33620d1e7702befdfddf688f206595adf219788a711bf83f9fb2e2832fcb831",
+  "startedAt": "2026-11-09T23:44:39.168Z",
+  "endedAt": "2026-11-09T23:47:04.879Z",
+  "os": "macOS-27.0.1-arm64-arm-64bit-Mach-O",
+  "browser": "HeadlessChrome151.0.7922.34, Playwright1.58.2, ordinary multi-process mode",
+  "context": {
+    "title": "Mission Control",
+    "viewport": {
+      "width": 1920,
+      "height": 940
+    },
+    "visibility": "visible",
+    "dpr": 1,
+    "zoom": 1,
+    "theme": "dark",
+    "fonts": "loaded",
+    "sideScroll": 0,
+    "names": [
+      "CAPCOM",
+      "FLIGHT",
+      "#crew",
+      "SEAT-1",
+      "SEAT-2",
+      "SEAT-3",
+      "SEAT-4",
+      "SEAT-5",
+      "SEAT-6",
+      "SEAT-7",
+      "SEAT-8",
+      "SEAT-9"
+    ],
+    "waitingNodes": 1,
+    "headings": [
+      "Comms chart"
+    ],
+    "buttons": [
+      "CPU \u2014, RAM \u2014, Lock: \u2014Full-suite test lock",
+      "Away mode",
+      "",
+      "",
+      "",
+      "All",
+      "Open 1",
+      "Browser full screen",
+      "Demo",
+      "Show build status"
+    ],
+    "animations": 1
+  },
+  "comparisonContext": {
+    "graph": {
+      "title": "Mission Control",
+      "viewport": {
+        "width": 1918,
+        "height": 938
+      },
+      "visibility": "visible",
+      "dpr": 1,
+      "zoom": 1,
+      "theme": "dark",
+      "fonts": "loaded",
+      "sideScroll": 0,
+      "names": [
+        "CAPCOM",
+        "FLIGHT",
+        "#crew",
+        "SEAT-1",
+        "SEAT-2",
+        "SEAT-3",
+        "SEAT-4",
+        "SEAT-5",
+        "SEAT-6",
+        "SEAT-7",
+        "SEAT-8",
+        "SEAT-9"
+      ],
+      "waitingNodes": 1,
+      "headings": [
+        "Comms chart"
+      ],
+      "buttons": [
+        "CPU \u2014, RAM \u2014, Lock: \u2014Full-suite test lock",
+        "Away mode",
+        "",
+        "",
+        "",
+        "All",
+        "Open 1",
+        "Browser full screen",
+        "Demo",
+        "Show build status"
+      ],
+      "animations": 1
+    },
+    "prototype": {
+      "viewport": {
+        "width": 1918,
+        "height": 938
+      },
+      "fonts": "loaded",
+      "title": "Comms living graph prototype",
+      "nodes": 0
+    },
+    "after": {
+      "title": "Mission Control",
+      "viewport": {
+        "width": 1918,
+        "height": 938
+      },
+      "visibility": "visible",
+      "dpr": 1,
+      "zoom": 1,
+      "theme": "dark",
+      "fonts": "loaded",
+      "sideScroll": 0,
+      "names": [
+        "CAPCOM",
+        "FLIGHT",
+        "#crew",
+        "SEAT-1",
+        "SEAT-2",
+        "SEAT-3",
+        "SEAT-4",
+        "SEAT-5",
+        "SEAT-6",
+        "SEAT-7",
+        "SEAT-8",
+        "SEAT-9"
+      ],
+      "waitingNodes": 0,
+      "headings": [
+        "Comms chart"
+      ],
+      "buttons": [
+        "CPU \u2014, RAM \u2014, Lock: \u2014Full-suite test lock",
+        "Away mode",
+        "",
+        "",
+        "",
+        "All",
+        "Open",
+        "Browser full screen",
+        "Demo",
+        "Show build status"
+      ],
+      "animations": 1
+    }
+  },
+  "geometry": {
+    "names": [
+      {
+        "id": "CAPCOM",
+        "text": "CAPCOM",
+        "rect": {
+          "left": 907.9789428710938,
+          "top": 605.4839477539062,
+          "right": 951.5414428710938,
+          "bottom": 619.4839477539062,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "flight-1",
+        "text": "FLIGHT",
+        "rect": {
+          "left": 889.82080078125,
+          "top": 531.8065185546875,
+          "right": 933.38330078125,
+          "bottom": 545.8065185546875,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "crew",
+        "text": "#crew",
+        "rect": {
+          "left": 979.6722412109375,
+          "top": 604.9633178710938,
+          "right": 1015.9847412109375,
+          "bottom": 618.9633178710938,
+          "width": 36.3125,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-1",
+        "text": "SEAT-1",
+        "rect": {
+          "left": 788.6564331054688,
+          "top": 573.5677490234375,
+          "right": 832.2189331054688,
+          "bottom": 587.5677490234375,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-2",
+        "text": "SEAT-2",
+        "rect": {
+          "left": 895.851318359375,
+          "top": 505.666259765625,
+          "right": 939.413818359375,
+          "bottom": 519.666259765625,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-3",
+        "text": "SEAT-3",
+        "rect": {
+          "left": 830.3291015625,
+          "top": 580.6859130859375,
+          "right": 873.8916015625,
+          "bottom": 594.6859130859375,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-4",
+        "text": "SEAT-4",
+        "rect": {
+          "left": 805.4999389648438,
+          "top": 512.0982666015625,
+          "right": 849.0624389648438,
+          "bottom": 526.0982666015625,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-5",
+        "text": "SEAT-5",
+        "rect": {
+          "left": 758.2180786132812,
+          "top": 525.1806640625,
+          "right": 801.7805786132812,
+          "bottom": 539.1806640625,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-6",
+        "text": "SEAT-6",
+        "rect": {
+          "left": 869.2694091796875,
+          "top": 452.6708068847656,
+          "right": 912.8319091796875,
+          "bottom": 466.6708068847656,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-7",
+        "text": "SEAT-7",
+        "rect": {
+          "left": 826.5975952148438,
+          "top": 481.5306396484375,
+          "right": 870.1600952148438,
+          "bottom": 495.5306396484375,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-8",
+        "text": "SEAT-8",
+        "rect": {
+          "left": 803.9035034179688,
+          "top": 430.9136657714844,
+          "right": 847.4660034179688,
+          "bottom": 444.9136657714844,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-9",
+        "text": "SEAT-9",
+        "rect": {
+          "left": 756.8120727539062,
+          "top": 480.678955078125,
+          "right": 800.3745727539062,
+          "bottom": 494.678955078125,
+          "width": 43.5625,
+          "height": 14
+        }
+      }
+    ],
+    "overlaps": [
+      [
+        "seat-1",
+        "seat-3"
+      ]
+    ],
+    "clipped": []
+  },
+  "cpuMetric": "Process CPU-time delta / monotonic elapsed time *100, percent of one core; isolated renderer and whole Chrome tree reported separately. Fixed3second warmup. Recording/prototype closed duringCPU; all planned intervals retained.",
+  "phases": [
+    {
+      "name": "idle graph",
+      "seconds": 31.081577250000002,
+      "messages": 0,
+      "treeCPUPercent": 8.815511445771305,
+      "rendererCPUPercent": 6.338159689112946,
+      "maxFrameRoundTripMs": 23.33112500000425,
+      "maxIntervalTreeCPUPercent": 11.667673539898331,
+      "maxIntervalRendererCPUPercent": 8.73404894333557
+    },
+    {
+      "name": "20-message burst",
+      "seconds": 62.12926520799999,
+      "messages": 20,
+      "treeCPUPercent": 12.152083200603883,
+      "rendererCPUPercent": 8.67546072202052,
+      "maxFrameRoundTripMs": 21.27900000000227,
+      "maxIntervalTreeCPUPercent": 16.51590105340376,
+      "maxIntervalRendererCPUPercent": 11.658283096520316
+    },
+    {
+      "name": "graph unmounted on Overview",
+      "seconds": 30.854795333999995,
+      "messages": 0,
+      "treeCPUPercent": 1.0695258109081123,
+      "rendererCPUPercent": 0.4213283497516779,
+      "maxFrameRoundTripMs": 13.83041699999012,
+      "maxIntervalTreeCPUPercent": 3.9223673598818145,
+      "maxIntervalRendererCPUPercent": 2.941775519911361
+    }
+  ],
+  "afterUnmount": {
+    "title": "Mission Control",
+    "viewport": {
+      "width": 1920,
+      "height": 940
+    },
+    "visibility": "visible",
+    "dpr": 1,
+    "zoom": 1,
+    "theme": "dark",
+    "fonts": "loaded",
+    "sideScroll": 0,
+    "names": [],
+    "waitingNodes": 0,
+    "headings": [
+      "Overview",
+      "Crew",
+      "Board",
+      "Ready\u2014",
+      "Building \u00b7 checks\u2014",
+      "In review\u2014",
+      "Merging\u2014",
+      "Done \u00b7 24h\u2014",
+      "Mac",
+      "Tokens",
+      "Live log",
+      "FLIGHT \u00b7 Head agent"
+    ],
+    "buttons": [
+      "CPU \u2014, RAM \u2014, Lock: \u2014Full-suite test lock",
+      "Away mode",
+      "",
+      "",
+      "",
+      "Refresh overview",
+      "Pause crew",
+      "Add agent",
+      "FLIGHT",
+      "6 free \u25be",
+      "Refresh allowance",
+      "All",
+      "Steps",
+      "Reviews",
+      "Merges",
+      "Guard",
+      "Messages",
+      "Pause",
+      "FLIGHT",
+      "Hide",
+      "Retry summary",
+      "Send",
+      "Start FLIGHT",
+      "Demo",
+      "Show build status"
+    ],
+    "animations": 1,
+    "graphResourceRequests": []
+  },
+  "observations": [
+    "Base placement no longer collapses to the upper-left.",
+    "SEAT1 and SEAT3 label boxes still overlap at1920x940; there is no viewport clipping.",
+    "The full chart still lacks the Waiting on a reply and Just said companion lists.",
+    "Idle renderer6.338% remains above the under5% requirement. Burst renderer average8.675%, tree12.152%.",
+    "After graph unmount its nodes disappear and no graphresource requests occur over30.85seconds."
+  ],
+  "limits": [
+    "Same controlled10-seat topology asbefore, with capture-relative timestamps; not a live backend capture.",
+    "Prototype uses different historical data with placeholder wording.",
+    "Synthetic resource refetch bridge exercises the current rendering path; production SSE transport/two-second latency unverified.",
+    "Side-by-side iframe content viewports1918x938; standaloneApp1920x940. DPR1, zoom1, dark, localfonts loaded.",
+    "No production source edit, new QA verdict, acceptance or waiver. Raw samples, scripts and original files stay private."
+  ],
+  "assets": [
+    {
+      "file": "graph-1920x940-dark.png",
+      "bytes": 76254,
+      "sha256": "73b255f0f20fa6475d22f74685c4f0a3be48804d8635aa95f320f0c4b2061581"
+    },
+    {
+      "file": "side-by-side-after.png",
+      "bytes": 733705,
+      "sha256": "00d44a7cc84921612302269ba3872a63db0abbb38b02934493877bf3a07570ca"
+    },
+    {
+      "file": "prototype-and-app.webm",
+      "bytes": 1756174,
+      "sha256": "bf5083e66a5937a51f48099893131a40e88497b95f99dd210564bdc2a530842f"
+    },
+    {
+      "file": "side-by-side-before.png",
+      "bytes": 715741,
+      "sha256": "68e92b4ff0eb4e1ec2110e580bad4eb9efbbdb6477c6219c4a58fee40c5a5f43"
+    }
+  ]
+}
