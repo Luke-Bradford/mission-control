@@ -343,7 +343,7 @@ import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
-import { type CcConfig, crewSeatDef, flightPowersOf, seatUnavailable, SEAT_ID } from "../config.ts";
+import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
