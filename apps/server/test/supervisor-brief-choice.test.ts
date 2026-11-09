@@ -3,7 +3,10 @@ import "./supervisor-harness.ts";
 import { writeFileSync } from "node:fs";
 import { expect, it } from "vitest";
 import { checkBriefDispatch, withinBriefDispatch } from "../src/brief-dispatch-context.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { make, recordFile, seatState, store, until, userLines } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 it("1389 refuses an expected-run change in the actual queued provider message", async () => {
   const { sup } = make();
