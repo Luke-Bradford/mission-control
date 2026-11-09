@@ -11,3 +11,9 @@ The parent plan's S1 acceptance also requires one internal key-and-title context
 The complete conversation, Comms, Store and API suites pass 673 cases. Lint, workspace typecheck and build pass. No additional full local-suite pass is claimed for this existing-PR update; fresh pushed-head full CI and independent whole-branch QA remain required. The two Minor renderer findings remain logged in review 1337: shared safe Markdown and long-body presentation belong to the unstarted shared-thread work in #1621. This correction does not claim the shared-thread pages or W2 click-flow delivery.
 
 No provider, budget, hold, approval or observed-loop setting changes. Internal context is descriptive and grants no action or decision authority.
+
+## Merge the landed always-available composer
+
+The main merge preserves the reply-route readiness check and stopped notice. The new source still joins turn replies with null timestamps and source-bound controls. Delivery state is rendered once under each operator message in the existing state-line position; its server-provided Answered state takes precedence over the older stored/delivered fallback. The browser explicitly checks one state line for the message while transitioning all three states.
+
+After images are recaptured from the merged source. Before remains the exact round-one reviewed source a63e0412; after also includes the now-landed composer and receipt presentation. Metadata records this parent difference rather than presenting it as an isolated label-only comparison. The real App arrives through Overview and Comms navigation. All22 browser/conversation presentation cases and60 server conversation/Comms component cases pass. Lint, workspace types and build pass. Fresh pushed-head CI and QA remain required.

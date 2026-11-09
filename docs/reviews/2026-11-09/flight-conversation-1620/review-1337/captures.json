@@ -14,7 +14,7 @@
     "dark"
   ],
   "zoom": 1,
-  "currentConversationSHA256": "ba865a26ca5689b9171540c86938d042d0093302f6916a6328f80b9c0a5b6042",
+  "currentConversationSHA256": "f56f29b7d92b4d7a524e4d89759c0a934a6b98e971193bab8eb85747ccceb5f0",
   "captures": [
     {
       "phase": "before",
@@ -163,146 +163,147 @@
     {
       "phase": "after",
       "file": "after/flight-state-stored-1600x1000-dark.png",
-      "sha256": "5a8a0d453798c76d0f1ebe501961215f6a96d89f69f95ad12af1b69226ab27ce",
-      "captureFileAt": "2026-11-09T12:56:01.050953+00:00"
+      "sha256": "1bece196eea4bb8a7d1d3bb1cd551086b8d018700158b142fb7f123f2fdb949a",
+      "captureFileAt": "2026-11-09T13:20:14.306566+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-delivered-1600x1000-dark.png",
-      "sha256": "90485ce6c221fc3c698443a11dc4adf2dd103ca3b216530371b389744754b1d2",
-      "captureFileAt": "2026-11-09T12:56:01.097735+00:00"
+      "sha256": "2eecb916e7c26499727bbc6ea618ba66934ded6e8f71b20e7ff3a8b18a9f1116",
+      "captureFileAt": "2026-11-09T13:20:14.361825+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-stored-1600x700-dark.png",
-      "sha256": "cf727b9b6a3f73f29599b24fded238a9399c0cf7ebe8126066a8a81709351943",
-      "captureFileAt": "2026-11-09T12:56:03.975164+00:00"
+      "sha256": "024a7fb43e87083eeed824ee665c759d5c7239500c0abefe6bd53a3b2fe9940f",
+      "captureFileAt": "2026-11-09T13:20:17.206498+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-stored-1600x1000-light.png",
-      "sha256": "9a5cbf8b159306163d89b017ac5f427c0b2d46bc1eea1124b8e83ed538914623",
-      "captureFileAt": "2026-11-09T12:56:00.293633+00:00"
+      "sha256": "536bcf7eba12ed51e330d86e61f703942cf6ac1a3e19c3b6a17d5761f68da64f",
+      "captureFileAt": "2026-11-09T13:20:13.537193+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-delivered-1600x1000-light.png",
-      "sha256": "9cae834098217062fac520a0b9c5961507a0f215ad198c19f9a9a778a0f21b8c",
-      "captureFileAt": "2026-11-09T12:56:00.385420+00:00"
+      "sha256": "adf50150f1d63470bae6343379dc23c6c0b405e8a9e02823738f1c3421ff965a",
+      "captureFileAt": "2026-11-09T13:20:13.588853+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-answered-1280x1000-dark.png",
-      "sha256": "42d996b1c98c5ec3ce5010b1e0898a7c606382c60d37f1a2e8da60a6fd340c0e",
-      "captureFileAt": "2026-11-09T12:55:59.679044+00:00"
+      "sha256": "f5da8ae05831892c87bafbb80d1481280e683f97f6889d54f69e1c108f158fd6",
+      "captureFileAt": "2026-11-09T13:20:12.906423+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-answered-1600x700-light.png",
-      "sha256": "4bf0e4a3e47d939c24797f8adc55d9cb95eb9603a0792a19daf752ff75c0816a",
-      "captureFileAt": "2026-11-09T12:56:03.367414+00:00"
+      "sha256": "c6bb421162079c0e6842f7f92786d714ff8161ffbad1bfc046a3967a3f30e40a",
+      "captureFileAt": "2026-11-09T13:20:16.574693+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-answered-1600x700-dark.png",
-      "sha256": "5f8998dbe46041d9638bda673a1319c959d4e9a30d4be1ce876b5b84ef800a5b",
-      "captureFileAt": "2026-11-09T12:56:04.042778+00:00"
+      "sha256": "c376f7df3c68da338fa23c7208186a506781164d89e4e9fa9a140e6c5676adbb",
+      "captureFileAt": "2026-11-09T13:20:17.313066+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-delivered-1280x1000-light.png",
-      "sha256": "f7c59bad6ed23282f319136a81083520ba1291f6ec91ebb6a97444a74b95ebb1",
-      "captureFileAt": "2026-11-09T12:55:58.382958+00:00"
+      "sha256": "d9229961add3eaa78f844243f80522b14d47ef6d279138c94a04a70be8d3323c",
+      "captureFileAt": "2026-11-09T13:20:12.071901+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-stored-1280x1000-light.png",
-      "sha256": "b7b93b57633fe8594376a4cbc21b2c4148a274fbabec565b11f48a7ffb96cfb2",
-      "captureFileAt": "2026-11-09T12:55:58.336080+00:00"
+      "sha256": "5a68f0c188cc3007e445eafa6f30a0ba66516c6b274676f72cd9c8bb238fbb19",
+      "captureFileAt": "2026-11-09T13:20:12.031956+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-answered-1600x1000-light.png",
-      "sha256": "5d6856112d2ded8d2cf476cb39fbc6e805b3419a3227fcbd5491e9d4feb253a0",
-      "captureFileAt": "2026-11-09T12:56:00.425829+00:00"
+      "sha256": "e6c336c893164a36e3aae7356a2f7e956402fa2840d9ce1fefe660ebfb7f3450",
+      "captureFileAt": "2026-11-09T13:20:13.656033+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-answered-1280x1000-light.png",
-      "sha256": "554574fb1a6c230b61515150ed2e98928a34ff86a3b8f5fbfeeaed9efd51782b",
-      "captureFileAt": "2026-11-09T12:55:58.428869+00:00"
+      "sha256": "1149cb21cd6dd2f6a094e3f59290bd3ac6e0d1c545e5a22fd793c1e1846520a9",
+      "captureFileAt": "2026-11-09T13:20:12.136238+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-delivered-1920x1000-dark.png",
-      "sha256": "d076442974f95281875a43d0a9cd515df74ee5aacd4bcb1d79c86668fe89a4e9",
-      "captureFileAt": "2026-11-09T12:56:02.594004+00:00"
+      "sha256": "46f1f59b9ff7a676bcbf87434dff6e78d68201c0f3ff6247a0545b76344d4403",
+      "captureFileAt": "2026-11-09T13:20:15.809127+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-stored-1920x1000-dark.png",
-      "sha256": "f6819d7914b6940a834648f8c0e81a346255263947f02df2d520f65d599cafff",
-      "captureFileAt": "2026-11-09T12:56:02.524291+00:00"
+      "sha256": "0243cb8546a7c244d10c439dac7ef1fc19248a3efda65aae02b8e396df9500fb",
+      "captureFileAt": "2026-11-09T13:20:15.758277+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-delivered-1600x700-light.png",
-      "sha256": "e4485206701501959a1ffca6a4f45b1b04b7a5512f4bab66ad6aa192a70f7f95",
-      "captureFileAt": "2026-11-09T12:56:03.335003+00:00"
+      "sha256": "d0f21e6d8b3aca91ce2d4ae8279acb235d1248898bdb4ca315b1e8bf6ac175df",
+      "captureFileAt": "2026-11-09T13:20:16.535155+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-delivered-1280x1000-dark.png",
-      "sha256": "907c1d8955cc65643e2c1c3559ea9cc818885d9758ec87a44c20eb0cbb4658ac",
-      "captureFileAt": "2026-11-09T12:55:59.621417+00:00"
+      "sha256": "eecd3b9944dee29406e83e726d9a783b5806f50aff712a39b86a4a1025832a0b",
+      "captureFileAt": "2026-11-09T13:20:12.871011+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-stored-1280x1000-dark.png",
-      "sha256": "2b430a6a144e612bfb08fc0c689412ff481ca9574d306c394cdfecd65bb56715",
-      "captureFileAt": "2026-11-09T12:55:59.568528+00:00"
+      "sha256": "c92d832c481ddc9929336f0c3ce7ea5558321dcfb61bd33b18b9a3359b41a89a",
+      "captureFileAt": "2026-11-09T13:20:12.820340+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-stored-1600x700-light.png",
-      "sha256": "12d0807f4aa8611e4fecb6defe4868688a1a2ffda611541eb6652358f5930fd7",
-      "captureFileAt": "2026-11-09T12:56:03.300607+00:00"
+      "sha256": "9305ce925536d29e693665027d14e632d7651f1d576fda20f1546d5ae9855453",
+      "captureFileAt": "2026-11-09T13:20:16.501769+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-answered-1920x1000-light.png",
-      "sha256": "9889e916d83121874e8e538f2735d6d80bdd70ff0422844e2f9d01a4306c07e5",
-      "captureFileAt": "2026-11-09T12:56:01.881405+00:00"
+      "sha256": "b4954a5b43122997970176e5933a36ef6cf5701dee674e2f8d47e3923e9a0788",
+      "captureFileAt": "2026-11-09T13:20:15.122739+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-answered-1600x1000-dark.png",
-      "sha256": "a4c67b50e55c45b6554a4d3ba21462b3cbe7c9cb14bab45078ddb194c9994256",
-      "captureFileAt": "2026-11-09T12:56:01.149776+00:00"
+      "sha256": "ac6bbfd0b37a0460ab70234cd4e686bc437951d72c830ad5785fb26ececeb928",
+      "captureFileAt": "2026-11-09T13:20:14.405176+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-stored-1920x1000-light.png",
-      "sha256": "2b8c7bc93ee6f772573b6ea4353d2714312ce9d57884dd33bd95d9b67e0f65a0",
-      "captureFileAt": "2026-11-09T12:56:01.793475+00:00"
+      "sha256": "9ed45ab3379c41302fc56ac76180aca66d22622da84220b0cc8891825cf1b3cd",
+      "captureFileAt": "2026-11-09T13:20:15.030977+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-delivered-1920x1000-light.png",
-      "sha256": "67a1c96332974d6dfc9efc7bdfb68cfb646f765c9d9f47834de2b2bd1e8c022f",
-      "captureFileAt": "2026-11-09T12:56:01.839044+00:00"
+      "sha256": "579f8c5bc54159b12bf551ef216293a29b06fe5044742e68540f7370ad50e383",
+      "captureFileAt": "2026-11-09T13:20:15.073270+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-answered-1920x1000-dark.png",
-      "sha256": "51790fcb769de20a0bfd38a85005361468745132bd25baba3443ed0560e85e9f",
-      "captureFileAt": "2026-11-09T12:56:02.665689+00:00"
+      "sha256": "a69a7b9b8a621b325805cab622d295841cd17bace4216fae6cd01637a963a7ea",
+      "captureFileAt": "2026-11-09T13:20:15.877343+00:00"
     },
     {
       "phase": "after",
       "file": "after/flight-state-delivered-1600x700-dark.png",
-      "sha256": "37ce3fe9419fe3fdb271cbf4438994ee7ff4f21de37c6a605b75618910fcb90f",
-      "captureFileAt": "2026-11-09T12:56:04.008115+00:00"
+      "sha256": "156d797fbdd68f6455ec920b47fc0ce90b8901fec9f677b5fd8b95fa0542fac7",
+      "captureFileAt": "2026-11-09T13:20:17.251118+00:00"
     }
-  ]
+  ],
+  "afterParent": "main d307ee9839ae09610186a3715e94a3810d86a648 merged; includes landed stopped notices and receipt lines"
 }

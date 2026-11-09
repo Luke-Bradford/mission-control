@@ -101,6 +101,15 @@ describeRendered("the joined FLIGHT source in Comms", () => {
               undefined,
             );
           await expect.poll(labels).toEqual(["Stored"]);
+          expect(
+            await page.evaluate(
+              () =>
+                document
+                  .getElementById("comms-message-comms:1")
+                  ?.querySelectorAll('[data-testid="message-state"]').length,
+              undefined,
+            ),
+          ).toBe(1);
           await page.screenshot(join(SHOTS, `flight-state-stored-${width}x${height}-${theme}.png`));
           for (const state of ["delivered", "answered"] as const) {
             Object.assign(messages[0] ?? {}, { state, deliveredAt: NOW });
