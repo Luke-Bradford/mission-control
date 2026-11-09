@@ -1,6 +1,7 @@
 import type {
   ConfigView,
   CrewRow,
+  FlightDecision,
   OverviewSummary,
   OverviewTimeline,
   PipelineStage,
@@ -625,6 +626,30 @@ export function demoSeed() {
     "/api/overview": summary,
     "/api/overview?session=demo": summary,
     "/api/prs/flow": prFlowView(),
+    "/api/flight": {
+      seat: {
+        id: "flight-1",
+        call: "FLIGHT",
+        model: "fixture-model",
+        state: "running",
+        live: true,
+        context: { tokens: 74_200, rotateAt: 200_000, text: null },
+      },
+      decisions: DEMO_TICKETS.slice(0, 8).map(
+        (ticket, i): FlightDecision => ({
+          id: i + 1,
+          at: NOW - (i + 1) * 11 * MIN,
+          kind: "answer",
+          seatId: ticket.seat,
+          targetRunId: null,
+          ref: `${DEMO_REPO}#${ticket.n}`,
+          questionId: null,
+          about: ticket.title,
+          decision: "Keep the agreed scope and check the result against the ticket before merging.",
+          basis: "The ticket records the accepted outcome; no additional approval is needed.",
+        }),
+      ),
+    },
     "/api/flight/summary": flightSummary(),
     "/api/settings/away": {
       on: false,

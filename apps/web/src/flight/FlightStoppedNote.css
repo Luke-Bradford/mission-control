@@ -1,0 +1,22 @@
+.flight-stopped {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  flex-basis: 100%;
+}
+
+.flight-stopped > .note {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.flight-stopped > button {
+  flex: none;
+}
+
+.flight-stopped > .err {
+  flex-basis: 100%;
+}
