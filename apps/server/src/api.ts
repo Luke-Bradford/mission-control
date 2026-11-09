@@ -68,7 +68,6 @@ import {
   fixesSent,
   flightShellBreakerWrite,
   flightShellWrite,
-  flightTicketWrites,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -78,7 +77,6 @@ import {
   GUARD_CHECK_PATH,
   GUARD_HITS_LIMIT,
   GUARD_HOOK_EVENTS,
-  GUARD_RULES,
   GUARD_WINDOW_DAYS,
   type GuardHitsView,
   globMatches,
@@ -299,7 +297,7 @@ import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./flight/memory.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
-import { liftRunaway, noteFlightWrite, runawayTrip } from "./flight/runaway.ts";
+import { liftRunaway, noteFlightWrite } from "./flight/runaway.ts";
 import {
   flightBriefView,
   flightScheduleView,
@@ -307,12 +305,7 @@ import {
   flightView,
   prFlow,
 } from "./flight/state.ts";
-import {
-  FLIGHT_APPROVAL_MAX_MS,
-  findApproval,
-  grantApproval,
-  useApproval,
-} from "./flight-approvals.ts";
+import { FLIGHT_APPROVAL_MAX_MS, grantApproval } from "./flight-approvals.ts";
 import {
   FlightConversationCursorError,
   flightConversation,

@@ -3299,7 +3299,7 @@ import(${JSON.stringify(fixture)});
   });
 
   it("releases an accepted test lock when its process exits mid-item", async () => {
-    const { sup, lock } = codex({ command: "pnpm -s test", holdItem: true, exitPending: true });
+    const { sup, lock } = codex({ command: "pnpm -s test", holdItem: true, exitAccepted: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await untilCodex(() => expect(decision()).toBe("accept"));

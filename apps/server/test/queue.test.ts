@@ -50,6 +50,7 @@ import { ProfilesError } from "../src/profiles.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const NOW = Date.parse("2026-10-21T12:00:00Z");
 const DAY = 24 * 60 * 60_000;
@@ -1911,7 +1912,7 @@ it("checks the current seat focus if reload replaces the seat during a fresh rea
 it.each(["mc#2", null, undefined, "removed"])(
   "uses current focus %s if reload replaces or removes a captured queue seat during a fetch",
   async (focus) => {
-    const session = config.crew!.sessions[0];
+    const session = defined(config.crew).sessions[0];
     const index = session.seats.findIndex((s) => s.id === SERVER);
     const original = session.seats[index];
     original.focus = "mc#1";
