@@ -44,6 +44,7 @@ import {
   run,
   SESSION_CONFIG,
   seatRow,
+  stoppedSeat,
 } from "./fixtures.ts";
 
 export function digest(over: Partial<RunDigest> = {}): RunDigest {
@@ -3027,6 +3028,31 @@ describe("Agent page: driving a crew seat", () => {
     });
     await vi.waitFor(() => expect(bodyOf(f, "/api/seats/guido-1/interrupt")).toBe("{}"));
     off();
+  });
+
+  it("shows the selected seat in the fixed roster, identity and activity workspace", async () => {
+    stub({ rows: [seat(), studio()], extra: SEAT_ROUTES() });
+    const page = render(<Agent id="guido-1" />);
+    await seatLoaded();
+    expect(page.container.querySelector(".agent-roster"))?.toBeTruthy();
+    expect(page.container.querySelector(".agent-identity-band")?.textContent).toContain("GUIDO-1");
+    expect(page.container.querySelector(".agent-live-activity"))?.toBeTruthy();
+  });
+
+  it("marks ten minutes without output as Silent and keeps a stopped reason in words", async () => {
+    const silent = seat({ lastOutputAt: NOW - 10 * MIN });
+    stub({ rows: [silent], extra: SEAT_ROUTES() });
+    const page = render(<Agent id="guido-1" />);
+    await screen.findByText("Silent");
+    page.unmount();
+    cleanup();
+    stub({ rows: [stoppedSeat({ note: "Stopped for the planned maintenance window." })] });
+    const stopped = render(<Agent id="guido-1" />);
+    expect(
+      await within(stopped.container.querySelector("#ahead") as HTMLElement).findByTitle(
+        "Stopped for the planned maintenance window.",
+      ),
+    ).toBeTruthy();
   });
 });
 

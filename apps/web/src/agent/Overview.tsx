@@ -14,6 +14,8 @@ import { Reason } from "./Reason.tsx";
 import "./Overview.css";
 
 const DASH = "—";
+/** A seat becomes Silent after ten minutes without a recorded output. */
+export const SILENT_AFTER_MS = 10 * 60_000;
 const localLink = (event: MouseEvent<HTMLAnchorElement>) =>
   followLink(event, event.currentTarget.getAttribute("href") ?? "/agent");
 function BriefReason({ text, limit, label }: { text: string; limit: number; label: string }) {
@@ -33,11 +35,16 @@ function StepAge({ since }: { since: number }) {
 }
 export function AgentIdentity({ view }: { view: AgentDetailView }) {
   const { row, awaiting } = view;
+  const now = useNow();
   const role = useRoleLabel(row.id);
   const reason = awaiting.reason,
     short = reason ? firstLine(reason).slice(0, 140) : null;
   return (
-    <section className="panel agent-v2-identity" id="ahead" aria-label={`${row.id} details`}>
+    <section
+      className="panel agent-v2-identity agent-identity-band"
+      id="ahead"
+      aria-label={`${row.id} details`}
+    >
       <div className="agent-v2-idrow">
         <h2 title={role.title}>
           <i aria-hidden="true" style={{ background: `var(--seat-${(row.index % 7) + 1})` }} />
@@ -45,7 +52,13 @@ export function AgentIdentity({ view }: { view: AgentDetailView }) {
           {role.suffix !== null && <span className="rt">{` · ${role.suffix}`}</span>}
         </h2>
         <span className={`agent-v2-state ${awaiting.label === "Parked" ? "parked" : row.hudState}`}>
-          <b>{awaiting.label}</b>
+          <b>
+            {row.hudState !== "stopped" &&
+            row.lastOutputAt !== null &&
+            now - row.lastOutputAt >= SILENT_AFTER_MS
+              ? "Silent"
+              : awaiting.label}
+          </b>
           {short && (
             <>
               {" "}
@@ -60,6 +73,12 @@ export function AgentIdentity({ view }: { view: AgentDetailView }) {
         <AgentHeaderActions key={row.id} row={row} />
       </div>
       <div className="agent-v2-meta">
+        <span className="mono muted">
+          last output{" "}
+          {row.lastOutputAt === null
+            ? "not recorded"
+            : `${dur(Math.max(0, now - row.lastOutputAt))} ago`}
+        </span>
         {view.story.ticketHref && (
           <a href={view.story.ticketHref} onClick={localLink}>
             {row.ticket}

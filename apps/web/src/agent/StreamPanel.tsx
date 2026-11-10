@@ -23,6 +23,7 @@ import { dur, hhmm, mss } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { toast } from "../shell/Toast.tsx";
+import { AGENT_DRAFT_KEY, readKey, writeKey } from "../storage.ts";
 import { reviewPark, reviewParkSha } from "./reviewPark.tsx";
 import { messageRun, messageSeat, seatError } from "./seat.ts";
 import { type Relativise, relativiser, toolResult, toolTarget } from "./toolTarget.ts";
@@ -260,7 +261,7 @@ export function SeatComposer({
   prefill?: ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState(() => readKey(AGENT_DRAFT_KEY) ?? "");
   const input = useRef<HTMLInputElement>(null);
   const used = useRef<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -298,6 +299,7 @@ export function SeatComposer({
       if (parkedReview && row.run) await messageRun(row.run.id, text);
       else await messageSeat(row, text, interrupt);
       setText("");
+      writeKey(AGENT_DRAFT_KEY, "");
       toast(`Delivered to ${call}.`);
       onSent?.();
     } catch (e) {
@@ -324,7 +326,10 @@ export function SeatComposer({
         }
         disabled={composerDisabled}
         value={text}
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => {
+          setText(e.target.value);
+          writeKey(AGENT_DRAFT_KEY, e.target.value);
+        }}
       />
       <button type="submit" className="primary" disabled={composerDisabled}>
         {parkKindUnknown
@@ -400,15 +405,25 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   // Follow the newest event only when the list's content changed and the reader was already at
   // the bottom: a refetch (a fresh object every few seconds) or a reader scrolled up stays put.
   const atBottom = useRef(true);
+  const previousCount = useRef(count);
+  const [newRows, setNewRows] = useState(0);
   const signature = `${stream.data?.runId ?? ""}:${filter}:${count}:${events.at(-1)?.at ?? ""}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger
   useLayoutEffect(() => {
     const el = box.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [signature]);
+  useEffect(() => {
+    const added = Math.max(0, count - previousCount.current);
+    previousCount.current = count;
+    if (!atBottom.current && added) setNewRows((n) => n + added);
+  }, [count]);
   const onScroll = () => {
     const el = box.current;
-    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    if (el) {
+      atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+      if (atBottom.current) setNewRows(0);
+    }
   };
 
   let empty: string | null = null;
@@ -421,6 +436,7 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   return (
     <Panel
       id="streamP"
+      className="agent-live-activity"
       title="Activity"
       sub="messages, thinking, tool calls and checks"
       actions={
@@ -428,6 +444,18 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
       }
     >
       <LiveCall row={row} tz={tz} />
+      {newRows > 0 && (
+        <button
+          type="button"
+          className="agent-new-rows"
+          onClick={() => {
+            box.current?.scrollTo({ top: box.current.scrollHeight });
+            setNewRows(0);
+          }}
+        >
+          {newRows} new
+        </button>
+      )}
       <div className="scroll" id="stream" ref={box} onScroll={onScroll}>
         {empty !== null ? (
           <p className="pb s muted">{empty}</p>

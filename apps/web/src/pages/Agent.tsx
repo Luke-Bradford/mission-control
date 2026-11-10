@@ -114,30 +114,28 @@ export function Agent({ id }: { id: string | null }) {
                 </div>
               )}
               <AgentIdentity view={detail.data as AgentDetailView} />
-              {row && (
-                <div className="agent-v2-columns">
-                  <div className="agent-v2-left">
-                    <AgentStory view={detail.data as AgentDetailView} />
-                    <AgentNextMove view={detail.data as AgentDetailView} />
-                    <AgentDeliverables view={detail.data as AgentDetailView} />
-                    <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
-                  </div>
-                  <div className="agent-v2-right">
-                    <AgentAvailability view={detail.data as AgentDetailView} />
-                    <AgentStats view={detail.data as AgentDetailView} />
-                    <AgentLoop view={detail.data as AgentDetailView} />
-                    {!handoffRun && row.kind === "crew" && row.run && (
-                      <HandoffPanel runId={row.run.id} />
-                    )}
-                    <AgentRelated view={detail.data as AgentDetailView} />
-                    <AgentContext view={detail.data as AgentDetailView} />
-                    {row.kind === "crew" && (
-                      <SeatInstructionsDisclosure key={`instructions:${row.id}`} seatId={row.id} />
-                    )}
-                    <SideTabs key={`t:${row.id}`} row={row} />
-                  </div>
+              <div className="agent-v2-columns">
+                <div className="agent-v2-left">
+                  <AgentStory view={detail.data as AgentDetailView} />
+                  <AgentNextMove view={detail.data as AgentDetailView} />
+                  <AgentDeliverables view={detail.data as AgentDetailView} />
+                  <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
                 </div>
-              )}
+                <div className="agent-v2-right">
+                  <AgentAvailability view={detail.data as AgentDetailView} />
+                  <AgentStats view={detail.data as AgentDetailView} />
+                  <AgentLoop view={detail.data as AgentDetailView} />
+                  {!handoffRun && row.kind === "crew" && row.run && (
+                    <HandoffPanel runId={row.run.id} />
+                  )}
+                  <AgentRelated view={detail.data as AgentDetailView} />
+                  <AgentContext view={detail.data as AgentDetailView} />
+                  {row.kind === "crew" && (
+                    <SeatInstructionsDisclosure key={`instructions:${row.id}`} seatId={row.id} />
+                  )}
+                  <SideTabs key={`t:${row.id}`} row={row} />
+                </div>
+              </div>
               {row.run && (
                 <details
                   className="panel agent-v2-history"
