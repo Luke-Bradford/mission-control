@@ -36,7 +36,7 @@ it("retains a Markdown packet and rewrites its raster image links", async () => 
     git: async (_checkout, _commit, path) =>
       path.endsWith("README.md")
         ? Buffer.from(
-            "# Plan\n\n![Before](before.png)\n\n| Proposed |\n| --- |\n| [After](after.png) |\n",
+            "# Plan\n\n![Before](./before.png)\n\n| Proposed |\n| --- |\n| [After](nested/after.png) |\n",
           )
         : Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     checkout: () => "/fixture",
@@ -55,6 +55,18 @@ it("retains a Markdown packet and rewrites its raster image links", async () => 
   await expect(
     service.register("tag:sample", { ...input, sourcePath: "docs/%2e%2e/secret.md" }),
   ).rejects.toMatchObject({ status: 400 });
+  const escaping = createAttentionMaterials({
+    store: memoryStore(),
+    config: { repos: [{ id: "sample" }] } as never,
+    item: () => ({ repoId: "sample" }),
+    checkout: () => "/fixture",
+    git: async (_checkout, _commit, path) =>
+      path.endsWith(".md")
+        ? Buffer.from("[Escape](../outside.png)")
+        : Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    assetsDir: mkdtempSync(join(process.cwd(), ".mc-tmp/materials-escape-")),
+  });
+  await expect(escaping.register("tag:sample", input)).rejects.toMatchObject({ status: 400 });
   const forged = createAttentionMaterials({
     store: memoryStore(),
     config: { repos: [{ id: "sample" }] } as never,

@@ -76,6 +76,16 @@ function storedMediaType(bytes: Buffer): AttentionMaterialImage["mediaType"] | n
 function safePath(path: string): boolean {
   return RELATIVE_PATH.test(path) && !path.includes("\\") && !path.includes("\0");
 }
+/** A link may name this packet's directory or a descendant, but never climb from it. */
+function safePacketLink(link: string): boolean {
+  return (
+    !link.startsWith("/") &&
+    !link.includes("\\") &&
+    !link.includes("\0") &&
+    !link.includes("%") &&
+    link.split("/").every((segment) => segment !== "" && segment !== "..")
+  );
+}
 function packetId(key: string, input: AttentionMaterialRegistration): string {
   return hash(
     `${key}\0${input.repoId}\0${input.sourceCommit}\0${input.sourcePath}\0${input.label}`,
@@ -194,11 +204,16 @@ export function createAttentionMaterials(i: {
             output += imageSyntax ? `[${label ?? "image"}](${link})` : match[0];
             continue;
           }
-          const path = posix.normalize(posix.join(base, link));
-          if (!safePath(path) || !path.startsWith("docs/"))
+          if (!safePacketLink(link))
             throw new AttentionMaterialsError(
               400,
-              "Plan image path is not a safe repository path.",
+              "Plan image path must stay within the packet directory.",
+            );
+          const path = posix.normalize(posix.join(base, link));
+          if (!safePath(path) || (path !== base && !path.startsWith(`${base}/`)))
+            throw new AttentionMaterialsError(
+              400,
+              "Plan image path must stay within the packet directory.",
             );
           if (images.length >= MAX_IMAGES)
             throw new AttentionMaterialsError(400, "Plan has too many images.");
