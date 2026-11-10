@@ -205,10 +205,11 @@ it("sends a dot along the link for each new message, and none under reduced moti
   expect(document.querySelector(".comms-edge.live")).not.toBeNull();
 });
 
-it("drifts with a live signal without replacing the node placement", () => {
-  const first = view(3);
+it("adds its idle drift to, rather than replacing, the node placement", () => {
+  vi.useFakeTimers();
+  view(3);
   expect(document.querySelector(".comms-organic-layout animateTransform")).toBeNull();
-  first.rerender(<CommsRails {...first.props} flows={later} />);
+  act(() => vi.advanceTimersByTime(8_000));
   const drift = document.querySelector(".comms-organic-layout animateTransform");
   expect(drift?.getAttribute("additive")).toBe("sum");
   expect(document.querySelector(".comms-node")?.getAttribute("transform")).toMatch(/^translate\(/);

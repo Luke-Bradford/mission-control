@@ -84,19 +84,13 @@ function meetAt(layout: RailLayout, id: string, other: string): Point | undefine
   return { x: p.x + (q.x < p.x ? -HUB_W / 2 : HUB_W / 2), y: p.y };
 }
 
-type Particle = { id: number; d: string; color: string; delay: number; x: number; y: number };
+type Particle = { id: number; d: string; color: string; delay: number };
 type Tip = { kind: "seat" | "edge"; id: string } | null;
 
 /** The wait mark's words. */
 const waitLabel = (w: Waiting) => `⧖ ${waitWord(w.ms)}`;
 
 const keyOf = (a: string, b: string) => (a < b ? `${a}\0${b}` : `${b}\0${a}`);
-
-/** A straight low-detail link keeps unusually large sessions responsive without hiding traffic. */
-function lowDetailPath(a: Point, b: Point): { d: string; mid: Point; at: (t: number) => Point } {
-  const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
-  return { d: `M${a.x.toFixed(1)} ${a.y.toFixed(1)} L${b.x.toFixed(1)} ${b.y.toFixed(1)}`, mid: at(0.5), at };
-}
 
 /** A small, deterministic force pass keeps frequent correspondents close without a simulation loop. */
 function organicLayout(
@@ -118,7 +112,8 @@ function organicLayout(
   seats.forEach((seat, index) => {
     // A deterministic, irregular ring gives every label a berth before the force pass draws
     // frequent correspondents closer. The hashed offset means it never reads as a fixed grid.
-    const angle = (Math.PI * 2 * index) / Math.max(1, seats.length) + ((hash(seat.id) % 17) - 8) * 0.008;
+    const angle =
+      (Math.PI * 2 * index) / Math.max(1, seats.length) + ((hash(seat.id) % 17) - 8) * 0.008;
     positions.set(seat.id, {
       x: cx + Math.cos(angle) * rx,
       y: cy + Math.sin(angle) * ry,
@@ -264,9 +259,11 @@ export function CommsRails({
   const [activeEdge, setActiveEdge] = useState<string | null>(null);
   const [particles, setParticles] = useState<Particle[]>([]);
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
+  const [interacting, setInteracting] = useState(false);
+  const [ambientDrift, setAmbientDrift] = useState(false);
+  const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
   const timers = useRef(new Set<number>());
   const nextParticle = useRef(0);
-  const burstCooling = useRef(false);
 
   useLayoutEffect(() => {
     const el = root.current;
@@ -287,31 +284,35 @@ export function CommsRails({
     return () => observer.disconnect();
   }, []);
 
-  // Keep the expensive SVG topology stable during a dense-room burst. New messages still pulse on
-  // the live links, while the next membership/topology change refreshes the static readout.
-  const largeRoom = seats.length > 12;
-  const membership = seats.map((seat) => seat.id).join("\0");
-  const topology = edges
-    .map((edge) => edge.key)
-    .sort()
-    .join("\0");
-  const visual = useMemo(
-    () => ({ seats, edges }),
-    [largeRoom, largeRoom ? membership : seats, largeRoom ? topology : edges],
-  );
-  const visualSeats = visual.seats;
-  const visualEdges = visual.edges;
-  const byId = useMemo(() => new Map(visualSeats.map((s) => [s.id, s])), [visualSeats]);
+  useEffect(() => {
+    const update = () => setVisible(document.visibilityState !== "hidden");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  useEffect(() => {
+    if (reduced || interacting || !visible) return;
+    const nudge = () => {
+      setAmbientDrift(true);
+      const end = window.setTimeout(() => setAmbientDrift(false), PARTICLE_MS);
+      timers.current.add(end);
+    };
+    const first = window.setTimeout(nudge, 8_000);
+    const repeat = window.setInterval(nudge, 16_000);
+    return () => {
+      window.clearTimeout(first);
+      window.clearInterval(repeat);
+      setAmbientDrift(false);
+    };
+  }, [interacting, reduced, visible]);
+
+  const byId = useMemo(() => new Map(seats.map((s) => [s.id, s])), [seats]);
   const nameOf = (id: string) => byId.get(id)?.name ?? id;
-  const layout = useMemo(
-    () => organicLayout(visualSeats, visualEdges, size),
-    [visualSeats, visualEdges, size],
-  );
+  const layout = useMemo(() => organicLayout(seats, edges, size), [seats, edges, size]);
   const point = (id: string): Point | undefined => layout.seats.get(id) ?? layout.hubs.get(id);
 
   const shown = useMemo(
-    () => visualEdges.filter((edge) => (mode === "open" ? edge.waiting !== null : true)),
-    [visualEdges, mode],
+    () => edges.filter((edge) => (mode === "open" ? edge.waiting !== null : true)),
+    [edges, mode],
   );
   const drawn = useMemo(
     () =>
@@ -319,7 +320,7 @@ export function CommsRails({
         const a = meetAt(layout, edge.a, edge.b);
         const b = meetAt(layout, edge.b, edge.a);
         if (!a || !b) return [];
-        return [{ edge, path: visualSeats.length > 12 ? lowDetailPath(a, b) : linkPath(a, b, layout.cx) }];
+        return [{ edge, path: linkPath(a, b, layout.cx) }];
       }),
     [shown, layout],
   );
@@ -376,32 +377,18 @@ export function CommsRails({
     const { flows: read, reduced, layout, byId } = latest.current;
     if (generation === seenGeneration.current) return;
     seenGeneration.current = generation;
-    // A large room can produce many link updates in one poll. Coalesce them into one visible
-    // pulse while that pulse is in flight, rather than scheduling a React/SVG update per link.
-    if (byId.size > 12 && burstCooling.current) return;
     const keys = new Set<string>();
     const fresh: Particle[] = [];
-    // In a very large session, one representative pulse per busy link keeps the graph legible
-    // without spending the frame budget on a cloud of identical dots.
-    const particleLimit = byId.size > 12 ? 4 : MAX_PARTICLES;
-    const perFlow = particleLimit < MAX_PARTICLES ? 1 : MAX_PARTICLES_PER_FLOW;
     for (const flow of read.list) {
       const a = meetAt(layout, flow.from, flow.to);
       const b = meetAt(layout, flow.to, flow.from);
       if (!a || !b) continue;
       keys.add(keyOf(flow.from, flow.to));
       if (reduced) continue;
-      const path = linkPath(a, b, layout.cx);
+      const { d } = linkPath(a, b, layout.cx);
       const color = byId.get(flow.from)?.color ?? "var(--accent)";
-      for (let i = 0; i < Math.min(flow.n, perFlow) && fresh.length < particleLimit; i++)
-        fresh.push({
-          id: nextParticle.current++,
-          d: path.d,
-          color,
-          delay: i * PARTICLE_GAP_MS,
-          x: path.at(0.5).x,
-          y: path.at(0.5).y,
-        });
+      for (let i = 0; i < Math.min(flow.n, MAX_PARTICLES_PER_FLOW); i++)
+        fresh.push({ id: nextParticle.current++, d, color, delay: i * PARTICLE_GAP_MS });
     }
     if (keys.size > 0) {
       setLit(keys);
@@ -412,15 +399,13 @@ export function CommsRails({
       timers.current.add(off);
     }
     if (fresh.length > 0) {
-      if (byId.size > 12) burstCooling.current = true;
-      const added = fresh.slice(0, particleLimit);
-      setParticles((current) => [...current, ...added].slice(-particleLimit));
+      const added = fresh.slice(0, MAX_PARTICLES);
+      setParticles((current) => [...current, ...added].slice(-MAX_PARTICLES));
       const ids = new Set(added.map((p) => p.id));
       const life = PARTICLE_MS + PARTICLE_GAP_MS * MAX_PARTICLES_PER_FLOW + 100;
       const gone = window.setTimeout(() => {
         timers.current.delete(gone);
         setParticles((current) => current.filter((p) => !ids.has(p.id)));
-        burstCooling.current = false;
       }, life);
       timers.current.add(gone);
     }
@@ -430,7 +415,6 @@ export function CommsRails({
     return () => {
       for (const t of live) window.clearTimeout(t);
       live.clear();
-      burstCooling.current = false;
     };
   }, []);
 
@@ -557,12 +541,22 @@ export function CommsRails({
                 walk(e, edgeOrder, edge.key, setActiveEdge, "data-key");
               }}
               onFocus={() => {
+                setInteracting(true);
                 setActiveEdge(edge.key);
                 setTip({ kind: "edge", id: edge.key });
               }}
-              onBlur={() => setTip(null)}
-              onMouseEnter={() => setTip({ kind: "edge", id: edge.key })}
-              onMouseLeave={() => setTip(null)}
+              onBlur={() => {
+                setInteracting(false);
+                setTip(null);
+              }}
+              onMouseEnter={() => {
+                setInteracting(true);
+                setTip({ kind: "edge", id: edge.key });
+              }}
+              onMouseLeave={() => {
+                setInteracting(false);
+                setTip(null);
+              }}
             >
               <path className="comms-edge-hit" d={path.d} />
               <path
@@ -599,7 +593,7 @@ export function CommsRails({
   const nodeMarks = useMemo(
     () => (
       <g className="comms-nodes">
-        {visualSeats.map((seat) => {
+        {seats.map((seat) => {
           const p = point(seat.id);
           if (!p) return null;
           const hub = seat.hub;
@@ -641,17 +635,22 @@ export function CommsRails({
                 walk(e, seatOrder, seat.id, setActiveSeat, "data-id");
               }}
               onFocus={() => {
+                setInteracting(true);
                 setActiveSeat(seat.id);
                 setTip({ kind: "seat", id: seat.id });
               }}
-              onBlur={() => setTip(null)}
-              onMouseEnter={() => {
-                // A particle burst is the moment to keep the interaction path cheap; keyboard
-                // focus remains available throughout, and hover cards resume when it settles.
-                if (visualSeats.length <= 12 && particles.length === 0)
-                  setTip({ kind: "seat", id: seat.id });
+              onBlur={() => {
+                setInteracting(false);
+                setTip(null);
               }}
-              onMouseLeave={() => setTip(null)}
+              onMouseEnter={() => {
+                setInteracting(true);
+                setTip({ kind: "seat", id: seat.id });
+              }}
+              onMouseLeave={() => {
+                setInteracting(false);
+                setTip(null);
+              }}
             >
               {hub ? (
                 <>
@@ -702,7 +701,7 @@ export function CommsRails({
       </g>
     ),
     [
-      visualSeats,
+      seats,
       layout,
       hubIds,
       filter,
@@ -769,7 +768,7 @@ export function CommsRails({
           >
             <title>{label}</title>
             <g className="comms-organic-layout">
-              {!reduced && particles.length > 0 && visualSeats.length <= 12 && (
+              {!reduced && visible && !interacting && ambientDrift && particles.length === 0 && (
                 <animateTransform
                   attributeName="transform"
                   type="translate"
@@ -792,26 +791,15 @@ export function CommsRails({
           >
             <g className="comms-particles">
               {particles.map((p) => (
-                <circle
-                  key={p.id}
-                  className="comms-particle"
-                  r={3.5}
-                  fill={p.color}
-                  cx={visualSeats.length > 12 ? p.x : undefined}
-                  cy={visualSeats.length > 12 ? p.y : undefined}
-                >
-                  {visualSeats.length <= 12 ? (
-                    <>
-                      <animateMotion path={p.d} dur={`${PARTICLE_MS}ms`} begin={`${p.delay}ms`} />
-                      <animate
-                        attributeName="opacity"
-                        values="0;1;1;0"
-                        keyTimes="0;0.1;0.9;1"
-                        dur={`${PARTICLE_MS}ms`}
-                        begin={`${p.delay}ms`}
-                      />
-                    </>
-                  ) : null}
+                <circle key={p.id} className="comms-particle" r={3.5} fill={p.color}>
+                  <animateMotion path={p.d} dur={`${PARTICLE_MS}ms`} begin={`${p.delay}ms`} />
+                  <animate
+                    attributeName="opacity"
+                    values="0;1;1;0"
+                    keyTimes="0;0.1;0.9;1"
+                    dur={`${PARTICLE_MS}ms`}
+                    begin={`${p.delay}ms`}
+                  />
                 </circle>
               ))}
             </g>
