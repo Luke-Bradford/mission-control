@@ -310,8 +310,12 @@ describeRendered("Comms chart, rendered", () => {
         await page.evaluate(() => {
           const base = document.querySelector(".comms-rails-svg");
           const overlay = document.querySelector(".comms-rails-overlay");
-          const w = window as unknown as { __churn: { chart: number; particles: number } };
+          const w = window as unknown as {
+            __churn: { chart: number; particles: number };
+            __longTasks: number[];
+          };
           w.__churn = { chart: 0, particles: 0 };
+          w.__longTasks = [];
           if (!base || !overlay) throw new Error("no chart");
           new MutationObserver((records) => {
             for (const r of records) w.__churn.chart += r.addedNodes.length + r.removedNodes.length;
@@ -320,6 +324,9 @@ describeRendered("Comms chart, rendered", () => {
             for (const r of records)
               w.__churn.particles += r.addedNodes.length + r.removedNodes.length;
           }).observe(overlay, { childList: true, subtree: true });
+          new PerformanceObserver((list) => {
+            for (const entry of list.getEntries()) w.__longTasks.push(entry.duration);
+          }).observe({ type: "longtask" });
         }, null);
         // Busy: sweep the pointer over every seat for 3 seconds, while new messages land on a third
         // of the links every 300 ms and the page reads them again.
@@ -367,6 +374,10 @@ describeRendered("Comms chart, rendered", () => {
           () => (window as unknown as { __churn: { chart: number; particles: number } }).__churn,
           null,
         );
+        const longTasks = await page.evaluate(
+          () => (window as unknown as { __longTasks: number[] }).__longTasks,
+          null,
+        );
         // Messages really travelled during the measurement.
         expect(seen).toBeGreaterThan(0);
         // Deterministic: with new messages on a third of the 100 links every round, almost nothing is
@@ -376,8 +387,11 @@ describeRendered("Comms chart, rendered", () => {
         // instead grow with frame count, even when the machine is too busy to deliver 60fps.
         expect(seen).toBeLessThanOrEqual(16);
         expect(churn.particles).toBeLessThanOrEqual(round * 32 + 16);
+        // A long task reports chart work that blocks the browser's main thread, unlike a delayed
+        // animation frame caused by parallel workers on the same machine.
+        expect(Math.max(0, ...longTasks)).toBeLessThan(100);
         console.info(
-          `comms chart 50 seats ${at}: ${seen} dots at most, ${churn.chart} chart and ${churn.particles} particle elements churned in ${round} rounds`,
+          `comms chart 50 seats ${at}: ${seen} dots at most, ${churn.chart} chart and ${churn.particles} particle elements churned in ${round} rounds, ${longTasks.length} long tasks`,
         );
         await page.close();
       }
