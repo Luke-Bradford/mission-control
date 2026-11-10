@@ -349,6 +349,7 @@ export const ACTIONS = {
   hold: (key: string) => `/api/attention/${enc(key)}/hold`,
   notNow: (key: string) => `/api/attention/${enc(key)}/not-now`,
   drop: (key: string) => `/api/attention/${enc(key)}/drop`,
+  clear: (key: string) => `/api/attention/${enc(key)}/clear`,
   releaseHold: (key: string) => `/api/attention/${enc(key)}/hold/release`,
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
