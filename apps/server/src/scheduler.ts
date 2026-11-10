@@ -1326,7 +1326,10 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
                 )
                 .join("; ")
             : "unavailable";
-          store.refreshNote({
+          // An open capacity episode keeps the original item, age and FLIGHT acknowledgement.
+          // `raiseNote` only changes a cleared note, unlike `refreshNote`, which makes each
+          // fluctuating reading appear to FLIGHT as a newly raised item.
+          store.raiseNote({
             key: MACHINE_CAPACITY_KEY,
             kind: "flag",
             runId: null,

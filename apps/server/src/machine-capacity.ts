@@ -1,6 +1,8 @@
 import type { MachineSample } from "@mc/core";
 
 export const MACHINE_CAPACITY_KEY = "machine-capacity";
+export const DISK_PERCENTAGE_CLEAR_HEADROOM = 1;
+export const DISK_PERCENTAGE_CLEAR_AFTER_MIN = 10;
 export const MACHINE_CAPACITY_DEFAULTS = {
   diskFreeGb: 15,
   diskFreePct: 5,
@@ -32,15 +34,21 @@ export interface MachineCapacity {
 
 /** Earliest persisted reading needed to assess a sustained breach and its recovery period. */
 export const machineCapacitySince = (now: number, config: MachineCapacityConfig): number =>
-  now - (config.loadWindowMin + config.clearAfterMin) * 60_000;
+  now -
+  Math.max(config.loadWindowMin + config.clearAfterMin, DISK_PERCENTAGE_CLEAR_AFTER_MIN) * 60_000;
 
 const gb = (bytes: number): string => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+
+const diskFreePct = (s: MachineSample): number | null =>
+  s.diskFreeBytes !== null && s.diskTotalBytes !== null && s.diskTotalBytes > 0
+    ? (s.diskFreeBytes / s.diskTotalBytes) * 100
+    : null;
 
 function immediateReason(s: MachineSample, c: MachineCapacityConfig): string | null {
   if (s.diskFreeBytes !== null && s.diskFreeBytes < c.diskFreeGb * 1024 ** 3)
     return `disk free is ${gb(s.diskFreeBytes)} (below ${c.diskFreeGb} GB)`;
-  if (s.diskFreeBytes !== null && s.diskTotalBytes !== null && s.diskTotalBytes > 0) {
-    const pct = (s.diskFreeBytes / s.diskTotalBytes) * 100;
+  const pct = diskFreePct(s);
+  if (pct !== null) {
     if (pct < c.diskFreePct) return `disk free is ${pct.toFixed(1)}% (below ${c.diskFreePct}%)`;
   }
   const swap =
@@ -107,6 +115,21 @@ export function machineCapacity(
     return {
       blocked: true,
       reason: `${prior}; waiting ${config.clearAfterMin} minutes of headroom`,
+    };
+  const diskClearMs = DISK_PERCENTAGE_CLEAR_AFTER_MIN * 60_000;
+  const diskRecovery = samples.filter((s) => s.at >= now - diskClearMs);
+  const hadPercentageDiskBreach = diskRecovery.some(
+    (s) => (diskFreePct(s) ?? Infinity) < config.diskFreePct,
+  );
+  if (
+    hadPercentageDiskBreach &&
+    diskRecovery.some(
+      (s) => (diskFreePct(s) ?? Infinity) <= config.diskFreePct + DISK_PERCENTAGE_CLEAR_HEADROOM,
+    )
+  )
+    return {
+      blocked: true,
+      reason: `disk free is waiting ${DISK_PERCENTAGE_CLEAR_AFTER_MIN} minutes above ${(config.diskFreePct + DISK_PERCENTAGE_CLEAR_HEADROOM).toFixed(0)}%`,
     };
   const loaded = samples.some((s) => s.at >= now - clearMs && sustainedAt(s.at));
   return loaded

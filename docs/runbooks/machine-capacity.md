@@ -3,7 +3,10 @@
 The hub samples disk free space, swap, memory-pressure free percentage and one-minute load. It
 does not start a new writer run, review or FLIGHT `start_seat` request while capacity is tight;
 work already running is left alone. A single `machine-capacity` Needs you item names the measured
-condition and the tracked agent consumers. It closes after five minutes of headroom.
+condition and the tracked agent consumers. The item keeps its original age and acknowledgement
+through the whole capacity episode, including readings that move around a threshold. A
+percentage-disk episode closes only after ten minutes above the configured floor plus one point
+(6% with the default 5% floor). Other capacity conditions close after five minutes of headroom.
 
 Every 10 seconds the hub reads load, memory and disk from the operating system. It spawns
 `vm_stat`, `sysctl vm.swapusage`, `memory_pressure` and `ps` only while a browser is connected,
