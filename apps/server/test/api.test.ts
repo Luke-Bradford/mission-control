@@ -7372,6 +7372,92 @@ describe("crew routes", () => {
       });
     });
 
+    it("returns only FLIGHT's seat when shape is seat", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "flight-run", agentId: "flight-1", startedAt: NOW - HOUR }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-run",
+        cliSessionId: "cli",
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      sessionAlive = true;
+      const measuredAt = Date.now();
+      for (let n = 0; n < 200; n++) {
+        store.addFlightDecision({
+          at: measuredAt - n,
+          kind: "note",
+          seatId: "flight-1",
+          targetRunId: null,
+          ref: null,
+          questionId: null,
+          about: `decision ${n}`,
+          decision: "For the controller: stored decision ".repeat(100),
+          basis: "b",
+        });
+      }
+
+      const fullResponse = await get("/api/flight");
+      const full = fullResponse.json<FlightView>();
+      const projected = await get("/api/flight?shape=seat");
+      expect(projected.statusCode).toBe(200);
+      expect(full.controllerDecisions).toHaveLength(200);
+      expect(projected.json()).toEqual({ seat: full.seat });
+      expect(Object.keys(projected.json())).toEqual(["seat"]);
+      expect(Buffer.byteLength(projected.body)).toBeLessThan(
+        Buffer.byteLength(JSON.stringify(full)) * 0.05,
+      );
+    });
+
+    it("does not read FLIGHT history when shape is seat", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "flight-run", agentId: "flight-1" }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-run",
+        cliSessionId: "cli",
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      for (const reader of [
+        "flightDecisions",
+        "agentPromptWakes",
+        "runsOverlapping",
+        "commsTo",
+      ] as const)
+        vi.spyOn(store, reader).mockImplementation(() => {
+          throw new Error(`${reader} read`);
+        });
+
+      const response = await get("/api/flight?shape=seat");
+      expect(response.statusCode).toBe(200);
+      expect(Object.keys(response.json())).toEqual(["seat"]);
+      expect(response.json()).toMatchObject({ seat: { id: "flight-1" } });
+    });
+
+    it("rejects an unsupported FLIGHT view shape", async () => {
+      const response = await get("/api/flight?shape=history");
+      expect(response.statusCode).toBe(400);
+      expect(response.json()).toEqual({ error: "shape must be seat" });
+    });
+
     it("lists the last day's decisions, newest first", async () => {
       config.crew?.sessions[0]?.seats.push({
         id: "flight-1",

@@ -303,6 +303,7 @@ import {
   flightLive,
   flightScheduleView,
   flightSeat,
+  flightSeatView,
   flightView,
   prFlow,
 } from "./flight/state.ts";
@@ -4788,11 +4789,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         },
       );
-      // Reader: apps/web/src/shell/Dock.tsx#Dock
+      // Reader: apps/web/src/data.ts#RESOURCES (the dependent web child switches seat-only readers)
       // `live` is judged from FLIGHT's session, not only its run row (#798)
-      api.get("/flight", async () =>
-        flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
-      );
+      api.get<{ Querystring: { shape?: unknown } }>("/flight", async (req, reply) => {
+        const { shape } = req.query;
+        if (shape !== undefined && shape !== "seat")
+          return reply.code(400).send({ error: "shape must be seat" });
+        const at = Date.now();
+        const alive = (id: string) => supervisor?.sessionAlive?.(id) ?? null;
+        return shape === "seat"
+          ? { seat: flightSeatView(config, store, alive) }
+          : flightView(config, store, at, alive);
+      });
       // Reader: apps/web/src/flight/PrFlowPanel.tsx (protected PR-flow panel)
       api.get("/prs/flow", async (req, reply) => {
         if (
