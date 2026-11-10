@@ -1,8 +1,8 @@
-<!doctype html><html><head><meta charset=utf-8></head><body style='margin:0'><title>Agents page mockup</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Agents page mockup</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
 <style>
-/* Layout: a roster of seat cards down the left; the chosen seat on the right as identity band, instrument row, then live activity with its message box beside a narrow column. App tokens; dark only. */
+/* Prototype: roster, selected identity, instruments and live activity. Recompose at the actual viewport; never scale the text or controls. */
 :root{color-scheme:dark;--bg:#070a0e;--surface:#0c1117;--surface-2:#131a23;--line:#1b2430;--line-2:#2a3646;--fg:#e7eaef;--fg-2:#aab2bf;--muted:#808999;--accent:#56d8e6;--accent-ink:#021417;--accent-soft:rgba(86,216,230,.14);--ok:#45c486;--ok-soft:rgba(69,196,134,.16);--warn:#f2b53a;--warn-soft:rgba(242,181,58,.15);--crit:#f1706d;--think:#b8a8f7;
 --sans:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono",Consolas,ui-monospace,monospace;--display:"Barlow Semi Condensed","Arial Narrow",sans-serif}
 *{box-sizing:border-box}
@@ -99,10 +99,78 @@ button{font:inherit;color:inherit}
 .todo{display:grid;grid-template-columns:16px minmax(0,1fr);gap:8px;color:var(--fg-2)}.todo.c{color:var(--fg)}.todo.d{color:var(--muted)}
 .todo i{font-style:normal;font-family:var(--mono)}.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.clamp2 .num{color:var(--accent);font-size:12px}
 dl{display:grid;grid-template-columns:104px minmax(0,1fr);gap:8px 12px;margin:0;padding:12px 16px}dt{color:var(--muted)}dd{margin:0;overflow-wrap:anywhere}dd a,.ph a{color:var(--accent)}
-</style>
+
+/* Actual-size layout and keyboard controls for the existing proposal. */
+main{position:static;left:auto;top:auto;transform:none;width:100%;max-width:1888px;height:100dvh;margin:0 auto;min-height:0}
+.app{grid-template-columns:clamp(240px,calc(16.875vw + 24px),348px) minmax(0,1fr)}
+.instr{grid-template-columns:200px minmax(0,1fr) minmax(360px,420px)}
+.cols{grid-template-columns:minmax(0,1fr) clamp(320px,22vw,392px)}
+.track{overflow-x:auto;min-width:0;padding:4px}
+.legend{flex-wrap:wrap}.grp{flex-wrap:wrap}
+.intro p{max-width:none}
+.say .t,.meta>span{overflow-wrap:anywhere;min-width:0}
+button{min-height:24px;min-width:24px}
+a{min-height:24px;display:inline-flex;align-items:center}
+.tabs{flex-wrap:wrap}
+.tabs button{font:12px/16px var(--mono);min-height:28px;padding:4px 8px;border-radius:3px;background:transparent;color:var(--fg-2);border:1px solid transparent;cursor:pointer}
+.tabs button[aria-pressed="true"]{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.cards,.feed,.tbody{scrollbar-gutter:stable}
+.rhead,.grp,.slot{flex-shrink:0}
+.card .r1>span:first-child{display:flex;align-items:baseline;gap:4px}
+.card .name{flex:0 0 auto}
+.card .r1 .role{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.instr .r1>.lbl,.instr .seg{flex-shrink:0}
+.seg button{white-space:nowrap}
+.dial svg{flex:0 0 68px}
+.dial{gap:12px}
+.dial>div{min-width:0}
+.dial small{white-space:normal}
+.side>.panel:first-child{max-height:48%;min-height:80px}
+.detail-link{background:none;border:0;color:inherit;text-align:left;cursor:pointer;padding:0;min-width:0;overflow-wrap:anywhere}
+.todo .detail-link{width:100%;color:var(--fg-2)}
+.detail-link:focus-visible .clamp2{display:block;-webkit-line-clamp:unset;overflow:visible}
+.hrow.detail-link{width:100%;padding:4px 0}
+.hrow:focus-visible span:nth-child(2){white-space:normal;overflow:visible}
+dialog{color:var(--fg);background:var(--surface);border:1px solid var(--line-2);border-radius:4px;padding:24px;max-width:min(720px,calc(100vw - 32px));max-height:calc(100dvh - 32px);overflow:auto}
+dialog::backdrop{background:rgba(0,0,0,.65)}
+dialog h2{font:600 20px/28px var(--display);margin:16px 0 8px}
+dialog .full-title{white-space:normal;overflow-wrap:anywhere;font:14px/20px var(--sans)}
+dialog dl{padding:12px 0}
+@media(max-width:1350px){
+ .app{grid-template-columns:300px minmax(0,1fr)}
+ .instr{grid-template-columns:180px minmax(0,1fr)}
+ .instr>.cell:nth-child(2){border-right:0}
+ .instr>.cell:nth-child(3){grid-column:1/-1;border-top:1px solid var(--line);display:grid;grid-template-columns:260px minmax(0,1fr);gap:8px 16px;align-items:center}
+ .instr>.cell:nth-child(3)>.stats{grid-column:2;grid-row:1/3}
+ .instr>.cell:nth-child(3)>a{grid-column:1;grid-row:2}
+ .ph{gap:8px;padding:8px 12px}
+ .compose{grid-template-columns:minmax(0,1fr) auto}
+ .compose .btn:last-child{grid-column:1/-1;justify-self:end}
+ .row{grid-template-columns:44px 80px minmax(0,1fr) 40px;gap:8px;padding:8px 12px}
+}
+@media(max-width:1050px){
+ html,body{height:auto;overflow:auto}
+ main{height:auto;min-height:100dvh}
+ .top{height:auto;min-height:48px;flex-wrap:wrap;padding-block:8px;gap:12px}
+ .intro p{white-space:normal}
+ .app{grid-template-columns:220px minmax(0,1fr)}
+ .cols{grid-template-columns:minmax(0,1fr)}
+ .seat{min-height:900px}
+ #live{min-height:360px}
+ .side{min-height:300px}
+ .instr{grid-template-columns:minmax(0,1fr)}
+ .instr>.cell:nth-child(3){grid-template-columns:minmax(0,1fr);grid-column:1}
+ .instr>.cell:nth-child(3)>.stats,.instr>.cell:nth-child(3)>a{grid-column:1;grid-row:auto}
+}
+@media(prefers-color-scheme:light){
+ :root{color-scheme:light;--bg:#f1f4f8;--surface:#fff;--surface-2:#eaf0f6;--line:#d3dbe7;--line-2:#aab8ca;--fg:#17202d;--fg-2:#40516a;--muted:#5b6b83;--accent:#007b90;--accent-ink:#fff;--accent-soft:rgba(0,123,144,.1);--ok:#16794f;--ok-soft:rgba(22,121,79,.1);--warn:#936000;--warn-soft:rgba(147,96,0,.1);--crit:#b33737;--think:#6a4db0}
+ .card[aria-current="true"]{background:#deedf3}
+ .meter,.strip{background:#dce4ef}
+}
+</style></head><body style="margin:0">
 <main>
   <div class="top"><b>MISSION CONTROL</b><span>OVERVIEW</span><span>NEEDS YOU</span><span>FLIGHT</span><span>BOARD</span><span class="on">AGENTS</span><span>COMMS</span><span>QA</span><span>TELEMETRY</span><span>AUDIT</span></div>
-  <div class="intro"><p><b>Prototype</b> of the page at 1920×940, scaled to fit this window. Real, read 9 November 2026, 23:37: seats, states, tickets, summaries, loop steps, last hour, runs. Placeholder: context %, activity rows, plan items.</p></div>
+  <div class="intro"><p><b>Prototype</b> of the responsive Agents page. Real, read 9 November 2026, 23:37: seats, states, tickets, summaries, loop steps, last hour, runs. Placeholder: context %, activity rows, plan items.</p></div>
   <div class="app">
     <div class="panel roster" id="roster"></div>
     <div class="seat">
@@ -129,12 +197,12 @@ const tk=s=>s.ticket?s.ticket.replace("mission-control",""):"";
 const k=n=>n>=1e6?(n/1e6).toFixed(1)+"M":n>=1e3?Math.round(n/1e3)+"k":String(n);
 const held=s=>s.hist.filter(h=>h.status==="running"&&h.ticket!==tk(s));
 const silent=s=>s.state==="running"&&D.now-s.lastOut>10*60000;
-let cur=(seats.find(s=>s.state==="running")||seats[0]).id,mode="run",tab=null;
+let cur=(seats.find(s=>s.state==="running")||seats[0]).id,mode="run",tab=null,activityFilter="All";
 function roster(){const r=document.getElementById("roster");r.textContent="";
   const h=el("div","rhead");h.append(el("b","","Crew"),el("span","lbl",seats.filter(s=>s.state!=="idle").length+" active · "+seats.length+" seats"));r.append(h);
   const g=el("div","grp");const lg=el("div","legend");g.append(el("span","lbl","mission-control"),lg);g.title="Colours of the last-hour strip";r.append(g);for(const [n,c] of [["turn","#56d8e6"],["check","#45c486"],["review","#b8a8f7"],["wait","#f2b53a"]]){const s=el("span");const i=el("i");i.style.background=c;s.append(i,document.createTextNode(n));lg.append(s);}
   const cs=el("div","cards");
-  for(const s of seats){const c=el("button","card"+(s.state==="idle"&&s.roleKey!=="FLIGHT"?" off":""));c.setAttribute("aria-current",s.id===cur);c.onclick=()=>{cur=s.id;tab=null;roster();seat();};
+  for(const s of seats){const c=el("button","card"+(s.state==="idle"&&s.roleKey!=="FLIGHT"?" off":""));c.setAttribute("aria-current",s.id===cur);c.onclick=()=>{cur=s.id;tab=null;activityFilter="All";roster();seat();};
     const bar=el("span","bar");bar.style.background=HUE[s.id];const inn=el("span","in");
     const r1=el("span","r1");const nm=el("span");nm.append(el("span","name",s.id.toUpperCase()),el("span","role"," "+s.short));r1.append(nm,pill(s));
     const w=el("span","work");if(s.roleKey==="FLIGHT")w.textContent="Watching the crew";else if(s.state==="idle"){w.textContent="Free";const o=held(s).length;if(o)w.append(el("span","open"," · "+o+(o===1?" ticket":" tickets")+" waiting"));}else{if(s.ticket)w.append(el("span","tk",tk(s)+" "));w.append(document.createTextNode(s.title||(s.roleKey==="FLIGHT"?"Running the crew":"Reviewing")));}
@@ -146,6 +214,11 @@ function roster(){const r=document.getElementById("roster");r.textContent="";
 function ring(p){const R=26,C=2*Math.PI*R,ns="http://www.w3.org/2000/svg",s=document.createElementNS(ns,"svg");s.setAttribute("width",68);s.setAttribute("height",68);s.setAttribute("viewBox","0 0 68 68");s.setAttribute("role","img");s.setAttribute("aria-label","Context "+p+" percent used");
   const mk=(st,da,off)=>{const c=document.createElementNS(ns,"circle");c.setAttribute("cx",34);c.setAttribute("cy",34);c.setAttribute("r",R);c.setAttribute("fill","none");c.setAttribute("stroke",st);c.setAttribute("stroke-width",7);c.setAttribute("transform","rotate(-90 34 34)");if(da){c.setAttribute("stroke-dasharray",da);c.setAttribute("stroke-linecap","butt");}if(off!=null)c.setAttribute("stroke-dashoffset",off);return c;};
   s.append(mk("#1b2430"),mk(p>=75?"#f2b53a":"#56d8e6",(C*p/100)+" "+C));const t=mk("#e7eaef","2 "+C,-(C*.75));s.append(t);return s;}
+function showDetails(heading,text,fields){
+  let dialog=document.getElementById("prototype-details");
+  if(!dialog){dialog=el("dialog");dialog.id="prototype-details";dialog.setAttribute("aria-labelledby","prototype-details-title");document.body.append(dialog);}
+  dialog.textContent="";const close=el("button","btn","Close details");close.type="button";close.onclick=()=>dialog.close();const title=el("h2","",heading);title.id="prototype-details-title";const body=el("p","full-title",text);const meta=el("dl");for(const [key,value] of fields)meta.append(el("dt","",key),el("dd","",value));dialog.append(close,title,body,meta);dialog.showModal();close.focus();
+}
 function seat(){const s=seats.find(x=>x.id===cur);
   const id=document.getElementById("ident");id.textContent="";
   const l=el("div","idl");const sw=el("span","sw");sw.style.background=HUE[s.id];l.append(sw,el("span","big",s.id.toUpperCase()),el("span","role",s.role),pill(s));if(s.state!=="idle")l.append(el("span","lbl","last output "+(D.now-s.lastOut<60000?"just now":age(D.now-s.lastOut)+" ago")));
@@ -170,24 +243,25 @@ function seat(){const s=seats.find(x=>x.id===cur);
     else if(s.rev){add((s.rev[1]/s.rev[0]).toFixed(1),"blocking per review",s.rev[1]/s.rev[0]>=2);add((s.rev[2]/s.rev[0]).toFixed(1),"minor per review");}
     else{add(L.hours.toLocaleString(),"hours in runs");add(L.cost==null?"—":"$"+L.cost.toLocaleString(),"cost, all time");}}
   c3.append(st);const more=el("a","","Open this seat in Audit ›");more.href="#";more.style.cssText="color:var(--accent);font-size:12px";c3.append(more);ins.append(c1,c2,c3);
-  const lv=document.getElementById("live");lv.textContent="";const ph=el("div","ph");ph.append(el("b","","Live activity"));const tb=el("div","tabs");["All","Messages","Thinking","Tools","Guard"].forEach((t,i)=>tb.append(el("span",i?"":"on",t)));const fl=el("span","pill run");fl.append(el("i"),document.createTextNode("Following"));ph.append(tb,fl);lv.append(ph);const feed=el("div","feed");feed.tabIndex=0;feed.setAttribute("aria-label","Live activity");lv.append(feed);
+  const lv=document.getElementById("live");lv.textContent="";const ph=el("div","ph");ph.append(el("b","","Live activity"));const tb=el("div","tabs");tb.setAttribute("role","group");tb.setAttribute("aria-label","Live activity filters");for(const t of ["All","Messages","Thinking","Tools","Guard"]){const b=el("button","",t);b.type="button";b.setAttribute("aria-pressed",String(activityFilter===t));b.setAttribute("aria-controls","activity-feed");b.onclick=()=>{activityFilter=t;for(const button of tb.querySelectorAll("button"))button.setAttribute("aria-pressed",String(button===b));renderFeed();};tb.append(b);}const fl=el("span","pill run");fl.append(el("i"),document.createTextNode("Following"));ph.append(tb,fl);lv.append(ph);const feed=el("div","feed");feed.id="activity-feed";feed.tabIndex=0;feed.setAttribute("aria-label","Live activity");lv.append(feed);
   const rows=s.state==="idle"?[]:[["23:42","tool","Read","the file it is about to change","70ms"],["23:43","thinking","","weighing two ways to do it",""],["23:44","to FLIGHT","msg","A short question, shown in full, never cut.",""],["23:44","from FLIGHT","msg","The answer, in full.",""],["23:46","tool","Bash","the check command · passed","31 s"],["23:47","to you","msg","What it did and what is next, in one or two lines.",""],["23:49","guard","grd","A refusal, with the reason in plain words.",""],["23:50","tool","Edit","the file · 12 lines changed","40ms"],["23:51","tool","Bash","running the tests it touched…","live"]];
-  if(!rows.length){const e=el("div","box");e.append(el("span","","No run in progress."),el("span","role","Its last runs are listed on the right; each opens its full trace."));feed.append(e);}
-  for(const [tm,kd,c,x,du] of rows){const r=el("div","row"+(du==="live"?" live":""));const kk=el("span","k"+(c==="msg"?" msg":c==="grd"?" grd":kd==="thinking"?" thk":""),kd);const xx=el("span","x");if(kd==="tool"){const cd=el("code","",c+"  ");xx.append(cd);}xx.append(document.createTextNode(x));r.append(el("span","tm",tm),kk,xx,el("span","du",du==="live"?"…":du));feed.append(r);}
+  const renderFeed=()=>{feed.textContent="";const filtered=rows.filter(([,kind,code])=>activityFilter==="All"||(code==="msg"?"Messages":code==="grd"?"Guard":kind==="thinking"?"Thinking":"Tools")===activityFilter);
+  if(!filtered.length){const e=el("div","box");e.append(el("span","",rows.length?"No "+activityFilter.toLowerCase()+" in this activity snapshot.":"No run in progress."),el("span","role","Its last runs are listed on the right; each opens its full title and recorded details."));feed.append(e);}
+  for(const [tm,kd,c,x,du] of filtered){const r=el("div","row"+(du==="live"?" live":""));const kk=el("span","k"+(c==="msg"?" msg":c==="grd"?" grd":kd==="thinking"?" thk":""),kd);const xx=el("span","x");if(kd==="tool"){const cd=el("code","",c+"  ");xx.append(cd);}xx.append(document.createTextNode(x));r.append(el("span","tm",tm),kk,xx,el("span","du",du==="live"?"…":du));feed.append(r);}};renderFeed();
   const cp=el("div","compose");const inp=el("input");inp.id="msg";inp.placeholder="Message "+s.id.toUpperCase()+"…";inp.setAttribute("aria-label","Message "+s.id);cp.append(inp,el("button","btn pri","Send"),el("button","btn","Interrupt and send"));lv.append(cp,el("div","hint",s.state==="idle"?"Starts "+s.id.toUpperCase()+"'s next turn.":"Send reaches "+s.id.toUpperCase()+" at its next step. Interrupt and send stops the current step first."));
   const sd=document.getElementById("side");sd.textContent="";
   const w=el("div","panel");const wh=el("div","ph");wh.append(el("b","","Waiting on"));w.append(wh);const wb=el("div","box");
   if(silent(s))wb.append(el("span","open","Silent: no output for "+age(D.now-s.lastOut)+". It may be stuck."));
   if(s.state==="waiting")wb.append(el("span","","CI and review on its pushed commit"),el("span","role","Since "+age(D.now-s.since)+" ago. The seat is free to take other work meanwhile."));else if(!silent(s))wb.append(el("span","role",s.state==="idle"?"Nothing. It is free to take the next Ready ticket in its area.":"Nothing. It is working."));w.append(wb);
-  const hl=held(s);if(hl.length){const hb=el("div","box");hb.style.borderTop="1px solid var(--line)";hb.append(el("span","lbl","Also open, not being worked"));for(const h of hl){const r=el("div","todo");const tx=el("span","clamp2");tx.append(el("span","num",h.ticket+" "),document.createTextNode(h.title));tx.title=h.title;r.append(el("i","open","‖"),tx);hb.append(r);}w.append(hb);}sd.append(w);
+  const hl=held(s);if(hl.length){const hb=el("div","box");hb.style.borderTop="1px solid var(--line)";hb.append(el("span","lbl","Also open, not being worked"));for(const h of hl){const r=el("div","todo");const tx=el("button","detail-link");tx.type="button";const title=el("span","clamp2");title.append(el("span","num",h.ticket+" "),document.createTextNode(h.title));tx.append(title);tx.onclick=()=>showDetails("Ticket "+h.ticket,h.title,[["State","Waiting; not being worked"],["Seat",s.id.toUpperCase()]]);r.append(el("i","open","‖"),tx);hb.append(r);}w.append(hb);}sd.append(w);
   const hasPlan=s.state!=="idle"&&s.steps.length>0;if(!tab||(tab==="Plan"&&!hasPlan))tab=hasPlan?"Plan":"Recent runs";
   const tp=el("div","panel tabbed");const th2=el("div","ph");const sg2=el("span","seg");for(const n of ["Plan","Recent runs","Setup"]){if(n==="Plan"&&!hasPlan)continue;const b=el("button","",n);b.setAttribute("aria-pressed",tab===n);b.onclick=()=>{tab=n;seat();};sg2.append(b);}th2.append(sg2);if(tab==="Setup"){const ed=el("a","","Edit in Setup ›");ed.href="#";ed.style.fontSize="12px";th2.append(ed);}tp.append(th2);const tbody=el("div","tbody");tp.append(tbody);sd.append(tp);
   if(tab==="Plan"){const p=tbody;const b=el("div","box");[["d","✓","Reproduce the failure in a test"],["d","✓","Find where the review refuses to install"],["d","✓","Write the read-only review path"],["d","✓","Record the narrowed review with its reason"],["c","●","Run lint, typecheck and the tests it touched"],["","○","Open the draft PR"],["","○","Answer the review"]].forEach(([c,i,t])=>{const r=el("div","todo "+c);r.append(el("i","",i),el("span","",t));b.append(r);});p.append(b);}
-  if(tab==="Recent runs"){const hp=tbody;const hbx=el("div","box");if(!s.hist.length)hbx.append(el("span","role","None recorded for this seat."));for(const h of s.hist){const r=el("div","hrow");const out=h.status==="running"?(h.ticket===tk(s)?"now":"open"):h.by==="operator"?"ended by you":"finished";r.append(el("span","num",h.ticket||"review"),el("span","",h.title||"—"),el("span","lbl"+(out==="open"?" open":""),out),el("span","num",h.status==="running"?"":age(h.mins*60000)));hbx.append(r);}hp.append(hbx);}
+  if(tab==="Recent runs"){const hp=tbody;const hbx=el("div","box");if(!s.hist.length)hbx.append(el("span","role","None recorded for this seat."));for(const h of s.hist){const r=el("button","hrow detail-link");r.type="button";r.onclick=()=>showDetails("Recorded run "+(h.ticket||"review"),h.title||"No ticket title recorded",[["Seat",s.id.toUpperCase()],["Status",h.status],["Started",new Date(h.at).toLocaleString("en-GB",{timeZone:"UTC"})+" UTC"],["Duration",age(h.mins*60000)]]);const out=h.status==="running"?(h.ticket===tk(s)?"now":"open"):h.by==="operator"?"ended by you":"finished";r.append(el("span","num",h.ticket||"review"),el("span","",h.title||"—"),el("span","lbl"+(out==="open"?" open":""),out),el("span","num",h.status==="running"?"":age(h.mins*60000)));hbx.append(r);}hp.append(hbx);}
   if(tab==="Setup"){const su=tbody;const dl=el("dl");
   const dd=(a,b,href)=>{dl.append(el("dt","",a));const d=el("dd");if(href){const x=el("a","",b);x.href="#";d.append(x);}else d.textContent=b;dl.append(d);};
   dd("Assigned to",s.repo);dd("Role",s.role);dd("May change",s.area.length?s.area.join(", "):s.mode==="writer"?"anything in the repo":"nothing; read only");dd("Model",(s.model||"—")+(s.effort?" · "+s.effort:""));dd("Account",s.account);dd("Role prompt","Open the "+s.roleKey+" prompt ›",1);su.append(dl);}}
-const fit=()=>document.documentElement.style.setProperty('--s',Math.min(document.body.clientWidth/1920,innerHeight/948));addEventListener('resize',fit);fit();
+
 roster();seat();
 </script>
 </body></html>
