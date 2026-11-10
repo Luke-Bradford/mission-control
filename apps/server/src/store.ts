@@ -1502,8 +1502,7 @@ export class Store {
   refreshCodeHealthRecommendations(repoId: string, at: number, checkout?: string) {
     this.transaction(() => {
       const proposals = recommendationProposals(this, repoId, at, checkout);
-      for (const proposal of proposals) upsertRecommendation(this.db, proposal, at);
-      const ids = proposals.map((row) => row.id);
+      const ids = proposals.map((proposal) => upsertRecommendation(this.db, proposal, at));
       this.db
         .prepare(
           `UPDATE code_health_recommendations SET active=0,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND active=1 AND id NOT IN (${ids.map(() => "?").join(",")})`,

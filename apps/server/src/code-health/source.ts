@@ -110,7 +110,7 @@ export function codeHealthReviewSource(db: Db, repoId: string, from: number, unt
   const findings: CodeHealthFinding[] = bounded(
     db
       .prepare(`SELECT f.id, f.review_id,
-    f.file, f.category, f.summary, f.fix, f.state, f.resolution, f.resolved_review_id, v.pr_number, v.sha,
+    f.file, f.category, f.summary, f.fix, f.state, f.resolution, f.resolved_review_id, v.pr_number, v.sha, v.ended_at,
     p.head_sha AS current_head_sha
     FROM review_findings f JOIN reviews v ON v.id = f.review_id
     LEFT JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number
@@ -123,6 +123,7 @@ export function codeHealthReviewSource(db: Db, repoId: string, from: number, unt
     pr: row.pr_number as number,
     reviewId: String(row.review_id),
     headSha: row.sha as string,
+    reportedAt: row.ended_at as number,
     currentHeadSha: row.current_head_sha as string | null,
     file: row.file as string,
     category: row.category as string | null,

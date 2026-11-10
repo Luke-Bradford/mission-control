@@ -64,6 +64,8 @@ export interface CodeHealthFinding {
   pr: number;
   reviewId: string;
   headSha: string;
+  /** Epoch milliseconds of the review that recorded this finding. */
+  reportedAt: number;
   /** Latest polled PR head. A different value means this finding is not an exact-head measure. */
   currentHeadSha?: string | null;
   file: string | null;

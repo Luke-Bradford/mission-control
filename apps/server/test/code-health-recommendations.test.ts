@@ -6,11 +6,16 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { RecommendationMutation } from "../src/code-health/recommendations.ts";
+import {
+  type Proposal,
+  RecommendationMutation,
+  upsertRecommendation,
+} from "../src/code-health/recommendations.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.UTC(2026, 10, 2),
+  DAY = 86_400_000,
   TOKEN = `operator-fixture-${"x".repeat(48)}`;
 const config: CcConfig = {
   operator: { id: "operator", timezone: "UTC" },
@@ -267,6 +272,124 @@ describe("durable code-health decisions", () => {
     expect(rows).toHaveLength(2);
     expect(new Set(rows.map((row) => row.id)).size).toBe(2);
     expect(new Set(rows.map((row) => row.causeId)).size).toBe(2);
+  });
+  it.each(["dismiss", "accept"] as const)(
+    "carries a legacy %s decision to its replacement cause",
+    (decision) => {
+      const legacy: Proposal = {
+        id: `chr_legacy_${decision}`,
+        repoId: "sample",
+        rule: "recurring-correction",
+        ruleVersion: 1,
+        scope: {
+          file: "src/a.ts",
+          category: "boundary-check",
+          from: NOW - 30 * 86400000,
+          until: NOW,
+          observedFrom: NOW - 1000,
+          observedUntil: NOW - 1000,
+        },
+        evidenceFingerprint: "legacy-fingerprint",
+        observation: "Legacy observed finding",
+        proposal: "Legacy proposal",
+        uncertainty: "Legacy uncertainty",
+        rankingReason: "Legacy ranking",
+        target: { metric: "findings", direction: "decrease", baseline: 4 },
+      };
+      upsertRecommendation(db, legacy, NOW);
+      const old = present(store.codeHealthRecommendation("sample", legacy.id));
+      const decided = store.decideCodeHealthRecommendation(
+        "sample",
+        old.id,
+        request(
+          old,
+          decision === "dismiss"
+            ? { action: "dismiss", reason: "Already handled" }
+            : { action: "accept", owner: "operator", reviewAt: NOW + DAY },
+        ),
+        "operator",
+        NOW,
+      );
+      review(1, 10);
+      review(2, 11);
+      for (let pos = 0; pos < 2; pos++) {
+        finding(1, pos, "src/a.ts", "boundary-check");
+        finding(2, pos, "src/b.ts", "boundary-check");
+      }
+      currentHead(10, "a".repeat(40));
+      currentHead(11, "a".repeat(40));
+
+      store.refreshCodeHealthRecommendations("sample", NOW + 1);
+
+      const replacement = present(
+        store
+          .codeHealthRecommendations("sample")
+          .find((row) => row.rule === "recurring-correction" && row.id === legacy.id),
+      );
+      expect(replacement.id).toBe(legacy.id);
+      expect(replacement.state.kind).toBe(decision === "dismiss" ? "dismissed" : "accepted");
+      if (decision === "accept") {
+        expect(replacement.owner).toBe("operator");
+        expect(replacement.reviewAt).toBe(NOW + DAY);
+        expect(replacement.baseline).toEqual(decided.baseline);
+        expect(
+          db
+            .prepare(
+              "SELECT COUNT(*) AS n FROM code_health_recommendations WHERE repo_id='sample' AND json_extract(proposal,'$.rule')='recurring-correction'",
+            )
+            .get(),
+        ).toEqual({ n: 1 });
+      }
+    },
+  );
+  it("does not carry a legacy decision to a later different cause in the same file and category", () => {
+    const legacy: Proposal = {
+      id: "chr_legacy_later",
+      repoId: "sample",
+      rule: "recurring-correction",
+      ruleVersion: 1,
+      scope: {
+        file: "src/a.ts",
+        category: "boundary-check",
+        from: NOW - 30 * DAY,
+        until: NOW,
+        observedFrom: NOW - 1000,
+        observedUntil: NOW - 1000,
+      },
+      evidenceFingerprint: "legacy-fingerprint",
+      observation: "Legacy observed finding",
+      proposal: "Legacy proposal",
+      uncertainty: "Legacy uncertainty",
+      rankingReason: "Legacy ranking",
+      target: { metric: "findings", direction: "decrease", baseline: 4 },
+    };
+    upsertRecommendation(db, legacy, NOW);
+    const old = present(store.codeHealthRecommendation("sample", legacy.id));
+    store.decideCodeHealthRecommendation(
+      "sample",
+      old.id,
+      request(old, { action: "dismiss", reason: "Already handled" }),
+      "operator",
+      NOW,
+    );
+    review(1, 10);
+    review(2, 11);
+    for (let pos = 0; pos < 2; pos++) {
+      finding(1, pos, "src/a.ts", "boundary-check", "New cause", "New fix");
+      finding(2, pos, "src/a.ts", "boundary-check", "New cause", "New fix");
+    }
+    db.prepare("UPDATE reviews SET ended_at=? WHERE id IN (?,?)").run(NOW + 1, 1, 2);
+    currentHead(10, "a".repeat(40));
+    currentHead(11, "a".repeat(40));
+
+    store.refreshCodeHealthRecommendations("sample", NOW + 2);
+
+    const newCause = present(
+      store
+        .codeHealthRecommendations("sample")
+        .find((row) => row.rule === "recurring-correction" && row.id !== legacy.id),
+    );
+    expect(newCause.state).toEqual({ kind: "proposed" });
   });
   it("clears an unknown changed head only after a review records that head", () => {
     review(1, 10);

@@ -30,6 +30,7 @@ const finding = (id: number, pr: number, category: string | null = null): CodeHe
   pr,
   reviewId: `review-${pr}`,
   headSha: "a".repeat(40),
+  reportedAt: id,
   file: "src/example.ts",
   category,
   summary: "Fixture finding",

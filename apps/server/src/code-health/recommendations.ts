@@ -25,6 +25,8 @@ export interface RecommendationScope {
   category?: string;
   findingSummary?: string;
   findingFix?: string;
+  /** Latest reported review time for this exact lineage. Used only for safe legacy migration. */
+  lineageObservedUntil?: number;
   pr?: number;
   /** What the PR's review findings mostly concerned; one-per-PR proposals with one cause group. */
   cause?: string;
@@ -172,7 +174,49 @@ export function recommendationRowsForFiles(
     .all(repo, JSON.stringify(paths), at)
     .map(decode);
 }
-export function upsertRecommendation(db: Db, proposal: Proposal, at: number) {
+function legacyReplacement(db: Db, proposal: Proposal): RecommendationRecord | null {
+  const scope = proposal.scope;
+  if (
+    proposal.rule !== "recurring-correction" ||
+    !scope?.category ||
+    !scope.files?.length ||
+    scope.lineageObservedUntil === undefined
+  )
+    return null;
+  const files = scope.files,
+    lineageObservedUntil = scope.lineageObservedUntil;
+  const legacy = (
+    db
+      .prepare(
+        "SELECT * FROM code_health_recommendations WHERE repo_id=? AND json_extract(proposal,'$.rule')='recurring-correction'",
+      )
+      .all(proposal.repoId) as Record<string, unknown>[]
+  )
+    .map(decode)
+    .filter(
+      (row) =>
+        row.causeId?.startsWith("legacy:") &&
+        row.scope !== null &&
+        row.scope.category === scope.category &&
+        row.scope.file !== undefined &&
+        files.includes(row.scope.file) &&
+        row.scope.until >= lineageObservedUntil &&
+        (row.state.kind === "dismissed" || row.state.kind === "accepted"),
+    );
+  return legacy.length === 1 ? legacy[0] : null;
+}
+/** Returns the durable id, which can be a safely migrated legacy id. */
+export function upsertRecommendation(db: Db, proposal: Proposal, at: number): string {
+  const existing = recommendationRow(db, proposal.repoId, proposal.id);
+  if (!existing) {
+    const legacy = legacyReplacement(db, proposal);
+    if (legacy) {
+      db.prepare(
+        "UPDATE code_health_recommendations SET proposal=?,active=1,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND id=?",
+      ).run(JSON.stringify({ ...proposal, id: legacy.id }), at, proposal.repoId, legacy.id);
+      return legacy.id;
+    }
+  }
   db.prepare(`INSERT INTO code_health_recommendations(id,repo_id,proposal,created_at,updated_at) VALUES(?,?,?,?,?)
     ON CONFLICT(id) DO UPDATE SET proposal=excluded.proposal,active=1,updated_at=MAX(excluded.updated_at,updated_at+1)
     WHERE proposal != excluded.proposal OR active=0`).run(
@@ -182,6 +226,7 @@ export function upsertRecommendation(db: Db, proposal: Proposal, at: number) {
     at,
     at,
   );
+  return proposal.id;
 }
 const text = z.string().trim().min(1).max(2000);
 export const RecommendationAction = z.discriminatedUnion("action", [
@@ -446,6 +491,7 @@ export function recommendationProposals(
           category,
           findingSummary: summary,
           findingFix: fix,
+          lineageObservedUntil: Math.max(...rows.map((row) => row.reportedAt)),
           cause: causeId,
         },
       );
