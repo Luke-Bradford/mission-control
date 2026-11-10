@@ -160,6 +160,7 @@ export function createCodexApprover(i: {
           : null
       : codexApproval(req, paths, { cwd: i.cwd });
     if (!repo || events === null) return refuse("codex-allowlist");
+    let admitted: { runId: string; toolUseId: string } | undefined;
     for (const event of events) {
       if (
         !i.fullAccess &&
@@ -194,7 +195,16 @@ export function createCodexApprover(i: {
         );
       // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
-        const running = await i.checks?.running?.(i.runId, event.input.command);
+        const id = params.approvalId ?? params.itemId;
+        if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
+        const key = { runId: i.runId, toolUseId: String(id) };
+        const atRoot = sameDir(params.cwd, i.cwd);
+        const running = atRoot
+          ? i.checks?.admit
+            ? await i.checks.admit(key, event.input.command)
+            : await i.checks?.running?.(i.runId, event.input.command)
+          : null;
+        admitted = atRoot && i.checks?.admit !== undefined && running === null ? key : undefined;
         if (running !== null && running !== undefined)
           verdict = {
             kind: "deny",
@@ -206,7 +216,10 @@ export function createCodexApprover(i: {
         const check = await i.checks?.lockedBy(i.runId, event.input.command);
         if (check) verdict = { kind: "lock", command: check };
       }
-      if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
+      if (verdict.kind === "deny") {
+        if (admitted !== undefined) i.checks?.cancel?.(admitted);
+        return refuse(verdict.rule, verdict.text);
+      }
       if (verdict.kind === "lock") {
         const id = params.approvalId ?? params.itemId;
         if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
@@ -214,6 +227,7 @@ export function createCodexApprover(i: {
         const granted = await i.lock.acquire(key, i.seatId, verdict.command, LOCK_WAIT_MS, signal);
         if (!granted || signal.aborted) {
           if (granted) i.lock.release(key);
+          if (admitted !== undefined) i.checks?.cancel?.(admitted);
           const h = i.lock.state().holder;
           return refuse(
             "full-suite",
@@ -225,7 +239,10 @@ export function createCodexApprover(i: {
         }
       }
     }
-    if (signal.aborted) return refuse("codex-allowlist");
+    if (signal.aborted) {
+      if (admitted !== undefined) i.checks?.cancel?.(admitted);
+      return refuse("codex-allowlist");
+    }
     // the lock's key: the completion event names the same one (see codex-session's tool-result)
     const id = params.approvalId ?? params.itemId;
     // only a command run at the worktree root is a check: from a subfolder it checks something else

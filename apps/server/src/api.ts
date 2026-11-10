@@ -2700,13 +2700,17 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
+          let admitted = false;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
           if (
             verdict.kind === "allow" &&
             body.data.tool_name === "Bash" &&
             typeof command === "string"
           ) {
-            const running = await checks?.running?.(who.runId, command);
+            const running = checks?.admit
+              ? await checks.admit(key, command)
+              : await checks?.running?.(who.runId, command);
+            admitted = checks?.admit !== undefined && running === null;
             if (running !== null && running !== undefined)
               verdict = {
                 kind: "deny",
@@ -2735,6 +2739,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return answer();
           }
           if (verdict.kind === "deny") {
+            if (admitted) checks?.cancel?.(key);
             store.addGuardHit({
               agentId: who.seatId,
               runId: who.runId,
@@ -2745,7 +2750,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             bus.emit("guard");
             return answer(verdict.text);
           }
-          if (lock === undefined) return answer(TEST_LOCK_UNAVAILABLE_TEXT);
+          if (lock === undefined) {
+            if (admitted) checks?.cancel?.(key);
+            return answer(TEST_LOCK_UNAVAILABLE_TEXT);
+          }
           // The hook hung up (killed, or its CLI interrupted) when the reply closes unanswered. The
           // request's own close is not it: that fires once the body has been read.
           const res = reply.raw;
@@ -2779,6 +2787,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             }
             // a grant that landed after the hang-up: nobody will run that call
             if (granted) lock.release(key);
+            if (admitted) checks?.cancel?.(key);
             const h = lock.state().holder;
             return answer(
               lockBusyText(

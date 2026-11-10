@@ -411,6 +411,36 @@ describe("the check recorder", () => {
     await r.end(KEY, true, 0);
   });
 
+  it("atomically refuses a second check admission in the same checkout", async () => {
+    const r = recorder();
+    const other = { runId: "r1", toolUseId: "t2" };
+    const admissions = await Promise.all([r.admit?.(KEY, LINT), r.admit?.(other, TYPES)]);
+    expect(admissions.filter((admission) => admission === null)).toHaveLength(1);
+    expect(admissions.filter((admission) => admission !== null)).toEqual([LINT]);
+    const winner = admissions[0] === null ? KEY : other;
+    await r.begin(winner, winner === KEY ? LINT : TYPES);
+    await r.end(winner, true, 0);
+  });
+
+  it.each([
+    ["dirty", { head: HEAD, clean: false } as CloneState, {}],
+    ["unreadable", null, {}],
+    ["background", { head: HEAD, clean: true } as CloneState, { background: true }],
+  ])(
+    "keeps a %s test execution exclusive although it cannot earn a receipt",
+    async (_n, start, options) => {
+      const r = recorder();
+      state = start;
+      await r.begin(KEY, "pnpm -s test apps/server/test/guard.test.ts", [], options);
+      expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, LINT)).toBe(
+        "pnpm -s test apps/server/test/guard.test.ts",
+      );
+      state = { head: HEAD, clean: true };
+      await r.end(KEY, true, 0);
+      expect(rows).toEqual([]);
+    },
+  );
+
   it("takes no lock when the repo's rules cannot be read", async () => {
     const lines: string[] = [];
     const r = createCheckRecorder({

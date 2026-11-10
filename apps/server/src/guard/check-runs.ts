@@ -113,6 +113,10 @@ export interface CheckRecorder {
   lockedBy(runId: string, command: string): Promise<string | null>;
   /** The active command in this checkout that prevents a check or test from starting. */
   running?(runId: string, command: string): Promise<string | null>;
+  /** Atomically reserves this checkout for a check or test, or names the command already reserved. */
+  admit?(key: CallKey, command: string): Promise<string | null>;
+  /** Releases an admission whose command will not start. */
+  cancel?(key: CallKey): void;
   /** A turn ended. Keep watching calls that have not reported their final exit yet. */
   dropRun(runId: string): void;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
@@ -139,9 +143,10 @@ export interface CheckRecorderDeps {
 
 interface StartedCall {
   runId: string;
+  /** Empty when the call executed but cannot produce a receipt. */
   matched: string[];
   command: string;
-  head: string;
+  head: string | null;
   startedAt: number;
   timeoutMs: number;
   worktree: string | null;
@@ -153,6 +158,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   const now = d.now ?? Date.now;
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, StartedCall>();
+  const admitted = new Map<string, { key: CallKey; command: string }>();
   const finishing = new Set<StartedCall>();
   /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
   const dropped = new Map<string, CheckDrop[]>();
@@ -180,6 +186,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     if (rest.length === 0) dropped.delete(runId);
     else dropped.set(runId, rest);
   };
+  const cancel = (key: CallKey): void => {
+    for (const [checkout, admission] of admitted) {
+      if (callId(admission.key) === callId(key)) admitted.delete(checkout);
+    }
+  };
   return {
     async lockedBy(runId, command) {
       try {
@@ -205,33 +216,81 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         return null;
       }
     },
+    async admit(key, command) {
+      try {
+        const checks = await d.checks(key.runId);
+        if (lockedCheck(command, checks) === null && !testCommand(command)) return null;
+        const worktree =
+          d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
+        const checkout = worktree ?? key.runId;
+        const active = admitted.get(checkout);
+        if (active !== undefined && callId(active.key) !== callId(key)) return active.command;
+        const running = [...new Set(started.values())].find(
+          (call) => call.runId === key.runId || (worktree !== null && call.worktree === worktree),
+        );
+        if (running !== undefined) return running.command;
+        admitted.set(checkout, { key, command });
+        return null;
+      } catch (e) {
+        d.log?.(`checks: could not admit a check for ${key.runId}: ${(e as Error).message}`);
+        return null;
+      }
+    },
+    cancel(key) {
+      cancel(key);
+    },
     async begin(key, command, aliases = [], options = {}) {
       try {
         const checks = await d.checks(key.runId);
         const own = d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
         const matched = checksRun(withoutOwnCd(command, own), checks);
         const isTest = testCommand(command);
-        if (matched.length === 0 && !isTest) {
-          // a configured check inside a chain, a pipe or a list is not counted: say so
-          const inside = lockedCheck(command, checks);
-          if (inside === null) return;
-          const at = await d.state(key.runId).catch(() => null);
-          noteDrop(key.runId, "not-plain", [inside], at?.head ?? null, command);
+        const inside = lockedCheck(command, checks);
+        if (matched.length === 0 && !isTest && inside === null) {
+          cancel(key);
           return;
         }
         const at = await d.state(key.runId);
+        // Track execution even when its receipt cannot be trusted. A dirty start must not earn a
+        // pass, but it still prevents another check or test racing in this checkout.
+        const trackOnly = (head: string | null): void => {
+          const call: StartedCall = {
+            runId: key.runId,
+            matched: [],
+            command,
+            head,
+            startedAt: now(),
+            timeoutMs: 0,
+            worktree: own,
+          };
+          started.set(callId(key), call);
+          for (const alias of aliases) started.set(callId(alias), call);
+        };
         if (at === null) {
           noteDrop(key.runId, "unreadable", matched, null, command);
+          trackOnly(null);
+          cancel(key);
+          return;
+        }
+        // a configured check inside a chain, a pipe or a list is not counted, but is still running
+        if (matched.length === 0 && inside !== null) {
+          noteDrop(key.runId, "not-plain", [inside], at.head, command);
+          trackOnly(at.head);
+          cancel(key);
           return;
         }
         // a dirty tree: the check ran on something no commit holds
         if (!at.clean) {
           noteDrop(key.runId, "dirty-start", matched, at.head, command);
+          trackOnly(at.head);
+          cancel(key);
           return;
         }
         // a background call reports its end at once, long before the check has run
         if (options.background) {
           noteDrop(key.runId, "background", matched, at.head, command);
+          trackOnly(at.head);
+          cancel(key);
           return;
         }
         const call = {
@@ -248,9 +307,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
           worktree: own,
         };
         started.set(callId(key), call);
+        cancel(key);
         for (const alias of aliases) started.set(callId(alias), call);
       } catch (e) {
         d.log?.(`checks: could not start a record for ${key.runId}: ${(e as Error).message}`);
+        cancel(key);
       }
     },
     async end(key, ok, exitCode = null) {
@@ -259,6 +320,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       finishing.add(call);
       for (const [id, startedCall] of started) if (startedCall === call) started.delete(id);
       try {
+        // This call exists only to exclude an overlapping execution; it can never cover a commit.
+        if (call.matched.length === 0 || call.head === null) return;
         const at = await d.state(key.runId);
         // the head moved, or the call left the tree dirty: it did not check the commit it started on
         if (at === null) {
