@@ -4301,6 +4301,15 @@ describe("promote", () => {
     expect(moveCalls[0]?.column).toBe("Refinement");
   });
 
+  it("flags a private prototype and refuses Ready until it is copied into docs/prototype", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\nPrototype: [working copy](https://private.example/prototype)` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
   it("names only what is missing, and honours the rules' needs", async () => {
     board(backlog({ size: null }));
     expect((await call("promote", P())).text).toBe(

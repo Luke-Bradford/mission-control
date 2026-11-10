@@ -186,7 +186,7 @@ describe("fetchTicket repos", () => {
       title: "t",
       url: "u",
       state: "OPEN",
-      body: "",
+      body: "Prototype: [working copy](https://private.example/prototype)",
       subIssues: {
         nodes: [
           { number: 6, title: "same", state: "OPEN", repository: at("octo-org", "shop-app") },
@@ -225,6 +225,7 @@ describe("fetchTicket repos", () => {
       [30, "site-builder"],
       [31, null],
     ]);
+    expect(t?.prototypeProblem).toBe("links a prototype outside docs/prototype/.");
   });
 
   it("asks GitHub for each item's repository", async () => {
@@ -1698,6 +1699,26 @@ describe("collectGithub pull requests", () => {
       await collectGithub(repo, store, gql, NOW);
       expect(prs()[0]?.ci, state).toBe("passing");
     }
+  });
+
+  it("reports the hub's refused review on PR 1520 as skipped, not a failed check", async () => {
+    const { gql } = stub({
+      prPages: [
+        prPage([
+          pull(1520, {
+            commits: heads(
+              "FAILURE",
+              checkRun("check", "SUCCESS"),
+              statusContext("mc/review", "FAILURE"),
+            ),
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(prs()[0]?.checks).toContainEqual(
+      expect.objectContaining({ name: "mc/review", skipped: true, conclusion: "FAILURE" }),
+    );
   });
 
   it("with required_checks, an unreported required check is pending", async () => {

@@ -44,6 +44,7 @@ import {
 import type { CcConfig } from "../config.ts";
 import { observeFlightChecks, observeFlightMain } from "../flight/signals.ts";
 import { singleSelectField } from "../github-fields.ts";
+import { prototypeLinkProblem } from "../prototype-links.ts";
 import { hasQuestionFence, parseAutonomyQuestion } from "../sd32.ts";
 import type { Store } from "../store.ts";
 import { str } from "../util.ts";
@@ -817,6 +818,7 @@ export async function fetchTicket(
     // read on the whole body: a section past the cut still holds a merge
     controllerCheck: controllerCheckOf(chars.join("")),
     body: chars.slice(0, TICKET_BODY_MAX).join(""),
+    prototypeProblem: prototypeLinkProblem(chars.join("")),
     bodyTruncated: chars.length > TICKET_BODY_MAX,
     bodyLength: chars.length,
     labels: names(issue.labels),
@@ -1094,6 +1096,9 @@ export function parseChecks(rollup: unknown): PrCheck[] {
         name,
         kind: "status",
         state: lookup(CHECKS, n.state) ?? "pending",
+        ...(n.context === "mc/review" && lookup(CHECKS, n.state) === "failing"
+          ? { skipped: true }
+          : {}),
         conclusion: str(n.state, ""),
         attempt: null,
         url: str(n.targetUrl, "") || null,

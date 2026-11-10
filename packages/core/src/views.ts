@@ -284,6 +284,8 @@ export interface TicketView {
   closedAt?: number | null;
   /** Plain text as written on GitHub, cut at 20 000 characters (`bodyTruncated`). */
   body: string;
+  /** Why a prototype link is not available to the crew, or null when every prototype is in-repo. */
+  prototypeProblem?: string | null;
   /**
    * The ticket's controller-check section, found on the full body before it was cut; null when
    * it has none. Absent: the reader did not look (use `body`).
@@ -723,6 +725,8 @@ export interface TicketHistory {
   /** The body as written, cut by the collector; null when GitHub was unreachable. */
   body: string | null;
   bodyTruncated: boolean;
+  /** Why a linked prototype is unavailable to the crew, or null when every prototype is in-repo. */
+  prototypeProblem?: string | null;
   /** Why the body is missing; null when GitHub answered. */
   githubError: string | null;
   runs: TicketRunView[];
