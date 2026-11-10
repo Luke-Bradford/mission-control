@@ -18,7 +18,7 @@ import {
   seatCallSign,
 } from "@mc/core";
 import { type CcConfig, crewSeatGrants } from "../config.ts";
-import type { CheckRecorder } from "../guard/check-runs.ts";
+import { type CheckRecorder, testCommand } from "../guard/check-runs.ts";
 import { crewGuardDecision } from "../guard/decision.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { codexApproval, codexEditAllowed } from "./codex-floor.ts";
@@ -195,22 +195,27 @@ export function createCodexApprover(i: {
         );
       // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
-        const id = params.approvalId ?? params.itemId;
-        if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
-        const key = { runId: i.runId, toolUseId: String(id) };
         const atRoot = sameDir(params.cwd, i.cwd);
-        const running = atRoot
-          ? i.checks?.admit
+        const tracked =
+          atRoot &&
+          i.checks !== undefined &&
+          (testCommand(event.input.command) ||
+            (await i.checks.lockedBy(i.runId, event.input.command)) !== null);
+        if (tracked) {
+          const id = params.approvalId ?? params.itemId;
+          if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
+          const key = { runId: i.runId, toolUseId: String(id) };
+          const running = i.checks?.admit
             ? await i.checks.admit(key, event.input.command)
-            : await i.checks?.running?.(i.runId, event.input.command)
-          : null;
-        admitted = atRoot && i.checks?.admit !== undefined && running === null ? key : undefined;
-        if (running !== null && running !== undefined)
-          verdict = {
-            kind: "deny",
-            rule: "full-suite",
-            text: `A check is already running in this checkout: ${running}. Wait for it to finish.`,
-          };
+            : await i.checks?.running?.(i.runId, event.input.command);
+          admitted = i.checks?.admit !== undefined && running === null ? key : undefined;
+          if (running !== null && running !== undefined)
+            verdict = {
+              kind: "deny",
+              rule: "full-suite",
+              text: `A check is already running in this checkout: ${running}. Wait for it to finish.`,
+            };
+        }
       }
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
         const check = await i.checks?.lockedBy(i.runId, event.input.command);
