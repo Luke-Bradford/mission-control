@@ -929,6 +929,14 @@ async function safeReviewPnpmChanges(
     const after = parseYaml(
       await readFile(join(s.path, PNPM_TOOL.lockfile), "utf8"),
     ) as typeof before;
+    // `snapshots`, catalogues, patches and settings also affect what pnpm resolves. They do not
+    // carry enough provenance to establish an install-safe dependency closure, so any change is
+    // reviewed without installing rather than being treated as a types-only bump.
+    const beforeResolution = { ...before };
+    const afterResolution = { ...after };
+    delete beforeResolution.packages;
+    delete afterResolution.packages;
+    if (JSON.stringify(beforeResolution) !== JSON.stringify(afterResolution)) return false;
     const keys = new Set([
       ...Object.keys(before.packages ?? {}),
       ...Object.keys(after.packages ?? {}),
