@@ -1,0 +1,17 @@
+[
+  {
+    "name": "idle graph",
+    "maxOneSecondTree": 51.28584881201823,
+    "maxOneSecondRenderer": 2.9587989699241337
+  },
+  {
+    "name": "20-message burst",
+    "maxOneSecondTree": 50.96581681893264,
+    "maxOneSecondRenderer": 2.9981669956530337
+  },
+  {
+    "name": "graph unmounted on Overview",
+    "maxOneSecondTree": 3.990913854500102,
+    "maxOneSecondRenderer": 1.0098817341740405
+  }
+]

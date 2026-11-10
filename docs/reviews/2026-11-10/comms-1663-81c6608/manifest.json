@@ -1,0 +1,136 @@
+{
+  "kind": "Controlled published-head render and resource observation; not live acceptance or independent RETRO verdict",
+  "at": "2026-11-10T01:22:40.409291+00:00",
+  "head": "81c6608b9fcba540b6d8b4888f3c88e4e1fd8d6d",
+  "viewport": {
+    "width": 1920,
+    "height": 940,
+    "dpr": 1,
+    "zoom": 1,
+    "theme": "dark"
+  },
+  "recording": {
+    "durationSeconds": 14.76,
+    "width": 3840,
+    "height": 988,
+    "fps": 25,
+    "formatProbe": "Input recognized; null muxer unsupported exit234; no full-decode pass claimed"
+  },
+  "motion": {
+    "baselineMoved": false,
+    "browserOnlyBeginElementControlMoved": true,
+    "controlIsNotCurrentApplicationAcceptance": true
+  },
+  "findings": [
+    "Current moving signal remains at origin until browser-only beginElement diagnostic",
+    "Full-chart Waiting and Justsaid lists absent",
+    "Renderer mean1.365% but isolatedChrome idle8.689% withGPU7.291%; burst aggregatepeak50.966%; no wholebudgetpass claimed"
+  ],
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "9eb8cae501a60eb80421d03c491b67cfd22eb4b64d85bfc8e882caa56151a702",
+      "bytes": 7048
+    },
+    {
+      "path": "fixture.json",
+      "sha256": "be4e01471ec70c2907aac62e5c075bba7004cb3403e1277787d54be885d2d381",
+      "bytes": 14766
+    },
+    {
+      "path": "graph-1920x940-dark.png",
+      "sha256": "8545be95d50a82df22f03db88c433a79511648f924bddc557633c90b27cf8a49",
+      "bytes": 126720
+    },
+    {
+      "path": "graph-realistic-names-1920x940-dark.png",
+      "sha256": "d23daeef601cea118e7a4a0c25d62ed2a534224af903a246ace630ac7075d96f",
+      "bytes": 128148
+    },
+    {
+      "path": "harness-source/controllerGraphBrowser.html",
+      "sha256": "ed6076d09ab674843e7a22a5261129645b935fcc531e85b3c40195f9c19a85b9",
+      "bytes": 169
+    },
+    {
+      "path": "harness-source/controllerGraphBrowser.tsx",
+      "sha256": "e707f7d2d4dcfe69c8d1924d4ea9ed2d32cd247da06f22b4f8fcc3e83ea20a67",
+      "bytes": 1406
+    },
+    {
+      "path": "harness-source/mc-1663-81c-motion-probe.mjs",
+      "sha256": "ff10bcab14964b238696250ea4904515d79b0cb32d59a9ac748ffa77be91d23e",
+      "bytes": 9640
+    },
+    {
+      "path": "harness-source/mc-1663-capture-after-81c.mjs",
+      "sha256": "d3087d40d913f1fbea75a04216ccba26e51f019f4c652ae561d6d7160ee9dcab",
+      "bytes": 14838
+    },
+    {
+      "path": "harness-source/reference-comms-prototype.html",
+      "sha256": "c33620d1e7702befdfddf688f206595adf219788a711bf83f9fb2e2832fcb831",
+      "bytes": 51810
+    },
+    {
+      "path": "host-sample.json",
+      "sha256": "35d976133b2d10428239207d083db925765c87af634d599d3220d7899828a752",
+      "bytes": 210
+    },
+    {
+      "path": "idle-process-components.json",
+      "sha256": "31646241244dc8fbebf85634973bc7ecbe451dc918e44e785ff451968f58ced3",
+      "bytes": 503
+    },
+    {
+      "path": "media-metadata-probe.txt",
+      "sha256": "12f2446f80f073c5ba2d733f670daad314a2b9fa19b8dff4ba0995f070b6f1fb",
+      "bytes": 740
+    },
+    {
+      "path": "motion-baseline-stalled-1920x940-dark.png",
+      "sha256": "205e90331fc50a6966c459c9d7c1a17ad14f20d71aceb5200aff380e5b133e09",
+      "bytes": 127124
+    },
+    {
+      "path": "motion-control-beginElement-1920x940-dark.png",
+      "sha256": "365f10d438f14115039dcaf16a06e4e79ef3dfae9f6bcd54e708101c1799a344",
+      "bytes": 127126
+    },
+    {
+      "path": "motion-probe-fixture.json",
+      "sha256": "53c3ae2bcb82c13b5863b4ff39b4cdc05bd0b507c17f209b47a1b2a960e403d9",
+      "bytes": 14766
+    },
+    {
+      "path": "motion-probe-receipt.json",
+      "sha256": "e912eb8833e8273e2dce0f3bce307fef4c1b4d649e8f0a41555fda6bbb3066ba",
+      "bytes": 4310
+    },
+    {
+      "path": "peak-samples.json",
+      "sha256": "fc4d2c9a4e54e27d6ead13ac3fe61be10c1639d42336a4f3f2cd1e6abc372448",
+      "bytes": 400
+    },
+    {
+      "path": "prototype-and-app.webm",
+      "sha256": "93eee68d8e0fdfaffc6dd23baac5662c64e5b668ed6aecc233e139ce106675c7",
+      "bytes": 1738938
+    },
+    {
+      "path": "receipt.json",
+      "sha256": "a33d67125f8ec807f09ab99f09aed3d7ce1a4c296cc48ae0b079ea6e0239847c",
+      "bytes": 118322
+    },
+    {
+      "path": "side-by-side-after.png",
+      "sha256": "1ebb4f7afe69ef7fb2c41c417caa32f6f40f0b338cf18a6caa3c560849a027a2",
+      "bytes": 773996
+    },
+    {
+      "path": "side-by-side-before.png",
+      "sha256": "c1b5d56dc00ff356be52d530d69ed62dd1002181f3eea4699eb13815e35990f9",
+      "bytes": 781098
+    }
+  ]
+}

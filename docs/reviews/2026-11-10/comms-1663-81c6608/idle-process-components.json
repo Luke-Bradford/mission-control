@@ -1,0 +1,27 @@
+{
+  "at": "2026-11-10T01:14:30.948129+00:00",
+  "phase": "idle graph",
+  "seconds": 30.038147749999997,
+  "components": [
+    {
+      "pid": 12307,
+      "kind": "browser",
+      "cpuPercent": 0.033291000774173934
+    },
+    {
+      "pid": 12377,
+      "kind": "gpu-process",
+      "cpuPercent": 7.290729169544085
+    },
+    {
+      "pid": 12378,
+      "kind": "utility",
+      "cpuPercent": 0.0
+    },
+    {
+      "pid": 12380,
+      "kind": "renderer",
+      "cpuPercent": 1.36493103174113
+    }
+  ]
+}

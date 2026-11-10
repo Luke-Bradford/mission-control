@@ -1,0 +1,5229 @@
+{
+  "head": "81c6608b9fcba540b6d8b4888f3c88e4e1fd8d6d",
+  "startedAt": "2026-11-10T01:12:20.133Z",
+  "output": "/Users/lukebradford/.local/share/mission-control/controller/comms-1663-after-81c-rwpot71r",
+  "observations": [
+    {
+      "kind": "synthetic agents resource update",
+      "index": 0,
+      "sentAt": 1794273143614,
+      "bridgeRoundTripMs": 2.2539170000000013
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 1,
+      "sentAt": 1794273145620,
+      "bridgeRoundTripMs": 3.4286669999992228
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 2,
+      "sentAt": 1794273147622,
+      "bridgeRoundTripMs": 1.48174999999992
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 3,
+      "sentAt": 1794273149624,
+      "bridgeRoundTripMs": 1.3607080000001588
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 4,
+      "sentAt": 1794273151631,
+      "bridgeRoundTripMs": 2.7037920000002487
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 5,
+      "sentAt": 1794273153634,
+      "bridgeRoundTripMs": 2.620249999999942
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 100,
+      "sentAt": 1794273189602,
+      "bridgeRoundTripMs": 2.009749999997439
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 101,
+      "sentAt": 1794273192644,
+      "bridgeRoundTripMs": 1.0789589999985765
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 102,
+      "sentAt": 1794273195638,
+      "bridgeRoundTripMs": 1.1705409999995027
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 103,
+      "sentAt": 1794273198634,
+      "bridgeRoundTripMs": 1.077832999995735
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 104,
+      "sentAt": 1794273201640,
+      "bridgeRoundTripMs": 1.4097919999985606
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 105,
+      "sentAt": 1794273204623,
+      "bridgeRoundTripMs": 1.2640829999945709
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 106,
+      "sentAt": 1794273207638,
+      "bridgeRoundTripMs": 1.2062080000032438
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 107,
+      "sentAt": 1794273210631,
+      "bridgeRoundTripMs": 1.3608749999984866
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 108,
+      "sentAt": 1794273213641,
+      "bridgeRoundTripMs": 1.0658750000002328
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 109,
+      "sentAt": 1794273216639,
+      "bridgeRoundTripMs": 1.241333999991184
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 110,
+      "sentAt": 1794273219625,
+      "bridgeRoundTripMs": 1.4955829999962589
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 111,
+      "sentAt": 1794273222635,
+      "bridgeRoundTripMs": 1.1275000000023283
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 112,
+      "sentAt": 1794273225635,
+      "bridgeRoundTripMs": 1.412917000008747
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 113,
+      "sentAt": 1794273228638,
+      "bridgeRoundTripMs": 1.330207999999402
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 114,
+      "sentAt": 1794273231645,
+      "bridgeRoundTripMs": 1.2820420000061858
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 115,
+      "sentAt": 1794273234633,
+      "bridgeRoundTripMs": 1.5784999999887077
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 116,
+      "sentAt": 1794273237643,
+      "bridgeRoundTripMs": 1.125499999994645
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 117,
+      "sentAt": 1794273240635,
+      "bridgeRoundTripMs": 1.1251669999910519
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 118,
+      "sentAt": 1794273243635,
+      "bridgeRoundTripMs": 1.0825000000040745
+    },
+    {
+      "kind": "synthetic agents resource update",
+      "index": 119,
+      "sentAt": 1794273246654,
+      "bridgeRoundTripMs": 1.3336249999993015
+    }
+  ],
+  "phases": [
+    {
+      "name": "idle graph",
+      "seconds": 30.038147749999997,
+      "messages": 0,
+      "messageOffsetsMs": [],
+      "treeCPUPercent": 8.688951202059387,
+      "rendererCPUPercent": 1.36493103174113,
+      "maxFrameRoundTripMs": 27.00433300000077,
+      "samples": [
+        {
+          "at": 1794273159538,
+          "wall": 19882.073292,
+          "treeCPU": 0.55,
+          "rendererCPU": 0.24,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.24,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273160572,
+          "wall": 20915.937542,
+          "treeCPU": 0.5900000000000001,
+          "rendererCPU": 0.26,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.26,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273161577,
+          "wall": 21921.854625,
+          "treeCPU": 0.62,
+          "rendererCPU": 0.27,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.27,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273162571,
+          "wall": 22915.360833,
+          "treeCPU": 0.64,
+          "rendererCPU": 0.28,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.28,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273163578,
+          "wall": 23921.94425,
+          "treeCPU": 0.6699999999999999,
+          "rendererCPU": 0.29,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.22,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.29,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273164572,
+          "wall": 24916.408833,
+          "treeCPU": 0.71,
+          "rendererCPU": 0.31,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.31,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273165568,
+          "wall": 25912.21525,
+          "treeCPU": 0.73,
+          "rendererCPU": 0.32,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.25,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.32,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273166569,
+          "wall": 26913.832,
+          "treeCPU": 0.76,
+          "rendererCPU": 0.33,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.27,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.33,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273167578,
+          "wall": 27922.873,
+          "treeCPU": 0.78,
+          "rendererCPU": 0.34,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.28,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.34,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273168565,
+          "wall": 28909.878417,
+          "treeCPU": 0.8099999999999999,
+          "rendererCPU": 0.35,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.3,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.35,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273169583,
+          "wall": 29927.629958,
+          "treeCPU": 0.83,
+          "rendererCPU": 0.36,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.31,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.36,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273170573,
+          "wall": 30917.783792,
+          "treeCPU": 0.88,
+          "rendererCPU": 0.38,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.34,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.38,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273171586,
+          "wall": 31930.798167,
+          "treeCPU": 1.33,
+          "rendererCPU": 0.39,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 0.78,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.39,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273172563,
+          "wall": 32907.555292,
+          "treeCPU": 1.75,
+          "rendererCPU": 0.41,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.18,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.41,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273173577,
+          "wall": 33921.342833,
+          "treeCPU": 1.7699999999999998,
+          "rendererCPU": 0.42,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.19,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.42,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273174571,
+          "wall": 34915.86775,
+          "treeCPU": 1.7999999999999998,
+          "rendererCPU": 0.43,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.21,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.43,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273175575,
+          "wall": 35919.597042,
+          "treeCPU": 1.82,
+          "rendererCPU": 0.44,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.22,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.44,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273176570,
+          "wall": 36914.009125,
+          "treeCPU": 1.86,
+          "rendererCPU": 0.46,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.24,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.46,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273177578,
+          "wall": 37922.750875,
+          "treeCPU": 1.88,
+          "rendererCPU": 0.47,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.25,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.47,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273178591,
+          "wall": 38935.513042,
+          "treeCPU": 1.91,
+          "rendererCPU": 0.48,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.27,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.48,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273179578,
+          "wall": 39922.420667,
+          "treeCPU": 1.94,
+          "rendererCPU": 0.49,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.13,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.29,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.49,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273180580,
+          "wall": 40924.192,
+          "treeCPU": 1.98,
+          "rendererCPU": 0.51,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.3,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.51,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273181574,
+          "wall": 41918.525417,
+          "treeCPU": 2.01,
+          "rendererCPU": 0.52,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.32,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.52,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273182575,
+          "wall": 42919.869417,
+          "treeCPU": 2.04,
+          "rendererCPU": 0.53,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.34,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.53,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273183580,
+          "wall": 43924.126708,
+          "treeCPU": 2.0600000000000005,
+          "rendererCPU": 0.54,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.35,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.54,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273184580,
+          "wall": 44924.104542,
+          "treeCPU": 2.1000000000000005,
+          "rendererCPU": 0.56,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.37,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.56,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273185576,
+          "wall": 45920.385,
+          "treeCPU": 2.13,
+          "rendererCPU": 0.57,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.39,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.57,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273186572,
+          "wall": 46916.434083,
+          "treeCPU": 2.18,
+          "rendererCPU": 0.59,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.42,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.59,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273187586,
+          "wall": 47930.359,
+          "treeCPU": 2.6999999999999997,
+          "rendererCPU": 0.62,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 1.91,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.62,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273188572,
+          "wall": 48916.008125,
+          "treeCPU": 3.13,
+          "rendererCPU": 0.64,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.32,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.64,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273189576,
+          "wall": 49920.221042,
+          "treeCPU": 3.1599999999999997,
+          "rendererCPU": 0.65,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.34,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.65,
+              "renderer": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "20-message burst",
+      "seconds": 60.044961875,
+      "messages": 20,
+      "messageOffsetsMs": [
+        0.01895900000090478,
+        3043.153833999997,
+        6036.374499999998,
+        9033.139834000001,
+        12038.430166999999,
+        15021.682709,
+        18036.872666999996,
+        21029.741042,
+        24040.212792,
+        27037.473458999993,
+        30023.622375,
+        33033.9275,
+        36033.313959,
+        39036.90754199999,
+        42043.475625,
+        45031.692334,
+        48041.310374999994,
+        51033.942917,
+        54033.977834,
+        57052.117458999994
+      ],
+      "treeCPUPercent": 8.143897251829175,
+      "rendererCPUPercent": 1.6154561010785888,
+      "maxFrameRoundTripMs": 26.986999999993714,
+      "samples": [
+        {
+          "at": 1794273189600,
+          "wall": 49944.550083,
+          "treeCPU": 3.1599999999999997,
+          "rendererCPU": 0.65,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.34,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.03,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.65,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273190639,
+          "wall": 50983.887958,
+          "treeCPU": 3.22,
+          "rendererCPU": 0.68,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.36,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.68,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273191635,
+          "wall": 51979.324625,
+          "treeCPU": 3.25,
+          "rendererCPU": 0.69,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.38,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.69,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273192643,
+          "wall": 52987.686917,
+          "treeCPU": 3.29,
+          "rendererCPU": 0.71,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.4,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.71,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273193641,
+          "wall": 53985.692458,
+          "treeCPU": 3.3200000000000003,
+          "rendererCPU": 0.72,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.14,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.42,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.72,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273194635,
+          "wall": 54978.974458,
+          "treeCPU": 3.38,
+          "rendererCPU": 0.74,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.45,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.74,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273195636,
+          "wall": 55980.915208,
+          "treeCPU": 3.4,
+          "rendererCPU": 0.75,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.46,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.75,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273196635,
+          "wall": 56979.368083,
+          "treeCPU": 3.4299999999999997,
+          "rendererCPU": 0.76,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.48,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.76,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273197635,
+          "wall": 57979.111708,
+          "treeCPU": 3.4799999999999995,
+          "rendererCPU": 0.78,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.51,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.78,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273198633,
+          "wall": 58977.679417,
+          "treeCPU": 3.51,
+          "rendererCPU": 0.79,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.53,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.79,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273199640,
+          "wall": 59984.21,
+          "treeCPU": 3.55,
+          "rendererCPU": 0.81,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.55,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.81,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273200629,
+          "wall": 60972.974125,
+          "treeCPU": 3.5799999999999996,
+          "rendererCPU": 0.82,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.57,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.82,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273201639,
+          "wall": 61982.970208,
+          "treeCPU": 3.61,
+          "rendererCPU": 0.83,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.59,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.83,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273202629,
+          "wall": 62973.394583,
+          "treeCPU": 3.69,
+          "rendererCPU": 0.85,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.15,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 2.65,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.85,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273203633,
+          "wall": 63977.381542,
+          "treeCPU": 4.18,
+          "rendererCPU": 0.87,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.11,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.87,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273204622,
+          "wall": 64966.222542,
+          "treeCPU": 4.58,
+          "rendererCPU": 0.89,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.49,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.89,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273205642,
+          "wall": 65986.578667,
+          "treeCPU": 4.62,
+          "rendererCPU": 0.91,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.51,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.91,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273206643,
+          "wall": 66987.555042,
+          "treeCPU": 4.65,
+          "rendererCPU": 0.92,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.53,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.92,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273207637,
+          "wall": 67981.412833,
+          "treeCPU": 4.6899999999999995,
+          "rendererCPU": 0.94,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.55,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.94,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273208633,
+          "wall": 68977.367833,
+          "treeCPU": 4.73,
+          "rendererCPU": 0.96,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.57,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.96,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273209633,
+          "wall": 69977.375208,
+          "treeCPU": 4.76,
+          "rendererCPU": 0.97,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.59,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.97,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273210630,
+          "wall": 70974.281667,
+          "treeCPU": 4.79,
+          "rendererCPU": 0.98,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.61,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 0.98,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273211624,
+          "wall": 71968.88875,
+          "treeCPU": 4.83,
+          "rendererCPU": 1,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.16,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.63,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273212637,
+          "wall": 72980.955917,
+          "treeCPU": 4.87,
+          "rendererCPU": 1.01,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.65,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.01,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273213640,
+          "wall": 73984.752625,
+          "treeCPU": 4.9,
+          "rendererCPU": 1.02,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.67,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.02,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273214634,
+          "wall": 74978.368958,
+          "treeCPU": 4.9399999999999995,
+          "rendererCPU": 1.04,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.69,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.04,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273215639,
+          "wall": 75983.490917,
+          "treeCPU": 4.97,
+          "rendererCPU": 1.05,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.71,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.05,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273216638,
+          "wall": 76982.01325,
+          "treeCPU": 5.01,
+          "rendererCPU": 1.07,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.73,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.04,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.07,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273217640,
+          "wall": 77984.018792,
+          "treeCPU": 5.06,
+          "rendererCPU": 1.09,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.75,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.09,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273218620,
+          "wall": 78964.874292,
+          "treeCPU": 5.140000000000001,
+          "rendererCPU": 1.1,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 3.82,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.1,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273219624,
+          "wall": 79968.162333,
+          "treeCPU": 5.59,
+          "rendererCPU": 1.12,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.17,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.25,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.12,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273220624,
+          "wall": 80968.773708,
+          "treeCPU": 6,
+          "rendererCPU": 1.15,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.18,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.62,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.15,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273221633,
+          "wall": 81977.235042,
+          "treeCPU": 6.04,
+          "rendererCPU": 1.16,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.18,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.65,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.16,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273222634,
+          "wall": 82978.468042,
+          "treeCPU": 6.069999999999999,
+          "rendererCPU": 1.17,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.18,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.67,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.17,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273223645,
+          "wall": 83989.112917,
+          "treeCPU": 6.1,
+          "rendererCPU": 1.19,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.18,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.68,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.19,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273224637,
+          "wall": 84981.38575,
+          "treeCPU": 6.1499999999999995,
+          "rendererCPU": 1.21,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.18,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.71,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.21,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273225633,
+          "wall": 85977.853542,
+          "treeCPU": 6.18,
+          "rendererCPU": 1.22,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.18,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.73,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.22,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273226638,
+          "wall": 86982.228583,
+          "treeCPU": 6.22,
+          "rendererCPU": 1.24,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.18,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.75,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.24,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273227631,
+          "wall": 87975.803042,
+          "treeCPU": 6.26,
+          "rendererCPU": 1.25,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.18,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.78,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.25,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273228637,
+          "wall": 88981.447375,
+          "treeCPU": 6.29,
+          "rendererCPU": 1.26,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.79,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.26,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273229638,
+          "wall": 89982.139542,
+          "treeCPU": 6.340000000000001,
+          "rendererCPU": 1.28,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.82,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.28,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273230634,
+          "wall": 90978.091708,
+          "treeCPU": 6.38,
+          "rendererCPU": 1.3,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.84,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.3,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273231644,
+          "wall": 91988.015958,
+          "treeCPU": 6.41,
+          "rendererCPU": 1.31,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.86,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.31,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273232639,
+          "wall": 92983.413292,
+          "treeCPU": 6.45,
+          "rendererCPU": 1.33,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.88,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.33,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273233640,
+          "wall": 93984.03575,
+          "treeCPU": 6.49,
+          "rendererCPU": 1.34,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.91,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.34,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273234632,
+          "wall": 94976.232917,
+          "treeCPU": 6.540000000000001,
+          "rendererCPU": 1.35,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 4.95,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.35,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273235632,
+          "wall": 95976.903625,
+          "treeCPU": 7.05,
+          "rendererCPU": 1.38,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.19,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 5.43,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.38,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273236625,
+          "wall": 96969.42375,
+          "treeCPU": 7.52,
+          "rendererCPU": 1.4,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 5.87,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.4,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273237641,
+          "wall": 97985.849792,
+          "treeCPU": 7.55,
+          "rendererCPU": 1.41,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 5.89,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.41,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273238640,
+          "wall": 98984.766083,
+          "treeCPU": 7.59,
+          "rendererCPU": 1.43,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 5.91,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.43,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273239631,
+          "wall": 99975.576417,
+          "treeCPU": 7.640000000000001,
+          "rendererCPU": 1.45,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 5.94,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.45,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273240634,
+          "wall": 100978.4825,
+          "treeCPU": 7.68,
+          "rendererCPU": 1.47,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 5.96,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.05,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.47,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273241637,
+          "wall": 101981.519667,
+          "treeCPU": 7.73,
+          "rendererCPU": 1.49,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 5.98,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.49,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273242639,
+          "wall": 102983.629167,
+          "treeCPU": 7.779999999999999,
+          "rendererCPU": 1.5,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.02,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.5,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273243634,
+          "wall": 103978.51725,
+          "treeCPU": 7.8100000000000005,
+          "rendererCPU": 1.52,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.2,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.03,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.52,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273244643,
+          "wall": 104987.68025,
+          "treeCPU": 7.859999999999999,
+          "rendererCPU": 1.54,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.21,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.05,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.54,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273245645,
+          "wall": 105989.283875,
+          "treeCPU": 7.91,
+          "rendererCPU": 1.56,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.21,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.08,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.56,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273246652,
+          "wall": 106996.656917,
+          "treeCPU": 7.9399999999999995,
+          "rendererCPU": 1.57,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.21,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.1,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.57,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273247660,
+          "wall": 108004.073917,
+          "treeCPU": 7.9799999999999995,
+          "rendererCPU": 1.59,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.21,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.12,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.59,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273248642,
+          "wall": 108986.699208,
+          "treeCPU": 8.03,
+          "rendererCPU": 1.61,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.21,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.15,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.61,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273249645,
+          "wall": 109989.511958,
+          "treeCPU": 8.05,
+          "rendererCPU": 1.62,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.21,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.16,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.06,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.62,
+              "renderer": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "graph unmounted on Overview",
+      "seconds": 30.032435249999995,
+      "messages": 0,
+      "messageOffsetsMs": [],
+      "treeCPUPercent": 1.4317853228369144,
+      "rendererCPUPercent": 0.4661626632492279,
+      "maxFrameRoundTripMs": 2.9706249999871943,
+      "samples": [
+        {
+          "at": 1794273251713,
+          "wall": 112057.150542,
+          "treeCPU": 8.290000000000001,
+          "rendererCPU": 1.79,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.2,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.79,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273252749,
+          "wall": 113093.250833,
+          "treeCPU": 8.31,
+          "rendererCPU": 1.8,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.21,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.8,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273253760,
+          "wall": 114104.5655,
+          "treeCPU": 8.32,
+          "rendererCPU": 1.8,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.22,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.8,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273254747,
+          "wall": 115091.489542,
+          "treeCPU": 8.32,
+          "rendererCPU": 1.8,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.22,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.8,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273255748,
+          "wall": 116092.798083,
+          "treeCPU": 8.340000000000002,
+          "rendererCPU": 1.81,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.23,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.81,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273256744,
+          "wall": 117088.025042,
+          "treeCPU": 8.360000000000001,
+          "rendererCPU": 1.82,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.24,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.82,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273257745,
+          "wall": 118089.941042,
+          "treeCPU": 8.370000000000001,
+          "rendererCPU": 1.82,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.25,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.82,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273258746,
+          "wall": 119090.281,
+          "treeCPU": 8.370000000000001,
+          "rendererCPU": 1.82,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.25,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.82,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273259758,
+          "wall": 120102.365375,
+          "treeCPU": 8.39,
+          "rendererCPU": 1.83,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.26,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.83,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273260742,
+          "wall": 121086.6405,
+          "treeCPU": 8.4,
+          "rendererCPU": 1.83,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.27,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.83,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273261748,
+          "wall": 122091.950917,
+          "treeCPU": 8.420000000000002,
+          "rendererCPU": 1.84,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.28,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.84,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273262744,
+          "wall": 123087.991625,
+          "treeCPU": 8.430000000000001,
+          "rendererCPU": 1.84,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.23,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.29,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.84,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273263745,
+          "wall": 124089.917875,
+          "treeCPU": 8.46,
+          "rendererCPU": 1.85,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.3,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.85,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273264746,
+          "wall": 125090.207458,
+          "treeCPU": 8.47,
+          "rendererCPU": 1.85,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.31,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.85,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273265744,
+          "wall": 126088.167042,
+          "treeCPU": 8.48,
+          "rendererCPU": 1.85,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.32,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.85,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273266744,
+          "wall": 127088.327417,
+          "treeCPU": 8.5,
+          "rendererCPU": 1.86,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.33,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.86,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273267743,
+          "wall": 128087.151625,
+          "treeCPU": 8.51,
+          "rendererCPU": 1.86,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.34,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.86,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273268745,
+          "wall": 129089.638083,
+          "treeCPU": 8.530000000000001,
+          "rendererCPU": 1.87,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.35,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.87,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273269743,
+          "wall": 130087.057833,
+          "treeCPU": 8.540000000000001,
+          "rendererCPU": 1.87,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.36,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.87,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273270755,
+          "wall": 131099.81375,
+          "treeCPU": 8.56,
+          "rendererCPU": 1.88,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.37,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.88,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273271743,
+          "wall": 132087.202875,
+          "treeCPU": 8.57,
+          "rendererCPU": 1.88,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.38,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.88,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273272744,
+          "wall": 133088.453917,
+          "treeCPU": 8.57,
+          "rendererCPU": 1.88,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.38,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.88,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273273742,
+          "wall": 134086.553083,
+          "treeCPU": 8.59,
+          "rendererCPU": 1.89,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.39,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.89,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273274746,
+          "wall": 135090.803958,
+          "treeCPU": 8.600000000000001,
+          "rendererCPU": 1.89,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.4,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.89,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273275746,
+          "wall": 136090.787167,
+          "treeCPU": 8.620000000000001,
+          "rendererCPU": 1.9,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.24,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.41,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.9,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273276749,
+          "wall": 137093.063875,
+          "treeCPU": 8.66,
+          "rendererCPU": 1.91,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.25,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.43,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.91,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273277745,
+          "wall": 138089.08075,
+          "treeCPU": 8.67,
+          "rendererCPU": 1.91,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.25,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.44,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.91,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273278745,
+          "wall": 139089.381875,
+          "treeCPU": 8.67,
+          "rendererCPU": 1.91,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.25,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.44,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.91,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273279745,
+          "wall": 140089.556708,
+          "treeCPU": 8.690000000000001,
+          "rendererCPU": 1.92,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.25,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.45,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.92,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273280755,
+          "wall": 141099.370833,
+          "treeCPU": 8.7,
+          "rendererCPU": 1.92,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.25,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.46,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.92,
+              "renderer": true
+            }
+          ]
+        },
+        {
+          "at": 1794273281745,
+          "wall": 142089.585792,
+          "treeCPU": 8.72,
+          "rendererCPU": 1.93,
+          "processes": [
+            {
+              "pid": 12307,
+              "cpu": 0.25,
+              "renderer": false
+            },
+            {
+              "pid": 12377,
+              "cpu": 6.47,
+              "renderer": false
+            },
+            {
+              "pid": 12378,
+              "cpu": 0.07,
+              "renderer": false
+            },
+            {
+              "pid": 12380,
+              "cpu": 1.93,
+              "renderer": true
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "requests": [
+    {
+      "at": 1794273141846,
+      "method": "GET",
+      "path": "/api/attention"
+    },
+    {
+      "at": 1794273141847,
+      "method": "GET",
+      "path": "/api/config"
+    },
+    {
+      "at": 1794273141848,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273141848,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273141849,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273141879,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273141880,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273141880,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273143614,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273143614,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273143615,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273143616,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273143616,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273143616,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273145620,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273145622,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273145622,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273145622,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273145623,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273145623,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273147623,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273147623,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273147623,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273147623,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273147623,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273147623,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273149625,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273149625,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273149625,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273149626,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273149626,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273149627,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273149628,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273149630,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273149630,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273149630,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273149631,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273149632,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273151630,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273151631,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273151631,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273151632,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273151632,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273151632,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273153634,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273153635,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273153635,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273153636,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273153636,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273153636,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273156417,
+      "method": "GET",
+      "path": "/api/attention"
+    },
+    {
+      "at": 1794273156418,
+      "method": "GET",
+      "path": "/api/config"
+    },
+    {
+      "at": 1794273156419,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273156420,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273156421,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273156427,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273156429,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273156429,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273189602,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273189603,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273189603,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273189604,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273189604,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273189604,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273192645,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273192645,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273192645,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273192645,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273192646,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273192646,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273195638,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273195638,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273195638,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273195638,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273195639,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273195639,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273198635,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273198635,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273198635,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273198635,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273198636,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273198636,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273201640,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273201640,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273201640,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273201641,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273201641,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273201641,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273204623,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273204624,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273204624,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273204624,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273204624,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273204624,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273207638,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273207639,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273207639,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273207639,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273207639,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273207639,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273210631,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273210632,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273210632,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273210632,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273210632,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273210632,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273213642,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273213642,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273213642,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273213643,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273213643,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273213643,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273216639,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273216639,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273216639,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273216640,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273216640,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273216640,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273219625,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273219626,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273219626,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273219626,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273219626,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273219626,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273222635,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273222636,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273222636,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273222636,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273222636,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273222636,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273225635,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273225635,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273225635,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273225636,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273225636,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273225636,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273228638,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273228639,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273228639,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273228639,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273228639,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273228640,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273231645,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273231645,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273231646,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273231646,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273231646,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273231646,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273234633,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273234634,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273234634,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273234634,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273234635,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273234635,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273237643,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273237643,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273237643,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273237644,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273237644,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273237644,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273240636,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273240636,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273240636,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273240637,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273240637,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273240637,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273243635,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273243636,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273243636,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273243636,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273243636,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273243636,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273246654,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273246654,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273246655,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273246655,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273246656,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273246656,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273249677,
+      "method": "GET",
+      "path": "/api/comms/flight"
+    },
+    {
+      "at": 1794273281751,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273281751,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273281751,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273281752,
+      "method": "GET",
+      "path": "/api/comms/flight"
+    },
+    {
+      "at": 1794273281753,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273281753,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273281753,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    }
+  ],
+  "unhandledApi": [
+    {
+      "path": "/api/limits",
+      "method": "GET"
+    },
+    {
+      "path": "/api/machine",
+      "method": "GET"
+    },
+    {
+      "path": "/api/test-lock",
+      "method": "GET"
+    },
+    {
+      "path": "/api/settings/away",
+      "method": "GET"
+    },
+    {
+      "path": "/api/away/digest",
+      "method": "GET"
+    },
+    {
+      "path": "/api/escalations",
+      "method": "GET"
+    },
+    {
+      "path": "/api/notifications",
+      "method": "GET"
+    },
+    {
+      "path": "/api/limits",
+      "method": "GET"
+    },
+    {
+      "path": "/api/machine",
+      "method": "GET"
+    },
+    {
+      "path": "/api/test-lock",
+      "method": "GET"
+    },
+    {
+      "path": "/api/settings/away",
+      "method": "GET"
+    },
+    {
+      "path": "/api/away/digest",
+      "method": "GET"
+    },
+    {
+      "path": "/api/escalations",
+      "method": "GET"
+    },
+    {
+      "path": "/api/notifications",
+      "method": "GET"
+    },
+    {
+      "path": "/api/flight/summary",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agents/flight-1/stream?limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/overview",
+      "method": "GET"
+    },
+    {
+      "path": "/api/crew/status",
+      "method": "GET"
+    },
+    {
+      "path": "/api/settings/crew-pause",
+      "method": "GET"
+    },
+    {
+      "path": "/api/overview/timeline",
+      "method": "GET"
+    },
+    {
+      "path": "/api/flight/brief",
+      "method": "GET"
+    },
+    {
+      "path": "/api/metrics",
+      "method": "GET"
+    },
+    {
+      "path": "/api/health",
+      "method": "GET"
+    },
+    {
+      "path": "/api/activity",
+      "method": "GET"
+    },
+    {
+      "path": "/api/agents/flight-1/stream?limit=20",
+      "method": "GET"
+    },
+    {
+      "path": "/api/overview/timeline",
+      "method": "GET"
+    },
+    {
+      "path": "/api/crew/status",
+      "method": "GET"
+    },
+    {
+      "path": "/api/flight/brief",
+      "method": "GET"
+    },
+    {
+      "path": "/api/activity",
+      "method": "GET"
+    }
+  ],
+  "prototypeSha256": "c33620d1e7702befdfddf688f206595adf219788a711bf83f9fb2e2832fcb831",
+  "comparison": {
+    "graph": {
+      "title": "Mission Control",
+      "viewport": {
+        "width": 1918,
+        "height": 938
+      },
+      "visibility": "visible",
+      "dpr": 1,
+      "zoom": 1,
+      "theme": "dark",
+      "fonts": "loaded",
+      "sideScroll": 0,
+      "names": [
+        "CAPCOM",
+        "FLIGHT",
+        "#crew",
+        "SEAT-1",
+        "SEAT-2",
+        "SEAT-3",
+        "SEAT-4",
+        "SEAT-5",
+        "SEAT-6",
+        "SEAT-7",
+        "SEAT-8",
+        "SEAT-9"
+      ],
+      "waitingNodes": 1,
+      "headings": [
+        "Comms chart"
+      ],
+      "buttons": [
+        "CPU —, RAM —, Lock: —Full-suite test lock",
+        "Away mode",
+        "",
+        "",
+        "",
+        "All",
+        "Open 1",
+        "Browser full screen",
+        "Demo",
+        "Show build status"
+      ],
+      "animations": 2
+    },
+    "prototype": {
+      "viewport": {
+        "width": 1918,
+        "height": 938
+      },
+      "fonts": "loaded",
+      "title": "Comms living graph prototype",
+      "nodes": 0
+    },
+    "after": {
+      "title": "Mission Control",
+      "viewport": {
+        "width": 1918,
+        "height": 938
+      },
+      "visibility": "visible",
+      "dpr": 1,
+      "zoom": 1,
+      "theme": "dark",
+      "fonts": "loaded",
+      "sideScroll": 0,
+      "names": [
+        "CAPCOM",
+        "FLIGHT",
+        "#crew",
+        "SEAT-1",
+        "SEAT-2",
+        "SEAT-3",
+        "SEAT-4",
+        "SEAT-5",
+        "SEAT-6",
+        "SEAT-7",
+        "SEAT-8",
+        "SEAT-9"
+      ],
+      "waitingNodes": 0,
+      "headings": [
+        "Comms chart"
+      ],
+      "buttons": [
+        "CPU —, RAM —, Lock: —Full-suite test lock",
+        "Away mode",
+        "",
+        "",
+        "",
+        "All",
+        "Open",
+        "Browser full screen",
+        "Demo",
+        "Show build status"
+      ],
+      "animations": 2
+    }
+  },
+  "graphContext": {
+    "title": "Mission Control",
+    "viewport": {
+      "width": 1920,
+      "height": 940
+    },
+    "visibility": "visible",
+    "dpr": 1,
+    "zoom": 1,
+    "theme": "dark",
+    "fonts": "loaded",
+    "sideScroll": 0,
+    "names": [
+      "CAPCOM",
+      "FLIGHT",
+      "#crew",
+      "SEAT-1",
+      "SEAT-2",
+      "SEAT-3",
+      "SEAT-4",
+      "SEAT-5",
+      "SEAT-6",
+      "SEAT-7",
+      "SEAT-8",
+      "SEAT-9"
+    ],
+    "waitingNodes": 1,
+    "headings": [
+      "Comms chart"
+    ],
+    "buttons": [
+      "CPU —, RAM —, Lock: —Full-suite test lock",
+      "Away mode",
+      "",
+      "",
+      "",
+      "All",
+      "Open 1",
+      "Browser full screen",
+      "Demo",
+      "Show build status"
+    ],
+    "animations": 2
+  },
+  "geometry": {
+    "names": [
+      {
+        "id": "CAPCOM",
+        "text": "CAPCOM",
+        "rect": {
+          "left": 1689.1842041015625,
+          "top": 486.72998046875,
+          "right": 1732.7467041015625,
+          "bottom": 500.72998046875,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "flight-1",
+        "text": "FLIGHT",
+        "rect": {
+          "left": 1155.90869140625,
+          "top": 542.847412109375,
+          "right": 1199.47119140625,
+          "bottom": 556.847412109375,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "crew",
+        "text": "#crew",
+        "rect": {
+          "left": 1310.276123046875,
+          "top": 749.939208984375,
+          "right": 1346.588623046875,
+          "bottom": 763.939208984375,
+          "width": 36.3125,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-1",
+        "text": "SEAT-1",
+        "rect": {
+          "left": 886.0143432617188,
+          "top": 765.3024291992188,
+          "right": 929.5768432617188,
+          "bottom": 779.3024291992188,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-2",
+        "text": "SEAT-2",
+        "rect": {
+          "left": 565.8310546875,
+          "top": 722.2570190429688,
+          "right": 609.3935546875,
+          "bottom": 736.2570190429688,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-3",
+        "text": "SEAT-3",
+        "rect": {
+          "left": 333.32904052734375,
+          "top": 623.50634765625,
+          "right": 376.89154052734375,
+          "bottom": 637.50634765625,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-4",
+        "text": "SEAT-4",
+        "rect": {
+          "left": 218.22366333007812,
+          "top": 487.2987976074219,
+          "right": 261.7861633300781,
+          "bottom": 501.2987976074219,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-5",
+        "text": "SEAT-5",
+        "rect": {
+          "left": 318.7422790527344,
+          "top": 377.36907958984375,
+          "right": 362.3047790527344,
+          "bottom": 391.3690490722656,
+          "width": 43.5625,
+          "height": 13.999969482421875
+        }
+      },
+      {
+        "id": "seat-6",
+        "text": "SEAT-6",
+        "rect": {
+          "left": 566.3809204101562,
+          "top": 285.177978515625,
+          "right": 609.9434204101562,
+          "bottom": 299.177978515625,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-7",
+        "text": "SEAT-7",
+        "rect": {
+          "left": 894.9893188476562,
+          "top": 244.47927856445312,
+          "right": 938.5518188476562,
+          "bottom": 258.4792785644531,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-8",
+        "text": "SEAT-8",
+        "rect": {
+          "left": 1327.78857421875,
+          "top": 260.8621826171875,
+          "right": 1371.35107421875,
+          "bottom": 274.8621826171875,
+          "width": 43.5625,
+          "height": 14
+        }
+      },
+      {
+        "id": "seat-9",
+        "text": "SEAT-9",
+        "rect": {
+          "left": 1589.26904296875,
+          "top": 356.06585693359375,
+          "right": 1632.83154296875,
+          "bottom": 370.06585693359375,
+          "width": 43.5625,
+          "height": 14
+        }
+      }
+    ],
+    "overlaps": [],
+    "clipped": []
+  },
+  "browserRoot": {
+    "pid": 12307,
+    "ppid": 83355,
+    "cpu": 0.13,
+    "command": "/Users/lukebradford/Library/Caches/ms-playwright/chromium_headless_shell-1234/chrome-headless-shell-mac-arm64/chrome-headless-shell --disable-field-trial-config --disable-background-networking --disable-background-timer-throttling --disable-backgrounding-occluded-windows --disable-back-forward-cache --disable-breakpad --disable-client-side-phishing-detection --disable-component-extensions-with-background-pages --disable-component-update --no-default-browser-check --disable-default-apps --disable-dev-shm-usage --disable-extensions --disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,Translate,AutoDeElevate,RenderDocument,OptimizationHints --enable-features=CDPScreenshotNewSurface --allow-pre-commit-input --disable-hang-monitor --disable-ipc-flooding-protection --disable-popup-blocking --disable-prompt-on-repost --disable-renderer-backgrounding --force-color-profile=srgb --metrics-recording-only --no-first-run --password-store=basic --use-mock-keychain --no-service-autorun --export-tagged-pdf --disable-search-engine-choice-screen --unsafely-disable-devtools-self-xss-warnings --edge-skip-compat-layer-relaunch --enable-automation --disable-infobars --disable-search-engine-choice-screen --disable-sync --headless --hide-scrollbars --mute-audio --blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4 --no-sandbox --user-data-dir=/Users/lukebradford/.local/share/mission-control/controller/comms-1663-after-81c-rwpot71r/profile-cpu --remote-debugging-pipe about:blank"
+  },
+  "afterUnmount": {
+    "title": "Mission Control",
+    "viewport": {
+      "width": 1920,
+      "height": 940
+    },
+    "visibility": "visible",
+    "dpr": 1,
+    "zoom": 1,
+    "theme": "dark",
+    "fonts": "loaded",
+    "sideScroll": 0,
+    "names": [],
+    "waitingNodes": 0,
+    "headings": [
+      "Overview",
+      "Crew",
+      "Board",
+      "Ready—",
+      "Building · checks—",
+      "In review—",
+      "Merging—",
+      "Done · 24h—",
+      "Mac",
+      "Tokens",
+      "Live log",
+      "FLIGHT · Head agent"
+    ],
+    "buttons": [
+      "CPU —, RAM —, Lock: —Full-suite test lock",
+      "Away mode",
+      "",
+      "",
+      "",
+      "Refresh overview",
+      "Pause crew",
+      "Add agent",
+      "FLIGHT",
+      "6 free ▾",
+      "Refresh allowance",
+      "All",
+      "Steps",
+      "Reviews",
+      "Merges",
+      "Guard",
+      "Messages",
+      "Pause",
+      "FLIGHT",
+      "Hide",
+      "Retry summary",
+      "Send",
+      "Start FLIGHT",
+      "Demo",
+      "Show build status"
+    ],
+    "animations": 1,
+    "graphResourceRequests": []
+  },
+  "realisticNamesContext": {
+    "title": "Mission Control",
+    "viewport": {
+      "width": 1920,
+      "height": 940
+    },
+    "visibility": "visible",
+    "dpr": 1,
+    "zoom": 1,
+    "theme": "dark",
+    "fonts": "loaded",
+    "sideScroll": 0,
+    "names": [
+      "CAPCOM",
+      "FLIGHT",
+      "#crew",
+      "GUIDO-1",
+      "GUIDO-2",
+      "GUIDO-CX",
+      "INCO-1",
+      "INCO-CX",
+      "RETRO-1",
+      "RETRO-CX",
+      "FAO-1",
+      "OPS-1"
+    ],
+    "waitingNodes": 1,
+    "headings": [
+      "Comms chart"
+    ],
+    "buttons": [
+      "CPU —, RAM —, Lock: —Full-suite test lock",
+      "Away mode",
+      "",
+      "",
+      "",
+      "All",
+      "Open 1",
+      "Browser full screen",
+      "Demo",
+      "Show build status"
+    ],
+    "animations": 2
+  },
+  "realisticNamesGeometry": {
+    "names": [
+      {
+        "text": "CAPCOM",
+        "left": 1695.8084716796875,
+        "right": 1739.3709716796875,
+        "top": 485.9341735839844,
+        "bottom": 499.9341735839844
+      },
+      {
+        "text": "FLIGHT",
+        "left": 1233.8060302734375,
+        "right": 1277.3685302734375,
+        "top": 560.02685546875,
+        "bottom": 574.02685546875
+      },
+      {
+        "text": "#crew",
+        "left": 1310.1248779296875,
+        "right": 1346.4373779296875,
+        "top": 749.9685668945312,
+        "bottom": 763.9685668945312
+      },
+      {
+        "text": "GUIDO-1",
+        "left": 863.5467529296875,
+        "right": 914.3748779296875,
+        "top": 768.763427734375,
+        "bottom": 782.763427734375
+      },
+      {
+        "text": "GUIDO-2",
+        "left": 556.7611694335938,
+        "right": 607.5892944335938,
+        "top": 728.7607421875,
+        "bottom": 742.7607421875
+      },
+      {
+        "text": "GUIDO-CX",
+        "left": 292.8699645996094,
+        "right": 350.9637145996094,
+        "top": 625.5882568359375,
+        "bottom": 639.5882568359375
+      },
+      {
+        "text": "INCO-1",
+        "left": 202.95867919921875,
+        "right": 246.52117919921875,
+        "top": 485.66619873046875,
+        "bottom": 499.66619873046875
+      },
+      {
+        "text": "INCO-CX",
+        "left": 289.5205078125,
+        "right": 340.3486328125,
+        "top": 375.194580078125,
+        "bottom": 389.1945495605469
+      },
+      {
+        "text": "RETRO-1",
+        "left": 541.124755859375,
+        "right": 591.952880859375,
+        "top": 277.7850341796875,
+        "bottom": 291.7850341796875
+      },
+      {
+        "text": "RETRO-CX",
+        "left": 877.9042358398438,
+        "right": 935.9979858398438,
+        "top": 235.56594848632812,
+        "bottom": 249.56594848632812
+      },
+      {
+        "text": "FAO-1",
+        "left": 1330.3741455078125,
+        "right": 1366.6866455078125,
+        "top": 256.62799072265625,
+        "bottom": 270.62799072265625
+      },
+      {
+        "text": "OPS-1",
+        "left": 1603.0128173828125,
+        "right": 1639.3253173828125,
+        "top": 351.9537353515625,
+        "bottom": 365.9537353515625
+      }
+    ],
+    "overlaps": [],
+    "clipped": []
+  },
+  "endedAt": "2026-11-10T01:14:42.836Z",
+  "artifacts": [
+    {
+      "name": "graph-1920x940-dark.png",
+      "sha256": "8545be95d50a82df22f03db88c433a79511648f924bddc557633c90b27cf8a49"
+    },
+    {
+      "name": "graph-realistic-names-1920x940-dark.png",
+      "sha256": "d23daeef601cea118e7a4a0c25d62ed2a534224af903a246ace630ac7075d96f"
+    },
+    {
+      "name": "prototype-and-app.webm",
+      "sha256": "93eee68d8e0fdfaffc6dd23baac5662c64e5b668ed6aecc233e139ce106675c7"
+    },
+    {
+      "name": "side-by-side-after.png",
+      "sha256": "1ebb4f7afe69ef7fb2c41c417caa32f6f40f0b338cf18a6caa3c560849a027a2"
+    },
+    {
+      "name": "side-by-side-before.png",
+      "sha256": "c1b5d56dc00ff356be52d530d69ed62dd1002181f3eea4699eb13815e35990f9"
+    }
+  ]
+}

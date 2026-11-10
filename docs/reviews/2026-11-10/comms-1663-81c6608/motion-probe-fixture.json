@@ -1,0 +1,650 @@
+{
+  "/api/config": {
+    "githubLogin": null,
+    "operator": {
+      "id": "operator",
+      "timezone": "Europe/London"
+    },
+    "accounts": [
+      {
+        "id": "claude-main",
+        "vendor": "claude",
+        "alertAt": 85,
+        "stopAt": 95
+      },
+      {
+        "id": "codex-main",
+        "vendor": "codex",
+        "alertAt": 70,
+        "stopAt": 80
+      }
+    ],
+    "repos": [
+      {
+        "id": "shop-app",
+        "github": "octo-org/shop-app",
+        "project": 2,
+        "statusMap": {
+          "Todo": "planned",
+          "In Progress": "in progress",
+          "Done": "done"
+        },
+        "needsYouLabels": [
+          "needs-design"
+        ],
+        "fullSuite": [
+          "pnpm test",
+          "pnpm -s test"
+        ]
+      },
+      {
+        "id": "site-builder",
+        "github": "octo-org/site-builder",
+        "project": 3,
+        "statusMap": {
+          "Backlog": "planned"
+        },
+        "needsYouLabels": null,
+        "fullSuite": []
+      }
+    ],
+    "loops": [
+      {
+        "id": "shop-app-ta",
+        "repoId": "shop-app",
+        "kind": "ta-loop",
+        "accountId": "claude-main",
+        "stateDir": "/u/.shop-app-autonomy/var/autonomy",
+        "logsDir": null,
+        "worktree": "/u/.shop-app-autonomy",
+        "launchdLabel": "com.shop-app.ta-loop"
+      }
+    ],
+    "poll": {
+      "usageMinutes": 30,
+      "githubSeconds": 60
+    },
+    "crew": null
+  },
+  "/api/crew?shape=summary": {
+    "rows": [
+      {
+        "id": "flight-1",
+        "repoId": "shop-app",
+        "index": 0,
+        "hudState": "running",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "FLIGHT",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-1",
+        "repoId": "shop-app",
+        "index": 1,
+        "hudState": "idle",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "RETRO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-2",
+        "repoId": "shop-app",
+        "index": 2,
+        "hudState": "idle",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "INCO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-3",
+        "repoId": "shop-app",
+        "index": 3,
+        "hudState": "running",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "FAO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-4",
+        "repoId": "shop-app",
+        "index": 4,
+        "hudState": "idle",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "OPS",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-5",
+        "repoId": "shop-app",
+        "index": 5,
+        "hudState": "idle",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-6",
+        "repoId": "shop-app",
+        "index": 6,
+        "hudState": "running",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "RETRO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-7",
+        "repoId": "shop-app",
+        "index": 7,
+        "hudState": "idle",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "INCO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-8",
+        "repoId": "shop-app",
+        "index": 8,
+        "hudState": "idle",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "FAO",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      {
+        "id": "seat-9",
+        "repoId": "shop-app",
+        "index": 9,
+        "hudState": "running",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "OPS",
+        "mode": "writer",
+        "area": [
+          "apps/**"
+        ],
+        "model": "sonnet",
+        "sessionId": "s1",
+        "loopKind": "crew",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": null,
+        "run": null,
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      }
+    ],
+    "firstRunToday": null
+  },
+  "/api/attention": [],
+  "/api/flight": {
+    "seat": {
+      "id": "flight-1"
+    },
+    "decisions": []
+  },
+  "/api/comms/crew": {
+    "messages": [],
+    "hasMore": false
+  },
+  "/api/comms/flight": {
+    "messages": []
+  },
+  "/api/comms/mentions": {
+    "mentions": []
+  },
+  "/api/comms/pins": {
+    "messages": []
+  },
+  "/api/comms/read": {
+    "ok": true
+  },
+  "/api/comms/links": {
+    "links": [
+      {
+        "from": "flight-1",
+        "to": "seat-1",
+        "count": 2,
+        "lastId": "initial-0",
+        "lastAt": 1794273647114,
+        "lastText": "Existing message 0"
+      },
+      {
+        "from": "flight-1",
+        "to": "CAPCOM",
+        "count": 1
+      },
+      {
+        "from": "seat-1",
+        "to": "seat-2",
+        "count": 3,
+        "lastId": "initial-1",
+        "lastAt": 1794273643614,
+        "lastText": "Existing message 1"
+      },
+      {
+        "from": "seat-1",
+        "to": "flight-1",
+        "count": 2
+      },
+      {
+        "from": "seat-2",
+        "to": "seat-3",
+        "count": 4,
+        "lastId": "initial-2",
+        "lastAt": 1794273640114,
+        "lastText": "Existing message 2"
+      },
+      {
+        "from": "seat-2",
+        "to": "flight-1",
+        "count": 3
+      },
+      {
+        "from": "seat-3",
+        "to": "seat-4",
+        "count": 5,
+        "lastId": "initial-3",
+        "lastAt": 1794273636614,
+        "lastText": "Existing message 3"
+      },
+      {
+        "from": "seat-3",
+        "to": "flight-1",
+        "count": 4
+      },
+      {
+        "from": "seat-4",
+        "to": "seat-5",
+        "count": 6,
+        "lastId": "initial-4",
+        "lastAt": 1794273633114,
+        "lastText": "Existing message 4"
+      },
+      {
+        "from": "seat-4",
+        "to": "flight-1",
+        "count": 1
+      },
+      {
+        "from": "seat-5",
+        "to": "seat-6",
+        "count": 7,
+        "lastId": "initial-5",
+        "lastAt": 1794273629614,
+        "lastText": "Existing message 5"
+      },
+      {
+        "from": "seat-5",
+        "to": "flight-1",
+        "count": 2
+      },
+      {
+        "from": "seat-6",
+        "to": "seat-7",
+        "count": 8,
+        "lastId": "initial-6",
+        "lastAt": 1794273626114,
+        "lastText": "Existing message 6"
+      },
+      {
+        "from": "seat-6",
+        "to": "flight-1",
+        "count": 3
+      },
+      {
+        "from": "seat-7",
+        "to": "seat-8",
+        "count": 2,
+        "lastId": "initial-7",
+        "lastAt": 1794273622614,
+        "lastText": "Existing message 7"
+      },
+      {
+        "from": "seat-7",
+        "to": "flight-1",
+        "count": 4
+      },
+      {
+        "from": "seat-8",
+        "to": "seat-9",
+        "count": 3,
+        "lastId": "initial-8",
+        "lastAt": 1794273619114,
+        "lastText": "Existing message 8"
+      },
+      {
+        "from": "seat-8",
+        "to": "flight-1",
+        "count": 1
+      },
+      {
+        "from": "seat-9",
+        "to": "flight-1",
+        "count": 4,
+        "lastId": "initial-9",
+        "lastAt": 1794273615614,
+        "lastText": "Existing message 9"
+      },
+      {
+        "from": "seat-9",
+        "to": "flight-1",
+        "count": 2
+      }
+    ]
+  },
+  "/api/comms/chatter": {
+    "pairs": []
+  },
+  "/api/comms/traffic": {
+    "hours": []
+  },
+  "/api/comms/metrics": {
+    "p95BySeat": [],
+    "bySeat": []
+  },
+  "/api/comms/open": {
+    "items": [
+      {
+        "id": "controlled-ask",
+        "label": "question",
+        "from": "seat-1",
+        "to": "seat-2",
+        "ticket": null,
+        "waitedMs": 840000,
+        "question": "Which branch should be reviewed?"
+      }
+    ]
+  },
+  "/api/comms/feed": {
+    "messages": [
+      {
+        "id": "feed-0",
+        "from": "flight-1",
+        "to": "flight-1",
+        "at": 1794273647114,
+        "text": "Existing crew update 0"
+      },
+      {
+        "id": "feed-1",
+        "from": "seat-1",
+        "to": "flight-1",
+        "at": 1794273587114,
+        "text": "Existing crew update 1"
+      },
+      {
+        "id": "feed-2",
+        "from": "seat-2",
+        "to": "flight-1",
+        "at": 1794273527114,
+        "text": "Existing crew update 2"
+      },
+      {
+        "id": "feed-3",
+        "from": "seat-3",
+        "to": "flight-1",
+        "at": 1794273467114,
+        "text": "Existing crew update 3"
+      },
+      {
+        "id": "feed-4",
+        "from": "seat-4",
+        "to": "flight-1",
+        "at": 1794273407114,
+        "text": "Existing crew update 4"
+      },
+      {
+        "id": "feed-5",
+        "from": "seat-5",
+        "to": "flight-1",
+        "at": 1794273347114,
+        "text": "Existing crew update 5"
+      }
+    ]
+  }
+}

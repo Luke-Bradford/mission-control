@@ -1,0 +1,217 @@
+{
+  "head": "81c6608b9fcba540b6d8b4888f3c88e4e1fd8d6d",
+  "startedAt": "2026-11-10T01:20:47.101Z",
+  "output": "/Users/lukebradford/.local/share/mission-control/controller/comms-1663-after-81c-rwpot71r",
+  "observations": [
+    {
+      "kind": "synthetic agents resource update",
+      "index": 300,
+      "sentAt": 1794273650062,
+      "bridgeRoundTripMs": 4.749707999999828
+    }
+  ],
+  "phases": [],
+  "errors": [],
+  "requests": [
+    {
+      "at": 1794273647531,
+      "method": "GET",
+      "path": "/api/attention"
+    },
+    {
+      "at": 1794273647531,
+      "method": "GET",
+      "path": "/api/config"
+    },
+    {
+      "at": 1794273647532,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273647533,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273647535,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273647546,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273647546,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273647546,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    },
+    {
+      "at": 1794273650061,
+      "method": "GET",
+      "path": "/api/crew?shape=summary"
+    },
+    {
+      "at": 1794273650061,
+      "method": "GET",
+      "path": "/api/flight"
+    },
+    {
+      "at": 1794273650062,
+      "method": "GET",
+      "path": "/api/comms/mentions"
+    },
+    {
+      "at": 1794273650062,
+      "method": "GET",
+      "path": "/api/comms/links"
+    },
+    {
+      "at": 1794273650062,
+      "method": "GET",
+      "path": "/api/comms/open"
+    },
+    {
+      "at": 1794273650063,
+      "method": "GET",
+      "path": "/api/comms/feed"
+    }
+  ],
+  "unhandledApi": [
+    {
+      "path": "/api/limits",
+      "method": "GET"
+    },
+    {
+      "path": "/api/machine",
+      "method": "GET"
+    },
+    {
+      "path": "/api/test-lock",
+      "method": "GET"
+    },
+    {
+      "path": "/api/settings/away",
+      "method": "GET"
+    },
+    {
+      "path": "/api/away/digest",
+      "method": "GET"
+    },
+    {
+      "path": "/api/escalations",
+      "method": "GET"
+    },
+    {
+      "path": "/api/notifications",
+      "method": "GET"
+    }
+  ],
+  "prototypeSha256": "c33620d1e7702befdfddf688f206595adf219788a711bf83f9fb2e2832fcb831",
+  "motionSamples": [
+    {
+      "at": 2595.5,
+      "svgTime": 2.5369338989257812,
+      "animationStart": null,
+      "x": 29.5,
+      "y": 124.5,
+      "opacity": "1",
+      "ctm": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "at": 2719.300000011921,
+      "svgTime": 2.663395881652832,
+      "animationStart": null,
+      "x": 29.5,
+      "y": 124.5,
+      "opacity": "1",
+      "ctm": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "at": 2841.399999976158,
+      "svgTime": 2.7779300212860107,
+      "animationStart": null,
+      "x": 29.5,
+      "y": 124.5,
+      "opacity": "1",
+      "ctm": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "at": 2965.5,
+      "svgTime": 2.904129981994629,
+      "animationStart": null,
+      "x": 29.5,
+      "y": 124.5,
+      "opacity": "1",
+      "ctm": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "at": 3087.300000011921,
+      "svgTime": 3.0333659648895264,
+      "animationStart": null,
+      "x": 29.5,
+      "y": 124.5,
+      "opacity": "1",
+      "ctm": {
+        "x": 0,
+        "y": 0
+      }
+    },
+    {
+      "at": 3210.599999964237,
+      "svgTime": 3.144929885864258,
+      "animationStart": null,
+      "x": 29.5,
+      "y": 124.5,
+      "opacity": "1",
+      "ctm": {
+        "x": 0,
+        "y": 0
+      }
+    }
+  ],
+  "motionChanged": false,
+  "controlIntervention": "Browser-only beginElement() on the already inserted motion/opacity elements; no source edit",
+  "controlSamples": [
+    {
+      "at": 3505.599999964237,
+      "x": 899.5708618164062,
+      "y": 767.9176025390625
+    },
+    {
+      "at": 3627.899999976158,
+      "x": 865.3892211914062,
+      "y": 765.1978149414062
+    },
+    {
+      "at": 3750.899999976158,
+      "x": 831.7020263671875,
+      "y": 760.170166015625
+    },
+    {
+      "at": 3873.199999988079,
+      "x": 802.3331298828125,
+      "y": 753.6950073242188
+    }
+  ],
+  "controlMoved": true
+}

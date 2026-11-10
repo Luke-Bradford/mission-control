@@ -1,0 +1,13 @@
+[libvpx @ 0x7c73028000] v1.14.1
+Input #0, matroska,webm, from '/Users/lukebradford/.local/share/mission-control/controller/comms-1663-after-81c-rwpot71r/prototype-and-app.webm':
+  Metadata:
+    ENCODER         : Lavf61.1.100
+  Duration: 00:00:14.76, start: 0.000000, bitrate: 942 kb/s
+  Stream #0:0: Video: vp8 (libvpx), yuv420p(tv, progressive), 3840x988, SAR 1:1 DAR 960:247, 25 fps, 25 tbr, 1k tbn
+      Metadata:
+        ENCODER         : Lavc61.3.100 libvpx
+        DURATION        : 00:00:14.760000000
+[AVFormatContext @ 0x7c73010280] Requested output format 'null' is not known.
+[out#0 @ 0x7c72c44180] Error initializing the muxer for pipe:: Invalid argument
+Error opening output file -.
+Error opening output files: Invalid argument
