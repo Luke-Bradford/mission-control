@@ -341,7 +341,7 @@ export function hudState(i: {
       return i.lastOutputAt !== null && i.now - i.lastOutputAt >= limit ? "stalled" : "running";
     }
     case "waiting-you":
-      return "blocked";
+      return "waiting";
     case "waiting-agent":
       return "waiting";
     case "idle":
@@ -410,8 +410,10 @@ function statusColumn(i: Pick<BoardItem, "status" | "state">): HudColumn {
 }
 
 /** A closed issue is Done whatever its Status says. */
-export function hudColumnOf(i: Pick<BoardItem, "status" | "state" | "closed">): HudColumn {
-  return i.closed ? "Done" : statusColumn(i);
+export function hudColumnOf(
+  i: Pick<BoardItem, "status" | "state" | "closed" | "waiting">,
+): HudColumn {
+  return i.closed ? "Done" : i.waiting !== undefined ? "Waiting" : statusColumn(i);
 }
 
 /** GitHub and the project disagree: closed outside Done, or open inside Done. */

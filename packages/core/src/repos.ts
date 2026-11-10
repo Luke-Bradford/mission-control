@@ -9,6 +9,7 @@ export const COLUMN_STATE: Record<HudColumn, TicketState> = {
   Refinement: "planned",
   Ready: "planned",
   Blocked: "blocked",
+  Waiting: "planned",
   "In progress": "in progress",
   "In review": "review",
   "Ready for QA": "review",

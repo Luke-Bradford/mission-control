@@ -25,6 +25,7 @@ export const HUD_COLUMNS = [
   "Backlog",
   "Refinement",
   "Blocked",
+  "Waiting",
   "Ready",
   "In progress",
   "In review",

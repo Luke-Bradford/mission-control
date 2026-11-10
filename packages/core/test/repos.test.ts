@@ -100,7 +100,7 @@ describe("statusColumns and missingColumns", () => {
   });
 
   it("lists columns nothing reaches, never Backlog", () => {
-    expect(missingColumns({ ...SHOP_APP })).toEqual(["Refinement", "Ready for QA"]);
+    expect(missingColumns({ ...SHOP_APP })).toEqual(["Refinement", "Waiting", "Ready for QA"]);
     expect(missingColumns({})).toEqual(HUD_COLUMNS.filter((c) => c !== "Backlog"));
   });
 });

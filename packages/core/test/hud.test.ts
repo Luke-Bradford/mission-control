@@ -99,7 +99,7 @@ describe("hudState", () => {
           hudState({ state, paused, stopped: false, lastOutputAt, now, backgroundInFlight: false });
         expect(h("error")).toBe("error");
         expect(h("working")).toBe(stale ? "stalled" : "running");
-        expect(h("waiting-you")).toBe("blocked");
+        expect(h("waiting-you")).toBe("waiting");
         expect(h("waiting-agent")).toBe("waiting");
         expect(h("idle")).toBe(paused ? "parked" : "idle");
       }
@@ -146,7 +146,7 @@ describe("hudState", () => {
       });
     expect(h("idle", false)).toBe("stopped");
     expect(h("idle", true)).toBe("parked");
-    expect(h("waiting-you", false)).toBe("blocked");
+    expect(h("waiting-you", false)).toBe("waiting");
     expect(h("error", false)).toBe("error");
     expect(driverStopKey("studio-builder")).toBe("driver-stop:studio-builder");
   });
@@ -176,7 +176,15 @@ describe("hudState", () => {
 
 describe("hudColumnOf", () => {
   it("lets a Status name win, else falls back on state", () => {
-    expect(HUD_COLUMNS).toHaveLength(8);
+    expect(HUD_COLUMNS).toHaveLength(9);
+    expect(
+      hudColumnOf({
+        status: "In progress",
+        state: "in progress",
+        closed: false,
+        waiting: { reason: "CI is running", freesWhen: "CI finishes", at: 1 },
+      }),
+    ).toBe("Waiting");
     expect(hudColumnOf({ status: "Todo", state: "planned", closed: false })).toBe("Ready");
     expect(hudColumnOf({ status: "Backlog", state: "planned", closed: false })).toBe("Backlog");
     expect(hudColumnOf({ status: " ready for qa ", state: "review", closed: false })).toBe(
