@@ -1,26 +1,12 @@
 import type { AgentDetailView, AttentionItem, Crew } from "@mc/core";
-import { useEffect, useState } from "react";
-import { HandoffPanel } from "../agent/HandoffPanel.tsx";
-import {
-  AgentAvailability,
-  AgentContext,
-  AgentDeliverables,
-  AgentIdentity,
-  AgentLoop,
-  AgentNextMove,
-  AgentRelated,
-  AgentStats,
-  AgentStory,
-} from "../agent/Overview.tsx";
+import { useEffect } from "react";
+import { AgentIdentity } from "../agent/Overview.tsx";
 import { Picker } from "../agent/Picker.tsx";
-import { RunsPanel } from "../agent/RunsPanel.tsx";
 import { RunTracePanel } from "../agent/RunTrace.tsx";
-import { SideTabs } from "../agent/SideTabs.tsx";
 import { StreamPanel } from "../agent/StreamPanel.tsx";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
-import { SeatInstructionsDisclosure } from "../instructions/Instructions.tsx";
 import { useSearch } from "../router.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
@@ -35,7 +21,6 @@ import "../agent/agent.css";
  * else the first crew seat, else the first in view.
  */
 export function Agent({ id }: { id: string | null }) {
-  const [historyOpen, setHistoryOpen] = useState(false);
   const crew = useResource<Crew>(RESOURCES.crew);
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data ?? [];
   const tz = useTz();
@@ -43,7 +28,6 @@ export function Agent({ id }: { id: string | null }) {
   const [selected] = useSelectedAgent();
   const params = new URLSearchParams(useSearch());
   const traceRun = params.get("trace");
-  const handoffRun = params.get("handoff");
 
   const all = crew.data ? [...crew.data.rows].sort((a, b) => a.index - b.index) : null;
   const inView = all?.filter((r) => matchesSession(r)) ?? [];
@@ -93,78 +77,50 @@ export function Agent({ id }: { id: string | null }) {
   return (
     <section id="page-agent" className="agent-v2">
       <h1 className="sr-only">Agents</h1>
-      {handoffRun && <HandoffPanel runId={handoffRun} />}
       {traceRun && id !== null ? (
         <RunTracePanel agentId={id} runId={traceRun} />
-      ) : (
-        <>
-          <Picker rows={inView} items={items} current={shownId} />
-          {row ? (
-            <>
-              {detail.error && (
-                <div className="pb s crit-t" role="status">
-                  Showing the last saved agent view. Could not refresh: {detail.error.message}{" "}
-                  <button
-                    type="button"
-                    className="sm"
-                    onClick={() => shownId && hub.refetch(RESOURCES.agentDetail(shownId).path)}
-                  >
-                    Retry agent
-                  </button>
-                </div>
-              )}
-              <AgentIdentity view={detail.data as AgentDetailView} />
-              <div className="agent-v2-columns">
-                <div className="agent-v2-left">
-                  <AgentStory view={detail.data as AgentDetailView} />
-                  <AgentNextMove view={detail.data as AgentDetailView} />
-                  <AgentDeliverables view={detail.data as AgentDetailView} />
-                  <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
-                </div>
-                <div className="agent-v2-right">
-                  <AgentAvailability view={detail.data as AgentDetailView} />
-                  <AgentStats view={detail.data as AgentDetailView} />
-                  <AgentLoop view={detail.data as AgentDetailView} />
-                  {!handoffRun && row.kind === "crew" && row.run && (
-                    <HandoffPanel runId={row.run.id} />
-                  )}
-                  <AgentRelated view={detail.data as AgentDetailView} />
-                  <AgentContext view={detail.data as AgentDetailView} />
-                  {row.kind === "crew" && (
-                    <SeatInstructionsDisclosure key={`instructions:${row.id}`} seatId={row.id} />
-                  )}
-                  <SideTabs key={`t:${row.id}`} row={row} />
-                </div>
-              </div>
-              {row.run && (
-                <details
-                  className="panel agent-v2-history"
-                  onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
-                >
-                  <summary>Attempts and previous runs</summary>
-                  {historyOpen && <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />}
-                </details>
-              )}
-            </>
-          ) : (
-            <p
-              className={
-                (crew.error && !crew.data) || (detail.error && !row) ? "pb crit-t" : "pb muted"
-              }
-            >
-              {missing}
-              {detail.error && shownId && (
+      ) : row ? (
+        <div className="agent-control-room">
+          <Picker rows={all ?? []} items={items} current={shownId} />
+          <main className="agent-seat-workspace">
+            {detail.error && (
+              <div className="pb s crit-t" role="status">
+                Showing the last saved agent view. Could not refresh: {detail.error.message}{" "}
                 <button
                   type="button"
                   className="sm"
-                  onClick={() => hub.refetch(RESOURCES.agentDetail(shownId).path)}
+                  onClick={() => shownId && hub.refetch(RESOURCES.agentDetail(shownId).path)}
                 >
                   Retry agent
                 </button>
-              )}
-            </p>
+              </div>
+            )}
+            <AgentIdentity view={detail.data as AgentDetailView} />
+            <section
+              className="panel agent-reserved-instruments"
+              aria-label="Reserved instruments"
+            />
+            <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
+          </main>
+          <aside className="panel agent-reserved-right" aria-label="Reserved right column" />
+        </div>
+      ) : (
+        <p
+          className={
+            (crew.error && !crew.data) || (detail.error && !row) ? "pb crit-t" : "pb muted"
+          }
+        >
+          {missing}
+          {detail.error && shownId && (
+            <button
+              type="button"
+              className="sm"
+              onClick={() => hub.refetch(RESOURCES.agentDetail(shownId).path)}
+            >
+              Retry agent
+            </button>
           )}
-        </>
+        </p>
       )}
     </section>
   );
