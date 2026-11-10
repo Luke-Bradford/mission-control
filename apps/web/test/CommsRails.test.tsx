@@ -205,13 +205,9 @@ it("sends a dot along the link for each new message, and none under reduced moti
   expect(document.querySelector(".comms-edge.live")).not.toBeNull();
 });
 
-it("adds its idle drift to, rather than replacing, the node placement", () => {
-  vi.useFakeTimers();
+it("keeps each node at its layout position while the graph drifts as a group", () => {
   view(3);
-  expect(document.querySelector(".comms-organic-layout animateTransform")).toBeNull();
-  act(() => vi.advanceTimersByTime(8_000));
-  const drift = document.querySelector(".comms-organic-layout animateTransform");
-  expect(drift?.getAttribute("additive")).toBe("sum");
+  expect(document.querySelector(".comms-organic-layout")).toBeTruthy();
   expect(document.querySelector(".comms-node")?.getAttribute("transform")).toMatch(/^translate\(/);
 });
 

@@ -259,9 +259,6 @@ export function CommsRails({
   const [activeEdge, setActiveEdge] = useState<string | null>(null);
   const [particles, setParticles] = useState<Particle[]>([]);
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
-  const [interacting, setInteracting] = useState(false);
-  const [ambientDrift, setAmbientDrift] = useState(false);
-  const [visible, setVisible] = useState(() => document.visibilityState !== "hidden");
   const timers = useRef(new Set<number>());
   const nextParticle = useRef(0);
 
@@ -283,27 +280,6 @@ export function CommsRails({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-
-  useEffect(() => {
-    const update = () => setVisible(document.visibilityState !== "hidden");
-    document.addEventListener("visibilitychange", update);
-    return () => document.removeEventListener("visibilitychange", update);
-  }, []);
-  useEffect(() => {
-    if (reduced || interacting || !visible) return;
-    const nudge = () => {
-      setAmbientDrift(true);
-      const end = window.setTimeout(() => setAmbientDrift(false), PARTICLE_MS);
-      timers.current.add(end);
-    };
-    const first = window.setTimeout(nudge, 8_000);
-    const repeat = window.setInterval(nudge, 16_000);
-    return () => {
-      window.clearTimeout(first);
-      window.clearInterval(repeat);
-      setAmbientDrift(false);
-    };
-  }, [interacting, reduced, visible]);
 
   const byId = useMemo(() => new Map(seats.map((s) => [s.id, s])), [seats]);
   const nameOf = (id: string) => byId.get(id)?.name ?? id;
@@ -541,22 +517,14 @@ export function CommsRails({
                 walk(e, edgeOrder, edge.key, setActiveEdge, "data-key");
               }}
               onFocus={() => {
-                setInteracting(true);
                 setActiveEdge(edge.key);
                 setTip({ kind: "edge", id: edge.key });
               }}
-              onBlur={() => {
-                setInteracting(false);
-                setTip(null);
-              }}
+              onBlur={() => setTip(null)}
               onMouseEnter={() => {
-                setInteracting(true);
                 setTip({ kind: "edge", id: edge.key });
               }}
-              onMouseLeave={() => {
-                setInteracting(false);
-                setTip(null);
-              }}
+              onMouseLeave={() => setTip(null)}
             >
               <path className="comms-edge-hit" d={path.d} />
               <path
@@ -635,22 +603,14 @@ export function CommsRails({
                 walk(e, seatOrder, seat.id, setActiveSeat, "data-id");
               }}
               onFocus={() => {
-                setInteracting(true);
                 setActiveSeat(seat.id);
                 setTip({ kind: "seat", id: seat.id });
               }}
-              onBlur={() => {
-                setInteracting(false);
-                setTip(null);
-              }}
+              onBlur={() => setTip(null)}
               onMouseEnter={() => {
-                setInteracting(true);
                 setTip({ kind: "seat", id: seat.id });
               }}
-              onMouseLeave={() => {
-                setInteracting(false);
-                setTip(null);
-              }}
+              onMouseLeave={() => setTip(null)}
             >
               {hub ? (
                 <>
@@ -768,15 +728,6 @@ export function CommsRails({
           >
             <title>{label}</title>
             <g className="comms-organic-layout">
-              {!reduced && visible && !interacting && ambientDrift && particles.length === 0 && (
-                <animateTransform
-                  attributeName="transform"
-                  type="translate"
-                  additive="sum"
-                  values="0 0; 2 -2; 0 0"
-                  dur={`${PARTICLE_MS}ms`}
-                />
-              )}
               {edgeMarks}
               {nodeMarks}
             </g>
