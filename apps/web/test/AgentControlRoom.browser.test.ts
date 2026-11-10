@@ -25,21 +25,27 @@ describeRendered("Agent control room", () => {
   it.each([
     { width: 1920, height: 940 },
     { width: 2560, height: 1145 },
-  ])("fits $width × $height without page scrolling", async ({ width, height }) => {
-    const page = await renderAt({ page: "test/agentV2Browser.html", width, height, api });
-    await page.box(".agent-control-room");
-    expect(
-      await page.evaluate(
-        () => ({
-          page: document.documentElement.scrollHeight <= innerHeight + 1,
-          hasLegacy: !!document.querySelector(".agent-v2-story, .agent-v2-deliverables, #sideP"),
-        }),
-        null,
-      ),
-    ).toEqual({ page: true, hasLegacy: false });
-    expect(
-      await page.unclipped(".agent-roster, .agent-identity-band, .agent-live-activity, #agentInput"),
-    ).not.toContain(false);
-    await page.close();
-  }, BROWSER_TEST_TIMEOUT_MS);
+  ])(
+    "fits $width × $height without page scrolling",
+    async ({ width, height }) => {
+      const page = await renderAt({ page: "test/agentV2Browser.html", width, height, api });
+      await page.box(".agent-control-room");
+      expect(
+        await page.evaluate(
+          () => ({
+            page: document.documentElement.scrollHeight <= innerHeight + 1,
+            hasLegacy: !!document.querySelector(".agent-v2-story, .agent-v2-deliverables, #sideP"),
+          }),
+          null,
+        ),
+      ).toEqual({ page: true, hasLegacy: false });
+      expect(
+        await page.unclipped(
+          ".agent-roster, .agent-identity-band, .agent-live-activity, #agentInput",
+        ),
+      ).not.toContain(false);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });
