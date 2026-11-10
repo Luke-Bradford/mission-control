@@ -4613,7 +4613,7 @@ describe("boards, escalations, health", () => {
   });
 
   it("shows a waiting ticket without an owner", async () => {
-    store.replaceBoard("shop-app", [{ ...item, assignees: ["hub"], owner: "GUIDO" }]);
+    store.replaceBoard("shop-app", [{ ...item, assignees: ["hub"], owner: "Agent" }]);
     store.setTicketWait({
       repoId: "shop-app",
       issue: 7,
