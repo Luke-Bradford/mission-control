@@ -260,7 +260,7 @@ describe("ticketBrief", () => {
       commands: ["uv run pytest", "uv run ruff check"],
       fullSuite: ["uv run pytest"],
     });
-    expect(out.split("\n").at(-2)).toBe(
+    expect(out.split("\n").find((line) => line.startsWith("Configured validation commands:"))).toBe(
       "Configured validation commands: `uv run pytest`, `uv run ruff check`. You may also use ordinary local commands to inspect and complete the work inside the sandbox. A whole suite (`uv run pytest`) takes the test lock, one seat at a time, and waits while another seat holds it; for one test, give the command a test file path.",
     );
     expect(out).not.toContain("pnpm");
@@ -268,7 +268,9 @@ describe("ticketBrief", () => {
 
   it("names the test lock even when the repo configures no validation commands", () => {
     const out = ticketBrief({ ...input, commands: [], fullSuite: ["make test"] });
-    expect(out.split("\n").at(-2)).toBe(
+    expect(
+      out.split("\n").find((line) => line.startsWith("No repository validation commands")),
+    ).toBe(
       "No repository validation commands are configured. You may still use ordinary local commands to inspect and complete the work inside the sandbox. A whole suite (`make test`) takes the test lock, one seat at a time, and waits while another seat holds it; for one test, give the command a test file path.",
     );
   });
@@ -287,7 +289,7 @@ describe("ticketBrief", () => {
 
   it("leaves the test lock out when the repo has no whole suite", () => {
     const out = ticketBrief({ ...input, commands: ["uv run pytest"], fullSuite: [] });
-    expect(out.split("\n").at(-2)).toBe(
+    expect(out.split("\n").find((line) => line.startsWith("Configured validation commands:"))).toBe(
       "Configured validation commands: `uv run pytest`. You may also use ordinary local commands to inspect and complete the work inside the sandbox.",
     );
   });

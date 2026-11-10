@@ -2,7 +2,9 @@
 import {
   type EvidenceManifest,
   evidenceSectionText,
+  inertNegatedClosingRefs,
   isReviewBudgetFailure,
+  NEGATED_CLOSING_REFS_NOTE,
   type PullRequestView,
   REVIEW_STATUS_CONTEXT,
   type ReviewRow,
@@ -16,10 +18,13 @@ import type { GhRunner } from "./mcp/gh.ts";
 import { ownsPr } from "./ownership.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
 import { postPrEvidence } from "./pr-evidence/sweep.ts";
-import { qaReportGitSummary } from "./qa-reports.ts";
+import { qaReportGitIndex } from "./qa-reports.ts";
 import type { Store } from "./store.ts";
 
 export { externalReviewKey, isExternalReview } from "./external-review-key.ts";
+
+/** Only fixed, non-sensitive publication failure messages use this class. */
+class ExternalReviewPublicationError extends Error {}
 
 /**
  * A branch the crew or an observed loop still owns: a build run that has not ended, any run of a
@@ -65,7 +70,8 @@ export async function readExternalSubject(
 ): Promise<ExternalReviewSubject | null> {
   if (!Number.isSafeInteger(number) || number < 1 || !/^[a-f0-9]{40}$/.test(sha)) return null;
   const result = await gh(["api", `repos/${repo.github}/pulls/${number}`], { cwd });
-  if (result.code !== 0) throw new Error("external review PR could not be read");
+  if (result.code !== 0)
+    throw new ExternalReviewPublicationError("external review PR could not be read");
   const value: unknown = JSON.parse(result.stdout);
   if (value === null || typeof value !== "object") return null;
   const pr = value as {
@@ -223,18 +229,27 @@ export function createExternalReviews(deps: {
       const findings = store.findingsOf(row.id);
       const report = store.qaReportForReview(row.id);
       const manifest = deps.evidenceManifest?.(row.repoId, row.prNumber, row.sha);
+      let proseChanged = false;
+      const prose = (text: string): string => {
+        const rendered = inertNegatedClosingRefs(text);
+        proseChanged ||= rendered !== text;
+        return rendered;
+      };
+      const summary = prose(row.summary ?? "No summary was recorded.");
+      const findingLines = findings.map(
+        (finding) =>
+          `- **${finding.severity}** ${finding.file}:${finding.line} — ${prose(finding.summary)}\n  ${prose(finding.scenario)}\n  Suggested fix: ${prose(finding.fix)}`,
+      );
       const body = [
         marker,
         `## QA review — ${row.sha}`,
         `Reviewer: ${row.seatId}. Round ${row.round}. ${row.blocking} blocking, ${row.minor} minor findings.`,
-        row.summary ?? "No summary was recorded.",
+        summary,
         ...(report
-          ? [qaReportGitSummary(report, deps.reportBaseUrl ?? deps.evidence?.baseUrl ?? "")]
+          ? [qaReportGitIndex(report, deps.reportBaseUrl ?? deps.evidence?.baseUrl ?? "")]
           : []),
-        ...findings.map(
-          (finding) =>
-            `- **${finding.severity}** ${finding.file}:${finding.line} — ${finding.summary}\n  ${finding.scenario}\n  Suggested fix: ${finding.fix}`,
-        ),
+        ...findingLines,
+        ...(proseChanged ? [NEGATED_CLOSING_REFS_NOTE] : []),
         "### Recorded checks",
         ...store.reviewChecks(row.id).map((check) => `- ${check.check}: ${check.result}`),
         "### Reviewer-reported test counts",
@@ -250,15 +265,18 @@ export function createExternalReviews(deps: {
         "This verdict records a scratch review. It does not waive CI, acceptance or repository merge rules.",
       ].join("\n\n");
       if (body.length > 60_000 || !(await deps.textAllowed(body, repo.github, pr.number)))
-        throw new Error("external review comment was withheld by the text check");
+        throw new ExternalReviewPublicationError(
+          "external review comment was withheld by the text check",
+        );
       const endpoint = `repos/${repo.github}/issues/${pr.number}/comments`;
       const existing = await deps.gh(["api", `${endpoint}?per_page=100`, "--paginate", "--slurp"], {
         cwd: deps.cwd,
       });
-      if (existing.code !== 0) throw new Error("external review comments could not be checked");
+      if (existing.code !== 0)
+        throw new ExternalReviewPublicationError("external review comments could not be checked");
       const pages: unknown = JSON.parse(existing.stdout);
       if (!Array.isArray(pages) || !pages.every(Array.isArray))
-        throw new Error("external review comments were unreadable");
+        throw new ExternalReviewPublicationError("external review comments were unreadable");
       const comments: unknown[] = pages.flat();
       if (
         !comments.some(
@@ -277,7 +295,8 @@ export function createExternalReviews(deps: {
           cwd: deps.cwd,
           input: JSON.stringify({ body }),
         });
-        if (posted.code !== 0) throw new Error("external review comment could not be posted");
+        if (posted.code !== 0)
+          throw new ExternalReviewPublicationError("external review comment could not be posted");
       }
       store.setSetting(commentKey, "posted");
     }
@@ -297,7 +316,8 @@ export function createExternalReviews(deps: {
           }),
         },
       );
-      if (posted.code !== 0) throw new Error("external review status could not be posted");
+      if (posted.code !== 0)
+        throw new ExternalReviewPublicationError("external review status could not be posted");
       store.setSetting(statusKey, fingerprint);
     }
   }
@@ -402,7 +422,8 @@ export function createExternalReviews(deps: {
                   !(await readExternalSubject(deps.gh, deps.cwd, repo, pr.number, pr.headSha))
                 )
                   continue;
-                if (deps.evidence) {
+                const evidence = deps.evidence;
+                if (evidence) {
                   const recorded = store.prFilePaths(repo.id, pr.number);
                   const paths =
                     pr.changedFiles != null && recorded.length === pr.changedFiles
@@ -414,22 +435,16 @@ export function createExternalReviews(deps: {
                     sha: pr.headSha,
                     paths,
                     onStored: (manifest: Parameters<typeof postPrEvidence>[3]) =>
-                      postPrEvidence(
-                        deps.gh,
-                        deps.cwd,
-                        repo.github,
-                        manifest,
-                        deps.evidence!.baseUrl,
-                      ),
+                      postPrEvidence(deps.gh, deps.cwd, repo.github, manifest, evidence.baseUrl),
                   };
-                  void deps.evidence
+                  void evidence
                     .ensure(target)
                     .catch(() =>
                       deps.log(
                         `External QA for ${repo.id}#${pr.number} could not prepare screenshots.`,
                       ),
                     );
-                  if (deps.evidence.gate(target) !== null) continue;
+                  if (evidence.gate(target) !== null) continue;
                 }
                 if (
                   !(deps.enabled?.() ?? true) ||
@@ -455,10 +470,12 @@ export function createExternalReviews(deps: {
                 row = id === null ? undefined : (store.review(id) ?? undefined);
               }
               if (row) await publish(pr, row);
-            } catch {
+            } catch (error) {
               // PR text, credentials and command output never enter this log.
+              const reason =
+                error instanceof ExternalReviewPublicationError ? ` ${error.message}.` : "";
               deps.log(
-                `External QA for ${repo.id}#${pr.number} could not complete its queue/status update; it will retry.`,
+                `External QA for ${repo.id}#${pr.number} could not complete its queue/status update; it will retry.${reason}`,
               );
             }
           }

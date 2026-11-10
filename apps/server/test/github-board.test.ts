@@ -16,6 +16,7 @@ import {
   moveCard,
 } from "../src/github-board.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const NOW = 1_000_000_000;
 const SHA40 = "a".repeat(40);
@@ -709,7 +710,11 @@ describe("followPrs", () => {
     const b = fakeBoard({ itemStatus: "O_review" });
     store.replaceBoard("mc", [{ ...card("In Review"), closed: true }]);
     // an old row has no head yet; the next poll gives it one, and the ask binds to that head
-    store.upsertPullRequests("mc", [{ ...store.pullRequests("mc")[0]!, headSha: SHA40 }], NOW);
+    store.upsertPullRequests(
+      "mc",
+      [{ ...defined(store.pullRequests("mc")[0]), headSha: SHA40 }],
+      NOW,
+    );
     askExternalReview(store, "mc", 91, "CAPCOM", NOW, SHA40);
     expect(await followPrs({ gql: b.gql, store, config, now: () => now }, "mc")).toBe(true);
     expect(b.state.card).toBe("O_done");

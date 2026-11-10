@@ -1,4 +1,4 @@
-import { FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
+import { AUDIT_MEASURED_TOOLS, FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -497,6 +497,16 @@ describe("audit", () => {
     },
     reviewRounds: { prs: [], late: [] },
     items: [],
+    improvements: AUDIT_MEASURED_TOOLS.map((name) => ({
+      kind: "tool-usage" as const,
+      subject: name,
+      ticket: null,
+      pr: null,
+      detail: `${name}: 0 calls and 0 characters in the last 24 hours.`,
+      at: NOW,
+      calls: 0,
+      chars: 0,
+    })),
     surgeonProposals: [],
   });
 
@@ -1571,6 +1581,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/flight"],
   ["GET", "/api/comms/agents/guido-1"],
   ["GET", "/api/comms/counts"],
+  ["GET", "/api/comms/ticket-counts"],
   ["GET", "/api/comms/agents/guido-1/contacts/CAPCOM"],
   ["GET", "/api/comms/pairs/guido-1/CAPCOM"],
   ["GET", "/api/comms/tickets/%237"],
@@ -1589,6 +1600,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/comms:1/reply-route"],
   ["GET", "/api/comms/comms:1/state"],
   ["POST", "/api/attention/unknown/choose", { optionId: "yes", briefAt: 1 }],
+  ["POST", "/api/attention/unknown/clear", {}],
   ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
   ["DELETE", "/api/comms/comms:1/pin", {}],
@@ -1633,6 +1645,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/boards/shop-app/setup"],
   ["GET", "/api/boards/shop-app/items/7"],
   ["GET", "/api/tickets/shop-app/7"],
+  ["GET", "/api/tickets/shop-app/7/set-aside"],
+  ["POST", "/api/tickets/shop-app/7/set-aside/3/answer", { text: "x" }],
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/prs/4"],
@@ -1652,6 +1666,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/attention/person:101:1/replies/review/post"],
   ["GET", "/api/flight"],
   ["GET", "/api/prs/flow"],
+  ["GET", "/api/dependencies"],
   ["GET", "/api/flight/orders"],
   ["GET", "/api/flight/orders/:id"],
   ["POST", "/api/flight/orders", { text: "Fixture order" }],
@@ -1732,6 +1747,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/runs/shop-app-ta/resume", {}],
   ["POST", "/api/runs/shop-app-ta/message", { text: "Rework this" }],
   ["POST", "/api/runs/shop-app-ta/controller-check", { verdict: "pass" }],
+  ["POST", "/api/runs/shop-app-ta/pr-head", { sha: "a".repeat(40) }],
   ["POST", "/api/prs/shop-app/12/uat", { action: "accept", sha: "a".repeat(40) }],
   ["POST", "/api/prs/shop-app/12/controller-check", { verdict: "pass", sha: "a".repeat(40) }],
   ["POST", "/api/prs/shop-app/12/merge-hold", { action: "release", sha: "a".repeat(40) }],
@@ -1746,6 +1762,11 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/attention/example/not-now", {}],
   ["POST", "/api/attention/example/drop", {}],
   ["GET", "/api/attention/unknown"],
+  [
+    "POST",
+    "/api/attention/example/choice",
+    { briefId: 1, sourceRevision: "a".repeat(64), optionId: "apply", requestId: "route-inventory" },
+  ],
   ["GET", "/api/attention/example/discussion"],
   ["POST", "/api/attention/example/discussion", { version: "old", messageId: "ask", text: "Why?" }],
   ["POST", "/api/attention/ack", { keys: ["esc:shop-app#9"] }],
@@ -2213,6 +2234,7 @@ describe("repo onboarding (POST /api/repos/onboard)", () => {
       store,
       bus,
       configPath,
+      configHubRoot: "/mc-api-fixture-hub",
       crewReloader: reloader,
       seatWrites: true,
       githubGql: async () => gql,
@@ -2528,6 +2550,7 @@ describe("local access", () => {
       if (/^\/api\/attention\/unknown\/choo?[si]/.test(url)) continue; // needs an open question; choose.test.ts covers it
       if (url.startsWith("/api/hud-screenshots/")) continue; // needs a stored screenshot; hud-shot-route.test.ts covers it
       if (url.startsWith("/api/prs/")) continue; // needs stored evidence; pr-evidence-api.test.ts covers it
+      if (url.includes("/set-aside/")) continue; // needs the Needs-you wiring; needs-you-answer.test.ts covers it
       if (url.endsWith("/seats")) continue; // needs seatWrites and a real body; its own tests cover it
       if (url.startsWith("/api/code-health/evidence/")) continue; // issued references are covered by code-health-reader.test.ts
       if (
@@ -2591,6 +2614,14 @@ describe("local access", () => {
       if (url === "/api/repos/shop-app/prs/4") {
         // the fixture has no such PR: unknown is a 404, not a refusal
         expect(r.statusCode, `${method} ${url}`).toBe(404);
+        continue;
+      }
+      if (url.endsWith("/choice")) {
+        // Valid envelope, but this placeholder has no bound brief. It never grants authority.
+        expect(r.statusCode).toBe(409);
+        expect(r.json()).toEqual({
+          error: "Needs a refreshed brief: this brief identity is no longer current or bound.",
+        });
         continue;
       }
       if (url.endsWith("/discussion")) {
@@ -2685,7 +2716,11 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
-      if (url === "/api/attention/unknown" || /^\/api\/attention\/unknown\/choo?[si]/.test(url)) {
+      if (
+        url === "/api/attention/unknown" ||
+        url === "/api/attention/unknown/clear" ||
+        /^\/api\/attention\/unknown\/choo?[si]/.test(url)
+      ) {
         expect(r.statusCode).toBe(404);
         continue;
       }
@@ -2968,6 +3003,10 @@ describe("local access", () => {
             .replace("/shop-app", "/:repoId")
             .replace("/items/7", "/items/:number")
             .replace(/\/tickets\/:repoId\/7$/, "/tickets/:repoId/:number")
+            .replace(
+              /\/tickets\/:repoId\/7\/set-aside(\/3\/answer)?$/,
+              (_m, a) => `/tickets/:repoId/:number/set-aside${a ? "/:id/answer" : ""}`,
+            )
             .replace(/\/prs\/4$/, "/prs/:number")
             .replace(
               /\/prs\/:repoId\/12\/(uat|controller-check|merge-hold|review-request)$/,
@@ -3823,10 +3862,20 @@ describe("crew and attention", () => {
       basis: "read the issue",
       at: NOW,
     };
-    store.addBrief({ key: "esc:shop-app#9", ...brief });
+    const id = store.addBrief({ key: "esc:shop-app#9", ...brief });
     bus.emit("attention");
     const items = (await get("/api/attention")).json() as AttentionItem[];
-    expect(items[0]?.brief).toEqual(brief);
+    expect(items[0]?.brief).toEqual({
+      ...brief,
+      id,
+      state: {
+        completeness: "incomplete",
+        freshness: "unknown",
+        reason: "Needs a refreshed brief: historical source/action binding is unknown.",
+      },
+    });
+    expect(items[0]?.brief).not.toHaveProperty("binding");
+    expect(items[0]?.brief).not.toHaveProperty("defaultAt");
   });
 
   it("POST /api/attention/ack acks the keys, emits attention, and the next GET shows them acked", async () => {
@@ -9682,6 +9731,24 @@ describe("operator token", () => {
         })
       ).statusCode,
     ).toBe(200);
+  });
+
+  it("protects the dependency chains read and validates repository scope", async () => {
+    for (const headers of [{}, { [OPERATOR_HEADER]: "wrong" }]) {
+      const response = await guarded.inject({ method: "GET", url: "/api/dependencies", headers });
+      expect(response.statusCode).toBe(401);
+      expect(response.json()).toEqual({ error: OPERATOR_TOKEN_REQUIRED });
+    }
+    const read = (url: string) =>
+      guarded.inject({ method: "GET", url, headers: { [OPERATOR_HEADER]: "tok-1" } });
+    expect((await read("/api/dependencies?repoId=unknown")).statusCode).toBe(404);
+    expect((await read("/api/dependencies?repoId=")).statusCode).toBe(400);
+    expect((await read("/api/dependencies?unexpected=yes")).statusCode).toBe(400);
+    const response = await read("/api/dependencies?repoId=shop-app");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+    expect((await read("/api/dependencies")).json()).toEqual([]);
+    expect(store.getSetting("dependency-waits:shop-app")).toBeNull();
   });
 
   describe("controller check route", () => {

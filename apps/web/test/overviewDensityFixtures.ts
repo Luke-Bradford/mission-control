@@ -1,6 +1,7 @@
 import type {
   ConfigView,
   CrewRow,
+  FlightDecision,
   OverviewSummary,
   OverviewTimeline,
   PipelineStage,
@@ -31,6 +32,11 @@ import {
   seatRow,
 } from "./fixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
+
+function defined<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error("Test expected a value to exist");
+  return value;
+}
 
 export type OverviewScenario =
   | "default"
@@ -201,7 +207,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
           Math.floor(tokens / count) + (index === 0 ? tokens % count : 0),
         ]),
       ),
-      stateSince: NOW - stateMinutes[index % stateMinutes.length]! * MIN,
+      stateSince: NOW - defined(stateMinutes[index % stateMinutes.length]) * MIN,
       contextWindow: index === 7 ? null : index % 3 === 0 ? 200_000 : 400_000,
       hudState: index === 0 || index % 4 === 0 ? "idle" : "running",
       ticket: index ? `shop-app#${100 + index}` : null,
@@ -211,7 +217,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
               5,
             )
           : `Recorded fixture work ${index}`,
-      run: { ...seatRow().run!, id: `fixture-run-${index}` },
+      run: { ...defined(seatRow().run), id: `fixture-run-${index}` },
     }),
   );
   if (rows[4])
@@ -276,7 +282,7 @@ export function overviewDensityFixture(scenario: OverviewScenario = "default") {
             }))
         : [],
     crew: {
-      ...CREW_CONFIG.crew!,
+      ...defined(CREW_CONFIG.crew),
       sessions: [
         {
           id: "demo",
@@ -621,6 +627,30 @@ export function demoSeed() {
     "/api/overview": summary,
     "/api/overview?session=demo": summary,
     "/api/prs/flow": prFlowView(),
+    "/api/flight": {
+      seat: {
+        id: "flight-1",
+        call: "FLIGHT",
+        model: "fixture-model",
+        state: "running",
+        live: true,
+        context: { tokens: 74_200, rotateAt: 200_000, text: null },
+      },
+      decisions: DEMO_TICKETS.slice(0, 8).map(
+        (ticket, i): FlightDecision => ({
+          id: i + 1,
+          at: NOW - (i + 1) * 11 * MIN,
+          kind: "answer",
+          seatId: ticket.seat,
+          targetRunId: null,
+          ref: `${DEMO_REPO}#${ticket.n}`,
+          questionId: null,
+          about: ticket.title,
+          decision: "Keep the agreed scope and check the result against the ticket before merging.",
+          basis: "The ticket records the accepted outcome; no additional approval is needed.",
+        }),
+      ),
+    },
     "/api/flight/summary": flightSummary(),
     "/api/settings/away": {
       on: false,

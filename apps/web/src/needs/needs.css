@@ -212,7 +212,13 @@
 
 /* The decision comes first, in the wide column: the options sit side by side. */
 .needs-answer .optlist {
+  width: 100%;
+  min-width: 0;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.needs-answer .optlist > .recommendation {
+  grid-column: 1 / -1;
 }
 
 .needs-answer .composer textarea {
@@ -257,22 +263,26 @@
 /* Under 1100 px of detail width the columns stack and the band stays in view */
 @container needs-detail (max-width: 1099px) {
   .needs-pane {
-    overflow: auto;
+    overflow: hidden;
   }
   .needs-body {
-    display: block;
-    flex: none;
+    display: flex;
+    flex-direction: column;
   }
-  .needs-main,
-  .needs-side {
-    overflow: visible;
+  .needs-main {
+    flex: 1 1 auto;
+    overflow: auto;
   }
   .needs-side {
+    flex: 1 1 240px;
+    min-height: 240px;
+    overflow: hidden;
     border-left: 0;
     border-top: 1px solid var(--line);
   }
   .needs-side .needs-log {
-    flex-basis: 360px;
+    flex: 1 1 auto;
+    min-height: 48px;
   }
 }
 

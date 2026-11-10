@@ -42,8 +42,20 @@ export interface ReleasedWait {
 
 export interface WaitRecord {
   /** Each waiting ticket: its open waits (refs) and when the hub first saw it wait. */
-  waiting: Record<string, { open: string[]; unread?: string[]; since: number }>;
+  waiting: Record<
+    string,
+    { open: string[]; unread?: string[]; since: number; sinceByRef?: Record<string, number> }
+  >;
   released: ReleasedWait[];
+}
+
+/** Each edge retains its first observation; legacy entries fall back to their recorded set start. */
+export function observedWaitSince(
+  entry: WaitRecord["waiting"][string] | undefined,
+  ref: string,
+): number | null {
+  if (!entry?.open.includes(ref)) return null;
+  return entry.sinceByRef?.[ref] ?? entry.since;
 }
 
 export const WAIT_RECORD_SETTING = "dependency-waits";
@@ -91,6 +103,9 @@ export function observeWaits(
       open: waits.map((w) => w.ref),
       ...(unread.length > 0 ? { unread } : {}),
       since: record.waiting[ref]?.since ?? now,
+      sinceByRef: Object.fromEntries(
+        waits.map((wait) => [wait.ref, observedWaitSince(record.waiting[ref], wait.ref) ?? now]),
+      ),
     };
   }
   const released = record.released.filter((r) => now - r.at < WAIT_RELEASED_KEEP_MS);

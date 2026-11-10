@@ -55,7 +55,7 @@ describe("POST /api/profiles", () => {
     } satisfies Run);
     try {
       const config = (await app.inject({ method: "GET", url: "/api/config" })).json();
-      expect(config.profiles.list).toHaveLength(7);
+      expect(config.profiles.list).toHaveLength(8);
       const payload = {
         base: config.profiles.version,
         profile: {

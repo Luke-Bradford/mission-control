@@ -10,6 +10,8 @@ import {
   FINDING_RESOLUTION_OUTCOMES,
   FINDING_SEVERITIES,
   type FindingResolution,
+  inertNegatedClosingRefs,
+  NEGATED_CLOSING_REFS_NOTE,
   prEvidenceAffectedPages,
   type QaImageRef,
   type QaReport,
@@ -382,8 +384,7 @@ export function createQaReports(i: {
     )
       missing.push("Before/after evidence or a visual applicability reason is missing.");
     if (
-      base.visual.manifest &&
-      base.visual.manifest.pairs.some(
+      base.visual.manifest?.pairs.some(
         (pair) =>
           !base.visual.pairs.some(
             (saved) =>
@@ -590,7 +591,7 @@ export function createQaReports(i: {
       } catch {
         throw new QaReportError(400, "Give the source review or comment permalink on this PR.");
       }
-      const sourcePath = `/` + repo.github + `/pull/${input.prNumber}`;
+      const sourcePath = `/${repo.github}/pull/${input.prNumber}`;
       if (
         source.origin !== "https://github.com" ||
         source.username ||
@@ -1000,15 +1001,27 @@ export function qaReportMarkdown(report: QaReport): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** Kept inside the existing review-comment/PR-body write; the full export remains immutable. */
-export function qaReportGitSummary(report: QaReport, baseUrl = ""): string {
-  const short = (text: string, limit = 800) => Array.from(text).slice(0, limit).join("");
-  const lines = [
+/** A compact index for GitHub comments; detailed notes stay in the retained report. */
+export function qaReportGitIndex(report: QaReport, baseUrl = ""): string {
+  return [
     "## Saved QA report",
     "",
-    `[Immutable QA report](${baseUrl}${report.permalink}) · [Markdown export](${baseUrl}/api/qa-reports/${report.id}/markdown)`,
+    `[Immutable QA report](${baseUrl}/api/qa-reports/${report.id}) · [Markdown export](${baseUrl}/api/qa-reports/${report.id}/markdown)`,
     `Head ${report.headSha}; reviewer ${report.reviewer.label}; source ${report.source}; registered ${new Date(report.registeredAt).toISOString()}; evidence ${report.completeness.state}.`,
     "This snapshot is not current merge approval.",
+  ].join("\n");
+}
+
+/** Kept inside the existing review-comment/PR-body write; the full export remains immutable. */
+export function qaReportGitSummary(report: QaReport, baseUrl = ""): string {
+  let proseChanged = false;
+  const short = (text: string, limit = 800) => {
+    const rendered = inertNegatedClosingRefs(text);
+    proseChanged ||= rendered !== text;
+    return Array.from(rendered).slice(0, limit).join("");
+  };
+  const lines = [
+    qaReportGitIndex(report, baseUrl),
     "",
     "Works well:",
     ...(report.worksWell.length
@@ -1039,8 +1052,9 @@ export function qaReportGitSummary(report: QaReport, baseUrl = ""): string {
     `Visual applicability: ${report.visual.applicability}${report.visual.reason ? ` — ${short(report.visual.reason, 1000)}` : ""}.`,
     `${report.visual.pairs.length} retained/reference before-and-after pairs. Test commands and their hub/controller/reviewer provenance are in the immutable report; reported counts are not execution receipts.`,
   ];
+  if (proseChanged) lines.push("", NEGATED_CLOSING_REFS_NOTE);
   const body = lines.join("\n");
   return body.length <= 12000
     ? body
-    : `${short(body, 11900)}\n[Summary shortened; read the immutable report.]`;
+    : `${Array.from(body).slice(0, 11900).join("")}\n[Summary shortened; read the immutable report.]`;
 }

@@ -13,6 +13,46 @@ import { NOW } from "./fixtures.ts";
 import { testHealthFixture } from "./testHealthFixtures.ts";
 
 const { renderAt } = browserSession();
+/** A key scroll is complete when the browser emits scrollend, not at its first rounded endpoint. */
+async function evidenceScrollByKey(page: RenderedPage, key: string) {
+  await page.evaluate(() => {
+    const body = document.querySelector(".ch-dialog-body");
+    if (!body) throw new Error("Evidence scroll body is missing");
+    const state = { ended: false, before: body.scrollTop, cleanup: () => {} };
+    const onEnd = () => {
+      state.ended = true;
+    };
+    body.addEventListener("scrollend", onEnd);
+    state.cleanup = () => body.removeEventListener("scrollend", onEnd);
+    Reflect.set(window, "__testHealthKeyScroll", state);
+  }, undefined);
+  await page.press(key);
+  return page.evaluate(async () => {
+    const state = Reflect.get(window, "__testHealthKeyScroll") as {
+      ended: boolean;
+      before: number;
+      cleanup: () => void;
+    };
+    const body = document.querySelector(".ch-dialog-body");
+    if (!body) throw new Error("Evidence scroll body is missing");
+    try {
+      const deadline = performance.now() + 2000;
+      while (!state.ended && performance.now() < deadline)
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      return {
+        ended: state.ended,
+        before: state.before,
+        top: body.scrollTop,
+        height: body.clientHeight,
+        total: body.scrollHeight,
+      };
+    } finally {
+      state.cleanup();
+      Reflect.deleteProperty(window, "__testHealthKeyScroll");
+    }
+  }, undefined);
+}
+
 async function metadataOverflow(page: RenderedPage) {
   return page.evaluate(() => {
     const overflow: {
@@ -296,6 +336,10 @@ describeRendered("Test health measured layout", () => {
             fixture.data.durations[0].environment = "isolated runner / ".repeat(15);
             fixture.data.qaProposals[0].reviewer = "reviewer-with-long-identity-".repeat(12);
             for (const row of records.rows) row.environment = fixture.data.durations[0].environment;
+            // A later field may wrap beyond one line; End targets the record's end, not Environment.
+            records.rows[0].cause = "infrastructure";
+            records.rows[0].causeEvidence =
+              "Runner disconnected before the test completed. ".repeat(8);
             const qaRecords = fixture.api[
               "/api/code-health/evidence/ch_test_qa_linked?repo=sample&cursor=0"
             ] as { rows: Record<string, unknown>[] };
@@ -373,11 +417,62 @@ describeRendered("Test health measured layout", () => {
                   undefined,
                 );
                 await page.press("Enter");
-                await page.press("End");
-                await page.evaluate(
-                  () => new Promise((resolve) => setTimeout(resolve, 100)),
-                  undefined,
+                const scrollEndpoint = await evidenceScrollByKey(page, "End");
+                expect(scrollEndpoint.ended).toBe(true);
+                expect(scrollEndpoint.top + scrollEndpoint.height).toBeGreaterThanOrEqual(
+                  scrollEndpoint.total - 1,
                 );
+                // Resume the normal Tab path inside the expanded record before paging its text.
+                await page.press("Tab");
+                expect(
+                  await page.evaluate(
+                    () => !!document.activeElement?.closest(".ch-evidence-rows details[open] a"),
+                    undefined,
+                  ),
+                ).toBe(true);
+                // End proves the region scrolls; a middle field may sit above its final viewport.
+                // Read it with real keyboard scrolling, never scrollTop or scrollIntoView.
+                for (let step = 0; step < 16; step++) {
+                  const position = await page.evaluate((expected) => {
+                    const value = [
+                      ...document.querySelectorAll(".ch-evidence-rows details[open] dd"),
+                    ].find((node) => node.textContent === expected);
+                    const body = document.querySelector(".ch-dialog-body");
+                    if (!value || !body) throw new Error("Environment evidence is missing");
+                    const target = value.getBoundingClientRect(),
+                      bounds = body.getBoundingClientRect();
+                    return {
+                      top: target.top,
+                      bottom: target.bottom,
+                      height: target.height,
+                      bodyTop: bounds.top,
+                      bodyBottom: bounds.bottom,
+                      bodyHeight: bounds.height,
+                      scrollTop: body.scrollTop,
+                      activeTag: document.activeElement?.tagName,
+                      activeText: document.activeElement?.textContent?.slice(0, 60),
+                      focusInBody: !!document.activeElement?.closest(".ch-dialog-body"),
+                      documentFocused: document.hasFocus(),
+                      visibility: document.visibilityState,
+                      windowY: window.scrollY,
+                    };
+                  }, fixture.data.durations[0].environment);
+                  expect(position.height).toBeLessThanOrEqual(position.bodyHeight);
+                  if (position.top >= position.bodyTop && position.bottom <= position.bodyBottom)
+                    break;
+                  const motion = await evidenceScrollByKey(
+                    page,
+                    position.top < position.bodyTop ? "PageUp" : "PageDown",
+                  );
+                  expect(
+                    motion.ended,
+                    JSON.stringify({ colorScheme, count, position, motion }),
+                  ).toBe(true);
+                  expect(
+                    motion.top,
+                    JSON.stringify({ colorScheme, count, position, motion }),
+                  ).not.toBe(position.scrollTop);
+                }
                 const fullEnvironment = await page.evaluate((expected) => {
                   const value = [
                     ...document.querySelectorAll(".ch-evidence-rows details[open] dd"),
@@ -392,7 +487,21 @@ describeRendered("Test health measured layout", () => {
                       !!bounds && !!body && bounds.top >= body.top && bounds.bottom <= body.bottom,
                   };
                 }, fixture.data.durations[0].environment);
-                expect(fullEnvironment).toEqual({
+                const geometry = await page.evaluate((expected) => {
+                  const value = [
+                    ...document.querySelectorAll(".ch-evidence-rows details[open] dd"),
+                  ].find((node) => node.textContent === expected);
+                  const body = document.querySelector(".ch-dialog-body");
+                  return {
+                    value: value?.getBoundingClientRect().toJSON(),
+                    body: body?.getBoundingClientRect().toJSON(),
+                    scrollTop: body?.scrollTop,
+                    scrollHeight: body?.scrollHeight,
+                    clientHeight: body?.clientHeight,
+                    fonts: document.fonts.status,
+                  };
+                }, fixture.data.durations[0].environment);
+                expect(fullEnvironment, JSON.stringify({ colorScheme, count, geometry })).toEqual({
                   text: fixture.data.durations[0].environment,
                   contained: true,
                   visible: true,

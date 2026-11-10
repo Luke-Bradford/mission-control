@@ -271,7 +271,10 @@ review data includes its PR, head and waiting reason even when the reviewer cann
 The hub posts `mc/review` and a report comment containing the SHA, findings and recorded checks and
 tests. It links the available before/after screenshot manifest for that head, or states that no pairs
 were captured. Web changes require the configured screenshot gate before queueing. Evidence uses
-isolated previews and copied data; it never reconstructs a historical approval. A reviewer run is
+isolated previews and copied data; it never reconstructs a historical approval. Which pages a web change is photographed on comes from the static imports of the PR head's
+`apps/web/src`: each file in `pages/` is a page (a lazy `import()` of it is the boundary), what
+`main.tsx` and `App.tsx` reach counts for every page, and CSS belongs to the file that imports it.
+A file listed with no photographed pages needs no pairs (for example, one reached only by the unphotographed Ticket page). A file the graph does not list, or a graph that cannot be read, falls back to the folder rule. Graph reads use a temporary archive of the fetched head, share one read per head, retry after failure and are cancelled on shutdown. A reviewer run is
 recorded, but no developer run is invented for the PR.
 
 A crew review that reports after its author's run has ended (or is gone from this hub) is posted the
@@ -366,6 +369,28 @@ invalidate them immediately. Live ownership and waits are read fresh on every re
 FLIGHT wakes after five unowned minutes, a stage's seven-day p90, or fifteen minutes waiting for
 the controller or operator. Repeated polls do not reset stage clocks or repeat the same wake fact.
 
+## Dependency chains API
+
+`GET /api/dependencies?repoId=<configured repository>` uses the same operator-token check as
+PR flow. It returns `DependencyChain[]`; omit `repoId` for all configured repositories.
+An unknown repository returns 404 and an invalid query returns 400. This is the approved server
+contract for the Dependencies Board, FLIGHT and QA builds. Those web readers ship separately.
+
+The read joins stored ticket dependencies, stacked PRs, active holds, PR ownership and seat queues.
+A PR reference continues through its carried ticket's waits. All open waits participate; work
+with multiple roots appears under each, with its other roots in `alsoWaitsOn`. Cycles return
+`stuck` with their refs. Unread or out-of-repository roots remain `unknown`.
+The response retains all dependents; the web applies its five-dependent disclosure.
+
+`waitedMs` and `longestWaitMs` use observed wait, hold or queue-transition times. An older run's
+start is not evidence of when it entered a queue. Unknown ages stay null. Sort is longest wait
+first, unknown last, then stuck first and ref. `frees` names only dependents whose last direct
+wait ends with the root; grandchildren still waiting on intervening work stay in `stillWaiting`.
+Ownership comes from PR flow or an active author; operator holds remain visible. A root without
+an owner, closed without merging, or past its seven-day stage p90 is stuck.
+
+Page reads never observe waits, change settings, release holds, call GitHub or write decisions.
+
 ### As a launchd job (optional; nothing loads it for you)
 
 `ops/com.missioncontrol.server.plist.tmpl` runs
@@ -412,6 +437,12 @@ When a reported review is held back from GitHub, the hub logs one warning line s
 for `is not posted` (the launchd files under `~/Library/Logs/mission-control/` do not have it). The reason covers
 GitHub's own read of the PR too: closed, draft, labelled skip-review, another head, or a base that
 is not the default branch.
+
+External QA comments carry a compact index linking the immutable JSON and Markdown report.
+Detailed checklist notes and dispositions stay in that retained report. The generated comment
+still passes the secret, notifier and HTML-reference checks before its status is published.
+Publication errors log a fixed, non-sensitive reason after `could not complete its queue/status
+update`; unexpected exceptions keep their content private and log only the generic failure.
 
 ### Budget brake
 
@@ -478,6 +509,31 @@ unresolved findings remain while their PR snapshot is open. Deletion makes SQLit
 pages reusable; it does not shrink the database file on disk.
 
 ### Ticket history
+
+The response also carries `questions` and `questionsNextBefore`. These are a separate question
+page, newest ask first (id breaks timestamp ties). The same `limit` applies; pass the returned
+cursor as `questionsBefore` to read older questions. This leaves the existing timeline's `before`
+and `nextBefore` unchanged. Question records include run, seat, text, ask/pass/set-aside times,
+`closedAt`, and the latest recorded `answer`, `answerAt` and `answerBasis`. A run can close a
+question without answering it: the answer fields then stay null. `asideAt` retains the stored
+set-aside time, including Not now; it does not itself prove a question has an answer. Each Comms
+timeline entry carries its recorded `senderKind`, or null for legacy unknown provenance.
+
+`GET /api/comms/ticket-counts` returns `{ tickets: [{ ticket, count }], unassignedCount }` across
+all recorded structured references, without the feed's 100-message or time window. Retention
+preserves reference totals transactionally when deleting message bodies, without preserving
+their text. Totals survive a database reopen and repeated retention sweeps. Already deleted
+messages from before this migration cannot be reconstructed. Tickets with
+no attributed messages have no row. Qualified ticket identity takes precedence over a PR/short
+reference. Legacy short references use the sender's configured repository, or the single
+configured repository; ambiguous multi-repository messages stay in `unassignedCount`. PR
+references resolve from stored primary and closing tickets, counting a message once per ticket.
+Counts do not infer references from free-form message text or invent missing repository context.
+
+The stored Comms agent and pair reads accept the hub id `MC` and the controller id `CONTROLLER`.
+Contact summaries include `hasMessages` from their all-time count. The configured FLIGHT and
+controller pair appears even before its first message, with count zero and `hasMessages: false`.
+Unknown agent ids still answer 404; existing paging and read cursors are unchanged.
 
 `GET /api/tickets/<repo id>/<number>` returns everything Mission Control knows about one ticket:
 its fields (title, outcome, done-when items with their ticked state, size, priority, status,
@@ -593,12 +649,13 @@ What each seat's process starts with:
   from the addressee closes an item, as a reply does; a `seen` from anyone else does not.
   `GET /api/comms/feed` lists recent messages (id, time, from, to, label, ref, and the first 280 characters of text) newest
   first. `since=comms:<n>` returns only newer ones; `limit` defaults to 100 and is at most 200.
-  If FLIGHT has not settled it 30 minutes later (45 in all), the hub raises one decision for you
-  on that key, once: it carries FLIGHT's recommendation when FLIGHT briefed the item for itself,
-  and the options Proceed (recommended) and Hold. Proceed is the default and applies through the
-  decision-default sweep 40 minutes later unless you answer, delivered to the sending seat. A
-  message to CAPCOM, one before the rollout boundary, and one whose sender's run is held
-  (budget park, stopped seat, account at its stop) never get a decision. The Comms graph also reports 24-hour run-token totals per link and flags a pair
+  An overdue crew question stays with FLIGHT. The hub does not write a Proceed/Hold brief or
+  answer it for the operator. Only FLIGHT's complete brief makes it an operator question.
+  Old hub-written Comms briefs remain in history but are ignored by the attention projection.
+  When FLIGHT is down, waiting crew messages count under one FLIGHT-down/not-triaging alert.
+  Protected operator approvals, account and budget holds, and the runaway alert keep their own rules.
+
+  The Comms graph also reports 24-hour run-token totals per link and flags a pair
   that exceeds six reciprocal rounds on one ticket, including when FLIGHT stepped in.
 - **Short Comms.** Messages are limited to 1,200 characters. Put complete findings, plans and
   evidence in `report_findings`, `report_plan` or `report_evidence`, then send Comms a short
@@ -925,7 +982,12 @@ Every writer run started while the engine is on (not a preview, `MC_NO_LOOP_WRIT
 hub holding the crew lock) carries a loop. A writer run started without one cannot publish: its
 `report_evidence` answers that Mission Control is not driving the run.
 
-- **Report.** The seat commits, then calls `report_evidence` with a note and one `doneWhen`
+- **Report.** A shell response with a session id is a yielded command, not a completed check.
+  Poll that session until it supplies a final numeric exit code. `report_evidence` refuses while
+  a configured check is still running or its completion receipt is being validated, without
+  saving evidence or starting a push. If polling is refused, report the blocker rather than a pass.
+  The push gate still requires passing checks on the clean current commit.
+  The seat commits, then calls `report_evidence` with a note and one `doneWhen`
   entry for each line of the ticket's `## Done when`: `met` with its evidence (a test name, a file,
   a measurement) or `not_met` with the reason. The hub took those lines from the ticket when the
   run started, and refuses a report that leaves one out, quoting it (a run started before this
@@ -1233,6 +1295,26 @@ The text waits for that run (it is not sent to a newer run on the same seat). Th
 `review` and `review-ruling` parks into working, without waiving their findings. Other park kinds are
 refused; use the explicitly named resume route above only when accepting a review waiver is intended.
 
+### Recover a preserved crew PR
+
+An author at its account stop starts no more work. Its already green, independently reviewed PR
+can still receive FLIGHT's clearance and merge without waking the author. Explicit operator Stop,
+crew pause, budget parks, operator questions, merge holds and the ordinary QA and CI gates remain.
+
+When the controller has continued a crew PR on its preserved branch, the controller or operator
+can adopt its actual published head with
+`POST /api/runs/:id/pr-head { "sha": "<full published SHA>" }`. The ordinary operator or controller
+credential is required; seat tokens and FLIGHT's operator tool cannot make this recovery. It applies
+only to a same-repository, open, non-draft PR in a superuser merge workspace, at the freshly verified
+GitHub head and original branch. It refuses an active author, a dirty or unreadable worktree, a
+paused or explicitly stopped run, any park and any merge hold. A working run must be preserved aside.
+
+Adoption records the source as the run's push, clears old-head waivers and clearance, and returns the
+run to CI. It creates no check receipts, changes no checkout and starts no author. Fresh CI and
+independent QA on that head are required; FLIGHT then gives its normal head-bound merge clearance.
+An account stop still prevents the author from waking if rework is needed. The controller action
+is logged as a sync decision. A repeated request for the same adopted head makes no second adoption.
+
 ### Accept or send back a PR at UAT
 
 A repo whose rules set `uat` (labels, paths or both) keeps the engine from merging a matching PR until
@@ -1403,7 +1485,7 @@ Anything else answers 409 and writes nothing. Both are the operator's own click 
   instead, and ends the sender's run only when it is a crew seat's own run on that ticket; FLIGHT's own question is
   never offered. If the comment alone fails once the run has ended, the question stays aside and the route answers
   502. A second request for the same key while one is running answers 409. A set-aside question closes when its
-  ticket closes. Nothing serves or answers a set-aside question yet; that is a follow-up.
+  ticket closes. It is read and answered from its ticket, see [Answering a set-aside question](#answering-a-set-aside-question).
 - `POST /api/attention/:key/drop` closes the ticket as not planned with one comment, after the same refusals as
   FLIGHT's `close_ticket` (`closeBlocker` in `apps/server/src/flight/ticket-close.ts`: an open PR, open dependants,
   blocked-by cards, open sub-issues). The run that waits on the question ends with the close; it is the only
@@ -1411,6 +1493,23 @@ Anything else answers 409 and writes nothing. Both are the operator's own click 
 
 The comment goes through the same text scan as `comment_ticket` (no secret, no mention, no other item's number);
 a question whose text fails it answers 422 and nothing is written.
+
+### Answering a set-aside question
+
+- `GET /api/tickets/:repoId/:number/set-aside` lists the ticket's set-aside, unanswered seat questions, oldest first:
+  `id`, `text`, `ask` (FLIGHT's briefed ask, or null), `options` (`id`, `label`, `answer`), `asideAt` and `runId`.
+- `POST /api/tickets/:repoId/:number/set-aside/:id/answer` with `{ "text": "..." }` (operator token). It scans the text like
+  any Comms message (400 on a secret), removes `waiting:operator` from the issue, moves the card from Backlog to Ready
+  (left alone when another hand already moved it or a run works the ticket now), sends the text to the asking seat as
+  a Comms line to the ended run only (another run of that seat never reads it), and closes the question as answered. The
+  answer is stored first as an `answer` decision, so every later run on the ticket starts with it in its brief
+  (`answeredQuestionsOn`); a retry after a 502 replaces it. The run's handoff stays open, so the next start of the
+  ticket picks it up. A GitHub step that fails answers 502 and changes nothing a retry cannot repeat. An unknown
+  question or one on another ticket answers 404; one that is not set aside, or already answered, answers 409.
+- `POST /api/seats/:id/message` with a `question` that is set aside, whose run has ended, answers 409 and sends nothing:
+  without the refusal the text would reach whatever run holds the seat now.
+- After each board poll the hub removes `waiting:operator` from any open card outside the Backlog (someone moved it),
+  skipping while a Not now is running and any repo but the one Not now acts on (`autonomy: merge`, FLIGHT's session repo). A preview (`MC_NO_LOOP_WRITES`/no board writes) never does.
 
 ### FLIGHT's controller powers
 
@@ -1439,6 +1538,7 @@ named pause or attributes an unknown grant to FLIGHT.
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
+| `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. FLIGHT may pass the target budget brake only with a recorded basis that names a P0 ticket. |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
 | `resume_seat` | Resume a seat's unfinished run after a stop, a crew pause, an error or a restart; a build or plan seat in FLIGHT's session and a run in its lane. A stop can be lifted, but a crew-pause exception covers that run only. The original pause keeps its owner and seat coverage. Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), an already live unpaused session, and a machine without headroom. A failed resume removes only its own exception and restores the stop unless the operator changed it |
 | `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |
@@ -1897,10 +1997,14 @@ theme, Setup, and the dock toggle.
 | **Telemetry** (`/telemetry`) | KPIs, flow of work (throughput, cycle time, quality, you as CAPCOM), agents (tokens per minute, per turn, time), capacity and cost, for 1h/6h/24h/7d, by agent or account. Its read-only payload also carries bounded raw chart series: observed crew-state spans (open spans stop at their last observation), quota samples with configured alert/stop lines and reset causes, open and completed ticket Ready/start/merge/Done facts, timestamped range-bounded throughput, daily quality points (null means no evidence), and crew-pause, hub-Update and quota-reset annotations. Ticket cost retains both range-prorated cost and all-run cost for tickets merged in range. Charts take focus: ←/→ step the crosshair, Home/End jump. |
 | **Setup** (`/setup/<tab>`) | Read-only: sessions, loops, accounts, roles/guard/test lock, sources (each collector's last poll) with the glossary, access and notifications. |
 
-For a reversible operator decision, FLIGHT may brief a recommended option with a stored deadline.
-When that deadline passes, the hub records and delivers that recommendation once. Update holds,
-approvals, budget/account parks, guard acknowledgements, hard-rule flags, protected dismissal rows,
-observed-loop escalations, and briefs written before deadlines were stored are never defaulted.
+Operator briefs require complete decision context and typed, source-bound options. Genuine operator
+decisions wait for an explicit operator choice. A validated reversible action within FLIGHT's existing
+authority can receive a server-owned forty-minute FYI deadline. Its dispatch rechecks the current actor,
+exact target and existing holds; grants, approvals, review waivers and hold releases never default.
+Ordinary guidance follows its run across commits, while head-specific actions retain exact-head checks.
+An answer to a passed question set aside on that exact question is stored for its preserved run.
+Confirmed refusals release their choice claim for a new request. Uncertain outcomes retain their receipt
+and never replay automatically, including partial queue writes or a stored answer whose wake failed.
 
 **Overlays.** FLIGHT's dock is a column at 1200 px and wider, and a drawer with a scrim below
 that. The Item panel flies out from the right for one item; Away mode and Keys and lamps (`?`) are
@@ -2544,6 +2648,19 @@ branch previews do.
 - `tokenOveruse`: one finding per run started in range whose input + output tokens pass its ticket size's expected use. Expected use is 1.5 times the median of that size's build runs (only runs of build seats; watch, plan and review seats and observed loops are left out, as are runs of agents no longer configured) of the last `AUDIT_BASELINE_DAYS` (14) days, and `AUDIT_EXPECTED_TOKENS_DEFAULT` (400000) for a size with fewer than `AUDIT_BASELINE_MIN_RUNS` (5) of them or none. A finding carries review rounds, blocking findings by category, turns, uncached input, output, cache read and create, the expected use and a likely cause: `plan-gap` (scope or spec findings), `flaky-test-loop` (wrong or stale test findings), `rework-churn` (4 or more rounds, or 10 or more blocking findings), `wide-ticket` (Size L or XL with little rework) or `unexplained`. `groups` collects causes that repeat across two or more findings with a prevention to propose (`lesson`, `plan-rule` or `split-rule`); the proposal is text for the delegated path to take, nothing applies it. A finding never stops a run; only the `crew.run_token_budget` ceiling does.
 - `reviewRounds`: `prs` counts the PRs reviewed in range by their highest review round, and `late` counts, per reviewer seat and model, the blocking findings (Critical and Important) reported in range and how many were late. A finding is late when it comes in round 2 or later on a file the author left unchanged since the previous review (the hub compares the files of `since-last-review.diff`; a finding the reviewer holds from the last round, by a `held` resolution, is carried and not late; a review with no earlier round, or whose changed files are unknown, tags none). The tag is also on each stored finding.
 - `items`: stored Audit items in range, each with a `tier` that says who may act on it: `auto` (the hub does, and logs it), `flight`, `acknowledge` or `go-ahead`. The tier is fixed per item kind in `AUDIT_KIND_TIERS` (mc/core `audit.ts`) and stored with the item; a kind not listed is `go-ahead`, never `auto`. The kinds: `cli-update` auto, `cli-update-failed` flight, `cli-update-major` go-ahead, `flake` and `pr-size-outlier` flight, `audit-finding` and `code-health-proposal` acknowledge.
+- `improvements`: Audit's list of things to improve, worked out by hub code from its own records (no agent reads messages). Each row has a `kind`, a `subject`, the `ticket` and `pr` it links to, one plain `detail` line and a time. The four `tool-usage` rows come first and are always there: `report_findings`, `report_evidence`, `read_ticket` and `preview_browser`, with `calls` and `chars` (characters sent plus returned) for calls made in the 24 hours before the range end, recorded in `mcp_tool_calls` as each call finishes, so a long run and a run still open count by when the call happened (calls from before this table existed are not there). The message rows exist only while their condition holds:
+  - `question-asked-back`: the operator's first message in a question's discussion ends with a question mark.
+  - `question-waited`: a question that waited more than the wait, counted when it is answered or closed in the range (operator choices, operator closures, seats' `ask_flight` questions) or while still open at the range end, whenever it began.
+  - `delivered-after-run-ended`: a message with a target run delivered after that run ended.
+  - `chatter`: a pair past `COMMS_CHATTER_ROUNDS` on one ticket.
+  - `repeat-message`: a message the exact-repeat guard turned away at least once.
+  - `repeat-notice`: the same hub notice sent `notice_repeats` times on one PR.
+  - `controller-request-waited`: a message to the controller with no reply, `done` or settlement from it within the wait; counted when closed in the range or still open at its end.
+  - `ticket-message-volume`: a ticket whose message text is at least `ticket_text_factor` times the median ticket's and over 5,000 characters.
+
+  A message row links to its message's ticket or PR, else its sending run's ticket, else its reference; a row that cannot be linked to either is left out.
+
+  Thresholds are in `config.yaml` under `audit:`, with these defaults: `question_wait_minutes` 120, `controller_wait_minutes` 240, `ticket_text_factor` 3, `notice_repeats` 3.
 - `surgeonProposals`: always empty until SURGEON proposals are stored.
 
 The route only reads data the hub already stores.
@@ -2565,11 +2682,21 @@ The live check starts the new version the way a real seat does (`checkCli` in `a
 - If no build seat of that vendor is configured, no run can break on that tool, and the old bare check applies instead (`claude -p --allowedTools=Read` or `codex exec --sandbox read-only` in an empty temp dir, same nonce read).
 A pass keeps the version, clears the pending record and records a `cli-update` item; the next seat run uses it. A failure (install, wrong version or check) puts the previous version back (skipped when the failed install changed nothing), holds the failed version until a newer one appears, records a `cli-update-failed` item and raises one Needs-you note (`cli-auto:<tool>:<version>`). If the previous version is not back, new runs stay held and the update stays pending: the next pass (or the hub after a restart, which re-holds runs at start) re-checks and retries the rollback. Each step writes a server log line starting `cli update <tool>:`. The job never touches the guard, the safety floor, CI workflows or the Mission Control block.
 
-**Batching.** A wake whose only new facts are routine (a free seat, a startable ticket, a hold to release, an idle reviewer, a PR moving through its steps) waits until `FLIGHT_BATCH_MS` (15 minutes) after the last wake and goes out together with whatever else has built up. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. Everything else wakes at once, under the 2-minute gap: an unread plain message from the operator (the `operator` wake fact, cleared once FLIGHT's inbox reads it), operator holds in force, discussions, questions, triage, blockers and parks, signals, planned entries, stopped seats, instruction changes and the breaker. The safety floor is never held back.
+**Batching.** A wake whose only new facts are routine (a free seat, a startable ticket, a hold to release, an idle reviewer, a PR moving through its steps) waits until `FLIGHT_BATCH_MS` (15 minutes) after the last wake and goes out together with whatever else has built up. Settling a question, park or discussion, or FLIGHT reading a message, is not a change and wakes nothing (a breaker lift or a hold lifting still does: it frees work FLIGHT can act on). An operator message sent with interrupt is marked read once its text reaches the seat. An unread plain message from the operator or controller uses a 30-second gap so an idle FLIGHT wakes within a minute. It stays in the `operator` wake fact until FLIGHT reads it, including through an outage longer than six hours. Other non-routine facts keep the 2-minute gap: operator holds in force, discussions, questions, triage, blockers and parks, signals, planned entries, stopped seats, instruction changes and the breaker. The safety floor is never held back.
 
 **Wakes that end in nothing.** `dismiss_item` acks an item and it leaves FLIGHT's triage list. An item FLIGHT has a live `wait_on` for (its full key) raises no `item_stale` signal until the wait ends. A `wait_on` whose target is a reason's whole key (an item's full key, or a `repeat_park` key with spaces) counts as handling that reason, including an `item_stale` signal for the item.
 
 **What FLIGHT costs.** `GET /api/flight` `wakeCost` has the last 14 days: `totalUsd` (FLIGHT), `crewUsd`, `share` (0..1, the whole 14 days) and `weekShare` (the last 7 days only; read this one against the 0.2 target after a week of live work), `byDay`, and `byReason` (a run's cost spread over its messages by tokens, each message given to the latest wake before it, a wake's cost split over its reasons; `start` is the turn before a run's first wake). `wakeWaits` has the median milliseconds an operator message, a blocker to FLIGHT and a seat's `call_flight` waited, per day and overall. A wait ends at the first recorded wake after it or the first message FLIGHT's run produced after it, whichever is earlier; seat calls come from the signal record, which keeps them for the 14 days the figures cover. Compare the days before and after a change to see that decisions did not slow down.
+
+## FLIGHT's operator messages at an account stop
+
+An unread message from the operator or controller asks the watch to start FLIGHT even when its
+account is at the configured usage stop. Background starts still wait at that stop. Developer and
+reviewer starts keep their existing account and budget checks. The watch uses the normal start
+path: an explicit operator Stop, a parked run, unavailable seats and runtime guards still hold.
+If that requested start fails, one outage alert says the message is saved; provider error details
+stay out of that alert. Waiting crew questions stay with FLIGHT rather than becoming extra
+operator questions.
 
 ## FLIGHT's fresh session
 
@@ -2811,3 +2938,22 @@ keep their permission checks.
 - **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,
   FLIGHT's `answer` and `pass` decisions, question messages (label `question`) and the replies to
   them keep 365.
+
+
+### Clearing a Needs-you item
+
+`POST /api/attention/:key/clear` with an empty body returns `{ cleared: key }`. The operator or
+independent controller can clear an acknowledged item too. A delegated FLIGHT actor is refused
+with 403; a missing item returns 404, `That item is no longer waiting.` The runaway flag directs
+the operator to Lift and stays in force.
+
+Clear records a `cleared` closure, closes the displayed source and stores its notices atomically.
+A waiting seat receives a notice for its exact preserved run. FLIGHT receives one hub line.
+Existing approvals, budget stops and run holds remain in force. A new ask can appear again;
+refreshing the presentation cannot reopen the cleared ask. A queued legacy default for it stays
+undelivered and is excluded from new delivery attempts.
+
+FLIGHT can withdraw its own brief from a protected item. This retains the underlying question,
+source and protections; the original brief remains in history. Its unfinished-wake reminder stays
+in FLIGHT's wake and is omitted from operator attention. Answered and superseded note briefs
+are excluded from the current projection.

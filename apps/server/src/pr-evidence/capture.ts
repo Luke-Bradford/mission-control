@@ -18,6 +18,7 @@ import {
   evidenceUncataloguedText,
   prEvidenceAffectedPages,
   prEvidenceUncatalogued,
+  type WebPageGraph,
 } from "@mc/core";
 import { decodePng, diffImages } from "./png.ts";
 import type { EvidenceImage, PrEvidenceStore } from "./store.ts";
@@ -55,6 +56,11 @@ export interface PrEvidenceDeps {
     scheme: EvidenceScheme,
     signal: AbortSignal,
   ): Promise<Buffer>;
+  /**
+   * The static import graph of `sha`'s web source, so a change is photographed on the pages that
+   * reach it. A rejection (or no dep) keeps the folder rule.
+   */
+  webGraph?(sha: string, signal: AbortSignal): Promise<WebPageGraph>;
   retryMs?: number;
   /** The deadline of one capture; default EVIDENCE_CAPTURE_MS. */
   captureMs?: number;
@@ -119,6 +125,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
   /** Heads whose PR-body section is written. */
   const posted = new Set<string>();
   const controllers = new Set<AbortController>();
+  /** Successfully read head graphs, plus deduplicated reads still in flight. */
+  const pagesOf = new Map<string, EvidencePage[]>();
+  const readingPages = new Map<string, Promise<EvidencePage[]>>();
   let stopped = false;
   /** Captures run one at a time: each builds two hubs. */
   let queue: Promise<void> = Promise.resolve();
@@ -230,6 +239,43 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     }
   }
 
+  /** The pages `t` affects: by the head's import graph, else by folder. */
+  async function pagesFor(t: EvidenceTarget): Promise<EvidencePage[]> {
+    const key = keyOf(t);
+    const known = pagesOf.get(key);
+    if (known) return known;
+    const byFolder = prEvidenceAffectedPages(t.paths);
+    if (byFolder.length === 0 || deps.webGraph === undefined) return byFolder;
+    const reading = readingPages.get(key);
+    if (reading) return reading;
+    const graph = deps.webGraph;
+    const pending = Promise.resolve().then(async () => {
+      const controller = new AbortController();
+      controllers.add(controller);
+      const signal = AbortSignal.any([AbortSignal.timeout(2 * 60_000), controller.signal]);
+      if (stopped) controller.abort(new Error("the hub is shutting down"));
+      try {
+        const pages = prEvidenceAffectedPages(
+          t.paths,
+          await abortable(graph(t.sha, signal), signal),
+        );
+        pagesOf.set(key, pages);
+        return pages;
+      } catch (e) {
+        log(
+          `#${t.pr}: import graph not read, photographing by folder: ${e instanceof Error ? e.message : String(e)}`,
+        );
+        // A temporary failure must not fix this head to the folder fallback forever.
+        return byFolder;
+      } finally {
+        controllers.delete(controller);
+        readingPages.delete(key);
+      }
+    });
+    readingPages.set(key, pending);
+    return pending;
+  }
+
   async function post(t: EvidenceTarget): Promise<void> {
     const manifest = deps.store.manifest(deps.repoId, t.pr, t.sha);
     if (manifest === null || posted.has(keyOf(t)) || t.onStored === undefined) return;
@@ -245,8 +291,8 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     baseUrl: deps.baseUrl,
     async ensure(t) {
       if (stopped || t.repoId !== deps.repoId) return;
-      const pages = prEvidenceAffectedPages(t.paths);
-      if (pages.length === 0) return;
+      const pages = await pagesFor(t);
+      if (stopped || pages.length === 0) return;
       const key = keyOf(t);
       const have = manifest(t);
       if (evidenceMissing(have, t.sha, pages).length === 0) return post(t);
@@ -290,7 +336,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (t.repoId !== deps.repoId) return null;
       const uncatalogued = prEvidenceUncatalogued(t.paths);
       if (uncatalogued.length > 0) return evidenceUncataloguedText(uncatalogued);
-      const pages = prEvidenceAffectedPages(t.paths);
+      const pages = pagesOf.get(keyOf(t)) ?? prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
       const missing = evidenceMissing(manifest(t), t.sha, pages);
       if (missing.length === 0)
@@ -306,7 +352,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     async stop() {
       stopped = true;
       for (const controller of controllers) controller.abort(new Error("the hub is shutting down"));
-      await Promise.allSettled([...running.values()]);
+      await Promise.allSettled([...running.values(), ...readingPages.values()]);
     },
   };
 }

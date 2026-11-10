@@ -1,0 +1,10 @@
+{
+  "head": "3975c9adbf5a70a4db0504fbd12ca6d94e67d0c5",
+  "command": "pnpm -s test",
+  "cwd": "/private/tmp/mc-fix-1620",
+  "startedAt": 1794207157.345278,
+  "state": "finished",
+  "tmpdir": "/private/tmp/mc-1620-full-hjadovt_",
+  "exitCode": 1,
+  "elapsedSeconds": 1114.4071600437164
+}

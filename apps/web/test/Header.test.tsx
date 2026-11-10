@@ -39,6 +39,7 @@ function routes(
     machine?: unknown;
     lock?: TestLockState;
     limits?: LimitRow[];
+    mentions?: unknown[];
   } = {},
 ) {
   return stubFetch({
@@ -51,6 +52,7 @@ function routes(
     "/api/repos": REPOS,
     "/api/config": over.config ?? CONFIG,
     "/api/flight": { seat: null, decisions: [] },
+    "/api/comms/mentions": { mentions: over.mentions ?? [] },
   });
 }
 
@@ -64,19 +66,30 @@ afterEach(() => {
 });
 
 describe("Header chat button", () => {
-  it("badges the Needs-you count, briefed or not, and names it", async () => {
+  it("badges only the unread messages to the operator, not the Needs-you items", async () => {
+    const mention = (id: string, seen: boolean) => ({
+      seen,
+      message: { id, from: "inco-1", to: "CAPCOM", text: "hello", at: NOW },
+    });
     routes({
       attention: [
         item({ key: "esc:a#1", brief: brief() }),
         item({ key: "esc:a#2", brief: brief() }),
         item({ key: "esc:a#3" }),
-        item({ key: "esc:a#4", owner: "flight", brief: brief() }),
       ],
+      mentions: [mention("1", false), mention("2", false), mention("3", true)],
     });
     render(<Header page="board" />);
-    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 3 waiting on you" });
-    expect(btn.querySelector(".dock-unread")?.textContent).toBe("3");
+    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 2 unread to you" });
+    expect(btn.querySelector(".dock-unread")?.textContent).toBe("2");
     expect(screen.getByRole("link", { name: "Needs you: 3 waiting" })).toBeTruthy();
+  });
+
+  it("shows no badge for Needs-you items alone", async () => {
+    routes({ attention: [item({ key: "esc:a#1", brief: brief() })] });
+    render(<Header page="board" />);
+    const quiet = await screen.findByRole("button", { name: "FLIGHT chat" });
+    expect(quiet.querySelector(".dock-unread")).toBeNull();
   });
 
   it("shows no badge for unread replies alone", async () => {

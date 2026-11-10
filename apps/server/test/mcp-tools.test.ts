@@ -117,6 +117,7 @@ import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { PreviewRefused } from "../src/design-previews.ts";
 import { externalReviewKey } from "../src/external-review-key.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
+import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { attentionItems, NO_LOCK } from "../src/hud.ts";
 import { createGh, type GhRunner, ghCommand } from "../src/mcp/gh.ts";
@@ -2629,6 +2630,7 @@ describe("push and draft_pr", () => {
     git(clone, "fetch", "-q", "origin");
     ghDir = join(dir, "fakegh");
     mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "package.json"), '{"type":"commonjs"}');
     writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
     ghState({ "pr list": { stdout: "[]\n" }, "pr create": { stdout: `${PR_URL}\n` } });
     known = [LOCAL];
@@ -4156,6 +4158,7 @@ describe("the gh wrapper", () => {
   beforeEach(() => {
     ghDir = join(dir, "fakegh");
     mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "package.json"), '{"type":"commonjs"}');
     writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
   });
 
@@ -4308,6 +4311,102 @@ describe("report_evidence", () => {
     clock += 1000;
     expect((await rm(["apps/a.ts"], "chore: drop a", ev)).text).toMatch(/^Removed .*\nCommitted /);
     expect(await report("done")).toEqual({ text: EVIDENCE_RECORDED });
+  });
+
+  it("refuses a handoff while a check is running, then accepts its completed receipt", async () => {
+    const sha = await committed();
+    const command = "pnpm -s test:related";
+    const checks = createCheckRecorder({
+      store,
+      checks: async () => [command],
+      state: async () => ({ head: head(), clean: true }),
+    });
+    ev = make({
+      pendingChecks: (runId) => checks.pending(runId),
+      onEvidence: (s, r) => told.push([s, r]),
+    });
+    // An older passing attempt must not hide a new, still-running attempt on the same head.
+    store.addCheckRun({ runId: RUN, command, headSha: sha, ok: true, exitCode: 0, at: clock });
+    const key = { runId: RUN, toolUseId: "codex-item" };
+    await checks.begin(key, command);
+    const result = await report("Checks passed; ready to push.");
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain(command);
+    expect(result.text).toContain("poll");
+    expect(store.latestEvidence(RUN)).toBeNull();
+    expect(told).toEqual([]);
+    await checks.end(key, true, 0);
+    expect(await report("Checks completed with exit code 0.")).toEqual({ text: EVIDENCE_RECORDED });
+    expect(told).toEqual([[CTX.seatId, CTX.runId]]);
+  });
+
+  it("takes a fresh recovery report after a push-wait stop and its check completes", async () => {
+    const oldHead = await committed();
+    store.addCheckRun({
+      runId: RUN,
+      command: "pnpm -s test:related",
+      headSha: oldHead,
+      ok: false,
+      exitCode: 1,
+      at: clock,
+    });
+    expect(await report("Original check failed; work retained.")).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
+    const original = store.latestEvidence(RUN);
+    if (!original) throw new Error("Original evidence was not saved");
+    const recoveryHead = await committed("apps/recovery.ts");
+    const command = "pnpm -s test:related";
+    const checks = createCheckRecorder({
+      store,
+      checks: async () => [command],
+      state: async () => ({ head: head(), clean: true }),
+    });
+    ev = make({
+      now: () => clock,
+      pendingChecks: (runId) => checks.pending(runId),
+      onEvidence: (s, r) => told.push([s, r]),
+    });
+    told = [];
+    const key = { runId: RUN, toolUseId: "codex-recovery-check" };
+    await checks.begin(key, command);
+    setLoop({
+      phase: "parked",
+      parked: { kind: "stuck", reason: "Push missing while recovery check ran", ended: false },
+      pushFor: recoveryHead,
+      pushStartedAt: clock - 11 * 60_000,
+      reportedEvidenceId: original.id,
+    });
+    try {
+      const pending = await report("Recovery check still running.");
+      expect(pending.isError).toBe(true);
+      expect(pending.text).toContain(command);
+      expect(pending.text).toContain("poll");
+      expect(store.latestEvidence(RUN)?.id).toBe(original.id);
+      expect(store.run(RUN)?.loop?.parked?.kind).toBe("stuck");
+      expect(told).toEqual([]);
+    } finally {
+      await checks.end(key, true, 0);
+    }
+    expect(await report("Recovery checks completed with exit 0.")).toEqual({
+      text: EVIDENCE_RECORDED,
+    });
+    expect(store.run(RUN)?.loop).toMatchObject({ phase: "working", parked: null });
+    expect(told).toEqual([[CTX.seatId, CTX.runId]]);
+
+    const reported = store.latestEvidence(RUN);
+    if (!reported) throw new Error("Recovery evidence was not saved");
+    setLoop({
+      phase: "parked",
+      parked: { kind: "stuck", reason: "A later push wait on the reported head", ended: false },
+      pushFor: recoveryHead,
+      reportedEvidenceId: reported.id,
+    });
+    expect(await report("Repeat of the already reported recovery.")).toEqual(
+      refused(EVIDENCE_NO_COMMIT),
+    );
+    expect(store.run(RUN)?.loop?.parked?.kind).toBe("stuck");
+    expect(store.evidenceCount(RUN)).toBe(2);
   });
 
   it("records build-seat test runs and tests added", async () => {
@@ -4488,7 +4587,7 @@ describe("report_evidence", () => {
     expect(await report("@someone done")).toEqual(refused(EVIDENCE_NO_COMMIT));
   });
 
-  it.each(["review", "silent", "refused"])(
+  it.each(["review", "silent", "refused", "stuck"])(
     "records fresh evidence and resumes a %s park",
     async (kind) => {
       setLoop({
@@ -4509,11 +4608,27 @@ describe("report_evidence", () => {
     },
   );
 
-  it.each(["budget", "account-stop"])("keeps a %s park held", async (kind) => {
-    setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+  it.each(["budget", "account-stop", "controller-check", "uat", "gate", "review-ruling"])(
+    "keeps a %s park held",
+    async (kind) => {
+      setLoop({ phase: "parked", parked: { kind, reason: "held", ended: false } });
+      await committed();
+      expect(await report("fixed")).toEqual(refused(EVIDENCE_PARKED));
+      expect(store.latestEvidence(RUN)).toBeNull();
+    },
+  );
+
+  it("keeps an ended push-wait stop held despite fresh committed work", async () => {
+    setLoop({
+      phase: "parked",
+      parked: { kind: "stuck", reason: "Ended by operator", ended: true },
+    });
     await committed();
-    expect(await report("fixed")).toEqual(refused(EVIDENCE_PARKED));
+    expect(await report("Fresh work must not undo an operator stop.")).toEqual(
+      refused(EVIDENCE_PARKED),
+    );
     expect(store.latestEvidence(RUN)).toBeNull();
+    expect(told).toEqual([]);
   });
 
   it("records a refused retry for the same pushed and reported head", async () => {
@@ -4606,36 +4721,39 @@ describe("report_evidence", () => {
     expect(store.evidenceCount(RUN)).toBe(0);
   });
 
-  it("does not unpark when a budget hold lands while git status is pending", async () => {
-    await committed();
-    let statusReads = 0;
-    let release = () => {};
-    const pending = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    const delayed = make({
-      now: () => clock,
-      git: async (cwd, args, common, options) => {
-        if (cwd === wt && args[0] === "status") {
-          statusReads++;
-          await pending;
-        }
-        return crewGit(cwd, args, common, options);
-      },
-    });
-    setLoop({ phase: "parked", parked: { kind: "review", reason: "waiting", ended: false } });
-    const reporting = tool("report_evidence", delayed).call(CTX, { note: "fixed" });
-    await vi.waitFor(() => expect(statusReads).toBe(1));
-    setLoop({ phase: "parked", parked: { kind: "budget", reason: "held", ended: false } });
-    release();
+  it.each(["review", "stuck"])(
+    "does not unpark %s when a budget hold lands during git status",
+    async (kind) => {
+      await committed();
+      let statusReads = 0;
+      let release = () => {};
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const delayed = make({
+        now: () => clock,
+        git: async (cwd, args, common, options) => {
+          if (cwd === wt && args[0] === "status") {
+            statusReads++;
+            await pending;
+          }
+          return crewGit(cwd, args, common, options);
+        },
+      });
+      setLoop({ phase: "parked", parked: { kind, reason: "waiting", ended: false } });
+      const reporting = tool("report_evidence", delayed).call(CTX, { note: "fixed" });
+      await vi.waitFor(() => expect(statusReads).toBe(1));
+      setLoop({ phase: "parked", parked: { kind: "budget", reason: "held", ended: false } });
+      release();
 
-    expect(await reporting).toEqual(refused(EVIDENCE_PARKED));
-    expect(store.latestEvidence(RUN)).toBeNull();
-    expect(store.run(RUN)?.loop).toMatchObject({
-      phase: "parked",
-      parked: { kind: "budget", reason: "held", ended: false },
-    });
-  });
+      expect(await reporting).toEqual(refused(EVIDENCE_PARKED));
+      expect(store.latestEvidence(RUN)).toBeNull();
+      expect(store.run(RUN)?.loop).toMatchObject({
+        phase: "parked",
+        parked: { kind: "budget", reason: "held", ended: false },
+      });
+    },
+  );
 
   it("refuses a report with no commit since the last one, and takes it after a new one", async () => {
     expect(await report("done")).toEqual(refused(EVIDENCE_NO_COMMIT));
@@ -5445,6 +5563,7 @@ describe("report_plan", () => {
   beforeEach(() => {
     ghDir = join(dir, "fakegh");
     mkdirSync(ghDir);
+    writeFileSync(join(ghDir, "package.json"), '{"type":"commonjs"}');
     writeFileSync(join(ghDir, "gh"), FAKE_GH, { mode: 0o755 });
     ghState(view("Do X."));
     const cfg = config();

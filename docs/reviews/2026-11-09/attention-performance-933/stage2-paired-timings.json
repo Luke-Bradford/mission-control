@@ -1,0 +1,86 @@
+{
+  "description": "Five alternating-order pairs, separate Store instances, one unchanged SQLite snapshot and fixed timestamp. No request to the live hub.",
+  "now": 1794208087129,
+  "results": [
+    {
+      "pair": 0,
+      "label": "before",
+      "elapsedMs": 672.36,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "elapsedMs": 190.77,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "elapsedMs": 105.53,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "elapsedMs": 219.39,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "elapsedMs": 171.79,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "elapsedMs": 117.78,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "elapsedMs": 86.01,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "elapsedMs": 196.66,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "elapsedMs": 158.73,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "elapsedMs": 98.13,
+      "items": 11,
+      "bytes": 13449,
+      "sha256": "a014f77aa6268137a5d9bd3ccddbcc66df7da28b6122f09b4752772712472f01"
+    }
+  ]
+}

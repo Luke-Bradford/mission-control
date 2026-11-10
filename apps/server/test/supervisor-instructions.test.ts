@@ -1,3 +1,4 @@
+import { defined } from "./defined.ts";
 // All process boundaries use the repository's fake CLI/keeper fixture, never a paid provider.
 import "./supervisor-harness.ts";
 import { createHash } from "node:crypto";
@@ -267,7 +268,7 @@ it.each(["label:new", null, undefined])(
   "keeps current reloaded focus %s on the existing live run's next delivery",
   async (focus) => {
     const { sup, cfg } = make();
-    const session = cfg.crew!.sessions[0];
+    const session = defined(cfg.crew).sessions[0];
     const index = session.seats.findIndex((s) => s.id === "guido-1");
     const original = session.seats[index];
     original.focus = "label:old";
@@ -294,7 +295,7 @@ it.each(["label:new", null, undefined])(
 
 it("refuses a seat removed while its delivery waits without reimporting captured focus", async () => {
   const { sup, cfg } = make();
-  const configured = cfg.crew!.sessions[0];
+  const configured = defined(cfg.crew).sessions[0];
   const index = configured.seats.findIndex((s) => s.id === "guido-1");
   configured.seats[index].focus = "label:old";
   store.instructions.syncFocus(configured.seats[index], 1);
@@ -367,7 +368,7 @@ it.each(["saved instruction", "initial legacy focus import"])(
       );
       expect((await announceInstruction(deps, saved)).delivery).toBe("inbox");
     } else {
-      const seat = cfg.crew!.sessions[0].seats.find((s) => s.id === "guido-1");
+      const seat = defined(cfg.crew).sessions[0].seats.find((s) => s.id === "guido-1");
       if (!seat) throw new Error("Fixture seat missing");
       store.deleteSetting("instruction.config-focus:guido-1");
       seat.focus = "label:legacy";
