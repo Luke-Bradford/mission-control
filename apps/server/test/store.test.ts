@@ -697,6 +697,24 @@ describe("Store", () => {
     expect(store.board("r2")).toEqual([item(3, "r2")]);
   });
 
+  it("keeps a ticket wait separately from the GitHub board state", () => {
+    store.setTicketWait({
+      repoId: "r1",
+      issue: 1,
+      reason: "CI is running",
+      freesWhen: "CI finishes",
+      at: 1000,
+    });
+
+    expect(store.ticketWait("r1", 1)).toEqual({
+      reason: "CI is running",
+      freesWhen: "CI finishes",
+      at: 1000,
+    });
+    store.clearTicketWait("r1", 1);
+    expect(store.ticketWait("r1", 1)).toBeNull();
+  });
+
   it("migrates an old board_items table, defaulting the new columns", () => {
     const old = join(dir, "old-board.sqlite");
     const db = new DatabaseSync(old);

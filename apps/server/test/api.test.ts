@@ -4612,6 +4612,26 @@ describe("boards, escalations, health", () => {
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
   });
 
+  it("shows a waiting ticket without an owner", async () => {
+    store.replaceBoard("shop-app", [{ ...item, assignees: ["hub"], owner: "GUIDO" }]);
+    store.setTicketWait({
+      repoId: "shop-app",
+      issue: 7,
+      reason: "CI is running",
+      freesWhen: "CI finishes",
+      at: NOW,
+    });
+
+    expect((await get("/api/boards/shop-app")).json()).toEqual([
+      {
+        ...item,
+        assignees: [],
+        owner: null,
+        waiting: { reason: "CI is running", freesWhen: "CI finishes", at: NOW },
+      },
+    ]);
+  });
+
   it("says in words why the map snapshot is unavailable, without git's command text", async () => {
     withCrew();
     const session = config.crew?.sessions[0];

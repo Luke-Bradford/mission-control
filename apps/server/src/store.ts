@@ -157,6 +157,7 @@ import {
   type StrayKind,
   type Telemetry,
   type TestLockRun,
+  type TicketWait,
   TICKET_SIZES,
   TITLE_MARKERS,
   type TokenUsage,
@@ -495,6 +496,12 @@ CREATE TABLE IF NOT EXISTS hub_events (
 CREATE TABLE IF NOT EXISTS queues (
   seat_id TEXT NOT NULL, pos INTEGER NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
   taken_at INTEGER, PRIMARY KEY (seat_id, pos)
+);
+-- Hub-owned ticket waits do not change the GitHub Project Status field. They make the ticket
+-- unowned while it waits, so a free seat can take other Ready work.
+CREATE TABLE IF NOT EXISTS ticket_waits (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, reason TEXT NOT NULL, frees_when TEXT NOT NULL,
+  at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
 );
 -- Needs-you notes the engine raises; cleared_at is set once the cause is gone, dismissed_at when the operator dismissed it (reset when it is raised again).
 -- Things the hub did or needs decided, with the risk tier fixed by the item's kind when recorded.
@@ -3775,6 +3782,40 @@ export class Store {
       .prepare("SELECT * FROM board_items WHERE repo_id = ? AND issue_number = ?")
       .get(repoId, issueNumber) as Row | undefined;
     return row === undefined ? null : toBoardItem(row);
+  }
+
+  /** The hub-owned wait for a ticket. GitHub's board state remains the source for every other field. */
+  ticketWait(repoId: RepoId, issue: number): TicketWait | null {
+    const row = this.db
+      .prepare("SELECT reason, frees_when, at FROM ticket_waits WHERE repo_id = ? AND issue = ?")
+      .get(repoId, issue) as Row | undefined;
+    return row === undefined
+      ? null
+      : { reason: row.reason as string, freesWhen: row.frees_when as string, at: row.at as number };
+  }
+
+  /** Records that a ticket, rather than its former seat, waits for a known condition. */
+  setTicketWait({
+    repoId,
+    issue,
+    ...wait
+  }: { repoId: RepoId; issue: number } & TicketWait): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO ticket_waits (repo_id, issue, reason, frees_when, at) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(repo_id, issue) DO UPDATE SET reason = excluded.reason,
+             frees_when = excluded.frees_when, at = excluded.at`,
+        )
+        .run(repoId, issue, wait.reason, wait.freesWhen, wait.at);
+    });
+  }
+
+  /** Clears a condition the hub has observed to be resolved. */
+  clearTicketWait(repoId: RepoId, issue: number): void {
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM ticket_waits WHERE repo_id = ? AND issue = ?").run(repoId, issue);
+    });
   }
 
   /**

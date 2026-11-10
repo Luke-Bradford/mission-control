@@ -3776,17 +3776,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const handoffs = new Map(store.latestHandoffs(repo.id).map((h) => [h.ticket, h]));
         return store.board(repo.id).map((card) => {
           const h = handoffs.get(`${repo.id}#${card.issueNumber}`);
-          return h
-            ? {
-                ...card,
-                handoff: {
-                  runId: h.runId,
-                  fromSeat: h.fromSeat,
-                  at: h.at,
-                  acceptedBy: h.acceptedBy,
-                },
-              }
-            : card;
+          const waiting = store.ticketWait(repo.id, card.issueNumber);
+          return {
+            ...card,
+            ...(waiting ? { waiting, assignees: [], owner: null } : {}),
+            ...(h
+              ? {
+                  handoff: {
+                    runId: h.runId,
+                    fromSeat: h.fromSeat,
+                    at: h.at,
+                    acceptedBy: h.acceptedBy,
+                  },
+                }
+              : {}),
+          };
         });
       });
 
