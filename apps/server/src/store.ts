@@ -2099,7 +2099,7 @@ export class Store {
     this.addColumn(
       "comms",
       "label",
-      "TEXT CHECK (label IS NULL OR label IN ('question','handoff','blocker'))",
+      "TEXT CHECK (label IS NULL OR label IN ('question','handoff','blocker','none'))",
     );
     this.addColumn("comms", "ref", "TEXT");
     this.addColumn("comms", "reply_to", "INTEGER");
@@ -2113,6 +2113,7 @@ export class Store {
     this.addColumn("question_choices", "chosen_by", "TEXT");
     // Who sent it, set by the hub; NULL on rows stored before this column.
     this.addColumn("comms", "sender_kind", "TEXT");
+    this.migrateCommsLabels();
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
       CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
@@ -2170,6 +2171,39 @@ export class Store {
         OR (NEW.reaction != 'cant' AND NEW.reason IS NOT NULL)
       BEGIN SELECT RAISE(ABORT, 'invalid Comms reaction reason'); END;
     `);
+  }
+
+  /** Adds the explicit `none` label to databases created before Comms recorded it. */
+  private migrateCommsLabels(): void {
+    const schema = this.db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'comms'")
+      .get() as { sql?: string } | undefined;
+    if (schema?.sql?.includes("'none'")) {
+      if (this.db.prepare("SELECT 1 FROM comms WHERE label IS NULL LIMIT 1").get())
+        this.db.prepare("UPDATE comms SET label = 'none' WHERE label IS NULL").run();
+      return;
+    }
+    this.transaction(() => {
+      this.db.exec(`
+        ALTER TABLE comms RENAME TO comms_before_none_label;
+        CREATE TABLE comms (
+          id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
+          to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL,
+          label TEXT NOT NULL CHECK (label IN ('question','handoff','blocker','none')),
+          ref TEXT, reply_to INTEGER, target_run_id TEXT, from_run_id TEXT, pr INTEGER,
+          wake_failed_at INTEGER, delivered_at INTEGER, sender_kind TEXT, item_key TEXT
+        );
+        INSERT INTO comms (id, at, from_id, to_id, ticket, text, label, ref, reply_to,
+          target_run_id, from_run_id, pr, wake_failed_at, delivered_at, sender_kind, item_key)
+        SELECT id, at, from_id, to_id, ticket, text, COALESCE(label, 'none'), ref, reply_to,
+          target_run_id, from_run_id, pr, wake_failed_at, delivered_at, sender_kind, item_key
+        FROM comms_before_none_label;
+        DROP TABLE comms_before_none_label;
+        CREATE INDEX comms_at ON comms(at);
+        CREATE INDEX comms_from_id ON comms(from_id, id);
+        CREATE INDEX comms_to_id ON comms(to_id, id);
+      `);
+    }, true);
   }
 
   /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
@@ -6513,6 +6547,8 @@ export class Store {
     /** Server-resolved title for one internal context line accompanying an operator item send. */
     flightContextTitle?: string,
   ): (CommsRow & { repeat?: true }) | null {
+    if (!Number.isFinite(row.at)) throw new Error("Comms messages need a time.");
+    const label = row.label ?? "none";
     const text = cutCommsText(row.text);
     const replyTo =
       row.replyTo === undefined || row.replyTo === null ? null : commsMessageNumber(row.replyTo);
@@ -6534,7 +6570,7 @@ export class Store {
             text,
             repeatSince,
             row.ticket,
-            row.label ?? null,
+            label,
             replyTo,
             row.targetRunId ?? null,
             row.itemKey ?? null,
@@ -6554,7 +6590,7 @@ export class Store {
           .get(row.from, rate.since) as { n: number };
         if (count.n >= rate.limit) return;
       }
-      id = this.insertComms(row, text, replyTo);
+      id = this.insertComms({ ...row, label }, text, replyTo);
       if (
         row.from === COMMS_CAPCOM &&
         row.itemKey !== undefined &&

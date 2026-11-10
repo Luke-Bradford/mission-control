@@ -156,11 +156,12 @@ describe("claudeVersion", () => {
 
   it("kills a binary that ignores SIGTERM, and does not respawn it after the timeout", async () => {
     stuckCli("claude-stuck");
-    expect(await probeClaudeVersion("claude-stuck", 300)).toBeNull();
+    // Use the real probe's startup budget so a loaded runner can start the fixture before it is killed.
+    expect(await probeClaudeVersion("claude-stuck")).toBeNull();
     const pid = Number(readFileSync(join(dir, "pid"), "utf8"));
     await new Promise((r) => setTimeout(r, 200));
     expect(() => process.kill(pid, 0)).toThrow();
-    expect(await probeClaudeVersion("claude-stuck", 300)).toBeNull();
+    expect(await probeClaudeVersion("claude-stuck")).toBeNull();
     expect(claudeVersion("claude-stuck")).toBeNull();
     expect(runs("claude-stuck")).toBe(1);
   });

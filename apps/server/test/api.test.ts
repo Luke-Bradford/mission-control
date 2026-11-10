@@ -11,6 +11,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -275,7 +276,7 @@ const exampleText = () =>
   );
 
 beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), "mc-api-"));
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-api-")));
   stateDir = join(dir, "ta-state");
   mkdirSync(stateDir);
   mkdirSync(join(dir, "studio-logs"));
@@ -1062,7 +1063,7 @@ describe("Comms API", () => {
           at: third.at,
           from: "alpha",
           to: "crew",
-          label: null,
+          label: "none",
           ref: null,
           text: "three",
           senderKind: null,
@@ -1072,7 +1073,7 @@ describe("Comms API", () => {
           at: second.at,
           from: "beta",
           to: "alpha",
-          label: null,
+          label: "none",
           ref: null,
           text: "two",
           senderKind: null,
