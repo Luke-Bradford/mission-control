@@ -137,13 +137,10 @@ describeRendered("Demo, rendered", () => {
       await eventually(page, async () => (await text(page, selector)).length > 100, "content");
       await page.evaluate(() => window.__demoSetBeatMs(100), undefined);
       const read = () =>
-        page.evaluate(
-          ([css]) => {
-            const el = document.querySelector(css);
-            return el?.textContent ?? "";
-          },
-          selector,
-        );
+        page.evaluate(([css]) => {
+          const el = document.querySelector(css);
+          return el?.textContent ?? "";
+        }, selector);
       const before = await read();
       await eventually(page, async () => (await read()) !== before, `${at} to change`, 40_000);
       await page.close();

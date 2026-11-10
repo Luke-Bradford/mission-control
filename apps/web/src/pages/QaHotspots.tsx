@@ -16,7 +16,9 @@ export function QaHotspots() {
     () =>
       repos.data
         ? repos.data.flatMap((repo) => {
-            const seats = crew.data?.rows.filter((row) => row.kind === "crew" && row.repoId === repo.id).length ?? 0;
+            const seats =
+              crew.data?.rows.filter((row) => row.kind === "crew" && row.repoId === repo.id)
+                .length ?? 0;
             return config.data?.crew?.sessions.some((session) => session.repoId === repo.id)
               ? [{ id: repo.id, label: `${repo.id} · ${seats} crew seats` }]
               : [];

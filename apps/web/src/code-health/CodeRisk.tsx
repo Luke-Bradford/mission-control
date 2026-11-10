@@ -16,13 +16,11 @@ export function CodeRisk({
   data,
   window,
   coverage,
-  repo,
   onInspect,
 }: {
   data: Risk;
   window: CodeHealthView["window"];
   coverage: CodeHealthCoverage[];
-  repo: string;
   onInspect: (
     title: string,
     refs: CodeHealthEvidenceRef[],

@@ -49,7 +49,9 @@ export interface DemoBeat {
 }
 
 type Emit = (type: "changed", data: unknown) => void;
-interface Subscriber { emit: Emit; }
+interface Subscriber {
+  emit: Emit;
+}
 
 let seed: ReturnType<typeof demoSeed> | undefined;
 let state: DemoState | undefined;
@@ -399,9 +401,9 @@ function onVisibility() {
 
 /**
  * Join the scene as one stream. The first stream starts it, from beat 0; the last to leave drops
- * the state. `path` is the stream's address: `?map=<repo>` also gets that repo's frames.
+ * the state.
  */
-export function connect(path: string, emit: Emit): () => void {
+export function connect(_path: string, emit: Emit): () => void {
   const subscriber: Subscriber = { emit };
   if (subscribers.size === 0) {
     getState();

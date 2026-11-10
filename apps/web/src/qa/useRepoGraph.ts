@@ -4,9 +4,7 @@ import { ApiError } from "../api.ts";
 import { hub, RESOURCES, type Resource, useResource } from "../data.ts";
 
 /** Reads the repository graph only when a QA view needs import relationships. */
-export function useRepoGraph(
-  repo: string | null,
-): Resource<MapSnapshot> & { retry: () => void } {
+export function useRepoGraph(repo: string | null): Resource<MapSnapshot> & { retry: () => void } {
   const snapshot = useResource<MapSnapshot>(repo === null ? null : RESOURCES.repoMap(repo));
   const key = snapshot.data?.graphKey;
   const graphRef =
@@ -30,7 +28,11 @@ export function useRepoGraph(
       });
   }, [repo]);
   useEffect(() => {
-    if (!(graph.error instanceof ApiError) || graph.error.status !== 409 || attempts.current.count >= 2)
+    if (
+      !(graph.error instanceof ApiError) ||
+      graph.error.status !== 409 ||
+      attempts.current.count >= 2
+    )
       return;
     attempts.current.count++;
     let current = true;
@@ -56,9 +58,19 @@ export function useRepoGraph(
         retry,
       };
     try {
-      return { ...snapshot, data: joinMapGraph(snapshot.data, graph.data), error: graph.error ?? snapshot.error, retry };
+      return {
+        ...snapshot,
+        data: joinMapGraph(snapshot.data, graph.data),
+        error: graph.error ?? snapshot.error,
+        retry,
+      };
     } catch (e) {
-      return { data: undefined, error: e instanceof Error ? e : new Error(String(e)), loading: false, retry };
+      return {
+        data: undefined,
+        error: e instanceof Error ? e : new Error(String(e)),
+        loading: false,
+        retry,
+      };
     }
   }, [snapshot, key, graph, recoveryError, retry]);
 }

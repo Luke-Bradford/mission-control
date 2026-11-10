@@ -13,7 +13,6 @@ function setup(count = 6) {
         data={fixture.data}
         coverage={fixture.coverage}
         window="30d"
-        repo="sample"
         onInspect={onInspect}
       />,
     );

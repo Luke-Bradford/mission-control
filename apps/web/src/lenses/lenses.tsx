@@ -5,9 +5,9 @@ import {
   type MapSeat,
   type MapSnapshot,
 } from "@mc/core";
+import { seatColorVar } from "../crew.ts";
 import { percent, plural } from "../fmt.ts";
 import { githubItemHref } from "../links.ts";
-import { seatColorVar } from "../crew.ts";
 import "./lenses.css";
 
 /** The ownership areas' colours, in rules order: the mockup's three first, then other distinct tokens. */

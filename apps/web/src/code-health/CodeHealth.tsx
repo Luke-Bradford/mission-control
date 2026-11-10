@@ -325,13 +325,7 @@ export function CodeHealth() {
           />
         )}
         {view && tab === "risk" && view.data.tab === "risk" && (
-          <CodeRisk
-            data={view.data}
-            window={window}
-            coverage={view.coverage}
-            repo={repo}
-            onInspect={inspect}
-          />
+          <CodeRisk data={view.data} window={window} coverage={view.coverage} onInspect={inspect} />
         )}
         {view &&
           review &&

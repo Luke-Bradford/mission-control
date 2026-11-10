@@ -171,7 +171,6 @@ describe("App", () => {
     );
   });
 
-
   it("starts the dock collapsed on the Board and expands it on click", async () => {
     sessionStorage.removeItem("mc-dock-collapsed");
     act(() => toggleDock(true));
