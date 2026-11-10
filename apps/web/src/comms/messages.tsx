@@ -7,6 +7,7 @@ import {
   type Crew,
 } from "@mc/core";
 import { Fragment } from "react";
+import { MarkdownInline } from "../components/Markdown.tsx";
 import { seatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -86,7 +87,7 @@ export function MentionText({ text, onRef }: { text: string; onRef?: (ref: strin
             (login && part.toLowerCase() === `@${login.toLowerCase()}`) ? (
             <span className="mention">{part}</span>
           ) : (
-            part
+            <MarkdownInline text={part} />
           )}
         </Fragment>
       ))}

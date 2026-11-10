@@ -21,6 +21,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { MarkdownInline } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { messageStateLine, sendStateLine } from "../flight/conversation.ts";
@@ -663,7 +664,9 @@ function MentionsBell({
                   {mention.message.to === COMMS_CREW ? "#crew" : "direct"} ·{" "}
                   {time(mention.message.at)}
                 </span>
-                <em>{mention.message.text}</em>
+                <em>
+                  <MarkdownInline text={mention.message.text} />
+                </em>
               </button>
             );
           })}

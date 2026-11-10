@@ -221,6 +221,16 @@
   font: 600 var(--fs-title) / var(--lh-title) var(--display);
 }
 
+.display-controls {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .sgrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));

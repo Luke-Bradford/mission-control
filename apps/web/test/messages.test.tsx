@@ -5,6 +5,13 @@ import { stubFetch } from "./fetchStub.ts";
 import { CONFIG } from "./fixtures.ts";
 
 describe("MentionText", () => {
+  it("uses the shared formatted-text renderer", () => {
+    stubFetch({ "/api/config": CONFIG });
+    const { container } = render(<MentionText text="**Update:** the check passed." />);
+    expect(container.querySelector("strong")?.textContent).toBe("Update:");
+    expect(container.textContent).toBe("Update: the check passed.");
+  });
+
   it("links the exact saved QA report in rework Comms without enabling arbitrary URLs", () => {
     stubFetch({ "/api/config": CONFIG });
     const path = `/qa?repo=mission-control&pr=1365&report=${"a".repeat(64)}`;
