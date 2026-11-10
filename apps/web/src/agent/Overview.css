@@ -317,6 +317,10 @@
   overflow: hidden;
   padding-bottom: 0;
 }
+#page-agent.agent-v2.agent-trace-page {
+  overflow-y: auto;
+  padding-bottom: var(--sp-4);
+}
 .agent-control-room {
   display: grid;
   grid-template-columns: clamp(260px, 19vw, 348px) minmax(0, 1fr) clamp(220px, 18vw, 320px);

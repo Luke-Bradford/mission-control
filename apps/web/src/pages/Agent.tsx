@@ -75,7 +75,7 @@ export function Agent({ id }: { id: string | null }) {
   else if (!row) missing = detail.error ? "Could not load this agent." : "Loading…";
 
   return (
-    <section id="page-agent" className="agent-v2">
+    <section id="page-agent" className={`agent-v2${traceRun ? " agent-trace-page" : ""}`}>
       <h1 className="sr-only">Agents</h1>
       {traceRun && id !== null ? (
         <RunTracePanel agentId={id} runId={traceRun} />

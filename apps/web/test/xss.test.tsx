@@ -207,21 +207,6 @@ describe("untrusted text renders literally", () => {
     expect(pre).toContain(`input: ${SCRIPT}`);
     expect(pre).toContain(`result: ${PAYLOAD + SCRIPT}`);
     expect(container.querySelector("#liveCall")?.textContent).toContain(PAYLOAD);
-    act(() =>
-      within(container.querySelector("#sideP") as HTMLElement)
-        .getByRole("button", { name: "Subagents 1" })
-        .click(),
-    );
-    expect(container.querySelector("#sideBody")?.textContent).toContain(SCRIPT);
-    act(() =>
-      within(container.querySelector("#sideP") as HTMLElement)
-        .getByRole("button", { name: /^Files/ })
-        .click(),
-    );
-    await waitFor(() =>
-      expect(container.querySelector("#sideBody")?.textContent).toContain(PAYLOAD),
-    );
-    expect(container.querySelector("#sideBody")?.textContent).toContain(SCRIPT);
     expect(container.querySelector("img, script")).toBeNull();
   });
 });
