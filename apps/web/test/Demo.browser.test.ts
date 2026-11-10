@@ -137,7 +137,7 @@ describeRendered("Demo, rendered", () => {
       await eventually(page, async () => (await text(page, selector)).length > 100, "content");
       await page.evaluate(() => window.__demoSetBeatMs(100), undefined);
       const read = () =>
-        page.evaluate(([css]) => {
+        page.evaluate((css) => {
           const el = document.querySelector(css);
           return el?.textContent ?? "";
         }, selector);
