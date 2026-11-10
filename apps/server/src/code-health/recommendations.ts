@@ -1,5 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   CODE_HEALTH_RULES,
   type CodeHealthRecommendation,
   type CodeHealthRecommendationState,
@@ -19,7 +20,11 @@ export interface RecommendationScope {
   from: number;
   until: number;
   file?: string;
+  /** All paths carrying the same explicit finding lineage. */
+  files?: string[];
   category?: string;
+  findingSummary?: string;
+  findingFix?: string;
   pr?: number;
   /** What the PR's review findings mostly concerned; one-per-PR proposals with one cause group. */
   cause?: string;
@@ -32,6 +37,36 @@ export type Proposal = Omit<
 > & {
   scope: RecommendationScope | null;
 };
+
+function defaultDecision(rule: string): NonNullable<CodeHealthRecommendation["decision"]> {
+  return CODE_HEALTH_FLIGHT_TIER_RULES.includes(rule)
+    ? { owner: "FLIGHT", tier: "flight" }
+    : { owner: "operator", tier: "operator" };
+}
+function normaliseProposal(
+  value: Omit<CodeHealthRecommendation, "createdAt" | "updatedAt" | "state" | "evidence">,
+): Proposal {
+  const legacy = value as typeof value & Partial<CodeHealthRecommendation>;
+  return {
+    ...value,
+    causeId: legacy.causeId ?? `legacy:${value.rule}:${value.id}`,
+    title: legacy.title ?? value.proposal,
+    measure: legacy.measure ?? {
+      current: value.target.baseline,
+      unit: value.target.metric,
+      window: "recorded observation",
+      sourceAt: null,
+      coverage: "Recorded before measured recommendation fields were introduced.",
+    },
+    target: {
+      ...value.target,
+      value: value.target.value ?? null,
+      source: value.target.source ?? "Missing recorded target policy.",
+      policy: value.target.policy ?? "A numeric target was not recorded for this rule.",
+    },
+    decision: legacy.decision ?? defaultDecision(value.rule),
+  } as Proposal;
+}
 export interface RecommendationRecord extends CodeHealthRecommendation {
   scope: RecommendationScope | null;
   baseline: {
@@ -76,8 +111,10 @@ export function installRecommendations(db: Db) {
     db.exec("ALTER TABLE code_health_recommendations ADD COLUMN remeasure TEXT");
 }
 function decode(row: Record<string, unknown>): RecommendationRecord {
+  const proposal = normaliseProposal(JSON.parse(String(row.proposal)));
   return {
-    ...JSON.parse(String(row.proposal)),
+    ...proposal,
+    scope: proposal.scope ?? null,
     state: JSON.parse(String(row.state)),
     active: row.active === 1,
     workReady: row.work_ready === 1,
@@ -300,11 +337,15 @@ export function recommendationProposals(
   function add(
     rule: string,
     subject: string,
+    causeId: string,
+    title: string,
     observations: unknown,
     observation: string,
     proposal: string,
     metric: string,
     baseline: number | null,
+    target: { value: number | null; source: string; policy: string },
+    measure: NonNullable<CodeHealthRecommendation["measure"]>,
     uncertainty: string,
     scope: Omit<
       RecommendationScope,
@@ -316,6 +357,8 @@ export function recommendationProposals(
       repoId,
       rule,
       ruleVersion: CODE_HEALTH_RULES.version,
+      causeId,
+      title,
       scope: scope
         ? {
             ...scope,
@@ -333,7 +376,9 @@ export function recommendationProposals(
         rule === "collection"
           ? "Collection is missing; no negative health judgement is possible."
           : "Conservative triage threshold met by observed reported reviews in 30 days.",
-      target: { metric, direction: "decrease", baseline },
+      measure,
+      target: { metric, direction: "decrease", baseline, ...target },
+      decision: defaultDecision(rule),
     });
   }
   const groups = new Map<string, typeof source.findings>();
@@ -341,7 +386,9 @@ export function recommendationProposals(
   for (const f of source.findings)
     if (f.category !== null && f.file && !seenFindings.has(f.findingId)) {
       seenFindings.add(f.findingId);
-      const key = JSON.stringify([f.category, f.file]);
+      // The reviewer-recorded summary and fix are the explicit cause lineage. A path or
+      // category alone is only a location or label and must not merge recommendations.
+      const key = JSON.stringify([f.category, f.summary.trim(), f.fix.trim()]);
       const group = groups.get(key) ?? [];
       group.push(f);
       groups.set(key, group);
@@ -351,17 +398,56 @@ export function recommendationProposals(
       rows.length >= CODE_HEALTH_RULES.recurringCorrection.findings &&
       new Set(rows.map((r) => r.pr)).size >= CODE_HEALTH_RULES.recurringCorrection.distinctPrs
     ) {
-      const [category, file] = JSON.parse(key);
+      const [category, summary, fix] = JSON.parse(key) as [string, string, string];
+      const files = [
+        ...new Set(rows.map((row) => row.file).filter((file): file is string => !!file)),
+      ].sort();
+      const causeId = `finding-lineage:${hash([category, summary, fix])}`;
+      const exactHead = [...new Set(rows.map((row) => row.pr))].every((pr) => {
+        const currentHead = rows.find((row) => row.pr === pr)?.currentHeadSha;
+        return (
+          currentHead !== null &&
+          currentHead !== undefined &&
+          source.reviews.some((review) => review.pr === pr && review.headSha === currentHead)
+        );
+      });
+      const unresolved = rows.filter(
+        (row) => row.resolution === null && row.currentHeadSha === row.headSha,
+      );
+      const current = exactHead ? unresolved.length : null;
       add(
         "recurring-correction",
         key,
+        causeId,
+        `Apply recorded ${category} fix: ${fix}`,
         rows.map((r) => r.findingId).sort(),
-        `${rows.length} distinct ${category} findings on ${file} across ${new Set(rows.map((r) => r.pr)).size} PRs in 30 days.`,
-        "Inspect the shared cause and propose a narrow invariant or regression test.",
-        "distinct findings in this category/file per 30 days",
-        rows.length,
+        `${rows.length} recorded ${category} findings for one cause across ${files.length} files and ${new Set(rows.map((r) => r.pr)).size} PRs in 30 days.`,
+        `Apply the recorded fix “${fix}” for ${category} findings, then add its regression coverage.`,
+        "unresolved findings for this recorded cause",
+        current,
+        {
+          value: 0,
+          source: "clean-review target",
+          policy: "Existing clean-review target: no unresolved findings for the recorded cause.",
+        },
+        {
+          current,
+          unit: "findings",
+          window: "30d",
+          sourceAt: source.observedUntil,
+          coverage: exactHead
+            ? "Exact reviewed heads for the recorded finding lineage."
+            : "A newer PR head has no matching review; the current blocking count is unknown.",
+        },
         "Reported findings are review observations, not confirmed production defects. Carry lineage may be unknown.",
-        { file, category },
+        {
+          file: files[0],
+          files,
+          category,
+          findingSummary: summary,
+          findingFix: fix,
+          cause: causeId,
+        },
       );
     }
   const prs = new Map<number, { round: number; reviews: typeof source.reviews }>();
@@ -389,11 +475,25 @@ export function recommendationProposals(
       add(
         "repeated-rounds",
         String(pr),
+        `review-rounds:${pr}`,
+        `Reduce review rounds for PR ${pr} before extending its scope`,
         group.reviews.map((r) => [r.reviewId, r.round]),
         `PR ${pr} reached ${group.round} reported review rounds in the observed 30-day cohort.`,
         "Inspect finding history and planning scope before extending the same work.",
         "maximum reported review round for this PR",
         group.round,
+        {
+          value: null,
+          source: "Missing recorded clean-review target.",
+          policy: "A review-round threshold is a triage trigger, not a numeric completion target.",
+        },
+        {
+          current: group.round,
+          unit: "review rounds",
+          window: "recorded PR",
+          sourceAt: source.observedUntil,
+          coverage: "Reported reviews for this PR in the observed 30-day cohort.",
+        },
         "Recent cohorts are provisional; round counts do not establish a production defect.",
         { pr, cause: causeOf(pr) },
       );
@@ -411,11 +511,25 @@ export function recommendationProposals(
     add(
       "collection",
       "risk-and-tests",
+      "collection:risk-and-tests",
+      "Collect the missing code-health measurement sources",
       [missing, tests],
       `Missing measurement sources: ${missing.join(", ")}. ${tests.reports} imported test reports are recorded in this window.`,
       "Check missing collection before judging file trends or test reliability.",
       "missing measurement sources",
       null,
+      {
+        value: null,
+        source: "Missing source collection.",
+        policy: "A numeric health target cannot be set until these sources are collected.",
+      },
+      {
+        current: null,
+        unit: "sources",
+        window: "30d",
+        sourceAt: source.observedUntil,
+        coverage: "Collection prerequisite, not a code-health measure.",
+      },
       "Observed imports are not complete GitHub history. Explicit order metadata is not a verified retry sequence; mixed job outcomes alone do not establish flaky tests.",
     );
     collection = proposals.pop();

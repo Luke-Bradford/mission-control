@@ -32,6 +32,8 @@ const finding = (id: number, pr: number, category: string | null = null): CodeHe
   headSha: "a".repeat(40),
   file: "src/example.ts",
   category,
+  summary: "Fixture finding",
+  fix: "Add fixture coverage",
   state: "open",
   resolution: null,
   resolvedReviewId: null,

@@ -17,17 +17,49 @@ function measure(
   at: number,
   checkout: string | undefined,
 ): { current: number | null; note: string } | typeof RETRY {
-  if (row.rule === "recurring-correction" && row.scope?.file && row.scope.category) {
+  if (row.rule === "recurring-correction" && row.scope?.category) {
     const source = store.codeHealthReviews(repoId, at - WINDOW_MS, at);
     if (source.observedFrom === null) return RETRY;
+    const matching = source.findings.filter(
+      (f) =>
+        f.category === row.scope?.category &&
+        (row.scope?.findingSummary === undefined || f.summary === row.scope.findingSummary) &&
+        (row.scope?.findingFix === undefined || f.fix === row.scope.findingFix),
+    );
+    // Legacy accepted records have no recorded lineage or exact-head source. Preserve their
+    // immutable-baseline re-measure behaviour; new projections never take this path.
+    const legacy = row.scope.findingSummary === undefined;
+    const exactHead =
+      legacy ||
+      [...new Set(matching.map((f) => f.pr))].every((pr) => {
+        const currentHead = matching.find((f) => f.pr === pr)?.currentHeadSha;
+        return (
+          currentHead !== null &&
+          currentHead !== undefined &&
+          source.reviews.some((review) => review.pr === pr && review.headSha === currentHead)
+        );
+      });
+    if (!exactHead) return { current: null, note: "A newer PR head has no matching review." };
     const ids = new Set(
-      source.findings
-        .filter((f) => f.file === row.scope?.file && f.category === row.scope?.category)
+      matching
+        .filter(
+          (f) =>
+            f.category === row.scope?.category &&
+            f.resolution === null &&
+            (legacy || f.currentHeadSha === f.headSha) &&
+            (row.scope?.findingSummary === undefined || f.summary === row.scope.findingSummary) &&
+            (row.scope?.findingFix === undefined || f.fix === row.scope.findingFix) &&
+            (row.scope?.files === undefined ||
+              (f.file !== null && row.scope.files.includes(f.file))) &&
+            (row.scope?.files !== undefined ||
+              row.scope?.file === undefined ||
+              f.file === row.scope.file),
+        )
         .map((f) => f.findingId),
     );
     return {
       current: ids.size,
-      note: "Distinct findings in this category and file, last 30 days.",
+      note: "Unresolved findings for the recorded cause, last 30 days.",
     };
   }
   if (row.rule === "repeatedly-changed-large-file" && row.scope?.file) {

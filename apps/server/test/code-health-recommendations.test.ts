@@ -45,24 +45,52 @@ describe("durable code-health decisions", () => {
     store.close();
     rmSync(dir, { recursive: true, force: true });
   });
-  function review(id: number, pr: number, round = 1) {
+  function review(id: number, pr: number, round = 1, sha = "a".repeat(40)) {
     db.prepare(
       `INSERT INTO reviews(id,author_run_id,repo_id,seat_id,pr_number,sha,epoch,attempt,round,state,created_at,ended_at)VALUES(?,?,'sample','reviewer',?,?,0,1,?,'reported',?,?)`,
-    ).run(id, `run-${id}`, pr, "a".repeat(40), round, NOW - 1000, NOW - 1000);
+    ).run(id, `run-${id}`, pr, sha, round, NOW - 1000, NOW - 1000);
   }
   function finding(
     review: number,
     pos: number,
     file = "src/example.ts",
     category: string | null = "spec",
+    summary = "Example",
+    fix = "Example",
   ) {
     db.prepare(
-      `INSERT INTO review_findings(review_id,author_run_id,pos,severity,file,line,summary,scenario,fix,category,state)VALUES(?,?,?,'Minor',?,1,'Example','Example','Example',?,'open')`,
-    ).run(review, `run-${review}`, pos, file, category);
+      `INSERT INTO review_findings(review_id,author_run_id,pos,severity,file,line,summary,scenario,fix,category,state)VALUES(?,?,?,'Minor',?,1,?,'Example',?,?,'open')`,
+    ).run(review, `run-${review}`, pos, file, summary, fix, category);
   }
   function proposal() {
     store.refreshCodeHealthRecommendations("sample", NOW);
     return present(store.codeHealthRecommendations("sample")[0]);
+  }
+  function currentHead(number: number, headSha: string) {
+    store.upsertPullRequests(
+      "sample",
+      [
+        {
+          repoId: "sample",
+          number,
+          title: `PR ${number}`,
+          url: `https://github.com/example/sample/pull/${number}`,
+          branch: `fixture/${number}`,
+          base: "main",
+          ticket: null,
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: NOW - 1000,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha,
+          mergeable: null,
+        } as never,
+      ],
+      NOW,
+    );
   }
   it("updates collection gaps from imported metadata without materialising named attempts on Overview", () => {
     const full = vi.spyOn(store, "codeHealthTestAttempts").mockImplementation(() => {
@@ -144,8 +172,153 @@ describe("durable code-health decisions", () => {
       "recurring-correction",
       "repeated-rounds",
     ]);
-    expect(rows.find((r) => r.rule === "recurring-correction")?.target.baseline).toBe(4);
+    expect(rows.find((r) => r.rule === "recurring-correction")?.target.baseline).toBeNull();
     expect(store.codeHealthRecommendations("other")).toEqual([]);
+  });
+  it("groups one recorded cause across files and publishes its measured decision fields", () => {
+    review(1, 10);
+    review(2, 11);
+    review(3, 12);
+    finding(1, 0, "src/first.ts", "boundary-check");
+    finding(1, 1, "src/first.ts", "boundary-check");
+    finding(2, 0, "src/second.ts", "boundary-check");
+    finding(2, 1, "src/second.ts", "boundary-check");
+    finding(2, 2, "src/second.ts", "other-cause");
+    finding(2, 3, "src/second.ts", "other-cause");
+    finding(3, 0, "src/second.ts", "other-cause");
+    finding(3, 1, "src/second.ts", "other-cause");
+    currentHead(10, "a".repeat(40));
+    currentHead(11, "a".repeat(40));
+    currentHead(12, "a".repeat(40));
+
+    store.refreshCodeHealthRecommendations("sample", NOW);
+
+    const rows = store
+      .codeHealthRecommendations("sample")
+      .filter((row) => row.rule === "recurring-correction");
+    expect(rows).toHaveLength(2);
+    const boundary = present(rows.find((row) => row.scope?.files?.length === 2));
+    expect(boundary.scope?.files).toEqual(["src/first.ts", "src/second.ts"]);
+    expect(boundary.title).toContain("boundary-check");
+    expect(boundary.measure).toMatchObject({ current: 4, unit: "findings", window: "30d" });
+    expect(boundary.target).toMatchObject({ value: 0, source: "clean-review target" });
+    expect(boundary.decision).toEqual({ owner: "operator", tier: "operator" });
+  });
+  it("reports an unreviewed changed head as an unknown current measure", () => {
+    review(1, 10);
+    review(2, 11);
+    for (let pos = 0; pos < 3; pos++) {
+      finding(1, pos, "src/a.ts", "boundary-check");
+      finding(2, pos, "src/b.ts", "boundary-check");
+    }
+    currentHead(10, "b".repeat(40));
+    currentHead(11, "a".repeat(40));
+
+    store.refreshCodeHealthRecommendations("sample", NOW);
+
+    const row = present(
+      store
+        .codeHealthRecommendations("sample")
+        .find((value) => value.rule === "recurring-correction"),
+    );
+    expect(row.measure?.current).toBeNull();
+    expect(row.measure?.coverage).toContain("newer PR head");
+    expect(row.target.value).toBe(0);
+  });
+  it("keeps resolved historical findings as evidence but excludes them from the current measure", () => {
+    review(1, 10);
+    review(2, 11);
+    for (let pos = 0; pos < 2; pos++) {
+      finding(1, pos, "src/a.ts", "boundary-check");
+      finding(2, pos, "src/b.ts", "boundary-check");
+    }
+    currentHead(10, "a".repeat(40));
+    currentHead(11, "a".repeat(40));
+    db.prepare("UPDATE review_findings SET resolution='fixed' WHERE review_id IN (?,?)").run(1, 2);
+
+    store.refreshCodeHealthRecommendations("sample", NOW);
+
+    const row = present(
+      store
+        .codeHealthRecommendations("sample")
+        .find((value) => value.rule === "recurring-correction"),
+    );
+    expect(row.observation).toContain("4 recorded");
+    expect(row.measure?.current).toBe(0);
+    expect(row.target.value).toBe(0);
+  });
+  it("keeps distinct causes in one category and file as separate stored recommendations", () => {
+    review(1, 10);
+    review(2, 11);
+    for (let pos = 0; pos < 2; pos++) {
+      finding(1, pos, "src/shared.ts", "boundary", "Range check", "Validate bounds");
+      finding(2, pos, "src/shared.ts", "boundary", "Range check", "Validate bounds");
+      finding(1, pos + 2, "src/shared.ts", "boundary", "Null check", "Reject null input");
+      finding(2, pos + 2, "src/shared.ts", "boundary", "Null check", "Reject null input");
+    }
+    currentHead(10, "a".repeat(40));
+    currentHead(11, "a".repeat(40));
+
+    store.refreshCodeHealthRecommendations("sample", NOW);
+
+    const rows = store
+      .codeHealthRecommendations("sample")
+      .filter((row) => row.rule === "recurring-correction");
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.id)).size).toBe(2);
+    expect(new Set(rows.map((row) => row.causeId)).size).toBe(2);
+  });
+  it("clears an unknown changed head only after a review records that head", () => {
+    review(1, 10);
+    review(2, 11);
+    for (let pos = 0; pos < 2; pos++) {
+      finding(1, pos, "src/a.ts", "boundary-check");
+      finding(2, pos, "src/b.ts", "boundary-check");
+    }
+    currentHead(10, "b".repeat(40));
+    currentHead(11, "a".repeat(40));
+    store.refreshCodeHealthRecommendations("sample", NOW);
+    expect(
+      store.codeHealthRecommendations("sample").find((row) => row.rule === "recurring-correction")
+        ?.measure?.current,
+    ).toBeNull();
+
+    review(3, 10, 2, "b".repeat(40));
+    store.refreshCodeHealthRecommendations("sample", NOW + 1);
+    expect(
+      store.codeHealthRecommendations("sample").find((row) => row.rule === "recurring-correction")
+        ?.measure?.current,
+    ).toBe(2);
+  });
+  it("keeps eight distinct real-shaped causes with measured targets in a busy fixture", () => {
+    for (let cause = 1; cause <= 8; cause++) {
+      const first = cause * 10,
+        second = first + 1,
+        category = `boundary-${cause}`;
+      review(first, first);
+      review(second, second);
+      finding(first, 0, `src/feature-${cause}.ts`, category);
+      finding(first, 1, `src/feature-${cause}.ts`, category);
+      finding(second, 0, `src/feature-${cause}.spec.ts`, category);
+      finding(second, 1, `src/feature-${cause}.spec.ts`, category);
+      currentHead(first, "a".repeat(40));
+      currentHead(second, "a".repeat(40));
+    }
+
+    store.refreshCodeHealthRecommendations("sample", NOW);
+
+    const causes = store
+      .codeHealthRecommendations("sample")
+      .filter((row) => row.rule === "recurring-correction");
+    expect(new Set(causes.map((row) => row.causeId)).size).toBe(8);
+    expect(
+      causes.filter(
+        (row) => typeof row.measure?.current === "number" && typeof row.target.value === "number",
+      ),
+    ).toHaveLength(8);
+    expect(causes.every((row) => row.title && row.decision && row.state.kind === "proposed")).toBe(
+      true,
+    );
   });
   it("refresh deduplicates and retains accepted owner and immutable baseline after evidence changes", () => {
     review(1, 10, 3);
@@ -354,7 +527,7 @@ describe("durable code-health decisions", () => {
       await app.close();
     }
   });
-  it("narrows recurring-correction evidence to the actual category/file", async () => {
+  it("narrows recurring-correction evidence to the recorded cause across its files", async () => {
     review(1, 10);
     review(2, 11);
     finding(1, 0);
@@ -383,11 +556,11 @@ describe("durable code-health decisions", () => {
           headers,
         })
       ).json();
-      expect(page.rows).toHaveLength(3);
+      expect(page.rows).toHaveLength(4);
       expect(
         page.rows.every(
           (r: { file: string; category: string }) =>
-            r.file === "src/example.ts" && r.category === "spec",
+            ["src/example.ts", "src/other.ts"].includes(r.file) && r.category === "spec",
         ),
       ).toBe(true);
     } finally {

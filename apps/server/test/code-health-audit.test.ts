@@ -191,6 +191,24 @@ describe("code-health audit", () => {
       expect(store.codeHealthRecommendation("sample", early.id)?.remeasure).toBeNull();
       expect(store.codeHealthRecommendation("sample", due.id)?.state.kind).toBe("accepted");
     });
+    it("stores one due re-measure across a fresh reader", () => {
+      const due = proposal("recurring-correction", "restart", { scope });
+      accept(due, NOW + DAY);
+      review(21, 31);
+      finding(21, 0, "spec");
+
+      audit(NOW);
+      expect(store.codeHealthRecommendation("sample", due.id)?.remeasure).toBeNull();
+
+      audit(NOW + DAY);
+      const measured = store.codeHealthRecommendation("sample", due.id)?.remeasure;
+      expect(measured).toMatchObject({ baseline: 5, current: 1, change: "improved" });
+
+      const restarted = new CodeHealthReader(store, config, () => NOW + DAY);
+      expect(restarted.recommendation("sample", due.id).remeasure).toEqual(measured);
+      audit(NOW + 2 * DAY);
+      expect(store.codeHealthRecommendation("sample", due.id)?.remeasure).toEqual(measured);
+    });
     it("keeps the first result", () => {
       const due = proposal("recurring-correction", "due", { scope });
       accept(due, NOW - 1000);

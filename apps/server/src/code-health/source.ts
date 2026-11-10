@@ -92,8 +92,9 @@ function bounded(rows: Row[]): Row[] {
 export function codeHealthReviewSource(db: Db, repoId: string, from: number, until: number) {
   const rows = bounded(
     db
-      .prepare(`SELECT id, pr_number, sha, round, ended_at FROM reviews
-    WHERE repo_id = ? AND state = 'reported' AND ended_at >= ? AND ended_at < ?
+      .prepare(`SELECT v.id, v.pr_number, v.sha, v.round, v.ended_at, p.head_sha AS current_head_sha FROM reviews v
+    LEFT JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number
+    WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ?
     ORDER BY ended_at, id LIMIT ?`)
       .all(repoId, from, until, SOURCE_ROWS_MAX + 1) as Row[],
   );
@@ -102,14 +103,17 @@ export function codeHealthReviewSource(db: Db, repoId: string, from: number, unt
     repoId,
     pr: row.pr_number as number,
     headSha: row.sha as string,
+    currentHeadSha: row.current_head_sha as string | null,
     round: row.round as number,
     state: "reported",
   }));
   const findings: CodeHealthFinding[] = bounded(
     db
       .prepare(`SELECT f.id, f.review_id,
-    f.file, f.category, f.state, f.resolution, f.resolved_review_id, v.pr_number, v.sha
+    f.file, f.category, f.summary, f.fix, f.state, f.resolution, f.resolved_review_id, v.pr_number, v.sha,
+    p.head_sha AS current_head_sha
     FROM review_findings f JOIN reviews v ON v.id = f.review_id
+    LEFT JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number
     WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ?
     ORDER BY f.id LIMIT ?`)
       .all(repoId, from, until, SOURCE_ROWS_MAX + 1) as Row[],
@@ -119,8 +123,11 @@ export function codeHealthReviewSource(db: Db, repoId: string, from: number, unt
     pr: row.pr_number as number,
     reviewId: String(row.review_id),
     headSha: row.sha as string,
+    currentHeadSha: row.current_head_sha as string | null,
     file: row.file as string,
     category: row.category as string | null,
+    summary: row.summary as string,
+    fix: row.fix as string,
     state: row.state as CodeHealthFinding["state"],
     resolution: row.resolution as CodeHealthFinding["resolution"],
     resolvedReviewId: row.resolved_review_id as number | null,
@@ -214,6 +221,8 @@ export function codeHealthEvidenceSource(
     seriesKey?: string;
     environmentKey?: string;
     category?: string;
+    findingSummary?: string;
+    findingFix?: string;
     pr?: number;
     at?: number;
   },
@@ -388,7 +397,7 @@ export function codeHealthEvidenceSource(
     f.line, f.summary, f.scenario, f.fix, f.category, f.state, f.resolution,
     f.resolved_review_id AS resolvedReviewId, v.ended_at AS reportedAt
     FROM review_findings f JOIN reviews v ON v.id = f.review_id
-    WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ? ${query.file === undefined ? "" : "AND f.file = ?"} ${query.category === undefined ? "" : "AND f.category=?"} ${query.pr === undefined ? "" : "AND v.pr_number=?"}
+    WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ? ${query.file === undefined ? "" : "AND f.file = ?"} ${query.category === undefined ? "" : "AND f.category=?"} ${query.findingSummary === undefined ? "" : "AND f.summary=?"} ${query.findingFix === undefined ? "" : "AND f.fix=?"} ${query.pr === undefined ? "" : "AND v.pr_number=?"}
     ORDER BY v.ended_at, f.id LIMIT ? OFFSET ?`)
       .all(
         query.repoId,
@@ -396,6 +405,8 @@ export function codeHealthEvidenceSource(
         query.until,
         ...(query.file === undefined ? [] : [query.file]),
         ...(query.category === undefined ? [] : [query.category]),
+        ...(query.findingSummary === undefined ? [] : [query.findingSummary]),
+        ...(query.findingFix === undefined ? [] : [query.findingFix]),
         ...(query.pr === undefined ? [] : [query.pr]),
         query.limit + 1,
         query.offset,

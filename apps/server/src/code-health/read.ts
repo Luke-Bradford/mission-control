@@ -35,6 +35,8 @@ interface EvidenceQuery {
   seriesKey?: string;
   environmentKey?: string;
   category?: string;
+  findingSummary?: string;
+  findingFix?: string;
   pr?: number;
 }
 
@@ -260,7 +262,7 @@ export class CodeHealthReader {
       complete: false,
       note: "Conservative fixed-30-day triage, independent of the selected dashboard window. Coverage describes the observed cohort; this query is narrowed to the recommendation's PR or category/file. Earlier unobserved periods are not zero.",
     };
-    const { file, category, pr, from, until } = scope;
+    const { file, category, pr, from, until, findingSummary, findingFix } = scope;
     if (scope.kind === "file-risk") {
       if (!file || !scope.sizeSha || scope.sizeVersion !== 1)
         throw new CodeHealthReadError(
@@ -302,15 +304,20 @@ export class CodeHealthReader {
             revision,
             from,
             until,
-            file,
+            file:
+              row.rule === "recurring-correction" && findingSummary && findingFix
+                ? undefined
+                : file,
             category,
+            findingSummary,
+            findingFix,
             pr,
             kind: row.rule === "recurring-correction" ? "findings" : "review-rounds",
           },
           row.rule === "recurring-correction"
             ? "Recurring correction evidence · 30d"
             : "Repeated review rounds · 30d",
-          "Reported rows in the recommendation's own 30-day window, filtered to its category/file or PR.",
+          "Reported rows in the recommendation's own 30-day window, filtered to its recorded cause or PR.",
           coverage,
         ),
       ],
