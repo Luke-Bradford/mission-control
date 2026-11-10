@@ -74,7 +74,6 @@ const PAGES: PageCase[] = [
   { name: "Board", at: "/board", minText: 700 },
   { name: "a ticket", at: "/tickets/shop-app/101", minText: 150 },
   { name: "an agent", at: "/agent/dev-1", minText: 500 },
-  { name: "a repo's Map", at: "/map/shop-app", minText: 500, populated: [".map-treemap-tile", 30] },
   { name: "Comms", at: "/comms/crew", minText: 2000 },
   { name: "QA", at: "/qa", minText: 500 },
   { name: "Telemetry", at: "/telemetry", minText: 3000 },
@@ -130,7 +129,6 @@ describeRendered("Demo, rendered", () => {
     ["Overview", "/", "#agentsList", "text"],
     ["Board", "/board", "main", "text"],
     ["Comms", "/comms/crew", "main", "text"],
-    ["Map", "/map/shop-app", "main", "html"],
   ] as const)(
     "%s moves on its own at a quick beat",
     async (_name, at, selector, kind) => {

@@ -63,7 +63,6 @@ export type Page =
   | "flight"
   | "board"
   | "agent"
-  | "map"
   | "comms"
   | "qa"
   | "telemetry"
@@ -87,8 +86,6 @@ export type Route =
   /** One ticket as Mission Control knows it (`/tickets/:repo/:number`); the Board tab stays lit. */
   | { page: "ticket"; repoId: string; number: number }
   | { page: "agent"; id: string | null }
-  /** The Crew Activity Map of one repo; `/map` alone picks the repo and redirects. */
-  | { page: "map"; repoId: string | null }
   | { page: "comms"; item: string | null; view: CommsView }
   /** The Comms chart on its own, filling the window (`/comms/chart`); the Comms tab stays lit. */
   | { page: "commsChart" }
@@ -121,7 +118,6 @@ export const agentPath = (id: string): string => `/agent/${enc(id)}`;
 export const tracePath = (agentId: string, runId: string): string =>
   `${agentPath(agentId)}?trace=${enc(runId)}`;
 export const boardPath = (repoId: string): string => `/board/${enc(repoId)}`;
-export const mapPath = (repoId: string): string => `/map/${enc(repoId)}`;
 /** The ticket page: the form, and what the crew did on it. GitHub is one link on it. */
 export const ticketPath = (repoId: string, issueNumber: number): string =>
   `/tickets/${enc(repoId)}/${issueNumber}`;
@@ -238,8 +234,6 @@ export function route(path: string, search = ""): Route | null {
   if (page) return { page: "ticket", ...page };
   const agent = withId(path, "agent");
   if (agent) return { page: "agent", id: agent.id };
-  const map = withId(path, "map");
-  if (map) return { page: "map", repoId: map.id };
   if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
   if (p === COMMS_CHART_PATH) return { page: "commsChart" };
   if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };

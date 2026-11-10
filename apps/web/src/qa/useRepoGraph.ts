@@ -3,12 +3,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError } from "../api.ts";
 import { hub, RESOURCES, type Resource, useResource } from "../data.ts";
 
-/** Only Impact and History request this resource; the activity map and ownership need no graph. */
-export function useGraphSnapshot(
+/** Reads the repository graph only when a QA view needs import relationships. */
+export function useRepoGraph(
   repo: string | null,
 ): Resource<MapSnapshot> & { retry: () => void } {
-  const map = useResource<MapSnapshot>(repo === null ? null : RESOURCES.repoMap(repo));
-  const key = map.data?.graphKey;
+  const snapshot = useResource<MapSnapshot>(repo === null ? null : RESOURCES.repoMap(repo));
+  const key = snapshot.data?.graphKey;
   const graphRef =
     repo && key
       ? {
@@ -30,11 +30,7 @@ export function useGraphSnapshot(
       });
   }, [repo]);
   useEffect(() => {
-    if (
-      !(graph.error instanceof ApiError) ||
-      graph.error.status !== 409 ||
-      attempts.current.count >= 2
-    )
+    if (!(graph.error instanceof ApiError) || graph.error.status !== 409 || attempts.current.count >= 2)
       return;
     attempts.current.count++;
     let current = true;
@@ -51,28 +47,18 @@ export function useGraphSnapshot(
     void reconcile().catch((e) => setRecoveryError(e instanceof Error ? e : new Error(String(e))));
   }, [reconcile]);
   return useMemo(() => {
-    if (!map.data || !key) return { ...map, retry };
+    if (!snapshot.data || !key) return { ...snapshot, retry };
     if (!graph.data)
       return {
         data: undefined,
-        error: recoveryError ?? graph.error ?? map.error,
-        loading: graph.loading || map.loading,
+        error: recoveryError ?? graph.error ?? snapshot.error,
+        loading: graph.loading || snapshot.loading,
         retry,
       };
     try {
-      return {
-        ...map,
-        data: joinMapGraph(map.data, graph.data),
-        error: graph.error ?? map.error,
-        retry,
-      };
+      return { ...snapshot, data: joinMapGraph(snapshot.data, graph.data), error: graph.error ?? snapshot.error, retry };
     } catch (e) {
-      return {
-        data: undefined,
-        error: e instanceof Error ? e : new Error(String(e)),
-        loading: false,
-        retry,
-      };
+      return { data: undefined, error: e instanceof Error ? e : new Error(String(e)), loading: false, retry };
     }
-  }, [map, key, graph, recoveryError, retry]);
+  }, [snapshot, key, graph, recoveryError, retry]);
 }

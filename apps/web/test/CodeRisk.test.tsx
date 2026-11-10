@@ -27,11 +27,8 @@ it("keeps independent measured inputs, missing values and exact file evidence", 
   expect(within(unknown).getAllByText("—")).toHaveLength(3);
   fireEvent.click(within(table).getByRole("button", { name: "src/domain/state.ts" }));
   expect(h.onInspect).toHaveBeenCalledWith("src/domain/state.ts", [h.ref], h.coverage);
-  expect(screen.getByRole("link", { name: "Open repo in Map" }).getAttribute("href")).toBe(
-    "/map/sample",
-  );
-  expect(screen.getByRole("link", { name: "Open repo in Map" }).getAttribute("target")).toBe(
-    "_blank",
+  expect(screen.getByRole("link", { name: "Open code risk in Audit" }).getAttribute("href")).toBe(
+    "/audit?tab=risk",
   );
 });
 it("sorts unknown values last in both directions and includes test files only on request", () => {

@@ -32,7 +32,11 @@ export function CodeHealth() {
     );
   const [repo, setRepo] = useState(""),
     [window, setWindow] = useState<CodeHealthWindow>("30d"),
-    [tab, setTab] = useState<Tab>("overview");
+    [tab, setTab] = useState<Tab>(() =>
+      new URLSearchParams(globalThis.window.location.search).get("tab") === "risk"
+        ? "risk"
+        : "overview",
+    );
   const [last, setLast] = useState<{ path: string; view: CodeHealthView }>(),
     [expired, setExpired] = useState(false);
   const [evidence, setEvidence] = useState<{
@@ -272,7 +276,7 @@ export function CodeHealth() {
           </button>
         ))}
         <span className="ch-links">
-          <a href={repo ? `/map/${encodeURIComponent(repo)}` : "/map"}>Repo context in Map</a>
+          <a href="/audit?tab=risk">Code risk in Audit</a>
           <a href="/qa">PR readiness and tests in QA</a>
         </span>
       </div>

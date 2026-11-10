@@ -10,8 +10,6 @@ import type {
   CommsMessage,
   CrewRow,
   LimitRow,
-  MapDelta,
-  MapSnapshot,
   OverviewSummary,
   Topic,
 } from "@mc/core";
@@ -29,12 +27,10 @@ import {
 } from "../../test/demoSeedPages.ts";
 import { NOW } from "../../test/fixtures.ts";
 import { demoSeed } from "../../test/overviewDensityFixtures.ts";
-import { applyDelta } from "../map/deltas.ts";
 import { shiftTimes } from "./shift.ts";
 
 export const DEMO_BEAT_MS = 4000;
 const SCENE_BEATS = 45;
-const MAP_PATH = `/api/repos/${DEMO_REPO}/map`;
 const CREW_PATH = "/api/crew?shape=summary";
 const DOCK_PATH = "/api/agents/flight-1/stream?limit=20";
 
@@ -48,20 +44,15 @@ export interface DemoState {
 
 export interface DemoBeat {
   topics: readonly Topic[];
-  /** Change `state` as of `at`; returns the Map frames this beat sends, with their `seq` set. */
-  apply(state: DemoState, at: number): MapDelta[];
+  /** Change `state` as of `at`. */
+  apply(state: DemoState, at: number): void;
 }
 
-type Emit = (type: "changed" | "map", data: unknown) => void;
-interface Subscriber {
-  repo: string | null;
-  emit: Emit;
-}
+type Emit = (type: "changed", data: unknown) => void;
+interface Subscriber { emit: Emit; }
 
 let seed: ReturnType<typeof demoSeed> | undefined;
 let state: DemoState | undefined;
-/** The Map's frame counter. It only rises, so a restarted scene never replays an old `seq`. */
-let mapSeq = 0;
 let beatMs = DEMO_BEAT_MS;
 let timer: ReturnType<typeof setTimeout> | undefined;
 const subscribers = new Set<Subscriber>();
@@ -81,7 +72,6 @@ function fresh(): DemoState {
   seed ??= demoSeed();
   // A whole number of minutes, so the per-minute token buckets still start on minute marks.
   const api = shiftTimes(seed.api, NOW, wholeMinutes(Date.now() - NOW));
-  (api[MAP_PATH] as MapSnapshot).seq = mapSeq;
   return { api, tickets: DEMO_TICKETS.map((t) => ({ ...t })), beat: -1 };
 }
 
@@ -135,7 +125,6 @@ type CommsLink = {
 
 const rowsOf = (s: DemoState): CrewRow[] => (s.api[CREW_PATH] as { rows: CrewRow[] }).rows;
 const summaryOf = (s: DemoState): OverviewSummary => s.api["/api/overview"] as OverviewSummary;
-const snapshotOf = (s: DemoState): MapSnapshot => s.api[MAP_PATH] as MapSnapshot;
 
 function logActivity(s: DemoState, at: number, who: string, text: string, kind: string) {
   const rows = s.api["/api/activity"] as ActivityRow[];
@@ -331,61 +320,6 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
   );
 }
 
-type Frame = {
-  [K in MapDelta["type"]]: Omit<Extract<MapDelta, { type: K }>, "seq">;
-}[MapDelta["type"]];
-
-/** A frame for the Map, applied to the state so a refetch agrees with the stream. */
-function frame(s: DemoState, delta: Frame): MapDelta {
-  const snapshot = snapshotOf(s);
-  const full = { ...delta, seq: snapshot.seq + 1 } as MapDelta;
-  const next =
-    full.type === "edit" || full.type === "invalidate"
-      ? { ...snapshot, seq: full.seq }
-      : (applyDelta(snapshot, full, Date.now()) ?? { ...snapshot, seq: full.seq });
-  s.api[MAP_PATH] = next;
-  mapSeq = next.seq;
-  return full;
-}
-
-function mapBeat(s: DemoState, at: number): MapDelta[] {
-  const seat = WORKERS[(s.beat >> 1) % WORKERS.length] ?? "dev-1";
-  const tree = snapshotOf(s).tree;
-  const fileAt = (beat: number) => tree[(beat * 7) % tree.length]?.path ?? "src/app/module-1.ts";
-  if (s.beat % 2 === 0) {
-    const file = fileAt(s.beat);
-    return [
-      frame(s, {
-        type: "call.start",
-        seat,
-        id: `call-${s.beat}`,
-        since: at,
-        tool: "Edit",
-        detail: file,
-        files: [file],
-        writeTok: 40 + s.beat,
-      }),
-    ];
-  }
-  const file = fileAt(s.beat - 1);
-  return [
-    frame(s, {
-      type: "call.end",
-      seat,
-      id: `call-${s.beat - 1}`,
-      at,
-      files: [file],
-      resultTok: 12,
-      error: false,
-      refused: false,
-      why: null,
-      tests: null,
-    }),
-    frame(s, { type: "edit", seat, file, add: 3 + (s.beat % 7), rem: 1 }),
-    frame(s, { type: "diff", seat, file, add: 6 + s.beat, rem: 2 }),
-  ];
-}
-
 function makeBeat(index: number): DemoBeat {
   const move = index % 5 === 4 ? TICKET_MOVES[Math.floor(index / 5) % TICKET_MOVES.length] : null;
   const topics: Topic[] = ["agents"];
@@ -401,7 +335,7 @@ function makeBeat(index: number): DemoBeat {
       if (index % 2 === 0) say(s, at, 0);
       if (index % 7 === 3) say(s, at, 1);
       if (move) moveTicket(s, at, move);
-      return mapBeat(s, at);
+      return;
     },
   };
 }
@@ -425,10 +359,9 @@ const pageDocument = (): PageDocument | undefined =>
 const hidden = (): boolean => pageDocument()?.visibilityState === "hidden";
 const EVERY_TOPIC: readonly Topic[] = ["agents", "boards", "limits", "attention", "machine"];
 
-function tell(topics: readonly Topic[], deltas: readonly MapDelta[]) {
+function tell(topics: readonly Topic[]) {
   for (const sub of [...subscribers]) {
     for (const topic of topics) sub.emit("changed", { topic });
-    if (sub.repo === DEMO_REPO) for (const delta of deltas) sub.emit("map", delta);
   }
 }
 
@@ -437,13 +370,13 @@ export function playNext(): void {
   const s = getState();
   const index = s.beat + 1;
   if (index >= SCENE_BEATS) {
-    // The Map's `seq` carries on from where it was, and an invalidate makes it refetch.
     state = fresh();
-    tell(EVERY_TOPIC, [frame(state, { type: "invalidate" })]);
+    tell(EVERY_TOPIC);
     return;
   }
   const beat = DEMO_SCENE[index] as DemoBeat;
-  tell(beat.topics, beat.apply(s, Date.now()));
+  beat.apply(s, Date.now());
+  tell(beat.topics);
 }
 
 function tick() {
@@ -469,8 +402,7 @@ function onVisibility() {
  * the state. `path` is the stream's address: `?map=<repo>` also gets that repo's frames.
  */
 export function connect(path: string, emit: Emit): () => void {
-  const repo = new URL(path, "http://demo.invalid").searchParams.get("map");
-  const subscriber: Subscriber = { repo, emit };
+  const subscriber: Subscriber = { emit };
   if (subscribers.size === 0) {
     getState();
     pageDocument()?.addEventListener("visibilitychange", onVisibility);

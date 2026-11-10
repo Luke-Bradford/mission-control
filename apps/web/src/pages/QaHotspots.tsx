@@ -3,8 +3,7 @@ import { useMemo, useState } from "react";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { HistoryLens, ReviewLens } from "../lenses/lenses.tsx";
-import { mapRepoOptions } from "../map/repos.ts";
-import { useGraphSnapshot } from "../map/useGraphSnapshot.ts";
+import { useRepoGraph } from "../qa/useRepoGraph.ts";
 import { MAP_REPO_KEY, readKey } from "../storage.ts";
 import "./qa-hotspots.css";
 
@@ -15,7 +14,14 @@ export function QaHotspots() {
   const crew = useResource<Crew>(RESOURCES.crew);
   const mapped = useMemo(
     () =>
-      repos.data ? mapRepoOptions(repos.data, config.data, crew.data).filter((o) => o.mapped) : [],
+      repos.data
+        ? repos.data.flatMap((repo) => {
+            const seats = crew.data?.rows.filter((row) => row.kind === "crew" && row.repoId === repo.id).length ?? 0;
+            return config.data?.crew?.sessions.some((session) => session.repoId === repo.id)
+              ? [{ id: repo.id, label: `${repo.id} · ${seats} crew seats` }]
+              : [];
+          })
+        : [],
     [repos.data, config.data, crew.data],
   );
   const [picked, setPicked] = useState<string | null>(null);
@@ -71,7 +77,7 @@ function RepoHotspots({
   github: string | undefined;
   names: Record<string, string>;
 }) {
-  const map = useGraphSnapshot(repo);
+  const map = useRepoGraph(repo);
   const [focus, setFocus] = useState<string | null>(null);
   if (!map.data)
     return map.error ? (
