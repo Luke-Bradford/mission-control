@@ -94,11 +94,20 @@ export interface CommsMessage {
 /** A transcript can lack a timestamp; keep that fact instead of inventing its clock time. */
 export type FlightConversationMessage = Omit<CommsMessage, "at"> & { at: number | null };
 
+/** FLIGHT's current run, when the server includes its status with the conversation. */
+export interface FlightConversationStatus {
+  live: boolean;
+  since: number | null;
+  runId: string | null;
+}
+
 export interface FlightConversationPage {
   messages: FlightConversationMessage[];
   hasMore: boolean;
   cursor: string | null;
   unread: number;
+  /** Absent from older servers that do not yet return FLIGHT's run status. */
+  flight?: FlightConversationStatus;
 }
 
 /** Where a message stands: kept by the hub, or taken by its recipient. */

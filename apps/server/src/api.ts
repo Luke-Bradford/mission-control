@@ -300,6 +300,7 @@ import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
 import { liftRunaway, noteFlightWrite } from "./flight/runaway.ts";
 import {
   flightBriefView,
+  flightLive,
   flightScheduleView,
   flightSeat,
   flightView,
@@ -2176,16 +2177,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               (typeof before !== "string" || before.length === 0 || before.length > 300))
           )
             return reply.code(400).send({ error: COMMS_PAGING_ERROR });
-          const flight = flightSeat(config)?.seat.id;
-          if (flight === undefined)
-            return { messages: [], hasMore: false, cursor: null, unread: 0 };
+          const found = flightSeat(config);
+          if (found === null)
+            return {
+              messages: [],
+              hasMore: false,
+              cursor: null,
+              unread: 0,
+              flight: { live: false, since: null, runId: null },
+            };
+          const flight = found.seat.id;
+          const runId = store.seatSession(flight)?.runId ?? null;
+          const live = flightLive(config, store, (id) => supervisor?.sessionAlive?.(id) ?? null);
+          const flightStatus = {
+            live,
+            since: live && runId !== null ? (store.run(runId)?.startedAt ?? null) : null,
+            runId,
+          };
           try {
-            return await flightConversation(
-              store,
-              flight,
-              flightSeat(config)?.session.seats.map((s) => s.id) ?? [],
-              { limit, before },
-            );
+            return {
+              ...(await flightConversation(
+                store,
+                flight,
+                found.session.seats.map((s) => s.id),
+                { limit, before },
+              )),
+              flight: flightStatus,
+            };
           } catch (error) {
             if (error instanceof FlightConversationCursorError)
               return reply.code(400).send({ error: error.message });
