@@ -206,6 +206,10 @@ describeRendered("Comms chart, rendered", () => {
           search: `?at=${encodeURIComponent(`/comms/chart${focus}`)}`,
           api: crewApi(20),
         });
+        // ResizeObserver measures the chart's parent. Exercise the real viewport event before
+        // checking its settled size, rather than reading the component's initial test fallback.
+        await page.resize(width - 1, height);
+        await page.resize(width, height);
         await page.box(".comms-rails svg");
         const m = await measure(page);
         expect(m.nodes).toBe(22);
