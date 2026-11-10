@@ -293,36 +293,38 @@ describeRendered("Comms chart, rendered", () => {
         });
         await page.box(".comms-node");
         // Count the chart's elements added or removed from here on: a message must update what
-        // changed, never rebuild the links and seats. The dots live in the overlay, not counted here.
+        // changed, never rebuild the links and seats. Count the dots separately: their population
+        // is capped, and they must not be rebuilt on every animation frame.
         await page.evaluate(() => {
           const base = document.querySelector(".comms-rails-svg");
-          const w = window as unknown as { __churn: number };
-          w.__churn = 0;
-          if (!base) throw new Error("no chart");
+          const overlay = document.querySelector(".comms-rails-overlay");
+          const w = window as unknown as { __churn: { chart: number; particles: number } };
+          w.__churn = { chart: 0, particles: 0 };
+          if (!base || !overlay) throw new Error("no chart");
           new MutationObserver((records) => {
-            for (const r of records) w.__churn += r.addedNodes.length + r.removedNodes.length;
+            for (const r of records) w.__churn.chart += r.addedNodes.length + r.removedNodes.length;
           }).observe(base, { childList: true, subtree: true });
+          new MutationObserver((records) => {
+            for (const r of records)
+              w.__churn.particles += r.addedNodes.length + r.removedNodes.length;
+          }).observe(overlay, { childList: true, subtree: true });
         }, null);
         // Busy: sweep the pointer over every seat for 3 seconds, while new messages land on a third
         // of the links every 300 ms and the page reads them again.
         const measuring = page.evaluate(
           () =>
-            new Promise<number[]>((resolve) => {
+            new Promise<void>((resolve) => {
               const seats = [...document.querySelectorAll<SVGElement>(".comms-node")];
-              const deltas: number[] = [];
               const started = performance.now();
-              let last = started;
               let i = 0;
               const tick = (now: number) => {
-                deltas.push(now - last);
-                last = now;
                 i++;
                 seats[i % seats.length]?.dispatchEvent(
                   new MouseEvent("mouseover", { bubbles: true }),
                 );
                 seats[i % seats.length]?.dispatchEvent(new MouseEvent("mouseenter"));
                 if (now - started < 3000) requestAnimationFrame(tick);
-                else resolve(deltas);
+                else resolve();
               };
               requestAnimationFrame(tick);
             }),
@@ -348,25 +350,23 @@ describeRendered("Comms chart, rendered", () => {
             await page.evaluate(() => document.querySelectorAll(".comms-particle").length, null),
           );
         }
-        const frames = await measuring;
+        await measuring;
         const churn = await page.evaluate(
-          () => (window as unknown as { __churn: number }).__churn,
+          () => (window as unknown as { __churn: { chart: number; particles: number } }).__churn,
           null,
         );
         // Messages really travelled during the measurement.
         expect(seen).toBeGreaterThan(0);
         // Deterministic: with new messages on a third of the 100 links every round, almost nothing is
         // added or removed from the chart. A rebuild per arrival would add hundreds each round.
-        expect(churn).toBeLessThanOrEqual(round * 4);
-        // Timing is wall-clock on a shared runner, so it is logged and only loosely bounded.
-        const sorted = [...frames].sort((a, b) => a - b);
-        const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
-        const p95 = sorted[Math.floor(sorted.length * 0.95)] ?? 0;
+        expect(churn.chart).toBeLessThanOrEqual(round * 4);
+        // Each update can replace the capped 16-dot overlay once. Rebuilding it every frame would
+        // instead grow with frame count, even when the machine is too busy to deliver 60fps.
+        expect(seen).toBeLessThanOrEqual(16);
+        expect(churn.particles).toBeLessThanOrEqual(round * 32 + 16);
         console.info(
-          `comms chart 50 seats ${at}: ${frames.length} frames, ${seen} dots at most, ${churn} elements churned in ${round} rounds, median ${median.toFixed(1)}ms, p95 ${p95.toFixed(1)}ms, slowest ${(sorted.at(-1) ?? 0).toFixed(1)}ms`,
+          `comms chart 50 seats ${at}: ${seen} dots at most, ${churn.chart} chart and ${churn.particles} particle elements churned in ${round} rounds`,
         );
-        expect(median).toBeLessThan(34);
-        expect(sorted.at(-1) ?? 0).toBeLessThan(500);
         await page.close();
       }
     },
