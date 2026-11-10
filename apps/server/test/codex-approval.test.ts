@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { type CrewMode, GUARD_RULES, MC_MCP_SERVER, MC_TOOL_NAMES } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import type { CheckRecorder } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { CODEX_ESCALATION_TEXT, createCodexApprover } from "../src/runtime/codex-approval.ts";
 import { CODEX_MCP_ELICITATION } from "../src/runtime/codex-session.ts";
@@ -322,7 +322,8 @@ describe("Codex check records", () => {
   const recorder = () => {
     const begun: unknown[][] = [];
     const checks: CheckRecorder = {
-      begin: async (k, c, aliases) => void begun.push([k, c, aliases ?? []]),
+      begin: async (k, c, aliases, options) =>
+        void begun.push([k, c, aliases ?? [], options ?? {}]),
       end: async () => {},
       lockedBy: async (_run, c) => (c === "pnpm -s typecheck" ? c : null),
       dropRun: () => {},
@@ -350,11 +351,12 @@ describe("Codex check records", () => {
       ),
     ).toBe("accept");
     expect(begun).toEqual([
-      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint", []],
+      [{ runId: "run", toolUseId: "item-1" }, "pnpm -s lint", [], { receiptEligible: true }],
       [
         { runId: "run", toolUseId: "appr-2" },
         "pnpm -s typecheck",
         [{ runId: "run", toolUseId: "item-2" }],
+        { receiptEligible: true },
       ],
     ]);
   });
@@ -384,13 +386,64 @@ describe("Codex check records", () => {
     );
   });
 
-  it("starts no record for a command run from a subfolder of the worktree", async () => {
+  it("starts an execution-only record for a command run from a subfolder of the worktree", async () => {
     const { begun, checks } = recorder();
     const h = approver("writer", [], undefined, checks);
     mkdirSync(join(cwd, "apps"));
     const sub = request("pnpm -s lint", { itemId: "item-4", cwd: join(cwd, "apps") });
     expect(await h.approve(sub, undefined, signal())).toBe("accept");
-    expect(begun).toEqual([]);
+    expect(begun).toEqual([
+      [{ runId: "run", toolUseId: "item-4" }, "pnpm -s lint", [], { receiptEligible: false }],
+    ]);
+  });
+
+  it("excludes nested and root tests in one checkout until an alias completion releases them", async () => {
+    const rows: unknown[] = [];
+    const checks = createCheckRecorder({
+      store: { addCheckRun: (row) => void rows.push(row) },
+      checks: async () => [],
+      state: async () => ({ head: "a".repeat(40), clean: true }),
+      worktree: async () => cwd,
+    });
+    const h = approver("writer", [], undefined, checks);
+    const apps = join(cwd, "apps");
+    mkdirSync(apps);
+    const nested = request("pnpm -s test one.test.ts", {
+      itemId: "nested-item",
+      approvalId: "nested-approval",
+      cwd: apps,
+    });
+    expect(await h.approve(nested, undefined, signal())).toBe("accept");
+    expect(
+      await h.approve(
+        request("pnpm -s test two.test.ts", { itemId: "nested-second", cwd: apps }),
+        undefined,
+        signal(),
+      ),
+    ).toBe("decline");
+    expect(
+      await h.approve(
+        request("pnpm -s test root.test.ts", { itemId: "root-during-nested" }),
+        undefined,
+        signal(),
+      ),
+    ).toBe("decline");
+    await checks.end({ runId: "run", toolUseId: "nested-item" }, true, 0);
+    expect(rows).toEqual([]);
+    expect(
+      await h.approve(
+        request("pnpm -s test root.test.ts", { itemId: "root-after-nested" }),
+        undefined,
+        signal(),
+      ),
+    ).toBe("accept");
+    expect(
+      await h.approve(
+        request("pnpm -s test nested.test.ts", { itemId: "nested-during-root", cwd: apps }),
+        undefined,
+        signal(),
+      ),
+    ).toBe("decline");
   });
 
   it("starts no record for a refused command", async () => {

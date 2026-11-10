@@ -1,5 +1,6 @@
 /** The same Codex approval path for supervisor runs and the controller's live check. */
 import { realpathSync } from "node:fs";
+import { isAbsolute, relative } from "node:path";
 import {
   type CrewMode,
   codexCommand,
@@ -31,6 +32,19 @@ function sameDir(a: unknown, b: string): boolean {
   if (typeof a !== "string") return false;
   try {
     return realpathSync.native(a) === realpathSync.native(b);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `path` is the checkout itself or a directory below it once symlinks are resolved. */
+function withinDir(path: unknown, root: string): boolean {
+  if (typeof path !== "string") return false;
+  try {
+    const child = realpathSync.native(path);
+    const parent = realpathSync.native(root);
+    const fromRoot = relative(parent, child);
+    return fromRoot === "" || (!fromRoot.startsWith("..") && !isAbsolute(fromRoot));
   } catch {
     return false;
   }
@@ -195,9 +209,9 @@ export function createCodexApprover(i: {
         );
       // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
-        const atRoot = sameDir(params.cwd, i.cwd);
+        const inCheckout = withinDir(params.cwd, i.cwd);
         const tracked =
-          atRoot &&
+          inCheckout &&
           i.checks !== undefined &&
           (testCommand(event.input.command) ||
             (await i.checks.lockedBy(i.runId, event.input.command)) !== null);
@@ -250,11 +264,11 @@ export function createCodexApprover(i: {
     }
     // the lock's key: the completion event names the same one (see codex-session's tool-result)
     const id = params.approvalId ?? params.itemId;
-    // only a command run at the worktree root is a check: from a subfolder it checks something else
+    // Commands below the worktree root still reserve this checkout, but cannot create a root receipt.
     if (
       i.checks !== undefined &&
       (typeof id === "string" || typeof id === "number") &&
-      sameDir(params.cwd, i.cwd)
+      withinDir(params.cwd, i.cwd)
     ) {
       for (const event of events) {
         if (event.tool === "Bash" && event.input.command !== undefined) {
@@ -263,6 +277,7 @@ export function createCodexApprover(i: {
             { runId: i.runId, toolUseId: String(id) },
             event.input.command,
             itemId === null || itemId === String(id) ? [] : [{ runId: i.runId, toolUseId: itemId }],
+            { receiptEligible: sameDir(params.cwd, i.cwd) },
           );
         }
       }

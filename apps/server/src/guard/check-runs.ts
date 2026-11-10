@@ -95,6 +95,8 @@ export interface CallKey {
 export interface CallOptions {
   /** The call asked to run in the background. */
   background?: boolean;
+  /** The command runs within the checkout but below its root, so it cannot cover the root HEAD. */
+  receiptEligible?: boolean;
   /** The call's own Bash `timeout` (ms); Claude's default applies when it names none. */
   timeoutMs?: number;
 }
@@ -266,6 +268,13 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
           started.set(callId(key), call);
           for (const alias of aliases) started.set(callId(alias), call);
         };
+        // A command below the checkout root can still contend for the checkout's test resources,
+        // but it cannot attest to the root worktree's HEAD.
+        if (options.receiptEligible === false) {
+          trackOnly(at?.head ?? null);
+          cancel(key);
+          return;
+        }
         if (at === null) {
           noteDrop(key.runId, "unreadable", matched, null, command);
           trackOnly(null);
