@@ -129,7 +129,7 @@ const SHOTS = join(process.env.TMPDIR ?? "/tmp", "flight-shots");
 const TABS = ["needs", "did", "crew", "knows"] as const;
 /** The sizes the HUD system checks: three widths at 1000 tall, and a short window. */
 const SIZES = [
-  { width: 1280, height: 1000 },
+  { width: 1280, height: 900 },
   { width: 1600, height: 1000 },
   { width: 1920, height: 1000 },
   { width: 1600, height: 700 },

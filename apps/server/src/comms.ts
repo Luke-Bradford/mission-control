@@ -184,7 +184,7 @@ export async function sendComms(
   if (stored.repeat && !deps.store.commsWakeFailed(sent.id)) return { ...sent, repeat: true };
   // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat, and
   // what the operator sends does too.
-  if (sent.label !== null || deps.wakeUnlabelled === true) {
+  if ((sent.label !== "none" && sent.label !== null) || deps.wakeUnlabelled === true) {
     try {
       for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
     } catch (e) {

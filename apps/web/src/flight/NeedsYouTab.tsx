@@ -10,7 +10,7 @@ import { followLink, NEEDS_YOU_PATH } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
 import { useSessionScope } from "../shell/session.ts";
 import { Drafts } from "./Drafts.tsx";
-import { HeldNeeds } from "./HeldNeeds.tsx";
+import { WatchList } from "./HeldNeeds.tsx";
 import { needsGroups } from "./needsGroups.ts";
 import { Pending } from "./Pending.tsx";
 import { PrFlowPanel } from "./PrFlowPanel.tsx";
@@ -88,14 +88,14 @@ export function NeedsYouTab() {
             )}
           </div>
         </Panel>
-        <Panel id="heldP" title="Held" sub={`${held?.length ?? 0} on a condition`}>
+        <Panel id="heldP" title="Watch list" sub={`${held?.length ?? 0} on a condition`}>
           <div className="flight-panel-scroll">
             {held === undefined ? (
               <Pending what="held items" error={heldRes.error} resource={RESOURCES.heldAttention} />
             ) : held.length === 0 ? (
               <p className="pb note">{NOTHING_HELD}</p>
             ) : (
-              <HeldNeeds />
+              <WatchList />
             )}
           </div>
         </Panel>
