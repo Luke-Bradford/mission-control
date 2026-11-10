@@ -2455,6 +2455,34 @@ describe("Agent page: header and tile mockup", () => {
     },
   );
 
+  it("assigns the first Ready ticket and reports the receipt", async () => {
+    const f = stub({
+      rows: [seat({ hudState: "idle", run: null })],
+      extra: SEAT_ROUTES({
+        "/api/boards/shop-app": [boardItem({ issueNumber: 7, status: "Ready", state: "planned" })],
+        "POST /api/seats/guido-1/start": { runId: "r-13" },
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    const assign = await screen.findByRole("button", { name: "Assign #7" });
+    fireEvent.click(assign);
+    expect(await screen.findByText("Assign confirmed.")).toBeTruthy();
+    expect(JSON.parse(bodyOf(f, "/api/seats/guido-1/start") as string)).toEqual({ issue: 7 });
+  });
+
+  it("disables Assign while the seat holds a run", async () => {
+    stub({
+      rows: [seat()],
+      extra: SEAT_ROUTES({
+        "/api/boards/shop-app": [boardItem({ issueNumber: 7, status: "Ready", state: "planned" })],
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    expect(
+      ((await screen.findByRole("button", { name: "Assign #7" })) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  });
+
   it.each([
     ["idle", true],
     ["stopped", true],
@@ -2770,6 +2798,22 @@ describe("Agent page: driving a crew seat", () => {
         "src/a.ts+3 −1uncommitted",
       ]),
     );
+  });
+
+  it("shows the server refusal when Assign fails", async () => {
+    stub({
+      rows: [seat({ hudState: "idle", run: null })],
+      extra: SEAT_ROUTES({
+        "/api/boards/shop-app": [boardItem({ issueNumber: 7, status: "Ready", state: "planned" })],
+        "POST /api/seats/guido-1/start": () => ({
+          status: 409,
+          body: { error: "seat is not available" },
+        }),
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Assign #7" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("seat is not available");
   });
 
   it("a read-only seat's Files tab shows only its note", async () => {

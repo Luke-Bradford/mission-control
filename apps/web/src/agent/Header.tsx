@@ -1,4 +1,5 @@
 import type {
+  BoardItem,
   CliAccountStatus,
   ConfigView,
   CrewChanges,
@@ -10,6 +11,7 @@ import type {
 } from "@mc/core";
 import { type CSSProperties, useId, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
+import { cardColumn } from "../board/cards.ts";
 import { useSecond, useTz } from "../clock.ts";
 import {
   ErrorSummary,
@@ -49,23 +51,30 @@ export function SeatControls({
   row,
   interrupt = true,
   hold = false,
+  end = true,
   compact = false,
 }: {
   row: CrewRow;
   interrupt?: boolean;
   hold?: boolean;
+  /** Leave End out when the identity band places Stop after More. */
+  end?: boolean;
   /** Shows "End" for the end button, which keeps its full name for assistive tech and hover. */
   compact?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<string | null>(null);
   const turn = seatTurn(row);
-  const run = async (fn: () => Promise<void>) => {
+  const run = async (name: "Interrupt" | "Stop", fn: () => Promise<void>) => {
     setBusy(true);
     setError(null);
+    setReceipt(`${name} sent.`);
     try {
       await fn();
+      setReceipt(`${name} confirmed.`);
     } catch (e) {
+      setReceipt(null);
       setError(seatError(e));
     } finally {
       setBusy(false);
@@ -78,17 +87,22 @@ export function SeatControls({
           {error}
         </span>
       )}
+      {receipt && (
+        <span className="s muted" role="status">
+          {receipt}
+        </span>
+      )}
       {interrupt && turn === "running" && (
         <button
           type="button"
           className={row.hudState === "stalled" ? "sm warn" : "sm"}
           disabled={busy}
-          onClick={() => run(() => interruptSeat(row))}
+          onClick={() => run("Interrupt", () => interruptSeat(row))}
         >
           Interrupt
         </button>
       )}
-      {turn !== "none" && (
+      {end && turn !== "none" && (
         <button
           type="button"
           className="sm warn"
@@ -96,13 +110,64 @@ export function SeatControls({
           title={compact && !hold ? "End the run" : undefined}
           aria-label={compact && !hold ? "End the run" : undefined}
           onClick={() => {
-            if (window.confirm(endConfirm(row, hold))) void run(() => endSeat(row, hold));
+            if (window.confirm(endConfirm(row, hold))) void run("Stop", () => endSeat(row, hold));
           }}
         >
           {hold ? "Stop" : compact ? "End" : "End the run"}
         </button>
       )}
     </>
+  );
+}
+
+/** Starts an idle crew seat on a Ready ticket in its configured repository. */
+function AssignSeat({ row }: { row: CrewRow }) {
+  const board = useResource<BoardItem[]>(RESOURCES.boards(row.repoId));
+  const [busy, setBusy] = useState(false);
+  const [receipt, setReceipt] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const ready = (board.data ?? []).filter((item) => !item.closed && cardColumn(item) === "Ready");
+  const ticket = ready[0];
+  const holdsRun = row.run !== null && row.run.endedAt === null;
+  const assign = async () => {
+    if (!ticket || busy || holdsRun) return;
+    setBusy(true);
+    setError(null);
+    setReceipt("Assign sent.");
+    try {
+      await apiPost(ACTIONS.seatStart(row.id), { issue: ticket.issueNumber });
+      setReceipt("Assign confirmed.");
+      hub.refetch(RESOURCES.crew.path);
+    } catch (e) {
+      setReceipt(null);
+      setError(seatError(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (board.loading && !board.data) return <span className="s muted">Loading work…</span>;
+  if (!ticket) return null;
+  return (
+    <span className="agent-assign">
+      <button
+        type="button"
+        className="sm"
+        disabled={busy || holdsRun}
+        onClick={() => void assign()}
+      >
+        {`Assign #${ticket.issueNumber}`}
+      </button>
+      {receipt && (
+        <span className="s muted" role="status">
+          {receipt}
+        </span>
+      )}
+      {error && (
+        <span className="crit-t s" role="alert">
+          {error}
+        </span>
+      )}
+    </span>
   );
 }
 
@@ -670,10 +735,11 @@ export function AgentHeaderActions({ row }: { row: CrewRow }) {
   return (
     <span className="agent-v2-actions">
       {row.kind === "crew" ? (
-        <SeatControls row={row} hold />
+        <SeatControls row={row} hold end={false} />
       ) : row.loopKind === "ta-loop" ? (
         <PauseButton row={row} />
       ) : null}
+      {row.kind === "crew" && <AssignSeat row={row} />}
       <details onToggle={(event) => setOpen(event.currentTarget.open)}>
         <summary>More</summary>
         {open && (
@@ -692,6 +758,7 @@ export function AgentHeaderActions({ row }: { row: CrewRow }) {
           </div>
         )}
       </details>
+      {row.kind === "crew" && <SeatControls row={row} interrupt={false} hold />}
     </span>
   );
 }
