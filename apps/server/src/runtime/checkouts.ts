@@ -844,6 +844,71 @@ async function refuseChangedInputs(
  * DefinitelyTyped package records which do not declare a build. Every other install input keeps
  * the normal byte-for-byte origin check.
  */
+function rightDependencyValue(
+  before: Record<string, unknown>,
+  after: Record<string, unknown>,
+  name: string,
+): unknown {
+  for (const field of [
+    "dependencies",
+    "devDependencies",
+    "optionalDependencies",
+    "peerDependencies",
+  ]) {
+    const left = before[field] as Record<string, unknown> | undefined;
+    const right = after[field] as Record<string, unknown> | undefined;
+    if (left?.[name] !== right?.[name]) return right?.[name];
+  }
+  return undefined;
+}
+
+/** Only approved type dependencies may differ in pnpm's importer resolution records. */
+function safeTypeImporters(
+  before: unknown,
+  after: unknown,
+  typeSpecs: ReadonlyMap<string, unknown>,
+): boolean {
+  if (before === null || after === null || typeof before !== "object" || typeof after !== "object")
+    return JSON.stringify(before) === JSON.stringify(after);
+  for (const root of new Set([...Object.keys(before), ...Object.keys(after)])) {
+    const left = (before as Record<string, unknown>)[root];
+    const right = (after as Record<string, unknown>)[root];
+    if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
+      if (JSON.stringify(left) !== JSON.stringify(right)) return false;
+      continue;
+    }
+    for (const field of new Set([...Object.keys(left), ...Object.keys(right)])) {
+      const leftField = (left as Record<string, unknown>)[field];
+      const rightField = (right as Record<string, unknown>)[field];
+      if (
+        leftField === null ||
+        rightField === null ||
+        typeof leftField !== "object" ||
+        typeof rightField !== "object"
+      ) {
+        if (JSON.stringify(leftField) !== JSON.stringify(rightField)) return false;
+        continue;
+      }
+      const l = { ...(leftField as Record<string, unknown>) };
+      const r = { ...(rightField as Record<string, unknown>) };
+      for (const [name, specifier] of typeSpecs) {
+        const value = r[name];
+        if (
+          value !== undefined &&
+          typeof value === "object" &&
+          value !== null &&
+          (value as Record<string, unknown>).specifier !== specifier
+        )
+          return false;
+        delete l[name];
+        delete r[name];
+      }
+      if (JSON.stringify(l) !== JSON.stringify(r)) return false;
+    }
+  }
+  return true;
+}
+
 async function safeReviewPnpmChanges(
   s: InstallVerification,
   read: ReadObject,
@@ -867,6 +932,7 @@ async function safeReviewPnpmChanges(
 
   let typesOnly = false;
   let scriptsChanged = false;
+  const typeSpecs = new Map<string, unknown>();
   for (const file of changed.filter((file) => basename(file) === "package.json")) {
     const entry = await baseEntry(read, base, file);
     if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return false;
@@ -910,6 +976,7 @@ async function safeReviewPnpmChanges(
       }
       if (names.size > 0) {
         if ([...names].some((name) => !name.startsWith("@types/"))) return false;
+        for (const name of names) typeSpecs.set(name, rightDependencyValue(before, after, name));
         typesOnly = true;
       }
     } catch {
@@ -924,6 +991,7 @@ async function safeReviewPnpmChanges(
     const before = parseYaml(
       (await read("blob", entry.id, PNPM_TOOL.lockfile)).toString("utf8"),
     ) as {
+      importers?: unknown;
       packages?: Record<string, { requiresBuild?: unknown }>;
     };
     const after = parseYaml(
@@ -936,7 +1004,10 @@ async function safeReviewPnpmChanges(
     const afterResolution = { ...after };
     delete beforeResolution.packages;
     delete afterResolution.packages;
+    delete beforeResolution.importers;
+    delete afterResolution.importers;
     if (JSON.stringify(beforeResolution) !== JSON.stringify(afterResolution)) return false;
+    if (!safeTypeImporters(before.importers, after.importers, typeSpecs)) return false;
     const keys = new Set([
       ...Object.keys(before.packages ?? {}),
       ...Object.keys(after.packages ?? {}),

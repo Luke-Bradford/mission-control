@@ -1966,8 +1966,8 @@ describe("review scratch checkouts", () => {
   });
 
   it("installs a types-only manifest and lockfile bump for a review", async () => {
-    const oldLock = `${EMPTY_LOCK}\npackages:\n\n  '@types/example@1.0.0':\n    resolution: {integrity: sha512-old}\n`;
-    const newLock = `${EMPTY_LOCK}\npackages:\n\n  '@types/example@2.0.0':\n    resolution: {integrity: sha512-new}\n`;
+    const oldLock = `lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    devDependencies:\n      '@types/example':\n        specifier: 1.0.0\n        version: 1.0.0\n\npackages:\n\n  '@types/example@1.0.0':\n    resolution: {integrity: sha512-old}\n`;
+    const newLock = `lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    devDependencies:\n      '@types/example':\n        specifier: 2.0.0\n        version: 2.0.0\n\npackages:\n\n  '@types/example@2.0.0':\n    resolution: {integrity: sha512-new}\n`;
     commit(seed, {
       "package.json": `${JSON.stringify({
         name: "x",
