@@ -4478,6 +4478,7 @@ describe("ticket detail", () => {
       body: "line one\nline two",
       bodyTruncated: false,
       bodyLength: 17,
+      prototypeProblem: null,
       // no "## Controller check" heading in the body
       controllerCheck: null,
       labels: ["bug"],
