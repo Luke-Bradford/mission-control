@@ -157,9 +157,9 @@ import {
   type StrayKind,
   type Telemetry,
   type TestLockRun,
-  type TicketWait,
   TICKET_SIZES,
   TITLE_MARKERS,
+  type TicketWait,
   type TokenUsage,
   testsTouched,
   tokenBaselines,
@@ -3795,11 +3795,7 @@ export class Store {
   }
 
   /** Records that a ticket, rather than its former seat, waits for a known condition. */
-  setTicketWait({
-    repoId,
-    issue,
-    ...wait
-  }: { repoId: RepoId; issue: number } & TicketWait): void {
+  setTicketWait({ repoId, issue, ...wait }: { repoId: RepoId; issue: number } & TicketWait): void {
     this.transaction(() => {
       this.db
         .prepare(
@@ -3814,7 +3810,9 @@ export class Store {
   /** Clears a condition the hub has observed to be resolved. */
   clearTicketWait(repoId: RepoId, issue: number): void {
     this.transaction(() => {
-      this.db.prepare("DELETE FROM ticket_waits WHERE repo_id = ? AND issue = ?").run(repoId, issue);
+      this.db
+        .prepare("DELETE FROM ticket_waits WHERE repo_id = ? AND issue = ?")
+        .run(repoId, issue);
     });
   }
 
