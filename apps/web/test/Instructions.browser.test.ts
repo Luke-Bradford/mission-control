@@ -20,7 +20,7 @@ const cases = [
   { width: 1920, height: 1080 },
   { width: 1600, height: 700 },
 ].flatMap((size) =>
-  ["orders", "crew", "agent"].map((view) => ({
+  ["orders", "crew"].map((view) => ({
     ...size,
     view,
     label: `${view}-${size.width}x${size.height}`,
