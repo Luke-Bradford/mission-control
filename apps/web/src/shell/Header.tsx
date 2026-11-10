@@ -19,7 +19,6 @@ import { Lamp } from "../hud/Lamp.tsx";
 import { FULL_WIDTH_PAGES, followLink, navigate, PAGE_PATHS, type Page } from "../router.ts";
 import { currentTheme, nextTheme, setTheme, subscribeTheme, type ThemeChoice } from "../theme.ts";
 import { LiveIndicator } from "./LiveIndicator.tsx";
-import { useOperatorUnread } from "./operatorMessages.ts";
 import { openAway, useDock } from "./overlays.ts";
 import { resetSession, SESSION_ALL, useSession, useSessions } from "./session.ts";
 import { toast } from "./Toast.tsx";
@@ -40,7 +39,6 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
 export function Header({ page }: { page: Page | null }) {
-  const unread = useOperatorUnread().length;
   const demo = useDemo();
   return (
     <header className="top">
@@ -65,7 +63,7 @@ export function Header({ page }: { page: Page | null }) {
         <AwayButton />
         <ThemeButton />
         <SetupButton on={page === "setup"} />
-        <DockButton page={page ?? "overview"} unread={unread} />
+        <DockButton page={page ?? "overview"} />
       </div>
       <span className="sr-only">
         <LiveIndicator />
@@ -395,10 +393,10 @@ function ThemeIcon({ choice }: { choice: ThemeChoice }) {
 }
 
 /**
- * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Its badge counts the
- * unread messages addressed to the operator (CAPCOM); the Needs you tab owns the waiting count.
+ * FLIGHT's chat: a dock toggle where mounted, otherwise its full Comms view. Mention counts stay
+ * on Comms, where opening the list cannot cover the Overview's operational right column.
  */
-function DockButton({ page, unread }: { page: Page; unread: number }) {
+function DockButton({ page }: { page: Page }) {
   const dock = useDock();
   const inComms = page === "comms";
   const fullWidth = FULL_WIDTH_PAGES.has(page);
@@ -412,7 +410,7 @@ function DockButton({ page, unread }: { page: Page; unread: number }) {
       type="button"
       className={`iconbtn${inComms || (!fullWidth && dock.visible && !dock.collapsed) ? " on" : ""}`}
       title={title}
-      aria-label={unread > 0 ? `FLIGHT chat, ${unread} unread to you` : "FLIGHT chat"}
+      aria-label="FLIGHT chat"
       aria-pressed={inComms ? true : fullWidth ? undefined : dock.visible && !dock.collapsed}
       onClick={() => {
         if (fullWidth) navigate(PAGE_PATHS.comms);
@@ -429,7 +427,6 @@ function DockButton({ page, unread }: { page: Page; unread: number }) {
           strokeLinejoin="round"
         />
       </svg>
-      {unread > 0 && <span className="dock-unread">{unread}</span>}
     </button>
   );
 }
