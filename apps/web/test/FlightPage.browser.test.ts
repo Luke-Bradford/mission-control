@@ -36,7 +36,12 @@ describeRendered("FLIGHT page in a browser", () => {
                 item({
                   key: "hold:watch",
                   text: "Wait for CI to finish before the next release.",
-                  hold: { reason: "CI is still running", condition: { kind: "manual" }, at: NOW },
+                  hold: {
+                    reason: "CI is still running",
+                    condition: { kind: "manual" },
+                    by: "flight-1",
+                    at: NOW,
+                  },
                 }),
               ],
             }),
