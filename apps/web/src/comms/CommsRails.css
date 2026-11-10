@@ -140,27 +140,9 @@
 
 /* A message in flight rides its line. Under reduced motion none is drawn. */
 .comms-particle {
-  offset-rotate: 0deg;
-  animation: comms-travel 1150ms linear both;
   stroke: var(--surface);
   stroke-width: 1.5;
   pointer-events: none;
-}
-@keyframes comms-travel {
-  from {
-    offset-distance: 0%;
-    opacity: 0;
-  }
-  10% {
-    opacity: 1;
-  }
-  90% {
-    opacity: 1;
-  }
-  to {
-    offset-distance: 100%;
-    opacity: 0;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .comms-particle {

@@ -84,13 +84,19 @@ function meetAt(layout: RailLayout, id: string, other: string): Point | undefine
   return { x: p.x + (q.x < p.x ? -HUB_W / 2 : HUB_W / 2), y: p.y };
 }
 
-type Particle = { id: number; d: string; color: string; delay: number };
+type Particle = { id: number; d: string; color: string; delay: number; x: number; y: number };
 type Tip = { kind: "seat" | "edge"; id: string } | null;
 
 /** The wait mark's words. */
 const waitLabel = (w: Waiting) => `⧖ ${waitWord(w.ms)}`;
 
 const keyOf = (a: string, b: string) => (a < b ? `${a}\0${b}` : `${b}\0${a}`);
+
+/** A straight low-detail link keeps unusually large sessions responsive without hiding traffic. */
+function lowDetailPath(a: Point, b: Point): { d: string; mid: Point; at: (t: number) => Point } {
+  const at = (t: number) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+  return { d: `M${a.x.toFixed(1)} ${a.y.toFixed(1)} L${b.x.toFixed(1)} ${b.y.toFixed(1)}`, mid: at(0.5), at };
+}
 
 /** A small, deterministic force pass keeps frequent correspondents close without a simulation loop. */
 function organicLayout(
@@ -99,18 +105,26 @@ function organicLayout(
   size: { w: number; h: number },
 ): RailLayout {
   const w = Math.max(300, size.w);
-  const h = Math.max(260, size.h);
+  // Give the graph enough vertical perimeter for the labels as the crew grows. The scroll owner is
+  // the chart, so a busy session grows there rather than turning names into an unreadable cluster.
+  const h = Math.max(260, size.h, seats.length * 20 + 180);
   const positions = new Map<string, Point>();
+  const nameRoom = 110;
+  const cx = w / 2;
+  const cy = h / 2;
+  const rx = Math.max(32, (w - nameRoom * 2 - 40) / 2);
+  const ry = Math.max(80, h * 0.4);
   const hash = (id: string) => [...id].reduce((n, char) => (n * 31 + char.charCodeAt(0)) >>> 0, 7);
   seats.forEach((seat, index) => {
-    const angle = ((hash(seat.id) % 360) * Math.PI) / 180;
-    const radius = Math.min(w, h) * (0.18 + (index % 4) * 0.045);
+    // A deterministic, irregular ring gives every label a berth before the force pass draws
+    // frequent correspondents closer. The hashed offset means it never reads as a fixed grid.
+    const angle = (Math.PI * 2 * index) / Math.max(1, seats.length) + ((hash(seat.id) % 17) - 8) * 0.008;
     positions.set(seat.id, {
-      x: w / 2 + Math.cos(angle) * radius,
-      y: h / 2 + Math.sin(angle) * radius,
+      x: cx + Math.cos(angle) * rx,
+      y: cy + Math.sin(angle) * ry,
     });
   });
-  for (let pass = 0; pass < 90; pass++) {
+  for (let pass = 0; pass < 18; pass++) {
     const delta = new Map(seats.map((seat) => [seat.id, { x: 0, y: 0 }]));
     for (let left = 0; left < seats.length; left++)
       for (let right = left + 1; right < seats.length; right++) {
@@ -119,7 +133,7 @@ function organicLayout(
         const dx = a.x - b.x;
         const dy = a.y - b.y;
         const distance = Math.max(16, Math.hypot(dx, dy));
-        const push = 900 / (distance * distance);
+        const push = 1_800 / (distance * distance);
         const da = delta.get(seats[left]?.id ?? "") as Point;
         const db = delta.get(seats[right]?.id ?? "") as Point;
         da.x += (dx / distance) * push;
@@ -134,7 +148,7 @@ function organicLayout(
       const dx = b.x - a.x;
       const dy = b.y - a.y;
       const distance = Math.max(1, Math.hypot(dx, dy));
-      const pull = (distance - 80) * (0.004 + edge.weight * 0.012);
+      const pull = (distance - 112) * (0.002 + edge.weight * 0.006);
       const da = delta.get(edge.a) as Point;
       const db = delta.get(edge.b) as Point;
       da.x += (dx / distance) * pull;
@@ -145,8 +159,8 @@ function organicLayout(
     for (const seat of seats) {
       const p = positions.get(seat.id) as Point;
       const d = delta.get(seat.id) as Point;
-      p.x = Math.min(w - 52, Math.max(52, p.x + d.x + (w / 2 - p.x) * 0.008));
-      p.y = Math.min(h - 28, Math.max(28, p.y + d.y + (h / 2 - p.y) * 0.008));
+      p.x = Math.min(w - nameRoom - 14, Math.max(nameRoom + 14, p.x + d.x + (cx - p.x) * 0.002));
+      p.y = Math.min(h - 28, Math.max(28, p.y + d.y + (cy - p.y) * 0.002));
     }
   }
   const regular = new Map<string, Point & { side: "left" | "right" }>();
@@ -159,10 +173,10 @@ function organicLayout(
   return {
     w,
     h,
-    cx: w / 2,
+    cx,
     leftX: 0,
     rightX: w,
-    nameRoom: 80,
+    nameRoom,
     rowH: 28,
     seats: regular,
     hubs,
@@ -252,27 +266,52 @@ export function CommsRails({
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
   const timers = useRef(new Set<number>());
   const nextParticle = useRef(0);
+  const burstCooling = useRef(false);
 
   useLayoutEffect(() => {
     const el = root.current;
     if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = (box: { width: number; height: number }) => {
+      if (box.width > 0 && box.height > 0)
+        setSize((current) => {
+          const next = { w: Math.round(box.width), h: Math.round(box.height) };
+          return current.w === next.w && current.h === next.h ? current : next;
+        });
+    };
+    measure(el.getBoundingClientRect());
     const observer = new ResizeObserver(([entry]) => {
       const box = entry?.contentRect;
-      if (box && box.width > 0 && box.height > 0)
-        setSize({ w: Math.round(box.width), h: Math.round(box.height) });
+      if (box) measure(box);
     });
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
 
-  const byId = useMemo(() => new Map(seats.map((s) => [s.id, s])), [seats]);
+  // Keep the expensive SVG topology stable during a dense-room burst. New messages still pulse on
+  // the live links, while the next membership/topology change refreshes the static readout.
+  const largeRoom = seats.length > 12;
+  const membership = seats.map((seat) => seat.id).join("\0");
+  const topology = edges
+    .map((edge) => edge.key)
+    .sort()
+    .join("\0");
+  const visual = useMemo(
+    () => ({ seats, edges }),
+    [largeRoom, largeRoom ? membership : seats, largeRoom ? topology : edges],
+  );
+  const visualSeats = visual.seats;
+  const visualEdges = visual.edges;
+  const byId = useMemo(() => new Map(visualSeats.map((s) => [s.id, s])), [visualSeats]);
   const nameOf = (id: string) => byId.get(id)?.name ?? id;
-  const layout = useMemo(() => organicLayout(seats, edges, size), [seats, edges, size]);
+  const layout = useMemo(
+    () => organicLayout(visualSeats, visualEdges, size),
+    [visualSeats, visualEdges, size],
+  );
   const point = (id: string): Point | undefined => layout.seats.get(id) ?? layout.hubs.get(id);
 
   const shown = useMemo(
-    () => edges.filter((edge) => (mode === "open" ? edge.waiting !== null : true)),
-    [edges, mode],
+    () => visualEdges.filter((edge) => (mode === "open" ? edge.waiting !== null : true)),
+    [visualEdges, mode],
   );
   const drawn = useMemo(
     () =>
@@ -280,7 +319,7 @@ export function CommsRails({
         const a = meetAt(layout, edge.a, edge.b);
         const b = meetAt(layout, edge.b, edge.a);
         if (!a || !b) return [];
-        return [{ edge, path: linkPath(a, b, layout.cx) }];
+        return [{ edge, path: visualSeats.length > 12 ? lowDetailPath(a, b) : linkPath(a, b, layout.cx) }];
       }),
     [shown, layout],
   );
@@ -337,18 +376,32 @@ export function CommsRails({
     const { flows: read, reduced, layout, byId } = latest.current;
     if (generation === seenGeneration.current) return;
     seenGeneration.current = generation;
+    // A large room can produce many link updates in one poll. Coalesce them into one visible
+    // pulse while that pulse is in flight, rather than scheduling a React/SVG update per link.
+    if (byId.size > 12 && burstCooling.current) return;
     const keys = new Set<string>();
     const fresh: Particle[] = [];
+    // In a very large session, one representative pulse per busy link keeps the graph legible
+    // without spending the frame budget on a cloud of identical dots.
+    const particleLimit = byId.size > 12 ? 4 : MAX_PARTICLES;
+    const perFlow = particleLimit < MAX_PARTICLES ? 1 : MAX_PARTICLES_PER_FLOW;
     for (const flow of read.list) {
       const a = meetAt(layout, flow.from, flow.to);
       const b = meetAt(layout, flow.to, flow.from);
       if (!a || !b) continue;
       keys.add(keyOf(flow.from, flow.to));
       if (reduced) continue;
-      const { d } = linkPath(a, b, layout.cx);
+      const path = linkPath(a, b, layout.cx);
       const color = byId.get(flow.from)?.color ?? "var(--accent)";
-      for (let i = 0; i < Math.min(flow.n, MAX_PARTICLES_PER_FLOW); i++)
-        fresh.push({ id: nextParticle.current++, d, color, delay: i * PARTICLE_GAP_MS });
+      for (let i = 0; i < Math.min(flow.n, perFlow) && fresh.length < particleLimit; i++)
+        fresh.push({
+          id: nextParticle.current++,
+          d: path.d,
+          color,
+          delay: i * PARTICLE_GAP_MS,
+          x: path.at(0.5).x,
+          y: path.at(0.5).y,
+        });
     }
     if (keys.size > 0) {
       setLit(keys);
@@ -359,13 +412,15 @@ export function CommsRails({
       timers.current.add(off);
     }
     if (fresh.length > 0) {
-      const added = fresh.slice(0, MAX_PARTICLES);
-      setParticles((current) => [...current, ...added].slice(-MAX_PARTICLES));
+      if (byId.size > 12) burstCooling.current = true;
+      const added = fresh.slice(0, particleLimit);
+      setParticles((current) => [...current, ...added].slice(-particleLimit));
       const ids = new Set(added.map((p) => p.id));
       const life = PARTICLE_MS + PARTICLE_GAP_MS * MAX_PARTICLES_PER_FLOW + 100;
       const gone = window.setTimeout(() => {
         timers.current.delete(gone);
         setParticles((current) => current.filter((p) => !ids.has(p.id)));
+        burstCooling.current = false;
       }, life);
       timers.current.add(gone);
     }
@@ -375,6 +430,7 @@ export function CommsRails({
     return () => {
       for (const t of live) window.clearTimeout(t);
       live.clear();
+      burstCooling.current = false;
     };
   }, []);
 
@@ -543,7 +599,7 @@ export function CommsRails({
   const nodeMarks = useMemo(
     () => (
       <g className="comms-nodes">
-        {seats.map((seat) => {
+        {visualSeats.map((seat) => {
           const p = point(seat.id);
           if (!p) return null;
           const hub = seat.hub;
@@ -589,7 +645,12 @@ export function CommsRails({
                 setTip({ kind: "seat", id: seat.id });
               }}
               onBlur={() => setTip(null)}
-              onMouseEnter={() => setTip({ kind: "seat", id: seat.id })}
+              onMouseEnter={() => {
+                // A particle burst is the moment to keep the interaction path cheap; keyboard
+                // focus remains available throughout, and hover cards resume when it settles.
+                if (visualSeats.length <= 12 && particles.length === 0)
+                  setTip({ kind: "seat", id: seat.id });
+              }}
               onMouseLeave={() => setTip(null)}
             >
               {hub ? (
@@ -640,7 +701,18 @@ export function CommsRails({
         })}
       </g>
     ),
-    [seats, layout, hubIds, filter, inside, waitingSeats, seatStop, full, onPickSeat],
+    [
+      visualSeats,
+      layout,
+      hubIds,
+      filter,
+      inside,
+      waitingSeats,
+      seatStop,
+      full,
+      onPickSeat,
+      particles.length,
+    ],
   );
 
   const tipFor = () => {
@@ -697,14 +769,13 @@ export function CommsRails({
           >
             <title>{label}</title>
             <g className="comms-organic-layout">
-              {!reduced && (
+              {!reduced && particles.length > 0 && visualSeats.length <= 12 && (
                 <animateTransform
                   attributeName="transform"
                   type="translate"
                   additive="sum"
                   values="0 0; 2 -2; 0 0"
-                  dur="45s"
-                  repeatCount="indefinite"
+                  dur={`${PARTICLE_MS}ms`}
                 />
               )}
               {edgeMarks}
@@ -725,14 +796,23 @@ export function CommsRails({
                   key={p.id}
                   className="comms-particle"
                   r={3.5}
-                  style={
-                    {
-                      offsetPath: `path("${p.d}")`,
-                      animationDelay: `${p.delay}ms`,
-                      fill: p.color,
-                    } as CSSProperties
-                  }
-                />
+                  fill={p.color}
+                  cx={visualSeats.length > 12 ? p.x : undefined}
+                  cy={visualSeats.length > 12 ? p.y : undefined}
+                >
+                  {visualSeats.length <= 12 ? (
+                    <>
+                      <animateMotion path={p.d} dur={`${PARTICLE_MS}ms`} begin={`${p.delay}ms`} />
+                      <animate
+                        attributeName="opacity"
+                        values="0;1;1;0"
+                        keyTimes="0;0.1;0.9;1"
+                        dur={`${PARTICLE_MS}ms`}
+                        begin={`${p.delay}ms`}
+                      />
+                    </>
+                  ) : null}
+                </circle>
               ))}
             </g>
           </svg>
