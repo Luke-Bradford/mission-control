@@ -1702,24 +1702,39 @@ describe("collectGithub pull requests", () => {
   });
 
   it("reports the hub's refused review on PR 1520 as skipped, not a failed check", async () => {
-    const { gql } = stub({
+    const { gql, calls } = stub({
       prPages: [
         prPage([
           pull(1520, {
-            commits: heads(
-              "FAILURE",
-              checkRun("check", "SUCCESS"),
-              statusContext("mc/review", "FAILURE"),
-            ),
+            commits: heads("FAILURE", checkRun("check", "SUCCESS"), {
+              ...statusContext("mc/review", "FAILURE"),
+              description: "QA review did not complete",
+            }),
           }),
         ]),
       ],
     });
     await collectGithub(repo, store, gql, NOW);
+    expect(calls.find(({ q }) => q.includes("pullRequests"))?.q).toMatch(
+      /on StatusContext\s*\{[^}]*\bdescription\b/,
+    );
     expect(prs()[0]?.checks).toContainEqual(
       expect.objectContaining({ name: "mc/review", skipped: true, conclusion: "FAILURE" }),
     );
   });
+
+  it.each(["QA review found blocking issues", undefined])(
+    "keeps a failed review failing without a skipped marker (%s)",
+    (description) => {
+      const [check] = parseChecks({
+        contexts: {
+          nodes: [{ ...statusContext("mc/review", "FAILURE"), description }],
+        },
+      });
+      expect(check?.state).toBe("failing");
+      expect(check?.skipped).not.toBe(true);
+    },
+  );
 
   it("with required_checks, an unreported required check is pending", async () => {
     const { gql } = stub({ prPages: [prPage([pull(1)])] });

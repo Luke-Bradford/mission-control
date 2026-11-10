@@ -2215,7 +2215,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       try {
         const ticket = await deps.fetchTicket(repo, issue);
         body = ticket?.body ?? "";
-        const prototypeProblem = ticket?.prototypeProblem ?? prototypeLinkProblem(body);
+        const prototypeProblem =
+          ticket?.prototypeProblem ?? prototypeLinkProblem(body, repo.github);
         if (prototypeProblem !== null) return fail(`Not moved: ${ref} ${prototypeProblem}`);
       } catch {
         return fail(PROMOTE_NO_GITHUB);

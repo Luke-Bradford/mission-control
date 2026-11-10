@@ -853,7 +853,13 @@ function prSummary(pr: PullRequestView, check: ReviewCheckState | null): PullReq
     : {
         ...rest,
         check,
-        checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
+        checks: checks.map(({ name, kind, state, attempt, skipped }) => ({
+          name,
+          kind,
+          state,
+          attempt,
+          ...(skipped === undefined ? {} : { skipped }),
+        })),
       };
 }
 

@@ -4310,6 +4310,26 @@ describe("promote", () => {
     expect(moveCalls).toEqual([]);
   });
 
+  it.each([
+    "https://private.example/docs/prototype/mockup.html",
+    "https://github.com/another/repo/blob/main/docs/prototype/mockup.html",
+  ])("refuses promotion when a private prototype mimics the repository path: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("allows promotion when the prototype URL names this repository", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, {
+        body: `${GOOD}\nPrototype: [working copy](https://github.com/o/mc/blob/main/docs/prototype/mockup.html)`,
+      });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
+  });
+
   it("names only what is missing, and honours the rules' needs", async () => {
     board(backlog({ size: null }));
     expect((await call("promote", P())).text).toBe(

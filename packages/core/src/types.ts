@@ -460,7 +460,7 @@ export interface PrCheck {
 }
 
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
-export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
+export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt" | "skipped">;
 
 /**
  * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.

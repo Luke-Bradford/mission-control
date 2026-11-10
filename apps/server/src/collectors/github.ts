@@ -27,6 +27,8 @@ import {
   parseDefectRefs,
   prSweepCollector,
   RATE_LIMIT_SELECTION,
+  REVIEW_STATUS_CONTEXT,
+  REVIEW_STATUS_INCOMPLETE,
   type RepoGoal,
   type RepoId,
   SEARCH_MAX_PAGES,
@@ -212,7 +214,7 @@ export const PR_FILES_MAX = 100;
 /** A PR head's checks read per poll; a required check past them reads as missing. */
 export const PR_CHECKS_MAX = 50;
 /** The head commit's rollup: its state and each check run or commit status by name. */
-export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { id name status conclusion detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state targetUrl } } } }`;
+export const CHECK_CONTEXTS = `statusCheckRollup { state contexts(first: ${PR_CHECKS_MAX}) { nodes { __typename ... on CheckRun { id name status conclusion detailsUrl checkSuite { workflowRun { runAttempt workflow { name } } } } ... on StatusContext { context state description targetUrl } } } }`;
 
 /** What the board reads from a pull request; the page query and the one-PR query share it. */
 const PR_FIELDS = `
@@ -818,7 +820,7 @@ export async function fetchTicket(
     // read on the whole body: a section past the cut still holds a merge
     controllerCheck: controllerCheckOf(chars.join("")),
     body: chars.slice(0, TICKET_BODY_MAX).join(""),
-    prototypeProblem: prototypeLinkProblem(chars.join("")),
+    prototypeProblem: prototypeLinkProblem(chars.join(""), repo.github),
     bodyTruncated: chars.length > TICKET_BODY_MAX,
     bodyLength: chars.length,
     labels: names(issue.labels),
@@ -1096,7 +1098,9 @@ export function parseChecks(rollup: unknown): PrCheck[] {
         name,
         kind: "status",
         state: lookup(CHECKS, n.state) ?? "pending",
-        ...(n.context === "mc/review" && lookup(CHECKS, n.state) === "failing"
+        ...(name === REVIEW_STATUS_CONTEXT &&
+        lookup(CHECKS, n.state) === "failing" &&
+        n.description === REVIEW_STATUS_INCOMPLETE
           ? { skipped: true }
           : {}),
         conclusion: str(n.state, ""),
