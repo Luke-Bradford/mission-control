@@ -1646,6 +1646,58 @@ describe("Comms seat tools", () => {
     expect(store.comms(0)).toEqual([]);
   });
 
+  it("teaches exposed Comms callers to link every answer", () => {
+    expect(tool("comms_send").description).toMatch(/every answer must.*replyTo/i);
+    const schema = tool("comms_send").inputSchema as {
+      properties: { replyTo: { description?: string } };
+    };
+    expect(schema.properties.replyTo.description).toMatch(/answered message/i);
+  });
+
+  it("keeps published Comms examples valid and stores their answer links", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:examples");
+    const paths = [
+      "roles/GUIDO.md",
+      "roles/INCO.md",
+      "roles/FAO.md",
+      "roles/FLIGHT.md",
+      ".claude/skills/flight-ops/ledger.md",
+    ];
+    const exposed = tool("comms_send").inputSchema as {
+      required: string[];
+      properties: { label: { enum: string[] }; replyTo: { pattern: string } };
+    };
+    for (const path of paths) {
+      const text = readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
+      expect(text, path).not.toMatch(/`question`, `handoff` or `blocker`/);
+      expect(text, path).toMatch(/every answer must.*replyTo/i);
+      const examples = [...text.matchAll(/`mc comms_send (\{[^`]+\})`/g)];
+      expect(examples.length, path).toBeGreaterThan(0);
+      for (const [, json] of examples) {
+        const args = JSON.parse(json) as Record<string, string>;
+        for (const key of exposed.required) expect(args[key], `${path}: ${key}`).toBeDefined();
+        expect(exposed.properties.label.enum, path).toContain(args.label);
+        expect(args.replyTo, path).toMatch(new RegExp(exposed.properties.replyTo.pattern));
+        const flight = args.to === "CAPCOM";
+        const ctx = flight ? { seatId: "flight-1", runId: "flight-1:examples" } : CTX;
+        const question = store.addComms({
+          at: NOW,
+          from: args.to,
+          to: ctx.seatId,
+          text: "Is the correction ready?",
+          label: "question",
+          ticket: "mc#42",
+        });
+        if (question === null) throw new Error(`Could not store the question for ${path}`);
+        const result = await tool("comms_send").call(ctx, { ...args, replyTo: question.id });
+        expect(result, path).toMatchObject({ text: expect.stringMatching(/^Sent comms:\d+\.$/) });
+        const id = result.text.replace(/^Sent (.*)\.$/, "$1");
+        expect(store.commsMessage(id), path).toMatchObject({ replyTo: question.id, label: "none" });
+      }
+    }
+  });
+
   it("requires a seat or FLIGHT to choose a Comms label, accepts none, and records reply links", async () => {
     tools = make({ config: withFlight() });
     liveSeat("flight-1", "flight-1:label");

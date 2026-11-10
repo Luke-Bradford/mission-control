@@ -3106,7 +3106,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.commsSend,
       description:
-        "Send a message to a local seat, CAPCOM, or the crew channel. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
+        "Send a message to a local seat, CAPCOM, or the crew channel. Choose question, blocker or none explicitly; use none for handoffs and ordinary answers. Every answer must pass the answered message id as replyTo. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
       inputSchema: {
         type: "object",
         properties: {
@@ -3114,7 +3114,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
           label: { type: "string", enum: [...COMMS_SEAT_LABELS] },
           ref: { type: "string" },
-          replyTo: { type: "string", pattern: "^comms:[0-9]+$" },
+          replyTo: {
+            type: "string",
+            pattern: "^comms:[0-9]+$",
+            description:
+              "The answered message id; required for every answer. Omit only for a new message.",
+          },
         },
         required: ["to", "text", "label"],
         additionalProperties: false,
