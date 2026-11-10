@@ -32,6 +32,8 @@ beforeEach(() => {
 afterEach(() => {
   off();
   setPageKey("i", null);
+  setPageKey("j", null);
+  setPageKey("k", null);
   vi.useRealTimers();
   document.body.replaceChildren();
 });
@@ -78,6 +80,20 @@ describe("installKeys", () => {
     expect(app.navigate).toHaveBeenCalledWith("/agent");
     press("?");
     expect(app.help).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["j", "selectNext"],
+    ["k", "selectPrev"],
+  ] as const)("%s uses the page handler without also running %s", (key, fallback) => {
+    const own = vi.fn();
+    setPageKey(key, own);
+    press(key);
+    expect(own).toHaveBeenCalledTimes(1);
+    expect(app[fallback]).not.toHaveBeenCalled();
+    setPageKey(key, null);
+    press(key);
+    expect(app[fallback]).toHaveBeenCalledTimes(1);
   });
 
   it("i toasts off the agent page, or runs the page's own handler", () => {

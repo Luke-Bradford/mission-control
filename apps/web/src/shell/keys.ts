@@ -101,11 +101,13 @@ export function installKeys(app: KeyApp): () => void {
         app.toggleDock();
         return;
       case "j":
-        pageKeys.get("j")?.() ?? app.selectNext();
+      case "k": {
+        const own = pageKeys.get(e.key);
+        if (own) own();
+        else if (e.key === "j") app.selectNext();
+        else app.selectPrev();
         return;
-      case "k":
-        pageKeys.get("k")?.() ?? app.selectPrev();
-        return;
+      }
       case "/":
         e.preventDefault();
         stopFocus();
