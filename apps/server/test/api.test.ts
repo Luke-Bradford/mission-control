@@ -7418,6 +7418,40 @@ describe("crew routes", () => {
       );
     });
 
+    it("does not read FLIGHT history when shape is seat", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      store.upsertRun(run({ id: "flight-run", agentId: "flight-1" }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-run",
+        cliSessionId: "cli",
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      for (const reader of [
+        "flightDecisions",
+        "agentPromptWakes",
+        "runsOverlapping",
+        "commsTo",
+      ] as const)
+        vi.spyOn(store, reader).mockImplementation(() => {
+          throw new Error(`${reader} read`);
+        });
+
+      const response = await get("/api/flight?shape=seat");
+      expect(response.statusCode).toBe(200);
+      expect(Object.keys(response.json())).toEqual(["seat"]);
+      expect(response.json()).toMatchObject({ seat: { id: "flight-1" } });
+    });
+
     it("rejects an unsupported FLIGHT view shape", async () => {
       const response = await get("/api/flight?shape=history");
       expect(response.statusCode).toBe(400);
