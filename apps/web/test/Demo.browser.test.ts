@@ -221,6 +221,9 @@ describeRendered("Demo, rendered", () => {
       await page.evaluate(() => {
         window.__noReload = true;
       }, undefined);
+      // Display controls belong in Setup, rather than competing with operational-page shortcuts.
+      await page.click("button[aria-label=Setup]");
+      await page.box(".demo-switch");
       const clickedAt = page.requests().length;
 
       await page.click(".demo-switch");
@@ -239,6 +242,7 @@ describeRendered("Demo, rendered", () => {
         async () => (await count(page, ".demo-marker")) === 0,
         "the marker to go",
       );
+      await page.click('a[href="/"]');
       await eventually(page, () => bodyHas(page, SENTINEL), "the Live sentinel back");
       const back = page
         .requests()
