@@ -1338,7 +1338,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)) {
           if (l.run.vendor !== "codex" || e.stopReason === "interrupted")
             deps.lock.releaseRun(l.run.id);
-          deps.checks?.dropRun(l.run.id);
+          deps.checks?.dropRun(l.run.id, {
+            keepWatching: l.run.vendor === "codex" && e.stopReason !== "interrupted",
+          });
         }
         const interrupted = l.interrupted;
         l.inTurn = false;
@@ -2316,6 +2318,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       spawns.delete(run.id);
       deps.tokens.revoke(run.id);
       deps.lock.releaseRun(run.id);
+      deps.checks?.dropRun(run.id);
       for (const p of [crewTokenPath(deps.dbPath, run.id), crewMcpPath(deps.dbPath, run.id)]) {
         try {
           rmSync(p, { force: true });
@@ -2568,6 +2571,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       deps.tokens.revoke(runId);
       deps.lock.releaseRun(runId);
+      deps.checks?.dropRun(runId);
       for (const p of [crewTokenPath(deps.dbPath, runId), crewMcpPath(deps.dbPath, runId)]) {
         rmSync(p, { force: true });
       }

@@ -197,7 +197,7 @@ describe("the check recorder", () => {
     readingEnd = true;
     const ending = r.end(alias, true, 0);
     expect(r.pending("r1")).toEqual([LINT, TYPES]);
-    r.dropRun("r1"); // A turn ending while the completed receipt is checked must not discard it.
+    r.dropRun("r1", { keepWatching: true }); // A normal Codex hand-back keeps its receipt alive.
     expect(r.pending("r1")).toEqual([LINT, TYPES]);
     finishState?.(state);
     await ending;
@@ -366,9 +366,17 @@ describe("the check recorder", () => {
     await r.end(KEY, true);
     expect(rows).toHaveLength(1);
     await r.begin(KEY, LINT);
-    r.dropRun("r1");
+    r.dropRun("r1", { keepWatching: true });
     await r.end(KEY, true);
     expect(rows).toHaveLength(2);
+  });
+
+  it("releases an interrupted call so another check can be admitted", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    r.dropRun("r1");
+    expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, TYPES)).toBeNull();
+    expect(r.drops("r1")).toMatchObject([{ reason: "turn-ended", command: LINT }]);
   });
 
   it("keeps two runs' calls with the same tool id apart", async () => {
@@ -531,7 +539,7 @@ describe("why the recorder dropped a check call", () => {
   it("keeps watching a check when the tool hands back early", async () => {
     const r = recorder();
     await r.begin(KEY, `${LINT} && ${TYPES}`);
-    r.dropRun("r1");
+    r.dropRun("r1", { keepWatching: true });
     await r.end(KEY, true, 0);
     expect(rows).toMatchObject([
       { command: LINT, headSha: HEAD, ok: true, exitCode: 0 },
@@ -543,7 +551,7 @@ describe("why the recorder dropped a check call", () => {
   it("marks an early-returned check stale when HEAD changes before it exits", async () => {
     const r = recorder();
     await r.begin(KEY, LINT);
-    r.dropRun("r1");
+    r.dropRun("r1", { keepWatching: true });
     state = { head: "b".repeat(40), clean: true };
     await r.end(KEY, true, 0);
     expect(rows).toEqual([]);
@@ -643,7 +651,7 @@ describe("why the recorder dropped a check call", () => {
       expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
       await r.begin({ runId: "r1", toolUseId: "t2" }, LINT, [], options);
       clock += LONG;
-      r.dropRun("r1");
+      r.dropRun("r1", { keepWatching: true });
       expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
       expect(rows).toEqual([]);
     });
@@ -659,7 +667,7 @@ describe("why the recorder dropped a check call", () => {
   it("keeps watching after a drop and keeps runs apart", async () => {
     const r = recorder();
     await r.begin(KEY, LINT);
-    r.dropRun("r1");
+    r.dropRun("r1", { keepWatching: true });
     expect(r.drops("r1")).toEqual([]);
     await r.begin({ runId: "r1", toolUseId: "t2" }, LINT);
     await r.end({ runId: "r1", toolUseId: "t2" }, true);

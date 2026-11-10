@@ -119,8 +119,8 @@ export interface CheckRecorder {
   admit?(key: CallKey, command: string): Promise<string | null>;
   /** Releases an admission whose command will not start. */
   cancel?(key: CallKey): void;
-  /** A turn ended. Keep watching calls that have not reported their final exit yet. */
-  dropRun(runId: string): void;
+  /** A turn ended. Only a normal Codex hand-back can keep waiting for an item completion. */
+  dropRun(runId: string, options?: { keepWatching?: boolean }): void;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
   /** Configured checks still executing or validating their completion, once per command. */
@@ -367,10 +367,16 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         finishing.delete(call);
       }
     },
-    dropRun(runId) {
+    dropRun(runId, options = {}) {
       // Codex can hand a turn back while its command keeps running. Its later item completion is
       // still the only result that can cover the commit this call started on.
-      void runId;
+      if (options.keepWatching) return;
+      const calls = [...new Set(started.values())].filter((call) => call.runId === runId);
+      for (const [id, call] of started) if (call.runId === runId) started.delete(id);
+      for (const call of calls)
+        noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
+      for (const [checkout, admission] of admitted)
+        if (admission.key.runId === runId) admitted.delete(checkout);
     },
     drops(runId) {
       return dropped.get(runId) ?? [];

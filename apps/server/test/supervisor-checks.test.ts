@@ -2,7 +2,7 @@
 import "./supervisor-harness.ts";
 
 import { describe, expect, it } from "vitest";
-import type { CheckRecorder } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -47,6 +47,27 @@ describe("a Codex seat's check records", () => {
       await sup.endRunByEngine(runId);
     },
   );
+
+  it("releases a check record after an interrupted Codex turn", async () => {
+    const checks = createCheckRecorder({
+      store: { addCheckRun: () => {} },
+      checks: async () => [],
+      state: async () => ({ head: "a".repeat(40), clean: true }),
+    });
+    const { sup } = codexSupervisor({ command: "pnpm -s test", holdItem: true }, { checks });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() =>
+      expect(checks.running?.(runId, "pnpm -s test another.test.ts")).resolves.toBe("pnpm -s test"),
+    );
+    await sup.interrupt("guido-1");
+    await until(() =>
+      expect(
+        checks.admit?.({ runId, toolUseId: "next" }, "pnpm -s test another.test.ts"),
+      ).resolves.toBeNull(),
+    );
+    await sup.endRunByEngine(runId);
+  });
 });
 
 describe("a Codex seat's test-lock outcome (#1411)", () => {
