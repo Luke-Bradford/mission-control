@@ -69,6 +69,16 @@ export function lockedCheck(command: string, checks: readonly string[]): string 
   return null;
 }
 
+/** Whether a command can run tests even when it is not one of the configured push checks. */
+export function testCommand(command: string): boolean {
+  return splitCommands(command).some((argv) => {
+    const program = argv[0]?.toLowerCase();
+    if (program === "vitest" || program?.endsWith("/vitest")) return true;
+    if (program !== "pnpm") return false;
+    return argv.slice(1).some((word) => /^test(?::|$)/.test(word) || word === "vitest");
+  });
+}
+
 /** The seat clone's state at one moment: its checked-out commit, and whether the worktree has no change, untracked files included. */
 export interface CloneState {
   head: string;
@@ -101,7 +111,9 @@ export interface CheckRecorder {
   end(key: CallKey, ok: boolean, exitCode?: number | null): Promise<void>;
   /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
   lockedBy(runId: string, command: string): Promise<string | null>;
-  /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
+  /** The active command in this checkout that prevents a check or test from starting. */
+  running?(runId: string, command: string): Promise<string | null>;
+  /** A turn ended. Keep watching calls that have not reported their final exit yet. */
   dropRun(runId: string): void;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
@@ -132,6 +144,7 @@ interface StartedCall {
   head: string;
   startedAt: number;
   timeoutMs: number;
+  worktree: string | null;
 }
 
 const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
@@ -176,12 +189,29 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         return null;
       }
     },
+    async running(runId, command) {
+      try {
+        const checks = await d.checks(runId);
+        if (lockedCheck(command, checks) === null && !testCommand(command)) return null;
+        const worktree =
+          d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
+        return (
+          [...new Set(started.values())].find(
+            (call) => call.runId === runId || (worktree !== null && call.worktree === worktree),
+          )?.command ?? null
+        );
+      } catch (e) {
+        d.log?.(`checks: could not find a running check for ${runId}: ${(e as Error).message}`);
+        return null;
+      }
+    },
     async begin(key, command, aliases = [], options = {}) {
       try {
         const checks = await d.checks(key.runId);
         const own = d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
         const matched = checksRun(withoutOwnCd(command, own), checks);
-        if (matched.length === 0) {
+        const isTest = testCommand(command);
+        if (matched.length === 0 && !isTest) {
           // a configured check inside a chain, a pipe or a list is not counted: say so
           const inside = lockedCheck(command, checks);
           if (inside === null) return;
@@ -215,6 +245,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
             options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
             CHECK_BASH_TIMEOUT_MS,
           ),
+          worktree: own,
         };
         started.set(callId(key), call);
         for (const alias of aliases) started.set(callId(alias), call);
@@ -265,15 +296,9 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
     },
     dropRun(runId) {
-      // a call can sit under two ids (Codex): it is one call
-      const calls = new Set<StartedCall>();
-      for (const [id, call] of started) {
-        if (call.runId !== runId) continue;
-        started.delete(id);
-        calls.add(call);
-      }
-      for (const call of calls)
-        noteDrop(runId, "turn-ended", call.matched, call.head, call.command);
+      // Codex can hand a turn back while its command keeps running. Its later item completion is
+      // still the only result that can cover the commit this call started on.
+      void runId;
     },
     drops(runId) {
       return dropped.get(runId) ?? [];

@@ -10,6 +10,7 @@ import {
   cloneState,
   createCheckRecorder,
   lockedCheck,
+  testCommand,
 } from "../src/guard/check-runs.ts";
 
 const LINT = "pnpm -s lint";
@@ -80,6 +81,18 @@ describe("lockedCheck", () => {
     expect(lockedCheck("pnpm -s lint --fix", CHECKS)).toBeNull();
     expect(lockedCheck("ls", CHECKS)).toBeNull();
     expect(lockedCheck(LINT, [])).toBeNull();
+  });
+});
+
+describe("testCommand", () => {
+  it.each([
+    "pnpm -s test apps/server/test/guard.test.ts",
+    "pnpm -s vitest run x.test.ts",
+    "vitest run x.test.ts",
+  ])("recognises %s", (command) => expect(testCommand(command)).toBe(true));
+
+  it("does not mistake a command that mentions tests for one that runs them", () => {
+    expect(testCommand("echo pnpm -s test")).toBe(false);
   });
 });
 
@@ -345,7 +358,7 @@ describe("the check recorder", () => {
     expect(rows).toEqual([]);
   });
 
-  it("records an end once, ignores an end it never saw begin, and forgets a dropped run", async () => {
+  it("records an end once, ignores an end it never saw begin, and keeps watching after a turn ends", async () => {
     const r = recorder();
     await r.end(KEY, true);
     await r.begin(KEY, LINT);
@@ -355,7 +368,7 @@ describe("the check recorder", () => {
     await r.begin(KEY, LINT);
     r.dropRun("r1");
     await r.end(KEY, true);
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
   });
 
   it("keeps two runs' calls with the same tool id apart", async () => {
@@ -387,6 +400,15 @@ describe("the check recorder", () => {
     // refused while another seat held the lock: it began but never ended, so no failed row
     await r.begin(KEY, TYPES);
     expect(rows).toEqual([]);
+  });
+
+  it("names the running test before another test can start in the same checkout", async () => {
+    const r = recorder();
+    await r.begin(KEY, "pnpm -s test apps/server/test/guard.test.ts");
+    expect(await r.running?.("r1", "vitest run apps/server/test/guard.test.ts")).toBe(
+      "pnpm -s test apps/server/test/guard.test.ts",
+    );
+    await r.end(KEY, true, 0);
   });
 
   it("takes no lock when the repo's rules cannot be read", async () => {
@@ -476,14 +498,26 @@ describe("why the recorder dropped a check call", () => {
     expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
   });
 
-  it("says the turn ended before a check reported its end", async () => {
+  it("keeps watching a check when the tool hands back early", async () => {
     const r = recorder();
     await r.begin(KEY, `${LINT} && ${TYPES}`);
     r.dropRun("r1");
-    expect(reasons(r)).toEqual([
-      ["turn-ended", LINT, HEAD],
-      ["turn-ended", TYPES, HEAD],
+    await r.end(KEY, true, 0);
+    expect(rows).toMatchObject([
+      { command: LINT, headSha: HEAD, ok: true, exitCode: 0 },
+      { command: TYPES, headSha: HEAD, ok: true, exitCode: 0 },
     ]);
+    expect(reasons(r)).toEqual([]);
+  });
+
+  it("marks an early-returned check stale when HEAD changes before it exits", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    r.dropRun("r1");
+    state = { head: "b".repeat(40), clean: true };
+    await r.end(KEY, true, 0);
+    expect(rows).toEqual([]);
+    expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
   });
 
   it("says a check moved to the background", async () => {
@@ -571,7 +605,7 @@ describe("why the recorder dropped a check call", () => {
       expect(rows).toEqual([]);
     });
 
-    it("does not count a background call or one whose end the hub never saw", async () => {
+    it("does not count a background call or invent a result whose end the hub never saw", async () => {
       const r = recorder();
       await r.begin(KEY, LINT, [], { ...options, background: true });
       clock += LONG;
@@ -580,7 +614,7 @@ describe("why the recorder dropped a check call", () => {
       await r.begin({ runId: "r1", toolUseId: "t2" }, LINT, [], options);
       clock += LONG;
       r.dropRun("r1");
-      expect(reasons(r)).toContainEqual(["turn-ended", LINT, HEAD]);
+      expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
       expect(rows).toEqual([]);
     });
   });
@@ -592,11 +626,11 @@ describe("why the recorder dropped a check call", () => {
     expect(reasons(r)).toEqual([["unreadable", LINT, null]]);
   });
 
-  it("forgets a drop once the check passes on that head, and keeps runs apart", async () => {
+  it("keeps watching after a drop and keeps runs apart", async () => {
     const r = recorder();
     await r.begin(KEY, LINT);
     r.dropRun("r1");
-    expect(r.drops("r1")).toHaveLength(1);
+    expect(r.drops("r1")).toEqual([]);
     await r.begin({ runId: "r1", toolUseId: "t2" }, LINT);
     await r.end({ runId: "r1", toolUseId: "t2" }, true);
     expect(r.drops("r1")).toEqual([]);

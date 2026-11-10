@@ -2706,6 +2706,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             body.data.tool_name === "Bash" &&
             typeof command === "string"
           ) {
+            const running = await checks?.running?.(who.runId, command);
+            if (running !== null && running !== undefined)
+              verdict = {
+                kind: "deny",
+                rule: "full-suite",
+                text: `A check is already running in this checkout: ${running}. Wait for it to finish.`,
+              };
+          }
+          if (
+            verdict.kind === "allow" &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
             const check = await checks?.lockedBy(who.runId, command);
             if (check) verdict = { kind: "lock", command: check };
           }

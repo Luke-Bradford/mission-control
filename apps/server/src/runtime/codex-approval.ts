@@ -194,6 +194,15 @@ export function createCodexApprover(i: {
         );
       // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
+        const running = await i.checks?.running?.(i.runId, event.input.command);
+        if (running !== null && running !== undefined)
+          verdict = {
+            kind: "deny",
+            rule: "full-suite",
+            text: `A check is already running in this checkout: ${running}. Wait for it to finish.`,
+          };
+      }
+      if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
         const check = await i.checks?.lockedBy(i.runId, event.input.command);
         if (check) verdict = { kind: "lock", command: check };
       }
