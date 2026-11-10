@@ -592,6 +592,7 @@ export function demoSeed() {
     ...entry,
     ticket: i === 0 ? `${DEMO_REPO}#104` : entry.ticket,
     agentId: i === 0 ? "dev-4" : entry.agentId,
+    offers: i === 0 ? (["not-now", "drop"] as const) : undefined,
     text: [
       "Which breakpoint should the address form use: 600 or 720 pixels?",
       "Confirm the import scope for the order export.",

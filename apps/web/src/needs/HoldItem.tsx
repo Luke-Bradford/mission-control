@@ -1,53 +1,57 @@
-import type { AttentionHoldCondition } from "@mc/core";
+import type { AttentionItem, NeedsYouOffer } from "@mc/core";
 import { useState } from "react";
-import { apiPost } from "../api.ts";
-import { HoldForm } from "../comms/HoldForm.tsx";
+import { ApiError, apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { writeFailure } from "../demo/mode.ts";
 
-/**
- * Put the open item on hold with a reason and a release condition (the Hold action Comms' decision
- * rows had before the item moved to this page). The server decides who may hold what.
- */
-export function HoldItem({ itemKey }: { itemKey: string }) {
-  const [holding, setHolding] = useState(false);
-  const [busy, setBusy] = useState(false);
+const ACTION_LABEL: Record<NeedsYouOffer, string> = {
+  "not-now": "Not now",
+  drop: "Drop",
+};
+
+const actionPath = (offer: NeedsYouOffer, key: string): string =>
+  offer === "not-now" ? ACTIONS.notNow(key) : ACTIONS.drop(key);
+
+/** Set aside or close only the actions the server has offered for this open question. */
+export function HoldItem({ item }: { item: AttentionItem }) {
+  const [busy, setBusy] = useState<NeedsYouOffer | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const hold = async (reason: string, condition: AttentionHoldCondition) => {
-    setBusy(true);
+  const offers = item.offers ?? [];
+  if (offers.length === 0) return null;
+  const act = async (offer: NeedsYouOffer) => {
+    setBusy(offer);
     setError(null);
     try {
-      await apiPost(ACTIONS.hold(itemKey), { reason, condition });
-      setHolding(false);
+      await apiPost(actionPath(offer, item.key), {});
       hub.refetch(RESOURCES.attention.path);
-      hub.refetch(RESOURCES.heldAttention.path);
+      hub.refetch(RESOURCES.answeredAttention.path);
     } catch (e) {
-      setError(writeFailure(e, "Could not hold this item."));
+      setError(
+        e instanceof ApiError && [409, 422, 502].includes(e.status)
+          ? e.message
+          : writeFailure(e, `Could not ${ACTION_LABEL[offer].toLowerCase()} this item.`),
+      );
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
   return (
-    <div className="needs-hold">
-      <button
-        type="button"
-        className="sm"
-        disabled={busy || holding}
-        onClick={() => setHolding(true)}
-      >
-        Hold
-      </button>
+    <div className="needs-actions">
+      {offers.map((offer) => (
+        <button
+          type="button"
+          className="sm"
+          disabled={busy !== null}
+          key={offer}
+          onClick={() => void act(offer)}
+        >
+          {ACTION_LABEL[offer]}
+        </button>
+      ))}
       {error && (
         <p className="note err" role="alert">
           {error}
         </p>
-      )}
-      {holding && (
-        <HoldForm
-          busy={busy}
-          onCancel={() => setHolding(false)}
-          onHold={(r, c) => void hold(r, c)}
-        />
       )}
     </div>
   );

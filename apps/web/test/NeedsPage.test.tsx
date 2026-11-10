@@ -1,4 +1,4 @@
-import { type AttentionItem, DEFAULT_AWAY } from "@mc/core";
+import { type AttentionItem, DEFAULT_AWAY, type QuestionClosure } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Decisions } from "../src/comms/Decisions.tsx";
@@ -6,6 +6,8 @@ import { Markdown, OpenLinks } from "../src/components/Markdown.tsx";
 import { hub } from "../src/data.ts";
 import { NeedsYouTab } from "../src/flight/NeedsYouTab.tsx";
 import { openableHref } from "../src/links.ts";
+import { HoldItem } from "../src/needs/HoldItem.tsx";
+import { NeedsList } from "../src/needs/NeedsList.tsx";
 import { briefLinks, briefPictures, pictureRoute } from "../src/needs/pictures.ts";
 import { Comms } from "../src/pages/Comms.tsx";
 import { Needs } from "../src/pages/Needs.tsx";
@@ -32,6 +34,7 @@ function routes(
     "/api/config": CONFIG,
     "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
     "/api/attention": items,
+    "/api/attention/answered": [],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
     "/api/flight": { seat: null, decisions: [] },
@@ -217,6 +220,72 @@ describe("Needs you page", () => {
     routes([]);
     render(<Needs item={null} />);
     expect(await screen.findByText("Nobody is waiting on you.")).toBeTruthy();
+  });
+
+  it("keeps closed and withdrawn questions folded under Answered with their reasons", async () => {
+    const longQuestion = `${"Which cache should we use when the deployment queue contains a long sequence of related changes that require the operator to see every condition before accepting the recommendation? ".repeat(2)}End.`;
+    const answered: QuestionClosure[] = [
+      {
+        key: "ask:closed",
+        askAt: NOW - HOUR,
+        kind: "ticket-closed",
+        reason: "The replacement ticket was merged.",
+        by: "hub",
+        question: "Should the old ticket stay open?",
+        ticket: "mission-control#1",
+        operator: true,
+        at: NOW - MIN,
+      },
+      {
+        key: "ask:withdrawn",
+        askAt: NOW - HOUR,
+        kind: "withdrawn",
+        reason: "FLIGHT withdrew this question.",
+        by: "flight-1",
+        question: longQuestion,
+        ticket: "mission-control#2",
+        operator: true,
+        at: NOW - 2 * MIN,
+      },
+    ];
+    routes([], { "/api/attention/answered": answered });
+    render(<Needs item={null} />);
+    const answeredGroup = await screen.findByRole("region", { name: "Answered · 2" });
+    expect(answeredGroup.querySelector("details")?.open).toBe(false);
+    fireEvent.click(within(answeredGroup).getByText("Answered · 2"));
+    expect(within(answeredGroup).getByText("Should the old ticket stay open?")).toBeTruthy();
+    expect(within(answeredGroup).getByText(longQuestion)).toBeTruthy();
+    expect(within(answeredGroup).getByText("The replacement ticket was merged.")).toBeTruthy();
+    expect(within(answeredGroup).getByText("FLIGHT withdrew this question.")).toBeTruthy();
+  });
+
+  it("names answered history while it loads, is empty, or cannot be read", async () => {
+    routes([], {
+      "/api/attention/answered": () => ({ status: 500, body: { error: "history down" } }),
+    });
+    render(<Needs item={null} />);
+    expect(await screen.findByText("Could not load answered questions: history down")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("names answered history while its request is loading", () => {
+    routes([]);
+    render(
+      <NeedsList
+        asks={[]}
+        defaulted={[]}
+        answered={undefined}
+        answeredError={null}
+        selected={null}
+      />,
+    );
+    expect(screen.getByText("Loading answered questions…")).toBeTruthy();
+  });
+
+  it("names an empty answered history", async () => {
+    routes([]);
+    render(<Needs item={null} />);
+    expect(await screen.findByText("No questions have been answered or withdrawn.")).toBeTruthy();
   });
 
   it("says a named item is no longer open, and links to the next one without jumping", async () => {
@@ -580,18 +649,46 @@ const bodies = (fn: ReturnType<typeof stubFetch>, path: string) =>
     .map(([, init]) => JSON.parse(String(init?.body)));
 
 describe("actions on the page", () => {
-  it("Hold posts the reason and the release condition for the open item", async () => {
-    const fn = routes([ask("q1")], { "POST /api/attention/q1/hold": { ok: true } });
-    render(<Needs item="q1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Hold" }));
-    fireEvent.change(screen.getByLabelText("Reason"), { target: { value: "Waiting for review" } });
-    fireEvent.click(screen.getByRole("button", { name: "Hold item" }));
-    await waitFor(() =>
-      expect(bodies(fn, "/api/attention/q1/hold")).toEqual([
-        { reason: "Waiting for review", condition: { kind: "manual" } },
-      ]),
-    );
+  it("shows only offered Not now and Drop actions, and posts their matching routes", async () => {
+    const fn = routes([ask("q1", { offers: ["not-now", "drop"] }), ask("q2")], {
+      "POST /api/attention/q1/not-now": { ok: true },
+      "POST /api/attention/q1/drop": { ok: true },
+    });
+    const view = render(<Needs item="q1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Not now" }));
+    await waitFor(() => expect(bodies(fn, "/api/attention/q1/not-now")).toEqual([{}]));
+    fireEvent.click(screen.getByRole("button", { name: "Drop" }));
+    await waitFor(() => expect(bodies(fn, "/api/attention/q1/drop")).toEqual([{}]));
+    view.unmount();
+    render(<HoldItem item={ask("q2")} />);
+    expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
+    expect(bodies(fn, "/api/attention/q1/drop")).toEqual([{}]);
   });
+
+  it.each([
+    ["Not now", "not-now", 409, "The ticket has new work."],
+    ["Not now", "not-now", 422, "The ticket cannot be set aside."],
+    ["Not now", "not-now", 502, "The ticket service is unavailable."],
+    ["Drop", "drop", 409, "The question changed while you read it."],
+    ["Drop", "drop", 422, "This question still needs a decision."],
+    ["Drop", "drop", 502, "The close request could not reach GitHub."],
+  ] as const)(
+    "shows the %s %i refusal reason and keeps the question in place",
+    async (label, offer, status, reason) => {
+      const fn = routes([ask("q1", { offers: [offer] })], {
+        [`POST /api/attention/q1/${offer}`]: () => ({ status, body: { error: reason } }),
+      });
+      render(<Needs item="q1" />);
+      fireEvent.click(await screen.findByRole("button", { name: label }));
+      expect((await screen.findByRole("alert")).textContent).toContain(reason);
+      expect(screen.getByRole("button", { name: label })).toBeTruthy();
+      expect(
+        within(screen.getByRole("navigation", { name: "Waiting on you" })).getByText("Question q1"),
+      ).toBeTruthy();
+      expect(bodies(fn, `/api/attention/q1/${offer}`)).toEqual([{}]);
+    },
+  );
 
   it("Ctrl or Cmd+Enter sends the answer; plain Enter does not", async () => {
     const fn = routes([ask("q1", { agentId: "flight-1" })], {
