@@ -126,23 +126,23 @@ describeRendered("Demo, rendered", () => {
   );
 
   it.each([
-    ["Overview", "/", "#agentsList", "text"],
-    ["Board", "/board", "main", "text"],
-    ["Comms", "/comms/crew", "main", "text"],
+    ["Overview", "/", "#agentsList"],
+    ["Board", "/board", "main"],
+    ["Comms", "/comms/crew", "main"],
   ] as const)(
     "%s moves on its own at a quick beat",
-    async (_name, at, selector, kind) => {
+    async (_name, at, selector) => {
       const page = await open(at);
       await page.box(".demo-marker");
       await eventually(page, async () => (await text(page, selector)).length > 100, "content");
       await page.evaluate(() => window.__demoSetBeatMs(100), undefined);
       const read = () =>
         page.evaluate(
-          ([css, how]) => {
+          ([css]) => {
             const el = document.querySelector(css);
-            return (how === "html" ? el?.innerHTML : el?.textContent) ?? "";
+            return el?.textContent ?? "";
           },
-          [selector, kind] as const,
+          selector,
         );
       const before = await read();
       await eventually(page, async () => (await read()) !== before, `${at} to change`, 40_000);

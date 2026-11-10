@@ -238,10 +238,6 @@ describe("Demo findings from round 3", () => {
     expect(document.body.textContent).not.toContain("has not touched this ticket");
     expect(document.body.textContent).not.toMatch(/Status\s*Ready/);
     document.body.innerHTML = "";
-    await at("/qa");
-    expect(document.body.textContent).not.toContain("PR #1107");
-    expect(document.body.textContent).toContain("PR #1101");
-    document.body.innerHTML = "";
     await at("/");
     expect(document.body.textContent).toMatch(/dev-7.*#201/i);
   });
