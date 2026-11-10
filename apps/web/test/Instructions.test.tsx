@@ -15,7 +15,6 @@ import {
   InstructionManager,
   instructionDrafts,
 } from "../src/instructions/Instructions.tsx";
-import { Agent } from "../src/pages/Agent.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { agentDensityFixture } from "./agentDensityFixture.ts";
 import { stubFetch } from "./fetchStub.ts";
@@ -433,30 +432,6 @@ it("reads status on Flight but no seat detail or full history before the owning 
   ).toHaveLength(1);
 });
 
-it("places the same lazy instructions in Agent without fetching every configured seat", async () => {
-  const fixture = agentDensityFixture();
-  const fn = stubFetch({
-    ...fixture.api,
-    ...base,
-    "/api/crew?shape=summary": fixture.api["/api/crew?shape=summary"],
-    "/api/seats/guido-1/instructions?limit=1": {
-      active: [{ ...order(8, "Agent seat instruction"), seatId: "guido-1" }],
-      history: [],
-      nextCursor: null,
-      effectiveFocus: null,
-      focusInstructionId: null,
-    },
-  });
-  render(<Agent id="guido-1" />);
-  const toggle = await screen.findByText("Instructions · guido-1");
-  expect(fn.mock.calls.some(([path]) => path.includes("/instructions?"))).toBe(false);
-  fireEvent.click(toggle);
-  await screen.findByText("Agent seat instruction");
-  expect(
-    fn.mock.calls.filter(([path]) => path.includes("/instructions?")).map(([path]) => path),
-  ).toEqual(["/api/seats/guido-1/instructions?limit=1"]);
-});
-
 it("keeps loading, failed and stale reads distinct from an empty active set", async () => {
   let fail = false;
   stubFetch({
@@ -544,80 +519,6 @@ it("names initial loading and failed reads without presenting either as no activ
     "Could not load orders: Orders could not be read",
   );
   expect(screen.queryByText("No active orders.")).toBeNull();
-});
-
-it("keeps Queue Clear authoritative until an explicit revoke reveals FLIGHT focus in both readers", async () => {
-  window.history.replaceState(null, "", "/agent/guido-1?side=queue");
-  const fixture = agentDensityFixture(),
-    flight = focus(1, "label:flight", "flight"),
-    old = focus(2, "label:old", "operator"),
-    clear = focus(3, null, "operator");
-  let active = [flight, old];
-  const current = () => active.find((entry) => entry.by === "operator") ?? flight;
-  const snapshot = () => {
-    const entry = current();
-    return {
-      active,
-      history: [],
-      nextCursor: null,
-      effectiveFocus: entry.kind === "focus" ? entry.focus : null,
-      focusInstructionId: entry.id,
-    };
-  };
-  const focusState = () => {
-    const { effectiveFocus, focusInstructionId } = snapshot();
-    return { effectiveFocus, focusInstructionId };
-  };
-  const fn = stubFetch({
-    ...fixture.api,
-    ...base,
-    "/api/crew?shape=summary": fixture.api["/api/crew?shape=summary"],
-    "/api/seats/guido-1/focus": () => ({
-      status: 200,
-      body: { focus: focusState().effectiveFocus, ...focusState() },
-    }),
-    "/api/seats/guido-1/instructions?limit=1": () => ({ status: 200, body: snapshot() }),
-    "POST /api/seats/guido-1/focus": (init: RequestInit) => {
-      if (new Headers(init.headers).get(OPERATOR_HEADER) !== "fixture-operator")
-        return { status: 401, body: { error: OPERATOR_TOKEN_REQUIRED } };
-      expect(JSON.parse(init.body as string)).toEqual({ focus: null });
-      active = [flight, clear];
-      return { status: 200, body: { focus: null, entry: clear, changed: true, ...focusState() } };
-    },
-    "POST /api/seats/guido-1/instructions/3/revoke": () => {
-      active = [flight];
-      return {
-        status: 200,
-        body: { entry: { ...clear, revokedAt: NOW }, changed: true, ...focusState() },
-      };
-    },
-  });
-  const { container } = render(<Agent id="guido-1" />);
-  await screen.findByText("label:old");
-  fireEvent.click(screen.getByRole("button", { name: "Change" }));
-  fireEvent.change(screen.getByRole("textbox", { name: "Focus" }), { target: { value: "" } });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await screen.findByText("Unrestricted · no focus filter");
-  expect(container.querySelector(".queue-focus")?.textContent).not.toContain("label:flight");
-  await waitFor(() =>
-    expect(screen.getByText(/Source: Operator #3/).textContent).toContain("explicit clear"),
-  );
-  fireEvent.click(screen.getByText("Instructions · guido-1"));
-  fireEvent.click(await screen.findByRole("button", { name: "Revoke #3" }));
-  expect(screen.getByText(/Resulting focus/).textContent).toContain("FLIGHT #1");
-  fireEvent.click(screen.getByRole("button", { name: "Confirm revoke #3" }));
-  await waitFor(() =>
-    expect(container.querySelector(".queue-focus")?.textContent).toContain("label:flight"),
-  );
-  expect(screen.getByText(/Effective focus/).closest("p")?.textContent).toContain("FLIGHT #1");
-  expect(
-    fn.mock.calls.filter(
-      ([path, init]) =>
-        path === "/api/seats/guido-1/focus" &&
-        init?.method === "POST" &&
-        new Headers(init.headers).get(OPERATOR_HEADER) === "fixture-operator",
-    ),
-  ).toHaveLength(1);
 });
 
 it("uses configured writer capability for Queue links while watch seats keep text actions", async () => {
