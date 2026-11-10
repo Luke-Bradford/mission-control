@@ -67,8 +67,6 @@ export type ChartMode = "all" | "open";
 
 const PARTICLE_MS = 1_150;
 const PARTICLE_GAP_MS = 200;
-const MAX_PARTICLES_PER_FLOW = 2;
-const MAX_PARTICLES = 16;
 /** How long a link stays lit after a new message on it. */
 const LIVE_MS = 1_800;
 /** The chart's size before it is measured (and in tests, where nothing is laid out). */
@@ -84,7 +82,7 @@ function meetAt(layout: RailLayout, id: string, other: string): Point | undefine
   return { x: p.x + (q.x < p.x ? -HUB_W / 2 : HUB_W / 2), y: p.y };
 }
 
-type Particle = { id: number; d: string; color: string; delay: number };
+type Particle = { id: number; d: string; color: string; delay: number; to: string };
 type Tip = { kind: "seat" | "edge"; id: string } | null;
 
 /** The wait mark's words. */
@@ -101,7 +99,7 @@ function organicLayout(
   const w = Math.max(300, size.w);
   // Give the graph enough vertical perimeter for the labels as the crew grows. The scroll owner is
   // the chart, so a busy session grows there rather than turning names into an unreadable cluster.
-  const h = Math.max(260, size.h, seats.length * 20 + 180);
+  const h = Math.max(260, size.h, seats.length > 13 ? seats.length * 20 + 180 : size.h);
   const positions = new Map<string, Point>();
   const nameRoom = 110;
   const cx = w / 2;
@@ -258,6 +256,7 @@ export function CommsRails({
   const [activeSeat, setActiveSeat] = useState<string | null>(null);
   const [activeEdge, setActiveEdge] = useState<string | null>(null);
   const [particles, setParticles] = useState<Particle[]>([]);
+  const [arrivals, setArrivals] = useState<ReadonlySet<string>>(new Set());
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
   const timers = useRef(new Set<number>());
   const nextParticle = useRef(0);
@@ -363,8 +362,14 @@ export function CommsRails({
       if (reduced) continue;
       const { d } = linkPath(a, b, layout.cx);
       const color = byId.get(flow.from)?.color ?? "var(--accent)";
-      for (let i = 0; i < Math.min(flow.n, MAX_PARTICLES_PER_FLOW); i++)
-        fresh.push({ id: nextParticle.current++, d, color, delay: i * PARTICLE_GAP_MS });
+      for (let i = 0; i < flow.n; i++)
+        fresh.push({
+          id: nextParticle.current++,
+          d,
+          color,
+          delay: i * PARTICLE_GAP_MS,
+          to: flow.to,
+        });
     }
     if (keys.size > 0) {
       setLit(keys);
@@ -375,15 +380,31 @@ export function CommsRails({
       timers.current.add(off);
     }
     if (fresh.length > 0) {
-      const added = fresh.slice(0, MAX_PARTICLES);
-      setParticles((current) => [...current, ...added].slice(-MAX_PARTICLES));
+      const added = fresh;
+      setParticles((current) => [...current, ...added]);
       const ids = new Set(added.map((p) => p.id));
-      const life = PARTICLE_MS + PARTICLE_GAP_MS * MAX_PARTICLES_PER_FLOW + 100;
+      const life = PARTICLE_MS + PARTICLE_GAP_MS * Math.max(0, added.length - 1) + 100;
       const gone = window.setTimeout(() => {
         timers.current.delete(gone);
         setParticles((current) => current.filter((p) => !ids.has(p.id)));
       }, life);
       timers.current.add(gone);
+      for (const particle of added) {
+        const arrive = window.setTimeout(() => {
+          timers.current.delete(arrive);
+          setArrivals((current) => new Set(current).add(particle.to));
+          const clear = window.setTimeout(() => {
+            timers.current.delete(clear);
+            setArrivals((current) => {
+              const next = new Set(current);
+              next.delete(particle.to);
+              return next;
+            });
+          }, 500);
+          timers.current.add(clear);
+        }, PARTICLE_MS + particle.delay);
+        timers.current.add(arrive);
+      }
     }
   }, [generation]);
   useEffect(() => {
@@ -488,7 +509,7 @@ export function CommsRails({
   const edgeMarks = useMemo(
     () => (
       <g className="comms-edges">
-        {drawn.map(({ edge, path }) => {
+        {drawn.map(({ edge, path }, index) => {
           const kept = filterKeeps(filter, edge.a, edge.b);
           const chosen = filter !== null && filter.kind === "pair" && kept;
           const cls = [
@@ -501,6 +522,9 @@ export function CommsRails({
             .filter(Boolean)
             .join(" ");
           const w = 1 + edge.weight * 2.5;
+          const age =
+            edge.last === null ? 24 * 60 * 60_000 : Math.max(0, Date.now() - edge.last.at);
+          const opacity = 0.18 + 0.72 * Math.max(0, 1 - age / (24 * 60 * 60_000));
           return (
             // biome-ignore lint/a11y/useSemanticElements: an SVG group cannot be a <button>
             <g
@@ -531,6 +555,8 @@ export function CommsRails({
                 className="comms-edge-line"
                 d={path.d}
                 strokeWidth={w}
+                stroke={`url(#${uid}-edge-${index})`}
+                style={{ opacity } as CSSProperties}
                 strokeDasharray={edge.waiting ? "6 4" : undefined}
               />
               {edge.waiting && waitSpots.placed.get(edge.key) && (
@@ -555,7 +581,7 @@ export function CommsRails({
         })}
       </g>
     ),
-    [drawn, filter, lit, edgeStop, onPickLink, byId, waitSpots],
+    [drawn, filter, lit, edgeStop, onPickLink, byId, waitSpots, uid],
   );
   // biome-ignore lint/correctness/useExhaustiveDependencies: helpers below derive from these inputs
   const nodeMarks = useMemo(
@@ -579,6 +605,7 @@ export function CommsRails({
             `presence-${seat.presence}`,
             seat.alert ? "alert" : "",
             waitingSeats.has(seat.id) ? "waiting" : "",
+            arrivals.has(seat.id) ? "arrival" : "",
             dim ? "dim" : "",
             selected ? "selected" : "",
           ]
@@ -671,6 +698,7 @@ export function CommsRails({
       full,
       onPickSeat,
       particles.length,
+      arrivals,
     ],
   );
 
@@ -727,6 +755,21 @@ export function CommsRails({
             aria-label={label}
           >
             <title>{label}</title>
+            <defs>
+              {drawn.map(({ edge }, index) => (
+                <linearGradient
+                  id={`${uid}-edge-${index}`}
+                  key={edge.key}
+                  x1="0"
+                  x2="1"
+                  y1="0"
+                  y2="0"
+                >
+                  <stop stopColor={byId.get(edge.a)?.color ?? "var(--fg-2)"} offset="0" />
+                  <stop stopColor={byId.get(edge.b)?.color ?? "var(--fg-2)"} offset="1" />
+                </linearGradient>
+              ))}
+            </defs>
             <g className="comms-organic-layout">
               {edgeMarks}
               {nodeMarks}

@@ -1,15 +1,16 @@
 import type { Crew } from "@mc/core";
 import { useEffect, useState } from "react";
 import { ChartPane } from "../comms/ChartPane.tsx";
+import { MessageList } from "../comms/CommsGraph.tsx";
 import { type ChartMode, ChartModeSwitch, CommsRails } from "../comms/CommsRails.tsx";
-import { useChartFilter } from "../comms/chartPaths.ts";
+import { commsHrefFor, useChartFilter } from "../comms/chartPaths.ts";
 import { useReducedMotion } from "../comms/chartTypes.ts";
 import { type ChartFilter, pairFilter, sameFilter } from "../comms/commsFilter.ts";
 import { useChartData } from "../comms/useChartData.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
 import { plural } from "../fmt.ts";
-import { followLink, PAGE_PATHS } from "../router.ts";
+import { followLink, navigate, PAGE_PATHS } from "../router.ts";
 import "../comms/comms.css";
 import "../comms/CommsChartPage.css";
 
@@ -95,6 +96,33 @@ export function CommsChartPage() {
         {filter && (
           <ChartPane filter={filter} flight={chart.flight} edges={chart.edges} nameOf={nameOf} />
         )}
+      </div>
+      <div className="comms-signal-lists comms-chart-lists">
+        <MessageList
+          title="Waiting on a reply"
+          empty="Nobody owes a reply."
+          rows={chart.edges
+            .filter((edge) => edge.waiting)
+            .sort((a, b) => (b.waiting?.ms ?? 0) - (a.waiting?.ms ?? 0))
+            .map((edge) => ({
+              key: edge.key,
+              label: `${edge.waiting?.asker} → ${edge.waiting?.owed ?? edge.b}`,
+              age: edge.waiting?.ms ?? 0,
+              text: edge.waiting?.question ?? "Reply requested",
+              onClick: () => navigate(commsHrefFor(pairFilter(edge.a, edge.b), chart.flight)),
+            }))}
+        />
+        <MessageList
+          title="Just said"
+          empty="No direct messages yet."
+          rows={chart.feed.slice(0, 5).map((message) => ({
+            key: message.id,
+            label: `${message.from} → ${message.to}`,
+            text: message.text.split(/\r?\n/, 1)[0] || "Message",
+            onClick: () =>
+              navigate(commsHrefFor(pairFilter(message.from, message.to), chart.flight)),
+          }))}
+        />
       </div>
     </section>
   );

@@ -108,8 +108,10 @@ export function useChartData(rows: CrewRow[], flightId: string | undefined) {
   const links = linksResource.data?.links;
   // Live only while the links are loaded and the last read of them succeeded.
   const streaming = links !== undefined && linksResource.error === null;
-  const openItems = useResource<{ items: OpenItem[] }>(RESOURCES.commsOpen).data?.items;
-  const feed = useResource<{ messages: FeedMessage[] }>(RESOURCES.commsFeed).data?.messages;
+  const openResource = useResource<{ items: OpenItem[] }>(RESOURCES.commsOpen);
+  const feedResource = useResource<{ messages: FeedMessage[] }>(RESOURCES.commsFeed);
+  const openItems = openResource.data?.items;
+  const feed = feedResource.data?.messages;
   const [flows, setFlows] = useState<Flows>({ generation: 0, list: [] });
   const previousLinks = useRef<Map<string, { count: number; lastId?: string }> | null>(null);
 
@@ -272,6 +274,8 @@ export function useChartData(rows: CrewRow[], flightId: string | undefined) {
       .sort((a, b) => b.at - a.at),
     streaming,
     hasData: links !== undefined,
+    chartError: linksResource.error !== null,
+    chartLoading: links === undefined,
     openCount: edges.filter((e) => e.waiting !== null).length,
     hubIds: [CAPCOM, flight, COMMS_CREW] as const,
   };

@@ -81,49 +81,64 @@ export function CommsGraph({
             <b>{chart.groups.length}</b> roles
           </span>
         </div>
-        <div className="comms-graph-stage">
-          <CommsRails
-            seats={chart.seats}
-            groups={chart.groups}
-            hubIds={chart.hubIds}
-            edges={edges}
-            mode={mode}
-            filter={filter}
-            flows={chart.flows}
-            reduced={reduced}
-            label={graphLabel}
-            full={false}
-            onPickSeat={(id) => pick({ kind: "seat", id })}
-            onPickLink={(a, b) => pick(pairFilter(a, b))}
-            onClear={() => setFilter(null)}
-          />
-        </div>
-        <div className="comms-signal-lists">
-          <MessageList
-            title="Waiting on a reply"
-            empty="Nobody owes a reply."
-            rows={edges
-              .filter((edge) => edge.waiting)
-              .sort((a, b) => (b.waiting?.ms ?? 0) - (a.waiting?.ms ?? 0))
-              .map((edge) => ({
-                key: edge.key,
-                label: `${edge.waiting?.asker} → ${edge.waiting?.owed ?? (edge.waiting?.asker === edge.a ? edge.b : edge.a)}`,
-                age: edge.waiting?.ms ?? 0,
-                text: edge.waiting?.question ?? "Reply requested",
-                onClick: () => pick(pairFilter(edge.a, edge.b)),
-              }))}
-          />
-          <MessageList
-            title="Just said"
-            empty="No direct messages yet."
-            rows={chart.feed.slice(0, 5).map((message) => ({
-              key: message.id,
-              label: `${message.from} → ${message.to}`,
-              text: message.text.split(/\r?\n/, 1)[0] || "Message",
-              onClick: () => pick(pairFilter(message.from, message.to)),
-            }))}
-          />
-        </div>
+        {chart.chartLoading && !chart.hasData ? (
+          <p className="comms-traffic-empty">Loading comms graph…</p>
+        ) : !chart.hasData ? (
+          <p className="comms-traffic-empty" role="alert">
+            Couldn't load comms graph. Retrying.
+          </p>
+        ) : (
+          <>
+            {chart.chartError && (
+              <p className="comms-length-stale" role="status">
+                Stale · couldn't refresh. Retrying.
+              </p>
+            )}
+            <div className="comms-graph-stage">
+              <CommsRails
+                seats={chart.seats}
+                groups={chart.groups}
+                hubIds={chart.hubIds}
+                edges={edges}
+                mode={mode}
+                filter={filter}
+                flows={chart.flows}
+                reduced={reduced}
+                label={graphLabel}
+                full={false}
+                onPickSeat={(id) => pick({ kind: "seat", id })}
+                onPickLink={(a, b) => pick(pairFilter(a, b))}
+                onClear={() => setFilter(null)}
+              />
+            </div>
+            <div className="comms-signal-lists">
+              <MessageList
+                title="Waiting on a reply"
+                empty="Nobody owes a reply."
+                rows={edges
+                  .filter((edge) => edge.waiting)
+                  .sort((a, b) => (b.waiting?.ms ?? 0) - (a.waiting?.ms ?? 0))
+                  .map((edge) => ({
+                    key: edge.key,
+                    label: `${edge.waiting?.asker} → ${edge.waiting?.owed ?? (edge.waiting?.asker === edge.a ? edge.b : edge.a)}`,
+                    age: edge.waiting?.ms ?? 0,
+                    text: edge.waiting?.question ?? "Reply requested",
+                    onClick: () => pick(pairFilter(edge.a, edge.b)),
+                  }))}
+              />
+              <MessageList
+                title="Just said"
+                empty="No direct messages yet."
+                rows={chart.feed.slice(0, 5).map((message) => ({
+                  key: message.id,
+                  label: `${message.from} → ${message.to}`,
+                  text: message.text.split(/\r?\n/, 1)[0] || "Message",
+                  onClick: () => pick(pairFilter(message.from, message.to)),
+                }))}
+              />
+            </div>
+          </>
+        )}
       </Panel>
       <Panel
         id="commsLength"
@@ -194,7 +209,7 @@ function lengthLevel(p95: number | null): "" | "near" | "over" {
   return p95 >= COMMS_MESSAGE_MAX * NEAR_LIMIT ? "near" : "";
 }
 
-function MessageList({
+export function MessageList({
   title,
   empty,
   rows,

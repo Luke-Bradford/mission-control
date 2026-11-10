@@ -201,6 +201,16 @@
   stroke-dasharray: 3 2;
   opacity: 1;
 }
+.comms-node.arrival .comms-node-core {
+  fill: var(--node-color);
+  stroke: var(--fg);
+  stroke-width: 2.5;
+}
+.comms-node.arrival .comms-node-ring {
+  opacity: 1;
+  stroke: var(--fg);
+  stroke-width: 2;
+}
 .comms-node-name {
   fill: var(--fg-2);
   font-family: var(--mono);
