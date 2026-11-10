@@ -2179,7 +2179,8 @@ export class Store {
       .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'comms'")
       .get() as { sql?: string } | undefined;
     if (schema?.sql?.includes("'none'")) {
-      this.db.prepare("UPDATE comms SET label = 'none' WHERE label IS NULL").run();
+      if (this.db.prepare("SELECT 1 FROM comms WHERE label IS NULL LIMIT 1").get())
+        this.db.prepare("UPDATE comms SET label = 'none' WHERE label IS NULL").run();
       return;
     }
     this.transaction(() => {
