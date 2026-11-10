@@ -7,7 +7,6 @@ import {
   type PullRequestView,
   prPill,
   STATUS_OUT_OF_DATE,
-  seatCallSign,
 } from "@mc/core";
 import { type MouseEvent, memo } from "react";
 import { seatStatus } from "../crew.ts";
@@ -330,21 +329,6 @@ export const Card = memo(function Card({
       >
         {item.title}
       </a>
-      {item.handoff && (
-        <a
-          className="handoff-link"
-          href={`${agentPath(item.handoff.acceptedBy ?? item.handoff.fromSeat)}?handoff=${encodeURIComponent(item.handoff.runId)}`}
-          onClick={(e) => {
-            e.stopPropagation();
-            followLink(
-              e,
-              `${agentPath(item.handoff?.acceptedBy ?? item.handoff?.fromSeat ?? "")}?handoff=${encodeURIComponent(item.handoff?.runId ?? "")}`,
-            );
-          }}
-        >
-          Handed off from {seatCallSign(item.handoff.fromSeat)}
-        </a>
-      )}
       {item.labels.length > 0 && (
         <div className="labels">
           {item.labels.slice(0, MAX_LABELS).map((l) => (
