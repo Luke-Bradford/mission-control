@@ -90,7 +90,7 @@ function Answered({
         {items.map((item) => (
           <div className="needs-answered" key={`${item.key}:${item.askAt}`}>
             <MarkdownInline text={item.question} />
-            <p className="s note">{item.reason}</p>
+            <p className="s note">{item.kind === "cleared" ? "Cleared by you" : item.reason}</p>
           </div>
         ))}
       </details>

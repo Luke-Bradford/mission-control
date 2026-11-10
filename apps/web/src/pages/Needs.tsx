@@ -24,11 +24,7 @@ function Open({ item, items }: { item: AttentionItem; items: readonly AttentionI
   const row = rows?.find((r) => r.id === item.agentId);
   return (
     <>
-      <QuestionBand
-        item={item}
-        row={row}
-        actions={isNotTriaging(item) ? undefined : <HoldItem item={item} />}
-      />
+      <QuestionBand item={item} row={row} actions={<HoldItem item={item} />} />
       {isNotTriaging(item) ? (
         <div className="needs-body">
           <div className="needs-main">

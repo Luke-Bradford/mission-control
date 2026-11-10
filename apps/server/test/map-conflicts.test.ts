@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { PullRequestView } from "@mc/core";
@@ -25,7 +33,7 @@ let left: string;
 let right: string;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "mc-map-conflicts-"));
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-map-conflicts-")));
   git("init", "-q");
   git("config", "user.name", "Fixture");
   git("config", "user.email", "fixture@example.invalid");
@@ -203,7 +211,7 @@ it("blames only the unrelated tip, holds its failed pairs until a head changes, 
 });
 
 it("checks a pair once its head is fetched, after the 10 s missing-head hold", async () => {
-  const other = mkdtempSync(join(tmpdir(), "mc-map-conflicts-other-"));
+  const other = realpathSync(mkdtempSync(join(tmpdir(), "mc-map-conflicts-other-")));
   try {
     execFileSync("git", ["clone", "-q", dir, other]);
     const run = (...args: string[]) =>

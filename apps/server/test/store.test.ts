@@ -3287,7 +3287,7 @@ describe("comms", () => {
     legacy.close();
     const migrated = new Store(legacyPath);
     try {
-      expect(migrated.commsMessage("comms:1")).toMatchObject({ text: "legacy", label: null });
+      expect(migrated.commsMessage("comms:1")).toMatchObject({ text: "legacy", label: "none" });
       expect(migrated.addComms({ ...row("new"), label: "question", ref: "#7" })).toMatchObject({
         label: "question",
         ref: "#7",
