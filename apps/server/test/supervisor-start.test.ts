@@ -2450,22 +2450,22 @@ describe("the mc tools and the guard (phase 2b)", () => {
   /** The next cue line: the first ends the fake's call (its tool_result), the second the turn. */
   const cue = (sup: Supervisor) => sup.message("guido-1", "cue", { interrupt: false });
 
-  it("releases a call's hold when its tool_result comes, and the run's holds at the turn's end", async () => {
+  it("refuses a parallel call, then frees the accepted call and later turn holds", async () => {
     const { sup, runId, lock } = await running();
     await toolgap(sup);
-    // the fake's call, and a parallel one of the same run that is still going
-    await lock.acquire({ runId, toolUseId: "toolu_g" }, "guido-1", "pnpm -s test", 1000, live());
-    await lock.acquire({ runId, toolUseId: "toolu_p" }, "guido-1", "pnpm -s test", 1000, live());
+    expect(
+      await lock.acquire({ runId, toolUseId: "toolu_g" }, "guido-1", "pnpm -s test", 1000, live()),
+    ).toBe(true);
+    expect(
+      await lock.acquire({ runId, toolUseId: "toolu_p" }, "guido-1", "pnpm -s test", 1000, live()),
+    ).toBe(false);
+    expect(lock.state().holder?.runId).toBe(runId);
     const transcript = () => readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8");
     await cue(sup);
     await until(() => expect(transcript()).toContain('"tool_use_id":"toolu_g"'));
-    // toolu_g ended, toolu_p holds on; the turn has not ended
-    expect(lock.state().holder?.runId).toBe(runId);
-    expect(seatState("guido-1")).toBe("running");
-    lock.release({ runId, toolUseId: "toolu_p" });
-    // the lock is free once toolu_g's hold is gone too: the transcript line is written by the keeper
-    // before the hub has read it, so that release may be a moment behind
+    // Only the accepted call held the lock. Its result releases it before the turn ends.
     await until(() => expect(lock.state().holder).toBeNull());
+    expect(seatState("guido-1")).toBe("running");
     // a hold no tool_result ends (an interrupt, a refusal) is freed at the turn's end
     await lock.acquire({ runId, toolUseId: "toolu_q" }, "guido-1", "pnpm -s test", 1000, live());
     await cue(sup);
@@ -3309,7 +3309,12 @@ import(${JSON.stringify(fixture)});
   });
 
   it("retains an accepted test lock when a steer is rejected", async () => {
-    const { sup, lock, log } = codex({ command: "pnpm -s test", holdItem: true, ackDelayMs: 100 });
+    const { sup, lock, log } = codex({
+      command: "pnpm -s test",
+      holdItem: true,
+      exitCode: 0,
+      ackDelayMs: 100,
+    });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await untilCodex(() => expect(decision()).toBe("accept"));
@@ -3319,7 +3324,8 @@ import(${JSON.stringify(fixture)});
     );
     expect(lock.state().holder?.runId).toBe(runId);
     expect(seatState("guido-1")).toBe("running");
-    await sup.message("guido-1", JSON.stringify({ completeTurn: true }), { interrupt: false });
+    // A rejected steer cannot end the accepted command; its actual item exit does.
+    await sup.message("guido-1", JSON.stringify({ completeItem: true }), { interrupt: false });
     await untilCodex(() => expect(lock.state().holder).toBeNull());
     await sup.endRunByEngine(runId);
   });
@@ -3348,7 +3354,7 @@ import(${JSON.stringify(fixture)});
     expect(lock.state().holder).toBeNull();
   });
 
-  it("releases an accepted lock on turn/completed without item/completed", async () => {
+  it("keeps an accepted lock after an early turn completion until the process exits", async () => {
     const { sup, lock } = codex({ command: "pnpm -s test", holdItem: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
@@ -3356,8 +3362,9 @@ import(${JSON.stringify(fixture)});
     expect(lock.state().holder?.runId).toBe(runId);
     await sup.message("guido-1", JSON.stringify({ completeTurn: true }), { interrupt: false });
     await untilCodex(() => expect(seatState("guido-1")).toBe("idle"));
-    expect(lock.state().holder).toBeNull();
+    expect(lock.state().holder?.runId).toBe(runId);
     await sup.endRunByEngine(runId);
+    expect(lock.state().holder).toBeNull();
   });
 
   it.each(["close", "exit"])("cancels an actual queued test on %s", async (how) => {
