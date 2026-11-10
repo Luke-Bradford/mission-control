@@ -2,7 +2,7 @@ import type { AttentionItem, CrewRow } from "@mc/core";
 import { useEffect, useMemo, useRef } from "react";
 import { useNow } from "../clock.ts";
 import { contextPct, needsLamp, seatStatus } from "../crew.ts";
-import { dur } from "../fmt.ts";
+import { dur, percent } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -106,7 +106,7 @@ export function Picker({
                           style={{ width: context === null ? "0%" : `${Math.min(100, context)}%` }}
                         />
                       </i>
-                      <span>{context === null ? "—" : `${Math.round(context)}%`}</span>
+                      <span>{percent(context)}</span>
                     </span>
                     <span
                       className="agent-roster-strip"

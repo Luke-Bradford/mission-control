@@ -369,7 +369,7 @@
 }
 .agent-roster-card {
   display: grid;
-  gap: 2px;
+  gap: var(--sp-1);
   width: 100%;
   margin-top: var(--sp-1);
   padding: var(--sp-2);
@@ -477,7 +477,7 @@
 .agent-new-rows {
   position: absolute;
   align-self: center;
-  margin-top: 48px;
+  margin-top: var(--sp-7);
   z-index: 1;
 }
 @media (max-width: 1279px) {
