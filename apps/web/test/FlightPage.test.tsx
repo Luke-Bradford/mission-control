@@ -97,6 +97,45 @@ describe("buildBlockers", () => {
 });
 
 describe("the FLIGHT page", () => {
+  it("shows held work in its Watch list and releases it", async () => {
+    const held = item({
+      key: "hold:1",
+      text: "Wait for CI to finish",
+      hold: { reason: "CI is still running", condition: { kind: "manual" }, at: NOW } as never,
+    });
+    const fetch = stubFetch(
+      flightPageApi("running", {
+        "/api/attention/held": [held],
+        "POST /api/attention/hold%3A1/hold/release": { ok: true },
+      }),
+    );
+    render(<Flight />);
+    const panel = await waitFor(() => {
+      const found = document.getElementById("watchP");
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(within(panel).getByText("Wait for CI to finish")).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("button", { name: "Release" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/attention/hold%3A1/hold/release",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("names an empty and failed Watch list", async () => {
+    show("running");
+    expect(await screen.findByText("Nothing is held.")).toBeTruthy();
+    cleanup();
+    hub.clear();
+    show("running", {
+      "/api/attention/held": () => ({ status: 500, body: { error: "held down" } }),
+    });
+    expect(await screen.findByText("Could not load Watch list: held down")).toBeTruthy();
+  });
+
   it("shows the four tiles with their definitions, and says Not recorded yet for cost and sessions", async () => {
     show("blocked");
     const band = await screen.findByLabelText("FLIGHT status");

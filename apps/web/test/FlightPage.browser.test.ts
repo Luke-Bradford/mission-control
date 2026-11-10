@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { REPOS } from "./fixtures.ts";
+import { item, NOW, REPOS } from "./fixtures.ts";
 import { flightPageApi, type PageState } from "./flightPageFixtures.ts";
 
 const { renderAt } = browserSession();
@@ -17,6 +17,53 @@ const SIZES = [
 const STATES: PageState[] = ["stopped", "running", "blocked"];
 
 describeRendered("FLIGHT page in a browser", () => {
+  for (const [width, height] of [
+    [1280, 900],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      it(
+        `shows the Watch list at ${width}x${height} in ${theme}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: flightPageApi("running", {
+              "/api/attention/held": [
+                item({
+                  key: "hold:watch",
+                  text: "Wait for CI to finish before the next release.",
+                  hold: { reason: "CI is still running", condition: { kind: "manual" }, at: NOW },
+                }),
+              ],
+            }),
+          });
+          await page.box("#watchP [data-testid=held-row]");
+          expect(page.errors()).toEqual([]);
+          expect(await page.reachable("#watchP")).toEqual([true]);
+          expect(await page.reachable("#watchP [data-testid=held-row]", "#watchP")).toEqual([true]);
+          const text = await page.evaluate(
+            () => document.getElementById("watchP")?.textContent ?? "",
+            null,
+          );
+          expect(text).toContain("Watch list");
+          expect(text).toContain("Wait for CI to finish before the next release.");
+          expect(text).toContain("Release");
+          const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(join(shots, `flight-watch-${width}x${height}-${theme}.png`));
+          }
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
   for (const [width, height] of SIZES) {
     for (const state of STATES) {
       for (const theme of ["dark", "light"] as const) {

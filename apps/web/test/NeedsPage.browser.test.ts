@@ -112,6 +112,54 @@ async function pictureLoaded(page: RenderedPage) {
 
 describeRendered("Needs you page", () => {
   it(
+    "shows every word of an answered question at the requested evidence sizes",
+    async () => {
+      const question = `${"Which cache should we use when the deployment queue contains a long sequence of related changes that need the operator to see every condition before accepting the recommendation? ".repeat(2)}End.`;
+      for (const [width, height] of [
+        [1280, 900],
+        [1600, 1000],
+      ] as const) {
+        const page = await renderAt({
+          page: "test/needsBrowser.html",
+          width,
+          height,
+          api: {
+            ...api(),
+            "/api/attention/answered": [
+              {
+                key: "ask:long",
+                askAt: NOW - HOUR,
+                kind: "withdrawn",
+                reason: "FLIGHT withdrew this question.",
+                by: "flight-1",
+                question,
+                ticket: "shop-app#1453",
+                operator: true,
+                at: NOW - MIN,
+              },
+            ],
+          },
+          assets: ASSETS,
+        });
+        try {
+          await ready(page);
+          await page.click(".needs-list summary");
+          expect(
+            await page.evaluate(
+              () => document.querySelector(".needs-answered")?.textContent ?? "",
+              undefined,
+            ),
+          ).toContain(question);
+          expect(await page.reachable(".needs-answered", ".needs-list")).toEqual([true]);
+        } finally {
+          await page.close();
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "the Needs you composition is clear at the requested light and dark evidence sizes",
     async () => {
       for (const [width, height] of [

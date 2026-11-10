@@ -37,11 +37,16 @@ export function holdConditionText(
  */
 export function WatchList() {
   const held = useResource<AttentionItem[]>(RESOURCES.heldAttention).data;
+  if (held === undefined || held.length === 0) return null;
+  return <WatchListItems items={held} />;
+}
+
+/** The watch rows are shared by FLIGHT's routed page and its tabbed workspace. */
+export function WatchListItems({ items }: { items: readonly AttentionItem[] }) {
   const now = useSecond();
   const tz = useTz();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  if (held === undefined || held.length === 0) return null;
   const release = async (key: string) => {
     setBusy(key);
     setError(null);
@@ -56,10 +61,9 @@ export function WatchList() {
     }
   };
   return (
-    <section aria-label="Watch list" data-testid="held-needs">
-      <h3 className="pb">{`Watch list · ${held.length}`}</h3>
+    <div data-testid="held-needs">
       {error && <p className="pb crit-t s">{error}</p>}
-      {held.map((i) => (
+      {items.map((i) => (
         <div className="drow" key={i.key} data-testid="held-row">
           <div className="row">
             <Pill tone="plain">{ATTENTION_LABEL[i.kind]}</Pill>
@@ -83,6 +87,6 @@ export function WatchList() {
           )}
         </div>
       ))}
-    </section>
+    </div>
   );
 }
