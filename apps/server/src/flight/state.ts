@@ -131,7 +131,7 @@ import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
-import { flightWakeCost, flightWakeWaits } from "./cost.ts";
+import { flightCostInWindow, flightWakeCost, flightWakeWaits } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
@@ -438,12 +438,23 @@ export function flightView(
   alive?: SessionAlive,
 ): FlightView {
   const found = flightSeat(config);
-  const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
+  const session = found === null ? null : store.seatSession(found.seat.id);
+  const runId = session?.runId ?? null;
   const live = found === null ? false : flightLive(config, store, alive);
+  const hourSince = now - FLIGHT_HOUR_MS;
+  const hourRuns =
+    found === null
+      ? []
+      : store
+          .runsOverlapping(hourSince, now + 1)
+          .filter((run) => run.agentId === found.seat.id && run.startedAt >= hourSince);
   const decisions = store.flightDecisions(now - FLIGHT_METRICS_DAY_MS, FLIGHT_DECISIONS_SCAN_LIMIT);
   const controller = found === null ? [] : controllerDecisions(decisions);
   const contextTokens = runId === null ? null : (store.digest(runId)?.contextTokens ?? null);
   return {
+    costLastHour: found === null ? null : flightCostInWindow(store, hourSince, now, found.seat.id),
+    sessionsLastHour: hourRuns.length === 0 ? null : hourRuns.length,
+    runStartedAt: runId === null ? null : (store.run(runId)?.startedAt ?? null),
     seat:
       found === null
         ? null
@@ -451,7 +462,7 @@ export function flightView(
             id: found.seat.id,
             call: seatCallSign(found.seat.id),
             model: found.seat.model,
-            state: store.seatSession(found.seat.id)?.state ?? null,
+            state: session?.state ?? null,
             live,
             turns:
               runId === null

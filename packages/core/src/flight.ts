@@ -134,6 +134,12 @@ export interface FlightView {
   wakeHistory?: FlightWakeHistory;
   /** What FLIGHT cost in the last FLIGHT_COST_DAYS days, per day and per wake reason, and its share of the crew's. */
   wakeCost?: FlightWakeCost;
+  /** API-equivalent cost of FLIGHT's sessions in the last 60 minutes; null without session data. */
+  costLastHour?: number | null;
+  /** FLIGHT sessions started in the last 60 minutes; null when none started. */
+  sessionsLastHour?: number | null;
+  /** Start time of FLIGHT's current session run; null when there is no current run. */
+  runStartedAt?: number | null;
   /** How long an operator message or a blocker waited for a wake, per day. */
   wakeWaits?: FlightWakeWaits;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */

@@ -14,6 +14,26 @@ const DAY_MS = 24 * 60 * 60_000;
 export const START_REASON = "start";
 const UNATTRIBUTED = "unattributed";
 
+/**
+ * API-equivalent cost for FLIGHT's runs that overlap a window. It uses the same timestamped
+ * attempt usage, with the same wall-time fallback, as the daily wake-cost figure.
+ */
+export function flightCostInWindow(
+  store: Store,
+  since: number,
+  now: number,
+  flightId: string,
+): number | null {
+  const runs = store.runsOverlapping(since, now + 1).filter((run) => run.agentId === flightId);
+  if (runs.length === 0) return null;
+  const digests = store.digests(runs.map((run) => run.id));
+  return runs.reduce(
+    (total, run) =>
+      total + runSpend(run, digests.get(run.id), since, now).reduce((n, usd) => n + usd, 0),
+    0,
+  );
+}
+
 const median = (values: number[]): number | null => {
   if (values.length === 0) return null;
   const s = [...values].sort((a, b) => a - b);
