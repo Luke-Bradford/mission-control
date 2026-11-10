@@ -1,5 +1,5 @@
 import type { AgentStream, CrewRow } from "@mc/core";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Agent } from "../src/pages/Agent.tsx";
 import { AGENT_DRAFT_KEY, readKey } from "../src/storage.ts";
@@ -171,6 +171,59 @@ describe("Agent control room", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Interrupt" }));
     expect(await screen.findByText("Interrupt failed: seat is busy")).toBeTruthy();
     confirm.mockRestore();
+  });
+
+  it.each(
+    (["Interrupt", "Stop", "Assign"] as const).flatMap((action) =>
+      ([true, false] as const).map((success) => ({ action, success })),
+    ),
+  )("names $action while pending and after success=$success", async ({ action, success }) => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    try {
+      const row = action === "Assign" ? seat({ hudState: "idle", run: null }) : seat();
+      const base = stub(row, {
+        "/api/boards/shop-app": [boardItem({ issueNumber: 7, status: "Ready", state: "planned" })],
+      });
+      const path = `/api/seats/guido-1/${({ Interrupt: "interrupt", Stop: "end", Assign: "start" } as const)[action]}`;
+      let finish: ((response: Response) => void) | undefined;
+      const pending = new Promise<Response>((resolve) => {
+        finish = resolve;
+      });
+      vi.stubGlobal(
+        "fetch",
+        vi.fn((input: string, init?: RequestInit) =>
+          input === path && init?.method === "POST" ? pending : base(input, init),
+        ),
+      );
+      render(<Agent id="guido-1" />);
+      const button = await screen.findByRole("button", {
+        name: action === "Assign" ? "Assign #7" : action,
+      });
+      const stateBefore = document.querySelector(".agent-v2-state")?.textContent;
+      fireEvent.click(button);
+      expect(await screen.findByText(`${action} sent.`)).toBeTruthy();
+      expect((button as HTMLButtonElement).disabled).toBe(true);
+      expect(confirm).toHaveBeenCalledTimes(action === "Stop" ? 1 : 0);
+      await act(async () => {
+        finish?.(
+          new Response(
+            JSON.stringify(success ? { ok: true } : { error: "server refused action" }),
+            { status: success ? 200 : 409 },
+          ),
+        );
+        await pending;
+      });
+      expect(
+        await screen.findByText(
+          success ? `${action} confirmed.` : `${action} failed: server refused action`,
+        ),
+      ).toBeTruthy();
+      expect((button as HTMLButtonElement).disabled).toBe(false);
+      if (!success)
+        expect(document.querySelector(".agent-v2-state")?.textContent).toBe(stateBefore);
+    } finally {
+      confirm.mockRestore();
+    }
   });
 
   it("keeps the chosen roster seat in the address", async () => {

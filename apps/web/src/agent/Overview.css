@@ -273,10 +273,6 @@
   font-size: var(--fs-s);
   color: var(--fg-2);
 }
-.agent-v2 #streamP {
-  height: 400px;
-  min-height: 280px;
-}
 .agent-v2 #sideP {
   max-height: 440px;
   min-height: 160px;

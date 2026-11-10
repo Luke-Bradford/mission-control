@@ -408,17 +408,26 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   );
   const timed = useMemo(() => [...a2a, ...guard].sort((a, b) => a.at - b.at), [a2a, guard]);
   const shows = SHOWS[filter];
-  const all = mergeTimed(stream.data?.events ?? [], timed);
+  const latest = useMemo(
+    () => mergeTimed(stream.data?.events ?? [], timed),
+    [stream.data?.events, timed],
+  );
+  const atBottom = useRef(true);
+  const displayed = useRef({ runId, rows: latest });
+  // A rolling server window can remove the row the reader is looking at. Keep the displayed
+  // window while they read above the bottom; arrivals remain available through the new-row button.
+  if (displayed.current.runId !== runId) atBottom.current = true;
+  if (atBottom.current) displayed.current = { runId, rows: latest };
+  const all = displayed.current.rows;
   const events = all.filter((e) => shows === null || shows.includes(e.kind));
   const count = events.length;
 
-  // Follow the newest event only when the list's content changed and the reader was already at
-  // the bottom: a refetch (a fresh object every few seconds) or a reader scrolled up stays put.
-  const atBottom = useRef(true);
+  // Follow only a changed displayed window when the reader is already at its bottom.
   const seenRows = useRef<Set<string>>(new Set());
   const seenRun = useRef<string | null>(null);
   const [newRows, setNewRows] = useState(0);
-  const signature = `${stream.data?.runId ?? ""}:${filter}:${count}:${events.at(-1)?.at ?? ""}`;
+  const last = events.at(-1);
+  const signature = `${stream.data?.runId ?? ""}:${filter}:${count}:${last ? ("key" in last ? last.key : last.id) : ""}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger
   useLayoutEffect(() => {
     const el = box.current;
@@ -426,7 +435,7 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   }, [signature]);
   useEffect(() => {
     const id = stream.data?.runId ?? null;
-    const keys = all.map((event) => ("key" in event ? event.key : `stream:${event.id}`));
+    const keys = latest.map((event) => ("key" in event ? event.key : `stream:${event.id}`));
     if (seenRun.current !== id) {
       seenRun.current = id;
       seenRows.current = new Set(keys);
@@ -436,7 +445,7 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
     const added = keys.filter((key) => !seenRows.current.has(key));
     for (const key of keys) seenRows.current.add(key);
     if (!atBottom.current && added.length) setNewRows((n) => n + added.length);
-  }, [all, stream.data?.runId]);
+  }, [latest, stream.data?.runId]);
   const onScroll = () => {
     const el = box.current;
     if (el) {
@@ -468,8 +477,9 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
           type="button"
           className="agent-new-rows"
           onClick={() => {
-            box.current?.scrollTo({ top: box.current.scrollHeight });
+            atBottom.current = true;
             setNewRows(0);
+            box.current?.scrollTo({ top: box.current.scrollHeight });
           }}
         >
           {newRows} new

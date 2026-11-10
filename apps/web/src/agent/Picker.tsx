@@ -48,7 +48,23 @@ export function Picker({
       .map(([repo, seats]) => [repo, [...seats].sort(compareRosterSeats)] as const);
   }, [rows]);
   useEffect(() => {
-    if (current) currentCard.current?.scrollIntoView?.({ block: "nearest" });
+    const card = currentCard.current;
+    const list = picker.current;
+    if (!current || !card || !list) return;
+    const reveal = () => {
+      const bounds = list.getBoundingClientRect();
+      const chosen = card.getBoundingClientRect();
+      if (chosen.height === 0) return;
+      if (chosen.top < bounds.top) list.scrollTop += chosen.top - bounds.top;
+      else if (chosen.bottom > bounds.bottom) list.scrollTop += chosen.bottom - bounds.bottom;
+    };
+    reveal();
+    // The scroll cue and loaded fonts can change the list after selection first renders.
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(reveal);
+    observer.observe(list);
+    observer.observe(card);
+    return () => observer.disconnect();
   }, [current]);
   useEffect(() => {
     const repo = rows.find((row) => row.id === current)?.repoId;
