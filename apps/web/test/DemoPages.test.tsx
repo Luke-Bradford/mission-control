@@ -45,21 +45,24 @@ const PAGES: [string, string, RegExp, string][] = [
 ];
 
 describe("Demo renders every page busy", () => {
-  it.each(PAGES)("%s shows the marker, no error and no real request", async (_name, path, text, title) => {
-    window.history.replaceState(null, "", path);
-    render(<App />);
-    await waitFor(() => expect(document.body.textContent).toMatch(text), { timeout: 4000 });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 300));
-    });
-    expect(document.querySelector(".demo-marker")?.textContent).toBe("DEMO");
-    expect(document.querySelector(".demo-frame")).not.toBeNull();
-    expect(document.querySelectorAll("[role=alert]")).toHaveLength(0);
-    expect(demoMisses()).toEqual([]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(sources).toHaveLength(0);
-    expect(document.title).toBe(`${title} · DEMO · Mission Control`);
-  });
+  it.each(PAGES)(
+    "%s shows the marker, no error and no real request",
+    async (_name, path, text, title) => {
+      window.history.replaceState(null, "", path);
+      render(<App />);
+      await waitFor(() => expect(document.body.textContent).toMatch(text), { timeout: 4000 });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 300));
+      });
+      expect(document.querySelector(".demo-marker")?.textContent).toBe("DEMO");
+      expect(document.querySelector(".demo-frame")).not.toBeNull();
+      expect(document.querySelectorAll("[role=alert]")).toHaveLength(0);
+      expect(demoMisses()).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(sources).toHaveLength(0);
+      expect(document.title).toBe(`${title} · DEMO · Mission Control`);
+    },
+  );
 
   it("fills the Overview's crew table and the Map's tree", async () => {
     window.history.replaceState(null, "", "/");
