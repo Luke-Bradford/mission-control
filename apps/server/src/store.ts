@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
+  AttentionMaterials,
   BriefChoiceReceipt,
   ChoiceTargetKind,
   ItemChatMessage,
@@ -361,6 +362,10 @@ CREATE TABLE IF NOT EXISTS collector_status (
 );
 CREATE TABLE IF NOT EXISTS machine_samples (at INTEGER PRIMARY KEY, sample TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS attention_materials (
+  id TEXT PRIMARY KEY, item_key TEXT NOT NULL, packet TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS attention_materials_item ON attention_materials(item_key, id DESC);
 -- Acknowledged attention items. absent_since: when the key was first missing from the current
 -- items (null while present); the ack is dropped once it has been absent for ACK_ABSENT_MS.
 CREATE TABLE IF NOT EXISTS acks (key TEXT PRIMARY KEY, at INTEGER NOT NULL, absent_since INTEGER);
@@ -5858,6 +5863,33 @@ export class Store {
     } catch {
       return null;
     }
+  }
+
+  /** Immutable display material for a Needs-you item; packets never alter its brief or choice. */
+  putAttentionMaterials(packet: AttentionMaterials): boolean {
+    return (
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO attention_materials (id, item_key, packet) VALUES (?, ?, ?)",
+        )
+        .run(packet.id, packet.itemKey, JSON.stringify(packet)).changes > 0
+    );
+  }
+
+  attentionMaterials(id: string): AttentionMaterials | null {
+    const row = this.db.prepare("SELECT packet FROM attention_materials WHERE id = ?").get(id) as
+      | { packet: string }
+      | undefined;
+    return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
+  }
+
+  attentionMaterialsForItem(itemKey: string): AttentionMaterials | null {
+    const row = this.db
+      .prepare(
+        "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') DESC, id DESC LIMIT 1",
+      )
+      .get(itemKey) as { packet: string } | undefined;
+    return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
   }
 
   qaReports(repoId: string, pr: number, headSha?: string): QaReport[] {

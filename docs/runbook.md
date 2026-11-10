@@ -2940,6 +2940,30 @@ keep their permission checks.
   them keep 365.
 
 
+### Retained Needs-you materials
+
+The operator can retain an inspectable repository plan for an open Needs-you item with
+`POST /api/attention/:key/materials`. The body names `repoId`, a full 40-character
+`sourceCommit`, a Markdown `sourcePath` below `docs/`, and a human `label`. The item must belong
+to that configured repository. Preview hubs refuse registration because they do not write loop
+data. Registration reads committed Git blobs only: it never reads a checkout file, follows a
+symlink, downloads a link, or changes a brief, option, approval, hold or decision receipt.
+
+The hub saves the complete Markdown and each linked PNG, JPEG or WebP under a private,
+content-addressed asset id. Relative image links, including links in Markdown tables, resolve from
+the packet's source directory at the named commit. The returned packet rewrites those links to
+`/api/attention-material-assets/:id` and includes the source repository, commit, path, label,
+registration time, image order and hashes. External and unsupported links remain ordinary safe
+links; they are never fetched or embedded. Files and image counts have bounded limits, so a failed
+registration does not save a partial packet.
+
+`GET /api/attention/:key/materials` returns the latest retained packet for that item and works
+after the question is rebriefed or no longer open. It labels a packet `historical` when its saved
+brief or repository no longer matches the current item. `GET /api/attention-material-assets/:id`
+returns the retained raster bytes with their original raster content type. All three routes require
+the normal operator token. These materials are provenance for display, not a current approval or
+source binding.
+
 ### Clearing a Needs-you item
 
 `POST /api/attention/:key/clear` with an empty body returns `{ cleared: key }`. The operator or
