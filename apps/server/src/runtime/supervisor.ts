@@ -1306,13 +1306,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             bus.emit("flight");
           }
         }
-        // A missing exit code is an early hand-back, not proof that the command ended. Keep its
-        // hold until Codex reports the final item completion or the session exits.
-        if (e.ok !== undefined)
+        // A Codex command without an exit code may still be running after an early hand-back.
+        // Claude tool results retain their existing release path; their check receipt uses Post.
+        if (l.run.vendor !== "codex" || e.ok !== undefined)
           deps.lock.release(
             { runId: l.run.id, toolUseId: e.toolUseId },
             // a wrapped call that succeeded says nothing of the check: done, never pass (#1411)
-            !e.ok ? true : e.wrapped ? undefined : false,
+            e.ok === undefined ? undefined : !e.ok ? true : e.wrapped ? undefined : false,
           );
         // a Codex command says how it exited; a Claude call's end comes by its Post hook instead
         if (e.ok !== undefined) {
@@ -1332,10 +1332,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         break;
       case "result": {
-        // A Codex turn can end before a command reports its final exit. Keep its holds and check
-        // receipts until that completion, or until the session process exits.
-        if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow))
+        // A normal Codex turn can end before its command exits. Preserve that hold, while
+        // Claude turn results and confirmed Codex interruptions retain their cleanup behavior.
+        // An old result replayed during attach must never free a later turn's hold.
+        if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)) {
+          if (l.run.vendor !== "codex" || e.stopReason === "interrupted")
+            deps.lock.releaseRun(l.run.id);
           deps.checks?.dropRun(l.run.id);
+        }
         const interrupted = l.interrupted;
         l.inTurn = false;
         l.interrupted = false;
