@@ -31,7 +31,7 @@ export interface KeyApp {
   toast: (msg: string) => void;
 }
 
-type PageKey = "i";
+type PageKey = "i" | "j" | "k";
 const pageKeys = new Map<PageKey, () => void>();
 
 /** Let the mounted page handle `key` itself (null hands it back). */
@@ -101,10 +101,10 @@ export function installKeys(app: KeyApp): () => void {
         app.toggleDock();
         return;
       case "j":
-        app.selectNext();
+        pageKeys.get("j")?.() ?? app.selectNext();
         return;
       case "k":
-        app.selectPrev();
+        pageKeys.get("k")?.() ?? app.selectPrev();
         return;
       case "/":
         e.preventDefault();

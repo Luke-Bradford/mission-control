@@ -266,6 +266,7 @@ export function SeatComposer({
   const used = useRef<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<"sent" | "read" | null>(null);
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const vendor = config?.accounts.find((a) => a.id === row.accountId)?.vendor;
   const loopResource = useResource<{ loop: RunLoop | null }>(
@@ -295,11 +296,15 @@ export function SeatComposer({
     }
     setBusy(true);
     setError(null);
+    setReceipt(null);
     try {
+      let delivered = false;
       if (parkedReview && row.run) await messageRun(row.run.id, text);
-      else await messageSeat(row, text, interrupt);
+      else delivered = (await messageSeat(row, text, interrupt)).state === "delivered";
       setText("");
       writeKey(AGENT_DRAFT_KEY, "");
+      setReceipt("sent");
+      if (delivered) window.setTimeout(() => setReceipt("read"), 0);
       toast(`Delivered to ${call}.`);
       onSent?.();
     } catch (e) {
@@ -354,6 +359,11 @@ export function SeatComposer({
           {error}
         </span>
       )}
+      {receipt && (
+        <span className="s muted" role="status">
+          {receipt === "sent" ? "Message sent." : "Message read."}
+        </span>
+      )}
       <span className="hint" id={HINT_ID}>
         {parkKindUnknown
           ? "Loading the park details before a message can be sent."
@@ -405,7 +415,8 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   // Follow the newest event only when the list's content changed and the reader was already at
   // the bottom: a refetch (a fresh object every few seconds) or a reader scrolled up stays put.
   const atBottom = useRef(true);
-  const previousCount = useRef(count);
+  const seenRows = useRef<Set<string>>(new Set());
+  const seenRun = useRef<string | null>(null);
   const [newRows, setNewRows] = useState(0);
   const signature = `${stream.data?.runId ?? ""}:${filter}:${count}:${events.at(-1)?.at ?? ""}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger
@@ -414,10 +425,18 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [signature]);
   useEffect(() => {
-    const added = Math.max(0, count - previousCount.current);
-    previousCount.current = count;
-    if (!atBottom.current && added) setNewRows((n) => n + added);
-  }, [count]);
+    const id = stream.data?.runId ?? null;
+    const keys = all.map((event) => ("key" in event ? event.key : `stream:${event.id}`));
+    if (seenRun.current !== id) {
+      seenRun.current = id;
+      seenRows.current = new Set(keys);
+      setNewRows(0);
+      return;
+    }
+    const added = keys.filter((key) => !seenRows.current.has(key));
+    for (const key of keys) seenRows.current.add(key);
+    if (!atBottom.current && added.length) setNewRows((n) => n + added.length);
+  }, [all, stream.data?.runId]);
   const onScroll = () => {
     const el = box.current;
     if (el) {

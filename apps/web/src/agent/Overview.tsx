@@ -99,6 +99,11 @@ export function AgentIdentity({ view }: { view: AgentDetailView }) {
         · {row.accountId} · {modelLine(row)}
         {row.kind === "crew" ? ` · area: ${seatAreaText(row)}` : ""}
       </p>
+      {row.summary && (
+        <p className="agent-identity-words" title={row.summary}>
+          <b>In its words</b> · {row.summary}
+        </p>
+      )}
     </section>
   );
 }

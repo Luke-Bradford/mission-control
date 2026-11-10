@@ -116,6 +116,20 @@ describe("Agent control room", () => {
     ).toBe("Please check the guard.");
   });
 
+  it("shows sent then read only when the message route reports delivery", async () => {
+    stub(seat(), {
+      "POST /api/seats/guido-1/message": { ok: true, state: "delivered", deliveredAt: NOW },
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Message this agent" }), {
+      target: { value: "Please check the guard." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Message sent.")).toBeTruthy();
+    vi.runOnlyPendingTimers();
+    expect(await screen.findByText("Message read.")).toBeTruthy();
+  });
+
   it("assigns Ready work, surfaces its receipt, and disables while a run is live", async () => {
     const f = stub(seat({ hudState: "idle", run: null }), {
       "/api/boards/shop-app": [boardItem({ issueNumber: 7, status: "Ready", state: "planned" })],
@@ -133,6 +147,30 @@ describe("Agent control room", () => {
     expect(
       ((await screen.findByRole("button", { name: "Assign #7" })) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+
+  it("confirms once for Stop and names action failures", async () => {
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+    stub(seat(), {
+      "/api/boards/shop-app": [boardItem({ issueNumber: 7, status: "Ready", state: "planned" })],
+      "POST /api/seats/guido-1/interrupt": { ok: true },
+      "POST /api/seats/guido-1/end": { ok: true },
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Interrupt" }));
+    expect(await screen.findByText("Interrupt confirmed.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    expect(await screen.findByText("Stop confirmed.")).toBeTruthy();
+    expect(confirm).toHaveBeenCalledTimes(1);
+    cleanup();
+    stub(seat(), {
+      "/api/boards/shop-app": [boardItem({ issueNumber: 7, status: "Ready", state: "planned" })],
+      "POST /api/seats/guido-1/interrupt": () => ({ status: 409, body: { error: "seat is busy" } }),
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Interrupt" }));
+    expect(await screen.findByText("Interrupt failed: seat is busy")).toBeTruthy();
+    confirm.mockRestore();
   });
 
   it("keeps the chosen roster seat in the address", async () => {

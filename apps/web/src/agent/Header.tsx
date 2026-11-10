@@ -75,7 +75,7 @@ export function SeatControls({
       setReceipt(`${name} confirmed.`);
     } catch (e) {
       setReceipt(null);
-      setError(seatError(e));
+      setError(`${name} failed: ${seatError(e)}`);
     } finally {
       setBusy(false);
     }
@@ -140,7 +140,7 @@ function AssignSeat({ row }: { row: CrewRow }) {
       hub.refetch(RESOURCES.crew.path);
     } catch (e) {
       setReceipt(null);
-      setError(seatError(e));
+      setError(`Assign failed: ${seatError(e)}`);
     } finally {
       setBusy(false);
     }

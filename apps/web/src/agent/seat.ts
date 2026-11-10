@@ -37,13 +37,18 @@ export async function endAsideRun(runId: string): Promise<void> {
   }
 }
 
+export type MessageReceipt = { state: "stored" | "delivered"; deliveredAt: number | null };
+
 export async function messageSeat(
   row: Pick<CrewRow, "id">,
   text: string,
   interrupt: boolean,
-): Promise<void> {
+): Promise<MessageReceipt> {
   try {
-    await apiPost(ACTIONS.seatMessage(row.id), interrupt ? { text, interrupt } : { text });
+    return await apiPost<MessageReceipt>(
+      ACTIONS.seatMessage(row.id),
+      interrupt ? { text, interrupt } : { text },
+    );
   } finally {
     done(row.id);
   }

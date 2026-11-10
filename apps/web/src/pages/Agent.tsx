@@ -1,13 +1,14 @@
 import type { AgentDetailView, AttentionItem, Crew } from "@mc/core";
 import { useEffect } from "react";
+import { HandoffPanel } from "../agent/HandoffPanel.tsx";
 import { AgentIdentity } from "../agent/Overview.tsx";
-import { Picker } from "../agent/Picker.tsx";
+import { compareRosterSeats, Picker } from "../agent/Picker.tsx";
 import { RunTracePanel } from "../agent/RunTrace.tsx";
 import { StreamPanel } from "../agent/StreamPanel.tsx";
 import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
-import { useSearch } from "../router.ts";
+import { agentPath, navigate, useSearch } from "../router.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
@@ -28,8 +29,12 @@ export function Agent({ id }: { id: string | null }) {
   const [selected] = useSelectedAgent();
   const params = new URLSearchParams(useSearch());
   const traceRun = params.get("trace");
+  // Compatibility for Board's saved handoff links and Overview's older run links.
+  const handoffRun = params.get("handoff");
+  const legacyRun = params.get("run");
+  const detailRun = traceRun ?? legacyRun;
 
-  const all = crew.data ? [...crew.data.rows].sort((a, b) => a.index - b.index) : null;
+  const all = crew.data ? [...crew.data.rows].sort(compareRosterSeats) : null;
   const inView = all?.filter((r) => matchesSession(r)) ?? [];
   const crewSeats = inView.filter((r) => r.kind === "crew");
   const listed =
@@ -67,6 +72,21 @@ export function Agent({ id }: { id: string | null }) {
     return () => setPageKey("i", null);
   }, [shownId, shownKind]);
 
+  useEffect(() => {
+    if (!shownId || !all?.length) return;
+    const move = (direction: 1 | -1) => {
+      const at = all.findIndex((seat) => seat.id === shownId);
+      const next = all[(at + direction + all.length) % all.length];
+      if (next) navigate(agentPath(next.id));
+    };
+    setPageKey("j", () => move(1));
+    setPageKey("k", () => move(-1));
+    return () => {
+      setPageKey("j", null);
+      setPageKey("k", null);
+    };
+  }, [all, shownId]);
+
   let missing: string | null = null;
   if (crew.error && !crew.data) missing = "Could not load the crew.";
   else if (!crew.data) missing = "Loading…";
@@ -75,10 +95,15 @@ export function Agent({ id }: { id: string | null }) {
   else if (!row) missing = detail.error ? "Could not load this agent." : "Loading…";
 
   return (
-    <section id="page-agent" className={`agent-v2${traceRun ? " agent-trace-page" : ""}`}>
+    <section
+      id="page-agent"
+      className={`agent-v2${detailRun || handoffRun ? " agent-trace-page" : ""}`}
+    >
       <h1 className="sr-only">Agents</h1>
-      {traceRun && id !== null ? (
-        <RunTracePanel agentId={id} runId={traceRun} />
+      {handoffRun ? (
+        <HandoffPanel runId={handoffRun} />
+      ) : detailRun && id !== null ? (
+        <RunTracePanel agentId={id} runId={detailRun} />
       ) : row ? (
         <div className="agent-control-room">
           <Picker rows={all ?? []} items={items} current={shownId} />

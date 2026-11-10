@@ -1,7 +1,7 @@
 import type { AttentionItem, CrewRow } from "@mc/core";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNow } from "../clock.ts";
-import { contextPct, needsLamp, seatStatus } from "../crew.ts";
+import { callSign, contextPct, needsLamp, seatStatus } from "../crew.ts";
 import { dur, percent } from "../fmt.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
@@ -11,12 +11,18 @@ import { setSelectedAgent } from "../shell/selection.ts";
 import { ListScrollCue } from "./ListScrollCue.tsx";
 
 const roleOrder = (row: CrewRow): number => {
-  const role = row.role?.toLowerCase() ?? row.loopKind;
-  if (role.includes("flight")) return 1;
-  if (role.includes("plan")) return 2;
-  if (role.includes("retro") || role.includes("review")) return 4;
-  return 3;
+  const role = row.role?.toUpperCase() ?? row.loopKind.toUpperCase();
+  if (role === "FLIGHT") return 0;
+  if (role === "FAO" || role.includes("PLAN")) return 1;
+  if (role === "RETRO" || role.includes("REVIEW")) return 3;
+  return 2;
 };
+
+/** One fixed order drives the roster, keyboard selection and selected-seat reveal. */
+export const compareRosterSeats = (a: CrewRow, b: CrewRow): number =>
+  a.repoId.localeCompare(b.repoId) ||
+  roleOrder(a) - roleOrder(b) ||
+  callSign(a).localeCompare(callSign(b), undefined, { numeric: true });
 
 /** The fixed-screen roster: grouped by repo, with each card carrying current work and session use. */
 export function Picker({
@@ -31,22 +37,23 @@ export function Picker({
   const picker = useRef<HTMLFieldSetElement>(null);
   const currentCard = useRef<HTMLButtonElement>(null);
   const now = useNow();
+  const [openRepos, setOpenRepos] = useState<Set<string>>(
+    () => new Set(rows.map((row) => row.repoId)),
+  );
   const groups = useMemo(() => {
     const byRepo = new Map<string, CrewRow[]>();
     for (const row of rows) byRepo.set(row.repoId, [...(byRepo.get(row.repoId) ?? []), row]);
     return [...byRepo.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(
-        ([repo, seats]) =>
-          [
-            repo,
-            [...seats].sort((a, b) => roleOrder(a) - roleOrder(b) || a.index - b.index),
-          ] as const,
-      );
+      .map(([repo, seats]) => [repo, [...seats].sort(compareRosterSeats)] as const);
   }, [rows]);
   useEffect(() => {
     if (current) currentCard.current?.scrollIntoView?.({ block: "nearest" });
   }, [current]);
+  useEffect(() => {
+    const repo = rows.find((row) => row.id === current)?.repoId;
+    if (repo) setOpenRepos((open) => (open.has(repo) ? open : new Set(open).add(repo)));
+  }, [current, rows]);
   return (
     <aside className="panel agent-roster" aria-label="Seat roster">
       <div className="agent-roster-head">
@@ -57,14 +64,28 @@ export function Picker({
       <fieldset className="agent-roster-list" ref={picker} aria-label="Pick an agent">
         {groups.map(([repo, seats]) => {
           return (
-            <details className="agent-roster-group" key={repo} open>
+            <details
+              className="agent-roster-group"
+              key={repo}
+              open={openRepos.has(repo)}
+              onToggle={(event) => {
+                const open = event.currentTarget.open;
+                setOpenRepos((repos) => {
+                  const next = new Set(repos);
+                  if (open) next.add(repo);
+                  else next.delete(repo);
+                  return next;
+                });
+              }}
+            >
               <summary className="agent-roster-group-title">
                 <span>{repo}</span>
                 <span className="mono muted">{seats.length}</span>
               </summary>
               {seats.map((row) => {
                 const status = seatStatus(row);
-                const context = contextPct(row);
+                const context =
+                  row.hudState === "idle" || row.run === null ? null : contextPct(row);
                 const age =
                   row.lastOutputAt === null
                     ? "no output"
@@ -96,7 +117,10 @@ export function Picker({
                       </span>
                     </span>
                     <span className="agent-roster-age">{age}</span>
-                    <span className="agent-roster-work" title={row.ticketTitle ?? undefined}>
+                    <span
+                      className="agent-roster-work"
+                      title={row.ticketTitle ?? row.ticket ?? row.summary ?? "Available for work"}
+                    >
                       {row.ticket ?? row.summary ?? "Available for work"}
                     </span>
                     <span className="agent-roster-context">
@@ -113,13 +137,13 @@ export function Picker({
                       role="img"
                       aria-label="Activity in the last hour"
                     >
-                      {(row.events ?? [])
-                        .filter((event) => event.at >= now - 3_600_000)
-                        .map((event) => (
+                      {(row.digest?.minuteTokens ?? [])
+                        .filter(([at, tokens]) => tokens > 0 && at >= now - 3_600_000 && at <= now)
+                        .map(([at]) => (
                           <i
-                            key={`${event.kind}:${event.at}`}
+                            key={at}
                             style={{
-                              left: `${Math.max(0, Math.min(100, ((event.at - (now - 3_600_000)) / 3_600_000) * 100))}%`,
+                              left: `${Math.max(0, Math.min(100, ((at - (now - 3_600_000)) / 3_600_000) * 100))}%`,
                             }}
                           />
                         ))}
