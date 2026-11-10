@@ -1,0 +1,44 @@
+/* Mockup-only overrides. These are not application implementation. */
+#page-comms .comms-grid { grid-template-columns: 272px minmax(0, 1fr) 280px; }
+.comms-mentions { display: none !important; }
+#page-comms .p1513-nav { flex: 0 1 54%; overflow: hidden; }
+.p1513-nav .comms-section-head { flex: 0 0 auto; }
+.p1513-nav .comms-nav-top { flex: 0 0 auto; min-height: 48px; grid-template-columns: minmax(0, 1fr); text-align: left; }
+.p1513-nav .comms-nav-top b { white-space: normal; line-height: 1.25; }
+.p1513-agents { min-height: 0; overflow-y: auto; }
+.p1513-agents .comms-nav-row { min-height: 48px; gap: 8px; grid-template-columns: minmax(0, 1fr) auto; width: 100%; }
+.p1513-agents .comms-nav-agent { text-align: left; }
+.p1513-unread { width: 8px; height: 8px; background: var(--accent); border-radius: 50%; display: inline-block; }
+.p1513-tickets { flex: 1 1 40%; display: flex; flex-direction: column; min-height: 0; }
+.p1513-tickets input { margin: 0 8px 8px; width: calc(100% - 16px); min-height: 32px; }
+.p1513-tickets ul { overflow-y: auto; margin: 0; padding: 0; min-height: 0; list-style: none; }
+.p1513-tickets li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px; border-top: 1px solid var(--line); }
+.p1513-tickets .comms-ticket-open { min-width: 0; line-height: 1.3; overflow-wrap: anywhere; }
+.p1513-tickets small { display: block; color: var(--muted); font-size: 12px; margin-top: 4px; }
+.p1513-tickets button { min-height: 28px; font-size: 12px; padding: 4px; }
+.p1513-right { display: flex; flex-direction: column; gap: 12px; align-content: start; }
+.p1513-waiting { list-style: none; padding: 0; margin: 0; }
+.p1513-waiting li + li { border-top: 1px solid var(--line); }
+.p1513-waiting button { width: 100%; padding: 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; text-align: left; border: 0; background: transparent; color: var(--fg); }
+.p1513-waiting time { color: var(--warn); }
+.p1513-waiting span { white-space: normal; overflow-wrap: anywhere; grid-column: 1 / -1; color: var(--fg-2); font-size: 14px; }
+.p1513-record-note, .p1513-graph-link { margin: 0; padding: 0 8px; font-size: 14px; color: var(--muted); }
+.p1513-record-note a, .p1513-graph-link { color: var(--accent); }
+#page-ticket.p1513-ticket { height: 100%; overflow: hidden; }
+.p1513-ticket .tk-head p { margin: 4px 0 0; color: var(--muted); }
+.p1513-ticket-grid { display: grid; grid-template-columns: minmax(300px, 2fr) minmax(0, 3fr); gap: 16px; min-height: 0; flex: 1; }
+.p1513-ticket-summary { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.p1513-ticket-summary h3 { margin: 12px 0 4px; font-size: 14px; }
+.p1513-ticket-summary p { margin: 0 0 8px; }
+.p1513-question .p1513-answer { border-left: 2px solid var(--accent); padding-left: 12px; margin-top: 12px; }
+.p1513-record-panel { display: flex; flex-direction: column; min-height: 0; height: 100%; overflow: hidden; }
+.p1513-state { padding: 16px; }
+.p1513-events[hidden] { display: none; }
+.p1513-events { list-style: none; padding: 0 12px; margin: 0; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+.p1513-events .tk-event { grid-template-columns: 48px 76px minmax(0, 1fr); gap: 8px; }
+.p1513-events p { margin: 0 0 4px; }
+.p1513-byline { font: 11px var(--mono); color: var(--muted); }
+.p1513-kind { font: 12px var(--mono); color: var(--fg-2); }
+.p1513-events summary, .p1513-question summary { color: var(--accent); cursor: pointer; min-height: 24px; }
+@media (max-width: 1350px) { #page-comms .comms-grid { grid-template-columns: 240px minmax(0, 1fr) 240px; } }
+@media (max-width: 1100px) { #page-comms .comms-grid { grid-template-columns: 220px minmax(0, 1fr); } .p1513-right { display: none; } }

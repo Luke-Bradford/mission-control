@@ -1,0 +1,315 @@
+{
+  "kind": "Rendered design proposal only; not application acceptance or independent QA",
+  "at": "2026-11-10T00:33:44.362629+00:00",
+  "ticket": 1513,
+  "existingDraftPR": 1600,
+  "productionBase": "708bbe76f08196ad2ccde7368c0189f0bbc0f8a6",
+  "publicationParent": "276a078ce26d57d1b0bc4be686bdb7b05817888e",
+  "productionFilesChanged": false,
+  "browser": "Playwright Chromium headless shell 1234 on macOS arm64",
+  "dpr": 1,
+  "zoom": 1,
+  "clock": "2026-10-17T12:00:00Z, fixed fictional clock",
+  "arrival": "Overview \u2192 Comms header \u2192 #crew \u2192 ticket link",
+  "screenshots": 41,
+  "busyMatrix": {
+    "pages": [
+      "Comms",
+      "Ticket"
+    ],
+    "stages": [
+      "before",
+      "after"
+    ],
+    "viewports": [
+      [
+        1280,
+        900
+      ],
+      [
+        1600,
+        1000
+      ],
+      [
+        1920,
+        940
+      ],
+      [
+        1600,
+        700
+      ]
+    ],
+    "themes": [
+      "dark",
+      "light"
+    ],
+    "images": 32
+  },
+  "interactionChecks": 17,
+  "artifactLimitations": [
+    "All data is fictional; no live unread/lifecycle/latency proof.",
+    "After aliases are preview-only modules, outside production source.",
+    "No application build approval inferred; original native author remains stopped.",
+    "The separate graph route uses the preserved old draft; its newer design is separate ticket1663.",
+    "No message sends, approvals, provider calls, observed-loop changes or hub restarts.",
+    "No new full suite; these checks exercise a design proposal."
+  ],
+  "historicalPhases": "Earlier preview grid clipping, wrong harness selector, and incorrect Filter chat route were detected and corrected. Private historical images/receipts remain retained; they are not current acceptance evidence.",
+  "files": [
+    {
+      "path": "comms-after-1280x900-dark.png",
+      "sha256": "0201785aa002ee53ded37334c1d631975a081190e5e86ab4661c54daf951d6c1",
+      "bytes": 199193
+    },
+    {
+      "path": "comms-after-1280x900-light.png",
+      "sha256": "59f244828d534ac1f0816ccc11b97493fd3d06ef6229f1d7f28e16e7dd6d6299",
+      "bytes": 197741
+    },
+    {
+      "path": "comms-after-1600x1000-dark.png",
+      "sha256": "4f55682ca29d0a2adf65583254130ab2198038c6f20ded8b19577aac5c45b2a9",
+      "bytes": 231453
+    },
+    {
+      "path": "comms-after-1600x1000-light.png",
+      "sha256": "eb5d7c9c8fd8e8ef5eca88a160dd5926a8e12320223d6fffde5d1b2a5cc61718",
+      "bytes": 229107
+    },
+    {
+      "path": "comms-after-1600x700-dark.png",
+      "sha256": "0acbf35f490c90b3503443952e2aea36d9d687de6ffd7073867407dd301f6500",
+      "bytes": 169195
+    },
+    {
+      "path": "comms-after-1600x700-light.png",
+      "sha256": "9c262594013e128e9087c488a027765e183e1c9adefb8ca19206af5704334de6",
+      "bytes": 167903
+    },
+    {
+      "path": "comms-after-1920x940-dark.png",
+      "sha256": "442e49985091870846fb64f2155f846d3334ea85364be8c422fdcd632efe570c",
+      "bytes": 222432
+    },
+    {
+      "path": "comms-after-1920x940-light.png",
+      "sha256": "af49a8473681934bd5e67e692e69dc5218de7ca1431095956cf7ae3bce601666",
+      "bytes": 220481
+    },
+    {
+      "path": "comms-before-1280x900-dark.png",
+      "sha256": "f8a30f2dea0876611d6d21b649d2dbb29c1d9b701ae16fffed83689a2a2b239f",
+      "bytes": 229794
+    },
+    {
+      "path": "comms-before-1280x900-light.png",
+      "sha256": "04f8447c6acacaabca5802eb032ca2238f6f4fcc3c3c9400d09e97923b499a84",
+      "bytes": 224342
+    },
+    {
+      "path": "comms-before-1600x1000-dark.png",
+      "sha256": "9aa644b3f9da83e4bdb0553e22de5df217b8d11f633ac38ec973b8f74f65eaec",
+      "bytes": 277019
+    },
+    {
+      "path": "comms-before-1600x1000-light.png",
+      "sha256": "e6998de4c52b9a4287888ef2098870febc60998306d8c198208aad027f04e9e6",
+      "bytes": 272352
+    },
+    {
+      "path": "comms-before-1600x700-dark.png",
+      "sha256": "d36e0ebc737e14d0d3ffe0bd5fc1ff3f77dbbd25933a4dba70d225af52e046a3",
+      "bytes": 203613
+    },
+    {
+      "path": "comms-before-1600x700-light.png",
+      "sha256": "1ff1764018ee902640e69bb145bd610111b6adb2b3153b18f233dc73729403a8",
+      "bytes": 199388
+    },
+    {
+      "path": "comms-before-1920x940-dark.png",
+      "sha256": "074314ab2c7e73c53e4d5230792d26f512fcdad39f039727f1da00b102af5f7a",
+      "bytes": 266734
+    },
+    {
+      "path": "comms-before-1920x940-light.png",
+      "sha256": "1f26377ba7945514c0b57ab0a84375bfb07736630c8856a3d85b7719ee5b3558",
+      "bytes": 262328
+    },
+    {
+      "path": "comms-state-empty-1280x900-dark.png",
+      "sha256": "4458bf4af351cc9a6a96d62ab78971e9640e2bd5bb02fa8fda34fb755e6750cc",
+      "bytes": 127892
+    },
+    {
+      "path": "comms-state-error-1280x900-dark.png",
+      "sha256": "5b93e70f5cccf564dc737d40a9a11d04c0990d1e9f1e9bba0be9e1491fefb56b",
+      "bytes": 131723
+    },
+    {
+      "path": "comms-state-loading-1280x900-dark.png",
+      "sha256": "9dd2a413fa21007ed649961fba2377cfe2a497d3f0f0865083cc2defae6c7421",
+      "bytes": 129813
+    },
+    {
+      "path": "design-contract.md",
+      "sha256": "12b4ada45e24f00f45dff639677960a1f187d92f999883dab25007d5b7875dc4",
+      "bytes": 2263
+    },
+    {
+      "path": "fixture.json",
+      "sha256": "b906ed8968179348b233f9bc07f903f85f859fdf58d8153d8c9007be63fef54f",
+      "bytes": 98306
+    },
+    {
+      "path": "harness/controller1513Data.ts",
+      "sha256": "d1863c3d1afb28d15aedd8f3c3af00fb50a3f31bb7436fb1ab722351e65abe35",
+      "bytes": 3190
+    },
+    {
+      "path": "harness/controller1513Preview.css",
+      "sha256": "8339205ef142271dcdc0c4ab921866883f4f8ad78c58541a1e909c7b7fcff145",
+      "bytes": 3772
+    },
+    {
+      "path": "harness/controller1513Preview.tsx",
+      "sha256": "f933743bf906abc00ca7e2e70dd8adafaebbb1b3f831e523576c152a31cbf3a9",
+      "bytes": 7547
+    },
+    {
+      "path": "harness/mc-1513-preview-capture.mjs",
+      "sha256": "e873af589a0336ea65886bc96e7e65a20b05501d948755a9d6cbffa73736ad1c",
+      "bytes": 12832
+    },
+    {
+      "path": "harness/mc-1513-preview-interactions.mjs",
+      "sha256": "f8242b52783137c4fd4b218dd1438a3bd0e3b3bded7a17133587ffa42640f3ab",
+      "bytes": 6753
+    },
+    {
+      "path": "interaction-hub-contact-1600x700-light.png",
+      "sha256": "82584f823572c14367dfbf4184ca05c521d040dce4a567b6b06492d5e6ac7b75",
+      "bytes": 139919
+    },
+    {
+      "path": "interaction-question-answer-1600x700-light.png",
+      "sha256": "926def5f0c3c041d1ee2467839cf5fa6a7979fd2e0e24a8fd6a960618706da91",
+      "bytes": 144460
+    },
+    {
+      "path": "interaction-ticket-context-1600x700-light.png",
+      "sha256": "b4c741fed1309fe5d081dc084391381732b1cb4f245079f80ae932330020e82f",
+      "bytes": 144406
+    },
+    {
+      "path": "interactions.json",
+      "sha256": "a173fdeac6f5cd385151286bf206ab0cc7238bba87e5fc65d4641e0f94b47cdc",
+      "bytes": 1198
+    },
+    {
+      "path": "receipt.json",
+      "sha256": "c1fb215ed543a346cf035b3621e4851f83de77f6a1f804aa453c8351eeffdc49",
+      "bytes": 259053
+    },
+    {
+      "path": "ticket-after-1280x900-dark.png",
+      "sha256": "03683c940b21b36d3e37e8dcc6951b0b3a386f5ce6464a448d727f88f1768565",
+      "bytes": 153487
+    },
+    {
+      "path": "ticket-after-1280x900-light.png",
+      "sha256": "2321aed6866b19cdc4212e8a100df5c4777ca4a8b1f19bb9c8bd5b54934a840a",
+      "bytes": 150476
+    },
+    {
+      "path": "ticket-after-1600x1000-dark.png",
+      "sha256": "4f9afac6f74e642a49d94baaebf0a90b47c7db3b90c9d098cf375a1488849ba0",
+      "bytes": 166163
+    },
+    {
+      "path": "ticket-after-1600x1000-light.png",
+      "sha256": "8684927937243202747f0a61e500eb42b069dfa7eb8af9ccb6f57e6cc25dc840",
+      "bytes": 164832
+    },
+    {
+      "path": "ticket-after-1600x700-dark.png",
+      "sha256": "740cdc76115295c078f7d72d583fe180377868b5ebc1d2b8b3146e82ff87d5ad",
+      "bytes": 136812
+    },
+    {
+      "path": "ticket-after-1600x700-light.png",
+      "sha256": "fce04ceb6356df4e60f40ddf583fae669610b0c76032b3bafb54de4a243996ee",
+      "bytes": 135200
+    },
+    {
+      "path": "ticket-after-1920x940-dark.png",
+      "sha256": "503912a90d4d7bd9f48107b7ba7e6e223c0318b847dc2eca4b97940ef9d67d70",
+      "bytes": 160793
+    },
+    {
+      "path": "ticket-after-1920x940-light.png",
+      "sha256": "8442b05d49193850d2dc77a998b0e30ec304a6d5d3c5f1b278b8b7ad2fc0f4dc",
+      "bytes": 159793
+    },
+    {
+      "path": "ticket-before-1280x900-dark.png",
+      "sha256": "4e9c17f0401cfbe92ad20b8e8a20aa5d1b8b169cddb495498e5787dbc742ce73",
+      "bytes": 143777
+    },
+    {
+      "path": "ticket-before-1280x900-light.png",
+      "sha256": "ebe18d05a04aebdaba02e6915df6aeac7d8bb9ade148acb9becf979d162e9bea",
+      "bytes": 140988
+    },
+    {
+      "path": "ticket-before-1600x1000-dark.png",
+      "sha256": "2622dbe0b434944eb5554f9dd08ea38dc241eb26ec0d0f6a962ca83b79c501ae",
+      "bytes": 162561
+    },
+    {
+      "path": "ticket-before-1600x1000-light.png",
+      "sha256": "9b424e8094973569e11aa82d8eecc250c3fbaf3877e171c829a84e238f85f534",
+      "bytes": 161206
+    },
+    {
+      "path": "ticket-before-1600x700-dark.png",
+      "sha256": "6adbe07312be812b4c45d38a34f923517d057fb95b90a1dd37feb4de80b68ab7",
+      "bytes": 125279
+    },
+    {
+      "path": "ticket-before-1600x700-light.png",
+      "sha256": "a1d5d6030b044bf40dcfdee350621bef76a01c194a4b83fd5f6c30921ab7e455",
+      "bytes": 123686
+    },
+    {
+      "path": "ticket-before-1920x940-dark.png",
+      "sha256": "4ad9e83e1c20c40ae713a4c524946a6ba9b3b25f4ff1939321d01a9cea9bf3bc",
+      "bytes": 156825
+    },
+    {
+      "path": "ticket-before-1920x940-light.png",
+      "sha256": "c7cc740073cebab1628a942f5f94297e39bec81999b53e32c47414757fdb2164",
+      "bytes": 155222
+    },
+    {
+      "path": "ticket-state-empty-1280x900-dark.png",
+      "sha256": "e40537e0aec222f339e4bbf5e45b0370a8fc0ce79f1afbafd03b1ff6a6a3fa72",
+      "bytes": 103547
+    },
+    {
+      "path": "ticket-state-error-1280x900-dark.png",
+      "sha256": "1ff6bfe15ecabe50d03ffc2c12441e2d84e3267be6ec4611d844ec23081917dd",
+      "bytes": 104301
+    },
+    {
+      "path": "ticket-state-loading-1280x900-dark.png",
+      "sha256": "19fec12b0d2f9248168805ee3fc5d783aad5fa3432ee56eb6d3329efb0cd4e75",
+      "bytes": 101745
+    },
+    {
+      "path": "README.md",
+      "sha256": "7875fc1e3a30e423a8b58ab0170d69d63e65d6e39e04a811ae486791c4987791",
+      "bytes": 5867
+    }
+  ]
+}

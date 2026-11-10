@@ -1,0 +1,26 @@
+{
+  "at": "2026-11-10T00:31:59.787Z",
+  "kind": "mockup interaction evidence only",
+  "checks": [
+    "One unread reply mark, on the operator reply thread",
+    "Mentions control is absent from the visible proposal",
+    "Controller entry opens its own five-message conversation",
+    "Controller conversation adds no operator unread mark",
+    "Opening the operator reply thread clears its mockup unread mark",
+    "Hub contact opens its two retained messages",
+    "Empty search has a specific written state",
+    "Filter chat retains the Comms page and shows the ticket conversation",
+    "Open ticket reaches a 30-entry record",
+    "Question context expands beside the exact answer",
+    "Record context expands independently",
+    "The last record entry is reachable by independent scrolling at 1600×700",
+    "No browser errors or failed API reads during the exercised paths",
+    "Ticket record retry restores the preview record",
+    "Comms empty state captured as a controlled example",
+    "Comms loading state captured as a controlled example",
+    "Comms error state captured as a controlled example"
+  ],
+  "errors": [],
+  "requests": [],
+  "finishedAt": "2026-11-10T00:32:03.246Z"
+}

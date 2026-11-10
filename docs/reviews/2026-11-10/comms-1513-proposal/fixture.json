@@ -1,0 +1,3565 @@
+{
+  "fictional": true,
+  "clock": 1792238400000,
+  "api": {
+    "/api/config": {
+      "githubLogin": null,
+      "operator": {
+        "id": "operator",
+        "timezone": "UTC"
+      },
+      "accounts": [
+        {
+          "id": "claude-main",
+          "vendor": "claude",
+          "alertAt": 85,
+          "stopAt": 95
+        },
+        {
+          "id": "codex-main",
+          "vendor": "codex",
+          "alertAt": 70,
+          "stopAt": 80
+        }
+      ],
+      "repos": [
+        {
+          "id": "shop-app",
+          "github": "octo-org/shop-app",
+          "project": 2,
+          "statusMap": {
+            "Todo": "planned",
+            "In Progress": "in progress",
+            "Done": "done"
+          },
+          "needsYouLabels": [
+            "needs-design"
+          ],
+          "fullSuite": [
+            "pnpm test",
+            "pnpm -s test"
+          ]
+        },
+        {
+          "id": "site-builder",
+          "github": "octo-org/site-builder",
+          "project": 3,
+          "statusMap": {
+            "Backlog": "planned"
+          },
+          "needsYouLabels": null,
+          "fullSuite": []
+        }
+      ],
+      "loops": [
+        {
+          "id": "shop-app-ta",
+          "repoId": "shop-app",
+          "kind": "ta-loop",
+          "accountId": "claude-main",
+          "stateDir": "/u/.shop-app-autonomy/var/autonomy",
+          "logsDir": null,
+          "worktree": "/u/.shop-app-autonomy",
+          "launchdLabel": "com.shop-app.ta-loop"
+        }
+      ],
+      "poll": {
+        "usageMinutes": 30,
+        "githubSeconds": 60
+      },
+      "crew": null
+    },
+    "/api/repos": [
+      {
+        "id": "shop-app",
+        "github": "octo-org/shop-app",
+        "project": 2
+      },
+      {
+        "id": "site-builder",
+        "github": "octo-org/site-builder",
+        "project": 3
+      }
+    ],
+    "/api/metrics": {
+      "at": 1792238400000,
+      "inProgress": {
+        "count": 4,
+        "oldestAt": 1792238280000
+      },
+      "merged": {
+        "count": 6,
+        "loops": 2
+      },
+      "cycleTime": {
+        "p50Ms": 4320000,
+        "p85Ms": 109440000,
+        "n": 8,
+        "excluded": 1
+      },
+      "cost": {
+        "usd": 24.31
+      }
+    },
+    "/api/crew?shape=summary": {
+      "rows": [
+        {
+          "id": "guido-1",
+          "repoId": "shop-app",
+          "index": 0,
+          "hudState": "idle",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#101",
+          "ticketTitle": "Fictional work 1",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-1"
+        },
+        {
+          "id": "guido-2",
+          "repoId": "shop-app",
+          "index": 1,
+          "hudState": "running",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#102",
+          "ticketTitle": "Fictional work 2",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-2"
+        },
+        {
+          "id": "guido-3",
+          "repoId": "shop-app",
+          "index": 2,
+          "hudState": "running",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#103",
+          "ticketTitle": "Fictional work 3",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-3"
+        },
+        {
+          "id": "guido-4",
+          "repoId": "shop-app",
+          "index": 3,
+          "hudState": "idle",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#104",
+          "ticketTitle": "Fictional work 4",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-4"
+        },
+        {
+          "id": "guido-5",
+          "repoId": "shop-app",
+          "index": 4,
+          "hudState": "running",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#105",
+          "ticketTitle": "Fictional work 5",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-5"
+        },
+        {
+          "id": "guido-6",
+          "repoId": "shop-app",
+          "index": 5,
+          "hudState": "running",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#106",
+          "ticketTitle": "Fictional work 6",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-6"
+        },
+        {
+          "id": "guido-7",
+          "repoId": "shop-app",
+          "index": 6,
+          "hudState": "idle",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#107",
+          "ticketTitle": "Fictional work 7",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-7"
+        },
+        {
+          "id": "guido-8",
+          "repoId": "shop-app",
+          "index": 7,
+          "hudState": "running",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#108",
+          "ticketTitle": "Fictional work 8",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-8"
+        },
+        {
+          "id": "guido-9",
+          "repoId": "shop-app",
+          "index": 8,
+          "hudState": "running",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#109",
+          "ticketTitle": "Fictional work 9",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-9"
+        },
+        {
+          "id": "guido-10",
+          "repoId": "shop-app",
+          "index": 9,
+          "hudState": "idle",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#110",
+          "ticketTitle": "Fictional work 10",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-10"
+        },
+        {
+          "id": "guido-11",
+          "repoId": "shop-app",
+          "index": 10,
+          "hudState": "running",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "GUIDO",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#111",
+          "ticketTitle": "Fictional work 11",
+          "loop": null,
+          "run": {
+            "id": "r-12",
+            "seq": 12,
+            "startedAt": 1792236900000,
+            "endedAt": null,
+            "status": "running",
+            "model": "claude-opus-4-1",
+            "branch": "feature/3349-quote-cache",
+            "tokens": {
+              "input": 12000,
+              "output": 3400,
+              "cacheRead": 1200000,
+              "cacheCreate": 40000
+            },
+            "costUsd": 2.4712
+          },
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "GUIDO-11"
+        },
+        {
+          "id": "flight-1",
+          "repoId": "shop-app",
+          "index": 11,
+          "hudState": "running",
+          "stateSince": 1792236900000,
+          "accountId": "claude-main",
+          "kind": "crew",
+          "role": "FLIGHT",
+          "mode": "writer",
+          "area": [
+            "apps/**"
+          ],
+          "model": "sonnet",
+          "sessionId": "s1",
+          "loopKind": "crew",
+          "paused": false,
+          "note": null,
+          "stop": null,
+          "sourceError": null,
+          "ticket": "shop-app#3349",
+          "ticketTitle": "Quote cache",
+          "loop": null,
+          "run": null,
+          "prs": [],
+          "summary": null,
+          "digest": null,
+          "contextWindow": null,
+          "lastOutputAt": 1792238340000,
+          "cli": {
+            "version": null,
+            "effort": null
+          },
+          "review": null,
+          "displayCallSign": "FLIGHT"
+        }
+      ],
+      "firstRunToday": null
+    },
+    "/api/agents/guido-1": {
+      "row": {
+        "id": "guido-1",
+        "repoId": "shop-app",
+        "index": 0,
+        "hudState": "idle",
+        "stateSince": 1792236900000,
+        "accountId": "claude-main",
+        "kind": "crew",
+        "role": "GUIDO",
+        "mode": "writer",
+        "area": [],
+        "model": null,
+        "sessionId": "s1",
+        "loopKind": "ta-loop",
+        "paused": false,
+        "note": null,
+        "stop": null,
+        "sourceError": null,
+        "ticket": "shop-app#3349",
+        "ticketTitle": "Quote cache",
+        "loop": {
+          "phase": "parked",
+          "text": "Review findings remain",
+          "prNumber": 77,
+          "parked": "One keyboard check remains",
+          "profile": "feature"
+        },
+        "run": {
+          "id": "r-12",
+          "seq": 12,
+          "startedAt": 1792236900000,
+          "endedAt": null,
+          "status": "running",
+          "model": "claude-opus-4-1",
+          "branch": "feature/3349-quote-cache",
+          "tokens": {
+            "input": 12000,
+            "output": 3400,
+            "cacheRead": 1200000,
+            "cacheCreate": 40000
+          },
+          "costUsd": 2.4712
+        },
+        "prs": [],
+        "summary": null,
+        "digest": null,
+        "contextWindow": null,
+        "lastOutputAt": 1792238340000,
+        "cli": {
+          "version": null,
+          "effort": null
+        },
+        "review": null
+      },
+      "awaiting": {
+        "label": "Parked",
+        "reason": "Review round 2 of 3: one keyboard check remains",
+        "since": 1792236900000
+      },
+      "health": {
+        "label": "Review findings",
+        "blocking": 1,
+        "failedTools": 1
+      },
+      "tools": {
+        "total": 37,
+        "failed": 1,
+        "byTool": [
+          {
+            "name": "Read",
+            "calls": 20,
+            "failed": 0
+          },
+          {
+            "name": "Bash",
+            "calls": 12,
+            "failed": 1
+          },
+          {
+            "name": "Edit",
+            "calls": 5,
+            "failed": 0
+          }
+        ]
+      },
+      "cost": {
+        "totalUsd": 2.4,
+        "meanPerReportedTurnUsd": 0.12,
+        "turns": 20,
+        "estimated": true
+      },
+      "context": {
+        "tokens": 104000,
+        "window": 200000,
+        "percent": 52,
+        "compactions": 2,
+        "prompt": null
+      },
+      "story": {
+        "title": "Quote cache",
+        "ticketHref": "/tickets/shop-app/3349",
+        "original": [
+          {
+            "line": 1,
+            "text": "Make the Agent page answer what it awaits and what happens next."
+          }
+        ],
+        "report": "The new page is implemented. The keyboard check remains.",
+        "reportedAt": 1792236900000,
+        "doneWhen": [
+          {
+            "line": 1,
+            "text": "Keyboard navigation",
+            "status": "not_met",
+            "evidence": "Check the More menu after review."
+          }
+        ],
+        "left": [
+          "Check the More menu after review."
+        ]
+      },
+      "nextMove": {
+        "owner": "controller",
+        "text": "Complete the keyboard check and request a fresh whole-branch review.",
+        "recommendation": "Run the focused browser check first.",
+        "label": "Open conversation",
+        "href": "/comms/crew"
+      },
+      "deliverables": [
+        {
+          "id": "pr:77",
+          "kind": "pr",
+          "label": "PR #77 · Agent page v2",
+          "href": "https://github.com/o/repo/pull/77"
+        },
+        {
+          "id": "shot:77",
+          "kind": "screenshot",
+          "label": "Agent · dark · after",
+          "href": "/api/prs/77/evidence/head/agent-dark-after.png"
+        },
+        {
+          "id": "file:77",
+          "kind": "file",
+          "label": "apps/web/src/pages/Agent.tsx",
+          "href": "https://github.com/o/repo/blob/head/apps/web/src/pages/Agent.tsx"
+        }
+      ],
+      "related": [
+        {
+          "id": "review:1",
+          "kind": "review",
+          "title": "RETRO-1 · round 2",
+          "status": "reported",
+          "href": null,
+          "detail": "1 blocking · 0 minor"
+        },
+        {
+          "id": "sub:1",
+          "kind": "subagent",
+          "title": "Explore · locate the keyboard handlers",
+          "status": "completed",
+          "href": null,
+          "detail": "12 tool calls"
+        }
+      ],
+      "steps": [
+        {
+          "id": "plan",
+          "label": "plan",
+          "state": "done",
+          "tries": null,
+          "failures": null,
+          "limit": null,
+          "durationMs": 60000,
+          "since": null,
+          "reason": null
+        },
+        {
+          "id": "go/no-go",
+          "label": "go/no-go",
+          "state": "done",
+          "tries": null,
+          "failures": null,
+          "limit": null,
+          "durationMs": 60000,
+          "since": null,
+          "reason": null
+        },
+        {
+          "id": "build",
+          "label": "build",
+          "state": "done",
+          "tries": null,
+          "failures": null,
+          "limit": null,
+          "durationMs": 60000,
+          "since": null,
+          "reason": null
+        },
+        {
+          "id": "checks",
+          "label": "checks",
+          "state": "done",
+          "tries": null,
+          "failures": 1,
+          "limit": 3,
+          "durationMs": 60000,
+          "since": null,
+          "reason": null
+        },
+        {
+          "id": "review",
+          "label": "review",
+          "state": "held",
+          "tries": 2,
+          "failures": null,
+          "limit": 3,
+          "durationMs": null,
+          "since": null,
+          "reason": "Keyboard check remains"
+        },
+        {
+          "id": "draft PR",
+          "label": "draft PR",
+          "state": "unknown",
+          "tries": null,
+          "failures": null,
+          "limit": null,
+          "durationMs": null,
+          "since": null,
+          "reason": null
+        }
+      ]
+    },
+    "/api/crew/guido-1": {
+      "id": "guido-1",
+      "repoId": "shop-app",
+      "index": 0,
+      "hudState": "idle",
+      "stateSince": 1792236900000,
+      "accountId": "claude-main",
+      "kind": "crew",
+      "role": "GUIDO",
+      "mode": "writer",
+      "area": [],
+      "model": null,
+      "sessionId": "s1",
+      "loopKind": "ta-loop",
+      "paused": false,
+      "note": null,
+      "stop": null,
+      "sourceError": null,
+      "ticket": "shop-app#3349",
+      "ticketTitle": "Quote cache",
+      "loop": {
+        "phase": "parked",
+        "text": "Review findings remain",
+        "prNumber": 77,
+        "parked": "One keyboard check remains",
+        "profile": "feature"
+      },
+      "run": {
+        "id": "r-12",
+        "seq": 12,
+        "startedAt": 1792236900000,
+        "endedAt": null,
+        "status": "running",
+        "model": "claude-opus-4-1",
+        "branch": "feature/3349-quote-cache",
+        "tokens": {
+          "input": 12000,
+          "output": 3400,
+          "cacheRead": 1200000,
+          "cacheCreate": 40000
+        },
+        "costUsd": 2.4712
+      },
+      "prs": [],
+      "summary": null,
+      "digest": null,
+      "contextWindow": null,
+      "lastOutputAt": 1792238340000,
+      "cli": {
+        "version": null,
+        "effort": null
+      },
+      "review": null
+    },
+    "/api/attention": [
+      {
+        "key": "fixture:0",
+        "kind": "decision",
+        "agentId": "guido-1",
+        "repoId": "shop-app",
+        "text": "Choose the cache eviction policy before the next check.",
+        "tool": null,
+        "at": 1792227600000,
+        "url": "https://github.com/octo-org/shop-app/issues/4001",
+        "escalationId": "shop-app#4001",
+        "ticket": "shop-app#4001",
+        "acked": false,
+        "owner": "operator",
+        "brief": {
+          "context": "The dev seat asks which port to preview on.",
+          "recommendation": "Use 5174.",
+          "options": [
+            {
+              "label": "5174",
+              "answer": "Use port 5174."
+            },
+            {
+              "label": "5180",
+              "answer": "Use port 5180."
+            }
+          ],
+          "basis": "read config",
+          "at": 1792238400000
+        }
+      },
+      {
+        "key": "fixture:1",
+        "kind": "question",
+        "agentId": "guido-2",
+        "repoId": "shop-app",
+        "text": "Confirm the recorded rollback evidence.",
+        "tool": null,
+        "at": 1792227600000,
+        "url": "https://github.com/octo-org/shop-app/issues/4001",
+        "escalationId": "shop-app#4001",
+        "ticket": "shop-app#4001",
+        "acked": false,
+        "owner": "operator",
+        "brief": {
+          "context": "The dev seat asks which port to preview on.",
+          "recommendation": "Use 5174.",
+          "options": [
+            {
+              "label": "5174",
+              "answer": "Use port 5174."
+            },
+            {
+              "label": "5180",
+              "answer": "Use port 5180."
+            }
+          ],
+          "basis": "read config",
+          "at": 1792238400000
+        }
+      },
+      {
+        "key": "fixture:2",
+        "kind": "question",
+        "agentId": "guido-3",
+        "repoId": "shop-app",
+        "text": "Clarify the import scope for the waiting developer.",
+        "tool": null,
+        "at": 1792227600000,
+        "url": "https://github.com/octo-org/shop-app/issues/4001",
+        "escalationId": "shop-app#4001",
+        "ticket": "shop-app#4001",
+        "acked": false,
+        "owner": "operator",
+        "brief": {
+          "context": "The dev seat asks which port to preview on.",
+          "recommendation": "Use 5174.",
+          "options": [
+            {
+              "label": "5174",
+              "answer": "Use port 5174."
+            },
+            {
+              "label": "5180",
+              "answer": "Use port 5180."
+            }
+          ],
+          "basis": "read config",
+          "at": 1792238400000
+        }
+      }
+    ],
+    "/api/escalations": [],
+    "/api/overview": {
+      "at": 1792238400000,
+      "kpis": {
+        "tokensPerMin": {
+          "now": 41200,
+          "series": [
+            100,
+            200,
+            300
+          ]
+        },
+        "spendToday": {
+          "usd": 24.31,
+          "perHour": [
+            1,
+            2
+          ]
+        },
+        "inFlight": {
+          "count": 4,
+          "oldestAt": null
+        },
+        "ciPassRate24h": {
+          "pct": 92,
+          "runs": 10,
+          "redNow": 1
+        },
+        "needsYou": {
+          "count": 2,
+          "overHour": 1
+        }
+      },
+      "pipeline": [],
+      "machine": {
+        "cpu": [],
+        "mem": [],
+        "diskFreeGb": null
+      }
+    },
+    "/api/overview/timeline": {
+      "from": 1792234800000,
+      "to": 1792238400000,
+      "lanes": []
+    },
+    "/api/flight": {
+      "seat": {
+        "id": "flight-1",
+        "call": "FLIGHT",
+        "model": "fixture-model",
+        "state": "idle",
+        "live": true
+      },
+      "decisions": []
+    },
+    "/api/flight/summary": {
+      "session": "s1",
+      "headlineAgeMin": 2,
+      "headline": "Two decisions need your attention. The crew is checking the current work.",
+      "now": [],
+      "watching": {
+        "counts": {
+          "active": 3,
+          "blocked": 1,
+          "waiting": 2,
+          "done": 4,
+          "dropped": 1
+        },
+        "top": []
+      },
+      "next": [],
+      "done": [],
+      "incoming": 0,
+      "metrics": {
+        "since": 1792195200000,
+        "opened": 8,
+        "inReview": 4,
+        "inCi": 2,
+        "ciFailures": 3,
+        "reruns": 1,
+        "parks": {
+          "day": 2,
+          "live": []
+        },
+        "seats": [
+          {
+            "seat": "flight-1",
+            "tokens": 1000,
+            "costUsd": 1.25
+          },
+          {
+            "seat": "guido-1",
+            "tokens": 2000,
+            "costUsd": 2.5
+          }
+        ],
+        "flight": {
+          "wakes": 10,
+          "costUsd": 1.25
+        },
+        "forTheController": 0
+      }
+    },
+    "/api/agents/flight-1/stream?limit=20": {
+      "events": [
+        {
+          "id": "fixture:0",
+          "at": 1792238390000,
+          "kind": "msg",
+          "text": "The next step is recorded with the current work. Review its evidence before deciding."
+        }
+      ],
+      "hasMore": false
+    },
+    "/api/activity": [],
+    "/api/health": [],
+    "/api/limits": [],
+    "/api/limits/github": {
+      "queries": {},
+      "pollCost": null
+    },
+    "/api/machine": {
+      "latest": null,
+      "warning": null
+    },
+    "/api/test-lock": {
+      "holder": null,
+      "waiting": []
+    },
+    "/api/crew/status": {
+      "enabled": true,
+      "note": null
+    },
+    "/api/settings/away": {
+      "on": false,
+      "until": "",
+      "may": {}
+    },
+    "/api/settings/crew-pause": null,
+    "/api/boards/shop-app": [
+      {
+        "repoId": "shop-app",
+        "issueNumber": 3349,
+        "title": "Quote cache",
+        "status": "In progress",
+        "state": "in progress",
+        "labels": [
+          "perf"
+        ],
+        "priority": "P1",
+        "updatedAt": 1792231200000,
+        "url": "https://github.com/octo-org/shop-app/issues/3349",
+        "stage": null,
+        "owner": null,
+        "parent": null,
+        "subIssues": null,
+        "blockedBy": [],
+        "milestone": null,
+        "size": null,
+        "closed": false,
+        "prioritySource": "field",
+        "createdAt": 1791979200000,
+        "itemId": null,
+        "projectId": null
+      },
+      {
+        "repoId": "shop-app",
+        "issueNumber": 3350,
+        "title": "Keep the cache warm after a restart",
+        "status": "In review",
+        "state": "in progress",
+        "labels": [
+          "perf"
+        ],
+        "priority": "P1",
+        "updatedAt": 1792231200000,
+        "url": "https://github.com/octo-org/shop-app/issues/3349",
+        "stage": null,
+        "owner": null,
+        "parent": null,
+        "subIssues": null,
+        "blockedBy": [],
+        "milestone": null,
+        "size": null,
+        "closed": false,
+        "prioritySource": "field",
+        "createdAt": 1791979200000,
+        "itemId": null,
+        "projectId": null
+      },
+      {
+        "repoId": "shop-app",
+        "issueNumber": 3351,
+        "title": "Explain a refused action beside its button",
+        "status": "Ready",
+        "state": "in progress",
+        "labels": [
+          "perf"
+        ],
+        "priority": "P1",
+        "updatedAt": 1792231200000,
+        "url": "https://github.com/octo-org/shop-app/issues/3349",
+        "stage": null,
+        "owner": null,
+        "parent": null,
+        "subIssues": null,
+        "blockedBy": [],
+        "milestone": null,
+        "size": null,
+        "closed": false,
+        "prioritySource": "field",
+        "createdAt": 1791979200000,
+        "itemId": null,
+        "projectId": null
+      },
+      {
+        "repoId": "shop-app",
+        "issueNumber": 3352,
+        "title": "Show the last successful refresh",
+        "status": "Done",
+        "state": "in progress",
+        "labels": [
+          "perf"
+        ],
+        "priority": "P1",
+        "updatedAt": 1792231200000,
+        "url": "https://github.com/octo-org/shop-app/issues/3349",
+        "stage": null,
+        "owner": null,
+        "parent": null,
+        "subIssues": null,
+        "blockedBy": [],
+        "milestone": null,
+        "size": null,
+        "closed": false,
+        "prioritySource": "field",
+        "createdAt": 1791979200000,
+        "itemId": null,
+        "projectId": null
+      }
+    ],
+    "/api/boards/site-builder": [],
+    "/api/repos/shop-app/prs?linked=1&shape=summary": [
+      {
+        "repoId": "shop-app",
+        "number": 77,
+        "title": "Cache quotes",
+        "url": "https://github.com/octo-org/shop-app/pull/77",
+        "branch": "feature/77-cache",
+        "ticket": "shop-app#77",
+        "state": "open",
+        "isDraft": false,
+        "review": null,
+        "ci": null,
+        "createdAt": 1792238400000,
+        "updatedAt": 1792238400000,
+        "mergedAt": null,
+        "headSha": null,
+        "mergeable": null
+      }
+    ],
+    "/api/repos/site-builder/prs?linked=1&shape=summary": [],
+    "/api/qa/queue": {
+      "prs": [],
+      "flightId": "flight-1"
+    },
+    "/api/notifications": {
+      "open": [],
+      "handledToday": []
+    },
+    "/api/settings/notifications": {},
+    "/api/crew/changes": {
+      "pending": [],
+      "error": null,
+      "restartNeeded": []
+    },
+    "/api/crew/sessions": [],
+    "/api/settings/teams": {
+      "sources": []
+    },
+    "/api/away/digest": {
+      "active": false,
+      "groups": [
+        {
+          "kind": "needYouNow",
+          "items": []
+        },
+        {
+          "kind": "safePrsReady",
+          "items": []
+        },
+        {
+          "kind": "draftsToWalkThrough",
+          "items": []
+        },
+        {
+          "kind": "failures",
+          "items": []
+        },
+        {
+          "kind": "flightDecisions",
+          "items": []
+        },
+        {
+          "kind": "messagesDrafted",
+          "items": []
+        }
+      ]
+    },
+    "/api/flight/brief": {
+      "session": null,
+      "sections": [],
+      "watch": [],
+      "planned": [],
+      "drafts": []
+    },
+    "/api/comms/agents/guido-1?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 10
+        },
+        {
+          "id": "MC",
+          "count": 2
+        }
+      ],
+      "unread": 1,
+      "directUnread": 1
+    },
+    "/api/comms/agents/guido-2?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-3?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-4?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-5?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-6?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-7?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-8?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-9?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-10?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/agents/guido-11?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    },
+    "/api/comms/crew": {
+      "messages": [
+        {
+          "id": "comms:100",
+          "at": 1792235400000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:101",
+          "at": 1792235460000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:102",
+          "at": 1792235520000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:103",
+          "at": 1792235580000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:104",
+          "at": 1792235640000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:105",
+          "at": 1792235700000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:106",
+          "at": 1792235760000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:107",
+          "at": 1792235820000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:108",
+          "at": 1792235880000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:109",
+          "at": 1792235940000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:110",
+          "at": 1792236000000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:111",
+          "at": 1792236060000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:112",
+          "at": 1792236120000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:113",
+          "at": 1792236180000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:114",
+          "at": 1792236240000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:115",
+          "at": 1792236300000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:116",
+          "at": 1792236360000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:117",
+          "at": 1792236420000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:118",
+          "at": 1792236480000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:119",
+          "at": 1792236540000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:120",
+          "at": 1792236600000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:121",
+          "at": 1792236660000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:122",
+          "at": 1792236720000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:123",
+          "at": 1792236780000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:124",
+          "at": 1792236840000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:125",
+          "at": 1792236900000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:126",
+          "at": 1792236960000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:127",
+          "at": 1792237020000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:128",
+          "at": 1792237080000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:129",
+          "at": 1792237140000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:130",
+          "at": 1792237200000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:131",
+          "at": 1792237260000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:132",
+          "at": 1792237320000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:133",
+          "at": 1792237380000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:134",
+          "at": 1792237440000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:135",
+          "at": 1792237500000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:136",
+          "at": 1792237560000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:137",
+          "at": 1792237620000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:138",
+          "at": 1792237680000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:139",
+          "at": 1792237740000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:140",
+          "at": 1792237800000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:141",
+          "at": 1792237860000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:142",
+          "at": 1792237920000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:143",
+          "at": 1792237980000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:144",
+          "at": 1792238040000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:145",
+          "at": 1792238100000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:146",
+          "at": 1792238160000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:147",
+          "at": 1792238220000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:148",
+          "at": 1792238280000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:149",
+          "at": 1792238340000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        }
+      ],
+      "hasMore": false,
+      "unread": 0
+    },
+    "/api/comms/crew?history=1": {
+      "messages": [
+        {
+          "id": "comms:100",
+          "at": 1792235400000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:101",
+          "at": 1792235460000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:102",
+          "at": 1792235520000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:103",
+          "at": 1792235580000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:104",
+          "at": 1792235640000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:105",
+          "at": 1792235700000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:106",
+          "at": 1792235760000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:107",
+          "at": 1792235820000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:108",
+          "at": 1792235880000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:109",
+          "at": 1792235940000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:110",
+          "at": 1792236000000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:111",
+          "at": 1792236060000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:112",
+          "at": 1792236120000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:113",
+          "at": 1792236180000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:114",
+          "at": 1792236240000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:115",
+          "at": 1792236300000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:116",
+          "at": 1792236360000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:117",
+          "at": 1792236420000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:118",
+          "at": 1792236480000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:119",
+          "at": 1792236540000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:120",
+          "at": 1792236600000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:121",
+          "at": 1792236660000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:122",
+          "at": 1792236720000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:123",
+          "at": 1792236780000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:124",
+          "at": 1792236840000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:125",
+          "at": 1792236900000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:126",
+          "at": 1792236960000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:127",
+          "at": 1792237020000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:128",
+          "at": 1792237080000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:129",
+          "at": 1792237140000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:130",
+          "at": 1792237200000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:131",
+          "at": 1792237260000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:132",
+          "at": 1792237320000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:133",
+          "at": 1792237380000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:134",
+          "at": 1792237440000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:135",
+          "at": 1792237500000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:136",
+          "at": 1792237560000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:137",
+          "at": 1792237620000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:138",
+          "at": 1792237680000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:139",
+          "at": 1792237740000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:140",
+          "at": 1792237800000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:141",
+          "at": 1792237860000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:142",
+          "at": 1792237920000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:143",
+          "at": 1792237980000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:144",
+          "at": 1792238040000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:145",
+          "at": 1792238100000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:146",
+          "at": 1792238160000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:147",
+          "at": 1792238220000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:148",
+          "at": 1792238280000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:149",
+          "at": 1792238340000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        }
+      ],
+      "hasMore": false,
+      "unread": 0
+    },
+    "/api/comms/flight": {
+      "messages": [
+        {
+          "id": "flight:0",
+          "at": 1792238040000,
+          "from": "CAPCOM",
+          "to": "flight-1",
+          "senderKind": "operator",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": null,
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "flight:1",
+          "at": 1792238100000,
+          "from": "flight-1",
+          "to": "CAPCOM",
+          "senderKind": "flight",
+          "text": "Please compare the cache results before merging.",
+          "ticket": null,
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "flight:2",
+          "at": 1792238160000,
+          "from": "CAPCOM",
+          "to": "flight-1",
+          "senderKind": "operator",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": null,
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "flight:3",
+          "at": 1792238220000,
+          "from": "flight-1",
+          "to": "CAPCOM",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": null,
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "flight:4",
+          "at": 1792238280000,
+          "from": "CAPCOM",
+          "to": "flight-1",
+          "senderKind": "operator",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": null,
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "flight:5",
+          "at": 1792238340000,
+          "from": "flight-1",
+          "to": "CAPCOM",
+          "senderKind": "flight",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": null,
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        }
+      ],
+      "hasMore": false,
+      "unread": 0
+    },
+    "/api/comms/mentions": {
+      "mentions": []
+    },
+    "/api/comms/pins": {
+      "messages": []
+    },
+    "/api/comms/read": {
+      "ok": true
+    },
+    "/api/comms/links": {
+      "links": [
+        {
+          "from": "guido-1",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-1:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-2",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-2:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-3",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-3:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-4",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-4:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-5",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-5:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-6",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-6:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-7",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-7:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-8",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-8:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-9",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-9:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-10",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-10:11",
+          "lastText": "The comparison is ready."
+        },
+        {
+          "from": "guido-11",
+          "to": "CAPCOM",
+          "count": 12,
+          "lastAt": 1792238340000,
+          "lastId": "direct:guido-11:11",
+          "lastText": "The comparison is ready."
+        }
+      ]
+    },
+    "/api/comms/open": {
+      "items": []
+    },
+    "/api/comms/feed": {
+      "messages": [
+        {
+          "id": "comms:144",
+          "at": 1792238040000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:145",
+          "at": 1792238100000,
+          "from": "CAPCOM",
+          "to": "crew",
+          "senderKind": "operator",
+          "text": "Please compare the cache results before merging.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": true
+        },
+        {
+          "id": "comms:146",
+          "at": 1792238160000,
+          "from": "CONTROLLER",
+          "to": "crew",
+          "senderKind": "controller",
+          "text": "The check is recorded. The request clears when the PR merges; no reply is needed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:147",
+          "at": 1792238220000,
+          "from": "flight-1",
+          "to": "crew",
+          "senderKind": "flight",
+          "text": "The decision is on Needs you. This thread keeps the conversation around it.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:148",
+          "at": 1792238280000,
+          "from": "guido-1",
+          "to": "crew",
+          "senderKind": "seat",
+          "text": "The cache handoff is ready, including the eviction evidence and the next step.",
+          "ticket": "shop-app#3349",
+          "label": "handoff",
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        },
+        {
+          "id": "comms:149",
+          "at": 1792238340000,
+          "from": "MC",
+          "to": "crew",
+          "senderKind": "hub",
+          "text": "The PR merged. Its request for a check is now closed.",
+          "ticket": "shop-app#3349",
+          "label": null,
+          "ref": "#3349",
+          "replyTo": null,
+          "mentions": [],
+          "reactions": [],
+          "pinned": false,
+          "operator": false
+        }
+      ]
+    },
+    "/api/comms/chatter": {
+      "pairs": []
+    },
+    "/api/comms/traffic": {
+      "hours": [
+        {
+          "from": "guido-1",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-2",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-3",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-4",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-5",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-6",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-7",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-8",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-9",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-10",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        },
+        {
+          "from": "guido-11",
+          "to": "CAPCOM",
+          "count": 12,
+          "hour": 1792234800000
+        }
+      ]
+    },
+    "/api/comms/metrics": {
+      "p95BySeat": [],
+      "bySeat": []
+    },
+    "/api/comms/agents/flight-1?summary=1": {
+      "contacts": [
+        {
+          "id": "CAPCOM",
+          "count": 6
+        },
+        {
+          "id": "CONTROLLER",
+          "count": 5
+        }
+      ],
+      "unread": 0,
+      "directUnread": 0
+    }
+  },
+  "allRecordedMessages": 193,
+  "ticketCounts": [
+    {
+      "number": 3349,
+      "title": "Quote cache",
+      "status": "In progress",
+      "count": 50
+    },
+    {
+      "number": 3350,
+      "title": "Keep the cache warm after a restart",
+      "status": "In review",
+      "count": 18
+    },
+    {
+      "number": 3351,
+      "title": "Explain a refused action beside its button",
+      "status": "Ready",
+      "count": 9
+    },
+    {
+      "number": 3352,
+      "title": "Show the last successful refresh",
+      "status": "Done",
+      "count": 6
+    }
+  ]
+}
