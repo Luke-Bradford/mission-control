@@ -1249,7 +1249,8 @@ describe("ask_flight", () => {
 
   it("refuses a seat's question to CAPCOM over comms_send, pointing at ask_flight (#758)", async () => {
     tools = make({ config: withFlight() });
-    const send = (ctx: McToolContext, args: unknown) => tool("comms_send").call(ctx, args);
+    const send = (ctx: McToolContext, args: object) =>
+      tool("comms_send").call(ctx, { label: "none", ...args });
     expect(await send(CTX, { to: "CAPCOM", text: "Which lane?", label: "question" })).toEqual({
       text: COMMS_QUESTION_TO_FLIGHT,
       isError: true,
@@ -1276,7 +1277,7 @@ describe("ask_flight", () => {
     tools = make({ config: withFlight() });
     liveSeat("flight-1", "flight-1:1");
     const flight = { seatId: "flight-1", runId: "flight-1:1" };
-    const line = { to: "CAPCOM", text: "Same line" };
+    const line = { to: "CAPCOM", text: "Same line", label: "none" };
     for (let i = 0; i < 5; i++)
       expect((await tool("comms_send").call(flight, line)).isError).toBeUndefined();
     expect(await tool("comms_send").call(flight, line)).toMatchObject({
@@ -1291,10 +1292,9 @@ describe("ask_flight", () => {
     tools = make({ config: withFlight() });
     liveSeat("flight-1", "flight-1:1");
     const flight = { seatId: "flight-1", runId: "flight-1:1" };
-    const id = (await tool("comms_send").call(CTX, { to: "flight-1", text: "ping" })).text.replace(
-      /^Sent (.*)\.$/,
-      "$1",
-    );
+    const id = (
+      await tool("comms_send").call(CTX, { to: "flight-1", text: "ping", label: "none" })
+    ).text.replace(/^Sent (.*)\.$/, "$1");
     const react = (c = flight) => tool("comms_react").call(c, { id, reaction: "seen" });
     // five identical reactions trip the breaker; the sixth is refused and writes nothing
     for (let i = 0; i < 5; i++) expect((await react()).isError).toBeUndefined();
@@ -1634,7 +1634,8 @@ describe("Comms seat tools", () => {
     tool("comms_read", ts).call(ctx, args);
   const inbox = (args: unknown = {}, ts = tools, ctx = CTX) =>
     tool("comms_inbox", ts).call(ctx, args);
-  const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
+  const send = (args: object, ts = tools, ctx = CTX) =>
+    tool("comms_send", ts).call(ctx, { label: "none", ...args });
   const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
 
   it("refuses a long message and directs the seat to its structured report", async () => {
@@ -1643,6 +1644,45 @@ describe("Comms seat tools", () => {
       isError: true,
     });
     expect(store.comms(0)).toEqual([]);
+  });
+
+  it("requires a seat or FLIGHT to choose a Comms label, accepts none, and records reply links", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:label");
+    expect(
+      await tool("comms_send").call(CTX, { to: "guido-2", text: "missing label" }),
+    ).toMatchObject({ isError: true, text: expect.stringContaining("Invalid arguments:") });
+    const question = await send({ to: "flight-1", text: "Can this merge?", label: "question" });
+    const id = question.text.replace(/^Sent (.*)\.$/, "$1");
+    const flightQuestion = await send(
+      { to: "guido-1", text: "What changed?", label: "question" },
+      tools,
+      { seatId: "flight-1", runId: "flight-1:label" },
+    );
+    const flightQuestionId = flightQuestion.text.replace(/^Sent (.*)\.$/, "$1");
+    expect(await send({ to: "flight-1", text: "No action needed.", label: "none" })).toMatchObject({
+      text: expect.stringMatching(/^Sent comms:\d+\.$/),
+    });
+    expect(
+      await send({
+        to: "flight-1",
+        text: "The reply link is stored.",
+        label: "none",
+        replyTo: flightQuestionId,
+      }),
+    ).toMatchObject({ text: expect.stringMatching(/^Sent comms:\d+\.$/) });
+    expect(
+      await send({ to: "guido-1", text: "It can merge.", label: "none", replyTo: id }, tools, {
+        seatId: "flight-1",
+        runId: "flight-1:label",
+      }),
+    ).toMatchObject({ text: expect.stringMatching(/^Sent comms:\d+\.$/) });
+    expect(store.commsForPair("guido-1", "flight-1")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ replyTo: flightQuestionId }),
+        expect.objectContaining({ replyTo: id }),
+      ]),
+    );
   });
 
   it("reads its own ticket's crew, direct and mentioned context, one line each, without leaking other DMs", async () => {
@@ -1666,8 +1706,8 @@ describe("Comms seat tools", () => {
     store.addComms({ at: NOW, from: "retro", to: "crew", ticket: "mc#7", text: "other ticket" });
     const result = await read({ limit: 2 });
     const lines = result.text.split("\n");
-    expect(lines[0]).toMatch(/^comms:\d+ guido-2>guido-1: direct$/);
-    expect(lines[1]).toMatch(/^comms:\d+ retro>CAPCOM: mentioned @guido-1$/);
+    expect(lines[0]).toMatch(/^comms:\d+ guido-2>guido-1 \[none\]: direct$/);
+    expect(lines[1]).toMatch(/^comms:\d+ retro>CAPCOM \[none\]: mentioned @guido-1$/);
     expect(result.text).not.toContain("private");
     expect(result.text).not.toContain("other ticket");
     expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
@@ -1814,7 +1854,7 @@ describe("Comms seat tools", () => {
       const texts = (await read({})).text
         .split("\n")
         .filter((l) => l.startsWith("comms:"))
-        .map((l) => l.replace(/^comms:\d+ \S+: /, ""));
+        .map((l) => l.replace(/^comms:\d+ \S+(?: \[none\])?: /, ""));
       expect(texts).toEqual(["mine", "crew", "pinned private", "reply to mine"]);
       // the pins are read once per call, not once per row
       expect(pins).toHaveBeenCalledTimes(1);
@@ -1899,8 +1939,8 @@ describe("Comms seat tools", () => {
 
   it("stores an identical message sent twice within a minute once and answers already sent", async () => {
     liveSeat("guido-2", "guido-2:live");
-    const first = await send({ to: "guido-2", text: "same", label: "handoff" });
-    const again = await send({ to: "guido-2", text: "same", label: "handoff" });
+    const first = await send({ to: "guido-2", text: "same", label: "none" });
+    const again = await send({ to: "guido-2", text: "same", label: "none" });
     expect(first.text).toMatch(/^Sent comms:\d+\.$/);
     expect(again).toEqual({ text: first.text.replace("Sent", "Already sent") });
     expect(again.isError).toBeUndefined();
@@ -1912,7 +1952,7 @@ describe("Comms seat tools", () => {
     liveSeat("guido-2", "guido-2:live");
     for (const [to, label, ref] of [
       ["guido-2", "question", "#703"],
-      ["crew", "handoff", "PR 711"],
+      ["crew", "none", "PR 711"],
       ["CAPCOM", "blocker", undefined],
     ] as const)
       expect(await send({ to, text: `to ${to} @guido-2`, label, ref })).toMatchObject({
@@ -1962,7 +2002,7 @@ describe("Comms seat tools", () => {
     liveSeat("guido-2", "guido-2:live");
     const wake = vi.fn();
     const ts = make({ onComms: wake });
-    await send({ to: "guido-2", text: "@guido-2 direct", label: "handoff" }, ts);
+    await send({ to: "guido-2", text: "@guido-2 direct", label: "blocker" }, ts);
     const message = store.commsForAgent("guido-1")[0];
     if (message === undefined) throw new Error("expected Comms message");
     expect(wake).toHaveBeenCalledTimes(1);

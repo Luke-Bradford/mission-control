@@ -27,10 +27,10 @@ import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CREW,
-  COMMS_LABELS,
   COMMS_QUESTION_TO_FLIGHT,
   COMMS_REACTIONS,
   COMMS_REF,
+  COMMS_SEAT_LABELS,
   carriedFrom,
   clashText,
   closesIssue,
@@ -399,7 +399,7 @@ const CommsReadArgs = z.strictObject({
 const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
   text: text(MC_TEXT_MAX),
-  label: z.enum(COMMS_LABELS).optional(),
+  label: z.enum(COMMS_SEAT_LABELS),
   ref: z.string().regex(COMMS_REF).optional(),
   replyTo: z
     .string()
@@ -3112,11 +3112,11 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         properties: {
           to: { type: "string" },
           text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
-          label: { type: "string", enum: [...COMMS_LABELS] },
+          label: { type: "string", enum: [...COMMS_SEAT_LABELS] },
           ref: { type: "string" },
           replyTo: { type: "string", pattern: "^comms:[0-9]+$" },
         },
-        required: ["to", "text"],
+        required: ["to", "text", "label"],
         additionalProperties: false,
       },
       modes: ["writer", "read-only", "scratch"],

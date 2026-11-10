@@ -673,8 +673,7 @@ as the operator had no ticket at all.
 ### The hub stamps every message; the agent types the recipient and the text
 
 A seat's token is tied to one run, so the hub already knows everything below when a tool is
-called. The agent gives the recipient and the text. It adds one word, the label, when the
-message must wake someone.
+called. The agent gives the recipient, text and one label choice on every message.
 
 | Field | Set by | From |
 |---|---|---|
@@ -682,10 +681,10 @@ message must wake someone.
 | Run | Hub | The token |
 | Ticket and PR | Hub | The run's ticket and its open PR (rule 2) |
 | Kind, for rows the hub writes | Hub | The tool that was called: `ask_flight` is a question, `answer_question` is an answer, a report tool's Comms line is a short note pointing at the report, the engine's line is a notice |
-| Label: question, handoff or blocker | Agent | Unchanged from today. Any label wakes an idle seat. A question or blocker also starts the clock that passes it to FLIGHT after 15 minutes with no answer |
+| Label: question, blocker or none | Agent | Required on `comms_send`. Question and blocker wake an idle seat and start the clock that passes them to FLIGHT after 15 minutes with no answer. None is a recorded FYI |
 | Commit | Hub | The run's newest commit, when the hub knows it **(controller's call)** |
 | Delivered, answered | Hub | When it put the message in a prompt; when a reply or answer closed it |
-| Reply-to | Agent | One id, only when replying. The id is on the row being answered |
+| Reply-to | Agent | One id when answering a Comms message. The id is on the row being answered |
 | To, text | Agent | |
 
 A seat's actions are tracked the same way and already are: taking a ticket, a commit, a push, a
