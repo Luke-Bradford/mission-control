@@ -25,6 +25,8 @@ export interface RecommendationScope {
   category?: string;
   findingSummary?: string;
   findingFix?: string;
+  /** Canonical cause that is durably represented by a migrated pre-cause-ID record. */
+  durableCauseId?: string;
   /** Latest reported review time for this exact lineage. Used only for safe legacy migration. */
   lineageObservedUntil?: number;
   pr?: number;
@@ -185,7 +187,7 @@ function legacyReplacement(db: Db, proposal: Proposal): RecommendationRecord | n
     return null;
   const files = scope.files,
     lineageObservedUntil = scope.lineageObservedUntil;
-  const legacy = (
+  const candidates = (
     db
       .prepare(
         "SELECT * FROM code_health_recommendations WHERE repo_id=? AND json_extract(proposal,'$.rule')='recurring-correction'",
@@ -193,16 +195,20 @@ function legacyReplacement(db: Db, proposal: Proposal): RecommendationRecord | n
       .all(proposal.repoId) as Record<string, unknown>[]
   )
     .map(decode)
-    .filter(
-      (row) =>
-        row.causeId?.startsWith("legacy:") &&
-        row.scope !== null &&
-        row.scope.category === scope.category &&
-        row.scope.file !== undefined &&
-        files.includes(row.scope.file) &&
-        row.scope.until >= lineageObservedUntil &&
-        (row.state.kind === "dismissed" || row.state.kind === "accepted"),
-    );
+  const durable = candidates.filter(
+    (row) => row.scope?.durableCauseId === proposal.causeId,
+  );
+  if (durable.length === 1) return durable[0];
+  const legacy = candidates.filter(
+    (row) =>
+      row.causeId?.startsWith("legacy:") &&
+      row.scope !== null &&
+      row.scope.category === scope.category &&
+      row.scope.file !== undefined &&
+      files.includes(row.scope.file) &&
+      row.scope.until >= lineageObservedUntil &&
+      (row.state.kind === "dismissed" || row.state.kind === "accepted"),
+  );
   return legacy.length === 1 ? legacy[0] : null;
 }
 /** Returns the durable id, which can be a safely migrated legacy id. */
@@ -211,9 +217,17 @@ export function upsertRecommendation(db: Db, proposal: Proposal, at: number): st
   if (!existing) {
     const legacy = legacyReplacement(db, proposal);
     if (legacy) {
+      const migrated: Proposal = {
+        ...proposal,
+        id: legacy.id,
+        scope: proposal.scope && {
+          ...proposal.scope,
+          durableCauseId: proposal.causeId,
+        },
+      };
       db.prepare(
         "UPDATE code_health_recommendations SET proposal=?,active=1,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND id=?",
-      ).run(JSON.stringify({ ...proposal, id: legacy.id }), at, proposal.repoId, legacy.id);
+      ).run(JSON.stringify(migrated), at, proposal.repoId, legacy.id);
       return legacy.id;
     }
   }

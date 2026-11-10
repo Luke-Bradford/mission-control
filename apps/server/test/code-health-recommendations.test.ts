@@ -274,7 +274,7 @@ describe("durable code-health decisions", () => {
     expect(new Set(rows.map((row) => row.causeId)).size).toBe(2);
   });
   it.each(["dismiss", "accept"] as const)(
-    "carries a legacy %s decision to its replacement cause",
+    "keeps a legacy %s decision on its original ID across a reader restart and repeated refresh",
     (decision) => {
       const legacy: Proposal = {
         id: `chr_legacy_${decision}`,
@@ -321,6 +321,15 @@ describe("durable code-health decisions", () => {
 
       store.refreshCodeHealthRecommendations("sample", NOW + 1);
 
+      // A new reader must find the durable identity selected during the legacy
+      // migration, rather than materialising a canonical-ID duplicate.
+      store.close();
+      db.close();
+      const file = join(dir, "fixture.sqlite");
+      store = new Store(file);
+      db = new DatabaseSync(file);
+      store.refreshCodeHealthRecommendations("sample", NOW + 2);
+
       const replacement = present(
         store
           .codeHealthRecommendations("sample")
@@ -328,17 +337,19 @@ describe("durable code-health decisions", () => {
       );
       expect(replacement.id).toBe(legacy.id);
       expect(replacement.state.kind).toBe(decision === "dismiss" ? "dismissed" : "accepted");
+      expect(
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM code_health_recommendations WHERE repo_id='sample' AND json_extract(proposal,'$.rule')='recurring-correction'",
+          )
+          .get(),
+      ).toEqual({ n: 1 });
       if (decision === "accept") {
         expect(replacement.owner).toBe("operator");
         expect(replacement.reviewAt).toBe(NOW + DAY);
         expect(replacement.baseline).toEqual(decided.baseline);
-        expect(
-          db
-            .prepare(
-              "SELECT COUNT(*) AS n FROM code_health_recommendations WHERE repo_id='sample' AND json_extract(proposal,'$.rule')='recurring-correction'",
-            )
-            .get(),
-        ).toEqual({ n: 1 });
+        expect(store.remeasureCodeHealth("sample", NOW + DAY + 1)).toEqual([legacy.id]);
+        expect(store.remeasureCodeHealth("sample", NOW + DAY + 2)).toEqual([]);
       }
     },
   );
