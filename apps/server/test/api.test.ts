@@ -11,6 +11,7 @@ import {
   readdirSync,
   readFileSync,
   readlinkSync,
+  realpathSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -275,7 +276,7 @@ const exampleText = () =>
   );
 
 beforeEach(async () => {
-  dir = mkdtempSync(join(tmpdir(), "mc-api-"));
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-api-")));
   stateDir = join(dir, "ta-state");
   mkdirSync(stateDir);
   mkdirSync(join(dir, "studio-logs"));
