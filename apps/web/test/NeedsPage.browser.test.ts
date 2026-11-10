@@ -160,7 +160,7 @@ describeRendered("Needs you page", () => {
   );
 
   it(
-    "the Needs you composition is clear at the requested light and dark evidence sizes",
+    "Clear stays beside the offered actions at the requested light and dark evidence sizes",
     async () => {
       for (const [width, height] of [
         [1280, 900],
@@ -179,6 +179,15 @@ describeRendered("Needs you page", () => {
             await ready(page);
             expect(await page.reachable(".needs-band")).toEqual([true]);
             expect(await page.reachable(".needs-actions")).toEqual([true]);
+            expect(
+              await page.evaluate(
+                () =>
+                  [...document.querySelectorAll(".needs-actions button")].map(
+                    (button) => button.textContent,
+                  ),
+                undefined,
+              ),
+            ).toEqual(["Not now", "Drop", "Clear"]);
             if (SHOTS) {
               mkdirSync(SHOTS, { recursive: true });
               await page.screenshot(join(SHOTS, `needs-${width}x${height}-${colorScheme}.png`));
