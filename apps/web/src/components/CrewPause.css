@@ -7,8 +7,8 @@
   max-width: 100%;
 }
 
-/* Doubled, not under .modal: it must outrank `.modal .panel` without leading with a class another area owns. */
-.crew-pause-panel.crew-pause-panel {
+/* Tripled, not under .modal: it must outrank `.modal .panel` regardless of import order. */
+.crew-pause-panel.crew-pause-panel.crew-pause-panel {
   width: min(640px, 100%);
 }
 
