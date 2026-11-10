@@ -1,15 +1,28 @@
 // @vitest-environment node
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { WORK_SUMMARY_MAX } from "@mc/core";
+import { crewSummary, WORK_SUMMARY_MAX } from "@mc/core";
 import { expect, it } from "vitest";
-import { populatedAgentView } from "./agentV2Fixture.ts";
+import { agentView } from "./agentV2Fixture.ts";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { CONFIG, NOW, run } from "./fixtures.ts";
+import { CONFIG, NOW, run, seatRow } from "./fixtures.ts";
 import { handoffFixture } from "./handoffFixture.ts";
 
 const { renderAt } = browserSession();
-const view = populatedAgentView();
+const view = agentView(
+  seatRow({
+    repoId: "mission-control",
+    hudState: "running",
+    loop: null,
+    ticket: "mission-control#1703",
+    ticketTitle: "Keep the complete Agents control room usable with a busy crew",
+    summary:
+      "The selected seat is completing its existing ticket and preserving the operator's current reading position. ".padEnd(
+        WORK_SUMMARY_MAX,
+        "Further checked work remains visible in the live activity. ",
+      ),
+  }),
+);
 const roster = [
   ["flight-1", "FLIGHT", "FLIGHT", "Keep every seat moving without losing operator context."],
   [
@@ -30,27 +43,41 @@ const roster = [
   ["flight-2", "FLIGHT", "FLIGHT", "Coordinate another repository's operator decision."],
   ["fao-2", "FAO", "planner", "Break down a complex operator request into ready work."],
   ["retro-2", "RETRO", "reviewer", "Check the accessible labels on all truncated work lines."],
-].map(([id, role, mode, summary], index) => ({
-  ...view.row,
-  id,
-  role,
-  mode,
-  index,
-  repoId: index < 6 ? "mission-control" : "shop-app",
-  summary: (summary ?? "").padEnd(WORK_SUMMARY_MAX, " awkward.long.work-description"),
-  ticket: index % 2 === 0 ? `mission-control#${1700 + index}` : null,
-  ticketTitle:
-    index % 2 === 0 ? "A long ticket title for a busy seat. ".repeat(7).slice(0, 240) : null,
-  hudState: index === 0 ? "running" : "idle",
-  lastOutputAt: NOW - (index + 1) * 60_000,
-  digest: {
-    ...view.row.digest,
-    minuteTokens: [[NOW - (index + 1) * 60_000, 100 + index]],
-  },
-}));
+].map(([id, role, mode, summary], index) =>
+  seatRow({
+    ...view.row,
+    id: id ?? "",
+    role: role ?? null,
+    mode: mode === "writer" ? "writer" : "read-only",
+    index,
+    repoId: index < 6 ? "mission-control" : "shop-app",
+    summary: (summary ?? "").padEnd(WORK_SUMMARY_MAX, " awkward.long.work-description"),
+    ticket: index % 2 === 0 ? `mission-control#${1700 + index}` : null,
+    ticketTitle:
+      index % 2 === 0 ? "A long ticket title for a busy seat. ".repeat(7).slice(0, 240) : null,
+    hudState: index % 3 === 0 ? "running" : "idle",
+    lastOutputAt: NOW - (index + 1) * 60_000,
+    digest: {
+      toolCalls: 3,
+      turns: 1,
+      lastEventAt: NOW,
+      model: view.row.model,
+      contextTokens: 42000,
+      contextWindow: 200000,
+      liveTool: null,
+      lastText: summary ?? null,
+      tools: {},
+      subagents: [],
+      minuteTokens: [[NOW - (index + 1) * 60_000, 100 + index]],
+      turnUsage: [],
+      background: [],
+      compactions: 0,
+    },
+  }),
+);
 const seatApi = Object.fromEntries(
   roster.flatMap((row) => [
-    [`/api/agents/${row.id}`, { ...view, row }],
+    [`/api/agents/${row.id}`, agentView(row)],
     [
       `/api/agents/${row.id}/stream?limit=20`,
       { runId: row.run?.id, events: [], truncated: false, lastOutputAt: NOW, reason: null },
@@ -60,9 +87,9 @@ const seatApi = Object.fromEntries(
 const api = {
   ...seatApi,
   "/api/config": CONFIG,
-  "/api/crew?shape=summary": { rows: roster, firstRunToday: null },
+  "/api/crew?shape=summary": crewSummary({ rows: roster, firstRunToday: null }),
   "/api/agents/guido-1": view,
-  "/api/agents/guido-2": { ...view, row: roster[4] },
+  "/api/agents/guido-2": agentView(roster[4]),
   "/api/attention": [],
   "/api/limits": [],
   "/api/agents/guido-1/stream?limit=20": {
@@ -97,6 +124,7 @@ describeRendered("Agent control room", () => {
         width,
         height,
         colorScheme,
+        search: "?dock=folded",
         api,
       });
       await page.box(".agent-control-room");
@@ -145,6 +173,12 @@ describeRendered("Agent control room", () => {
           ".agent-roster, .agent-identity-band, .agent-live-activity, #agentInput",
         ),
       ).not.toContain(false);
+      expect(
+        await page.evaluate(
+          () => document.querySelector(".agent-identity-words")?.getAttribute("title"),
+          null,
+        ),
+      ).toBe(view.row.summary);
       const evidenceDir = process.env.MC_AGENT_EVIDENCE_DIR;
       if (evidenceDir) {
         mkdirSync(evidenceDir, { recursive: true });
@@ -196,7 +230,7 @@ describeRendered("Agent control room", () => {
           ...api,
           ...Object.fromEntries(
             many.flatMap((row) => [
-              [`/api/agents/${row.id}`, { ...view, row }],
+              [`/api/agents/${row.id}`, agentView(row)],
               [
                 `/api/agents/${row.id}/stream?limit=20`,
                 {
@@ -209,7 +243,7 @@ describeRendered("Agent control room", () => {
               ],
             ]),
           ),
-          "/api/crew?shape=summary": { rows: many, firstRunToday: null },
+          "/api/crew?shape=summary": crewSummary({ rows: many, firstRunToday: null }),
         },
       });
       await page.box(".agent-roster-list");
