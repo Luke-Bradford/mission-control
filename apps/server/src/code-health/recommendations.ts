@@ -193,11 +193,8 @@ function legacyReplacement(db: Db, proposal: Proposal): RecommendationRecord | n
         "SELECT * FROM code_health_recommendations WHERE repo_id=? AND json_extract(proposal,'$.rule')='recurring-correction'",
       )
       .all(proposal.repoId) as Record<string, unknown>[]
-  )
-    .map(decode)
-  const durable = candidates.filter(
-    (row) => row.scope?.durableCauseId === proposal.causeId,
-  );
+  ).map(decode);
+  const durable = candidates.filter((row) => row.scope?.durableCauseId === proposal.causeId);
   if (durable.length === 1) return durable[0];
   const legacy = candidates.filter(
     (row) =>
