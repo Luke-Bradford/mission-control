@@ -54,11 +54,7 @@ import {
 import { pausedSeat } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { matchesConfiguredFocus } from "../focus.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "../machine-capacity.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
@@ -491,14 +487,7 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
   const { config, store, supervisor } = deps;
   if (!deps.enabled || deps.login === null || pausedSeat(store, seatId, null)) return;
   const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-  if (
-    machineCapacity(
-      store.machineSamples(machineCapacitySince(deps.now(), capacityConfig)),
-      deps.now(),
-      capacityConfig,
-    ).blocked
-  )
-    return;
+  if (storedMachineCapacity(store, deps.now(), capacityConfig).blocked) return;
   const found = writerSeats(config).find((s) => s.seat.id === seatId);
   if (found === undefined || !isMerge(config, found.session.repoId)) return;
   if (!seatMayTake(store, seatId, maxOpenRunsOf(config))) return;

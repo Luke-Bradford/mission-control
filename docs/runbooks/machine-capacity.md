@@ -8,6 +8,11 @@ through the whole capacity episode, including readings that move around a thresh
 percentage-disk episode closes only after ten minutes above the configured floor plus one point
 (6% with the default 5% floor). Other capacity conditions close after five minutes of headroom.
 
+The percentage breach timestamp is stored in hub settings, so a restart or the original reading
+leaving short history cannot clear an episode. The item keeps its original timestamp and dismissal
+while its measured condition and consumer details update. FLIGHT uses the episode timestamp for
+freshness, so a later episode gets a new wake.
+
 Every 10 seconds the hub reads load, memory and disk from the operating system. It spawns
 `vm_stat`, `sysctl vm.swapusage`, `memory_pressure` and `ps` only while a browser is connected,
 a queued ticket, a queued review or a ticket run is open, or the guard is holding starts. An idle

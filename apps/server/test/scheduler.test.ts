@@ -1631,6 +1631,7 @@ describe("scheduler", () => {
 
       const notes = store.notes().filter((n) => n.key === MACHINE_CAPACITY_KEY);
       expect(notes).toEqual([expect.objectContaining({ at: first.at })]);
+      expect(notes[0]?.text).toContain("disk free is 4.6%");
       expect(state().wake?.fresh).toEqual([]);
 
       diskFreeGb.push(6.1);
@@ -1720,7 +1721,7 @@ describe("scheduler", () => {
       expect(notes[0]?.text).toContain(reason);
     });
 
-    it("keeps the original capacity item while the active threshold and consumers change", async () => {
+    it("updates the capacity item without renewing its age when the active threshold changes", async () => {
       let t = NOW;
       let disk = true;
       const s = createScheduler({
@@ -1759,8 +1760,8 @@ describe("scheduler", () => {
       await s.tick("machine");
       const notes = store.notes().filter((n) => n.key === "machine-capacity");
       expect(notes).toHaveLength(1);
-      expect(notes[0]?.text).toContain("disk free is 14.0 GB");
-      expect(notes[0]?.text).toContain("Docker (pid 1");
+      expect(notes[0]?.text).toContain("swap used is 0.0 GB of 0.0 GB RAM (above 60%)");
+      expect(notes[0]?.text).toContain("node (pid 2");
     });
 
     it("writes collector status when ok/error changes and otherwise once a minute", async () => {

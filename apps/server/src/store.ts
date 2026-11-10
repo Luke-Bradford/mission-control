@@ -7927,6 +7927,21 @@ export class Store {
       .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
   }
 
+  /** Refresh measured details without restarting or unacknowledging an open episode. */
+  refreshNoteInEpisode(n: NoteInput): void {
+    this.db
+      .prepare(
+        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
+           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
+           at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.at ELSE excluded.at END,
+           dismissed_at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.dismissed_at ELSE NULL END,
+           cleared_at = NULL`,
+      )
+      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+  }
+
   clearNote(key: string, at: number): void {
     this.db
       .prepare("UPDATE attention_notes SET cleared_at = ? WHERE key = ? AND cleared_at IS NULL")
