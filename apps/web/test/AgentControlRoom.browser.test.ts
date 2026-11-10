@@ -63,6 +63,7 @@ const api = {
     more: false,
   },
   "/api/seats/guido-1/message": { ok: true, state: "delivered", deliveredAt: NOW },
+  "/api/runs/r-12/loop": { loop: null },
 };
 
 describeRendered("Agent control room", () => {
@@ -113,12 +114,25 @@ describeRendered("Agent control room", () => {
       ).not.toContain(false);
       await page.press("j");
       expect(await page.evaluate(() => location.pathname, null)).toBe("/agent/guido-2");
+      await page.evaluate(() => new Promise((resolve) => window.setTimeout(resolve, 25)), null);
+      expect(
+        await page.evaluate(
+          () => document.querySelector(".agent-roster-card.on")?.textContent?.includes("guido-2"),
+          null,
+        ),
+      ).toBe(true);
       await page.press("k");
       expect(await page.evaluate(() => location.pathname, null)).toBe("/agent/guido-1");
       await page.press("j");
       await page.evaluate(() => history.back(), null);
       await page.evaluate(() => new Promise((resolve) => window.setTimeout(resolve, 25)), null);
       expect(await page.evaluate(() => location.pathname, null)).toBe("/agent/guido-1");
+      expect(
+        await page.evaluate(
+          () => document.querySelector(".agent-roster-card.on")?.textContent?.includes("guido-1"),
+          null,
+        ),
+      ).toBe(true);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
@@ -179,10 +193,42 @@ describeRendered("Agent control room", () => {
       const crewRequests = () =>
         page.requests().filter((request) => request.path === "/api/crew?shape=summary").length;
       const initial = crewRequests();
-      await page.evaluate(() => new Promise((resolve) => window.setTimeout(resolve, 100)), null);
+      await page.evaluate(() => new Promise((resolve) => window.setTimeout(resolve, 30_000)), null);
       expect(crewRequests()).toBe(initial);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+
+  it("shows a sent receipt before the served read receipt", async () => {
+    const page = await renderAt({ page: "test/agentV2Browser.html", width: 1920, height: 940, api });
+    await page.box("#agentInput");
+    await page.evaluate(() => {
+      const lines: string[] = [];
+      const observer = new MutationObserver(() => {
+        const line = document.querySelector(".composer [role=status]")?.textContent?.trim();
+        if (line && !lines.includes(line)) lines.push(line);
+      });
+      observer.observe(document.querySelector(".composer") as Node, {
+        childList: true,
+        characterData: true,
+        subtree: true,
+      });
+      (window as unknown as { receiptLines: string[] }).receiptLines = lines;
+      const input = document.querySelector<HTMLInputElement>("#agentInput");
+      if (!input) throw new Error("composer input missing");
+      const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+      set?.call(input, "Please check the guard.");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    }, null);
+    await page.click("#agentForm button.primary");
+    await page.evaluate(() => new Promise((resolve) => window.setTimeout(resolve, 25)), null);
+    expect(
+      await page.evaluate(
+        () => (window as unknown as { receiptLines: string[] }).receiptLines,
+        null,
+      ),
+    ).toEqual(["Message sent.", "Message read."]);
+    await page.close();
+  }, BROWSER_TEST_TIMEOUT_MS);
 });
