@@ -41,9 +41,9 @@ describeRendered("FLIGHT page in a browser", () => {
         api,
       });
       await records.box("#decision-30");
-      expect(await records.evaluate(() => document.getElementById("decision-30") !== null, null)).toBe(
-        true,
-      );
+      expect(
+        await records.evaluate(() => document.getElementById("decision-30") !== null, null),
+      ).toBe(true);
       await records.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
