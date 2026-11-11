@@ -1,8 +1,8 @@
 import type { CommsReplyRoute } from "@mc/core";
-import { commsTicketForm } from "./index.ts";
 import type { CcConfig } from "../config.ts";
 import { flightSeat } from "../flight/seat.ts";
 import type { Store } from "../store.ts";
+import { commsTicketForm } from "./index.ts";
 
 /**
  * Where the operator's reply to a seat's message goes. When the run that wrote it has ended, the
