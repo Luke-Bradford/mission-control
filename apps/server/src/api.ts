@@ -367,7 +367,11 @@ import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
-import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
+import {
+  PREVIEW_ACTIVITY_HEADER,
+  PreviewHubError,
+  type PreviewManager,
+} from "./preview/previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
