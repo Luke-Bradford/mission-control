@@ -115,8 +115,8 @@ import {
 } from "../hud.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
+  MACHINE_CAPACITY_KEY,
+  storedMachineCapacity,
 } from "../machine-capacity.ts";
 import { paceStartCheck, paceView } from "../pace.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
@@ -695,11 +695,17 @@ const seenItems = (store: Store): Record<string, string> => {
   }
 };
 
-const itemHash = (x: { text: string }): string => entryHash(x.text);
+const itemHash = (store: Store, x: { key: string; text: string }): string => {
+  if (x.key === `${NOTE_KEY}${MACHINE_CAPACITY_KEY}`) {
+    const episode = store.notes().find((note) => note.key === MACHINE_CAPACITY_KEY);
+    if (episode !== undefined) return entryHash(`${x.key}:${episode.at}`);
+  }
+  return entryHash(x.text);
+};
 
 /** FLIGHT has received `s`: its items are not new again until their text changes. */
 export function markItemsShown(store: Store, s: FlightState): void {
-  const seen = Object.fromEntries(wakeItems(s).map((x) => [itemFactId(x), itemHash(x)]));
+  const seen = Object.fromEntries(wakeItems(s).map((x) => [itemFactId(x), itemHash(store, x)]));
   if (JSON.stringify(seen) !== JSON.stringify(seenItems(store))) {
     store.setSetting(FLIGHT_ITEMS_SEEN_SETTING, JSON.stringify(seen));
   }
@@ -768,7 +774,7 @@ function wakeInputs(i: {
   const seen = seenItems(i.store);
   const reviewsWaited = REVIEW_FAULT_TARGETS.some((target) => waitingOn(waits, target, i.now));
   const fresh = wakeItems({ items: i.items })
-    .filter((x) => seen[itemFactId(x)] !== itemHash(x))
+    .filter((x) => seen[itemFactId(x)] !== itemHash(i.store, x))
     .map(itemFactId);
   const flightId = i.flightId;
   const operator = flightId === null ? [] : unreadOperatorComms(i.store, flightId);
@@ -1252,11 +1258,7 @@ export function flightState(i: {
   });
 
   const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-  const capacity = machineCapacity(
-    store.machineSamples(machineCapacitySince(now, capacityConfig)),
-    now,
-    capacityConfig,
-  );
+  const capacity = storedMachineCapacity(store, now, capacityConfig);
   const queuedReviews = reviewQueue.queued;
   const idleReviewers = reviewQueue.seats.filter((seat) => seat.idle).length;
   const eligibleBuilds = tickets.filter((ticket) => ticket.ready).length;

@@ -115,12 +115,12 @@ const play = (beats: number) => {
 };
 
 describe("Demo pages keep moving where a person looks", () => {
-  it("Comms: the traffic and length panels load, and the graph's counts rise", async () => {
+  it("Comms: the live graph and message-length panels load as counts rise", async () => {
     const before = JSON.stringify(getState().api["/api/comms/links"] as object);
     play(10);
     expect(JSON.stringify(getState().api["/api/comms/links"])).not.toBe(before);
     await at("/comms");
-    expect(document.body.textContent).not.toContain("Loading traffic");
+    expect(document.body.textContent).toContain("Comms graph");
     expect(document.body.textContent).not.toContain("Loading message lengths");
     clean();
   });
@@ -204,11 +204,11 @@ describe("Demo findings from round 3", () => {
     expect(document.body.textContent).not.toContain("Could not read update.log");
   });
 
-  it("Comms opens on traffic for the 3 messages beside it, and every seat has contacts", async () => {
+  it("Comms opens on the live graph for the 3 messages beside it, and every seat has contacts", async () => {
     await at("/comms");
-    const panel = document.querySelector(".comms-traffic-panel") as HTMLElement;
+    const panel = document.querySelector(".comms-graph-panel") as HTMLElement;
     expect(document.body.textContent).not.toContain("No messages in FLIGHT");
-    expect(panel.textContent).not.toMatch(/\b0\s*msg/);
+    expect(panel.textContent).toMatch(/\d+\s*msg/);
     const counts = [...document.querySelectorAll(".comms-nav-counts small")].map((e) =>
       Number.parseInt(e.textContent ?? "", 10),
     );

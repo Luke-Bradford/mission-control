@@ -94,11 +94,7 @@ import {
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "./machine-capacity.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -207,11 +203,7 @@ export async function main(): Promise<void> {
         capacity: () => {
           const capacityConfig = config.crew?.machineCapacity;
           const c = capacityConfig ?? MACHINE_CAPACITY_DEFAULTS;
-          return machineCapacity(
-            store.machineSamples(machineCapacitySince(Date.now(), c)),
-            Date.now(),
-            c,
-          );
+          return storedMachineCapacity(store, Date.now(), c);
         },
         exists: async (candidate) =>
           await new Promise<boolean>((resolve) => {

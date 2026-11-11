@@ -179,6 +179,83 @@
   background: var(--warn);
 }
 
+/* The live graph is paired with words: colour and motion never carry the message alone. */
+.comms-signal-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+.comms-signal-list {
+  min-width: 0;
+}
+.comms-signal-list h3 {
+  margin: 0 0 var(--sp-1);
+  color: var(--fg-2);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.comms-signal-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+.comms-signal-list ul {
+  max-height: 112px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+.comms-signal-list :where(li + li) {
+  margin-top: var(--sp-1);
+}
+.comms-signal-list button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  width: 100%;
+  min-height: 24px;
+  padding: 0;
+  color: var(--fg-2);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+}
+.comms-signal-list :where(button b, button span) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.comms-signal-list :where(button b) {
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 500;
+}
+.comms-signal-list :where(button span) {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+.comms-signal-list :where(button em) {
+  color: var(--warn);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-style: normal;
+}
+.comms-signal-list button:hover b,
+.comms-signal-list button:focus-visible b {
+  color: var(--accent);
+}
+@media (max-width: 640px) {
+  .comms-signal-lists {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Traffic: four readings with units, then the hourly instrument. */
 .comms-traffic-panel {
   flex: 0 0 auto;

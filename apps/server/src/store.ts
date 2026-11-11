@@ -367,6 +367,15 @@ const DIGEST_BATCH = 500;
 const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
+const toTokenCall = (r: Row): TokenCall => ({
+  at: (r.at as number | null) ?? null,
+  context: r.context as number,
+  cacheRead: r.cache_read as number,
+  cacheWrite: r.cache_write as number,
+  output: r.output as number,
+  added: JSON.parse(r.added as string) as TokenSourceAdd[],
+});
+
 export class Store {
   private readonly db: DatabaseSync;
   private readonly rawDb: DatabaseSync;
@@ -808,6 +817,10 @@ export class Store {
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
     this.addColumn("review_moves", "budget_brake_override", "INTEGER NOT NULL DEFAULT 0");
+    // Token audit call times (#1646): audits stored before this have none until re-read.
+    this.addColumn("run_token_calls", "at", "INTEGER");
+    this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
+    this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
@@ -1416,7 +1429,7 @@ export class Store {
         .prepare(
           `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
              cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             by_source, by_command, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .run(
           runId,
@@ -1434,8 +1447,8 @@ export class Store {
           JSON.stringify(audit.byCommand),
         );
       const insert = this.db.prepare(
-        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const [i, c] of calls.entries()) {
         insert.run(
@@ -1446,6 +1459,7 @@ export class Store {
           c.cacheWrite,
           c.output,
           JSON.stringify(c.added),
+          c.at ?? null,
         );
       }
     });
@@ -1457,13 +1471,83 @@ export class Store {
       this.db
         .prepare("SELECT * FROM run_token_calls WHERE run_id = ? ORDER BY idx")
         .all(runId) as Row[]
-    ).map((r) => ({
-      context: r.context as number,
-      cacheRead: r.cache_read as number,
-      cacheWrite: r.cache_write as number,
-      output: r.output as number,
-      added: JSON.parse(r.added as string) as TokenSourceAdd[],
-    }));
+    ).map(toTokenCall);
+  }
+
+  /** Audited runs with calls whose call times were never looked for, oldest first (the back-fill). */
+  runsToRetimeTokens(limit: number): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT r.* FROM run_token_audit a JOIN runs r ON r.id = a.run_id
+           WHERE a.timestamps_checked = 0 AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC LIMIT ?`,
+        )
+        .all(limit) as Row[]
+    ).map(toRun);
+  }
+
+  /** Records that a run's transcript could not give call times, so it is not tried again. */
+  markTokenTimesChecked(runId: string): void {
+    this.db
+      .prepare("UPDATE run_token_audit SET timestamps_checked = 1 WHERE run_id = ?")
+      .run(runId);
+  }
+
+  /**
+   * Every stored call of each run that made a call in `(from, to]`, in order, so a window can read
+   * the calls before it (the context a call grew from) and after it (what re-read an addition).
+   */
+  tokenCallsOfRunsActiveIn(from: number, to: number): { run: Run; calls: TokenCall[] }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.*, c.context AS c_context, c.cache_read AS c_cache_read, c.cache_write AS c_cache_write,
+           c.output AS c_output, c.added AS c_added, c.at AS c_at
+         FROM run_token_calls c JOIN runs r ON r.id = c.run_id
+         WHERE c.run_id IN (SELECT run_id FROM run_token_calls WHERE at > ? AND at <= ?)
+         ORDER BY r.started_at DESC, r.seq DESC, c.run_id, c.idx`,
+      )
+      .all(from, to) as Row[];
+    const out: { run: Run; calls: TokenCall[] }[] = [];
+    for (const r of rows) {
+      let last = out.at(-1);
+      if (last === undefined || last.run.id !== (r.id as string)) {
+        last = { run: toRun(r), calls: [] };
+        out.push(last);
+      }
+      last.calls.push({
+        at: (r.c_at as number | null) ?? null,
+        context: r.c_context as number,
+        cacheRead: r.c_cache_read as number,
+        cacheWrite: r.c_cache_write as number,
+        output: r.c_output as number,
+        added: JSON.parse(r.c_added as string) as TokenSourceAdd[],
+      });
+    }
+    return out;
+  }
+
+  /**
+   * For each run overlapping `[from, to]`: whether its token audit is stored, whether it has calls,
+   * and whether any call has no time. What an event window can and cannot say.
+   */
+  tokenAuditStates(
+    from: number,
+    to: number,
+  ): { runId: string; stored: boolean; calls: number; untimed: boolean }[] {
+    const ids = this.overlappingRuns("id", from, to + 1).map((r) => r.id as string);
+    const state = this.db.prepare(
+      `SELECT a.calls AS calls, (SELECT COUNT(*) FROM run_token_calls c WHERE c.run_id = ? AND c.at IS NULL) AS untimed
+       FROM run_token_audit a WHERE a.run_id = ?`,
+    );
+    return ids.map((runId) => {
+      const row = state.get(runId, runId) as { calls: number; untimed: number } | undefined;
+      return {
+        runId,
+        stored: row !== undefined,
+        calls: row?.calls ?? 0,
+        untimed: (row?.untimed ?? 0) > 0,
+      };
+    });
   }
 
   /** Ended runs started since `since` with no token audit yet, newest first. */
@@ -7045,6 +7129,21 @@ export class Store {
          ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
            seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
            at = excluded.at, cleared_at = NULL, dismissed_at = NULL`,
+      )
+      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+  }
+
+  /** Refresh measured details without restarting or unacknowledging an open episode. */
+  refreshNoteInEpisode(n: NoteInput): void {
+    this.db
+      .prepare(
+        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
+           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
+           at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.at ELSE excluded.at END,
+           dismissed_at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.dismissed_at ELSE NULL END,
+           cleared_at = NULL`,
       )
       .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
   }
