@@ -86,6 +86,8 @@ const prep = vi.hoisted(() => ({
   peers: [] as unknown[],
   handoffGate: null as Promise<void> | null,
   handoffChecks: 0,
+  /** Set: the install command a review's checkout runs (the real one when null). */
+  installRunner: null as import("../src/runtime/checkouts.ts").InstallRunner | null,
 }));
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
@@ -115,7 +117,7 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
     },
     prepareScratch: async (i: Parameters<typeof real.prepareScratch>[0]) => {
       prep.peers.push(i.peers);
-      return real.prepareScratch(i);
+      return real.prepareScratch(i, prep.installRunner ?? undefined);
     },
     prepareCheckout: async (i: Parameters<typeof real.prepareCheckout>[0]) => {
       prep.peers.push(i.peers);
@@ -492,6 +494,7 @@ beforeEach(() => {
   prep.peers = [];
   prep.handoffGate = null;
   prep.handoffChecks = 0;
+  prep.installRunner = null;
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");
