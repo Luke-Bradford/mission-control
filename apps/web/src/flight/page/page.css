@@ -191,6 +191,8 @@
 }
 .fp-self-start {
   align-self: start;
+  /* Never taller than its grid row: past that its list scrolls, with a count of what is below. */
+  max-height: 100%;
 }
 .fp-watch .drow {
   padding: var(--sp-2) var(--sp-4);
@@ -205,10 +207,26 @@
   }
   .fp-watch {
     grid-column: 1 / -1;
-    /* Its heading and three rows; more scroll inside, so it gives way before the blockers do. */
-    max-height: calc(var(--fp-row) * 4);
-    overflow: auto;
   }
+}
+/* Where the screen is short the Watch list is capped at its heading plus three rows' height and
+   scrolls inside, with a count of what is below; a tall screen shows whole rows. */
+@media (max-width: 1800px) and (max-height: 999px) {
+  .fp-watch {
+    max-height: calc(var(--fp-row) * 4);
+  }
+}
+/* A list the panel may cut short: it scrolls inside, and the foot counts what is below. */
+.fp-sl {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fp-slbody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 @media (max-height: 800px) {
   .fp-watch .fp-note {

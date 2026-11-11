@@ -235,6 +235,37 @@ describe("Standing orders", () => {
     await waitFor(() => expect(posts).toContain("/api/flight/orders/7/revoke"));
   });
 
+  it("resumes the crew with the pause route and a null seat list", async () => {
+    const bodies: unknown[] = [];
+    stubFetch(
+      flightPageApi("running", {
+        "/api/flight/orders?limit=1": { active: [], history: [], nextCursor: null },
+        "/api/settings/crew-pause": pause,
+        "POST /api/settings/crew-pause": (init: RequestInit | undefined) => {
+          bodies.push(JSON.parse(String(init?.body)));
+          return { status: 200, body: null };
+        },
+      }),
+    );
+    render(<Flight />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume crew" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Confirm end: Resume crew/ }));
+    await waitFor(() => expect(bodies).toEqual([{ seats: null }]));
+  });
+
+  it("says why an order was not ended", async () => {
+    stubFetch(
+      flightPageApi("running", {
+        "/api/flight/orders?limit=1": orders,
+        "POST /api/flight/orders/7/revoke": () => ({ status: 500, body: { error: "boom" } }),
+      }),
+    );
+    render(<Flight />);
+    fireEvent.click(await screen.findByRole("button", { name: /End order/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /Confirm end/ }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Not ended");
+  });
+
   it("says so when nothing is in force", async () => {
     stubFetch(
       flightPageApi("running", {

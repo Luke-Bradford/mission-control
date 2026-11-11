@@ -279,17 +279,28 @@ describeRendered("FLIGHT page in a browser", () => {
             const whole = rows.filter(
               (b) => edge !== null && b.top >= edge.top - 1 && b.bottom <= edge.bottom + 1,
             ).length;
-            const line = box(document.querySelector("#doing li"));
-            const doing = box(document.getElementById("doingP"));
             const watch = box(document.getElementById("heldWatchP"));
+            const footCount = (panel: string) => {
+              const m = /^(\d+) more below/.exec(
+                document.querySelector(`${panel} .fp-more`)?.textContent ?? "",
+              );
+              return m ? Number(m[1]) : 0;
+            };
+            // Every Doing now line is clear of the Watch list, or counted in a visible foot.
+            const doingHidden = [...document.querySelectorAll("#doing li")].filter(
+              (li) => watch !== null && li.getBoundingClientRect().bottom > watch.top + 1,
+            ).length;
+            const panelBox = box(document.getElementById("heldWatchP"));
+            const watchHidden = [...document.querySelectorAll("#heldWatchP .drow")].filter(
+              (row) => {
+                const b = row.getBoundingClientRect();
+                return panelBox !== null && b.bottom > panelBox.bottom + 1;
+              },
+            ).length;
             return {
               whole,
-              doingLine:
-                line !== null &&
-                doing !== null &&
-                line.top >= doing.top &&
-                line.bottom <= doing.bottom + 1 &&
-                (watch === null || line.bottom <= watch.top + 1),
+              doingLine: doingHidden <= footCount("#doingP"),
+              watchRows: watchHidden <= footCount("#heldWatchP"),
               stripInViewport:
                 strip !== null && strip.top >= 0 && strip.bottom <= window.innerHeight,
               metaInStrip: inside(meta, strip),
@@ -298,7 +309,8 @@ describeRendered("FLIGHT page in a browser", () => {
             };
           }, null);
           expect(r.whole, "blocker rows wholly in view").toBeGreaterThanOrEqual(2);
-          expect(r.doingLine, "Doing now's first line is whole, above the Watch list").toBe(true);
+          expect(r.doingLine, "no Doing now line sits under the Watch list uncounted").toBe(true);
+          expect(r.watchRows, "no Watch list row is cut without a count").toBe(true);
           expect(r.stripInViewport).toBe(true);
           expect(r.metaInStrip).toBe(true);
           expect(r.endInStrip).toBe(true);

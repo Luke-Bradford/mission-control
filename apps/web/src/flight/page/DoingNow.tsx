@@ -3,6 +3,7 @@ import { MarkdownInline } from "../../components/Markdown.tsx";
 import { elapsed } from "../../fmt.ts";
 import type { FlightRun } from "../Situation.tsx";
 import { SUMMARY_EMPTY } from "../Summary.tsx";
+import { ScrollList } from "./ScrollList.tsx";
 
 /** The most lines Doing now shows. */
 export const DOING_MAX = 5;
@@ -59,15 +60,17 @@ export function doingLines(run: FlightRun, summary: FlightSummaryView | undefine
 
 export function DoingNowList({ lines }: { lines: DoingLine[] }) {
   return (
-    <ul className="fp-lines fp-doing" id="doing">
-      {lines.map((l) => (
-        <li key={l.key}>
-          <span className="fp-w">
-            <b>{l.lead}</b> <MarkdownInline text={l.rest} max={140} />
-          </span>
-          <span className="fp-age">{l.age}</span>
-        </li>
-      ))}
-    </ul>
+    <ScrollList row="li">
+      <ul className="fp-lines fp-doing" id="doing">
+        {lines.map((l) => (
+          <li key={l.key}>
+            <span className="fp-w">
+              <b>{l.lead}</b> <MarkdownInline text={l.rest} max={140} />
+            </span>
+            <span className="fp-age">{l.age}</span>
+          </li>
+        ))}
+      </ul>
+    </ScrollList>
   );
 }

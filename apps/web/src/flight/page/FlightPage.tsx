@@ -12,6 +12,7 @@ import { buildBlockers } from "./blockers.ts";
 import { DoingNowList, doingLines } from "./DoingNow.tsx";
 import { changedSomething } from "./decisionEffect.ts";
 import { DecisionRows, newestFirst } from "./RecentDecisions.tsx";
+import { ScrollList } from "./ScrollList.tsx";
 import { StandingOrders } from "./StandingOrders.tsx";
 import { StatusBand } from "./StatusBand.tsx";
 import "./page.css";
@@ -103,7 +104,9 @@ export function FlightPage() {
           ) : held.data.length === 0 ? (
             <p className="fp-note">Nothing is held.</p>
           ) : (
-            <WatchListItems items={held.data} />
+            <ScrollList row=".drow">
+              <WatchListItems items={held.data} />
+            </ScrollList>
           )}
         </section>
       </div>
