@@ -335,8 +335,8 @@ import {
   bindCompleteBrief,
   bindPreparedBrief,
   completeBriefError,
-} from "../brief-prepare.ts";
-import { BriefActionInput, BriefDecisionInput } from "../brief-schema.ts";
+} from "../brief/prepare.ts";
+import { BriefActionInput, BriefDecisionInput } from "../brief/schema.ts";
 import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";

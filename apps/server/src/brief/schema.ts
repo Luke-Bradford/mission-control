@@ -7,7 +7,7 @@ import {
   MC_TEXT_MAX,
 } from "@mc/core";
 import { z } from "zod";
-import { AttentionHoldInput } from "./attention-hold-schema.ts";
+import { AttentionHoldInput } from "../attention-hold-schema.ts";
 
 const text = z.string().trim().min(1).max(BRIEF_INPUT_MAX);
 const messageText = z.string().trim().min(1).max(COMMS_MESSAGE_MAX);

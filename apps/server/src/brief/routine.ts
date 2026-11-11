@@ -1,7 +1,16 @@
 import type { TestLockState } from "@mc/core";
 import { COMMS_CAPCOM, COMMS_MC } from "@mc/core";
-import { AsideAnswerChanged, answerAsideQuestion } from "./aside-answer.ts";
-import type { BriefChoiceDeps } from "./brief-choices.ts";
+import { AsideAnswerChanged, answerAsideQuestion } from "../aside-answer.ts";
+import type { ChangeBus } from "../bus.ts";
+import { sendComms, validateCommsText } from "../comms.ts";
+import { attentionItems, NO_LOCK } from "../hud.ts";
+import {
+  prepareQueueReorderSnapshot,
+  type QueueReorderDeps,
+  reorderQueue,
+} from "../queue-reorder.ts";
+import type { Supervisor } from "../runtime/supervisor.ts";
+import type { BriefChoiceDeps } from "./choices.ts";
 import {
   BriefActionRefused,
   BriefError,
@@ -9,16 +18,7 @@ import {
   checkBriefRun,
   currentBriefFlight,
   ORDINARY_GUIDANCE,
-} from "./brief-prepare.ts";
-import type { ChangeBus } from "./bus.ts";
-import { sendComms, validateCommsText } from "./comms.ts";
-import { attentionItems, NO_LOCK } from "./hud.ts";
-import {
-  prepareQueueReorderSnapshot,
-  type QueueReorderDeps,
-  reorderQueue,
-} from "./queue-reorder.ts";
-import type { Supervisor } from "./runtime/supervisor.ts";
+} from "./prepare.ts";
 
 export interface BriefRoutineDeps extends BriefPreparationDeps {
   supervisor?: Pick<Supervisor, "message">;

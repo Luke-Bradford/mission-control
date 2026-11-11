@@ -1,7 +1,7 @@
 import { type BriefAction, type BriefChoiceRequest, COMMS_MESSAGE_MAX } from "@mc/core";
-import { BriefError } from "./brief-prepare.ts";
+import { BriefError } from "./prepare.ts";
 
-export { checkBriefDispatch, withinBriefDispatch } from "./brief-dispatch-context.ts";
+export { checkBriefDispatch, withinBriefDispatch } from "./dispatch-context.ts";
 
 const enc = encodeURIComponent;
 type Route = { path: string; body: object };

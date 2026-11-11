@@ -36,7 +36,7 @@ import {
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
-import { routineBriefChoices } from "./brief-routine.ts";
+import { routineBriefChoices } from "./brief/routine.ts";
 import { ChangeBus } from "./bus.ts";
 import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli-update.ts";

@@ -133,7 +133,7 @@ import {
 } from "@mc/core";
 import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
-import { boundBriefGuard, boundBriefIdentity } from "../brief-dispatch-context.ts";
+import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
