@@ -1,7 +1,7 @@
 import type { Crew } from "@mc/core";
 import { useEffect, useState } from "react";
 import { ChartPane } from "../comms/ChartPane.tsx";
-import { MessageList } from "../comms/CommsGraph.tsx";
+import { SignalLists } from "../comms/CommsGraph.tsx";
 import { type ChartMode, ChartModeSwitch, CommsRails } from "../comms/CommsRails.tsx";
 import { commsHrefFor, useChartFilter } from "../comms/chartPaths.ts";
 import { useReducedMotion } from "../comms/chartTypes.ts";
@@ -69,61 +69,52 @@ export function CommsChartPage() {
         <div className="comms-chart-main">
           {crew === undefined ? (
             <p className="comms-chart-note">Loading the crew…</p>
+          ) : chart.chartLoading ? (
+            <p className="comms-chart-note">Loading comms graph…</p>
+          ) : !chart.hasData ? (
+            <p className="comms-chart-note" role="alert">
+              Couldn't load comms graph. Retrying.
+            </p>
           ) : (
-            <CommsRails
-              seats={chart.seats}
-              groups={chart.groups}
-              hubIds={chart.hubIds}
-              edges={chart.edges}
-              mode={mode}
-              filter={filter}
-              flows={chart.flows}
-              reduced={reduced}
-              label={`Comms chart, ${plural(rows.length, "seat")}, ${plural(total, "message")} in 24h`}
-              full
-              onPickSeat={(id) => {
-                const next: ChartFilter = { kind: "seat", id };
-                setFilter(sameFilter(filter, next) ? null : next);
-              }}
-              onPickLink={(a, b) => {
-                const next = pairFilter(a, b);
-                setFilter(sameFilter(filter, next) ? null : next);
-              }}
-              onClear={() => setFilter(null)}
-            />
+            <>
+              {chart.chartError && (
+                <p className="comms-chart-note" role="status">
+                  Stale · couldn't refresh. Retrying.
+                </p>
+              )}
+              <CommsRails
+                seats={chart.seats}
+                groups={chart.groups}
+                hubIds={chart.hubIds}
+                edges={chart.edges}
+                mode={mode}
+                filter={filter}
+                flows={chart.flows}
+                reduced={reduced}
+                label={`Comms chart, ${plural(rows.length, "seat")}, ${plural(total, "message")} in 24h`}
+                full
+                onPickSeat={(id) => {
+                  const next: ChartFilter = { kind: "seat", id };
+                  setFilter(sameFilter(filter, next) ? null : next);
+                }}
+                onPickLink={(a, b) => {
+                  const next = pairFilter(a, b);
+                  setFilter(sameFilter(filter, next) ? null : next);
+                }}
+                onClear={() => setFilter(null)}
+              />
+            </>
           )}
         </div>
         {filter && (
           <ChartPane filter={filter} flight={chart.flight} edges={chart.edges} nameOf={nameOf} />
         )}
       </div>
-      <div className="comms-signal-lists comms-chart-lists">
-        <MessageList
-          title="Waiting on a reply"
-          empty="Nobody owes a reply."
-          rows={chart.edges
-            .filter((edge) => edge.waiting)
-            .sort((a, b) => (b.waiting?.ms ?? 0) - (a.waiting?.ms ?? 0))
-            .map((edge) => ({
-              key: edge.key,
-              label: `${edge.waiting?.asker} → ${edge.waiting?.owed ?? edge.b}`,
-              age: edge.waiting?.ms ?? 0,
-              text: edge.waiting?.question ?? "Reply requested",
-              onClick: () => navigate(commsHrefFor(pairFilter(edge.a, edge.b), chart.flight)),
-            }))}
-        />
-        <MessageList
-          title="Just said"
-          empty="No direct messages yet."
-          rows={chart.feed.slice(0, 5).map((message) => ({
-            key: message.id,
-            label: `${message.from} → ${message.to}`,
-            text: message.text.split(/\r?\n/, 1)[0] || "Message",
-            onClick: () =>
-              navigate(commsHrefFor(pairFilter(message.from, message.to), chart.flight)),
-          }))}
-        />
-      </div>
+      <SignalLists
+        chart={chart}
+        className="comms-chart-lists"
+        pick={(next) => navigate(commsHrefFor(next, chart.flight))}
+      />
     </section>
   );
 }

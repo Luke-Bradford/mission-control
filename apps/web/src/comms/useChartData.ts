@@ -275,8 +275,17 @@ export function useChartData(rows: CrewRow[], flightId: string | undefined) {
     streaming,
     hasData: links !== undefined,
     chartError: linksResource.error !== null,
-    chartLoading: links === undefined,
+    chartLoading: links === undefined && linksResource.error === null,
     openCount: edges.filter((e) => e.waiting !== null).length,
+    // Said in words where the waiting list would otherwise read as "nobody owes a reply".
+    waitingNote:
+      openItems === undefined
+        ? openResource.error !== null
+          ? "Couldn't read who is waiting. Retrying."
+          : "Loading who is waiting…"
+        : openResource.error !== null
+          ? "Stale · couldn't refresh who is waiting. Retrying."
+          : null,
     hubIds: [CAPCOM, flight, COMMS_CREW] as const,
   };
 }

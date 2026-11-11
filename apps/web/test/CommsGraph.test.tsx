@@ -568,3 +568,67 @@ it("keeps a cached empty result but marks it stale when the refresh fails", asyn
   expect(await screen.findByText(/Stale · couldn't refresh/)).toBeTruthy();
   expect(screen.getByText(/No messages in the last 24h/)).toBeTruthy();
 });
+
+it("clears the owed ring, waiting mark, Open count and list row when the reply is recorded", async () => {
+  let open: unknown[] = [
+    {
+      id: "ask",
+      label: "question",
+      from: "guido-1",
+      to: "retro-1",
+      ticket: null,
+      waitedMs: 2 * 60_000,
+      question: "Which branch?",
+    },
+  ];
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 1 }] },
+    "/api/comms/open": () => ({ status: 200, body: { items: open } }),
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await screen.findByText(/guido-1 → retro-1/i);
+  expect(seat(/^retro-1,/i).classList).toContain("waiting");
+  expect(document.querySelector(".comms-wait-mark")).not.toBeNull();
+  expect(screen.getByRole("button", { name: /^open\b.*1/i })).toBeTruthy();
+  open = [];
+  act(() => hub.refetchTopic("agents"));
+  await waitFor(() => expect(screen.queryByText(/guido-1 → retro-1/i)).toBeNull());
+  expect(seat(/^retro-1,/i).classList).not.toContain("waiting");
+  expect(document.querySelector(".comms-wait-mark")).toBeNull();
+  expect(screen.getByText("Nobody owes a reply.")).toBeTruthy();
+  // The conversation itself stays.
+  expect(screen.getByRole("button", { name: /^guido-1 ↔ retro-1,/i })).toBeTruthy();
+});
+
+it("has no play control and no timeline", async () => {
+  stubFetch({ "/api/comms/links": { links: [] }, ...quiet });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await screen.findByRole("button", { name: /^FLIGHT,/i });
+  expect(screen.queryByRole("button", { name: /^(play|pause|resume|replay)\b/i })).toBeNull();
+  expect(screen.queryByRole("slider")).toBeNull();
+  expect(document.querySelector("[class*=timeline], [class*=scrub]")).toBeNull();
+});
+
+it("says in words when who is waiting could not be read, instead of 'nobody owes a reply'", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 1 }] },
+    "/api/comms/open": () => ({ status: 500, body: { error: "down" } }),
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  expect(await screen.findByText(/couldn't read who is waiting/i)).toBeTruthy();
+  expect(screen.queryByText("Nobody owes a reply.")).toBeNull();
+});
+
+it("says the graph could not be loaded when its links fail, not that it is loading", async () => {
+  stubFetch({
+    "/api/comms/links": () => ({ status: 500, body: { error: "down" } }),
+    ...quiet,
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  expect(await screen.findByText(/couldn't load comms graph/i)).toBeTruthy();
+  expect(screen.queryByText(/loading comms graph/i)).toBeNull();
+});

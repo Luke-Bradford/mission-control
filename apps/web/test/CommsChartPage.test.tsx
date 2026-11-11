@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
 import { CommsChartPage } from "../src/pages/CommsChartPage.tsx";
@@ -17,7 +17,7 @@ const rows = [
   seatRow({ id: "retro-1", index: 2, role: "RETRO" }),
 ];
 
-function open(search = "") {
+function open(search = "", over: Record<string, unknown> = {}) {
   window.history.replaceState(null, "", `/comms/chart${search}`);
   stubFetch({
     "/api/crew?shape=summary": { rows, firstRunToday: null },
@@ -25,6 +25,7 @@ function open(search = "") {
     "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 3 }] },
     "/api/comms/open": { items: [] },
     "/api/comms/feed": { messages: [] },
+    ...over,
   });
   return render(<CommsChartPage />);
 }
@@ -59,4 +60,55 @@ it("links back to Comms", async () => {
   expect((await screen.findByRole("link", { name: /← comms/i })).getAttribute("href")).toBe(
     "/comms",
   );
+});
+
+it("shows Waiting on a reply and Just said beside the graph, and opens the conversation from them", async () => {
+  open("", {
+    "/api/comms/open": {
+      items: [
+        {
+          id: "ask",
+          label: "question",
+          from: "guido-1",
+          to: "retro-1",
+          ticket: null,
+          waitedMs: 5 * 60_000,
+          question: "Which branch?",
+        },
+      ],
+    },
+    "/api/comms/feed": {
+      messages: [{ id: "m1", from: "retro-1", to: "guido-1", at: 1, text: "On main\nsecond line" }],
+    },
+  });
+  const waiting = await screen.findByRole("region", { name: "Waiting on a reply" });
+  expect(waiting.textContent).toContain("5m");
+  expect(waiting.textContent).toContain("Which branch?");
+  const said = screen.getByRole("region", { name: "Just said" });
+  expect(said.textContent).toContain("On main");
+  expect(said.textContent).not.toContain("second line");
+  fireEvent.click(within(said).getByRole("button"));
+  await waitFor(() =>
+    expect(window.location.pathname).toBe("/comms/agents/guido-1/contacts/retro-1"),
+  );
+});
+
+it("says so when there is nothing waiting or said", async () => {
+  open();
+  expect(await screen.findByText("Nobody owes a reply.")).toBeTruthy();
+  expect(screen.getByText("No direct messages yet.")).toBeTruthy();
+});
+
+it("says the links could not be loaded, rather than drawing an empty graph", async () => {
+  open("", { "/api/comms/links": () => ({ status: 500, body: { error: "down" } }) });
+  expect(await screen.findByText(/couldn't load comms graph/i)).toBeTruthy();
+  expect(document.querySelector(".comms-node")).toBeNull();
+});
+
+it("has no play control and no timeline", async () => {
+  open();
+  await screen.findByRole("button", { name: /^guido-1,/i });
+  expect(screen.queryByRole("button", { name: /^(play|pause|resume|replay)\b/i })).toBeNull();
+  expect(screen.queryByRole("slider")).toBeNull();
+  expect(document.querySelector("[class*=timeline], [class*=scrub]")).toBeNull();
 });

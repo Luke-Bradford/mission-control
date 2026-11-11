@@ -191,6 +191,34 @@ describeRendered("Comms chart, rendered", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
+  it(
+    "shows ten session seats, CAPCOM and FLIGHT in the 1920 × 940 panel: names readable, no overlap, no scrolling",
+    async () => {
+      mkdirSync(SHOTS, { recursive: true });
+      for (const colorScheme of ["light", "dark"] as const) {
+        const page = await renderAt({
+          page: "test/commsBrowser.html",
+          width: 1920,
+          height: 940,
+          colorScheme,
+          api: crewApi(11),
+        });
+        await page.box(".comms-rails svg");
+        await page.box(".comms-node");
+        const m = await measure(page);
+        // Ten session seats plus FLIGHT, CAPCOM and #crew (the three hubs are drawn on the centre line).
+        expect(m.nodes).toBe(13);
+        expect(m.names).toHaveLength(10);
+        expect(m.names.every((name) => name.size >= 11 && !name.text.endsWith("…"))).toBe(true);
+        expect(overlaps(m.names)).toBe(false);
+        expect(m.scrolls).toBe(false);
+        await page.screenshot(join(SHOTS, `panel-ten-seats-${colorScheme}.png`));
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
   it.each([
     { width: 1920, height: 940 },
     { width: 2560, height: 1250 },

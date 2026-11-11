@@ -290,3 +290,64 @@ it("keeps many waits from stacking: no two marks overlap, and the rest are count
   const more = document.querySelector(".comms-wait-more");
   expect(boxes.length + Number(/\+(\d+)/.exec(more?.textContent ?? "")?.[1] ?? 0)).toBe(9);
 });
+
+it("flashes only the recipient, once the light has travelled, then clears it", () => {
+  vi.useFakeTimers();
+  const v = view(3);
+  v.rerender(
+    <CommsRails
+      {...v.props}
+      flows={{ generation: 1, list: [{ from: "dev-1", to: "dev-2", n: 1 }] }}
+    />,
+  );
+  const node = (id: string) => document.querySelector(`.comms-node[data-id="${id}"]`);
+  expect(node("dev-2")?.classList.contains("arrival")).toBe(false);
+  act(() => vi.advanceTimersByTime(1_200));
+  expect(node("dev-2")?.classList.contains("arrival")).toBe(true);
+  expect(node("dev-1")?.classList.contains("arrival")).toBe(false);
+  act(() => vi.advanceTimersByTime(600));
+  expect(node("dev-2")?.classList.contains("arrival")).toBe(false);
+});
+
+it("gives every message in a burst its own light, in the sender's colour, none dropped", () => {
+  const v = view(3);
+  const seats = v.props.seats.map((s) =>
+    s.id === "dev-1" ? { ...s, color: "red" } : s.id === "dev-2" ? { ...s, color: "blue" } : s,
+  );
+  v.rerender(
+    <CommsRails
+      {...v.props}
+      seats={seats}
+      flows={{
+        generation: 1,
+        list: [
+          { from: "dev-1", to: "dev-2", n: 30 },
+          { from: "dev-2", to: "flight-1", n: 25 },
+        ],
+      }}
+    />,
+  );
+  const dots = [...document.querySelectorAll(".comms-particle")];
+  expect(dots).toHaveLength(55);
+  expect(new Set(dots.map((d) => d.getAttribute("fill"))).size).toBe(2);
+});
+
+it("stops its timers when it is unmounted", () => {
+  vi.useFakeTimers();
+  const v = view(3);
+  v.rerender(
+    <CommsRails
+      {...v.props}
+      flows={{ generation: 1, list: [{ from: "dev-1", to: "dev-2", n: 3 }] }}
+    />,
+  );
+  v.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("has no play control and no timeline", () => {
+  view(3);
+  expect(screen.queryByRole("button", { name: /^(play|pause|resume|replay)\b/i })).toBeNull();
+  expect(screen.queryByRole("slider")).toBeNull();
+  expect(document.querySelector("[class*=timeline], [class*=scrub]")).toBeNull();
+});
