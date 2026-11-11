@@ -319,7 +319,7 @@
 }
 .agent-control-room {
   display: grid;
-  grid-template-columns: clamp(260px, 19vw, 348px) minmax(0, 1fr) clamp(220px, 18vw, 320px);
+  grid-template-columns: clamp(240px, calc(16.875vw + 24px), 348px) minmax(0, 1fr);
   gap: var(--sp-3);
   min-height: 0;
   flex: 1;
@@ -457,6 +457,12 @@
 .agent-reserved-right {
   border-style: dashed;
 }
+.agent-seat-lower {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 22vw, 392px);
+  gap: var(--sp-3);
+  min-height: 0;
+}
 .agent-live-activity {
   min-height: 0;
   display: flex;
@@ -483,6 +489,9 @@
   .agent-control-room {
     grid-template-columns: clamp(260px, 28vw, 348px) minmax(0, 1fr);
     min-height: 900px;
+  }
+  .agent-seat-lower {
+    grid-template-columns: minmax(0, 1fr);
   }
   .agent-reserved-right {
     display: none;

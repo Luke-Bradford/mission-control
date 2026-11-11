@@ -106,6 +106,10 @@ export function Picker({
                   row.lastOutputAt === null
                     ? "no output"
                     : `${dur(Math.max(0, now - row.lastOutputAt))} ago`;
+                const work =
+                  row.ticket !== null && row.ticketTitle
+                    ? `${row.ticket} ${row.ticketTitle}`
+                    : (row.ticket ?? row.summary ?? "Available for work");
                 const lamp = needsLamp(
                   items.filter((item) => item.agentId === row.id),
                   false,
@@ -118,6 +122,7 @@ export function Picker({
                     className={`agent-roster-card${row.id === current ? " on" : ""}`}
                     aria-current={row.id === current ? "true" : undefined}
                     aria-pressed={row.id === current}
+                    aria-label={`${callSign(row)}, ${status.label}, ${work}`}
                     onClick={() => {
                       setSelectedAgent(row.id);
                       navigate(agentPath(row.id));
@@ -133,11 +138,8 @@ export function Picker({
                       </span>
                     </span>
                     <span className="agent-roster-age">{age}</span>
-                    <span
-                      className="agent-roster-work"
-                      title={row.ticketTitle ?? row.ticket ?? row.summary ?? "Available for work"}
-                    >
-                      {row.ticket ?? row.summary ?? "Available for work"}
+                    <span className="agent-roster-work" title={work}>
+                      {work}
                     </span>
                     <span className="agent-roster-context">
                       <span>ctx</span>

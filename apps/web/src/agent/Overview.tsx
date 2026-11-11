@@ -53,7 +53,7 @@ export function AgentIdentity({ view }: { view: AgentDetailView }) {
         </h2>
         <span className={`agent-v2-state ${awaiting.label === "Parked" ? "parked" : row.hudState}`}>
           <b>
-            {row.hudState !== "stopped" &&
+            {row.hudState === "running" &&
             row.lastOutputAt !== null &&
             now - row.lastOutputAt >= SILENT_AFTER_MS
               ? "Silent"

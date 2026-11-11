@@ -81,16 +81,37 @@ describe("Agent control room", () => {
     expect(screen.queryByText("Deliverables")).toBeNull();
   });
 
-  it("shows Silent after ten minutes without output and a stopped reason", async () => {
-    const stale = seat({ hudState: "idle", lastOutputAt: NOW - 10 * MIN, run: null });
-    stub(stale);
+  it("shows Silent only for a running seat with no output for ten minutes", async () => {
+    stub(seat({ hudState: "running", lastOutputAt: NOW - 10 * MIN }));
     render(<Agent id="guido-1" />);
     expect(await screen.findByText("Silent")).toBeTruthy();
     cleanup();
+    stub(seat({ hudState: "running", lastOutputAt: NOW - 9 * MIN }));
+    render(<Agent id="guido-1" />);
+    await screen.findByText(/last output/);
+    expect(screen.queryByText("Silent")).toBeNull();
+    cleanup();
+    stub(seat({ hudState: "idle", lastOutputAt: NOW - 30 * MIN, run: null }));
+    render(<Agent id="guido-1" />);
+    await screen.findByText(/last output/);
+    expect(screen.queryByText("Silent")).toBeNull();
+  });
+
+  it("shows a stopped seat's reason, never Silent", async () => {
     const stopped = stoppedSeat({ id: "guido-1", repoId: "shop-app", note: "operator stopped it" });
-    stub(stopped);
+    stub({ ...stopped, lastOutputAt: NOW - 30 * MIN });
     render(<Agent id="guido-1" />);
     expect(await screen.findByText("operator stopped it")).toBeTruthy();
+    expect(screen.queryByText("Silent")).toBeNull();
+  });
+
+  it("puts the ticket and its title on the roster card, reachable by name", async () => {
+    const title = "Rebuild the whole checkout flow so that a very long ticket title still reads";
+    stub(seat({ ticket: "shop-app#3349", ticketTitle: title }));
+    render(<Agent id="guido-1" />);
+    const card = await screen.findByRole("button", { name: new RegExp(title) });
+    expect(card.textContent).toContain(`shop-app#3349 ${title}`);
+    expect(card.querySelector(".agent-roster-work")?.getAttribute("title")).toContain(title);
   });
 
   it("filters live activity and expands a tool row", async () => {

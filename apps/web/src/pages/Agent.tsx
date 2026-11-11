@@ -125,9 +125,11 @@ export function Agent({ id }: { id: string | null }) {
               className="panel agent-reserved-instruments"
               aria-label="Reserved instruments"
             />
-            <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
+            <div className="agent-seat-lower">
+              <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
+              <aside className="panel agent-reserved-right" aria-label="Reserved right column" />
+            </div>
           </main>
-          <aside className="panel agent-reserved-right" aria-label="Reserved right column" />
         </div>
       ) : (
         <p
