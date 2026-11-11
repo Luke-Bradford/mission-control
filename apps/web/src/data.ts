@@ -25,13 +25,36 @@ import {
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { apiGet, apiOperatorGet, openStream, type StreamSource } from "./api.ts";
-import { shareMap } from "./map/structural.ts";
 import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
   data: T | undefined;
   error: Error | null;
   loading: boolean;
+}
+
+/** Preserve unchanged repository-analysis data across a refetch. */
+function shareMap(previous: MapSnapshot | undefined, next: MapSnapshot): MapSnapshot {
+  if (!previous || previous.repoId !== next.repoId) return next;
+  const out = { ...next };
+  for (const key of [
+    "tree",
+    "rules",
+    "imports",
+    "hist",
+    "seats",
+    "findings",
+    "conflicts",
+    "conflictsUnchecked",
+  ] as const) {
+    if (previous[key] === next[key] || JSON.stringify(previous[key]) === JSON.stringify(next[key]))
+      Object.assign(out, { [key]: previous[key] });
+  }
+  return Object.keys(out).every(
+    (key) => out[key as keyof MapSnapshot] === previous[key as keyof MapSnapshot],
+  )
+    ? previous
+    : out;
 }
 
 /**
@@ -72,6 +95,10 @@ export const RESOURCES = {
     path: `/api/agents/${enc(id)}`,
     topic: AGENT_DETAIL_TOPICS,
   }),
+  dependencies: {
+    path: "/api/dependencies",
+    topic: ["agents", "boards", "attention", "flight"],
+  },
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
@@ -490,6 +517,7 @@ const readResource = async <T>(path: string): Promise<T> => {
     return next as T;
   }
   return path === RESOURCES.prFlow.path ||
+    path === RESOURCES.dependencies.path ||
     path === RESOURCES.designPreviews.path ||
     path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)

@@ -117,7 +117,7 @@ const PROBE_PATHS = [
   "apps/server/src/github/board.ts",
   "apps/server/src/claim.ts",
   "apps/server/src/update.ts",
-  "apps/server/src/accounts.ts",
+  "apps/server/src/accounts/accounts.ts",
   "packages/core/src/profiles.ts",
   "packages/core/src/away.ts",
   "apps/server/src/away.ts",

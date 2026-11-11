@@ -21,9 +21,9 @@ import {
   externalPrControl,
   setExternalPrControl,
 } from "../external-pr-control.ts";
-import { branchOwned, isExternalReview, readExternalSubject } from "../external-reviews.ts";
 import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
 import type { GhRunner } from "../mcp/gh.ts";
+import { branchOwned, isExternalReview, readExternalSubject } from "../review/external.ts";
 import type { Store } from "../store.ts";
 
 export async function mergeExternalPr(i: {

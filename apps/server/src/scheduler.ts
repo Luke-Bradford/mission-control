@@ -28,11 +28,10 @@ import {
   type UsageSample,
   usageCollector,
 } from "@mc/core";
-import { codexProfile } from "./account-bindings.ts";
+import { codexProfile } from "./accounts/bindings.ts";
 import { evaluateHolds } from "./attention/holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
-import { syncBudgetBrake } from "./budget-brake.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
   AUTO_CLI_TOOLS,
@@ -126,6 +125,7 @@ import {
 } from "./machine-capacity.ts";
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
+import { syncBudgetBrake } from "./spend/budget-brake.ts";
 import type { Store } from "./store.ts";
 import { auditEndedRuns } from "./token-audit/audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
@@ -133,7 +133,7 @@ import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
   TRANSCRIPT_PASS_INTERVAL_MS,
-} from "./transcript-lifecycle.ts";
+} from "./transcript/lifecycle.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =

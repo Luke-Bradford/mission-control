@@ -219,10 +219,10 @@ import {
   testAttemptSource,
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
-import { externalReviewKey } from "./external-review-key.ts";
-import { openOlderFindings } from "./older-findings.ts";
+import { StandingInstructions } from "./instructions/standing.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
-import { StandingInstructions } from "./standing-instructions.ts";
+import { externalReviewKey } from "./review/external-key.ts";
+import { openOlderFindings } from "./review/older-findings.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import {
   compactFlightWake,
@@ -1862,7 +1862,7 @@ export class Store {
 
   /**
    * The merge hold on the branch's latest build run, ended or not. A hold outlives its run until
-   * someone releases it. A follow-on run gets a copy (run-handoffs.ts), so only the latest one counts.
+   * someone releases it. A follow-on run gets a copy (run/handoffs.ts), so only the latest one counts.
    */
   branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
     const latest = this.runsOnBranch(repoId, branch).findLast((run) => run.reviewId == null);

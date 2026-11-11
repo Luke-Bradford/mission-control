@@ -37,6 +37,13 @@
   min-width: var(--sp-5);
   vertical-align: middle;
 }
+.fp-records {
+  margin-left: auto;
+  min-width: var(--sp-5);
+  min-height: var(--sp-5);
+  line-height: var(--lh);
+  white-space: nowrap;
+}
 .fp-err {
   color: var(--crit);
 }

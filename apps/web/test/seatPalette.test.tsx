@@ -1,12 +1,10 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { mapSnapshotFixture } from "@mc/core";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentNavRow } from "../src/comms/CommsNav.tsx";
 import { hub } from "../src/data.ts";
 import { AgentTag } from "../src/hud/AgentTag.tsx";
-import { CrewMapView } from "../src/map/CrewMap.tsx";
 import { CrewLane } from "../src/overview/CrewLane.tsx";
 import { crewRow } from "./fixtures.ts";
 import { observedContextDigest } from "./overviewDensityFixtures.ts";
@@ -41,7 +39,7 @@ afterEach(() => {
 });
 
 describe("a seat is one colour on every page", () => {
-  it("renders the same hex on Overview, Agent, Comms and Map", () => {
+  it("renders the same hex on Overview, Agent and Comms", () => {
     // Overview: the agent's activity lane
     const overview = render(
       <CrewLane row={row} name="GUIDO-1" lane={undefined} now={NOW} max={10} />,
@@ -56,25 +54,7 @@ describe("a seat is one colour on every page", () => {
     const comms = render(<AgentNavRow row={row} view={{ kind: "crew" }} onNavigate={() => {}} />);
     const nav = comms.container.querySelector<HTMLElement>("i")?.style.background;
     comms.unmount();
-    // Map: the seat's light in the selector
-    const snapshot = structuredClone(mapSnapshotFixture);
-    snapshot.seats = [
-      {
-        ...structuredClone(mapSnapshotFixture.seats[0]),
-        seat: "GUIDO-1",
-        state: "running",
-      },
-    ];
-    render(
-      <CrewMapView snapshot={snapshot} indices={{ "GUIDO-1": SEAT_INDEX }} names={{}} work={{}} />,
-    );
-    const list = screen.getByRole("list", { name: "Seats working in this repo" });
-    const light = within(list)
-      .getAllByRole("button")[0]
-      ?.querySelector<HTMLElement>(".map-light")
-      ?.style.getPropertyValue("--light");
-
-    const hexes = [trace, tag, nav, light].map(resolve);
+    const hexes = [trace, tag, nav].map(resolve);
     expect(new Set(hexes).size).toBe(1);
   });
 

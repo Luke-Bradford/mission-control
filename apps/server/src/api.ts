@@ -9,6 +9,7 @@ import {
   type AccountModelsView,
   type AgentStream,
   API_PREFIX,
+  type AttentionCompactItem,
   type AttentionItem,
   type AuditRunKind,
   AWAY_SETTING,
@@ -53,6 +54,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  compactAttentionItem,
   compareDependencyChains,
   crewProfileOf,
   crewSummary,
@@ -86,6 +88,7 @@ import {
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
   isOperatorItem,
+  itemOwner,
   type LimitRow,
   LOCK_WAIT_MS,
   LOOPBACK_HOST,
@@ -167,9 +170,12 @@ import Fastify, {
   LogController,
 } from "fastify";
 import { z } from "zod";
-import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
+import {
+  type AccountModels,
+  discoverAccountModels,
+  readAccountStatus,
+} from "./accounts/accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
-import { AsideAnswerChanged, AsideAnswerUnconfirmed, answerAsideQuestion } from "./aside-answer.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
@@ -188,7 +194,6 @@ import {
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
-import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
@@ -283,7 +288,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -330,6 +334,7 @@ import {
   pinned,
   seatQuestionTriage,
 } from "./hud.ts";
+import { registerInstructionRoutes } from "./instructions/api.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import {
@@ -389,8 +394,22 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { reviewCheckFor } from "./review-check.ts";
-import { publicHandoff } from "./run-handoffs.ts";
+import { reviewCheckFor } from "./review/check.ts";
+import { branchOwned, readExternalSubject } from "./review/external.ts";
+import {
+  AsideAnswerChanged,
+  AsideAnswerUnconfirmed,
+  answerAsideQuestion,
+} from "./run/aside-answer.ts";
+import { publicHandoff } from "./run/handoffs.ts";
+import {
+  type BoardTitleCache,
+  type PrCache,
+  runPrs,
+  runTicket,
+  runUsage,
+  runView,
+} from "./run/view.ts";
 import {
   adminDirOf,
   CheckoutError,
@@ -402,15 +421,7 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import {
-  type BoardTitleCache,
-  type PrCache,
-  runPrs,
-  runTicket,
-  runUsage,
-  runView,
-} from "./runview.ts";
-import { registerInstructionRoutes } from "./standing-instructions-api.ts";
+import { weeklyProjection } from "./spend/budget-brake.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
@@ -423,8 +434,8 @@ import {
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
 import { tokenAuditView } from "./token-audit/view.ts";
-import { transcriptFilePath } from "./transcript-file.ts";
-import { transcriptFootprint } from "./transcript-lifecycle.ts";
+import { transcriptFilePath } from "./transcript/file.ts";
+import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -774,6 +785,15 @@ const QA_DAYS_ERROR = `days must be an integer 1..${QA_RETENTION_DAYS}`;
 /** `GET /api/agents/:id/files/diff?path=`: one path, as the file list gives it. */
 const DiffPath = z.string().min(1).max(4096);
 
+/** `GET /api/attention` options: one owner's items, and the compact shape. */
+const AttentionListQuery = z.strictObject({
+  owner: z.string().min(1).max(100).optional(),
+  compact: z
+    .enum(["1", "true", "0", "false"])
+    .transform((v) => v === "1" || v === "true")
+    .optional(),
+});
+
 /** `GET /api/attention/answered`: the questions closed without an answer, over the last week. */
 const ANSWERED_WINDOW_MS = 7 * 24 * 60 * 60_000;
 const ANSWERED_LIMIT = 50;
@@ -852,7 +872,13 @@ function prSummary(pr: PullRequestView, check: ReviewCheckState | null): PullReq
     : {
         ...rest,
         check,
-        checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
+        checks: checks.map(({ name, kind, state, attempt, skipped }) => ({
+          name,
+          kind,
+          state,
+          attempt,
+          ...(skipped === undefined ? {} : { skipped }),
+        })),
       };
 }
 
@@ -1695,15 +1721,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           const agent = agentById(req.params.id);
           if (!agent) return reply.code(404).send({ error: "unknown agent" });
+          const withFlightUnread = async (stream: AgentStream): Promise<AgentStream> => {
+            if (agent.kind !== "crew" || agent.seat.role !== "FLIGHT") return stream;
+            const session = config.crew?.sessions.find(
+              (candidate) => candidate.id === agent.sessionId,
+            );
+            if (session === undefined) return stream;
+            const conversation = await flightConversation(
+              store,
+              agent.id,
+              session.seats.map((seat) => seat.id),
+              { limit: 1 },
+            );
+            return { ...stream, unread: conversation.unread };
+          };
           const run = store.seatRun(agent.id);
           if (!run) {
-            return {
+            return withFlightUnread({
               runId: null,
               events: [],
               truncated: false,
               lastOutputAt: null,
               reason: NO_RUNS_YET,
-            };
+            });
           }
           const lastEventAt = store.digest(run.id)?.lastEventAt ?? null;
           const missing = (): AgentStream => ({
@@ -1715,9 +1755,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             reason: TRANSCRIPT_NOT_FOUND,
           });
           const path = run.transcriptPath;
-          if (path === "") return missing();
+          if (path === "") return withFlightUnread(missing());
           const st = await stat(transcriptFilePath(path)).catch(() => null);
-          if (!st?.isFile()) return missing();
+          if (!st?.isFile()) return withFlightUnread(missing());
           const { size, mtimeMs } = st;
           let entry = streamCache.get(agent.id);
           if (
@@ -1735,12 +1775,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   ? readTranscript(path, limit, run.vendor)
                   : readTranscript(path, limit, run.vendor, before);
             } catch {
-              return missing();
+              return withFlightUnread(missing());
             }
             entry = { path, size, mtimeMs, limit, before, result };
             streamCache.set(agent.id, entry);
           }
-          return {
+          return withFlightUnread({
             runId: run.id,
             tasks: store.digest(run.id)?.tasks ?? [],
             events: entry.result.events,
@@ -1748,7 +1788,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             hasMore: entry.result.more ?? false,
             lastOutputAt: lastOutputAt(lastEventAt, Math.floor(mtimeMs)),
             reason: null,
-          };
+          });
         },
       );
 
@@ -6205,17 +6245,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             }
           : item;
       };
+      // `?owner=operator` keeps one owner's items; `?compact=1` returns each as AttentionCompactItem (#1632)
       api.get(
         "/attention",
-        async (): Promise<AttentionItem[]> =>
-          sharedAttention().map((item) =>
-            // the operator's items carry their ticket and PR with titles (#1543)
-            pinnedFor(
-              item.kind === "tag" && item.text.length > 170
-                ? { ...item, text: `${item.text.slice(0, 169)}…` }
-                : item,
-            ),
-          ),
+        async (req, reply): Promise<AttentionItem[] | AttentionCompactItem[]> => {
+          const query = AttentionListQuery.safeParse(req.query);
+          if (!query.success) return reply.code(400).send({ error: "Bad owner or compact." });
+          const { owner, compact } = query.data;
+          return sharedAttention()
+            .filter((item) => owner === undefined || itemOwner(item) === owner)
+            .map((item) =>
+              // the operator's items carry their ticket and PR with titles (#1543)
+              pinnedFor(
+                item.kind === "tag" && item.text.length > 170
+                  ? { ...item, text: `${item.text.slice(0, 169)}…` }
+                  : item,
+              ),
+            )
+            .map((item) => (compact === true ? compactAttentionItem(item) : item));
+        },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
       registerBriefChoiceRoutes(api, app, deps, flightActor);

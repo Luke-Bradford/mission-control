@@ -66,6 +66,7 @@ import {
   type FlightPark,
   type FlightScheduleView,
   type FlightSeatState,
+  type FlightSignal,
   type FlightState,
   type FlightView,
   type FlightWake,
@@ -97,7 +98,7 @@ import {
   WAITING_OPERATOR_LABEL,
   wakeKeyPrefix,
 } from "@mc/core";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms/index.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
@@ -126,8 +127,8 @@ import {
   questionFacts,
   subjectId,
 } from "../question-watch.ts";
+import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
-import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
@@ -1659,6 +1660,26 @@ export function flightWake(
       facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
     },
   };
+}
+
+/**
+ * What `flight_state` shows of the signals by default: a wait that ended over a day ago folds into one
+ * summary line with a count. Every other signal stays whole. `full` in the tool call lists everything (#1632).
+ */
+export function compactSignals(signals: FlightSignal[], now: number): FlightSignal[] {
+  const expired = (s: FlightSignal): boolean =>
+    s.kind === "wait_over" && now - s.since > 24 * FLIGHT_HOUR_MS;
+  const folded = signals.filter(expired);
+  if (folded.length === 0) return signals;
+  return [
+    ...signals.filter((s) => !expired(s)),
+    {
+      kind: "wait_over",
+      key: "expired",
+      since: Math.min(...folded.map((s) => s.since)),
+      evidence: `${folded.length} expired waits left out; call flight_state with full: true to list them`,
+    },
+  ];
 }
 
 /** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */

@@ -448,7 +448,7 @@ update`; unexpected exceptions keep their content private and log only the gener
 
 When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
 stops dealing and starting new developer and review runs on that account. It is the same projection
-the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/budget-brake.ts`
+the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/spend/budget-brake.ts`
 is the one function for both.
 
 - Stopped: the engine's deal, the review start, `start_seat`, and the supervisor's `startRun`
@@ -773,7 +773,7 @@ What each seat's process starts with:
   not ours and creates each file exclusively without following a link. Unlike the guard hook it never blocks: any failure, or a full output that cannot
   be written, leaves the result whole. So does a built-in tool's result that cannot be cut in its
   own shape (the CLI rejects a plain text there), and Edit, Write, MultiEdit and NotebookEdit,
-  whose bulk never reaches the model. Codex seats are not covered. The 32 KB, 8 KB and 4 KB
+  whose bulk never reaches the model. Codex seats are not covered. What bounds a shell result, and the cap decision, are in `docs/runbooks/shell-output.md` (#1642). The 32 KB, 8 KB and 4 KB
   limits are `TOOL_TRIM_OVER`, `TOOL_TRIM_HEAD` and `TOOL_TRIM_TAIL` in `packages/core/src/tool-trim.ts`.
 - **A per-run token** for both, in hub memory and in two 0600 files beside the run's transcript:
   `{DB dir}/crew/<run id>.token` and `<run id>.mcp.json`. The sandbox cannot read them, and argv,

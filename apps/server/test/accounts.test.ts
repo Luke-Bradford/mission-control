@@ -27,7 +27,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { readAccountStatus } from "../src/accounts.ts";
+import { readAccountStatus } from "../src/accounts/accounts.ts";
 
 const dir = mkdtempSync(join(tmpdir(), "mc-accounts-"));
 state.script = join(dir, "fake.cjs");

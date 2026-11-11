@@ -4,7 +4,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../src/flight/operator-call.ts";
-import { announceInstruction, flushInstructionNotices } from "../src/instruction-notices.ts";
+import { announceInstruction, flushInstructionNotices } from "../src/instructions/notices.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
@@ -315,7 +315,7 @@ it("reports each concurrent mutation's own recipient delivery while draining a s
 });
 
 it("clears only the focus-import warning when a real capacity failure is resolved", async () => {
-  const { importInstructionFocus } = await import("../src/instruction-notices.ts");
+  const { importInstructionFocus } = await import("../src/instructions/notices.ts");
   const cfg = structuredClone(config);
   const builder = defined(defined(cfg.crew).sessions[0].seats.find((s) => s.id === "builder"));
   builder.focus = "label:catalog";

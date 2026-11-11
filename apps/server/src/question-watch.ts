@@ -86,7 +86,9 @@ export function openQuestionSubjects(d: {
     } else if (item.key.startsWith(COMMS_OPEN_PREFIX)) {
       const id = item.key.slice(COMMS_OPEN_PREFIX.length);
       const message = store.commsMessage(id);
-      runId = store.commsRun(id)?.id ?? null;
+      // FLIGHT's own question outlives the wake that asked it: each wake is a short run, and the
+      // question stays the operator's until answered (as resolvedCommsReason already treats it)
+      runId = message?.from === flightId ? null : (store.commsRun(id)?.id ?? null);
       seatId = message?.from ?? null;
       question = message?.text ?? question;
     }

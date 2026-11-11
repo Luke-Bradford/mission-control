@@ -7,7 +7,6 @@ import "../src/pages/Agent.tsx";
 import "../src/pages/BoardPage.tsx";
 import "../src/pages/Comms.tsx";
 import "../src/pages/Flight.tsx";
-import "../src/pages/MapPage.tsx";
 import "../src/pages/Overview.tsx";
 import "../src/pages/Setup.tsx";
 import "../src/pages/Telemetry.tsx";
@@ -44,7 +43,6 @@ const PAGES = [
   ["Flight", "/flight", "page-flight", 72],
   ["Board", "/board", "page-board", 12],
   ["Agent", "/agent", "page-agent", 0],
-  ["Map", "/map/sample", "page-map", 0],
   ["Comms", "/comms", "page-comms", 0],
   // The complete allowance and machine readers moved here from the Overview, with their clocks.
   ["Telemetry", "/telemetry", "page-telemetry", 74],

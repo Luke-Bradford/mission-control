@@ -377,6 +377,7 @@ export const REVIEW_STATUS_QUEUED = "QA review queued";
 export const REVIEW_STATUS_RUNNING = "QA review running";
 export const REVIEW_STATUS_PASSED = "QA review passed";
 export const REVIEW_STATUS_BLOCKED = "QA review found blocking issues";
+export const REVIEW_STATUS_INCOMPLETE = "QA review did not complete";
 export const REVIEW_STATUS_WAIVED = "QA review waived by the operator";
 
 export const carriedStatusText = (description: string, from: string): string =>

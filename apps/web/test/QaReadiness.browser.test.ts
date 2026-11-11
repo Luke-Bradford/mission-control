@@ -73,6 +73,37 @@ describeRendered("QA acceptance queue in a browser", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+  it.each(["light", "dark"] as const)(
+    "shows what a merge frees at 1920x1080 in %s",
+    async (theme) => {
+      mkdirSync(SHOTS, { recursive: true });
+      const page = await renderAt({
+        page: "test/qaReadinessBrowser.html",
+        width: 1920,
+        height: 1080,
+        colorScheme: theme,
+        api: fixture(),
+      });
+      await page.boxes(".uat-frees h3");
+      const text = await page.evaluate(
+        () => ({
+          line: document.querySelector(".uat-frees h3")?.textContent,
+          more: document.querySelector(".uat-frees-more")?.textContent,
+          refs: [...document.querySelectorAll(".uat-frees li")].length,
+          mark: document.querySelector(".uat-queue-row .uat-age")?.textContent,
+        }),
+        null,
+      );
+      expect(text.line).toBe("Merging this frees 7");
+      expect(text.more).toBe("2 more also wait on other work");
+      expect(text.refs).toBe(6);
+      expect(text.mark).toMatch(/^unblocks 7 · /);
+      expect(await page.unclipped(".uat-frees")).not.toContain(false);
+      await page.screenshot(join(SHOTS, `qa-frees-${theme}.png`));
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
   it(
     "shows an honest empty queue",
     async () => {

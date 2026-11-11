@@ -71,7 +71,7 @@ export async function demoSend(path: string, init: RequestInit): Promise<Respons
 }
 
 /** What the fake stream hands the simulator to deliver an event with. */
-type Emit = (type: "changed" | "map", data: unknown) => void;
+type Emit = (type: "changed", data: unknown) => void;
 
 /** An `EventTarget` that behaves as the hub's stream, fed by the simulator's timer. */
 export function demoStream(path: string): StreamSource {

@@ -409,6 +409,20 @@ it("marks through a displayed turn, preserves newer unread lines and never moves
   expect(store.commsScopeCursor("flight")).toMatch(/^comms:\d+$/);
 });
 
+it("shares the hub unread count between Comms and the FLIGHT fly-out stream", async () => {
+  const ids = run("flight-fly-out", [text("Reply", AT + 1)]);
+  const flyout = async () => {
+    const response = await app.inject("/api/agents/FLIGHT-1/stream");
+    expect(response.statusCode, response.body).toBe(200);
+    return response.json() as { unread?: number };
+  };
+  expect((await page()).unread).toBe(1);
+  expect((await flyout()).unread).toBe(1);
+  expect((await read(ids[0] ?? "")).statusCode).toBe(200);
+  expect((await page()).unread).toBe(0);
+  expect((await flyout()).unread).toBe(0);
+});
+
 it("upgrades legacy reads without reviving transcript history or hiding newer mixed replies", async () => {
   const legacy = stored("Legacy read reply", AT + 20, FLIGHT, "CAPCOM");
   store.markCommsScopeRead("flight", legacy.id);

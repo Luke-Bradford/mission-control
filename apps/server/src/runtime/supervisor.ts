@@ -131,10 +131,9 @@ import {
   watchStartRefusedText,
   wrapExternalText,
 } from "@mc/core";
-import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
+import { accountBindingProblem, codexProfile } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
-import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli/update.ts";
@@ -156,7 +155,6 @@ import { waitReader } from "../dependencies.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
-import { type ExternalReviewSubject, isExternalReview } from "../external-reviews.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
@@ -166,7 +164,6 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
-import { openOlderFindings } from "../older-findings.ts";
 import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
@@ -180,6 +177,8 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
+import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
+import { openOlderFindings } from "../review/older-findings.ts";
 import {
   enrichHandoff,
   handoffForBrief,
@@ -187,8 +186,9 @@ import {
   inheritedHandoffLoop,
   publicHandoff,
   recordRunHandoff,
-} from "../run-handoffs.ts";
+} from "../run/handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import {
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
@@ -216,6 +216,7 @@ import {
   ticketBrief,
   transferBrief,
   watchBrief,
+  withoutHubConfig,
 } from "./brief.ts";
 import {
   cloneGitDir,
@@ -1895,7 +1896,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           section: "rules",
           bytes:
             textBytes(references) +
-            block(CLAUDE_MD_HEADING, repoDocs?.claudeMd) +
+            // the text rolePrompt carries, not the raw file
+            block(
+              CLAUDE_MD_HEADING,
+              repoDocs?.claudeMd == null ? null : withoutHubConfig(repoDocs.claudeMd),
+            ) +
             block(AGENTS_MD_HEADING, repoDocs?.agentsMd),
         },
       ];

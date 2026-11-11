@@ -131,6 +131,12 @@ describe("QA acceptance", () => {
     );
     expect(fetcher.mock.calls.filter(([path]) => path.startsWith("/api/qa/uat/"))).toHaveLength(1);
   });
+  it("links Impact to Audit's code-risk tab", async () => {
+    details = { ...details, files: ["apps/web/src/App.tsx"] };
+    await ready();
+    const link = await screen.findByRole("link", { name: "Open code risk in Audit" });
+    expect(link.getAttribute("href")).toBe("/audit?tab=risk");
+  });
   it("accepts only the displayed immutable head, once", async () => {
     await ready();
     fireEvent.click(screen.getByRole("button", { name: "Accept" }));

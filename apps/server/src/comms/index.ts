@@ -22,7 +22,7 @@ import { confirmedResumeAfter, pendingRunApproval } from "../attention/subjects.
 import { statNoted } from "../file-deps.ts";
 import { commsPosition, type Store } from "../store.ts";
 import { readStream } from "../stream.ts";
-import { transcriptFilePath } from "../transcript-file.ts";
+import { transcriptFilePath } from "../transcript/file.ts";
 
 export const COMMS_INBOX_PROMPT_MAX = 8_000;
 export const COMMS_INBOX_PROMPT_ROWS = 40;
