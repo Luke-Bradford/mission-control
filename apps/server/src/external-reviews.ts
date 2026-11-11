@@ -18,7 +18,7 @@ import type { GhRunner } from "./mcp/gh.ts";
 import { ownsPr } from "./ownership.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
 import { postPrEvidence } from "./pr-evidence/sweep.ts";
-import { qaReportGitIndex } from "./qa-reports.ts";
+import { qaReportGitIndex } from "./qa/reports.ts";
 import type { Store } from "./store.ts";
 
 export { externalReviewKey, isExternalReview } from "./external-review-key.ts";

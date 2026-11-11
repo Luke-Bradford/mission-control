@@ -127,7 +127,7 @@ import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./preview/previews.ts";
 import { resolvePreviewRepo } from "./preview/repo.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
-import { createQaReports } from "./qa-reports.ts";
+import { createQaReports } from "./qa/reports.ts";
 import {
   prepareQueueReorderSnapshot,
   type QueueReorderDeps,

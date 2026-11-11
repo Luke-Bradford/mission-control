@@ -373,7 +373,7 @@ import {
   type PreviewManager,
 } from "./preview/previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
-import { qaHistoryPage, qaNativeHistory } from "./qa-history.ts";
+import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
   QA_REPORT_BODY_LIMIT,
@@ -381,7 +381,7 @@ import {
   QaReportError,
   type QaReportService,
   qaReportMarkdown,
-} from "./qa-reports.ts";
+} from "./qa/reports.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
