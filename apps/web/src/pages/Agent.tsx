@@ -73,11 +73,14 @@ export function Agent({ id }: { id: string | null }) {
   }, [shownId, shownKind]);
 
   useEffect(() => {
-    if (!shownId || !all?.length) return;
+    if (!shownId || !inView.length) return;
     const move = (direction: 1 | -1) => {
-      const at = all.findIndex((seat) => seat.id === shownId);
-      const next = all[(at + direction + all.length) % all.length];
-      if (next) navigate(agentPath(next.id));
+      const at = inView.findIndex((seat) => seat.id === shownId);
+      const next = inView[(at + direction + inView.length) % inView.length];
+      if (next) {
+        setSelectedAgent(next.id);
+        navigate(agentPath(next.id));
+      }
     };
     setPageKey("j", () => move(1));
     setPageKey("k", () => move(-1));
@@ -85,7 +88,7 @@ export function Agent({ id }: { id: string | null }) {
       setPageKey("j", null);
       setPageKey("k", null);
     };
-  }, [all, shownId]);
+  }, [inView, shownId]);
 
   let missing: string | null = null;
   if (crew.error && !crew.data) missing = "Could not load the crew.";
@@ -106,7 +109,7 @@ export function Agent({ id }: { id: string | null }) {
         <RunTracePanel agentId={id} runId={detailRun} />
       ) : row ? (
         <div className="agent-control-room">
-          <Picker rows={all ?? []} items={items} current={shownId} />
+          <Picker rows={inView} items={items} current={shownId} />
           <main className="agent-seat-workspace">
             {detail.error && (
               <div className="pb s crit-t" role="status">

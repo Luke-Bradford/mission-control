@@ -1,11 +1,23 @@
 import type { AgentStream, CrewRow } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { Agent } from "../src/pages/Agent.tsx";
+import { installKeys } from "../src/shell/keys.ts";
+import { getSelectedAgent } from "../src/shell/selection.ts";
+import { resetSession, setSession } from "../src/shell/session.ts";
+import { Toast } from "../src/shell/Toast.tsx";
 import { AGENT_DRAFT_KEY, readKey } from "../src/storage.ts";
 import { agentView } from "./agentV2Fixture.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { boardItem, CONFIG, crewRow, MIN, NOW, stoppedSeat } from "./fixtures.ts";
+import {
+  boardItem,
+  CREW_CONFIG,
+  crewRow,
+  MIN,
+  NOW,
+  SESSION_CONFIG,
+  stoppedSeat,
+} from "./fixtures.ts";
 
 const stream = (over: Partial<AgentStream> = {}): AgentStream => ({
   runId: "r-12",
@@ -46,7 +58,7 @@ function stub(row = seat(), extra: Record<string, unknown> = {}) {
     "/api/crew?shape=summary": { rows: [row], firstRunToday: null },
     "/api/attention": [],
     "/api/limits": [],
-    "/api/config": CONFIG,
+    "/api/config": CREW_CONFIG,
     "/api/agents/guido-1": agentView(row),
     "/api/agents/guido-1/stream?limit=20": stream(),
     "/api/agents/guido-1/runs?limit=50": [],
@@ -60,6 +72,7 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   localStorage.clear();
+  resetSession();
 });
 afterEach(() => {
   cleanup();
@@ -258,5 +271,237 @@ describe("Agent control room", () => {
     const roster = await screen.findByRole("complementary", { name: "Seat roster" });
     fireEvent.click(within(roster).getByRole("button", { name: /INCO-2/ }));
     expect(window.location.pathname).toBe("/agent/inco-2");
+  });
+
+  it("keeps a typed message after a refresh", async () => {
+    stub();
+    render(<Agent id="guido-1" />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Message this agent" }), {
+      target: { value: "Survive a reload." },
+    });
+    await waitFor(() => expect(readKey(AGENT_DRAFT_KEY)).toBe("Survive a reload."));
+    cleanup();
+    stub();
+    render(<Agent id="guido-1" />);
+    expect(
+      ((await screen.findByRole("textbox", { name: "Message this agent" })) as HTMLInputElement)
+        .value,
+    ).toBe("Survive a reload.");
+  });
+
+  it("keeps a typed message when another seat is chosen", async () => {
+    const other = seat({ id: "inco-2", index: 3, displayCallSign: "INCO-2" });
+    const routes = {
+      "/api/crew?shape=summary": { rows: [seat(), other], firstRunToday: null },
+      "/api/agents/inco-2": agentView(other),
+      "/api/agents/inco-2/stream?limit=20": stream(),
+    };
+    stub(seat(), routes);
+    const view = render(<Agent id="guido-1" />);
+    fireEvent.change(await screen.findByRole("textbox", { name: "Message this agent" }), {
+      target: { value: "Carry me over." },
+    });
+    await waitFor(() => expect(readKey(AGENT_DRAFT_KEY)).toBe("Carry me over."));
+    const roster = screen.getByRole("complementary", { name: "Seat roster" });
+    fireEvent.click(within(roster).getByRole("button", { name: /INCO-2/ }));
+    view.rerender(<Agent id="inco-2" />);
+    await screen.findByText("INCO-2", { selector: "h2, h2 *" }).catch(() => null);
+    expect(
+      (screen.getByRole("textbox", { name: "Message this agent" }) as HTMLInputElement).value,
+    ).toBe("Carry me over.");
+  });
+
+  it("lists only the chosen session's seats and steps j and k within it", async () => {
+    const mine = seat({ sessionId: "shop-app-session" });
+    const mate = seat({
+      id: "inco-2",
+      index: 3,
+      displayCallSign: "INCO-2",
+      sessionId: "shop-app-session",
+    });
+    const away = seat({
+      id: "inco-9",
+      repoId: "site-builder",
+      index: 4,
+      displayCallSign: "INCO-9",
+      sessionId: "site-builder-session",
+    });
+    stub(mine, {
+      "/api/config": SESSION_CONFIG,
+      "/api/crew?shape=summary": { rows: [mine, mate, away], firstRunToday: null },
+      "/api/agents/inco-2": agentView(mate),
+      "/api/agents/inco-2/stream?limit=20": stream(),
+    });
+    const off = installKeys({
+      navigate: () => {},
+      toggleDock: () => {},
+      help: () => {},
+      selectNext: () => {},
+      selectPrev: () => {},
+      toast: () => {},
+    });
+    onTestFinished(off);
+    render(<Agent id="guido-1" />);
+    await screen.findByText("Work on shop-app#3349");
+    act(() => setSession("site-builder-session"));
+    const roster = screen.getByRole("complementary", { name: "Seat roster" });
+    await waitFor(() =>
+      expect(within(roster).queryByRole("button", { name: /INCO-2/ })).toBeNull(),
+    );
+    expect(within(roster).getByRole("button", { name: /INCO-9/ })).toBeTruthy();
+    act(() => setSession("shop-app-session"));
+    expect(within(roster).queryByRole("button", { name: /INCO-9/ })).toBeNull();
+    fireEvent.keyDown(document.body, { key: "j" });
+    expect(window.location.pathname).toBe("/agent/inco-2");
+    expect(getSelectedAgent()).toBe("inco-2");
+    fireEvent.keyDown(document.body, { key: "j" });
+    expect(window.location.pathname).not.toBe("/agent/inco-9");
+  });
+
+  describe("Assign", () => {
+    const ready = (n: number, over = {}) =>
+      boardItem({
+        issueNumber: n,
+        title: `Ticket ${n}`,
+        status: "Ready",
+        state: "planned",
+        ...over,
+      });
+    const withDef = (def: Record<string, unknown>) => ({
+      "/api/config": {
+        ...CREW_CONFIG,
+        crew: {
+          ...CREW_CONFIG.crew,
+          sessions: [
+            {
+              ...(CREW_CONFIG.crew?.sessions[0] as object),
+              seats: [{ ...(CREW_CONFIG.crew?.sessions[0]?.seats[0] as object), ...def }],
+            },
+          ],
+        },
+      },
+    });
+
+    it.each([{ mode: "scratch" }, { loop: "watch" }])(
+      "is not offered to a seat that cannot take a ticket (%j)",
+      async (def) => {
+        stub(seat({ hudState: "idle", run: null }), {
+          ...withDef(def),
+          "/api/boards/shop-app": [ready(7)],
+        });
+        render(<Agent id="guido-1" />);
+        await screen.findByText("Work on shop-app#3349");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(screen.queryByRole("button", { name: /^Assign/ })).toBeNull();
+      },
+    );
+
+    it("takes the highest-priority, then oldest, Ready ticket", async () => {
+      const f = stub(seat({ hudState: "idle", run: null }), {
+        "/api/boards/shop-app": [
+          ready(9, { priority: "P2" }),
+          ready(8, { priority: "P0" }),
+          ready(5, { priority: "P0" }),
+          ready(2, { priority: "P1" }),
+        ],
+        "POST /api/seats/guido-1/start": { runId: "r-13" },
+      });
+      render(<Agent id="guido-1" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Assign #5" }));
+      await screen.findByText("Assign confirmed.");
+      const call = f.mock.calls.find(([path]) => path === "/api/seats/guido-1/start");
+      expect(JSON.parse(call?.[1]?.body as string)).toEqual({ issue: 5 });
+    });
+
+    it("lets the operator pick another Ready ticket", async () => {
+      const f = stub(seat({ hudState: "idle", run: null }), {
+        "/api/boards/shop-app": [ready(5, { priority: "P0" }), ready(9, { priority: "P2" })],
+        "POST /api/seats/guido-1/start": { runId: "r-13" },
+      });
+      render(<Agent id="guido-1" />);
+      fireEvent.change(await screen.findByRole("combobox", { name: "Ticket to assign" }), {
+        target: { value: "9" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Assign #9" }));
+      await screen.findByText("Assign confirmed.");
+      const call = f.mock.calls.find(([path]) => path === "/api/seats/guido-1/start");
+      expect(JSON.parse(call?.[1]?.body as string)).toEqual({ issue: 9 });
+    });
+  });
+
+  it("the live call bar shows the running tool and its elapsed time", async () => {
+    const row = seat({
+      digest: {
+        ...(seat().digest as object),
+        liveTool: { name: "Bash", since: NOW - 125_000 },
+      },
+    } as Partial<CrewRow>);
+    stub(row);
+    const { container } = render(<Agent id="guido-1" />);
+    await screen.findByText("Work on shop-app#3349");
+    const bar = container.querySelector(".livecall") as HTMLElement;
+    expect(bar.textContent).toBe("▶Bash2:05elapsed");
+  });
+
+  it("the composer is disabled with the observed-loop hint", async () => {
+    const loop = seat({ id: "guido-1", kind: "loop", loopKind: "ta-loop", sessionId: null });
+    stub(loop);
+    render(<Agent id="guido-1" />);
+    await screen.findByText("Work on shop-app#3349");
+    const input = screen.getByRole("textbox", { name: "Message this agent" }) as HTMLInputElement;
+    expect(input.disabled).toBe(true);
+    expect(screen.getByText(/is an observed loop/)).toBeTruthy();
+  });
+
+  it("Send posts {text}; Interrupt and send posts {text, interrupt: true}", async () => {
+    const f = stub();
+    render(<Agent id="guido-1" />);
+    const input = await screen.findByRole("textbox", { name: "Message this agent" });
+    fireEvent.change(input, { target: { value: "hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() =>
+      expect(f.mock.calls.filter((c) => c[0] === "/api/seats/guido-1/message").length).toBe(1),
+    );
+    const first = f.mock.calls.find((c) => c[0] === "/api/seats/guido-1/message");
+    expect(JSON.parse(first?.[1]?.body as string)).toEqual({ text: "hello" });
+    fireEvent.change(input, { target: { value: "  stop it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Interrupt and send" }));
+    await waitFor(() =>
+      expect(f.mock.calls.filter((c) => c[0] === "/api/seats/guido-1/message").length).toBe(2),
+    );
+    const last = f.mock.calls.filter((c) => c[0] === "/api/seats/guido-1/message")[1];
+    expect(JSON.parse(last?.[1]?.body as string)).toEqual({ text: "  stop it", interrupt: true });
+  });
+
+  it("a whitespace-only input toasts and posts nothing", async () => {
+    const f = stub();
+    render(
+      <>
+        <Agent id="guido-1" />
+        <Toast />
+      </>,
+    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "Message this agent" }), {
+      target: { value: "   " },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText("Type a message first.")).toBeTruthy();
+    expect(f.mock.calls.some((c) => c[0] === "/api/seats/guido-1/message")).toBe(false);
+  });
+
+  it("Rename rejects blank and overlong names in place", async () => {
+    const f = stub(seat(), {
+      "/api/crew/changes": { sessions: [{ id: "s1", seats: [{ id: "guido-1" }] }] },
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await screen.findByText("More"));
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const input = await screen.findByRole("textbox", { name: "Call sign" });
+    for (const value of ["   ", "x".repeat(65)]) {
+      fireEvent.change(input, { target: { value } });
+      fireEvent.submit(input.closest("form") as HTMLFormElement);
+      expect((await screen.findByRole("alert")).textContent).toContain("1–64");
+    }
+    expect(f.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
 });

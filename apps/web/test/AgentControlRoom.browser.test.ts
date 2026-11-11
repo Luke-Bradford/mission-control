@@ -484,4 +484,34 @@ describeRendered("Agent control room", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "keeps a typed message through a page reload",
+    async () => {
+      const page = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1920,
+        height: 940,
+        api,
+      });
+      await page.box("#agentInput");
+      await page.evaluate(() => {
+        const input = document.querySelector<HTMLInputElement>("#agentInput");
+        if (!input) throw new Error("composer input missing");
+        const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+        set?.call(input, "Survive a reload.");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      }, null);
+      await page.reload();
+      await page.box("#agentInput");
+      expect(
+        await page.evaluate(
+          () => document.querySelector<HTMLInputElement>("#agentInput")?.value ?? null,
+          null,
+        ),
+      ).toBe("Survive a reload.");
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

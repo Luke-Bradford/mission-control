@@ -9,6 +9,7 @@ import type {
   ReviewCheckState,
   RunLoopView,
 } from "@mc/core";
+import { labelPriority, priorityRank } from "@mc/core";
 import { type CSSProperties, useId, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { cardColumn } from "../board/cards.ts";
@@ -121,13 +122,30 @@ export function SeatControls({
 }
 
 /** Starts an idle crew seat on a Ready ticket in its configured repository. */
+/** Ready tickets in the order the queue takes them: Priority first, then oldest. */
+export function assignable(items: readonly BoardItem[]): BoardItem[] {
+  return items
+    .filter((item) => !item.closed && cardColumn(item) === "Ready")
+    .sort(
+      (a, b) =>
+        priorityRank(a.priority ?? labelPriority(a.labels)) -
+          priorityRank(b.priority ?? labelPriority(b.labels)) || a.issueNumber - b.issueNumber,
+    );
+}
+
 function AssignSeat({ row }: { row: CrewRow }) {
   const board = useResource<BoardItem[]>(RESOURCES.boards(row.repoId));
+  const config = useResource<ConfigView>(RESOURCES.config).data;
   const [busy, setBusy] = useState(false);
+  const [picked, setPicked] = useState<number | null>(null);
   const [receipt, setReceipt] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const ready = (board.data ?? []).filter((item) => !item.closed && cardColumn(item) === "Ready");
-  const ticket = ready[0];
+  // The rule StartSeat uses: a scratch copy and the watch seat never take a ticket.
+  const def = config?.crew?.sessions
+    .find((s) => s.repoId === row.repoId)
+    ?.seats.find((s) => s.id === row.id);
+  const ready = assignable(board.data ?? []);
+  const ticket = ready.find((item) => item.issueNumber === picked) ?? ready[0];
   const holdsRun = row.run !== null && row.run.endedAt === null;
   const assign = async () => {
     if (!ticket || busy || holdsRun) return;
@@ -145,10 +163,25 @@ function AssignSeat({ row }: { row: CrewRow }) {
       setBusy(false);
     }
   };
+  if (!def || def.mode === "scratch" || def.loop === "watch") return null;
   if (board.loading && !board.data) return <span className="s muted">Loading work…</span>;
   if (!ticket) return null;
   return (
     <span className="agent-assign">
+      {ready.length > 1 && (
+        <select
+          aria-label="Ticket to assign"
+          value={ticket.issueNumber}
+          disabled={busy || holdsRun}
+          onChange={(e) => setPicked(Number(e.target.value))}
+        >
+          {ready.map((item) => (
+            <option key={item.issueNumber} value={item.issueNumber}>
+              {`#${item.issueNumber} ${item.title}`}
+            </option>
+          ))}
+        </select>
+      )}
       <button
         type="button"
         className="sm"
