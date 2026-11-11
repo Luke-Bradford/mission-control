@@ -632,3 +632,34 @@ it("says the graph could not be loaded when its links fail, not that it is loadi
   expect(await screen.findByText(/couldn't load comms graph/i)).toBeTruthy();
   expect(screen.queryByText(/loading comms graph/i)).toBeNull();
 });
+
+it("words a long wait by its largest unit, and names seats by call sign, in both lists", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 1 }] },
+    "/api/comms/open": {
+      items: [
+        {
+          id: "ask",
+          label: "question",
+          from: "guido-1",
+          to: "retro-1",
+          ticket: null,
+          waitedMs: 3 * 24 * 60 * 60_000,
+          question: "Which branch?",
+        },
+      ],
+    },
+    "/api/comms/feed": {
+      messages: [{ id: "m1", from: "retro-1", to: "guido-1", at: 1, text: "On main" }],
+    },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const waiting = await screen.findByRole("region", { name: "Waiting on a reply" });
+  expect(waiting.textContent).toContain("3d");
+  expect(waiting.textContent).not.toMatch(/\d{4,}m/);
+  expect(waiting.textContent).toContain("GUIDO-1");
+  const said = await screen.findByRole("region", { name: "Just said" });
+  expect(said.textContent).toMatch(/RETRO-1 → GUIDO-1/);
+});

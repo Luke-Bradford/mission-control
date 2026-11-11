@@ -19,13 +19,16 @@ import {
 } from "./chartTypes.ts";
 import { type ChartFilter, filterKeeps, filterLabel, pairFilter } from "./commsFilter.ts";
 import {
-  fitName,
   HUB_W,
   linkPath,
+  NAME_ROOM,
+  nameHalf,
+  nameRect,
   type Point,
   placeWaitMarks,
   type RailGroup,
   type RailLayout,
+  shownName,
   WAIT_H,
   waitMarkWidth,
 } from "./rails.ts";
@@ -82,7 +85,8 @@ function meetAt(layout: RailLayout, id: string, other: string): Point | undefine
   return { x: p.x + (q.x < p.x ? -HUB_W / 2 : HUB_W / 2), y: p.y };
 }
 
-type Particle = { id: number; d: string; color: string; delay: number; to: string };
+/** `delay` is the stagger in ms; `begin` is when it starts on the overlay's own SMIL clock (s). */
+type Particle = { id: number; d: string; color: string; delay: number; begin: number; to: string };
 type Tip = { kind: "seat" | "edge"; id: string } | null;
 
 /** The wait mark's words. */
@@ -95,16 +99,33 @@ function organicLayout(
   seats: readonly RailSeatView[],
   edges: readonly RailEdgeView[],
   size: { w: number; h: number },
+  full: boolean,
 ): RailLayout {
   const w = Math.max(300, size.w);
   // Give the graph enough vertical perimeter for the labels as the crew grows. The scroll owner is
   // the chart, so a busy session grows there rather than turning names into an unreadable cluster.
   const h = Math.max(260, size.h, seats.length > 13 ? seats.length * 20 + 180 : size.h);
   const positions = new Map<string, Point>();
-  const nameRoom = 110;
   const cx = w / 2;
   const cy = h / 2;
-  const rx = Math.max(32, (w - nameRoom * 2 - 40) / 2);
+  // What each node takes up around its point: names sit under their dots, hubs are pills.
+  const room = new Map(
+    seats.map((seat) => [
+      seat.id,
+      seat.hub
+        ? { hw: HUB_W / 2 + 2, up: 13, down: 13 }
+        : { hw: nameHalf(shownName(seat.name, full)), up: 12, down: 28 },
+    ]),
+  );
+  const roomOf = (id: string) => room.get(id) as { hw: number; up: number; down: number };
+  const keep = (id: string, p: Point) => {
+    const { hw, up, down } = roomOf(id);
+    const x0 = hw + 8;
+    const x1 = w - hw - 8;
+    p.x = x1 < x0 ? cx : Math.min(x1, Math.max(x0, p.x));
+    p.y = Math.min(h - down - 6, Math.max(up + 6, p.y));
+  };
+  const rx = Math.max(32, (w - NAME_ROOM * 2 - 40) / 2);
   const ry = Math.max(80, h * 0.4);
   const hash = (id: string) => [...id].reduce((n, char) => (n * 31 + char.charCodeAt(0)) >>> 0, 7);
   seats.forEach((seat, index) => {
@@ -152,9 +173,40 @@ function organicLayout(
     for (const seat of seats) {
       const p = positions.get(seat.id) as Point;
       const d = delta.get(seat.id) as Point;
-      p.x = Math.min(w - nameRoom - 14, Math.max(nameRoom + 14, p.x + d.x + (cx - p.x) * 0.002));
-      p.y = Math.min(h - 28, Math.max(28, p.y + d.y + (cy - p.y) * 0.002));
+      p.x += d.x + (cx - p.x) * 0.002;
+      p.y += d.y + (cy - p.y) * 0.002;
+      keep(seat.id, p);
     }
+  }
+  // Last, push apart any two nodes whose boxes (dot, name, pill) still meet, so no name is covered.
+  const PAD = 4;
+  for (let pass = 0; pass < 120; pass++) {
+    let moved = false;
+    for (let i = 0; i < seats.length; i++)
+      for (let j = i + 1; j < seats.length; j++) {
+        const ia = seats[i]?.id ?? "";
+        const ib = seats[j]?.id ?? "";
+        const a = positions.get(ia) as Point;
+        const b = positions.get(ib) as Point;
+        const ra = roomOf(ia);
+        const rb = roomOf(ib);
+        const overX = ra.hw + rb.hw + PAD - Math.abs(a.x - b.x);
+        const overY =
+          Math.min(a.y + ra.down, b.y + rb.down) - Math.max(a.y - ra.up, b.y - rb.up) + PAD;
+        if (overX <= 0 || overY <= 0) continue;
+        moved = true;
+        if (overY <= overX) {
+          const dir = Math.sign(b.y - a.y) || (i % 2 ? 1 : -1);
+          a.y -= (dir * (overY + 1)) / 2;
+          b.y += (dir * (overY + 1)) / 2;
+        } else {
+          const dir = Math.sign(b.x - a.x) || (i % 2 ? 1 : -1);
+          a.x -= (dir * (overX + 1)) / 2;
+          b.x += (dir * (overX + 1)) / 2;
+        }
+      }
+    for (const seat of seats) keep(seat.id, positions.get(seat.id) as Point);
+    if (!moved) break;
   }
   const regular = new Map<string, Point & { side: "left" | "right" }>();
   const hubs = new Map<string, Point>();
@@ -169,8 +221,8 @@ function organicLayout(
     cx,
     leftX: 0,
     rightX: w,
-    nameRoom,
-    rowH: 28,
+    nameRoom: NAME_ROOM,
+    rowH: 40,
     seats: regular,
     hubs,
     headers: [],
@@ -260,6 +312,7 @@ export function CommsRails({
   const [lit, setLit] = useState<ReadonlySet<string>>(new Set());
   const timers = useRef(new Set<number>());
   const nextParticle = useRef(0);
+  const overlay = useRef<SVGSVGElement>(null);
 
   useLayoutEffect(() => {
     const el = root.current;
@@ -282,7 +335,7 @@ export function CommsRails({
 
   const byId = useMemo(() => new Map(seats.map((s) => [s.id, s])), [seats]);
   const nameOf = (id: string) => byId.get(id)?.name ?? id;
-  const layout = useMemo(() => organicLayout(seats, edges, size), [seats, edges, size]);
+  const layout = useMemo(() => organicLayout(seats, edges, size, full), [seats, edges, size, full]);
   const point = (id: string): Point | undefined => layout.seats.get(id) ?? layout.hubs.get(id);
 
   const shown = useMemo(
@@ -316,6 +369,10 @@ export function CommsRails({
       })),
       [...layout.hubs.values()],
       [...layout.seats.values()],
+      seats.flatMap((seat) => {
+        const p = layout.seats.get(seat.id);
+        return p ? [nameRect(p, nameHalf(shownName(seat.name, full)))] : [];
+      }),
     );
     const left = waiting.filter(({ edge }) => out.dropped.includes(edge.key));
     return {
@@ -323,7 +380,7 @@ export function CommsRails({
       more: left.length,
       longest: Math.max(0, ...left.map(({ edge }) => edge.waiting?.ms ?? 0)),
     };
-  }, [drawn, layout]);
+  }, [drawn, layout, seats, full]);
 
   // Who is inside the filter: its own ends, and the ends of every drawn link it keeps.
   const inside = useMemo(() => {
@@ -354,6 +411,7 @@ export function CommsRails({
     seenGeneration.current = generation;
     const keys = new Set<string>();
     const fresh: Particle[] = [];
+    const clockNow = overlay.current?.getCurrentTime?.() ?? 0;
     for (const flow of read.list) {
       const a = meetAt(layout, flow.from, flow.to);
       const b = meetAt(layout, flow.to, flow.from);
@@ -368,6 +426,9 @@ export function CommsRails({
           d,
           color,
           delay: i * PARTICLE_GAP_MS,
+          // SMIL counts from when the overlay first loaded, so "0ms" would be long past: start at
+          // the clock's current time plus the stagger.
+          begin: clockNow + (i * PARTICLE_GAP_MS) / 1000,
           to: flow.to,
         });
     }
@@ -503,7 +564,6 @@ export function CommsRails({
       waitingSeats.has(s.id) ? ", owes a reply" : ""
     }. Narrow the chart to ${s.name}`;
 
-  const sideOf = (id: string) => layout.seats.get(id)?.side;
   // The links and seats do not depend on the hover card, so hovering re-renders only the card.
   // biome-ignore lint/correctness/useExhaustiveDependencies: helpers below derive from these inputs
   const edgeMarks = useMemo(
@@ -591,8 +651,6 @@ export function CommsRails({
           const p = point(seat.id);
           if (!p) return null;
           const hub = seat.hub;
-          const side = sideOf(seat.id);
-          const out = hub ? 0 : side === "left" ? -1 : 1;
           const dim = inside !== null && !inside.has(seat.id);
           const selected =
             filter !== null &&
@@ -612,6 +670,7 @@ export function CommsRails({
             .filter(Boolean)
             .join(" ");
           const r = hub ? 0 : seat.presence === "running" ? 6 : 5;
+          const shown = shownName(seat.name, full);
           return (
             // biome-ignore lint/a11y/useSemanticElements: an SVG group cannot be a <button>
             <g
@@ -665,20 +724,15 @@ export function CommsRails({
                 <>
                   <rect
                     className="comms-node-hit"
-                    x={out < 0 ? -layout.nameRoom : -12}
-                    y={-layout.rowH / 2}
-                    width={layout.nameRoom + 12}
+                    x={-nameHalf(shown)}
+                    y={-14}
+                    width={nameHalf(shown) * 2}
                     height={layout.rowH}
                   />
                   <circle className="comms-node-ring" r={r + 4} />
                   <circle className="comms-node-core" r={r} />
-                  <text
-                    className="comms-node-name"
-                    x={out * (r + 8)}
-                    dy="0.34em"
-                    textAnchor={out < 0 ? "end" : "start"}
-                  >
-                    {full ? seat.name : fitName(seat.name, layout.nameRoom)}
+                  <text className="comms-node-name" y={r + 17} textAnchor="middle">
+                    {shown}
                   </text>
                 </>
               )}
@@ -770,13 +824,14 @@ export function CommsRails({
                 </linearGradient>
               ))}
             </defs>
-            <g className="comms-organic-layout">
+            <g className="comms-network">
               {edgeMarks}
               {nodeMarks}
             </g>
           </svg>
           {/* The travelling dots live on their own layer, so animating them repaints only them. */}
           <svg
+            ref={overlay}
             className="comms-rails-overlay"
             width={layout.w}
             height={layout.h}
@@ -786,13 +841,13 @@ export function CommsRails({
             <g className="comms-particles">
               {particles.map((p) => (
                 <circle key={p.id} className="comms-particle" r={3.5} fill={p.color}>
-                  <animateMotion path={p.d} dur={`${PARTICLE_MS}ms`} begin={`${p.delay}ms`} />
+                  <animateMotion path={p.d} dur={`${PARTICLE_MS}ms`} begin={`${p.begin}s`} />
                   <animate
                     attributeName="opacity"
                     values="0;1;1;0"
                     keyTimes="0;0.1;0.9;1"
                     dur={`${PARTICLE_MS}ms`}
-                    begin={`${p.delay}ms`}
+                    begin={`${p.begin}s`}
                   />
                 </circle>
               ))}

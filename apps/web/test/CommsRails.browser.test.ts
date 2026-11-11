@@ -134,6 +134,10 @@ const waitMarkProblems = (page: RenderedPage) =>
     const dots = [...document.querySelectorAll(".comms-node:not(.hub) .comms-node-core")].map((e) =>
       e.getBoundingClientRect(),
     );
+    const names = [...document.querySelectorAll(".comms-node-name")].map((e) =>
+      e.getBoundingClientRect(),
+    );
+    let onName = 0;
     let overlap = 0;
     let onSeat = 0;
     let onHub = 0;
@@ -142,9 +146,10 @@ const waitMarkProblems = (page: RenderedPage) =>
       for (const o of rects.slice(i + 1)) if (meet(r.box, o.box)) overlap++;
       for (const h of hubs) if (meet(r.box, h)) onHub++;
       for (const d of dots) if (meet(r.box, d)) onSeat++;
+      for (const n of names) if (meet(r.box, n)) onName++;
       if (r.text.left < r.box.left - 0.5 || r.text.right > r.box.right + 0.5) outside++;
     });
-    return { marks: rects.length, overlap, onHub, onSeat, outside };
+    return { marks: rects.length, overlap, onHub, onSeat, onName, outside };
   }, null);
 
 const overlaps = (names: { x: number; y: number; right: number; bottom: number }[]) =>
@@ -178,7 +183,7 @@ describeRendered("Comms chart, rendered", () => {
         if (n >= 9) {
           const w = await waitMarkProblems(page);
           expect(w.marks).toBeGreaterThan(0);
-          expect([w.overlap, w.onHub, w.onSeat, w.outside]).toEqual([0, 0, 0, 0]);
+          expect([w.overlap, w.onHub, w.onSeat, w.onName, w.outside]).toEqual([0, 0, 0, 0, 0]);
         }
         // Past what the panel can hold the rails scroll inside it, never off the page.
         expect(
@@ -191,20 +196,24 @@ describeRendered("Comms chart, rendered", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
-  it(
-    "shows ten session seats, CAPCOM and FLIGHT in the 1920 × 940 panel: names readable, no overlap, no scrolling",
-    async () => {
+  it.each([
+    { width: 1920, height: 940 },
+    { width: 1280, height: 800 },
+  ])(
+    "shows ten session seats, CAPCOM and FLIGHT in the $width × $height panel: names readable, clear of marks and pills, no scrolling",
+    async ({ width, height }) => {
       mkdirSync(SHOTS, { recursive: true });
       for (const colorScheme of ["light", "dark"] as const) {
         const page = await renderAt({
           page: "test/commsBrowser.html",
-          width: 1920,
-          height: 940,
+          width,
+          height,
           colorScheme,
           api: crewApi(11),
         });
         await page.box(".comms-rails svg");
         await page.box(".comms-node");
+        await page.box(".comms-wait-mark");
         const m = await measure(page);
         // Ten session seats plus FLIGHT, CAPCOM and #crew (the three hubs are drawn on the centre line).
         expect(m.nodes).toBe(13);
@@ -212,9 +221,141 @@ describeRendered("Comms chart, rendered", () => {
         expect(m.names.every((name) => name.size >= 11 && !name.text.endsWith("…"))).toBe(true);
         expect(overlaps(m.names)).toBe(false);
         expect(m.scrolls).toBe(false);
-        await page.screenshot(join(SHOTS, `panel-ten-seats-${colorScheme}.png`));
+        const w = await waitMarkProblems(page);
+        expect(w.marks).toBeGreaterThan(0);
+        expect([w.overlap, w.onHub, w.onSeat, w.onName, w.outside]).toEqual([0, 0, 0, 0, 0]);
+        // No name sits under a hub pill, and every name is inside the chart.
+        const clash = await page.evaluate(() => {
+          const canvas = (
+            document.querySelector(".comms-rails-canvas") as Element
+          ).getBoundingClientRect();
+          const hubs = [...document.querySelectorAll(".comms-node.hub .comms-node-core")].map((e) =>
+            e.getBoundingClientRect(),
+          );
+          let onHub = 0;
+          let outside = 0;
+          for (const e of document.querySelectorAll(".comms-node:not(.hub) .comms-node-name")) {
+            const n = e.getBoundingClientRect();
+            if (n.left < canvas.left - 0.5 || n.right > canvas.right + 0.5) outside++;
+            for (const h of hubs)
+              if (n.left < h.right && h.left < n.right && n.top < h.bottom && h.top < n.bottom)
+                onHub++;
+          }
+          return { onHub, outside };
+        }, null);
+        expect(clash).toEqual({ onHub: 0, outside: 0 });
+        await page.screenshot(join(SHOTS, `panel-ten-seats-${width}-${colorScheme}.png`));
         await page.close();
       }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "moves a light along its link when a message arrives after the page has been open a while",
+    async () => {
+      const api = crewApi(9);
+      const links = api["/api/comms/links"].links;
+      const page = await renderAt({
+        page: "test/commsBrowser.html",
+        width: 1920,
+        height: 940,
+        api,
+      });
+      await page.box(".comms-node");
+      // Past the SMIL clock's first seconds: a light timed from zero would never start now.
+      await new Promise((r) => setTimeout(r, 3_000));
+      const link = links[0] as { count: number; lastId?: string };
+      link.count += 1;
+      link.lastId = "late:1";
+      await page.evaluate(() => window.__refetchAgents(), null);
+      await page.box(".comms-particle");
+      const centre = () =>
+        page.evaluate(() => {
+          const r = document.querySelector(".comms-particle")?.getBoundingClientRect();
+          const c = document.querySelector(".comms-rails-canvas")?.getBoundingClientRect();
+          return r && c ? { x: r.x + r.width / 2, y: r.y + r.height / 2, cx: c.x, cy: c.y } : null;
+        }, null);
+      await new Promise((r) => setTimeout(r, 200));
+      const early = await centre();
+      await new Promise((r) => setTimeout(r, 400));
+      const later = await centre();
+      expect(early).not.toBeNull();
+      expect(later).not.toBeNull();
+      if (early && later) {
+        expect(Math.hypot(later.x - early.x, later.y - early.y)).toBeGreaterThan(10);
+        // Not parked at the canvas's top-left corner, where an unstarted light would sit.
+        expect(Math.hypot(early.x - early.cx, early.y - early.cy)).toBeGreaterThan(8);
+      }
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "does no work at idle, and little during a burst of 20 messages",
+    async () => {
+      const api = crewApi(11);
+      const links = api["/api/comms/links"].links;
+      const page = await renderAt({
+        page: "test/commsBrowser.html",
+        width: 1920,
+        height: 940,
+        api,
+      });
+      await page.box(".comms-node");
+      await page.evaluate(() => {
+        const w = window as unknown as { __raf: number; __mut: number; __long: number };
+        w.__raf = 0;
+        w.__mut = 0;
+        w.__long = 0;
+        const raf = window.requestAnimationFrame.bind(window);
+        window.requestAnimationFrame = (cb) => {
+          w.__raf++;
+          return raf(cb);
+        };
+        const chart = document.querySelector(".comms-rails");
+        if (chart)
+          new MutationObserver((records) => {
+            w.__mut += records.length;
+          }).observe(chart, { childList: true, subtree: true, attributes: true });
+        new PerformanceObserver((list) => {
+          for (const e of list.getEntries()) w.__long += e.duration;
+        }).observe({ entryTypes: ["longtask"] });
+      }, null);
+      await new Promise((r) => setTimeout(r, 5_000));
+      const idle = await page.evaluate(() => {
+        const w = window as unknown as { __raf: number; __mut: number; __long: number };
+        return {
+          raf: w.__raf,
+          mutations: w.__mut,
+          long: w.__long,
+          animations:
+            document.querySelector(".comms-rails")?.getAnimations({ subtree: true }).length ?? -1,
+        };
+      }, null);
+      // Nothing moves, repaints or schedules frames while there are no messages.
+      expect(idle.animations).toBe(0);
+      expect(idle.raf).toBe(0);
+      expect(idle.mutations).toBeLessThanOrEqual(10);
+      for (let i = 0; i < 20; i++) {
+        const link = links[i % links.length] as { count: number; lastId?: string };
+        link.count += 1;
+        link.lastId = `burst:${i}`;
+        await page.evaluate(() => window.__refetchAgents(), null);
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      await new Promise((r) => setTimeout(r, 2_500));
+      const burst = await page.evaluate(() => {
+        const w = window as unknown as { __raf: number; __mut: number; __long: number };
+        return { raf: w.__raf, mutations: w.__mut, long: w.__long };
+      }, null);
+      console.info(
+        `comms chart idle 5s: ${idle.raf} rAF, ${idle.mutations} mutations, ${idle.long.toFixed(0)}ms long tasks; 20-message burst: ${burst.raf} rAF, ${burst.mutations} mutations, ${burst.long.toFixed(0)}ms long tasks`,
+      );
+      // Long tasks (over 50ms) across the burst stay a small share of its ~5.5 seconds.
+      expect(burst.long).toBeLessThan(0.25 * 5_500);
+      await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
@@ -243,7 +384,7 @@ describeRendered("Comms chart, rendered", () => {
         expect(m.names.some((name) => name.text.endsWith("…"))).toBe(false);
         expect(overlaps(m.names)).toBe(false);
         const w = await waitMarkProblems(page);
-        expect([w.overlap, w.onHub, w.onSeat, w.outside]).toEqual([0, 0, 0, 0]);
+        expect([w.overlap, w.onHub, w.onSeat, w.onName, w.outside]).toEqual([0, 0, 0, 0, 0]);
         // Rows grow with the window: the seats span most of the chart's height, not a third of it.
         const spread = await page.evaluate(() => {
           const ys = [...document.querySelectorAll(".comms-node:not(.hub)")].map(
@@ -420,7 +561,7 @@ describeRendered("Comms chart, rendered", () => {
       expect(overlaps(m.names)).toBe(false);
       const w = await waitMarkProblems(page);
       expect(w.marks).toBeGreaterThan(0);
-      expect([w.overlap, w.onHub, w.onSeat, w.outside]).toEqual([0, 0, 0, 0]);
+      expect([w.overlap, w.onHub, w.onSeat, w.onName, w.outside]).toEqual([0, 0, 0, 0, 0]);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

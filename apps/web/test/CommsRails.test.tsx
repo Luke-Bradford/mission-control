@@ -205,9 +205,9 @@ it("sends a dot along the link for each new message, and none under reduced moti
   expect(document.querySelector(".comms-edge.live")).not.toBeNull();
 });
 
-it("keeps each node at its layout position while the graph drifts as a group", () => {
+it("keeps each node at its layout position, with nothing animating the whole graph", () => {
   view(3);
-  expect(document.querySelector(".comms-organic-layout")).toBeTruthy();
+  expect(document.querySelector("animateTransform")).toBeNull();
   expect(document.querySelector(".comms-node")?.getAttribute("transform")).toMatch(/^translate\(/);
 });
 
@@ -350,4 +350,49 @@ it("has no play control and no timeline", () => {
   expect(screen.queryByRole("button", { name: /^(play|pause|resume|replay)\b/i })).toBeNull();
   expect(screen.queryByRole("slider")).toBeNull();
   expect(document.querySelector("[class*=timeline], [class*=scrub]")).toBeNull();
+});
+
+it("starts each light on the overlay's current clock, not at zero, so a late message still moves", () => {
+  const proto = SVGSVGElement.prototype as unknown as { getCurrentTime?: () => number };
+  proto.getCurrentTime = () => 42;
+  try {
+    const v = view(3);
+    v.rerender(
+      <CommsRails
+        {...v.props}
+        flows={{ generation: 1, list: [{ from: "dev-1", to: "dev-2", n: 2 }] }}
+      />,
+    );
+    const begins = [...document.querySelectorAll(".comms-particle animateMotion")].map((a) =>
+      a.getAttribute("begin"),
+    );
+    expect(begins).toEqual(["42s", "42.2s"]);
+  } finally {
+    proto.getCurrentTime = undefined;
+  }
+});
+
+it("keeps every name clear of every other name, hub pill and wait mark", () => {
+  const { seats } = crew(9);
+  const waiting = {
+    n: 1,
+    ms: 5 * 60_000,
+    asker: "dev-1",
+    owed: "dev-2",
+    question: null,
+  };
+  view(9, {
+    edges: [edge("dev-1", "dev-2", { waiting }), edge("dev-3", "flight-1")],
+  });
+  expect(document.querySelectorAll(".comms-node-name")).toHaveLength(seats.length);
+  const pos = (id: string) =>
+    /translate\(([\d.]+) ([\d.]+)\)/.exec(
+      document.querySelector(`.comms-node[data-id="${id}"]`)?.getAttribute("transform") ?? "",
+    );
+  const pts = seats
+    .filter((s) => !s.hub)
+    .map((s) => ({ x: Number(pos(s.id)?.[1]), y: Number(pos(s.id)?.[2]) }));
+  for (const [i, a] of pts.entries())
+    for (const b of pts.slice(i + 1))
+      expect(Math.abs(a.x - b.x) >= 60 || Math.abs(a.y - b.y) >= 20).toBe(true);
 });

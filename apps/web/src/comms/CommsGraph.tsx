@@ -7,7 +7,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { type CommsView, navigate } from "../router.ts";
 import { type ChartMode, ChartModeSwitch, CommsRails } from "./CommsRails.tsx";
 import { chartHref, commsHrefFor, useChartFilter } from "./chartPaths.ts";
-import { useReducedMotion } from "./chartTypes.ts";
+import { useReducedMotion, waitWord } from "./chartTypes.ts";
 import { type ChartFilter, pairFilter } from "./commsFilter.ts";
 import { useChartData } from "./useChartData.ts";
 
@@ -194,6 +194,7 @@ export function SignalLists({
   pick: (filter: ChartFilter) => void;
   className?: string;
 }) {
+  const nameOf = (id: string) => chart.seats.find((seat) => seat.id === id)?.name ?? id;
   return (
     <div className={`comms-signal-lists ${className}`.trim()}>
       <MessageList
@@ -205,7 +206,7 @@ export function SignalLists({
           .sort((a, b) => (b.waiting?.ms ?? 0) - (a.waiting?.ms ?? 0))
           .map((edge) => ({
             key: edge.key,
-            label: `${edge.waiting?.asker} → ${edge.waiting?.owed ?? (edge.waiting?.asker === edge.a ? edge.b : edge.a)}`,
+            label: `${nameOf(edge.waiting?.asker ?? edge.a)} → ${nameOf(edge.waiting?.owed ?? (edge.waiting?.asker === edge.a ? edge.b : edge.a))}`,
             age: edge.waiting?.ms ?? 0,
             text: edge.waiting?.question ?? "Reply requested",
             onClick: () => pick(pairFilter(edge.a, edge.b)),
@@ -216,7 +217,7 @@ export function SignalLists({
         empty="No direct messages yet."
         rows={chart.feed.slice(0, 5).map((message) => ({
           key: message.id,
-          label: `${message.from} → ${message.to}`,
+          label: `${nameOf(message.from)} → ${nameOf(message.to)}`,
           text: message.text.split(/\r?\n/, 1)[0] || "Message",
           onClick: () => pick(pairFilter(message.from, message.to)),
         }))}
@@ -250,7 +251,7 @@ export function MessageList({
               <button type="button" onClick={row.onClick}>
                 <b>{row.label}</b>
                 <span>{row.text}</span>
-                {row.age !== undefined && <em>{Math.floor(row.age / 60_000)}m</em>}
+                {row.age !== undefined && <em>{waitWord(row.age)}</em>}
               </button>
             </li>
           ))}

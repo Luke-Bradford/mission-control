@@ -23,25 +23,6 @@
   display: block;
   overflow: visible;
 }
-/* A brief periodic nudge keeps the network alive without a permanent animation loop. Hovering or
-   focusing the graph pauses it before an interaction, and browsers pause it for hidden tabs. */
-.comms-organic-layout {
-  animation: comms-idle-drift 16s ease-in-out infinite;
-}
-.comms-rails:hover .comms-organic-layout,
-.comms-rails:focus-within .comms-organic-layout {
-  animation-play-state: paused;
-}
-@keyframes comms-idle-drift {
-  0%,
-  88%,
-  100% {
-    transform: translate(0, 0);
-  }
-  94% {
-    transform: translate(2px, -2px);
-  }
-}
 /* Own compositor layer: the dots animate every frame and must not repaint the links and seats. */
 .comms-rails-overlay {
   position: absolute;
@@ -164,9 +145,6 @@
   pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) {
-  .comms-organic-layout {
-    animation: none;
-  }
   .comms-particle {
     display: none;
   }
