@@ -13,7 +13,7 @@ import {
   resolvedCommsReason,
   sendComms,
   threadMessages,
-} from "../src/comms.ts";
+} from "../src/comms/index.ts";
 import { Store } from "../src/store.ts";
 import * as stream from "../src/stream.ts";
 
