@@ -32,7 +32,7 @@ Read this when a seat is free, before you start or promote a ticket, or when a c
 
 - `mc edit_card` sets fields and settles lane conflicts.
 - `mc set_fields` sets priority, size, labels and milestone. Keep exactly one `area:` label; lane changes use `edit_card`.
-  - It can also move a card to Blocked, for a ticket that waits on something outside this repo. You can't move it back.
+  - It can also move a card to Blocked, for a ticket that waits on something outside this repo, and back to Backlog (only from Blocked) once it no longer waits. From Backlog, `mc promote` moves it to Ready.
   - It refuses draft workspaces, closed tickets and tickets with a live run.
 - `mc edit_issue` sets a ticket's title or whole body. It refuses a ticket with a live run, and changes to its Controller check section.
 - Prefer asking the planner (`mc comment_ticket`) to change a started ticket's body.

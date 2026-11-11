@@ -56,7 +56,6 @@ describe("App", () => {
     ["/flight", "Flight"],
     ["/board", "Board"],
     ["/agent", "Agents"],
-    ["/map/sample", "Crew activity map"],
     ["/comms", "Comms"],
     ["/telemetry", "Telemetry"],
     ["/audit", "Audit"],
@@ -97,7 +96,6 @@ describe("App", () => {
     ["/flight", "page-flight", "Flight"],
     ["/board", "page-board", "Board"],
     ["/agent", "page-agent", "Agents"],
-    ["/map/sample", "page-map", "Map"],
     ["/comms", "page-comms", "Comms"],
     ["/telemetry", "page-telemetry", "Telemetry"],
     ["/audit", "page-audit", "Audit"],
@@ -173,24 +171,6 @@ describe("App", () => {
     );
   });
 
-  it("keeps Map navigation and its site-wide FLIGHT rail separate", async () => {
-    act(() => toggleDock(true));
-    const { container } = at("/");
-    act(() => {
-      fireEvent.keyDown(document.body, { key: "g" });
-      fireEvent.keyDown(document.body, { key: "m" });
-    });
-    expect(window.location.pathname).toMatch(/^\/map/);
-    await waitFor(() => expect(container.querySelector("#page-map")).not.toBeNull());
-    expect(container.querySelector(".shell.shell-full")).toBeNull();
-    expect(container.querySelector(".dock")).not.toBeNull();
-    act(() => {
-      fireEvent.keyDown(document.body, { key: "f" });
-    });
-    expect(window.location.pathname).toMatch(/^\/map/);
-    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(false);
-  });
-
   it("starts the dock collapsed on the Board and expands it on click", async () => {
     sessionStorage.removeItem("mc-dock-collapsed");
     act(() => toggleDock(true));
@@ -225,7 +205,7 @@ describe("App", () => {
   it("the footer carries the key hints, Setup included, and no sample-data chip", () => {
     const { container } = at("/");
     const keys = container.querySelector(".keys");
-    expect(keys?.textContent).toContain("g then o f b a m c t pages");
+    expect(keys?.textContent).toContain("g then o f b a c t pages");
     expect(keys?.textContent).toContain("s Setup");
     for (const hint of ["f FLIGHT", "jk next agent", "/ message agent", "i interrupt", "? help"]) {
       expect(keys?.textContent).toContain(hint);

@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { ImpactLens, prSeats } from "../lenses/lenses.tsx";
-import { useGraphSnapshot } from "../map/useGraphSnapshot.ts";
+import { useRepoGraph } from "./useRepoGraph.ts";
 
 /**
  * What a PR's changes reach through imports. The repo map is read only once the operator asks, and
@@ -12,7 +12,7 @@ import { useGraphSnapshot } from "../map/useGraphSnapshot.ts";
 export function PrImpact({ pr }: { pr: PullRequestView }) {
   const [asked, setAsked] = useState(false);
   const [focus, setFocus] = useState<string | null>(null);
-  const map = useGraphSnapshot(asked ? pr.repoId : null);
+  const map = useRepoGraph(asked ? pr.repoId : null);
   const crew = useResource<Crew>(asked ? RESOURCES.crew : null).data;
   const names = useMemo(
     () => Object.fromEntries((crew?.rows ?? []).map((row) => [row.id, callSign(row)])),

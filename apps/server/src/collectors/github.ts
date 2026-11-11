@@ -45,7 +45,7 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { observeFlightChecks, observeFlightMain } from "../flight/signals.ts";
-import { singleSelectField } from "../github-fields.ts";
+import { singleSelectField } from "../github/fields.ts";
 import { prototypeLinkProblem } from "../prototype-links.ts";
 import { hasQuestionFence, parseAutonomyQuestion } from "../sd32.ts";
 import type { Store } from "../store.ts";

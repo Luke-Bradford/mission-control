@@ -363,6 +363,7 @@ describe("Needs you page", () => {
     const row = await screen.findByTestId("not-triaging");
     expect(within(row).getByText("GUIDO-1 asks: Which lane?")).toBeTruthy();
     expect(within(row).getByRole("button", { name: "Hide them" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Clear" })).toBeTruthy();
     // the band names FLIGHT; the row does not repeat it
     expect(within(row).queryByText("FLIGHT")).toBeNull();
   });
@@ -649,6 +650,43 @@ const bodies = (fn: ReturnType<typeof stubFetch>, path: string) =>
     .map(([, init]) => JSON.parse(String(init?.body)));
 
 describe("actions on the page", () => {
+  it("clears an item, removes it from Needs you, and records the closure", async () => {
+    let cleared = false;
+    const fn = routes(() => ({ status: 200, body: cleared ? [] : [ask("q1")] }), {
+      "/api/attention/answered": () => ({
+        status: 200,
+        body: cleared
+          ? [
+              {
+                key: "q1",
+                askAt: NOW - HOUR,
+                kind: "cleared",
+                reason: "Cleared by you",
+                by: "operator",
+                question: "Question q1",
+                ticket: null,
+                operator: true,
+                at: NOW,
+              },
+            ]
+          : [],
+      }),
+      "POST /api/attention/q1/clear": () => {
+        cleared = true;
+        return { status: 200, body: { cleared: "q1" } };
+      },
+    });
+    render(<Needs item="q1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Clear" }));
+
+    await waitFor(() => expect(bodies(fn, "/api/attention/q1/clear")).toEqual([{}]));
+    expect(await screen.findByText("This item is no longer open.")).toBeTruthy();
+    const answered = screen.getByRole("region", { name: "Answered · 1" });
+    fireEvent.click(within(answered).getByText("Answered · 1"));
+    expect(within(answered).getByText("Cleared by you")).toBeTruthy();
+  });
+
   it("shows only offered Not now and Drop actions, and posts their matching routes", async () => {
     const fn = routes([ask("q1", { offers: ["not-now", "drop"] }), ask("q2")], {
       "POST /api/attention/q1/not-now": { ok: true },
@@ -664,6 +702,21 @@ describe("actions on the page", () => {
     expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Drop" })).toBeNull();
     expect(bodies(fn, "/api/attention/q1/drop")).toEqual([{}]);
+  });
+
+  it.each([
+    [404, "That item is no longer waiting."],
+    [409, "Use Lift to release the runaway flag."],
+  ])("shows a Clear refusal from the server (%i)", async (status, reason) => {
+    routes([ask("q1")], {
+      "POST /api/attention/q1/clear": () => ({ status, body: { error: reason } }),
+    });
+    render(<Needs item="q1" />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Clear" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(reason);
+    expect(screen.getByRole("button", { name: "Clear" })).toBeTruthy();
   });
 
   it.each([

@@ -64,9 +64,8 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { budgetBrake } from "../src/budget-brake.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { flightQuestion } from "../src/comms.ts";
+import { flightQuestion } from "../src/comms/index.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as retrospective from "../src/flight/retrospective.ts";
@@ -84,6 +83,7 @@ import {
   deliveredFacts,
   flightOwnSeatIds,
   flightSeat,
+  flightSeatView,
   flightState,
   flightView,
   flightWake,
@@ -106,6 +106,7 @@ import { attentionItems } from "../src/hud.ts";
 import { closeSettledQuestions } from "../src/question-watch.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
+import { budgetBrake } from "../src/spend/budget-brake.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 
@@ -323,6 +324,98 @@ afterEach(() => {
   watch.stop();
   vi.useRealTimers();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("FLIGHT seat projection", () => {
+  it("keeps the full view's seat across watch and session lifecycle states", () => {
+    const flight = (cfg: CcConfig) => {
+      const entry = cfg.crew?.sessions[0]?.seats.find((candidate) => candidate.id === "flight-1");
+      if (entry === undefined) throw new Error("missing FLIGHT seat");
+      return entry;
+    };
+    const expected = (state: SeatSessionRow["state"] | null, live: boolean) => ({
+      id: "flight-1",
+      call: "FLIGHT-1",
+      model: "opus",
+      state,
+      live,
+      turns: state === null ? null : { n: 1, max: FLIGHT_MAX_WAKES + 1 },
+      context:
+        state === null
+          ? null
+          : { tokens: null, rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS, text: null },
+    });
+    const check = (want: ReturnType<typeof expected>) => {
+      expect(flightSeatView(config, store, () => alive)).toEqual(want);
+      expect(flightView(config, store, nowMs, () => alive).seat).toEqual(want);
+    };
+
+    check(expected(null, false));
+    live("flight-1", "r-flight");
+    alive = true;
+    check(expected("idle", true));
+    store.setSeatSession(row("flight-1", "r-flight", "stopped"));
+    check(expected("stopped", false));
+    store.setSeatSession(row("flight-1", "r-flight", "parked"));
+    check(expected("parked", false));
+    store.upsertRun(run("r-flight", "flight-1", { endedAt: nowMs, status: "ok" }));
+    store.setSeatSession(row("flight-1", "r-flight", "idle"));
+    check(expected("idle", false));
+    store.upsertRun(run("r-flight", "flight-1"));
+    alive = null;
+    check(expected("idle", true));
+
+    const noWatch = structuredClone(config);
+    flight(noWatch).retiring = true;
+    expect(flightSeatView(noWatch, store, () => alive)).toBeNull();
+    expect(flightView(noWatch, store, nowMs, () => alive).seat).toBeNull();
+
+    const unavailable = structuredClone(config);
+    Object.assign(flight(unavailable), {
+      modelVendor: "codex" as const,
+      model: "unknown",
+    });
+    expect(flightSeatView(unavailable, store, () => alive)).toBeNull();
+    expect(flightView(unavailable, store, nowMs, () => alive).seat).toBeNull();
+
+    const replacement = structuredClone(config);
+    flight(replacement).retiring = true;
+    const seats = replacement.crew?.sessions[0]?.seats;
+    if (seats === undefined) throw new Error("missing crew session");
+    seats.push(seat("flight-2", "FLIGHT"));
+    const replacementSeat = {
+      id: "flight-2",
+      call: "FLIGHT-2",
+      model: "opus",
+      state: null,
+      live: false,
+      turns: null,
+      context: null,
+    };
+    expect(flightSeatView(replacement, store, () => alive)).toEqual(replacementSeat);
+    expect(flightView(replacement, store, nowMs, () => alive).seat).toEqual(replacementSeat);
+  });
+
+  it("does not read decision, wake-cost, wait-chain, or prompt history", () => {
+    live("flight-1", "r-flight");
+    vi.spyOn(store, "flightDecisions").mockImplementation(() => {
+      throw new Error("decision history read");
+    });
+    vi.spyOn(store, "agentPromptWakes").mockImplementation(() => {
+      throw new Error("prompt history read");
+    });
+    vi.spyOn(store, "runsOverlapping").mockImplementation(() => {
+      throw new Error("wake cost read");
+    });
+    vi.spyOn(store, "commsTo").mockImplementation(() => {
+      throw new Error("wait-chain read");
+    });
+
+    expect(flightSeatView(config, store, () => true)).toMatchObject({
+      id: "flight-1",
+      live: true,
+    });
+  });
 });
 
 it("keeps an older unanswered discussion visible and waking after 101 newer answered threads", () => {

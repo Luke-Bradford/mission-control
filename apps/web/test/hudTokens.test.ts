@@ -185,8 +185,6 @@ describe("readable content is at least 12px", () => {
     ["flight/flight.css", ".wif-checkpoint"],
     ["lenses/lenses.css", ".map-lens"],
     ["lenses/lenses.css", ".map-conflict-detail"],
-    ["map/map.css", ".map-results"],
-    ["map/map.css", ".map-results button"],
     ["components/config/Glossary.css", ".gloss code"],
   ] as const;
 

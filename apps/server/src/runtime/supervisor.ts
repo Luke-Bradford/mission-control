@@ -131,14 +131,13 @@ import {
   watchStartRefusedText,
   wrapExternalText,
 } from "@mc/core";
-import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
+import { accountBindingProblem, codexProfile } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
-import { boundBriefGuard, boundBriefIdentity } from "../brief-dispatch-context.ts";
-import { budgetBrake } from "../budget-brake.ts";
+import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
-import type { CliHold } from "../cli-update.ts";
-import { probeClaudeVersion } from "../cli-version.ts";
+import type { CliHold } from "../cli/update.ts";
+import { probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import {
   applySeatAccount,
@@ -156,7 +155,6 @@ import { waitReader } from "../dependencies.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
-import { type ExternalReviewSubject, isExternalReview } from "../external-reviews.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
@@ -166,11 +164,11 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
-import { openOlderFindings } from "../older-findings.ts";
 import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
+import type { ReviewPreviews } from "../preview/review.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -179,7 +177,8 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
-import type { ReviewPreviews } from "../review-preview.ts";
+import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
+import { openOlderFindings } from "../review/older-findings.ts";
 import {
   enrichHandoff,
   handoffForBrief,
@@ -187,10 +186,10 @@ import {
   inheritedHandoffLoop,
   publicHandoff,
   recordRunHandoff,
-} from "../run-handoffs.ts";
+} from "../run/handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import {
-  ACTIVE_SEAT_STATES,
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
@@ -203,9 +202,8 @@ import {
   crewSkillsDir,
   crewTokenPath,
   crewTranscriptPath,
-  type KeeperCursor,
-  type Store,
-} from "../store.ts";
+} from "../store/crew-paths.ts";
+import { ACTIVE_SEAT_STATES, type KeeperCursor, type Store } from "../store.ts";
 import {
   AGENTS_MD_HEADING,
   BRIEF_DECISIONS_MAX,

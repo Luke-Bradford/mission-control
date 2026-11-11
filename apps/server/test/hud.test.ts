@@ -35,8 +35,8 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLI_AUTO_NOTE_PREFIX } from "../src/cli-auto.ts";
-import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli-update.ts";
+import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
+import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {
@@ -51,7 +51,7 @@ import {
   NO_LOCK,
   pinned,
 } from "../src/hud.ts";
-import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instruction-notices.ts";
+import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";

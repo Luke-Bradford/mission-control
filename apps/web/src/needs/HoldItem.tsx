@@ -9,27 +9,35 @@ const ACTION_LABEL: Record<NeedsYouOffer, string> = {
   drop: "Drop",
 };
 
+type AttentionAction = NeedsYouOffer | "clear";
+
 const actionPath = (offer: NeedsYouOffer, key: string): string =>
   offer === "not-now" ? ACTIONS.notNow(key) : ACTIONS.drop(key);
 
+const pathFor = (action: AttentionAction, key: string): string =>
+  action === "clear" ? ACTIONS.clear(key) : actionPath(action, key);
+
+const labelFor = (action: AttentionAction): string =>
+  action === "clear" ? "Clear" : ACTION_LABEL[action];
+
 /** Set aside or close only the actions the server has offered for this open question. */
 export function HoldItem({ item }: { item: AttentionItem }) {
-  const [busy, setBusy] = useState<NeedsYouOffer | null>(null);
+  const [busy, setBusy] = useState<AttentionAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const offers = item.offers ?? [];
-  if (offers.length === 0) return null;
-  const act = async (offer: NeedsYouOffer) => {
-    setBusy(offer);
+  const actions: readonly AttentionAction[] = [...offers, "clear"];
+  const act = async (action: AttentionAction) => {
+    setBusy(action);
     setError(null);
     try {
-      await apiPost(actionPath(offer, item.key), {});
+      await apiPost(pathFor(action, item.key), {});
       hub.refetch(RESOURCES.attention.path);
       hub.refetch(RESOURCES.answeredAttention.path);
     } catch (e) {
       setError(
-        e instanceof ApiError && [409, 422, 502].includes(e.status)
+        e instanceof ApiError && [404, 409, 422, 502].includes(e.status)
           ? e.message
-          : writeFailure(e, `Could not ${ACTION_LABEL[offer].toLowerCase()} this item.`),
+          : writeFailure(e, `Could not ${labelFor(action).toLowerCase()} this item.`),
       );
     } finally {
       setBusy(null);
@@ -37,15 +45,15 @@ export function HoldItem({ item }: { item: AttentionItem }) {
   };
   return (
     <div className="needs-actions">
-      {offers.map((offer) => (
+      {actions.map((action) => (
         <button
           type="button"
           className="sm"
           disabled={busy !== null}
-          key={offer}
-          onClick={() => void act(offer)}
+          key={action}
+          onClick={() => void act(action)}
         >
-          {ACTION_LABEL[offer]}
+          {labelFor(action)}
         </button>
       ))}
       {error && (

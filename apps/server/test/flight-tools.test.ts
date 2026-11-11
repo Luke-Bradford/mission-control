@@ -144,7 +144,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { evaluateHolds, holds } from "../src/attention-holds.ts";
+import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
@@ -170,13 +170,13 @@ import {
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import type { Move, MoveResult } from "../src/github-board.ts";
+import type { Move, MoveResult } from "../src/github/board.ts";
 import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run-handoffs.ts";
+import { recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -10009,10 +10009,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(await call("edit_issue", { issue: 7, body: kept })).toHaveProperty("isError", true);
       expect(ghCalls).toEqual([]);
     });
-    it("set_fields leaves Ready and Backlog to promote, and keeps one area label", async () => {
+    it("set_fields leaves Ready to promote, and keeps one area label", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog"])
-        expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
+      expect(await call("set_fields", { issue: 7, status: "Ready" })).toHaveProperty(
+        "isError",
+        true,
+      );
       liveLabels = ["lane:home", "area:server"];
       expect(
         await call("set_fields", { issue: 7, labels: ["lane:home", "area:server", "area:web"] }),
@@ -10021,6 +10023,24 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         "isError",
         true,
       );
+      expect(moveCalls).toEqual([]);
+      expect(ghCalls).toEqual([]);
+    });
+    it("set_fields takes a Blocked card back to Backlog, so promote can reach it", async () => {
+      readImpl = (n) => card(n, { labels: liveLabels, status: "Blocked" });
+      board(card(7, { status: "Blocked" }));
+      expect((await call("set_fields", { issue: 7, status: "Backlog" })).isError).toBeUndefined();
+      expect(moveCalls.at(-1)).toMatchObject({ issue: 7, column: "Backlog" });
+    });
+    it("set_fields moves no card to Backlog from outside Blocked", async () => {
+      for (const status of ["Ready", "In progress", "In review", "Done"]) {
+        readImpl = (n) => card(n, { labels: liveLabels, status });
+        // the store says Blocked: only the live card counts
+        board(card(7, { status: "Blocked" }));
+        const r = await call("set_fields", { issue: 7, status: "Backlog", size: "S" });
+        expect(r.isError).toBe(true);
+        expect(r.text).toContain("not in Blocked");
+      }
       expect(moveCalls).toEqual([]);
       expect(ghCalls).toEqual([]);
     });
@@ -10173,9 +10193,9 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         labels: ["lane:home", "legacy-odd", "area:server", "bug"],
       });
     });
-    it("set_fields moves a card only to Blocked", async () => {
+    it("set_fields moves a card only to Blocked or back to Backlog", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog", "Refinement", "In progress", "Done"])
+      for (const status of ["Ready", "Refinement", "In progress", "Done"])
         expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
       expect(moveCalls).toEqual([]);
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();

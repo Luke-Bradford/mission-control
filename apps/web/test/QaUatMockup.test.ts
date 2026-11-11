@@ -59,7 +59,7 @@ describe("QA UAT mockup", () => {
     );
     expect(buttons).toEqual(["Accept", "Send back…"]);
     expect(document.querySelector("#q")).not.toBeNull();
-    expect(document.body.textContent).toContain("Open in Map, focused on these 5 files");
+    expect(document.body.textContent).toContain("Open code risk in Audit");
   });
 
   it.each(["queue", "nocapture", "loading", "empty", "error", "stale", "disconnected"])(

@@ -1,9 +1,0 @@
-Pan predicate did not settle; recording actual bounds
-file://[controller]/supplement-overview-1360-pan-diagnostic.ts:24
-   if(!facts.focus||!facts.lastColumnVisible||!facts.paintVisible)throw Error('Allowance last column not visibly accessible');
-                                                                        ^
-
-Error: Allowance last column not visibly accessible
-    at file://[controller]/supplement-overview-1360-pan-diagnostic.ts:24:73
-
-Node.js v25.9.0

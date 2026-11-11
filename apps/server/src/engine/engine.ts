@@ -1,4 +1,4 @@
-import { checkBriefDispatch, withoutBriefDispatch } from "../brief-dispatch-context.ts";
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief/dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -152,15 +152,13 @@ import {
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
-import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
-import { type ExternalReviews, isExternalReview } from "../external-reviews.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
-import type { Move, MoveResult } from "../github-board.ts";
+import type { Move, MoveResult } from "../github/board.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
@@ -168,7 +166,9 @@ import {
 } from "../machine-capacity.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
+import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import type { Store } from "../store.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";

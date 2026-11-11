@@ -10,7 +10,7 @@ import {
 } from "@mc/core";
 import { observedWaitSince, readWaitRecord } from "./dependencies.ts";
 import { externalMergeHold, externalPrControl } from "./external-pr-control.ts";
-import { prFlow } from "./pr-flow.ts";
+import { prFlow } from "./pr/flow.ts";
 import type { Store } from "./store.ts";
 
 const WEEK = 7 * 24 * 60 * 60_000;
