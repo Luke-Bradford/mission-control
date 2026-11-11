@@ -188,7 +188,6 @@ import {
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
-import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
@@ -283,7 +282,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -389,7 +387,8 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { reviewCheckFor } from "./review-check.ts";
+import { reviewCheckFor } from "./review/check.ts";
+import { branchOwned, readExternalSubject } from "./review/external.ts";
 import { publicHandoff } from "./run-handoffs.ts";
 import {
   adminDirOf,
@@ -410,6 +409,7 @@ import {
   runUsage,
   runView,
 } from "./runview.ts";
+import { weeklyProjection } from "./spend/budget-brake.ts";
 import { registerInstructionRoutes } from "./standing-instructions-api.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";

@@ -1,6 +1,6 @@
 import type { ReviewRow, StoredFinding } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { openOlderFindings } from "../src/older-findings.ts";
+import { openOlderFindings } from "../src/review/older-findings.ts";
 
 const review = (
   id: number,

@@ -64,7 +64,6 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { budgetBrake } from "../src/budget-brake.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms/index.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
@@ -107,6 +106,7 @@ import { attentionItems } from "../src/hud.ts";
 import { closeSettledQuestions } from "../src/question-watch.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
+import { budgetBrake } from "../src/spend/budget-brake.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 
