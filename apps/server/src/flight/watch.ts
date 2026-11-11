@@ -49,7 +49,7 @@ import {
   wakeKey,
   wakeLine,
 } from "@mc/core";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";

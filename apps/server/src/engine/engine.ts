@@ -152,7 +152,7 @@ import {
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";

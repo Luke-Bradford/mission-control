@@ -167,7 +167,11 @@ import Fastify, {
   LogController,
 } from "fastify";
 import { z } from "zod";
-import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
+import {
+  type AccountModels,
+  discoverAccountModels,
+  readAccountStatus,
+} from "./accounts/accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {

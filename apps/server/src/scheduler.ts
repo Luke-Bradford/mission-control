@@ -28,7 +28,7 @@ import {
   type UsageSample,
   usageCollector,
 } from "@mc/core";
-import { codexProfile } from "./account-bindings.ts";
+import { codexProfile } from "./accounts/bindings.ts";
 import { evaluateHolds } from "./attention/holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";

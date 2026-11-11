@@ -9564,7 +9564,7 @@ describe("QA board data", () => {
 });
 
 // Status transport is exercised with fake CLIs in accounts.test.ts, never the machine's login.
-vi.mock("../src/accounts.ts", () => ({
+vi.mock("../src/accounts/accounts.ts", () => ({
   readAccountStatus: async (account: { id: string; vendor: string }, now: number) => ({
     accountId: account.id,
     provider: account.vendor,

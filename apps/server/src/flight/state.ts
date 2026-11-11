@@ -97,7 +97,7 @@ import {
   WAITING_OPERATOR_LABEL,
   wakeKeyPrefix,
 } from "@mc/core";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms/index.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";

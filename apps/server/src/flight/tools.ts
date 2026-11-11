@@ -318,7 +318,7 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,

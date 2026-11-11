@@ -131,7 +131,7 @@ import {
   watchStartRefusedText,
   wrapExternalText,
 } from "@mc/core";
-import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
+import { accountBindingProblem, codexProfile } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import type { ChangeBus } from "../bus.ts";
