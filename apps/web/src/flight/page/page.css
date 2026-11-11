@@ -181,7 +181,12 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 4fr);
-  grid-template-rows: minmax(0, 1fr);
+  /* The row holding Doing now and Blockers keeps its heading, column head and two blocker rows
+     whatever the Watch list below it asks for. */
+  grid-template-rows: minmax(
+      calc(var(--fp-row) + var(--sp-6) + var(--sp-6) * 2 + var(--sp-5) * 2),
+      1fr
+    );
   gap: var(--sp-3);
 }
 .fp-self-start {
@@ -200,6 +205,9 @@
   }
   .fp-watch {
     grid-column: 1 / -1;
+    /* Its heading and three rows; more scroll inside, so it gives way before the blockers do. */
+    max-height: calc(var(--fp-row) * 4);
+    overflow: auto;
   }
 }
 @media (max-height: 800px) {

@@ -272,7 +272,24 @@ describeRendered("FLIGHT page in a browser", () => {
               a.top >= b.top - 1 &&
               a.bottom <= b.bottom + 1 &&
               a.right <= b.right + 1;
+            const edge = box(document.querySelector(".fp-brows"));
+            const rows = [...document.querySelectorAll("#blockers .fp-brow")].map((row) =>
+              row.getBoundingClientRect(),
+            );
+            const whole = rows.filter(
+              (b) => edge !== null && b.top >= edge.top - 1 && b.bottom <= edge.bottom + 1,
+            ).length;
+            const line = box(document.querySelector("#doing li"));
+            const doing = box(document.getElementById("doingP"));
+            const watch = box(document.getElementById("heldWatchP"));
             return {
+              whole,
+              doingLine:
+                line !== null &&
+                doing !== null &&
+                line.top >= doing.top &&
+                line.bottom <= doing.bottom + 1 &&
+                (watch === null || line.bottom <= watch.top + 1),
               stripInViewport:
                 strip !== null && strip.top >= 0 && strip.bottom <= window.innerHeight,
               metaInStrip: inside(meta, strip),
@@ -280,6 +297,8 @@ describeRendered("FLIGHT page in a browser", () => {
               height: strip?.height ?? 0,
             };
           }, null);
+          expect(r.whole, "blocker rows wholly in view").toBeGreaterThanOrEqual(2);
+          expect(r.doingLine, "Doing now's first line is whole, above the Watch list").toBe(true);
           expect(r.stripInViewport).toBe(true);
           expect(r.metaInStrip).toBe(true);
           expect(r.endInStrip).toBe(true);
