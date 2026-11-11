@@ -158,7 +158,7 @@ import {
 import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
-import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
+import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
 import {
   flightBriefView,
   flightState,
@@ -3686,6 +3686,52 @@ describe("flight_state", () => {
       string
     >;
     expect(Object.keys(seen)).toEqual([`ask:${id}`]);
+  });
+
+  describe("500 expired waits (#1632)", () => {
+    const waits = async (args: Record<string, unknown>) => {
+      for (let i = 0; i < 500; i++)
+        recordFlightWait(store, `mc#${1000 + i}`, {
+          on: "a long wait",
+          until: NOW - 3 * 24 * 60 * 60_000,
+          at: NOW - 4 * 24 * 60 * 60_000,
+        });
+      const read = JSON.parse((await call("flight_state", args)).text) as {
+        signals: { kind: string; evidence: string }[];
+      };
+      return read.signals.filter((s) => s.kind === "wait_over");
+    };
+
+    it("fold into one summary line with the count", async () => {
+      const over = await waits({});
+      expect(over).toHaveLength(1);
+      expect(over[0]?.evidence).toContain("500 expired waits");
+      expect(JSON.stringify(over).length).toBeLessThan(1000);
+    });
+
+    it("keep a wait that ended an hour ago listed on every read", async () => {
+      recordFlightWait(store, "mc#77", {
+        on: "PR 77 to merge",
+        until: NOW - 3_600_000,
+        at: NOW - 7_200_000,
+      });
+      const keys = async () =>
+        (
+          JSON.parse((await call("flight_state", {})).text) as {
+            signals: { kind: string; key: string }[];
+          }
+        ).signals
+          .filter((s) => s.kind === "wait_over")
+          .map((s) => s.key);
+      await keys();
+      const second = await keys();
+      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
+      expect(second).not.toContain("expired");
+    });
+
+    it("are all listed with full: true", async () => {
+      expect(await waits({ full: true })).toHaveLength(500);
+    });
   });
 
   it("exposes the hub's away bug decision key only for the current head", async () => {
