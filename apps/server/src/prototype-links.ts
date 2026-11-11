@@ -26,10 +26,8 @@ function inPrototypeDirectory(link: string, github: string | undefined): boolean
     const [owner, repo, ...rest] = url.pathname.split("/").slice(1);
     if (`${owner}/${repo}`.toLowerCase() !== github.toLowerCase()) return false;
     const route = rest.join("/");
-    if (url.hostname === "github.com")
-      return GITHUB_BLOB.test(route);
-    if (url.hostname === "raw.githubusercontent.com")
-      return RAW_FILE.test(route);
+    if (url.hostname === "github.com") return GITHUB_BLOB.test(route);
+    if (url.hostname === "raw.githubusercontent.com") return RAW_FILE.test(route);
     return false;
   } catch {
     return false;
