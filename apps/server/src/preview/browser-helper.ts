@@ -4,7 +4,7 @@ import {
   type PreviewHelperReply,
   previewRequest,
   runPreviewBrowser,
-} from "./preview-browser.ts";
+} from "./browser.ts";
 
 process.once("message", async (message: PreviewHelperJob) => {
   let reply: PreviewHelperReply;

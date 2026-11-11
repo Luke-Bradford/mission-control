@@ -331,7 +331,7 @@ import {
   seatQuestionTriage,
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
-import { loopTries } from "./loophistory.ts";
+import { loopTries } from "./loop/history.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
@@ -367,7 +367,11 @@ import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prAcceptanceFor, prUat } from "./pr-uat.ts";
-import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
+import {
+  PREVIEW_ACTIVITY_HEADER,
+  PreviewHubError,
+  type PreviewManager,
+} from "./preview/previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
@@ -418,7 +422,7 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
-import { tokenAuditView } from "./token-audit-view.ts";
+import { tokenAuditView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";

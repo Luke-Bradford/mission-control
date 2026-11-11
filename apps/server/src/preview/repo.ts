@@ -1,7 +1,7 @@
 /** Select only the running hub's repository for branch previews, including separate crew clones. */
 import { execFile } from "node:child_process";
 import type { RepoId } from "@mc/core";
-import type { CcConfig, CrewSessionConfig } from "./config.ts";
+import type { CcConfig, CrewSessionConfig } from "../config.ts";
 
 const READ_ORIGIN_MS = 5_000;
 

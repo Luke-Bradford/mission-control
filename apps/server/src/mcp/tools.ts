@@ -223,7 +223,7 @@ import {
   type PreviewJob,
   type PreviewResult,
   previewRequest,
-} from "../preview-browser.ts";
+} from "../preview/browser.ts";
 import type { ProfilesError } from "../profiles.ts";
 import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
 import {
