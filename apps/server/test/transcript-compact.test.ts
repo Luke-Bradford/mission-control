@@ -15,11 +15,6 @@ import { join } from "node:path";
 import type { Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  compactTranscriptFile,
-  compactTranscripts,
-  compactTranscriptText,
-} from "../src/compact-transcripts.ts";
-import {
   compactTranscriptLine,
   DELTA_HEARTBEAT_MS,
   deltaHeartbeats,
@@ -28,6 +23,11 @@ import {
 import { crewKeeperDir } from "../src/store/crew-paths.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
+import {
+  compactTranscriptFile,
+  compactTranscripts,
+  compactTranscriptText,
+} from "../src/transcript/compact-transcripts.ts";
 
 const MB = 1024 * 1024;
 const codexDone = (out: string) =>
