@@ -71,4 +71,35 @@ describe("trimMain", () => {
     expect(trimMain(post({}), dir)).toBe("");
     expect(readFileSync(target, "utf8")).toBe("keep");
   });
+
+  describe("large shell results (#1642)", () => {
+    const bash = (over: Record<string, unknown>) => post({ tool_name: "Bash", ...over });
+
+    it("a large successful Bash result returns bounded text and keeps the whole result, flags included", () => {
+      const stdout = `${"match: line\n".repeat(20_000)}done\n`;
+      const response = { stdout, stderr: "", interrupted: false, isImage: false };
+      const out = JSON.parse(trimMain(bash({ tool_response: response }), dir));
+      const shown = out.hookSpecificOutput.updatedToolOutput as typeof response;
+      const file = join(dir, "toolu_1.txt");
+      expect(shown.stdout.length).toBeLessThan(TOOL_TRIM_HEAD + TOOL_TRIM_TAIL + 400);
+      expect(shown.stdout).toContain(file);
+      expect(shown.stdout.endsWith("done\n")).toBe(true);
+      expect(shown.interrupted).toBe(false);
+      // the retrieval path holds all of it
+      expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(response);
+    });
+
+    it("a large failed Bash call (PostToolUseFailure) is left whole: its exit line and output stay as the CLI wrote them", () => {
+      const error = `Exit code 2\n${"error: nope\n".repeat(20_000)}`;
+      const event = bash({ hook_event_name: "PostToolUseFailure", tool_response: undefined, error });
+      expect(trimMain(event, dir)).toBe("");
+      expect(existsSync(join(dir, "toolu_1.txt"))).toBe(false);
+    });
+
+    it("a large Bash result that failed a check still shows its last failing line", () => {
+      const stdout = `${"ok\n".repeat(30_000)}FAIL src/a.test.ts > it breaks\n${"trailing detail\n".repeat(100)}`;
+      const out = JSON.parse(trimMain(bash({ tool_response: { stdout, stderr: "" } }), dir));
+      expect(out.hookSpecificOutput.updatedToolOutput.stdout).toContain("FAIL src/a.test.ts");
+    });
+  });
 });
