@@ -68,7 +68,11 @@ import {
   pausedSeat,
   startUnpausedRun,
 } from "./crew-pause.ts";
-import { DESIGN_PREVIEW_PORT, DESIGN_PREVIEW_SWEEP_MS, DesignPreviews } from "./design-previews.ts";
+import {
+  DESIGN_PREVIEW_PORT,
+  DESIGN_PREVIEW_SWEEP_MS,
+  DesignPreviews,
+} from "./design-preview/previews.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";

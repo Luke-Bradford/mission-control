@@ -11,8 +11,8 @@ import { lstat, mkdir, open, readdir, realpath, rename, rm, writeFile } from "no
 import { extname, join, sep } from "node:path";
 import type { DesignPreviewView, RepoId } from "@mc/core";
 import Fastify, { type FastifyInstance } from "fastify";
-import { DESIGN_PREVIEW_PORT } from "./design-preview-port.ts";
-import { webHandler } from "./web.ts";
+import { webHandler } from "../web.ts";
+import { DESIGN_PREVIEW_PORT } from "./port.ts";
 
 export { DESIGN_PREVIEW_PORT };
 export const DESIGN_PREVIEW_IDLE_MS = 60 * 60_000;
