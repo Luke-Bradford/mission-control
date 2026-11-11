@@ -9997,9 +9997,21 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(ghCalls).toEqual([]);
     });
     it("set_fields takes a Blocked card back to Backlog, so promote can reach it", async () => {
-      board(card(7));
+      readImpl = (n) => card(n, { labels: liveLabels, status: "Blocked" });
+      board(card(7, { status: "Blocked" }));
       expect((await call("set_fields", { issue: 7, status: "Backlog" })).isError).toBeUndefined();
       expect(moveCalls.at(-1)).toMatchObject({ issue: 7, column: "Backlog" });
+    });
+    it("set_fields moves no card to Backlog from outside Blocked", async () => {
+      for (const status of ["Ready", "In progress", "In review", "Done"]) {
+        readImpl = (n) => card(n, { labels: liveLabels, status });
+        board(card(7, { status }));
+        expect(await call("set_fields", { issue: 7, status: "Backlog" })).toHaveProperty(
+          "isError",
+          true,
+        );
+      }
+      expect(moveCalls).toEqual([]);
     });
     it("set_fields records a status move under its own kind, with no hourly cap", async () => {
       board(card(7));
