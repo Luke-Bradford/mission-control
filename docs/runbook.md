@@ -2853,6 +2853,15 @@ Raw strings are scanned before JSON escaping, and rejected secrets are neither s
 Only bounded validated report fields and PNG assets enter this archive; no submitted path is read
 from the controller's filesystem. Images still need a human check for sensitive visible data.
 
+Completed PR image retention is shorter than QA text retention. Once a PR has been merged or closed
+for seven days, the hub removes its `pr-evidence` images, report PNG assets and review screenshots.
+Open PRs are never swept. The report record and a 320-pixel thumbnail for each retained report image
+stay in QA history. Once an hour the same data-folder
+sweep removes controller scratch folders and hub preview copies untouched for three days; it keeps
+`controller/designs` and any supplied open-question path. The sweep resolves each candidate before
+deletion and refuses symlinks or paths outside the hub data directory. Its server log line gives the
+number of removed entries and their byte total.
+
 ## QA history
 
 Open **QA → History** to browse saved report versions and older completed native review records.

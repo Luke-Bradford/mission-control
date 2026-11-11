@@ -68,6 +68,7 @@ import {
   pausedSeat,
   startUnpausedRun,
 } from "./crew-pause.ts";
+import { sweepHubData } from "./data-retention-sweep.ts";
 import {
   DESIGN_PREVIEW_PORT,
   DESIGN_PREVIEW_SWEEP_MS,
@@ -1135,6 +1136,52 @@ export async function main(): Promise<void> {
   // reviews already in flight when this hub updated keep finishing: they count as asked once
   if (!preview) seedExternalReviewAsks(store, Date.now());
   scheduler.start();
+  const sweepData = () => {
+    const prs = config.repos.flatMap((repo) => store.pullRequests(repo.id));
+    const finished = new Set(
+      prs.filter((pr) => pr.state !== "open").map((pr) => `${pr.repoId}:${pr.number}`),
+    );
+    const reportAssets = new Map<string, Set<string>>();
+    for (const pr of prs) {
+      const key = `${pr.repoId}:${pr.number}`;
+      for (const report of store.qaReports(pr.repoId, pr.number)) {
+        for (const [, id] of JSON.stringify(report).matchAll(
+          /\/api\/qa-report-assets\/([a-f0-9]{64})/g,
+        )) {
+          const refs = reportAssets.get(id) ?? new Set<string>();
+          refs.add(key);
+          reportAssets.set(id, refs);
+        }
+      }
+    }
+    sweepHubData({
+      root: dirname(dbPath),
+      prs: prs.map((pr) => ({
+        repoId: pr.repoId,
+        number: pr.number,
+        state: pr.state,
+        finishedAt: pr.mergedAt ?? (pr.state === "closed" ? pr.updatedAt : null),
+      })),
+      qaAssets: [...reportAssets].flatMap(([id, refs]) =>
+        [...refs].every((key) => finished.has(key))
+          ? [...refs].map((key) => {
+              const [repoId, prNumber] = key.split(":");
+              return { id, repoId: repoId as string, prNumber: Number(prNumber) };
+            })
+          : [],
+      ),
+      reviewShots: prs.flatMap((pr) =>
+        store
+          .reviewShotIdsForPr(pr.repoId, pr.number)
+          .map((id) => ({ id, repoId: pr.repoId, prNumber: pr.number })),
+      ),
+      log,
+    });
+  };
+  const dataSweep = setInterval(sweepData, 60 * 60_000);
+  dataSweep.unref();
+  setTimeout(sweepData, 60_000).unref();
+  app.addHook("onClose", async () => clearInterval(dataSweep));
   gitFiles?.start();
   supervisor.start();
   // After the supervisor has taken the crew lock (it does so before returning), so the engine's

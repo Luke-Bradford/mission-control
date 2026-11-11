@@ -4960,6 +4960,18 @@ export class Store {
     });
   }
 
+  /** The stored review screenshots for one PR, including completed review rounds. */
+  reviewShotIdsForPr(repoId: string, prNumber: number): string[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT DISTINCT s.shot_id FROM review_shots s
+           JOIN reviews v ON v.id = s.review_id WHERE v.repo_id = ? AND v.pr_number = ?`,
+        )
+        .all(repoId, prNumber) as Row[]
+    ).map((row) => row.shot_id as string);
+  }
+
   /** Lightweight union, paginated before detail/asset reads. Archived native rows appear once. */
   qaHistory(
     repoIds: readonly string[],

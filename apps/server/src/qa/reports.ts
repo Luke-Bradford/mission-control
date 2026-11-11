@@ -488,7 +488,11 @@ export function createQaReports(i: {
         const png = readFileSync(join(assetsDir, `${id}.png`));
         return createHash("sha256").update(png).digest("hex") === id ? png : null;
       } catch {
-        return null;
+        try {
+          return readFileSync(join(assetsDir, "thumbnails", `${id}.png`));
+        } catch {
+          return null;
+        }
       }
     },
     async prepareNative(review, details, at) {
