@@ -422,7 +422,7 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
-import { tokenAuditView } from "./token-audit-view.ts";
+import { tokenAuditView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 import { transcriptFootprint } from "./transcript-lifecycle.ts";
 import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
