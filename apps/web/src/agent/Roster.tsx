@@ -1,6 +1,5 @@
 import type { ConfigView, Crew, CrewRow, OverviewTimeline } from "@mc/core";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useNow } from "../clock.ts";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { callSign, seatRoleTitle, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { percent } from "../fmt.ts";
@@ -19,6 +18,8 @@ import "./roster.css";
 
 /** A context bar turns amber from here, as the mockup's marker line does. */
 const CONTEXT_WARN_PCT = 75;
+/** How often the state ages are rewritten; the same rhythm as the shared 5 s clock. */
+const AGE_TICK_MS = 5000;
 
 /**
  * Every seat the hub serves, by repo, each repo in the fixed seat order and foldable. The roster
@@ -42,9 +43,22 @@ export function Roster({
   const groups = useMemo(() => rosterGroups(rows), [rows]);
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   const list = useRef<HTMLDivElement>(null);
-  const now = useNow();
+  const now = Date.now();
   const active = rows.filter((r) => r.hudState !== "idle" && r.hudState !== "stopped").length;
   const currentRepo = rows.find((r) => r.id === current)?.repoId ?? null;
+
+  // A state age moves on a quiet hub, but the page may not re-render for a clock tick (its idle
+  // render budget is none), so the ages are text this writes straight into the cards.
+  const paintAges = () => {
+    for (const el of list.current?.querySelectorAll<HTMLElement>("[data-since]") ?? [])
+      el.textContent = shortAge(Date.now() - Number(el.dataset.since));
+  };
+  useLayoutEffect(paintAges);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: paintAges reads only refs and the clock.
+  useEffect(() => {
+    const tick = setInterval(paintAges, AGE_TICK_MS);
+    return () => clearInterval(tick);
+  }, []);
 
   // Choosing a seat opens its group, even when it is in the repo already chosen.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `current` is the trigger, not a value read.
@@ -196,7 +210,7 @@ function SeatCard({
           </span>
           <span title={status.reason ?? status.label}>
             <Pill tone={status.tone}>
-              {status.label} · {shortAge(now - row.stateSince)}
+              {status.label} · <span data-since={row.stateSince} />
             </Pill>
           </span>
         </span>
