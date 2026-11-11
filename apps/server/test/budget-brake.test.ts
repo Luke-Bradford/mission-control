@@ -4,9 +4,9 @@ import { join } from "node:path";
 import { BUDGET_BRAKE_KEY, budgetBrakeText } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { limitRows } from "../src/api.ts";
-import { budgetBrake, syncBudgetBrake, weeklyProjection } from "../src/budget-brake.ts";
 import type { CcConfig } from "../src/config.ts";
 import { hubAlert } from "../src/hud.ts";
+import { budgetBrake, syncBudgetBrake, weeklyProjection } from "../src/spend/budget-brake.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-07T12:00:00Z");

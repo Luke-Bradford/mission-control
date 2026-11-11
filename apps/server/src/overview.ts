@@ -15,7 +15,7 @@ import {
 } from "@mc/core";
 import { reworkReview } from "./rework.ts";
 import { parseTicket } from "./runview.ts";
-import { runSpend } from "./spend.ts";
+import { runSpend } from "./spend/spend.ts";
 import type { Store } from "./store.ts";
 import { endOf } from "./views.ts";
 

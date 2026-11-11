@@ -6,8 +6,8 @@ import {
   projectAtReset,
   type UsageSample,
 } from "@mc/core";
-import type { CcConfig } from "./config.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import type { Store } from "../store.ts";
 
 const WEEK_MS = 7 * 24 * 3600e3;
 

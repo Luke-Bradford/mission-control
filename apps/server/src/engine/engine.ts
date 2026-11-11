@@ -154,7 +154,6 @@ import {
 } from "@mc/core";
 import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
-import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
@@ -169,6 +168,7 @@ import {
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import type { Store } from "../store.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
