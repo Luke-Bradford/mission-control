@@ -103,7 +103,7 @@ import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
-import { DesignPreviews } from "../src/design-previews.ts";
+import { DesignPreviews } from "../src/design-preview/previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
@@ -114,9 +114,9 @@ import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
-import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
-import { qaNativeIdentity } from "../src/qa-history-key.ts";
-import { recordRunHandoff } from "../src/run-handoffs.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
+import { qaNativeIdentity } from "../src/qa/history-key.ts";
+import { recordRunHandoff } from "../src/run/handoffs.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
@@ -4494,6 +4494,7 @@ describe("ticket detail", () => {
       body: "line one\nline two",
       bodyTruncated: false,
       bodyLength: 17,
+      prototypeProblem: null,
       // no "## Controller check" heading in the body
       controllerCheck: null,
       labels: ["bug"],
@@ -5599,6 +5600,48 @@ describe("boards, escalations, health", () => {
     expect(r.statusCode).toBe(200);
     expect(r.json()).toEqual([{ ...pr, check: null, preview: null, previewable: false }]);
     expect((await get("/api/repos/nope/prs")).statusCode).toBe(404);
+  });
+
+  it("the default PR list preserves a refused review's skipped marker", async () => {
+    store.upsertPullRequests(
+      "shop-app",
+      [
+        {
+          repoId: "shop-app",
+          number: 1520,
+          title: "Refused review",
+          url: "",
+          branch: "fix/9-x",
+          ticket: "shop-app#9",
+          state: "merged",
+          isDraft: false,
+          review: null,
+          ci: "passing",
+          createdAt: clock,
+          updatedAt: clock,
+          mergedAt: clock,
+          headSha: null,
+          mergeable: null,
+          checks: [
+            {
+              name: "mc/review",
+              kind: "status",
+              state: "failing",
+              skipped: true,
+              conclusion: "FAILURE",
+              attempt: null,
+              url: null,
+            },
+          ],
+        },
+      ],
+      clock,
+    );
+    const response = await get("/api/repos/shop-app/prs");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()[0]?.checks).toEqual([
+      { name: "mc/review", kind: "status", state: "failing", skipped: true, attempt: null },
+    ]);
   });
 
   it("prs/flow returns every open PR with its ownership flow", async () => {
@@ -9579,7 +9622,7 @@ describe("QA board data", () => {
 });
 
 // Status transport is exercised with fake CLIs in accounts.test.ts, never the machine's login.
-vi.mock("../src/accounts.ts", () => ({
+vi.mock("../src/accounts/accounts.ts", () => ({
   readAccountStatus: async (account: { id: string; vendor: string }, now: number) => ({
     accountId: account.id,
     provider: account.vendor,

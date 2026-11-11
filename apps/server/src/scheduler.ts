@@ -28,11 +28,10 @@ import {
   type UsageSample,
   usageCollector,
 } from "@mc/core";
-import { codexProfile } from "./account-bindings.ts";
-import { evaluateHolds } from "./attention-holds.ts";
+import { codexProfile } from "./accounts/bindings.ts";
+import { evaluateHolds } from "./attention/holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
-import type { BriefChoiceDeps } from "./brief-choices.ts";
-import { syncBudgetBrake } from "./budget-brake.ts";
+import type { BriefChoiceDeps } from "./brief/choices.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
   AUTO_CLI_TOOLS,
@@ -46,7 +45,7 @@ import {
   realCliOps,
   type SeatCheck,
   settlePending,
-} from "./cli-auto.ts";
+} from "./cli/auto.ts";
 import {
   CLI_COLLECTOR,
   CLI_NOTE_KEY,
@@ -60,7 +59,7 @@ import {
   cliFailedText,
   NOT_A_CASK,
   realExec,
-} from "./cli-update.ts";
+} from "./cli/update.ts";
 import { collectorName, DIGEST_RETENTION_MS, FOLD_WINDOW_MS } from "./collectors/common.ts";
 import { collectFlow } from "./collectors/flow.ts";
 import {
@@ -109,7 +108,7 @@ import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
-import { followPrs } from "./github-board.ts";
+import { followPrs } from "./github/board.ts";
 import {
   attentionItems,
   crew,
@@ -121,19 +120,19 @@ import {
 import {
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
-  machineCapacity,
-  machineCapacitySince,
+  storedMachineCapacity,
 } from "./machine-capacity.ts";
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
+import { syncBudgetBrake } from "./spend/budget-brake.ts";
 import type { Store } from "./store.ts";
-import { auditEndedRuns } from "./token-audit.ts";
+import { auditEndedRuns } from "./token-audit/audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
   TRANSCRIPT_PASS_INTERVAL_MS,
-} from "./transcript-lifecycle.ts";
+} from "./transcript/lifecycle.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =
@@ -1303,11 +1302,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         store.addMachineSample(r.sample);
         machineMinute = minute;
         const capacityConfig = deps.config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         machineBlocked = capacity.blocked;
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
@@ -1326,7 +1321,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
                 )
                 .join("; ")
             : "unavailable";
-          store.refreshNote({
+          store.refreshNoteInEpisode({
             key: MACHINE_CAPACITY_KEY,
             kind: "flag",
             runId: null,

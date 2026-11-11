@@ -12,6 +12,28 @@ export function isOperatorItem(i: AttentionItem): boolean {
   return itemOwner(i) === OWNER_OPERATOR;
 }
 
+/** One item of `GET /api/attention?compact=1`: enough to list Needs you without the whole item. */
+export interface AttentionCompactItem {
+  key: string;
+  kind: AttentionItem["kind"];
+  text: string;
+  ticket: string | null;
+  at: number;
+  /** The brief's ask, when FLIGHT has written one. */
+  ask?: string;
+}
+
+export function compactAttentionItem(i: AttentionItem): AttentionCompactItem {
+  return {
+    key: i.key,
+    kind: i.kind,
+    text: i.text,
+    ticket: i.ticket,
+    at: i.at,
+    ...(i.brief?.ask === undefined ? {} : { ask: i.brief.ask }),
+  };
+}
+
 declare const NEEDS_YOU: unique symbol;
 
 /**

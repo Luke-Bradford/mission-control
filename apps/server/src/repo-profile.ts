@@ -24,7 +24,7 @@ import {
 } from "./collectors/github.ts";
 import type { CcConfig } from "./config.ts";
 import type { RepoLocation } from "./config-write.ts";
-import { projectFields } from "./github-fields.ts";
+import { projectFields } from "./github/fields.ts";
 import type { Store } from "./store.ts";
 
 export function repoProfiles(config: CcConfig, store: Store): RepoProfile[] {

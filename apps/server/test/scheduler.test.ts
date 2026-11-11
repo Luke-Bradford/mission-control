@@ -17,7 +17,7 @@ import {
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { holdItem, holds } from "../src/attention-holds.ts";
+import { holdItem, holds } from "../src/attention/holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import { collectorName, FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
@@ -32,7 +32,9 @@ import {
 import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
 import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
+import { flightState, markItemsShown } from "../src/flight/state.ts";
 import * as hud from "../src/hud.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
   BACKFILL_BUDGET_MS,
@@ -1563,6 +1565,97 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
+    it("keeps one disk-capacity item and FLIGHT wake while headroom flaps around the percentage floor", async () => {
+      let t = Math.floor(NOW / 60_000) * 60_000;
+      const diskFreeGb = [4.5, 5.3, 4.6];
+      let reading = 0;
+      config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
+        sessions: [
+          {
+            id: "flight-session",
+            repoId: "shop-app",
+            checkout: join(dir, "checkout"),
+            seats: [
+              {
+                id: "flight-1",
+                role: "FLIGHT",
+                accountId: "claude-main",
+                model: "opus",
+                area: [],
+              },
+            ],
+          },
+        ],
+        machineCapacity: {
+          diskFreeGb: 1,
+          diskFreePct: 5,
+          swapUsedPct: 60,
+          memoryFreePct: 10,
+          loadPerCore: 1.5,
+          loadWindowMin: 5,
+          clearAfterMin: 5,
+        },
+      };
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: (diskFreeGb[reading] ?? 0) * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      const state = () => flightState({ config, store, busy: [], now: t });
+
+      await s.tick("machine");
+      const first = store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY);
+      if (first === undefined) throw new Error("machine-capacity note was not raised");
+      const firstWake = state();
+      expect(firstWake.wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
+      markItemsShown(store, firstWake);
+
+      for (reading = 1; reading < diskFreeGb.length; reading++) {
+        t += 60_000;
+        await s.tick("machine");
+      }
+
+      const notes = store.notes().filter((n) => n.key === MACHINE_CAPACITY_KEY);
+      expect(notes).toEqual([expect.objectContaining({ at: first.at })]);
+      expect(notes[0]?.text).toContain("disk free is 4.6%");
+      expect(state().wake?.fresh).toEqual([]);
+
+      diskFreeGb.push(6.1);
+      reading = diskFreeGb.length - 1;
+      t += 60_000;
+      await s.tick("machine");
+      for (let minute = 1; minute < 10; minute++) {
+        t += 60_000;
+        await s.tick("machine");
+        expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeDefined();
+      }
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeUndefined();
+
+      // A new episode is a fresh item, so it wakes FLIGHT again.
+      diskFreeGb.push(4.5);
+      reading = diskFreeGb.length - 1;
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)?.at).toBe(t);
+      expect(state().wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
+    });
+
     it("raises one budget-brake alert on the minute tick and lifts it when the week resets", async () => {
       const minute = Math.floor(NOW / 60_000) * 60_000;
       const resetAt = minute + 24 * 3600e3;
@@ -1641,7 +1734,7 @@ describe("scheduler", () => {
       expect(notes[0]?.text).toContain(reason);
     });
 
-    it("refreshes one capacity item when the active threshold and consumers change", async () => {
+    it("updates the capacity item without renewing its age when the active threshold changes", async () => {
       let t = NOW;
       let disk = true;
       const s = createScheduler({

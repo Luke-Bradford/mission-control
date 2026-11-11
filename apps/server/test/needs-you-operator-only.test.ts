@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COMMS_FLIGHT_ESCALATION_MS, COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { evaluateHolds, holdItem, nothingForOperator } from "../src/attention-holds.ts";
+import { evaluateHolds, holdItem, nothingForOperator } from "../src/attention/holds.ts";
 import type { CcConfig } from "../src/config.ts";
 import { wakeReasonWords } from "../src/flight/state.ts";
 import { agentViews, attentionItems } from "../src/hud.ts";

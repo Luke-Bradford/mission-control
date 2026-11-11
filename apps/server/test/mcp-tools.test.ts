@@ -114,8 +114,7 @@ import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
-import { PreviewRefused } from "../src/design-previews.ts";
-import { externalReviewKey } from "../src/external-review-key.ts";
+import { PreviewRefused } from "../src/design-preview/previews.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -132,6 +131,7 @@ import {
 } from "../src/mcp/tools.ts";
 import { setRunPathGrants } from "../src/path-grants.ts";
 import { ProfilesError } from "../src/profiles.ts";
+import { externalReviewKey } from "../src/review/external-key.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { runSeatGrants } from "../src/runtime/grants.ts";
@@ -1853,6 +1853,101 @@ describe("Comms seat tools", () => {
       ["reply", false, true],
       ["pin", true, true],
     ]);
+  });
+
+  describe("inbox defaults to unread messages plus pins", () => {
+    type Out = {
+      messages: { id: string; text: string; pinned: boolean; unread: boolean }[];
+      hiddenRead?: number;
+    };
+    const take = async (args: unknown = {}, ctx = CTX): Promise<Out> =>
+      JSON.parse((await inbox(args, tools, ctx)).text) as Out;
+    const seed = () => {
+      const add = (at: number, text: string, to = "guido-1", from = "retro") =>
+        store.addComms({ at: NOW - at, from, to, ticket: "mc#42", text });
+      const old = add(9, "old direct");
+      const pin = add(8, "old pin");
+      add(7, "other seat", "guido-2");
+      if (old === null || pin === null) throw new Error("expected stored messages");
+      store.setCommsPinned(pin.id, true, "CAPCOM", NOW - 1);
+      store.markCommsInboxRead("guido-1", [old.id, pin.id]);
+      const fresh = add(6, "fresh direct");
+      if (fresh === null) throw new Error("expected stored message");
+      return { old, pin, fresh };
+    };
+
+    it("returns the unread message and the pin, not the read history", async () => {
+      const { pin, fresh } = seed();
+      const out = await take();
+      expect(out.messages.map((m) => [m.id, m.text, m.pinned, m.unread])).toEqual([
+        [pin.id, "old pin", true, false],
+        [fresh.id, "fresh direct", false, true],
+      ]);
+      expect(out.hiddenRead).toBe(1);
+    });
+
+    it("keeps the read receipt: a second call has no unread messages but the pin stays", async () => {
+      const { pin, fresh } = seed();
+      await take();
+      expect(store.commsInboxRead("guido-1", fresh.id)).toBe(true);
+      const again = await take();
+      expect(again.messages.map((m) => m.id)).toEqual([pin.id]);
+      expect(again.hiddenRead).toBe(2);
+    });
+
+    it("reads the whole history with all:true, in the same order and ids", async () => {
+      const { old, pin, fresh } = seed();
+      const out = await take({ all: true });
+      expect(out.messages.map((m) => m.id)).toEqual([old.id, pin.id, fresh.id]);
+      expect(out.hiddenRead).toBe(0);
+      // the default view is an ordered subset of the history: ids do not shift
+      const next = await take();
+      expect(next.messages.map((m) => m.id)).toEqual([pin.id]);
+    });
+
+    it("still takes the newest `limit` of the unread and pinned set", async () => {
+      const { fresh } = seed();
+      const out = await take({ limit: 1 });
+      expect(out.messages.map((m) => m.id)).toEqual([fresh.id]);
+    });
+
+    it("keeps the privacy filter: another seat's messages never appear, with or without all", async () => {
+      seed();
+      for (const args of [{}, { all: true }]) {
+        const out = await take(args);
+        expect(out.messages.map((m) => m.text)).not.toContain("other seat");
+      }
+    });
+
+    it("measures the saving on 49 read messages beside one new one (synthetic text, no real messages)", async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 49; i++) {
+        const m = store.addComms({
+          at: NOW - 100 + i,
+          from: "retro",
+          to: "guido-1",
+          ticket: "mc#42",
+          text: `Synthetic read message ${i}: ${"x".repeat(180)}`,
+        });
+        if (m === null) throw new Error("expected stored message");
+        ids.push(m.id);
+      }
+      store.markCommsInboxRead("guido-1", ids);
+      store.addComms({ at: NOW, from: "retro", to: "guido-1", ticket: "mc#42", text: "new one" });
+      const after = (await inbox()).text.length;
+      const before = (await inbox({ all: true })).text.length;
+      console.info(`inbox receipt: all=${before} bytes, default=${after} bytes`);
+      expect(after).toBeLessThan(before / 10);
+    });
+
+    it("rejects a non-boolean all", async () => {
+      expect((await inbox({ all: "yes" })).isError).toBe(true);
+    });
+
+    it("tells the seat in its description that history needs all:true", () => {
+      expect(tool("comms_inbox").description).toMatch(/unread/i);
+      expect(JSON.stringify(tool("comms_inbox").inputSchema)).toContain('"all"');
+    });
   });
 
   it("keeps rework targeted at an aside run from a newer run on the same seat", async () => {

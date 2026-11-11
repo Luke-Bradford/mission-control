@@ -1,6 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
   AttentionMaterials,
@@ -8,7 +6,6 @@ import type {
   ChoiceTargetKind,
   ItemChatMessage,
   ItemDiscussion,
-  PersonMessage,
   PersonSource,
   PromptSection,
   PromptSectionCost,
@@ -27,7 +24,6 @@ import {
   type AgentId,
   ASKING_RUN_ENDED_REASON,
   type AttentionBrief,
-  type AttentionKind,
   AUDIT_BASELINE_DAYS,
   AUDIT_CHANGE_WINDOW_MS,
   AUDIT_PR_OUTLIER_LINES,
@@ -47,7 +43,6 @@ import {
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
-  type ChosenProfile,
   type CiRunView,
   CODE_HEALTH_FLIGHT_REVIEW_DAYS,
   CODE_HEALTH_FLIGHT_TIER_RULES,
@@ -72,7 +67,6 @@ import {
   type Escalation,
   estimateTokens,
   type FindingResolution,
-  type FLIGHT_HEADLINE,
   FLIGHT_INCOMING_LIMIT,
   FLIGHT_LEDGER_OPEN,
   FLIGHT_MEMORY_FULL,
@@ -85,7 +79,6 @@ import {
   FLIGHT_WAKE_STORED_BYTES,
   FLIGHT_WATCH_LIMIT,
   type FlightArrivalDisposition,
-  type FlightBriefSectionKey,
   type FlightDecision,
   type FlightDecisionKind,
   type FlightLedgerEntry,
@@ -153,7 +146,6 @@ import {
   reviewTimings,
   reworkRatios,
   type SeatSessionRow,
-  type SeatState,
   type StoredFinding,
   type StrayKind,
   type Telemetry,
@@ -228,470 +220,79 @@ import {
   testAttemptSource,
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
-import { externalReviewKey } from "./external-review-key.ts";
-import { openOlderFindings } from "./older-findings.ts";
-import { qaNativeIdentity } from "./qa-history-key.ts";
-import { StandingInstructions } from "./standing-instructions.ts";
+import { StandingInstructions } from "./instructions/standing.ts";
+import { qaNativeIdentity } from "./qa/history-key.ts";
+import { externalReviewKey } from "./review/external-key.ts";
+import { openOlderFindings } from "./review/older-findings.ts";
+import { strayKey } from "./store/crew-paths.ts";
+import {
+  compactFlightWake,
+  evidenceOf,
+  queueRow,
+  seatRow,
+  toBoardItem,
+  toCiRun,
+  toEscalation,
+  toFlightDecision,
+  toGuardHit,
+  toQuestion,
+  toReview,
+  toRun,
+  toSample,
+} from "./store/rows.ts";
+import {
+  ACK_ABSENT_MS,
+  ACTIVE_SEAT_STATES,
+  type AgentEvent,
+  type AttentionNote,
+  AUDIT_RETENTION_DAYS,
+  type BoardMove,
+  type BoardMoveState,
+  BUSY_TIMEOUT_MS,
+  COMMS_RETENTION_DAYS,
+  type CommsLinkCount,
+  type CommsReadScope,
+  type CommsRow,
+  type CommsSettlement,
+  type CrewError,
+  commsMessageNumber,
+  commsPosition,
+  type Evidence,
+  type FinancialRun,
+  FLIGHT_DECISIONS_RETENTION_DAYS,
+  type FlightBriefRow,
+  HISTORY_BATCH_ROWS,
+  HISTORY_SWEEP_MAX_BATCHES,
+  type Hold,
+  type KeeperCursor,
+  LIVE_COMMS_LIMIT,
+  LIVE_LOOP_EVENTS_LIMIT,
+  type LockHoldRow,
+  MACHINE_RETENTION_MS,
+  MAX_OPEN_RUN_AGE_MS,
+  type NewCommsRow,
+  type NoteInput,
+  type NoteKind,
+  type NotificationRead,
+  type NotificationRow,
+  OPERATIONAL_RETENTION_DAYS,
+  type QuestionChoiceRow,
+  type QueueRow,
+  type SeatLine,
+  type SeatLineOrigin,
+  type SeatQuestion,
+  type Stray,
+  THREAD_COMMS_LIMIT,
+} from "./store/types.ts";
 
-export const COMMS_RETENTION_DAYS = 90;
-export const FLIGHT_DECISIONS_RETENTION_DAYS = 90;
-export const HISTORY_BATCH_ROWS = 500;
-export const HISTORY_SWEEP_MAX_BATCHES = 10;
-export const LIVE_COMMS_LIMIT = 5_000;
-export const LIVE_LOOP_EVENTS_LIMIT = 5_000;
-export const OPERATIONAL_RETENTION_DAYS = 90;
-export const AUDIT_RETENTION_DAYS = 365;
+import { SCHEMA } from "./store/schema.ts";
+
+export * from "./store/types.ts";
+
 /** FLIGHT's answers to seats' questions, and the questions it passed on, outlive the 90-day log. */
 const COMMS_QUESTION_THREAD_SQL =
   "COALESCE(label, '') = 'question' OR COALESCE(reply_to, -1) IN (SELECT q.id FROM comms q WHERE q.label = 'question')";
 const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
-
-const SCHEMA = `
-CREATE TABLE IF NOT EXISTS drafts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, target TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
-  created_at INTEGER NOT NULL, state TEXT NOT NULL DEFAULT 'pending'
-);
-CREATE TABLE IF NOT EXISTS runs (
-  id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, repo_id TEXT NOT NULL, seq INTEGER NOT NULL,
-  started_at INTEGER NOT NULL, ended_at INTEGER, status TEXT NOT NULL, session_id TEXT,
-  model TEXT, branch TEXT, ticket TEXT, cost_usd REAL, tokens TEXT, transcript_path TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS runs_agent ON runs(agent_id, started_at);
--- Kept apart from runs so run queries stay small; written on its own change check.
-CREATE TABLE IF NOT EXISTS run_digests (run_id TEXT PRIMARY KEY, digest TEXT NOT NULL);
--- Map snapshot parts that never change for their key (a commit's tree and imports, a merge's files).
-CREATE TABLE IF NOT EXISTS map_cache (
-  kind TEXT NOT NULL, scope TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL,
-  PRIMARY KEY (kind, scope, key)
-);
--- HUD state changes that matter (#26 B14): into or out of a notable state.
-CREATE TABLE IF NOT EXISTS agent_events (
-  agent_id TEXT NOT NULL, at INTEGER NOT NULL, from_state TEXT NOT NULL, to_state TEXT NOT NULL,
-  text TEXT NOT NULL, PRIMARY KEY (agent_id, at)
-);
-CREATE TABLE IF NOT EXISTS usage_samples (
-  account_id TEXT NOT NULL, window TEXT NOT NULL, at INTEGER NOT NULL, pct REAL NOT NULL,
-  reset_at INTEGER NOT NULL, source TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS usage_lookup ON usage_samples(account_id, window, at);
-CREATE TABLE IF NOT EXISTS escalations (
-  id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, title TEXT NOT NULL,
-  kind TEXT NOT NULL, opened_at INTEGER NOT NULL, url TEXT NOT NULL, question TEXT,
-  source TEXT NOT NULL DEFAULT 'label'
-);
-CREATE TABLE IF NOT EXISTS board_items (
-  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, title TEXT NOT NULL, status TEXT NOT NULL,
-  state TEXT NOT NULL, labels TEXT NOT NULL, priority TEXT, updated_at INTEGER NOT NULL,
-  url TEXT NOT NULL, stage TEXT, owner TEXT, parent INTEGER, sub_done INTEGER, sub_total INTEGER,
-  blocked_by TEXT NOT NULL DEFAULT '[]', milestone TEXT, PRIMARY KEY (repo_id, issue_number)
-);
-CREATE TABLE IF NOT EXISTS pull_requests (
-  repo_id TEXT NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL, url TEXT NOT NULL,
-  branch TEXT NOT NULL, ticket TEXT, state TEXT NOT NULL, is_draft INTEGER NOT NULL,
-  review TEXT, ci TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, merged_at INTEGER,
-  PRIMARY KEY (repo_id, number)
-);
--- A merged PR outlives the bounded live PR cache used by the board.
-CREATE TABLE IF NOT EXISTS pr_history (
-  repo_id TEXT NOT NULL, number INTEGER NOT NULL, merged_at INTEGER NOT NULL, record TEXT NOT NULL,
-  PRIMARY KEY (repo_id, number)
-);
-CREATE INDEX IF NOT EXISTS pr_history_merged ON pr_history(repo_id, merged_at);
--- A PR's diff files as GitHub read them (first PR_FILES_MAX); the tests-per-PR count and the
--- file route of escaped defects read them.
-CREATE TABLE IF NOT EXISTS pr_files (
-  repo_id TEXT NOT NULL, pr_number INTEGER NOT NULL, path TEXT NOT NULL, change_type TEXT NOT NULL,
-  PRIMARY KEY (repo_id, pr_number, path)
-);
--- A bug filed after a PR merged that names it, a commit of it or a file only it changed. Kept
--- after the card leaves the board; seat and model are the PR branch's author run.
-CREATE TABLE IF NOT EXISTS escaped_defects (
-  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, pr_number INTEGER NOT NULL,
-  via TEXT NOT NULL, filed_at INTEGER NOT NULL, merged_at INTEGER NOT NULL, seat TEXT, model TEXT,
-  PRIMARY KEY (repo_id, issue_number, pr_number)
-);
-CREATE INDEX IF NOT EXISTS escaped_defects_merged ON escaped_defects(merged_at);
-CREATE TABLE IF NOT EXISTS retrospectives (
-  repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,
-  PRIMARY KEY (repo_id, day)
-);
-CREATE TABLE IF NOT EXISTS prompt_versions (
-  hash TEXT PRIMARY KEY, path TEXT NOT NULL, first_seen INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS prompt_sections (
-  run_id TEXT NOT NULL, wake INTEGER NOT NULL, section TEXT NOT NULL,
-  bytes INTEGER NOT NULL, tokens INTEGER NOT NULL, at INTEGER NOT NULL,
-  PRIMARY KEY (run_id, wake, section)
-);
-CREATE INDEX IF NOT EXISTS prompt_sections_at ON prompt_sections(at);
-CREATE TABLE IF NOT EXISTS run_token_audit (
-  run_id TEXT PRIMARY KEY, at INTEGER NOT NULL, calls INTEGER NOT NULL, peak_context INTEGER NOT NULL,
-  median_context INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
-  output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
-  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL
-);
--- Each finished mc tool call: when, which, and the characters sent and returned (Audit's tool rows).
-CREATE TABLE IF NOT EXISTS mcp_tool_calls (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, run_id TEXT NOT NULL,
-  tool TEXT NOT NULL, written INTEGER NOT NULL, returned INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS mcp_tool_calls_at ON mcp_tool_calls(at);
-CREATE TABLE IF NOT EXISTS run_token_calls (
-  run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
-  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL,
-  PRIMARY KEY (run_id, idx)
-);
-CREATE TABLE IF NOT EXISTS controller_messages (
-  message_id TEXT PRIMARY KEY, session_id TEXT NOT NULL, at INTEGER NOT NULL, input INTEGER NOT NULL,
-  cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL, output INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS controller_messages_at ON controller_messages(at);
-CREATE TABLE IF NOT EXISTS controller_files (path TEXT PRIMARY KEY, mtime INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS flow_issues (
-  repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
-  done_at INTEGER, PRIMARY KEY (repo_id, number)
-);
-CREATE TABLE IF NOT EXISTS flow_prs (
-  repo_id TEXT NOT NULL, number INTEGER NOT NULL, merged_at INTEGER NOT NULL, first_push_ci TEXT,
-  PRIMARY KEY (repo_id, number)
-);
-CREATE TABLE IF NOT EXISTS file_offsets (path TEXT PRIMARY KEY, offset INTEGER NOT NULL);
-CREATE TABLE IF NOT EXISTS collector_status (
-  collector TEXT PRIMARY KEY, ok INTEGER NOT NULL, error TEXT, at INTEGER NOT NULL,
-  last_ok_at INTEGER, failing_since INTEGER
-);
-CREATE TABLE IF NOT EXISTS machine_samples (at INTEGER PRIMARY KEY, sample TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS attention_materials (
-  id TEXT PRIMARY KEY, item_key TEXT NOT NULL, packet TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS attention_materials_item ON attention_materials(item_key, id DESC);
--- Acknowledged attention items. absent_since: when the key was first missing from the current
--- items (null while present); the ack is dropped once it has been absent for ACK_ABSENT_MS.
-CREATE TABLE IF NOT EXISTS acks (key TEXT PRIMARY KEY, at INTEGER NOT NULL, absent_since INTEGER);
-CREATE TABLE IF NOT EXISTS decision_defaults (
-  key TEXT NOT NULL, brief_at INTEGER NOT NULL, option_id TEXT, label TEXT NOT NULL,
-  due_at INTEGER NOT NULL, applied_at INTEGER NOT NULL, target TEXT, answer TEXT,
-  delivered_at INTEGER, PRIMARY KEY (key, brief_at)
-);
--- The operator's choice on a question: one row per brief, kept with the ticket's history.
-CREATE TABLE IF NOT EXISTS question_choices (
-  key TEXT NOT NULL, brief_at INTEGER NOT NULL, option_id TEXT NOT NULL, label TEXT NOT NULL,
-  answer TEXT NOT NULL, question TEXT NOT NULL, ticket TEXT, target TEXT NOT NULL,
-  target_kind TEXT NOT NULL, message_id INTEGER, chosen_at INTEGER NOT NULL, chosen_by TEXT,
-  PRIMARY KEY (key, brief_at)
-);
-CREATE INDEX IF NOT EXISTS question_choices_ticket ON question_choices(ticket);
-CREATE INDEX IF NOT EXISTS question_choices_message ON question_choices(message_id);
--- Status moves of a run's card (pending, then done or failed); the Activity page's board rows.
-CREATE TABLE IF NOT EXISTS board_moves (
-  id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
-  board_column TEXT NOT NULL, state TEXT NOT NULL, detail TEXT, at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS board_moves_at ON board_moves(at);
--- What a run's seat reported (append-only); the loop's reconciler reads the latest.
-CREATE TABLE IF NOT EXISTS run_evidence (
-  id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, note TEXT NOT NULL, at INTEGER NOT NULL,
-  tests TEXT NOT NULL DEFAULT '[]', tests_added TEXT NOT NULL DEFAULT '[]'
-);
-CREATE INDEX IF NOT EXISTS run_evidence_run ON run_evidence(run_id);
--- The ticket's Done-when lines as they stood when a run started; a report must answer each one.
-CREATE TABLE IF NOT EXISTS run_done_when (
-  run_id TEXT NOT NULL, pos INTEGER NOT NULL, line TEXT NOT NULL, PRIMARY KEY (run_id, pos)
-);
--- One review of a run's pushed sha (7b-1); attempt counts the tries of one sha within a loop epoch.
-CREATE TABLE IF NOT EXISTS reviews (
-  id INTEGER PRIMARY KEY, author_run_id TEXT NOT NULL, repo_id TEXT NOT NULL, seat_id TEXT NOT NULL,
-  pr_number INTEGER NOT NULL, sha TEXT NOT NULL, epoch INTEGER NOT NULL, attempt INTEGER NOT NULL,
-  round INTEGER NOT NULL, state TEXT NOT NULL, run_id TEXT, verdict TEXT, summary TEXT,
-  blocking INTEGER NOT NULL DEFAULT 0, minor INTEGER NOT NULL DEFAULT 0, failure TEXT,
-  created_at INTEGER NOT NULL, started_at INTEGER, ended_at INTEGER,
-  UNIQUE (author_run_id, sha, epoch, attempt)
-);
-CREATE INDEX IF NOT EXISTS reviews_state ON reviews(state, created_at);
--- A FLIGHT-directed queued-review move overrides the engine's ordinary reviewer selection.
-CREATE TABLE IF NOT EXISTS review_moves (
-  review_id INTEGER PRIMARY KEY, seat_id TEXT NOT NULL, at INTEGER NOT NULL,
-  budget_brake_override INTEGER NOT NULL DEFAULT 0
-);
-CREATE TABLE IF NOT EXISTS review_findings (
-  id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, author_run_id TEXT NOT NULL, pos INTEGER NOT NULL,
-  severity TEXT NOT NULL, file TEXT NOT NULL, line INTEGER NOT NULL, summary TEXT NOT NULL,
-  scenario TEXT NOT NULL, fix TEXT NOT NULL, category TEXT, state TEXT NOT NULL, UNIQUE (review_id, pos)
-);
-CREATE TABLE IF NOT EXISTS review_checks (
-  review_id INTEGER NOT NULL, check_id TEXT NOT NULL, result TEXT NOT NULL, note TEXT,
-  PRIMARY KEY (review_id, check_id)
-);
--- Immutable QA snapshots are independent of the native review/run retention sweep.
-CREATE TABLE IF NOT EXISTS qa_reports (
-  id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, pr_number INTEGER NOT NULL,
-  head_sha TEXT NOT NULL, registered_at INTEGER NOT NULL, native_review_id INTEGER UNIQUE,
-  report TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS qa_reports_subject ON qa_reports(repo_id, pr_number, head_sha, registered_at DESC);
-CREATE INDEX IF NOT EXISTS qa_reports_history ON qa_reports(repo_id, registered_at DESC, id DESC);
-CREATE INDEX IF NOT EXISTS reviews_history ON reviews(repo_id, COALESCE(ended_at, created_at) DESC, id DESC) WHERE state IN ('reported', 'failed', 'superseded');
-CREATE TABLE IF NOT EXISTS review_shots (
-  id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, shot_id TEXT NOT NULL, label TEXT NOT NULL,
-  width INTEGER NOT NULL, theme TEXT NOT NULL, at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS review_shots_review ON review_shots (review_id);
-CREATE TABLE IF NOT EXISTS review_tests (
-  id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, command TEXT NOT NULL, file TEXT,
-  passed INTEGER NOT NULL, failed INTEGER NOT NULL, skipped INTEGER NOT NULL, duration INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS review_resolutions (
-  review_id INTEGER NOT NULL, prior_review_id INTEGER NOT NULL, finding_pos INTEGER NOT NULL,
-  outcome TEXT NOT NULL, PRIMARY KEY (review_id, prior_review_id, finding_pos)
-);
--- One row per check run of a PR head, kept as the hub polled it: updated in place as it concludes.
-CREATE TABLE IF NOT EXISTS ci_runs (
-  repo_id TEXT NOT NULL, run_key TEXT NOT NULL, sha TEXT NOT NULL, name TEXT NOT NULL,
-  attempt INTEGER NOT NULL, pr_number INTEGER NOT NULL, workflow TEXT, state TEXT NOT NULL,
-  conclusion TEXT NOT NULL, url TEXT, first_seen_at INTEGER NOT NULL, at INTEGER NOT NULL,
-  PRIMARY KEY (repo_id, run_key)
-);
-CREATE INDEX IF NOT EXISTS ci_runs_at ON ci_runs(at);
--- A repo's milestones as GitHub last answered, replaced whole on each read.
-CREATE TABLE IF NOT EXISTS milestones (
-  repo_id TEXT NOT NULL, number INTEGER NOT NULL, title TEXT NOT NULL, state TEXT NOT NULL,
-  due_on INTEGER, open INTEGER NOT NULL, closed INTEGER NOT NULL, PRIMARY KEY (repo_id, number)
-);
--- Lines sent to a seat, one row per key: a claimed key is never sent twice.
-CREATE TABLE IF NOT EXISTS seat_lines (
-  key TEXT PRIMARY KEY, run_id TEXT NOT NULL, seat_id TEXT NOT NULL, origin TEXT NOT NULL,
-  text TEXT NOT NULL, at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS seat_lines_run ON seat_lines(run_id);
--- The Activity page's loop rows; the key makes a re-emitted event land once.
-CREATE TABLE IF NOT EXISTS loop_events (
-  key TEXT PRIMARY KEY, run_id TEXT NOT NULL, text TEXT NOT NULL, at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS loop_events_at ON loop_events(at);
-CREATE TABLE IF NOT EXISTS run_handoffs (
-  run_id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, ticket TEXT NOT NULL, at INTEGER NOT NULL,
-  record TEXT NOT NULL, accepted_by TEXT, accepted_run_id TEXT, claim_token TEXT
-);
-CREATE INDEX IF NOT EXISTS run_handoffs_ticket ON run_handoffs(repo_id, ticket, at DESC);
-CREATE INDEX IF NOT EXISTS run_handoffs_received ON run_handoffs(accepted_run_id);
--- Hand-offs between agents (Activity › Messages): who told whom what, about which ticket.
-CREATE TABLE IF NOT EXISTS comms (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
-  to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS comms_at ON comms(at);
--- Each exact repeat of a stored message that was turned away, for the count in Audit.
-CREATE TABLE IF NOT EXISTS comms_repeats (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
-  to_id TEXT NOT NULL, message_id INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS comms_from_id ON comms(from_id, id);
-CREATE INDEX IF NOT EXISTS comms_to_id ON comms(to_id, id);
-CREATE TABLE IF NOT EXISTS comms_reads (
-  thread_id TEXT NOT NULL, source_id TEXT NOT NULL, offset INTEGER NOT NULL, block INTEGER NOT NULL,
-  PRIMARY KEY (thread_id, source_id)
-);
--- The Activity page's hub rows (an automatic update); the primary key keeps a line landing once.
-CREATE TABLE IF NOT EXISTS hub_events (
-  at INTEGER NOT NULL, text TEXT NOT NULL, PRIMARY KEY (at, text)
-);
--- A seat's next issues; taken_at is set while a seat holds the head and has not started its run.
-CREATE TABLE IF NOT EXISTS queues (
-  seat_id TEXT NOT NULL, pos INTEGER NOT NULL, repo_id TEXT NOT NULL, issue INTEGER NOT NULL,
-  taken_at INTEGER, PRIMARY KEY (seat_id, pos)
-);
--- Needs-you notes the engine raises; cleared_at is set once the cause is gone, dismissed_at when the operator dismissed it (reset when it is raised again).
--- Things the hub did or needs decided, with the risk tier fixed by the item's kind when recorded.
-CREATE TABLE IF NOT EXISTS audit_items (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, subject TEXT NOT NULL,
-  tier TEXT NOT NULL, state TEXT NOT NULL, detail TEXT NOT NULL, at INTEGER NOT NULL,
-  UNIQUE (kind, subject)
-);
-CREATE INDEX IF NOT EXISTS audit_items_at ON audit_items(at);
-CREATE TABLE IF NOT EXISTS attention_notes (
-  key TEXT PRIMARY KEY, kind TEXT NOT NULL, run_id TEXT, seat_id TEXT, repo_id TEXT,
-  text TEXT NOT NULL, at INTEGER NOT NULL, cleared_at INTEGER, dismissed_at INTEGER
-);
--- Preserve every note episode, including the history available on upgrade.
-CREATE TABLE IF NOT EXISTS attention_episodes (
-  key TEXT NOT NULL, kind TEXT NOT NULL, seat_id TEXT, at INTEGER NOT NULL,
-  cleared_at INTEGER
-);
-CREATE TRIGGER IF NOT EXISTS attention_episode_open AFTER INSERT ON attention_notes BEGIN
-  INSERT INTO attention_episodes VALUES (NEW.key, NEW.kind, NEW.seat_id, NEW.at, NEW.cleared_at);
-END;
-CREATE TRIGGER IF NOT EXISTS attention_episode_reopen AFTER UPDATE ON attention_notes
-WHEN OLD.cleared_at IS NOT NULL AND NEW.cleared_at IS NULL BEGIN
-  INSERT INTO attention_episodes VALUES (NEW.key, NEW.kind, NEW.seat_id, NEW.at, NULL);
-END;
-CREATE TRIGGER IF NOT EXISTS attention_episode_close AFTER UPDATE ON attention_notes
-WHEN OLD.cleared_at IS NULL AND NEW.cleared_at IS NOT NULL BEGIN
-  UPDATE attention_episodes SET cleared_at = NEW.cleared_at WHERE key = OLD.key AND cleared_at IS NULL;
-END;
--- One row per crew seat (phase 2a); run_id is null when no run is active.
-CREATE TABLE IF NOT EXISTS seat_sessions (
-  seat_id TEXT PRIMARY KEY, run_id TEXT, cli_session_id TEXT, state TEXT NOT NULL, reason TEXT,
-  worktree TEXT, updated_at INTEGER NOT NULL
-);
--- Tool calls the guard refused (phase 2b). text: the rule's text plus program and subcommand.
-CREATE TABLE IF NOT EXISTS guard_hits (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT, rule TEXT NOT NULL,
-  text TEXT NOT NULL, at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS guard_hits_at ON guard_hits(at);
--- Each run's latest whole read of a large file, and what its refused re-reads saved (guard.ts rereadVerdict).
-CREATE TABLE IF NOT EXISTS run_reads (
-  run_id TEXT NOT NULL, agent_id TEXT NOT NULL, path TEXT NOT NULL, size INTEGER NOT NULL, mtime_ms REAL NOT NULL,
-  compactions INTEGER NOT NULL, tool_use_id TEXT NOT NULL, at INTEGER NOT NULL,
-  PRIMARY KEY (run_id, agent_id, path)
-);
-CREATE TABLE IF NOT EXISTS run_rereads (
-  run_id TEXT PRIMARY KEY, count INTEGER NOT NULL, tokens_saved INTEGER NOT NULL
-);
--- Commits the mc commit tool made (phase 2b): the only commits a push may send.
-CREATE TABLE IF NOT EXISTS run_commits (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, repo_id TEXT NOT NULL,
-  branch TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, UNIQUE (run_id, sha)
-);
-CREATE TABLE IF NOT EXISTS commit_lines (
-  sha TEXT PRIMARY KEY, additions INTEGER, deletions INTEGER
-);
-CREATE INDEX IF NOT EXISTS run_commits_first ON run_commits(repo_id, sha, at, id);
-CREATE INDEX IF NOT EXISTS run_commits_branch ON run_commits(repo_id, branch);
-CREATE INDEX IF NOT EXISTS run_commits_at ON run_commits(at);
--- Append-only observations for a run and its linked review runs.
-CREATE TABLE IF NOT EXISTS run_attempts (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, kind TEXT NOT NULL,
-  at INTEGER NOT NULL, data TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS run_attempts_run ON run_attempts(run_id, id);
--- The sha a run last pushed to its branch, or found origin already at (phase 2b): draft_pr needs
--- it to be the branch's tip.
-CREATE TABLE IF NOT EXISTS run_pushes (run_id TEXT PRIMARY KEY, sha TEXT NOT NULL, at INTEGER NOT NULL);
--- Paths a refused commit had outside the seat's area (Needs you). key: strayKey(session, path).
-CREATE TABLE IF NOT EXISTS strays (
-  key TEXT PRIMARY KEY, session_id TEXT NOT NULL, path TEXT NOT NULL, agent_id TEXT NOT NULL,
-  kind TEXT NOT NULL, at INTEGER NOT NULL
-);
--- A seat's ask_flight questions; answered_at is set by a message to the seat, or the run's end.
-CREATE TABLE IF NOT EXISTS seat_questions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT NOT NULL,
-  text TEXT NOT NULL, at INTEGER NOT NULL, answered_at INTEGER
-);
--- A question that left Needs you without an answer, with why (returned, withdrawn, or a fact).
-CREATE TABLE IF NOT EXISTS question_closures (
-  key TEXT NOT NULL, ask_at INTEGER NOT NULL, kind TEXT NOT NULL, reason TEXT NOT NULL,
-  by TEXT NOT NULL, question TEXT NOT NULL, ticket TEXT, operator INTEGER NOT NULL,
-  at INTEGER NOT NULL, PRIMARY KEY (key, ask_at)
-);
-CREATE INDEX IF NOT EXISTS question_closures_at ON question_closures(at);
--- Failures of the mc tools that the operator is told of (Needs you, until acked).
-CREATE TABLE IF NOT EXISTS crew_errors (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, agent_id TEXT NOT NULL, run_id TEXT, text TEXT NOT NULL,
-  at INTEGER NOT NULL, acked INTEGER NOT NULL DEFAULT 0
-);
--- What the FLIGHT seat decided, with its basis ("Decided without you").
-CREATE TABLE IF NOT EXISTS flight_decisions (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, seat_id TEXT,
-  target_run_id TEXT, ref TEXT, question_id INTEGER, about TEXT NOT NULL, decision TEXT NOT NULL,
-  basis TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS flight_decisions_at ON flight_decisions(at);
--- The test lock's held calls (one row per tool call of the holding run), so a restart restores them.
-CREATE TABLE IF NOT EXISTS test_lock_holds (
-  run_id TEXT NOT NULL, tool_use_id TEXT NOT NULL, seat_id TEXT NOT NULL, command TEXT NOT NULL,
-  since INTEGER NOT NULL, PRIMARY KEY (run_id, tool_use_id)
-);
--- One row per hold, retained for QA_RETENTION_DAYS. outcome: pass or fail from the Post hook event.
-CREATE TABLE IF NOT EXISTS test_lock_runs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, seat_id TEXT NOT NULL,
-  command TEXT NOT NULL, queued_at INTEGER NOT NULL, started_at INTEGER NOT NULL,
-  ended_at INTEGER, outcome TEXT
-);
-CREATE INDEX IF NOT EXISTS test_lock_runs_started ON test_lock_runs(started_at);
--- A configured check a seat ran in its clone, on the head it ran against (the push gate reads it).
-CREATE TABLE IF NOT EXISTS check_runs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, run_id TEXT NOT NULL, command TEXT NOT NULL,
-  invoked_command TEXT, head_sha TEXT NOT NULL, ok INTEGER NOT NULL, exit_code INTEGER, at INTEGER NOT NULL
-);
-CREATE INDEX IF NOT EXISTS check_runs_run ON check_runs(run_id, command, head_sha);
--- The last keeper line the hub acted on, per run: the next hub replays from here.
-CREATE TABLE IF NOT EXISTS keeper_cursors (
-  run_id TEXT PRIMARY KEY, spawn TEXT NOT NULL, line INTEGER NOT NULL, rate_limited_until INTEGER
-);
--- FLIGHT's briefs on Needs-you items (the newest row per key shows); options is JSON.
-CREATE TABLE IF NOT EXISTS briefs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, context TEXT NOT NULL,
-  recommendation TEXT NOT NULL, options TEXT NOT NULL, basis TEXT NOT NULL, at INTEGER NOT NULL
-);
-CREATE TABLE IF NOT EXISTS item_discussions (
-  id TEXT PRIMARY KEY, item_key TEXT NOT NULL, version TEXT NOT NULL, messages TEXT NOT NULL, sent TEXT NOT NULL DEFAULT '[]',
-  UNIQUE(item_key, version)
-);
-CREATE INDEX IF NOT EXISTS briefs_key ON briefs(key);
-CREATE INDEX IF NOT EXISTS briefs_at ON briefs(at);
--- The template profile FLIGHT or the planner chose for a ticket, with the reason; the latest wins.
-CREATE TABLE IF NOT EXISTS profile_overrides (
-  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, profile TEXT NOT NULL, reason TEXT NOT NULL,
-  by TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
-);
--- Cards FLIGHT holds in Backlog behind an open PR; released_at is set when the card is promoted again.
-CREATE TABLE IF NOT EXISTS holds (
-  id INTEGER PRIMARY KEY AUTOINCREMENT, ref TEXT NOT NULL, waits_on INTEGER NOT NULL,
-  basis TEXT NOT NULL, at INTEGER NOT NULL, released_at INTEGER, seen INTEGER NOT NULL DEFAULT 0,
-  told_state TEXT
-);
-CREATE INDEX IF NOT EXISTS holds_ref ON holds(ref);
--- FLIGHT's living brief: one row per crew session and section.
-CREATE TABLE IF NOT EXISTS flight_brief (
-  session_id TEXT NOT NULL, section TEXT NOT NULL, text TEXT NOT NULL,
-  updated_at INTEGER NOT NULL, updated_by TEXT NOT NULL, PRIMARY KEY (session_id, section)
-);
-CREATE TABLE IF NOT EXISTS flight_memory (
-  repo_id TEXT NOT NULL, topic TEXT NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL,
-  source TEXT NOT NULL, author TEXT NOT NULL, topic_key TEXT NOT NULL,
-  updated_at INTEGER NOT NULL, PRIMARY KEY (repo_id, topic_key)
-);
-CREATE TABLE IF NOT EXISTS flight_ledger (
-  session_id TEXT NOT NULL, key TEXT NOT NULL, kind TEXT NOT NULL, status TEXT NOT NULL,
-  updated_at INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY(session_id, key)
-);
--- What a ledger entry watches; the hub marks changed_at when the target moves, FLIGHT's wake stamps read_at.
-CREATE TABLE IF NOT EXISTS flight_pointers (
-  session_id TEXT NOT NULL, entry_key TEXT NOT NULL, kind TEXT NOT NULL, target TEXT NOT NULL,
-  changed_at INTEGER, change TEXT, read_at INTEGER, changed_seq INTEGER, read_seq INTEGER,
-  PRIMARY KEY (session_id, entry_key, kind, target)
-);
-CREATE INDEX IF NOT EXISTS flight_pointers_target ON flight_pointers(kind, target);
-CREATE TABLE IF NOT EXISTS flight_watch (
-  session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
-  PRIMARY KEY (session_id, id)
-);
-CREATE TABLE IF NOT EXISTS flight_plans (
-  session_id TEXT NOT NULL, id TEXT NOT NULL, entry TEXT NOT NULL,
-  PRIMARY KEY (session_id, id)
-);
--- One row per FLIGHT wake: the run it woke and the fact categories that woke it.
-CREATE TABLE IF NOT EXISTS flight_wakes (
-  run_id TEXT NOT NULL, at INTEGER NOT NULL, reasons TEXT NOT NULL, PRIMARY KEY (run_id, at)
-);
-CREATE TABLE IF NOT EXISTS flight_incoming (
-  id TEXT PRIMARY KEY, source TEXT NOT NULL, arrival_id TEXT NOT NULL, version TEXT NOT NULL,
-  at INTEGER NOT NULL, entry TEXT NOT NULL, UNIQUE (source, arrival_id, version)
-);
--- The operator's GitHub notification threads (read-only copy); handled_* closes a thread here.
-CREATE TABLE IF NOT EXISTS notifications (
-  id TEXT PRIMARY KEY, repo_id TEXT NOT NULL, subject_type TEXT NOT NULL, title TEXT NOT NULL,
-  number INTEGER, reason TEXT NOT NULL, url TEXT NOT NULL, author TEXT, snippet TEXT,
-  updated_at INTEGER NOT NULL, last_read_at INTEGER, unread INTEGER NOT NULL,
-  first_seen_at INTEGER NOT NULL, handled_at INTEGER, handled_how TEXT, handled_through INTEGER
-);
--- Worktree paths a crew start is making (worktree add, then the install); one still here at the
--- next start was left half-made, and is removed and made again.
-CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER NOT NULL);
-
-`;
 
 type Row = Record<string, SQLInputValue>;
 
@@ -704,35 +305,6 @@ function median(values: number[]): number | null {
   const mid = sorted.length >> 1;
   return sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
 }
-
-/** One notification thread, as stored. */
-export interface NotificationRow {
-  id: string;
-  repoId: RepoId;
-  subjectType: string;
-  title: string;
-  number: number | null;
-  reason: string;
-  url: string;
-  author: string | null;
-  snippet: string | null;
-  updatedAt: number;
-  lastReadAt: number | null;
-  unread: boolean;
-  firstSeenAt: number;
-  handledAt: number | null;
-  handledHow: "marked" | "read" | "replied" | "copied" | "flight" | null;
-  message?: PersonMessage;
-  history?: PersonMessage[];
-  /** The `updatedAt` that was handled: a thread updated after it is open again. */
-  handledThrough: number | null;
-}
-
-/** What a GitHub read gives for a thread: the stored row less the bookkeeping the store owns. */
-export type NotificationRead = Omit<
-  NotificationRow,
-  "unread" | "firstSeenAt" | "handledAt" | "handledHow" | "handledThrough"
->;
 
 const notificationRow = (r: Row): NotificationRow => ({
   ...(r.source_content ? JSON.parse(r.source_content as string) : {}),
@@ -754,181 +326,12 @@ const notificationRow = (r: Row): NotificationRow => ({
   handledThrough: r.handled_through as number | null,
 });
 
-/** One section of FLIGHT's brief, as stored. */
-export interface FlightBriefRow {
-  sessionId: string;
-  section: FlightBriefSectionKey | typeof FLIGHT_HEADLINE;
-  text: string;
-  updatedAt: number;
-  updatedBy: string;
-}
-
-/** A card FLIGHT holds in Backlog behind an open PR. */
-export interface Hold {
-  ref: string;
-  waitsOn: number;
-  basis: string;
-  at: number;
-  releasedAt: number | null;
-  /** The stored board has shown the card in Backlog since the hold; until then a Ready card is just stale. */
-  seen: boolean;
-  /** The PR state FLIGHT was last woken for on this hold, or null. */
-  toldState: string | null;
-}
-
-/** One path a refused commit had outside the seat's area. */
-export interface Stray {
-  key: string;
-  sessionId: string;
-  path: string;
-  /** The seat whose commit had it. */
-  agentId: AgentId;
-  kind: StrayKind;
-  at: number;
-}
-
-/** A seat's open `ask_flight` question. */
-export interface SeatQuestion {
-  id: number;
-  agentId: AgentId;
-  runId: string;
-  text: string;
-  at: number;
-  /** When FLIGHT passed it to the operator, else null. */
-  passedAt: number | null;
-  /**
-   * When the operator set it aside with Not now (#1534), else null. It stays open and answerable
-   * on the Ticket page, but it is not in Needs you and the end of its run does not close it.
-   */
-  asideAt: number | null;
-}
-
-/** An mc tool failure the operator is told of. */
-export interface CrewError {
-  id: number;
-  agentId: AgentId;
-  runId: string | null;
-  text: string;
-  at: number;
-}
-
-/** `stray:` + the first 16 hex characters of SHA-256 of `session\0path`: one item per path. */
-export function strayKey(sessionId: string, path: string): string {
-  return `stray:${createHash("sha256").update(`${sessionId}\0${path}`).digest("hex").slice(0, 16)}`;
-}
-
 /** Memory in use as a percentage of the total; null when unmeasured or the total is unknown. */
 const memPct = (s: MachineSample): number | null =>
   s.memUsedBytes !== null && s.memTotalBytes > 0 ? (s.memUsedBytes / s.memTotalBytes) * 100 : null;
 
-/** The seat states that still hold a run: the supervisor reattaches these after a restart. */
-export const ACTIVE_SEAT_STATES: readonly SeatState[] = ["idle", "starting", "running", "parked"];
-
-/** `{dir of the DB}/crew/`: every crew run's files. Created with mode 0700. */
-export function crewDir(dbPath: string): string {
-  const dir = crewDirPath(dbPath);
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
-  return dir;
-}
-
-/** Where `crewDir` is, without making it. */
-export function crewDirPath(dbPath: string): string {
-  return join(dirname(dbPath), "crew");
-}
-
-/** A crew run's transcript: `{dir of the DB}/crew/{runId}.jsonl`. */
-export function crewTranscriptPath(dbPath: string, runId: string): string {
-  return join(crewDir(dbPath), `${runId}.jsonl`);
-}
-
-/** A crew run's system prompt file (role brief + the repo's CLAUDE.md), beside its transcript. */
-export function crewPromptPath(dbPath: string, runId: string): string {
-  return join(dirname(crewTranscriptPath(dbPath, runId)), `${runId}.prompt.md`);
-}
-
-/**
- * A crew run's token file, beside its transcript: what the guard hook reads its token from. The
- * supervisor writes it at 0600 for the run's process and removes it when that process exits; the
- * sandbox read-denies the whole directory.
- */
-/** One held call of the test lock, as stored. */
-export interface LockHoldRow {
-  /** When the call joined the line; `since` when absent. Not a column of `test_lock_holds`. */
-  queuedAt?: number;
-  runId: string;
-  toolUseId: string;
-  seatId: string;
-  command: string;
-  since: number;
-}
-
-export function crewTokenPath(dbPath: string, runId: string): string {
-  return join(dirname(crewTranscriptPath(dbPath, runId)), `${runId}.token`);
-}
-
-/** A crew run's `--mcp-config` file (it holds the token too): written and removed with it. */
-export function crewMcpPath(dbPath: string, runId: string): string {
-  return join(dirname(crewTranscriptPath(dbPath, runId)), `${runId}.mcp.json`);
-}
-
-/** A draft PR's body file (`pr-<uuid>.md` in `{DB dir}/crew/`), which `gh pr create` reads. */
-export const CREW_PR_BODY_FILE =
-  /^pr-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.md$/;
-
-/** A new, unique path for a draft PR's body file; the tool removes it once gh has read it. */
-export function crewPrBodyPath(dbPath: string): string {
-  return join(crewDir(dbPath), `pr-${randomUUID()}.md`);
-}
-
-/** A crew run's keeper folder: `{dir of the DB}/crew/k-<12 hex of sha256(runId)>`, short for its socket path. */
-export function crewKeeperDir(dbPath: string, runId: string): string {
-  crewDir(dbPath);
-  return crewKeeperDirPath(dbPath, runId);
-}
-
-/** Where `crewKeeperDir` is, without making `crew/`. */
-export function crewKeeperDirPath(dbPath: string, runId: string): string {
-  const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
-  return join(crewDirPath(dbPath), `k-${hex}`);
-}
-
-/** Codex thread storage survives replacement of the run's keeper. */
-export function crewCodexDir(dbPath: string, runId: string): string {
-  const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
-  return join(crewDir(dbPath), `codex-${hex}`);
-}
-
-export const CREW_CODEX_DIR = /^codex-[0-9a-f]{12}$/;
-
-/**
- * A Claude run's skills plugin folder (`--plugin-dir`), built by the hub from the repo's commit. It
- * sits in the data dir, which the seat's sandbox cannot write, and is removed with the run's files.
- */
-export function crewSkillsDir(dbPath: string, runId: string): string {
-  const hex = createHash("sha256").update(runId).digest("hex").slice(0, 12);
-  return join(crewDir(dbPath), `skills-${hex}`);
-}
-
-export const CREW_SKILLS_DIR = /^skills-[0-9a-f]{12}$/;
-
-/** A keeper folder's name in `{DB dir}/crew/`. */
-export const CREW_KEEPER_DIR = /^k-[0-9a-f]{12}$/;
-
-/** What the hub has acted on of a run's keeper: the lines of keeper `spawn` below `line`. */
-export interface KeeperCursor {
-  runId: string;
-  spawn: string;
-  line: number;
-  rateLimitedUntil: number | null;
-}
-
-export const BUSY_TIMEOUT_MS = 5000;
 /** `PRAGMA user_version` once the usage_samples dedupe and its unique index are in place. */
 const USAGE_DEDUPE_VERSION = 1;
-/** Per-minute machine samples older than this (before the newest one) are deleted. */
-export const MACHINE_RETENTION_MS = 7 * 24 * 60 * 60_000;
-/** An ack whose key has been absent from the attention items for longer than this is deleted. */
-export const ACK_ABSENT_MS = 7 * 24 * 60 * 60_000;
 /**
  * A stored digest; one persisted before `background` existed has none in flight, one before
  * `compactions` existed has none counted, one before `lastText` existed has no text.
@@ -950,104 +353,8 @@ const REPO_TABLES = {
 } as const;
 type RepoTable = keyof typeof REPO_TABLES;
 
-export type BoardMoveState = "pending" | "done" | "failed";
-
-/** One Status move of a run's card; `detail` is why it failed. */
-export interface BoardMove {
-  id: number;
-  runId: string;
-  repoId: RepoId;
-  issue: number;
-  column: HudColumn;
-  state: BoardMoveState;
-  detail: string | null;
-  at: number;
-}
-
 /** How much of a link's newest message `commsLinkCounts` returns (the graph's hover preview). */
 const COMMS_LINK_PREVIEW = 200;
-/** One direction of a Comms link over a window, with its newest message. */
-export interface CommsLinkCount {
-  from: string;
-  to: string;
-  count: number;
-  lastId: string;
-  lastAt: number;
-  lastText: string;
-  tokens: number;
-}
-
-/** Who a seat line is from. */
-/** A hand-off between agents; `from` and `to` are seat ids, COMMS_CAPCOM or COMMS_MC. */
-export interface CommsRow {
-  id: string;
-  at: number;
-  from: string;
-  to: string;
-  ticket: string | null;
-  text: string;
-  label: CommsLabel | null;
-  ref: string | null;
-  replyTo: string | null;
-  mentions: string[];
-  senderKind: CommsSenderKind | null;
-  /** When the recipient seat took the message; null while it is only stored. */
-  deliveredAt: number | null;
-  itemKey?: string;
-}
-/** The operator's choice on a question, as stored. */
-export interface QuestionChoiceRow {
-  key: string;
-  briefAt: number;
-  optionId: string;
-  label: string;
-  answer: string;
-  question: string;
-  ticket: string | null;
-  target: string;
-  targetKind: ChoiceTargetKind;
-  /** The Comms message carrying the answer; null when none was stored. */
-  messageId: string | null;
-  /** Who chose, in words: "the operator", "FLIGHT" or "the controller". */
-  chosenBy: string;
-  chosenAt: number;
-}
-/** A slice of stored Comms: the crew channel, one pair, everything a seat sent or got, or its inbox. */
-export type CommsReadScope =
-  | { crew: true }
-  | { pair: readonly [string, string] }
-  | { agent: string }
-  | { inbox: string };
-export interface NewCommsRow {
-  at: number;
-  from: string;
-  to: string;
-  ticket: string | null;
-  text: string;
-  itemKey?: string;
-  label?: CommsLabel | null;
-  ref?: string | null;
-  replyTo?: string | null;
-  targetRunId?: string | null;
-  /** The sending seat's run, stamped by the hub; not typed by the agent. */
-  fromRunId?: string | null;
-  /** The number of the sender's newest open PR, stamped by the hub. */
-  pr?: number | null;
-  mentions?: readonly string[];
-  /**
-   * Who sent it. The hub sets it from how the request was made, never from the text. Every send in
-   * apps/server/src names it (comms-sender-kind.test.ts scans for that); only fixtures omit it.
-   */
-  senderKind?: CommsSenderKind;
-}
-
-/** A FLIGHT settlement of a stale Comms question or blocker. */
-export interface CommsSettlement {
-  messageId: string;
-  settledBy: string;
-  reason: string;
-  at: number;
-}
 
 function cutCommsText(text: string): string {
   const chars = Array.from(text);
@@ -1056,345 +363,10 @@ function cutCommsText(text: string): string {
     : text;
 }
 
-/** Parse the sole external representation of a stored Comms message ID. */
-export function commsMessageNumber(id: string): number | null {
-  const match = /^comms:(\d+)$/.exec(id);
-  if (match === null) return null;
-  const number = Number(match[1]);
-  return Number.isSafeInteger(number) ? number : null;
-}
-
-export const THREAD_COMMS_LIMIT = 500;
-
-/** The source and position of a stable Comms/transcript message ID. */
-export function commsPosition(
-  id: string,
-): { source: string; offset: number; block: number } | null {
-  const match = /^(comms):(\d+)$|^(stream:.+):(\d+):(\d+)$/.exec(id);
-  if (!match) return null;
-  const offset = Number(match[2] ?? match[4]);
-  const block = Number(match[5] ?? 0);
-  if (!Number.isSafeInteger(offset) || !Number.isSafeInteger(block)) return null;
-  const source = match[1] ?? match[3];
-  return source === undefined ? null : { source, offset, block };
-}
-
-export type SeatLineOrigin = "operator" | "engine";
-
-/** A line sent to a seat; its key is what makes sending it once-only. */
-export interface SeatLine {
-  runId: string;
-  seatId: string;
-  origin: SeatLineOrigin;
-  text: string;
-  at: number;
-}
-
-/** What a run's seat reported. */
-export interface Evidence {
-  id: number;
-  runId: string;
-  note: string;
-  at: number;
-  tests: ReportedTest[];
-  testsAdded: { file: string; failedOnBase: boolean }[];
-  /** The author's answer to each of the ticket's Done-when lines; empty for an older report. */
-  doneWhen: DoneWhenEntry[];
-}
-
-const evidenceOf = (r: Row): Evidence => ({
-  id: r.id as number,
-  runId: r.run_id as string,
-  note: r.note as string,
-  at: r.at as number,
-  tests: JSON.parse(r.tests as string) as ReportedTest[],
-  testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
-  doneWhen: JSON.parse(r.done_when as string) as DoneWhenEntry[],
-});
-
-/** One issue in a seat's queue; `takenAt` is set while the seat holds it. */
-export interface QueueRow {
-  seatId: string;
-  pos: number;
-  repoId: RepoId;
-  issue: number;
-  takenAt: number | null;
-}
-
-/** The attention kinds the engine raises as notes. */
-export type NoteKind = Extract<
-  AttentionKind,
-  "blocked" | "review" | "ready" | "flag" | "ratelimit" | "question" | "approval"
->;
-
-export interface NoteInput {
-  key: string;
-  kind: NoteKind;
-  runId: string | null;
-  seatId: string | null;
-  repoId: RepoId | null;
-  text: string;
-  at: number;
-}
-
-export interface AttentionNote extends NoteInput {
-  clearedAt: number | null;
-  /** When the operator dismissed it from Needs you, else null. */
-  dismissedAt: number | null;
-}
-
-/** One recorded HUD state change of an agent. */
-export interface AgentEvent {
-  agentId: AgentId;
-  at: number;
-  from: HudState;
-  to: HudState;
-  text: string;
-}
-
-/** A run still open (no end) this long before a query's end is an abandoned row, not live work. */
-export const MAX_OPEN_RUN_AGE_MS = 30 * 24 * 60 * 60_000;
-
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
 const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
-
-const toSample = (r: Row): UsageSample => ({
-  accountId: r.account_id as string,
-  window: r.window as "5h" | "7d",
-  at: r.at as number,
-  pct: r.pct as number,
-  resetAt: r.reset_at as number,
-  source: r.source as string,
-});
-
-/** A run's stored plan fact; a value that won't parse is dropped rather than failing every run read. */
-function parsePlan(raw: string): { plan?: Run["plan"] } {
-  try {
-    const plan = JSON.parse(raw) as Run["plan"];
-    return plan !== null && typeof plan === "object" ? { plan } : {};
-  } catch {
-    return {};
-  }
-}
-
-const toRun = (r: Row): Run => ({
-  ...(r.vendor === "codex" ? { vendor: "codex" as const } : {}),
-  ...(r.latest_plan == null ? {} : { latestPlan: r.latest_plan as string }),
-  // Absent, not null, on a row from before the ticket's title was stored.
-  ...(r.ticket_title === null || r.ticket_title === undefined
-    ? {}
-    : { ticketTitle: r.ticket_title as string }),
-  // Absent, not null, on a run that did not record its CLI version.
-  ...(r.cli_version === null || r.cli_version === undefined
-    ? {}
-    : { cliVersion: r.cli_version as string }),
-  ...(r.account_id == null ? {} : { accountId: r.account_id as AccountId }),
-  ...(r.effort == null ? {} : { effort: r.effort as string }),
-  ...(r.loop_kind == null ? {} : { loopKind: r.loop_kind as LoopKind }),
-  ...(r.prompt_hash == null ? {} : { promptHash: r.prompt_hash as string }),
-  // Absent, not null, on a run no loop drives or that has no recorded ender.
-  ...(r.loop === null || r.loop === undefined
-    ? {}
-    : { loop: JSON.parse(r.loop as string) as RunLoop }),
-  ...(r.plan == null ? {} : parsePlan(r.plan as string)),
-  // Absent, not null, on a run that started without a profile.
-  ...(r.profile === null || r.profile === undefined
-    ? {}
-    : {
-        profile: {
-          ...(JSON.parse(r.profile as string) as ChosenProfile),
-          hash: r.profile_hash as string,
-        },
-      }),
-  ...(r.ended_by === null || r.ended_by === undefined
-    ? {}
-    : { endedBy: r.ended_by as NonNullable<Run["endedBy"]> }),
-  ...(r.no_report == null
-    ? {}
-    : { noReport: JSON.parse(r.no_report as string) as Run["noReport"] }),
-  id: r.id as string,
-  agentId: r.agent_id as string,
-  repoId: r.repo_id as string,
-  seq: r.seq as number,
-  startedAt: r.started_at as number,
-  endedAt: r.ended_at as number | null,
-  status: r.status as Run["status"],
-  sessionId: r.session_id as string | null,
-  model: r.model as string | null,
-  branch: r.branch as string | null,
-  ticket: r.ticket as string | null,
-  costUsd: r.cost_usd as number | null,
-  tokens: r.tokens === null ? null : (JSON.parse(r.tokens as string) as TokenUsage),
-  transcriptPath: r.transcript_path as string,
-  prs: JSON.parse(r.prs as string) as Run["prs"],
-  summary: r.summary as string | null,
-  reviewId: (r.review_id ?? null) as number | null,
-});
-
-const toBoardItem = (r: Row): BoardItem => ({
-  repoId: r.repo_id as string,
-  issueNumber: r.issue_number as number,
-  title: r.title as string,
-  status: r.status as string,
-  state: r.state as BoardItem["state"],
-  labels: JSON.parse(r.labels as string) as string[],
-  assignees: JSON.parse(r.assignees as string) as string[],
-  ...(typeof r.author === "string" ? { author: r.author } : {}),
-  priority: r.priority as string | null,
-  updatedAt: r.updated_at as number,
-  url: r.url as string,
-  stage: r.stage as BoardItem["stage"],
-  owner: r.owner as BoardItem["owner"],
-  parent: r.parent as number | null,
-  subIssues:
-    r.sub_total === null ? null : { done: r.sub_done as number, total: r.sub_total as number },
-  blockedBy: JSON.parse(r.blocked_by as string) as BoardItem["blockedBy"],
-  ...(typeof r.after_deps === "string"
-    ? { after: JSON.parse(r.after_deps) as NonNullable<BoardItem["after"]> }
-    : {}),
-  ...(typeof r.defect_refs === "string"
-    ? { defectRefs: JSON.parse(r.defect_refs) as DefectRefs }
-    : {}),
-  milestone: r.milestone as string | null,
-  size: r.size as string | null,
-  closed: r.closed === 1,
-  prioritySource: r.priority_source as BoardItem["prioritySource"],
-  createdAt: r.created_at as number,
-  itemId: r.item_id as string | null,
-  projectId: r.project_id as string | null,
-});
-
-const toFlightDecision = (r: Row): FlightDecision => ({
-  ...(r.order_id == null ? {} : { orderId: Number(r.order_id) }),
-  ...(r.wake_id == null ? {} : { wakeId: r.wake_id as string }),
-  id: r.id as number,
-  at: r.at as number,
-  kind: r.kind as FlightDecisionKind,
-  seatId: r.seat_id as string | null,
-  targetRunId: r.target_run_id as string | null,
-  ref: r.ref as string | null,
-  questionId: r.question_id as number | null,
-  about: r.about as string,
-  decision: r.decision as string,
-  basis: r.basis as string,
-});
-
-const toCiRun = (r: Row): CiRunView => ({
-  repoId: r.repo_id as string,
-  prNumber: r.pr_number as number,
-  sha: r.sha as string,
-  workflow: r.workflow as string | null,
-  name: r.name as string,
-  attempt: r.attempt as number,
-  state: r.state as CiRunView["state"],
-  conclusion: r.conclusion as string,
-  url: r.url as string | null,
-  firstSeenAt: r.first_seen_at as number,
-  at: r.at as number,
-});
-
-const toEscalation = (r: Row): Escalation => ({
-  id: r.id as string,
-  repoId: r.repo_id as string,
-  issueNumber: r.issue_number as number,
-  title: r.title as string,
-  kind: r.kind as Escalation["kind"],
-  source: r.source === "title" ? "title" : "label",
-  openedAt: r.opened_at as number,
-  url: r.url as string,
-  question:
-    r.question === null ? null : (JSON.parse(r.question as string) as Escalation["question"]),
-});
-
-const toReview = (r: Row): ReviewRow => ({
-  id: r.id as number,
-  authorRunId: r.author_run_id as string,
-  repoId: r.repo_id as string,
-  seatId: r.seat_id as string,
-  prNumber: r.pr_number as number,
-  sha: r.sha as string,
-  epoch: r.epoch as number,
-  attempt: r.attempt as number,
-  round: r.round as number,
-  state: r.state as ReviewState,
-  runId: r.run_id as string | null,
-  verdict: r.verdict === null ? null : (JSON.parse(r.verdict as string) as ReviewVerdict),
-  summary: r.summary as string | null,
-  blocking: r.blocking as number,
-  minor: r.minor as number,
-  failure: r.failure as string | null,
-  createdAt: r.created_at as number,
-  startedAt: r.started_at as number | null,
-  endedAt: r.ended_at as number | null,
-});
-
-const toGuardHit = (r: Row): GuardHit => ({
-  id: r.id as number,
-  agentId: r.agent_id as string,
-  runId: r.run_id as string | null,
-  rule: r.rule as GuardRule,
-  text: r.text as string,
-  at: r.at as number,
-});
-
-const queueRow = (r: Row): QueueRow => ({
-  seatId: r.seat_id as string,
-  pos: r.pos as number,
-  repoId: r.repo_id as string,
-  issue: r.issue as number,
-  takenAt: r.taken_at as number | null,
-});
-
-const toQuestion = (r: Row): SeatQuestion => ({
-  id: r.id as number,
-  agentId: r.agent_id as string,
-  runId: r.run_id as string,
-  text: r.text as string,
-  at: r.at as number,
-  passedAt: r.passed_at as number | null,
-  asideAt: (r.aside_at as number | null | undefined) ?? null,
-});
-
-const seatRow = (r: Row): SeatSessionRow => ({
-  ...(r.vendor === "codex" ? { vendor: "codex" as const } : {}),
-  seatId: r.seat_id as string,
-  runId: r.run_id as string | null,
-  cliSessionId: r.cli_session_id as string | null,
-  state: r.state as SeatState,
-  reason: r.reason as string | null,
-  ...(r.stop_by === null || r.stop_by === undefined
-    ? {}
-    : {
-        stop: {
-          by: r.stop_by as string,
-          reason: r.stop_reason as string | null,
-          at: r.stop_at as number,
-        },
-      }),
-  worktree: r.worktree as string | null,
-  updatedAt: r.updated_at as number,
-  lastTurnEndedAt: (r.last_turn_ended_at as number | null | undefined) ?? null,
-  lastTurnStartedAt: (r.last_turn_started_at as number | null | undefined) ?? null,
-  quietTurns: (r.quiet_turns as number | null | undefined) ?? 0,
-  ...(r.state === "error" ? { errorSince: (r.error_since ?? r.updated_at) as number } : {}),
-});
-
-/** The sha256 identifies a wake, nothing more: the hub keeps no past wake JSON to retrieve. */
-function compactFlightWake(text: string): string {
-  const json = text.slice(text.lastIndexOf("\n") + 1);
-  const suffix = `\nsha256:${createHash("sha256").update(json).digest("hex")}`;
-  const limit = FLIGHT_WAKE_STORED_BYTES - Buffer.byteLength(suffix);
-  let header = "";
-  let bytes = 0;
-  for (const char of text.split("\n", 1)[0] ?? "") {
-    bytes += Buffer.byteLength(char);
-    if (bytes > limit) break;
-    header += char;
-  }
-  return header + suffix;
-}
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -2538,6 +1510,68 @@ export class Store {
     }));
   }
 
+  /** Context size of every stored model call of runs that started since `since`. */
+  runCallContexts(since: number): { runId: string; context: number }[] {
+    return this.db
+      .prepare(
+        `SELECT c.run_id AS runId, c.context AS context FROM run_token_calls c
+         JOIN runs r ON r.id = c.run_id WHERE r.started_at >= ?`,
+      )
+      .all(since) as { runId: string; context: number }[];
+  }
+
+  /** Review runs that started since `since` on a ticket, oldest first. */
+  reviewRunsSince(since: number): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM runs WHERE review_id IS NOT NULL AND ticket IS NOT NULL AND started_at >= ?
+           ORDER BY started_at, seq`,
+        )
+        .all(since) as Row[]
+    ).map(toRun);
+  }
+
+  /** PRs merged in `[from, to]`, and every run on a ticket one of them closed. */
+  mergedTicketRuns(from: number, to: number): { mergedPrs: number; runs: Run[] } {
+    const merged = this.db
+      .prepare("SELECT COUNT(*) AS n FROM pr_history WHERE merged_at >= ? AND merged_at <= ?")
+      .get(from, to) as { n: number };
+    const runs = (
+      this.db
+        .prepare(
+          `WITH merged_tickets AS (
+             SELECT DISTINCT repo_id, json_extract(record, '$.ticket') AS ticket FROM pr_history
+             WHERE merged_at >= ? AND merged_at <= ?
+           ) SELECT r.* FROM runs r JOIN merged_tickets t ON r.repo_id = t.repo_id AND r.ticket = t.ticket
+           ORDER BY r.started_at, r.seq`,
+        )
+        .all(from, to) as Row[]
+    ).map(toRun);
+    return { mergedPrs: merged.n, runs };
+  }
+
+  /** For each prompt section recorded since `since`, the run that sent the most of it. */
+  promptSectionTopRuns(since: number): {
+    section: PromptSection;
+    runId: string;
+    agentId: string;
+    ticket: string | null;
+    tokens: number;
+  }[] {
+    return this.db
+      .prepare(
+        `SELECT section, runId, agentId, ticket, tokens FROM (
+           SELECT p.section AS section, p.run_id AS runId, r.agent_id AS agentId, r.ticket AS ticket,
+             SUM(p.tokens) AS tokens,
+             ROW_NUMBER() OVER (PARTITION BY p.section ORDER BY SUM(p.tokens) DESC, p.run_id) AS n
+           FROM prompt_sections p JOIN runs r ON r.id = p.run_id WHERE p.at >= ?
+           GROUP BY p.section, p.run_id)
+         WHERE n = 1`,
+      )
+      .all(since) as never;
+  }
+
   /** Prompt-section tokens by section for prompts recorded since `since`. */
   promptSectionTotals(since: number): { section: PromptSection; tokens: number }[] {
     return this.db
@@ -2829,7 +1863,7 @@ export class Store {
 
   /**
    * The merge hold on the branch's latest build run, ended or not. A hold outlives its run until
-   * someone releases it. A follow-on run gets a copy (run-handoffs.ts), so only the latest one counts.
+   * someone releases it. A follow-on run gets a copy (run/handoffs.ts), so only the latest one counts.
    */
   branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
     const latest = this.runsOnBranch(repoId, branch).findLast((run) => run.reviewId == null);
@@ -3028,9 +2062,13 @@ export class Store {
    * `sinceMs`. Newest first.
    */
   runsOverlapping(sinceMs: number, untilMs: number): Run[] {
-    const rows = this.db
+    return this.overlappingRuns("*", sinceMs, untilMs).map(toRun);
+  }
+
+  private overlappingRuns(columns: string, sinceMs: number, untilMs: number): Row[] {
+    return this.db
       .prepare(
-        `SELECT * FROM runs WHERE started_at < ?
+        `SELECT ${columns} FROM runs WHERE started_at < ?
            AND (ended_at > ?
              OR (ended_at IS NULL AND status = ? AND started_at > ?)
              OR (ended_at IS NULL AND started_at >= ?))
@@ -3043,7 +2081,48 @@ export class Store {
         untilMs - MAX_OPEN_RUN_AGE_MS,
         sinceMs,
       ) as Row[];
-    return rows.map(toRun);
+  }
+
+  /**
+   * The run and attempt-usage fields FLIGHT's cost and wait figures read, for `agentIds`' runs
+   * overlapping [since, until) (same rule and order as `runsOverlapping`). Reads only the scalar
+   * columns and each digest's usage timestamps and tokens, never the whole digest or run row.
+   */
+  financialRuns(sinceMs: number, untilMs: number, agentIds: ReadonlySet<string>): FinancialRun[] {
+    const runs = this.overlappingRuns(
+      "id, agent_id, started_at, ended_at, status, cost_usd",
+      sinceMs,
+      untilMs,
+    )
+      .filter((r) => agentIds.has(r.agent_id as string))
+      .map(
+        (r): FinancialRun => ({
+          id: r.id as string,
+          agentId: r.agent_id as string,
+          startedAt: r.started_at as number,
+          endedAt: r.ended_at as number | null,
+          status: r.status as Run["status"],
+          costUsd: r.cost_usd as number | null,
+          attemptUsage: [],
+        }),
+      );
+    const byId = new Map(runs.map((r) => [r.id, r]));
+    const ids = [...byId.keys()];
+    for (let i = 0; i < ids.length; i += DIGEST_BATCH) {
+      const batch = ids.slice(i, i + DIGEST_BATCH);
+      const rows = this.statement(
+        `SELECT run_id, json_extract(digest, '$.attemptUsage') AS usage
+         FROM run_digests WHERE run_id IN (${batch.map(() => "?").join(", ")})`,
+      ).all(...batch) as { run_id: string; usage: string | null }[];
+      for (const r of rows) {
+        if (r.usage === null) continue;
+        const run = byId.get(r.run_id);
+        if (run === undefined) continue;
+        for (const u of JSON.parse(r.usage) as { at: number | null; tokens: number }[])
+          run.attemptUsage.push({ at: u.at, tokens: u.tokens });
+      }
+    }
+    return runs;
   }
 
   /**
@@ -4845,7 +3924,9 @@ export class Store {
     before: { at: number; id: number } | null = null,
   ): TicketQuestion[] {
     const rows =
-      this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis
+      this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis,
+        (SELECT x.item_key FROM item_discussions x WHERE x.item_key = 'ask:' || q.id LIMIT 1)
+          AS discussion_key
       FROM seat_questions q JOIN runs r ON r.id = q.run_id
       LEFT JOIN flight_decisions d ON d.id = (SELECT a.id FROM flight_decisions a
         WHERE a.question_id = q.id AND a.kind = 'answer' ORDER BY a.at DESC, a.id DESC LIMIT 1)
@@ -4862,6 +3943,7 @@ export class Store {
       runId: r.run_id as string,
       seat: r.agent_id as string,
       text: r.text as string,
+      discussionKey: r.discussion_key as string | null,
       at: r.at as number,
       passedAt: r.passed_at as number | null,
       asideAt: r.aside_at as number | null,
@@ -7995,6 +7077,21 @@ export class Store {
       .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
   }
 
+  /** Refresh measured details without restarting or unacknowledging an open episode. */
+  refreshNoteInEpisode(n: NoteInput): void {
+    this.db
+      .prepare(
+        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
+           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
+           at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.at ELSE excluded.at END,
+           dismissed_at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.dismissed_at ELSE NULL END,
+           cleared_at = NULL`,
+      )
+      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+  }
+
   clearNote(key: string, at: number): void {
     this.db
       .prepare("UPDATE attention_notes SET cleared_at = ? WHERE key = ? AND cleared_at IS NULL")
@@ -9700,6 +8797,14 @@ export class Store {
           messages: JSON.parse(row.messages as string) as ItemChatMessage[],
         }
       : null;
+  }
+
+  /** The newest stored conversation for an item which is no longer in attention. */
+  discussionForItem(itemKey: string): ItemDiscussion | null {
+    const row = this.db
+      .prepare("SELECT id FROM item_discussions WHERE item_key = ? ORDER BY rowid DESC LIMIT 1")
+      .get(itemKey) as Row | undefined;
+    return row ? this.discussion(itemKey, row.id as string) : null;
   }
 
   private discussionById(id: string): ItemDiscussion | null {

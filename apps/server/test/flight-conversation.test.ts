@@ -6,7 +6,7 @@ import { OPERATOR_HEADER, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { commsInboxContext } from "../src/comms.ts";
+import { commsInboxContext } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
@@ -407,6 +407,20 @@ it("marks through a displayed turn, preserves newer unread lines and never moves
   expect((await read(ids[1])).statusCode).toBe(200);
   expect(await page()).toMatchObject({ cursor: ids[1], unread: 0 });
   expect(store.commsScopeCursor("flight")).toMatch(/^comms:\d+$/);
+});
+
+it("shares the hub unread count between Comms and the FLIGHT fly-out stream", async () => {
+  const ids = run("flight-fly-out", [text("Reply", AT + 1)]);
+  const flyout = async () => {
+    const response = await app.inject("/api/agents/FLIGHT-1/stream");
+    expect(response.statusCode, response.body).toBe(200);
+    return response.json() as { unread?: number };
+  };
+  expect((await page()).unread).toBe(1);
+  expect((await flyout()).unread).toBe(1);
+  expect((await read(ids[0] ?? "")).statusCode).toBe(200);
+  expect((await page()).unread).toBe(0);
+  expect((await flyout()).unread).toBe(0);
 });
 
 it("upgrades legacy reads without reviving transcript history or hiding newer mixed replies", async () => {

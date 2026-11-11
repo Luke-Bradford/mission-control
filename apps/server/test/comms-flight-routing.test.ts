@@ -202,6 +202,34 @@ describe("crew Comms questions stay with FLIGHT", () => {
     });
   });
 
+  it("lists one owner's items in the compact shape (#1632)", async () => {
+    flight(true);
+    const operatorKey = message("question", 0);
+    const flightKey = message("question", 1);
+    const value = brief(operatorKey, "flight");
+    await pollDecisions();
+    const all = await attention();
+    expect(all.filter((item) => item.owner === "operator")).toHaveLength(1);
+    const response = await app.inject("/api/attention?owner=operator&compact=1");
+    expect(response.statusCode).toBe(200);
+    const item = all.find((candidate) => candidate.key === operatorKey);
+    expect(response.json()).toEqual([
+      {
+        key: operatorKey,
+        kind: item?.kind,
+        text: item?.text,
+        ticket: "repo#906",
+        at: item?.at,
+        ask: value.ask,
+      },
+    ]);
+    expect(JSON.stringify(response.json())).not.toContain(flightKey);
+    const flightOwned = (await app.inject("/api/attention?owner=flight")).json() as AttentionItem[];
+    expect(flightOwned.map((item) => item.key)).toContain(flightKey);
+    expect(flightOwned.every((item) => item.owner === "flight")).toBe(true);
+    expect((await app.inject("/api/attention?owner=")).statusCode).toBe(400);
+  });
+
   it("keeps the protected runaway alert beside the single outage alert", async () => {
     flight(false);
     message("blocker");

@@ -30,7 +30,6 @@ const ROUTES = [
   "/tickets/shop-app/102",
   "/agent/dev-1",
   "/agent/flight-1",
-  "/map/shop-app",
   "/comms",
   "/comms/crew",
   "/comms/agents/dev-1",
