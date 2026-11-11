@@ -18,7 +18,7 @@ import {
   WAITING_OPERATOR_COLOR,
   WAITING_OPERATOR_LABEL,
 } from "@mc/core";
-import { protectedDecisionItem, questionAskAt } from "./attention-holds.ts";
+import { protectedDecisionItem, questionAskAt } from "./attention/holds.ts";
 import type { ChangeBus } from "./bus.ts";
 import type { Gql } from "./collectors/github.ts";
 import { validateCommsText } from "./comms/index.ts";

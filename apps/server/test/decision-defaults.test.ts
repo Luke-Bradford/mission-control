@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AttentionItem, DECISION_DEFAULT_WAIT_MS } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { decisionDefault } from "../src/attention-holds.ts";
+import { decisionDefault } from "../src/attention/holds.ts";
 import type { CcConfig } from "../src/config.ts";
 import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { attentionItems, NOTE_KEY } from "../src/hud.ts";

@@ -29,7 +29,7 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./account-bindings.ts";
-import { evaluateHolds } from "./attention-holds.ts";
+import { evaluateHolds } from "./attention/holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
 import { syncBudgetBrake } from "./budget-brake.ts";
@@ -127,7 +127,7 @@ import {
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
-import { auditEndedRuns } from "./token-audit.ts";
+import { auditEndedRuns } from "./token-audit/audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
