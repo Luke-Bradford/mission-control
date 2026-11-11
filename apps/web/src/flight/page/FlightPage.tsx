@@ -86,7 +86,7 @@ export function FlightPage() {
             <Pending what="blockers" error={attention.error} resource={RESOURCES.attention} />
           )}
         </section>
-        <section className="fp-panel fp-watch" id="watchP" aria-labelledby="watchH">
+        <section className="fp-panel fp-watch" id="heldWatchP" aria-labelledby="watchH">
           <h2 className="fp-head" id="watchH">
             Watch list
             <span className="fp-sub">

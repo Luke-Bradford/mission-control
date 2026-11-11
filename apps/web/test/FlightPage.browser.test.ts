@@ -133,12 +133,14 @@ describeRendered("FLIGHT page in a browser", () => {
               ],
             }),
           });
-          await page.box("#watchP [data-testid=held-row]");
+          await page.box("#heldWatchP [data-testid=held-row]");
           expect(page.errors()).toEqual([]);
-          expect(await page.reachable("#watchP")).toEqual([true]);
-          expect(await page.reachable("#watchP [data-testid=held-row]", "#watchP")).toEqual([true]);
+          expect(await page.reachable("#heldWatchP")).toEqual([true]);
+          expect(await page.reachable("#heldWatchP [data-testid=held-row]", "#heldWatchP")).toEqual(
+            [true],
+          );
           const text = await page.evaluate(
-            () => document.getElementById("watchP")?.textContent ?? "",
+            () => document.getElementById("heldWatchP")?.textContent ?? "",
             null,
           );
           expect(text).toContain("Watch list");

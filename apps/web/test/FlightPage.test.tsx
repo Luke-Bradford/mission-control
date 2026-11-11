@@ -117,6 +117,7 @@ describe("the FLIGHT page", () => {
     ["#logP", "logP"],
     ["#wifP", "wifP"],
     ["#ledgerP", "ledgerP"],
+    ["#watchP", "watchP"],
   ])("routes old %s links to the %s Records panel", async (hash, panel) => {
     expect(isFlightRecordHash(hash)).toBe(true);
     expect(recordPanelForHash(hash)).toBe(panel);
@@ -179,7 +180,7 @@ describe("the FLIGHT page", () => {
     );
     render(<Flight />);
     const panel = await waitFor(() => {
-      const found = document.getElementById("watchP");
+      const found = document.getElementById("heldWatchP");
       expect(found).not.toBeNull();
       return found as HTMLElement;
     });
