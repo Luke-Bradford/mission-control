@@ -453,11 +453,24 @@
 }
 
 /* Standing orders: a compact strip above the working panels; many orders scroll inside it. */
-.fp-orders {
+.fp-left {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+}
+.fp-left > .fp-self-start {
   flex: none;
 }
+/* It sits under Doing now and gives way before the blockers do: its list scrolls. */
+.fp-orders {
+  flex: 0 1 auto;
+}
 .fp-orderlist {
-  flex: none;
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: auto;
   max-height: calc(var(--fp-row) * 3);
 }
 .fp-end {
