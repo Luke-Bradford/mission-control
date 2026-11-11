@@ -1,4 +1,4 @@
-import { checkBriefDispatch, withoutBriefDispatch } from "../brief-dispatch-context.ts";
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief/dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -160,7 +160,7 @@ import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } f
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import { type ExternalReviews, isExternalReview } from "../external-reviews.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
-import type { Move, MoveResult } from "../github-board.ts";
+import type { Move, MoveResult } from "../github/board.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,

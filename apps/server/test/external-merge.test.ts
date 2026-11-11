@@ -10,7 +10,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { bindCompleteBrief } from "../src/brief-prepare.ts";
+import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
@@ -27,7 +27,7 @@ import { grantApproval, mergeFloorScope } from "../src/flight-approvals.ts";
 import { attentionItems } from "../src/hud.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { ownsPr } from "../src/ownership.ts";
-import { prAcceptanceFor, prUat } from "../src/pr-uat.ts";
+import { prAcceptanceFor, prUat } from "../src/pr/uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";

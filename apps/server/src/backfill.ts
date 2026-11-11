@@ -13,7 +13,8 @@ import { GqlError } from "./collectors/github.ts";
 import { isRateLimitedError } from "./collectors/rate-limit.ts";
 import { agentIds, type CcConfig } from "./config.ts";
 import { parseTicket } from "./runview.ts";
-import { crewDirPath, type Store } from "./store.ts";
+import { crewDirPath } from "./store/crew-paths.ts";
+import type { Store } from "./store.ts";
 import type { TranscriptFacts } from "./streamjson.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 

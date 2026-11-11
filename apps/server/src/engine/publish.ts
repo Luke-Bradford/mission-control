@@ -57,7 +57,7 @@ import {
   withEngineSection,
 } from "../mcp/tools.ts";
 import { runPathGrants } from "../path-grants.ts";
-import { qaReportGitSummary } from "../qa-reports.ts";
+import { qaReportGitSummary } from "../qa/reports.ts";
 import {
   adminDirOf,
   CREW_GIT_SLOW_MS,
@@ -67,7 +67,7 @@ import {
   mainMergeArgs,
 } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
-import { crewDir, crewPrBodyPath } from "../store.ts";
+import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
 import { onlyHubMerges, yes } from "./hub-merges.ts";
 import { mcSection } from "./rules.ts";
 

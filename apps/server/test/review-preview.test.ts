@@ -4,8 +4,8 @@ import {
   PreviewHubError,
   PreviewManager,
   type PreviewStart,
-} from "../src/previews.ts";
-import { createReviewPreviews, isWebPr } from "../src/review-preview.ts";
+} from "../src/preview/previews.ts";
+import { createReviewPreviews, isWebPr } from "../src/preview/review.ts";
 
 const SHA = "a".repeat(40);
 const view = (pr: number, startedAt = 1, sha = SHA) => ({

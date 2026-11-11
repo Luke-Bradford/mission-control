@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { previewBrowserInHelper, previewRequest } from "../src/preview-browser.ts";
+import { previewBrowserInHelper, previewRequest } from "../src/preview/browser.ts";
 
 const HELPER = fileURLToPath(new URL("./fixtures/preview-stand-in-helper.mjs", import.meta.url));
 const ORIGIN = "http://127.0.0.1:7431";

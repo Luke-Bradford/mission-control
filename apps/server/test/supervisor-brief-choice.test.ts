@@ -2,7 +2,7 @@
 import "./supervisor-harness.ts";
 import { writeFileSync } from "node:fs";
 import { expect, it } from "vitest";
-import { checkBriefDispatch, withinBriefDispatch } from "../src/brief-dispatch-context.ts";
+import { checkBriefDispatch, withinBriefDispatch } from "../src/brief/dispatch-context.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { make, recordFile, seatState, store, until, userLines } from "./supervisor-harness.ts";
 

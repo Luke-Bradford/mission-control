@@ -29,9 +29,9 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./account-bindings.ts";
-import { evaluateHolds } from "./attention-holds.ts";
+import { evaluateHolds } from "./attention/holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
-import type { BriefChoiceDeps } from "./brief-choices.ts";
+import type { BriefChoiceDeps } from "./brief/choices.ts";
 import { syncBudgetBrake } from "./budget-brake.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
@@ -46,7 +46,7 @@ import {
   realCliOps,
   type SeatCheck,
   settlePending,
-} from "./cli-auto.ts";
+} from "./cli/auto.ts";
 import {
   CLI_COLLECTOR,
   CLI_NOTE_KEY,
@@ -60,7 +60,7 @@ import {
   cliFailedText,
   NOT_A_CASK,
   realExec,
-} from "./cli-update.ts";
+} from "./cli/update.ts";
 import { collectorName, DIGEST_RETENTION_MS, FOLD_WINDOW_MS } from "./collectors/common.ts";
 import { collectFlow } from "./collectors/flow.ts";
 import {
@@ -109,7 +109,7 @@ import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
-import { followPrs } from "./github-board.ts";
+import { followPrs } from "./github/board.ts";
 import {
   attentionItems,
   crew,
@@ -127,7 +127,7 @@ import {
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
-import { auditEndedRuns } from "./token-audit.ts";
+import { auditEndedRuns } from "./token-audit/audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,

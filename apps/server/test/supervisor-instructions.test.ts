@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { directionKey, readDirectionContext } from "../src/runtime/instruction-context.ts";
-import { crewPromptPath } from "../src/store.ts";
+import { crewPromptPath } from "../src/store/crew-paths.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   clone,
@@ -225,7 +225,7 @@ it("rebuilds a missing direction snapshot before delivering to a reattached keep
 });
 
 it("retains a notice after failed immediate notification and delivers it once on the next real fixture turn", async () => {
-  const { commsInboxContext } = await import("../src/comms.ts");
+  const { commsInboxContext } = await import("../src/comms/index.ts");
   const { announceInstruction } = await import("../src/instruction-notices.ts");
   const { bus } = await import("./supervisor-harness.ts");
   const { sup, cfg } = make({ inbox: (seatId, runId) => commsInboxContext(store, seatId, runId) });
@@ -339,7 +339,7 @@ it("refuses a seat removed while its delivery waits without reimporting captured
 it.each(["saved instruction", "initial legacy focus import"])(
   "keeps %s durable and unread while paused, then delivers on an authorised ordinary turn",
   async (source) => {
-    const { commsInboxContext } = await import("../src/comms.ts");
+    const { commsInboxContext } = await import("../src/comms/index.ts");
     const { messageUnpausedSeat } = await import("../src/crew-pause.ts");
     const { announceInstruction, flushInstructionNotices, importInstructionFocus } = await import(
       "../src/instruction-notices.ts"
@@ -399,7 +399,7 @@ it.each(["saved instruction", "initial legacy focus import"])(
 );
 
 it("rechecks a new operator pause inside the real delivery queue after notification was allowed", async () => {
-  const { commsInboxContext } = await import("../src/comms.ts");
+  const { commsInboxContext } = await import("../src/comms/index.ts");
   const { announceInstruction } = await import("../src/instruction-notices.ts");
   const { bus } = await import("./supervisor-harness.ts");
   const { sup, cfg } = make({ inbox: (seatId, runId) => commsInboxContext(store, seatId, runId) });
@@ -449,7 +449,7 @@ it("rechecks a new operator pause inside the real delivery queue after notificat
 it.each([true, false])(
   "uses only the current run's recorded pause exception for immediate notification (%s)",
   async (matching) => {
-    const { commsInboxContext } = await import("../src/comms.ts");
+    const { commsInboxContext } = await import("../src/comms/index.ts");
     const { announceInstruction } = await import("../src/instruction-notices.ts");
     const { bus } = await import("./supervisor-harness.ts");
     const { sup, cfg } = make({
