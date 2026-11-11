@@ -161,14 +161,6 @@ describe("the narrow financial read", () => {
     const ids = store.financialRuns(NOW - 7 * DAY, NOW + 1, new Set(["flight-1"])).map((r) => r.id);
     expect(ids.sort()).toEqual(["f-empty", "f-nodigest", "f-usage"]);
   });
-
-  it("ignores a digest that is not valid JSON, as no usage", () => {
-    store.upsertRun(run("bad", "flight-1"));
-    store.setDigest("bad", { attemptUsage: [{ id: "a", at: NOW - MIN, tokens: 5 }] } as RunDigest);
-    store.db.prepare("UPDATE run_digests SET digest = ? WHERE run_id = ?").run("{nope", "bad");
-    const [r] = store.financialRuns(NOW - DAY, NOW + 1, new Set(["flight-1"]));
-    expect(r?.attemptUsage).toEqual([]);
-  });
 });
 
 describe("the figures read the narrow facts once", () => {

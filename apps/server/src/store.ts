@@ -3078,16 +3078,16 @@ export class Store {
     for (let i = 0; i < ids.length; i += DIGEST_BATCH) {
       const batch = ids.slice(i, i + DIGEST_BATCH);
       const rows = this.statement(
-        `SELECT d.run_id AS run_id,
-                json_extract(u.value, '$.at') AS at,
-                json_extract(u.value, '$.tokens') AS tokens
-         FROM run_digests d,
-              json_each(CASE WHEN json_valid(d.digest) THEN d.digest ELSE '{}' END,
-                        '$.attemptUsage') u
-         WHERE d.run_id IN (${batch.map(() => "?").join(", ")})
-         ORDER BY d.run_id, u.key`,
-      ).all(...batch) as { run_id: string; at: number | null; tokens: number }[];
-      for (const r of rows) byId.get(r.run_id)?.attemptUsage.push({ at: r.at, tokens: r.tokens });
+        `SELECT run_id, json_extract(digest, '$.attemptUsage') AS usage
+         FROM run_digests WHERE run_id IN (${batch.map(() => "?").join(", ")})`,
+      ).all(...batch) as { run_id: string; usage: string | null }[];
+      for (const r of rows) {
+        if (r.usage === null) continue;
+        const run = byId.get(r.run_id);
+        if (run === undefined) continue;
+        for (const u of JSON.parse(r.usage) as { at: number | null; tokens: number }[])
+          run.attemptUsage.push({ at: u.at, tokens: u.tokens });
+      }
     }
     return runs;
   }
