@@ -82,7 +82,7 @@ import { operatorCall } from "./flight/operator-call.ts";
 import { createCrewTidy } from "./flight/tidy.ts";
 import { createFlightTools } from "./flight/tools.ts";
 import { createFlightWatch } from "./flight/watch.ts";
-import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github-board.ts";
+import { checkCardFieldOptions, editCardFields, type Move, moveCard } from "./github/board.ts";
 import {
   cloneState,
   configuredChecks,

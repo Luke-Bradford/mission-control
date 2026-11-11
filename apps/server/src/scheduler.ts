@@ -109,7 +109,7 @@ import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
-import { followPrs } from "./github-board.ts";
+import { followPrs } from "./github/board.ts";
 import {
   attentionItems,
   crew,

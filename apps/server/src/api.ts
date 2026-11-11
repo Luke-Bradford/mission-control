@@ -313,7 +313,7 @@ import {
   flightConversation,
   readFlightConversation,
 } from "./flight-conversation.ts";
-import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github/setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
