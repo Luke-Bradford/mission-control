@@ -409,7 +409,8 @@ describe("questions on the ticket", () => {
     const p = await panel();
     expect(within(p).getByText("Question 1: which cache?")).toBeTruthy();
     expect(within(p).getByText("Open")).toBeTruthy();
-    expect(within(p).getByText(/inco-1/i)).toBeTruthy();
+    expect(within(p).getByText("INCO-1")).toBeTruthy();
+    expect(within(p).queryByText("inco-1")).toBeNull();
   });
 
   it("shows an answered question with the answer and its basis", async () => {

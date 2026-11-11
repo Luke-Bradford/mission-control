@@ -5,6 +5,7 @@ import { useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
 import { SenderTag } from "../comms/SenderTag.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { useSeatName } from "../crew.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -109,6 +110,7 @@ function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null
 export function TicketPage({ repoId, number }: { repoId: string; number: number }) {
   const res = useResource<TicketHistory>(RESOURCES.ticketHistory(repoId, number));
   const tz = useTz();
+  const nameOf = useSeatName();
   const t = res.data;
   const [older, setOlder] = useState<{ events: TicketEvent[]; next: string | null } | null>(null);
   // every live event seen, so one that slides out of the newest page stays
@@ -298,7 +300,7 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
                     <li key={q.id} className="tk-question" data-state={questionState(q)}>
                       <p className="tk-qhead">
                         <Pill tone="plain">{questionState(q)}</Pill>
-                        <span className="mono">{q.seat}</span>
+                        <span>{nameOf(q.seat)}</span>
                         <span className="tk-when">
                           {tz ? `${dayMonth(q.at, tz)} ${hhmm(q.at, tz)}` : dash}
                         </span>

@@ -114,7 +114,7 @@ function RefChip({
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const repoOf = (id: string) => crew?.rows.find((r) => r.id === id)?.repoId;
   const repoId = refRepo(ticket, repoOf(from) ?? repoOf(to), config);
-  const target = repoId === null ? null : resolveRef(refText, repoId, config);
+  const target = repoId === null ? null : resolveRef(refText, repoId, config, ticket);
   const filter = () => navigate(commsTicketPath(refText, ticketForRef(refText, ticket)));
   return (
     <span className="comms-ref-pair">
@@ -166,10 +166,15 @@ function resolveRef(
   refText: string,
   repoId: string,
   config: ConfigView | undefined,
+  ticket: string | null,
 ): { to: string | null; github: string | null } | null {
   const issue = /^#(\d+)$/.exec(refText)?.[1];
   if (issue !== undefined) return { to: ticketPath(repoId, Number(issue)), github: null };
   const pr = /^PR (\d+)$/.exec(refText)?.[1];
+  // a PR the message is about belongs to the message's ticket: open that ticket's page
+  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
+  if (pr !== undefined && parsed)
+    return { to: ticketPath(parsed.repoId, parsed.number), github: null };
   const github = config?.repos.find((r) => r.id === repoId)?.github;
   const href = pr !== undefined && github ? githubItemHref(github, "pr", Number(pr)) : null;
   return href ? { to: null, github: href } : null;

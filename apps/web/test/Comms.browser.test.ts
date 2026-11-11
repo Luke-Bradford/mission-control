@@ -219,6 +219,15 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
       expect(tickets?.boxBottom).toBeLessThanOrEqual((tickets?.panelBottom ?? 0) + 0.5);
       expect(tickets?.panelTop).toBeGreaterThanOrEqual((tickets?.navBottom ?? 0) - 0.5);
       expect(tickets?.boxWidth).toBeGreaterThan(120);
+      // the agents list shows every row whole: the nav ends at or below its last row
+      const navFits = await page.evaluate(() => {
+        const nav = document.querySelector(".comms-nav")?.getBoundingClientRect();
+        const rows = [...document.querySelectorAll(".comms-nav button")];
+        return nav
+          ? rows.every((r) => r.getBoundingClientRect().bottom <= nav.bottom + 0.5)
+          : false;
+      }, undefined);
+      expect(navFits).toBe(true);
       // the busy list shows rows, each with its message count, and no row runs past the panel
       const listed = await page.evaluate(() => {
         const panel = document.querySelector(".comms-tickets")?.getBoundingClientRect();

@@ -362,8 +362,16 @@ describe("Comms routes", () => {
       expect(document.querySelector(".comms-ref-plain")?.textContent).toBe("#5");
     });
 
+    it("opens the message's ticket page from a PR number", async () => {
+      await open({ ...base, ticket: "shop-app#5", ref: null, text: "see PR 12" });
+      const link = await screen.findByRole("link", { name: "PR 12" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
+      fireEvent.click(link);
+      expect(window.location.pathname).toBe("/tickets/shop-app/5");
+    });
+
     it("opens a PR on GitHub from the message's repo, with a separate filter", async () => {
-      await open({ ...base, ref: null, text: "see PR 12" });
+      await open({ ...base, from: "sender", ticket: null, ref: null, text: "see PR 12" });
       const link = await screen.findByRole("link", { name: "PR 12 on GitHub" });
       expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/12");
       expect(link.getAttribute("target")).toBe("_blank");
@@ -371,7 +379,7 @@ describe("Comms routes", () => {
     });
 
     it("keeps a PR with no GitHub repo configured as the filter alone", async () => {
-      await open({ ...base, ref: null, text: "see PR 12" }, []);
+      await open({ ...base, ticket: null, ref: null, text: "see PR 12" }, []);
       await screen.findByRole("button", { name: "Filter chat to PR 12" });
       expect(screen.queryByRole("link", { name: /PR 12/ })).toBeNull();
     });

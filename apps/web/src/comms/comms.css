@@ -960,14 +960,19 @@ a.comms-ref {
   color: var(--muted);
 }
 
+/* Who is on the line comes first: the nav takes its whole height, and the Tickets list scrolls in what is left. */
+.comms-left > .comms-nav {
+  flex: 0 0 auto;
+  overflow: visible;
+}
+
 /* Tickets list: a search over one row per ticket; the number opens it, "Chat" filters the chat. */
 .comms-tickets {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 0;
   flex-direction: column;
   gap: var(--sp-1);
-  max-height: 46%;
-  min-height: 0;
+  min-height: 160px;
   padding-bottom: var(--sp-2);
   overflow: hidden;
   background: var(--surface);
