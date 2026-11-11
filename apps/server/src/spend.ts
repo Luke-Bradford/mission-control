@@ -1,10 +1,10 @@
-import type { Run, RunDigest } from "@mc/core";
+import type { Run } from "@mc/core";
 import { endOf } from "./views.ts";
 
 /** Message-time spend, falling back to wall time when no attempt tokens were recorded. */
 export function runSpend(
-  run: Run,
-  digest: RunDigest | undefined,
+  run: Pick<Run, "costUsd" | "startedAt" | "endedAt" | "status">,
+  digest: { attemptUsage?: readonly { at: number | null; tokens: number }[] } | undefined,
   since: number,
   now: number,
   bucketMs?: number,
