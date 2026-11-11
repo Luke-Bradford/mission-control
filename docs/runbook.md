@@ -473,7 +473,8 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
   never reaches Needs you.
 - FLIGHT lifts a hold with `resolve_waste_alarm` (alarm id and a basis, recorded in Decided without
   you). The alarm stays closed until its cause grows past the level it had.
-- A hold only refuses or parks the hub's own runs. No GitHub write.
+- A hold only refuses or parks the hub's own runs. No GitHub write. A seat's live run is never
+  killed by an alarm; the hold bites at the next start, resume of a review, or restart.
 - `GET /api/waste` serves what the Audit page shows: for the past day and week, spend per merged
   change and the share spent on building (developer runs); every open alarm; and, per check, its
   threshold, how often it fired in the week and how many of those later saw a merge. A cost is
