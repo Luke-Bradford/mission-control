@@ -1,6 +1,6 @@
 import type { CommsTicketCounts } from "@mc/core";
-import type { CcConfig } from "./config.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import type { Store } from "../store.ts";
 
 const issue = (text: string): number | null => {
   if (!/^[1-9]\d*$/.test(text)) return null;

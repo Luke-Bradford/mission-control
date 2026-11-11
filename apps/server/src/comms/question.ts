@@ -1,5 +1,5 @@
 import { COMMS_OPEN_PREFIX } from "@mc/core";
-import type { Store } from "./store.ts";
+import type { Store } from "../store.ts";
 
 /** The tag is legacy only; both keys name one stored labelled FLIGHT question. */
 export function flightQuestionKeys(messageId: string, flightId: string): readonly [string, string] {

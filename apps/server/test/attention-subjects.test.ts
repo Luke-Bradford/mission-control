@@ -1,7 +1,7 @@
 import { NEW_LOOP, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { confirmedResumeAfter, pendingRunApproval } from "../src/attention-subjects.ts";
-import { resolvedCommsReason } from "../src/comms.ts";
+import { resolvedCommsReason } from "../src/comms/index.ts";
 import { Store } from "../src/store.ts";
 
 let store: Store;
