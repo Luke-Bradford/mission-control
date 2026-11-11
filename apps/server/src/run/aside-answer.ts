@@ -1,5 +1,5 @@
-import type { ChangeBus } from "./bus.ts";
-import { type CommsServiceDeps, sendComms } from "./comms/index.ts";
+import type { ChangeBus } from "../bus.ts";
+import { type CommsServiceDeps, sendComms } from "../comms/index.ts";
 
 export class AsideAnswerChanged extends Error {
   readonly statusCode = 409;

@@ -127,7 +127,7 @@ import {
   subjectId,
 } from "../question-watch.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
-import { parseTicket } from "../runview.ts";
+import { parseTicket } from "../run/view.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";

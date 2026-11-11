@@ -13,9 +13,9 @@ import {
   type RunView,
   UAT_PARK,
 } from "@mc/core";
-import type { CcConfig } from "./config.ts";
-import { publicHandoff } from "./run-handoffs.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import { publicHandoff } from "./handoffs.ts";
+import type { Store } from "../store.ts";
 
 /** Compact list diagnostics without mutating the single-run record. */
 export function runSummary(run: Run): RunSummary {

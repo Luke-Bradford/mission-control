@@ -1,6 +1,6 @@
 import type { TestLockState } from "@mc/core";
 import { COMMS_CAPCOM, COMMS_MC } from "@mc/core";
-import { AsideAnswerChanged, answerAsideQuestion } from "../aside-answer.ts";
+import { AsideAnswerChanged, answerAsideQuestion } from "../run/aside-answer.ts";
 import type { ChangeBus } from "../bus.ts";
 import { sendComms, validateCommsText } from "../comms/index.ts";
 import { attentionItems, NO_LOCK } from "../hud.ts";

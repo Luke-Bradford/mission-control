@@ -14,7 +14,7 @@ import {
   startOfLocalDay,
 } from "@mc/core";
 import { reworkReview } from "./rework.ts";
-import { parseTicket } from "./runview.ts";
+import { parseTicket } from "./run/view.ts";
 import { runSpend } from "./spend.ts";
 import type { Store } from "./store.ts";
 import { endOf } from "./views.ts";

@@ -5,7 +5,7 @@ import { type LoopKind, NEW_LOOP, noReportNoteKey, noReportReason, type Run } fr
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
-import { runView } from "../src/runview.ts";
+import { runView } from "../src/run/view.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 

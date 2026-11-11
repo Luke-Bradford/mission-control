@@ -28,7 +28,7 @@ import {
 } from "@mc/core";
 import { type LiveSession, sessionForLoop } from "./collectors/sessions.ts";
 import { agentIds, type CcConfig, configuredAgents, seatUnavailable } from "./config.ts";
-import { type PrCache, runPrs, runTicket } from "./runview.ts";
+import { type PrCache, runPrs, runTicket } from "./run/view.ts";
 import type { Store } from "./store.ts";
 
 const MINUTE_MS = 60e3;
