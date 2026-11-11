@@ -2,6 +2,7 @@ import type { ConfigView, Crew, CrewRow } from "@mc/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { callSign, seatRoleTitle, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { percent } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { agentPath, navigate } from "../router.ts";
@@ -179,7 +180,7 @@ function SeatCard({
               />
             )}
           </span>
-          <span className="seat-v">{ctx === null ? "—" : `${ctx}%`}</span>
+          <span className="seat-v">{percent(ctx)}</span>
           <span className="seat-lbl">1 H</span>
           <span
             className="seat-strip"
