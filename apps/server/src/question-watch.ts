@@ -10,7 +10,7 @@ import {
   type TestLockState,
   ticketClosedReason,
 } from "@mc/core";
-import { protectedDecisionItem, questionAskAt } from "./attention-holds.ts";
+import { protectedDecisionItem, questionAskAt } from "./attention/holds.ts";
 import type { CcConfig } from "./config.ts";
 import { flightSeat, ownReply } from "./flight/state.ts";
 import { attentionItems, NO_LOCK } from "./hud.ts";

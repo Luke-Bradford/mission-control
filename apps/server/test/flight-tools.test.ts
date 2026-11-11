@@ -144,7 +144,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { evaluateHolds, holds } from "../src/attention-holds.ts";
+import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";

@@ -6,7 +6,7 @@ import type {
   BriefChoiceReceipt,
   BriefChoiceRequest,
 } from "@mc/core";
-import { holds } from "../attention-holds.ts";
+import { holds } from "../attention/holds.ts";
 import type { ChangeBus } from "../bus.ts";
 import {
   flightQuestionKeys,

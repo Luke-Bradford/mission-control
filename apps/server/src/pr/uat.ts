@@ -5,8 +5,8 @@ import {
   type PullRequestView,
   UAT_PARK,
 } from "@mc/core";
-import { externalPrControl } from "./external-pr-control.ts";
-import type { Store } from "./store.ts";
+import { externalPrControl } from "../external-pr-control.ts";
+import type { Store } from "../store.ts";
 
 /** One bounded overlay per repo, shared by the queue and Board PR list. */
 export function prAcceptanceFor(store: Store, repoId: string) {
