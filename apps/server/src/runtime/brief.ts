@@ -530,10 +530,27 @@ export const MC_RESTART_TEXT =
 
 /**
  * Drops the fenced yaml block that opens with `mc:` (the hub's own board configuration, which the
- * hub reads from the repo and a seat never acts on); every other line of the file is kept.
+ * hub reads from the repo and a seat never acts on); every other line of the file is kept. The
+ * block's `checks` commands are the one part a seat runs, so one line carries them in its place.
  */
 export function withoutHubConfig(markdown: string): string {
-  return markdown.replace(/^```ya?ml[ \t]*\r?\nmc:[ \t]*\r?\n[\s\S]*?^```[ \t]*(?:\r?\n|$)/gm, "");
+  return markdown.replace(
+    /^```ya?ml[ \t]*\r?\n(mc:[ \t]*\r?\n[\s\S]*?)^```[ \t]*(?:\r?\n|$)/gm,
+    (_block, body: string) => {
+      let checks: unknown;
+      try {
+        checks = (parseYaml(body) as { mc?: { checks?: unknown } } | null)?.mc?.checks;
+      } catch {
+        return "";
+      }
+      const commands = Array.isArray(checks)
+        ? checks.filter((c): c is string => typeof c === "string" && c.trim() !== "")
+        : [];
+      return commands.length === 0
+        ? ""
+        : `Checks (from the Mission Control block, left out here): ${commands.map((c) => `\`${c}\``).join(", ")}.\n`;
+    },
+  );
 }
 
 /**

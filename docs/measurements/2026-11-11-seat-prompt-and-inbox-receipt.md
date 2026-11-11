@@ -4,13 +4,13 @@ What changed, and what it measured before and after. Synthetic and repository te
 
 ## Seat prompt
 
-`rolePrompt` (`apps/server/src/runtime/brief.ts`) drops the fenced yaml block that opens with `mc:` from the repo's CLAUDE.md. The hub still reads that block from the repo itself. Everything else stays: source of truth, repo rules, review, skills, checks, and the prose above the block.
+`rolePrompt` (`apps/server/src/runtime/brief.ts`) drops the fenced yaml block that opens with `mc:` from the repo's CLAUDE.md. The hub still reads that block from the repo itself. The block's `checks` commands stay as one line in its place. Everything else stays: source of truth, repo rules, review, skills, checks, and the prose around the block. The supervisor's prompt-cost "rules" section measures this same text.
 
 | Text | Before | After |
 | --- | --- | --- |
-| This repo's CLAUDE.md in the prompt | 5,985 bytes | 4,518 bytes |
+| This repo's CLAUDE.md in the prompt | 5,985 bytes | 4,635 bytes |
 
-That is 1,467 bytes (about 370 tokens at 4 bytes a token) per seat start. The ticket's 560-token figure is the baseline's own estimate; the byte count above is the measured value.
+That is 1,350 bytes (about 340 tokens at 4 bytes a token) per seat start. The ticket's 560-token figure is the baseline's own estimate; the byte count above is the measured value.
 
 Test: `apps/server/test/brief.test.ts`, "omits only the hub-only Mission Control YAML block".
 

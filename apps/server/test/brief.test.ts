@@ -409,6 +409,9 @@ describe("rolePrompt", () => {
     expect(prompt).not.toContain("hard_rules:");
     expect(prompt).not.toContain("apps/server/src/guard/**");
     // everything else the seat is told stays
+    // the push gate's commands stay: they are the only part of the block a seat runs
+    for (const c of ["pnpm -s lint", "pnpm -s typecheck", "pnpm -s test:related"])
+      expect(prompt).toContain(c);
     for (const kept of [
       "## Source of truth",
       "docs/direction.md",
@@ -421,6 +424,15 @@ describe("rolePrompt", () => {
       "How the build loop treats this repo's board.",
     ])
       expect(prompt, kept).toContain(kept);
+  });
+
+  it("adds no checks line when the mc block has none, or is not valid yaml", () => {
+    for (const block of ["mc:\n  pick_from: [Ready]\n", "mc:\n  checks: [\n"]) {
+      const prompt = rolePrompt("Role", `Rule.\n\n\`\`\`yaml\n${block}\`\`\`\n\nAfter.\n`);
+      expect(prompt).not.toContain("Checks (from");
+      expect(prompt).not.toContain("pick_from");
+      expect(prompt).toMatch(/Rule\.\n+After\.\n/);
+    }
   });
 
   it("keeps a yaml fence that is not the mc block, and the text after the mc block", () => {
