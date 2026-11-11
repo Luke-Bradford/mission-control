@@ -6,7 +6,7 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import type { FastifyReply, FastifyRequest } from "fastify";
-import { DESIGN_PREVIEW_PORT } from "./design-preview-port.ts";
+import { DESIGN_PREVIEW_PORT } from "./design-preview/port.ts";
 
 const TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",

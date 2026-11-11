@@ -270,7 +270,7 @@ import {
   writeCrewPause,
 } from "./crew-pause.ts";
 import { readDependencyChains } from "./dependency-chains.ts";
-import type { DesignPreviews } from "./design-previews.ts";
+import type { DesignPreviews } from "./design-preview/previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";

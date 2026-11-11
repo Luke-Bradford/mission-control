@@ -3,7 +3,7 @@
  * (#934; rules in runtime/transcript-compact.ts). Run it once, with the hub stopped or right before
  * an Update restarts it:
  *
- *   node --experimental-strip-types apps/server/src/compact-transcripts.ts [path/to/mc.sqlite]
+ *   node --experimental-strip-types apps/server/src/transcript/compact-transcripts.ts [path/to/mc.sqlite]
  *
  * The DB is opened read-only and is never written. Only crew runs are touched: a transcript must
  * be a regular file (not a link) inside the DB's `crew/` folder, which leaves the observed loops'
@@ -29,9 +29,9 @@ import { homedir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
-import { keeperAlive } from "./runtime/keeper.ts";
-import { compactTranscriptLine, deltaHeartbeats } from "./runtime/transcript-compact.ts";
-import { crewDirPath, crewKeeperDirPath } from "./store/crew-paths.ts";
+import { keeperAlive } from "../runtime/keeper.ts";
+import { compactTranscriptLine, deltaHeartbeats } from "../runtime/transcript-compact.ts";
+import { crewDirPath, crewKeeperDirPath } from "../store/crew-paths.ts";
 
 /** A file written to this recently may still have a writer. */
 export const COMPACT_MIN_AGE_MS = 10 * 60 * 1000;
