@@ -6,8 +6,8 @@ import { afterEach, expect, it } from "vitest";
 import { type FoldState, foldPath } from "../src/collectors/common.ts";
 import { transcriptMtime } from "../src/hud.ts";
 import { readStream } from "../src/stream.ts";
-import { offsetSince, readNewLines } from "../src/transcript/tail.ts";
 import { openTranscript, transcriptFilePath } from "../src/transcript/file.ts";
+import { offsetSince, readNewLines } from "../src/transcript/tail.ts";
 
 let dir = "";
 afterEach(() => {
