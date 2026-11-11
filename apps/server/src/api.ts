@@ -872,7 +872,13 @@ function prSummary(pr: PullRequestView, check: ReviewCheckState | null): PullReq
     : {
         ...rest,
         check,
-        checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
+        checks: checks.map(({ name, kind, state, attempt, skipped }) => ({
+          name,
+          kind,
+          state,
+          attempt,
+          ...(skipped === undefined ? {} : { skipped }),
+        })),
       };
 }
 
@@ -1715,15 +1721,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           const agent = agentById(req.params.id);
           if (!agent) return reply.code(404).send({ error: "unknown agent" });
+          const withFlightUnread = async (stream: AgentStream): Promise<AgentStream> => {
+            if (agent.kind !== "crew" || agent.seat.role !== "FLIGHT") return stream;
+            const session = config.crew?.sessions.find(
+              (candidate) => candidate.id === agent.sessionId,
+            );
+            if (session === undefined) return stream;
+            const conversation = await flightConversation(
+              store,
+              agent.id,
+              session.seats.map((seat) => seat.id),
+              { limit: 1 },
+            );
+            return { ...stream, unread: conversation.unread };
+          };
           const run = store.seatRun(agent.id);
           if (!run) {
-            return {
+            return withFlightUnread({
               runId: null,
               events: [],
               truncated: false,
               lastOutputAt: null,
               reason: NO_RUNS_YET,
-            };
+            });
           }
           const lastEventAt = store.digest(run.id)?.lastEventAt ?? null;
           const missing = (): AgentStream => ({
@@ -1735,9 +1755,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             reason: TRANSCRIPT_NOT_FOUND,
           });
           const path = run.transcriptPath;
-          if (path === "") return missing();
+          if (path === "") return withFlightUnread(missing());
           const st = await stat(transcriptFilePath(path)).catch(() => null);
-          if (!st?.isFile()) return missing();
+          if (!st?.isFile()) return withFlightUnread(missing());
           const { size, mtimeMs } = st;
           let entry = streamCache.get(agent.id);
           if (
@@ -1755,12 +1775,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   ? readTranscript(path, limit, run.vendor)
                   : readTranscript(path, limit, run.vendor, before);
             } catch {
-              return missing();
+              return withFlightUnread(missing());
             }
             entry = { path, size, mtimeMs, limit, before, result };
             streamCache.set(agent.id, entry);
           }
-          return {
+          return withFlightUnread({
             runId: run.id,
             tasks: store.digest(run.id)?.tasks ?? [],
             events: entry.result.events,
@@ -1768,7 +1788,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             hasMore: entry.result.more ?? false,
             lastOutputAt: lastOutputAt(lastEventAt, Math.floor(mtimeMs)),
             reason: null,
-          };
+          });
         },
       );
 

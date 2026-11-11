@@ -452,13 +452,15 @@ export interface PrCheck {
   name: string; // a check run's name, or a status's context
   kind: "check" | "status";
   state: "passing" | "failing" | "pending";
+  /** The hub declined this status rather than a check run failing. */
+  skipped?: boolean;
   conclusion: string; // a check run's conclusion (its status until done); a status's state
   attempt: number | null; // the Actions run attempt; null for a status or a non-Actions run
   url: string | null;
 }
 
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
-export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
+export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt" | "skipped">;
 
 /**
  * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.
@@ -783,6 +785,8 @@ export interface AgentStream {
   lastOutputAt: number | null;
   /** Why there are no events (`no runs yet`, `transcript not found`), else null. */
   reason: string | null;
+  /** FLIGHT only: messages the operator has not read in either Comms or the fly-out. */
+  unread?: number;
 }
 
 /**

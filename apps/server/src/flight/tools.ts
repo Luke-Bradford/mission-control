@@ -385,6 +385,7 @@ import {
 } from "../mcp/tools.ts";
 import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
+import { prototypeLinkProblem } from "../prototype-links.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
 import { handoffTarget } from "../run/handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
@@ -2214,7 +2215,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (to === "Ready") {
       let body: string;
       try {
-        body = (await deps.fetchTicket(repo, issue))?.body ?? "";
+        const ticket = await deps.fetchTicket(repo, issue);
+        body = ticket?.body ?? "";
+        const prototypeProblem =
+          ticket?.prototypeProblem ?? prototypeLinkProblem(body, repo.github);
+        if (prototypeProblem !== null) return fail(`Not moved: ${ref} ${prototypeProblem}`);
       } catch {
         return fail(PROMOTE_NO_GITHUB);
       }
