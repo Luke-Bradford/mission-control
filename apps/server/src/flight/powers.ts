@@ -184,7 +184,8 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
 
   const SetFieldsArgs = z.strictObject({
     issue: issueNumber,
-    status: z.literal("Blocked").optional(),
+    // Ready stays promote's, which checks the ticket is complete; Backlog lets a Blocked card out
+    status: z.enum(["Blocked", "Backlog"]).optional(),
     priority: z.enum(PRIORITIES).optional(),
     size: z.enum(TICKET_SIZES).optional(),
     labels: z.array(z.string().min(1).max(100)).max(100).optional(),
@@ -193,7 +194,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
   });
   add(
     MC_TOOL_NAMES.setFields,
-    "Set an issue's board and issue fields in one call: status (a board column), priority, size, labels (the whole list) and milestone (a title, or null to clear). always_ask and other lanes' tickets are refused.",
+    "Set an issue's board and issue fields in one call: status (Blocked, or Backlog to take a card out of Blocked; Ready goes through promote), priority, size, labels (the whole list) and milestone (a title, or null to clear). always_ask and other lanes' tickets are refused.",
     SetFieldsArgs,
     "card",
     async (a: z.output<typeof SetFieldsArgs>, repo, ctx) => {

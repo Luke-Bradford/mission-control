@@ -9979,10 +9979,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(await call("edit_issue", { issue: 7, body: kept })).toHaveProperty("isError", true);
       expect(ghCalls).toEqual([]);
     });
-    it("set_fields leaves Ready and Backlog to promote, and keeps one area label", async () => {
+    it("set_fields leaves Ready to promote, and keeps one area label", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog"])
-        expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
+      expect(await call("set_fields", { issue: 7, status: "Ready" })).toHaveProperty(
+        "isError",
+        true,
+      );
       liveLabels = ["lane:home", "area:server"];
       expect(
         await call("set_fields", { issue: 7, labels: ["lane:home", "area:server", "area:web"] }),
@@ -9993,6 +9995,11 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       );
       expect(moveCalls).toEqual([]);
       expect(ghCalls).toEqual([]);
+    });
+    it("set_fields takes a Blocked card back to Backlog, so promote can reach it", async () => {
+      board(card(7));
+      expect((await call("set_fields", { issue: 7, status: "Backlog" })).isError).toBeUndefined();
+      expect(moveCalls.at(-1)).toMatchObject({ issue: 7, column: "Backlog" });
     });
     it("set_fields records a status move under its own kind, with no hourly cap", async () => {
       board(card(7));
@@ -10143,9 +10150,9 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         labels: ["lane:home", "legacy-odd", "area:server", "bug"],
       });
     });
-    it("set_fields moves a card only to Blocked", async () => {
+    it("set_fields moves a card only to Blocked or back to Backlog", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog", "Refinement", "In progress", "Done"])
+      for (const status of ["Ready", "Refinement", "In progress", "Done"])
         expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
       expect(moveCalls).toEqual([]);
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
