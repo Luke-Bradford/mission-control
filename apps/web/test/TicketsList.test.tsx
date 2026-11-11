@@ -112,6 +112,28 @@ describe("Tickets list", () => {
     expect(screen.queryByText(/\d+ of \d+/)).toBeNull();
   });
 
+  it("keeps the rows and warns when a later read of the repositories fails", async () => {
+    let fail = false;
+    stubFetch({
+      "/api/repos": () =>
+        fail ? { status: 500, body: { error: "boom" } } : { status: 200, body: REPOS },
+      "/api/boards/shop-app": [boardItem({ issueNumber: 3349, title: "Quote cache" })],
+      "/api/boards/site-builder": [],
+    });
+    render(<TicketsList />);
+    await screen.findByText("Quote cache");
+    fail = true;
+    await act(async () => {
+      hub.refetch("/api/repos");
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Could not read repositories.",
+    );
+    expect(screen.getByText(/may be out of date/)).toBeTruthy();
+    expect(screen.getByText("Quote cache")).toBeTruthy();
+  });
+
   it("names a board that could not be read and keeps the rows that loaded", async () => {
     hub.clear();
     stubFetch({

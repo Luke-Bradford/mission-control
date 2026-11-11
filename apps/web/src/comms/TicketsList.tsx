@@ -33,7 +33,9 @@ export function TicketsList() {
     <section className="comms-tickets" aria-label="Tickets">
       <div className="comms-section-head">
         <h2>Tickets</h2>
-        {!waiting && !reposRes.error && <span>{`${found.length} of ${all.length}`}</span>}
+        {!waiting && (!reposRes.error || reposRes.data) && (
+          <span>{`${found.length} of ${all.length}`}</span>
+        )}
       </div>
       <input
         type="search"
@@ -50,11 +52,14 @@ export function TicketsList() {
           role="alert"
         >{`Could not read the board for ${repo.id}.`}</p>
       ))}
-      {reposRes.error && !reposRes.data ? (
+      {reposRes.error && (
         <p className="note crit-t" role="alert">
-          Could not read repositories.
+          {reposRes.data
+            ? "Could not read repositories. These tickets may be out of date."
+            : "Could not read repositories."}
         </p>
-      ) : waiting ? (
+      )}
+      {reposRes.error && !reposRes.data ? null : waiting ? (
         <p className="note">Loading tickets…</p>
       ) : found.length === 0 ? (
         <p className="note">
