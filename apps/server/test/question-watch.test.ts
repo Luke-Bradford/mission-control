@@ -217,6 +217,50 @@ describe("the hub closes a question on a recorded fact", () => {
     expect(operatorKeys()).not.toContain(key);
   });
 
+  it("keeps FLIGHT's own question to the operator open after the wake that asked it ends", async () => {
+    store.upsertRun(run({ id: "r-flight", agentId: "flight-1", ticket: null, branch: null }));
+    const row = store.addComms({
+      at: NOW - 30_000,
+      from: "flight-1",
+      to: "CAPCOM",
+      ticket: "mc#7",
+      text: "@CAPCOM Should the crew retry the set-aside tickets?",
+      label: "question",
+    });
+    if (!row) throw new Error("message missing");
+    const key = `comms-open:${row.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      ask: "Should the crew retry the set-aside tickets?",
+      assessment: "a",
+      context: "Seven tickets failed review twice.",
+      recommendation: "a",
+      options: [
+        { id: "a", label: "A", answer: "Do A." },
+        { id: "b", label: "B", answer: "Do B." },
+      ],
+      ticket: "mc#7",
+      basis: "b",
+      at: NOW - 20_000,
+    });
+    expect(operatorKeys()).toContain(key);
+    store.upsertRun(
+      run({
+        id: "r-flight",
+        agentId: "flight-1",
+        ticket: null,
+        branch: null,
+        endedAt: NOW - 10_000,
+        status: "ok",
+      }),
+    );
+    expect(await closeSettledQuestions({ config: config(), store, now: NOW })).toBe(0);
+    expect(store.questionClosure(key, NOW - 30_000)).toBeNull();
+    expect(operatorKeys()).toContain(key);
+  });
+
   it("closes an operator question about an item when its PR merged or closed", async () => {
     passedQuestion();
     store.upsertPullRequests("mc", [pr(9)], NOW);
