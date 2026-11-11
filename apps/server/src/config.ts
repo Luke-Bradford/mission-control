@@ -52,8 +52,8 @@ import {
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { z } from "zod";
-import { accountBindingProblem, type CliBinding } from "./account-bindings.ts";
-import { CLI_UPDATES, type CliUpdates } from "./cli-update.ts";
+import { accountBindingProblem, type CliBinding } from "./accounts/bindings.ts";
+import { CLI_UPDATES, type CliUpdates } from "./cli/update.ts";
 import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
 import { seatFocus } from "./focus.ts";

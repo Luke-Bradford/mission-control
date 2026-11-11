@@ -43,7 +43,7 @@ jobs:
           node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec vitest run --project server --shard=${{ matrix.shard }}/2
+      - run: node apps/server/src/ci-vitest.ts --project server --shard=${{ matrix.shard }}/2
 
   server-process:
     runs-on: ubuntu-latest
@@ -60,7 +60,7 @@ jobs:
           node-version: 26
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec vitest run --project server-process --shard=${{ matrix.shard }}/2
+      - run: node apps/server/src/ci-vitest.ts --project server-process --shard=${{ matrix.shard }}/2
 
   web-core:
     runs-on: ubuntu-latest

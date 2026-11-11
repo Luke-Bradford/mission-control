@@ -31,7 +31,6 @@ const PAGES: [string, string, RegExp][] = [
   ["Board", "/board", /Cache the quote total/],
   ["a ticket", "/tickets/shop-app/101", /Cache the quote total at checkout/],
   ["an agent", "/agent/dev-1", /DEV-1/],
-  ["a repo's Map", "/map/shop-app", /Crew activity map/i],
   ["Comms", "/comms/crew", /Starting on the checkout cache/],
   ["QA", "/qa", /Export orders as CSV/],
   ["Telemetry", "/telemetry", /Cycle time/i],
@@ -56,7 +55,7 @@ describe("Demo renders every page busy", () => {
     expect(document.title).toBe("DEMO · Mission Control");
   });
 
-  it("fills the Overview's crew table and the Map's tree", async () => {
+  it("fills the Overview's crew table", async () => {
     window.history.replaceState(null, "", "/");
     const view = render(<App />);
     await waitFor(() =>
@@ -65,11 +64,6 @@ describe("Demo renders every page busy", () => {
       ).toBeGreaterThanOrEqual(10),
     );
     view.unmount();
-    window.history.replaceState(null, "", "/map/shop-app");
-    render(<App />);
-    await waitFor(() =>
-      expect(document.querySelectorAll(".map-treemap-tile").length).toBeGreaterThanOrEqual(30),
-    );
   });
 
   it("refuses a write from the Away modal and says it is a demo", async () => {

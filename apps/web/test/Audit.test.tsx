@@ -476,6 +476,41 @@ it("Hotspots tab shows History and Review findings for the picked repo", async (
   expect(fetch.mock.calls.filter(([path]) => path === "/api/repos/other/map")).toHaveLength(1);
 });
 
+it("Hotspots counts crew seats without FLIGHT, and falls back to configured seats", async () => {
+  const config = {
+    ...CONFIG,
+    crew: {
+      sessions: [
+        {
+          id: "s1",
+          repoId: "mission-control",
+          seats: [{ loop: "dev" }, { loop: "watch" }, { loop: "dev", retiring: true }],
+        },
+      ],
+    },
+  } as unknown as ConfigView;
+  const base = {
+    "/api/audit?range=30d": AUDIT,
+    "/api/config": config,
+    "/api/repos": [{ id: "mission-control", github: "Luke-Bradford/mission-control" }],
+    "/api/repos/mission-control/map": structuredClone(mapSnapshotFixture),
+  };
+  stubFetch({
+    ...base,
+    "/api/crew?shape=summary": {
+      rows: [
+        { id: "guido-1", kind: "crew", role: "GUIDO", repoId: "mission-control" },
+        { id: "flight-1", kind: "crew", role: "FLIGHT", repoId: "mission-control" },
+      ],
+    },
+  });
+  render(<Audit />);
+  await screen.findByRole("heading", { level: 2, name: "Workflow history" });
+  fireEvent.click(screen.getByRole("button", { name: "Hotspots" }));
+  const option = await screen.findByRole("option", { name: "mission-control · 1 crew seat" });
+  expect(option).toBeTruthy();
+});
+
 it("Hotspots tab says so when no repo has a crew session", async () => {
   stubFetch({
     "/api/audit?range=30d": AUDIT,

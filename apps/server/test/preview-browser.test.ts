@@ -5,7 +5,7 @@ import {
   type PreviewPlaywright,
   previewRequest,
   runPreviewBrowser,
-} from "../src/preview-browser.ts";
+} from "../src/preview/browser.ts";
 
 const ORIGIN = "http://127.0.0.1:7431";
 

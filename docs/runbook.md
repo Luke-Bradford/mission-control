@@ -448,7 +448,7 @@ update`; unexpected exceptions keep their content private and log only the gener
 
 When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
 stops dealing and starting new developer and review runs on that account. It is the same projection
-the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/budget-brake.ts`
+the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/spend/budget-brake.ts`
 is the one function for both.
 
 - Stopped: the engine's deal, the review start, `start_seat`, and the supervisor's `startRun`
@@ -515,8 +515,10 @@ page, newest ask first (id breaks timestamp ties). The same `limit` applies; pas
 cursor as `questionsBefore` to read older questions. This leaves the existing timeline's `before`
 and `nextBefore` unchanged. Question records include run, seat, text, ask/pass/set-aside times,
 `closedAt`, and the latest recorded `answer`, `answerAt` and `answerBasis`. A run can close a
-question without answering it: the answer fields then stay null. `asideAt` retains the stored
-set-aside time, including Not now; it does not itself prove a question has an answer. Each Comms
+question without answering it: the answer fields then stay null. `discussionKey` is the question's
+`ask:<id>` key when it has a stored conversation, otherwise null; read that conversation through
+`GET /api/attention/<discussionKey>/discussion`. `asideAt` retains the stored set-aside time,
+including Not now; it does not itself prove a question has an answer. Each Comms
 timeline entry carries its recorded `senderKind`, or null for legacy unknown provenance.
 
 `GET /api/comms/ticket-counts` returns `{ tickets: [{ ticket, count }], unassignedCount }` across
@@ -778,7 +780,7 @@ What each seat's process starts with:
   not ours and creates each file exclusively without following a link. Unlike the guard hook it never blocks: any failure, or a full output that cannot
   be written, leaves the result whole. So does a built-in tool's result that cannot be cut in its
   own shape (the CLI rejects a plain text there), and Edit, Write, MultiEdit and NotebookEdit,
-  whose bulk never reaches the model. Codex seats are not covered. The 32 KB, 8 KB and 4 KB
+  whose bulk never reaches the model. Codex seats are not covered. What bounds a shell result, and the cap decision, are in `docs/runbooks/shell-output.md` (#1642). The 32 KB, 8 KB and 4 KB
   limits are `TOOL_TRIM_OVER`, `TOOL_TRIM_HEAD` and `TOOL_TRIM_TAIL` in `packages/core/src/tool-trim.ts`.
 - **A per-run token** for both, in hub memory and in two 0600 files beside the run's transcript:
   `{DB dir}/crew/<run id>.token` and `<run id>.mcp.json`. The sandbox cannot read them, and argv,
@@ -2672,7 +2674,7 @@ branch previews do.
 
 The route only reads data the hub already stores.
 
-**Token audit.** `GET /api/audit/tokens?days=N` (a whole number from 1 to 365, default 7; anything else answers 400) says where the crew's tokens went, for runs started in the last N days. It returns `TokenAuditView` from mc/core: totals (`runs`, `calls`, `output`, `cacheRead`, `cacheWrite`, `reread`, `rewrites`), `byRole`, `bySource` and `byCommand` (each with tokens added to a context and `reread`, which is tokens added times the calls left in the run), `topRuns` (the ten with the most re-reading), `hubSections` (what the hub itself sent, from the `prompt_sections` rows), `flightStart` (FLIGHT's cost of starting sessions, the `start` reason of `wakeCost`) and `controller`.
+**Token audit.** `GET /api/audit/tokens?days=N` (a whole number from 1 to 365, default 7; anything else answers 400) says where the crew's tokens went, for runs started in the last N days. It returns `TokenAuditView` from mc/core: totals (`runs`, `calls`, `output`, `cacheRead`, `cacheWrite`, `reread`, `rewrites`), `byRole`, `bySource` and `byCommand` (each with tokens added to a context and `reread`, which is tokens added times the calls left in the run), `topRuns` (the ten with the most re-reading), `hubSections` (what the hub itself sent, from the `prompt_sections` rows), `flightStart` (FLIGHT's cost of starting sessions, the `start` reason of `wakeCost`) `controller` and `figures`. `figures` holds the figures the Tokens tab lists: `contextByRole` (90th-percentile context per model call by role, against `TOKEN_CONTEXT_BUDGET`, one budget for every role until roles get their own), `overBudget` (runs whose peak context passed it), `reviewRunsPerTicket`, `flight` (wakes, wakes with no decision, context at wake, sessions a day, start cost) and `costPerMergedPr` (by role). Each is `{ recorded: true, days, unit, value }` or `{ recorded: false, reason }`; `longPassingCommands`, `repeatedPrompt` and `rewriteWait` are always the second, because the hub stores no command results, prompt text or call times. `topRuns` rows carry `ticket`; `bySource`, `byCommand` and `hubSections` rows carry `topRun`, the run that put most into the row (`runId`, `agentId`, `ticket`, `value`).
 - **How it is filled.** The `transcripts` job (every 6 hours, first run a minute after start) first reads each ended run's transcript once and stores a `run_token_audit` row plus one `run_token_calls` row per model call, then gzips or deletes old transcripts as before, so a transcript is read before it can be removed. Only a transcript in the hub's own `crew/` folder is read; an observed loop's run, a Codex run or a missing file is stored with no calls and is not retried. A pass stops starting new runs after 20 seconds and carries on at the next one. Nothing is parsed on a request.
 - **What a call is.** One assistant message id from the run's own frames (a subagent's frames are left out). Context is input plus cache read plus cache write. What was added since the previous call is split between the agent's own earlier output, each tool result (by tool name; for Bash by the command's first word, or `pnpm <script>`), hub or operator lines (`hub line`) and, for the first call, `start of run`. A context that shrank adds nothing (compaction or a fresh session). The split uses each item's size in characters, so it is an estimate; the context sizes are the CLI's own.
 - **Cache rewrite.** A call that writes more than 20,000 tokens to the cache while reading less than half the previous call's context.

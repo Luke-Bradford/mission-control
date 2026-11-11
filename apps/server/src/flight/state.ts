@@ -66,6 +66,7 @@ import {
   type FlightPark,
   type FlightScheduleView,
   type FlightSeatState,
+  type FlightSignal,
   type FlightState,
   type FlightView,
   type FlightWake,
@@ -97,9 +98,9 @@ import {
   WAITING_OPERATOR_LABEL,
   wakeKeyPrefix,
 } from "@mc/core";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
-import { flightQuestion } from "../comms.ts";
+import { flightQuestion } from "../comms/index.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
@@ -118,7 +119,7 @@ import {
   machineCapacitySince,
 } from "../machine-capacity.ts";
 import { paceStartCheck, paceView } from "../pace.ts";
-import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr-flow.ts";
+import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
 import {
   closingFact,
   factsText,
@@ -126,12 +127,12 @@ import {
   questionFacts,
   subjectId,
 } from "../question-watch.ts";
+import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
-import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
-import { flightWakeCost, flightWakeWaits } from "./cost.ts";
+import { flightFinancialFacts, flightWakeCost, flightWakeWaits } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
@@ -150,7 +151,7 @@ interface TeamsDigestState {
   };
 }
 
-export { prFlow } from "../pr-flow.ts";
+export { prFlow } from "../pr/flow.ts";
 
 /**
  * Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. The
@@ -431,6 +432,23 @@ function flightWakeStatus(store: Store, repo: string, live: boolean): FlightWake
   };
 }
 
+/** Cost and wait figures, read from one set of historical facts taken for this response. */
+function financialFigures(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  found: NonNullable<ReturnType<typeof flightSeat>>,
+): Pick<FlightView, "wakeCost" | "wakeWaits"> {
+  const crewIds = new Set(
+    configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : [])),
+  );
+  const facts = flightFinancialFacts(store, now, new Set([...crewIds, found.seat.id]));
+  return {
+    wakeCost: flightWakeCost(store, now, found.seat.id, crewIds, undefined, facts),
+    wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId, undefined, facts),
+  };
+}
+
 export function flightView(
   config: CcConfig,
   store: Store,
@@ -448,17 +466,7 @@ export function flightView(
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
     ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now, decisions) }),
-    ...(found === null
-      ? {}
-      : {
-          wakeCost: flightWakeCost(
-            store,
-            now,
-            found.seat.id,
-            new Set(configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : []))),
-          ),
-          wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId),
-        }),
+    ...(found === null ? {} : financialFigures(config, store, now, found)),
     promptWakes:
       found === null
         ? []
@@ -1652,6 +1660,26 @@ export function flightWake(
       facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
     },
   };
+}
+
+/**
+ * What `flight_state` shows of the signals by default: a wait that ended over a day ago folds into one
+ * summary line with a count. Every other signal stays whole. `full` in the tool call lists everything (#1632).
+ */
+export function compactSignals(signals: FlightSignal[], now: number): FlightSignal[] {
+  const expired = (s: FlightSignal): boolean =>
+    s.kind === "wait_over" && now - s.since > 24 * FLIGHT_HOUR_MS;
+  const folded = signals.filter(expired);
+  if (folded.length === 0) return signals;
+  return [
+    ...signals.filter((s) => !expired(s)),
+    {
+      kind: "wait_over",
+      key: "expired",
+      since: Math.min(...folded.map((s) => s.since)),
+      evidence: `${folded.length} expired waits left out; call flight_state with full: true to list them`,
+    },
+  ];
 }
 
 /** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */

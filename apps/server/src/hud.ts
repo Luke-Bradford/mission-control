@@ -84,26 +84,26 @@ import {
   type TokenUsage,
   UAT_PARK,
 } from "@mc/core";
-import { runAccountId } from "./account-bindings.ts";
+import { runAccountId } from "./accounts/bindings.ts";
 import {
   decisionDefault,
   partitionAttention,
   protectedDecisionItem,
   questionAskAt,
-} from "./attention-holds.ts";
-import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
-import { briefReadState, briefSourceRevision } from "./brief-source.ts";
-import { claudeVersion } from "./cli-version.ts";
+} from "./attention/holds.ts";
+import { confirmedResumeAfter, pendingRunApproval } from "./attention/subjects.ts";
+import { briefReadState, briefSourceRevision } from "./brief/source.ts";
+import { claudeVersion } from "./cli/version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
-import { attentionChatter, resolvedCommsReason } from "./comms.ts";
+import { attentionChatter, resolvedCommsReason } from "./comms/index.ts";
 import {
   canonicalFlightQuestionKey,
   flightQuestionChoice,
   flightQuestionMessageId,
   isFlightOperatorQuestion,
-} from "./comms-question.ts";
+} from "./comms/question.ts";
 import {
   agentIds,
   type CcConfig,
@@ -118,9 +118,9 @@ import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
-import { loopPause } from "./loop-pause.ts";
-import { loopTries } from "./loophistory.ts";
-import { reviewCheckFor } from "./review-check.ts";
+import { loopTries } from "./loop/history.ts";
+import { loopPause } from "./loop/pause.ts";
+import { reviewCheckFor } from "./review/check.ts";
 import {
   type PrCache,
   parseTicket,
@@ -128,10 +128,10 @@ import {
   runSummary,
   runTicket,
   runTicketTitle,
-} from "./runview.ts";
+} from "./run/view.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
-import { transcriptFilePath } from "./transcript-file.ts";
+import { transcriptFilePath } from "./transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
@@ -991,7 +991,7 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 /**
  * Hub stops that only the operator clears, by note key or key prefix: machine capacity
  * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
- * auto-rollback (cli-auto.ts) and a seat's focus import (instruction-notices.ts). hud.test.ts pins
+ * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
  * them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
@@ -1000,7 +1000,7 @@ export const HUB_STOP_KEYS = [
   `${NOTE_KEY}${BUDGET_BRAKE_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
-  // a seat's focus could not be imported: the operator's config to fix (instruction-notices.ts)
+  // a seat's focus could not be imported: the operator's config to fix (instructions/notices.ts)
   `${NOTE_KEY}instruction-focus`,
 ] as const;
 

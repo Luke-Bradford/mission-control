@@ -30,8 +30,6 @@ describe("Overview layout (hud.css)", () => {
       String.raw`\.comms-section-head \.comms-needs-link`,
       String.raw`\.comms-mentions-panel header button`,
       String.raw`\.comms-ref`,
-      String.raw`\.map-results button`,
-      String.raw`\.map-timeline-controls button`,
     ]) {
       expect(rule(selector), selector).toMatch(/font(?:-size)?: (?:600 )?var\(--fs-s\)/);
     }

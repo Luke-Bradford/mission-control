@@ -8,7 +8,7 @@ import {
 import { statNoted } from "./file-deps.ts";
 import { commsPosition, type Store } from "./store.ts";
 import { readStreamPage } from "./stream.ts";
-import { transcriptFilePath } from "./transcript-file.ts";
+import { transcriptFilePath } from "./transcript/file.ts";
 
 type SourceRun = ReturnType<Store["flightConversationRuns"]>[number];
 interface Rank {

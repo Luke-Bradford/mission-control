@@ -143,9 +143,9 @@ import { seatMayTake } from "../src/engine/queue.ts";
 import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
-import { externalReviewKey } from "../src/external-reviews.ts";
-import type { Move } from "../src/github-board.ts";
+import type { Move } from "../src/github/board.ts";
 import { attentionItems } from "../src/hud.ts";
+import { externalReviewKey } from "../src/review/external.ts";
 import {
   type SeatBusy,
   type SeatFacts,
@@ -7957,7 +7957,7 @@ describe("the engine runs reviews", () => {
 });
 
 it("1389 checks a bound choice again after waiting on the real engine run chain", async () => {
-  const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+  const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
   setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
   let sourceChanged = false;
   const result = withinBriefDispatch(
@@ -7972,7 +7972,7 @@ it("1389 checks a bound choice again after waiting on the real engine run chain"
   expect(loopTexts()).not.toContain("resumed by CAPCOM");
 });
 it("1389 rechecks a bound source after asynchronous beforeLift without weakening ordinary resume", async () => {
-  const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+  const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
   setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
   let sourceChanged = false;
   const result = await withinBriefDispatch(
@@ -7996,7 +7996,7 @@ it("1389 rechecks a bound source after asynchronous beforeLift without weakening
 it.each(["controller", "uat"] as const)(
   "1389 preserves the %s hold if source changes after awaited send-back",
   async (kind) => {
-    const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+    const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
     setLoop({
       phase: "parked",
       parked: {
