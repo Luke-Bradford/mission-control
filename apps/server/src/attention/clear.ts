@@ -1,9 +1,9 @@
 import { type AttentionItem, COMMS_MC, COMMS_OPEN_PREFIX } from "@mc/core";
-import { questionAskAt } from "./attention-holds.ts";
-import type { ChangeBus } from "./bus.ts";
-import type { CcConfig } from "./config.ts";
-import { flightSeat } from "./flight/seat.ts";
-import type { NewCommsRow, Store } from "./store.ts";
+import { questionAskAt } from "./holds.ts";
+import type { ChangeBus } from "../bus.ts";
+import type { CcConfig } from "../config.ts";
+import { flightSeat } from "../flight/seat.ts";
+import type { NewCommsRow, Store } from "../store.ts";
 
 /** Clear the displayed question at its source. Waking it uses the engine's ordinary holds. */
 export async function clearAttentionItem(

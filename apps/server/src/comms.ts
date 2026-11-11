@@ -18,7 +18,7 @@ import {
   commsTooLongText,
   scanSecrets,
 } from "@mc/core";
-import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
+import { confirmedResumeAfter, pendingRunApproval } from "./attention/subjects.ts";
 import { statNoted } from "./file-deps.ts";
 import { commsPosition, type Store } from "./store.ts";
 import { readStream } from "./stream.ts";

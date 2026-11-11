@@ -328,7 +328,7 @@ import {
   protectedDecisionItem,
   questionAskAt,
   releaseHold,
-} from "../attention-holds.ts";
+} from "../attention/holds.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
