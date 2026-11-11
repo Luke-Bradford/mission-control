@@ -117,6 +117,30 @@ describe("machineCapacity", () => {
     ).toEqual({ blocked: false, reason: null });
   });
 
+  it("keeps a percentage-disk episode until ten minutes of headroom above the clear threshold", () => {
+    const config = { ...MACHINE_CAPACITY_DEFAULTS, diskFreeGb: 1 };
+    const nearThreshold = Array.from({ length: 11 }, (_, i) =>
+      sample({
+        at: NOW + (i + 1) * 60_000,
+        diskFreeBytes: 5.3 * 1024 ** 3,
+      }),
+    );
+    const breach = sample({ diskFreeBytes: 4.5 * 1024 ** 3 });
+    expect(machineCapacity([breach, ...nearThreshold], NOW + 11 * 60_000, config)).toMatchObject({
+      blocked: true,
+      reason: expect.stringContaining("waiting 10 minutes above 6%"),
+    });
+    const recovered = Array.from({ length: 11 }, (_, i) =>
+      sample({
+        at: NOW + (i + 12) * 60_000,
+        diskFreeBytes: 6.1 * 1024 ** 3,
+      }),
+    );
+    expect(
+      machineCapacity([breach, ...nearThreshold, ...recovered], NOW + 22 * 60_000, config),
+    ).toEqual({ blocked: false, reason: null });
+  });
+
   it("does not block while there are no samples", () => {
     expect(machineCapacity([], NOW, MACHINE_CAPACITY_DEFAULTS)).toEqual({
       blocked: false,

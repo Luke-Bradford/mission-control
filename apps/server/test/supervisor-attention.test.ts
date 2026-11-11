@@ -1,6 +1,6 @@
 import "./supervisor-harness.ts";
 import { expect, it } from "vitest";
-import { resolvedCommsReason } from "../src/comms.ts";
+import { resolvedCommsReason } from "../src/comms/index.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { make, noKeepers, store, until } from "./supervisor-harness.ts";
 

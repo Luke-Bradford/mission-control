@@ -18,7 +18,7 @@ import {
 } from "@mc/core";
 import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
-import { accountBindingProblem } from "./account-bindings.ts";
+import { accountBindingProblem } from "./accounts/bindings.ts";
 import {
   areaGlob,
   type CcConfig,

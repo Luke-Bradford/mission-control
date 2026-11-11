@@ -4,6 +4,7 @@ import { useNow } from "../../clock.ts";
 import { RESOURCES, useResource } from "../../data.ts";
 import { followLink, PAGE_PATHS } from "../../router.ts";
 import { FLIGHT_NO_SEAT, type FlightView } from "../flightTypes.ts";
+import { WatchListItems } from "../HeldNeeds.tsx";
 import { Pending } from "../Pending.tsx";
 import { flightRun } from "../Situation.tsx";
 import { BlockersList } from "./BlockersPanel.tsx";
@@ -23,6 +24,7 @@ export function FlightPage() {
   const flight = useResource<FlightView>(RESOURCES.flight);
   const summary = useResource<FlightSummaryView>(RESOURCES.flightSummary);
   const attention = useResource<AttentionItem[]>(RESOURCES.attention);
+  const held = useResource<AttentionItem[]>(RESOURCES.heldAttention);
   const pause = useResource<CrewPause | null>(RESOURCES.crewPause).data;
   const now = useNow();
   const [shown, setShown] = useState<number | null>(null);
@@ -43,6 +45,13 @@ export function FlightPage() {
           </a>
           .
         </span>
+        <a
+          className="fp-records"
+          href={`${PAGE_PATHS.flight}#handlingP`}
+          onClick={(e) => followLink(e, `${PAGE_PATHS.flight}#handlingP`)}
+        >
+          Records
+        </a>
       </div>
       <StatusBand run={run} view={view} now={now} />
       <div className="fp-mid">
@@ -75,6 +84,23 @@ export function FlightPage() {
             )
           ) : (
             <Pending what="blockers" error={attention.error} resource={RESOURCES.attention} />
+          )}
+        </section>
+        <section className="fp-panel fp-watch" id="heldWatchP" aria-labelledby="watchH">
+          <h2 className="fp-head" id="watchH">
+            Watch list
+            <span className="fp-sub">
+              {held.data === undefined
+                ? "loading"
+                : `${held.data.length} on a condition${held.data.length === 0 ? " · nothing held" : ""}`}
+            </span>
+          </h2>
+          {held.data === undefined ? (
+            <Pending what="Watch list" error={held.error} resource={RESOURCES.heldAttention} />
+          ) : held.data.length === 0 ? (
+            <p className="fp-note">Nothing is held.</p>
+          ) : (
+            <WatchListItems items={held.data} />
           )}
         </section>
       </div>

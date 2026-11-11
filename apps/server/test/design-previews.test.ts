@@ -8,7 +8,7 @@ import {
   DesignPreviews,
   PREVIEW_BOOT_SCRIPT,
   PreviewRefused,
-} from "../src/design-previews.ts";
+} from "../src/design-preview/previews.ts";
 
 const PORT = 7440;
 const HOST = `127.0.0.1:${PORT}`;

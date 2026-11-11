@@ -1,6 +1,7 @@
 import {
   COMMS_CAPCOM,
   COMMS_MESSAGE_MAX,
+  type DependencyChain,
   EVIDENCE_PAGE_PATHS,
   type EvidenceManifest,
   type PrUatView,
@@ -13,18 +14,20 @@ import { ApiError, apiPost, apiReviewImage } from "../api.ts";
 import { useNow } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
-import { hub, streamStatus, useResource } from "../data.ts";
+import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
 import { elapsed, percent, plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { chainFor, FreesLine, UnblocksMark } from "../qa/frees.tsx";
 import { NativeQaHistory, QaHistory, QaNavigation } from "../qa/QaHistory.tsx";
 import { ArchivedQaReport, CurrentQaReport, QaReportArchive } from "../qa/QaReport.tsx";
-import { mapPath, navigate, useSearch } from "../router.ts";
+import { navigate, useSearch } from "../router.ts";
 import { useStore } from "../shell/store.ts";
 import "./qa-readiness.css";
 
 type Queue = { prs: PullRequestSummary[]; flightId: string | null };
 const EMPTY: PullRequestSummary[] = [];
+const NO_CHAINS: DependencyChain[] = [];
 const QA_TOPICS = ["boards", "agents"] as const;
 const enc = encodeURIComponent;
 const keyOf = (p: PullRequestSummary) => `${p.repoId}:${p.number}`;
@@ -78,6 +81,8 @@ export function QaReadiness() {
 
 function CurrentQaReadiness() {
   const queue = useResource<Queue>({ path: "/api/qa/queue", topic: QA_TOPICS });
+  const chainsRead = useResource<DependencyChain[]>(RESOURCES.dependencies);
+  const chains = chainsRead.data ?? NO_CHAINS;
   const connection = useStore(streamStatus);
   const search = useSearch();
   const now = useNow();
@@ -196,15 +201,23 @@ function CurrentQaReadiness() {
               prs={waiting}
               selected={selected}
               now={now}
+              chains={chains}
               waiting
             />
-            <QueueGroup title="Also in review" prs={review} selected={selected} now={now} />
+            <QueueGroup
+              title="Also in review"
+              prs={review}
+              selected={selected}
+              now={now}
+              chains={chains}
+            />
           </Panel>
           {selected ? (
             <Detail
               key={`${keyOf(selected)}:${selected.headSha}`}
               pr={selected}
               flightId={queue.data?.flightId ?? null}
+              chains={chainsRead.data ?? (chainsRead.error ? null : undefined)}
               enabled={connection.connected && !queue.error}
               now={now}
             />
@@ -225,12 +238,14 @@ function QueueGroup({
   prs,
   selected,
   now,
+  chains,
   waiting = false,
 }: {
   title: string;
   prs: PullRequestSummary[];
   selected: PullRequestSummary | undefined;
   now: number;
+  chains: readonly DependencyChain[];
   waiting?: boolean;
 }) {
   return (
@@ -262,6 +277,7 @@ function QueueGroup({
                     : undefined
                 }
               >
+                <UnblocksMark count={chainFor(chains, p)?.frees.length ?? 0} />
                 {waiting
                   ? p.uat?.since == null
                     ? "Age unknown"
@@ -288,11 +304,14 @@ function QueueGroup({
 function Detail({
   pr,
   flightId,
+  chains,
   enabled,
   now,
 }: {
   pr: PullRequestSummary;
   flightId: string | null;
+  /** undefined while the dependencies read loads; null when it failed. */
+  chains: readonly DependencyChain[] | null | undefined;
   enabled: boolean;
   now: number;
 }) {
@@ -346,6 +365,15 @@ function Detail({
               </div>
             </div>
           </Decide>
+          {chains === undefined ? (
+            <p className="uat-frees" role="status">
+              Reading what this PR frees…
+            </p>
+          ) : chains ? (
+            <FreesLine chain={chainFor(chains, pr)} repoId={pr.repoId} />
+          ) : (
+            <p className="uat-frees">Could not read what this PR frees.</p>
+          )}
           {detail.loading && !data && <p role="status">Loading this PR’s evidence…</p>}
           {moved && (
             <p className="uat-banner" role="alert">
@@ -419,7 +447,7 @@ function Detail({
           <div className="pb uat-stack">
             <p>
               {data?.files?.length
-                ? `${plural(data.files.length, "changed file")}. Open the Map with this PR’s files selected.`
+                ? `${plural(data.files.length, "changed file")}. Review code risk in Audit.`
                 : "Changed paths have not been captured."}
             </p>
             {data?.files?.length ? (
@@ -431,7 +459,7 @@ function Detail({
                     </li>
                   ))}
                 </ul>
-                <a href={`${mapPath(pr.repoId)}?pr=${pr.number}`}>Open in Map with these files</a>
+                <a href="/audit?tab=risk">Open code risk in Audit</a>
               </>
             ) : null}
           </div>
