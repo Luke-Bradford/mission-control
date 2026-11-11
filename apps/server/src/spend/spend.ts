@@ -1,5 +1,5 @@
 import type { Run } from "@mc/core";
-import { endOf } from "./views.ts";
+import { endOf } from "../views.ts";
 
 /** Message-time spend, falling back to wall time when no attempt tokens were recorded. */
 export function runSpend(
