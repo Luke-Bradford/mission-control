@@ -9,11 +9,11 @@ import {
   useRef,
   useState,
 } from "react";
+import { stepRoster } from "./agent/roster.ts";
 import { useNeedsCount } from "./attention.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
-
 import {
   agentPath,
   FULL_WIDTH_PAGES,
@@ -48,7 +48,7 @@ import {
 } from "./shell/overlays.ts";
 import { PopoutContext } from "./shell/popout.ts";
 import { getSelectedAgent, nextAgent, setSelectedAgent } from "./shell/selection.ts";
-import { getSession, useSessionScope } from "./shell/session.ts";
+import { getSession, inCrewSession, useSessionScope } from "./shell/session.ts";
 import { Toast, toast } from "./shell/Toast.tsx";
 
 const Agent = lazy(() => import("./pages/Agent.tsx").then((m) => ({ default: m.Agent })));
@@ -352,16 +352,24 @@ function useShellKeys(current: Route, popout: boolean) {
   useEffect(() => {
     const select = (dir: 1 | -1) => {
       const { current: on, rows: r, items: i } = latest.current;
-      const id = nextAgent(
-        r ?? [],
-        i ?? [],
-        getSession(),
-        getSelectedAgent(),
-        dir,
-        latest.current.repo,
-        latest.current.flightId,
-        Date.now(),
-      );
+      // The Agents page steps in the roster's own order, so j and k move down the list on screen.
+      const id =
+        on.page === "agent"
+          ? stepRoster(
+              (r ?? []).filter((row) => inCrewSession(getSession(), row, latest.current.repo)),
+              getSelectedAgent(),
+              dir,
+            )
+          : nextAgent(
+              r ?? [],
+              i ?? [],
+              getSession(),
+              getSelectedAgent(),
+              dir,
+              latest.current.repo,
+              latest.current.flightId,
+              Date.now(),
+            );
       if (id === null) return;
       setSelectedAgent(id);
       if (on.page === "agent") navigate(agentPath(id)); // the URL follows the selection
