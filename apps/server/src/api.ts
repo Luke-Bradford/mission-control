@@ -169,7 +169,6 @@ import Fastify, {
 import { z } from "zod";
 import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
-import { AsideAnswerChanged, AsideAnswerUnconfirmed, answerAsideQuestion } from "./run/aside-answer.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -390,7 +389,20 @@ import {
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review-check.ts";
+import {
+  AsideAnswerChanged,
+  AsideAnswerUnconfirmed,
+  answerAsideQuestion,
+} from "./run/aside-answer.ts";
 import { publicHandoff } from "./run/handoffs.ts";
+import {
+  type BoardTitleCache,
+  type PrCache,
+  runPrs,
+  runTicket,
+  runUsage,
+  runView,
+} from "./run/view.ts";
 import {
   adminDirOf,
   CheckoutError,
@@ -402,14 +414,6 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import {
-  type BoardTitleCache,
-  type PrCache,
-  runPrs,
-  runTicket,
-  runUsage,
-  runView,
-} from "./run/view.ts";
 import { registerInstructionRoutes } from "./standing-instructions-api.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
