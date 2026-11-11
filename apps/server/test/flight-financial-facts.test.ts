@@ -1,8 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CcConfig, Run, RunDigest } from "@mc/core";
+import type { Run, RunDigest } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { CcConfig } from "../src/config.ts";
 import { flightWakeCost, flightWakeWaits } from "../src/flight/cost.ts";
 import { flightView } from "../src/flight/state.ts";
 import { runSpend } from "../src/spend.ts";
