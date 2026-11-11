@@ -1,3 +1,5 @@
+import { defined } from "./defined.ts";
+
 const codexProbe = vi.hoisted(() => ({
   checks: 0,
   gate: null as Promise<void> | null,
@@ -24,7 +26,6 @@ import {
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
-  READONLY_TOOLS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type Run,
@@ -499,7 +500,7 @@ describe("startWatch", () => {
     for (const flag of ["--tools", "--disallowedTools", "--restricted", "--permission-mode"])
       expect(argv).not.toContain(flag);
     expect(argv).toContain("mcp__mc__*");
-    const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!);
+    const settings = JSON.parse(defined(argv[argv.indexOf("--settings") + 1]));
     expect(settings.sandbox.enabled).toBe(false);
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     await until(() =>
@@ -751,17 +752,19 @@ describe("startReview", () => {
   it("reviews a trusted controller PR without a crew author run", async () => {
     const seed = reviewOfPush();
     const identity = externalReviewKey("mc", 10);
-    const id = store.requestReview({
-      authorRunId: identity,
-      repoId: "mc",
-      seatId: "retro",
-      prNumber: 10,
-      sha: seed.sha,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: identity,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: seed.sha,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(id, ["queued"], "starting", { at: 4 });
     const subject = vi.fn(async () => ({ sha: seed.sha, branch: "pr", ticket: TICKET }));
     const { sup } = make({ scratchRetro: true, externalReviewSubject: subject });
@@ -801,17 +804,19 @@ describe("startReview", () => {
       sameHead = false,
     ) {
       const seeded = reviewOfPush();
-      const old = store.requestReview({
-        authorRunId: seeded.author.id,
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: sameHead ? seeded.sha : OLD_SHA,
-        epoch: 0,
-        attempt: sameHead ? 2 : 1,
-        round: 1,
-        at: 1,
-      })!;
+      const old = defined(
+        store.requestReview({
+          authorRunId: seeded.author.id,
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: sameHead ? seeded.sha : OLD_SHA,
+          epoch: 0,
+          attempt: sameHead ? 2 : 1,
+          round: 1,
+          at: 1,
+        }),
+      );
       store.setReviewState(old, ["queued"], "running", { at: 2, runId: "retro:old" });
       store.recordFindings(old, "retro:old", {
         verdict: { spec: "fail", quality: "fail" },
@@ -820,17 +825,19 @@ describe("startReview", () => {
         at: 3,
       });
       between?.(seeded.author.id);
-      const id = store.requestReview({
-        authorRunId: externalReviewKey("mc", 10),
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: seeded.sha,
-        epoch: 0,
-        attempt: 1,
-        round: 2,
-        at: 4,
-      })!;
+      const id = defined(
+        store.requestReview({
+          authorRunId: externalReviewKey("mc", 10),
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: seeded.sha,
+          epoch: 0,
+          attempt: 1,
+          round: 2,
+          at: 4,
+        }),
+      );
       store.setReviewState(id, ["queued"], "starting", { at: 5 });
       return { old, id, sha: seeded.sha, authorRunId: seeded.author.id };
     }
@@ -871,17 +878,19 @@ describe("startReview", () => {
         finding("still open", "Important", "src/c.ts"),
       ]);
       // a later review of the same PR resolved the first two
-      const middle = store.requestReview({
-        authorRunId: externalReviewKey("mc", 10),
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: "b".repeat(40),
-        epoch: 0,
-        attempt: 1,
-        round: 2,
-        at: 4,
-      })!;
+      const middle = defined(
+        store.requestReview({
+          authorRunId: externalReviewKey("mc", 10),
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: "b".repeat(40),
+          epoch: 0,
+          attempt: 1,
+          round: 2,
+          at: 4,
+        }),
+      );
       store.setReviewState(middle, ["queued"], "running", { at: 4, runId: "retro:mid" });
       store.recordFindings(middle, "retro:mid", {
         verdict: { spec: "fail", quality: "fail" },
@@ -906,17 +915,19 @@ describe("startReview", () => {
       round: number,
       findings: ReturnType<typeof finding>[],
     ) {
-      const id = store.requestReview({
-        authorRunId,
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha,
-        epoch: 0,
-        attempt: 1,
-        round,
-        at: 4,
-      })!;
+      const id = defined(
+        store.requestReview({
+          authorRunId,
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha,
+          epoch: 0,
+          attempt: 1,
+          round,
+          at: 4,
+        }),
+      );
       store.setReviewState(id, ["queued"], "running", { at: 4, runId: `retro:r${id}` });
       store.recordFindings(id, `retro:r${id}`, {
         verdict:
@@ -970,17 +981,19 @@ describe("startReview", () => {
     "removes a controller scratch copy when fresh PR metadata is %s",
     async (failure) => {
       const seed = reviewOfPush();
-      const id = store.requestReview({
-        authorRunId: externalReviewKey("mc", 10),
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: seed.sha,
-        epoch: 0,
-        attempt: 1,
-        round: 1,
-        at: 3,
-      })!;
+      const id = defined(
+        store.requestReview({
+          authorRunId: externalReviewKey("mc", 10),
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: seed.sha,
+          epoch: 0,
+          attempt: 1,
+          round: 1,
+          at: 3,
+        }),
+      );
       store.setReviewState(id, ["queued"], "starting", { at: 4 });
       const subject = vi
         .fn()
@@ -1281,6 +1294,86 @@ describe("startReview", () => {
   it("a full-depth review runs on the full-depth model", async () => {
     expect(await reviewModel("full")).toBe(REVIEW_FULL_MODEL);
   });
+
+  it("a moved Size M review keeps the full model over its target's light model", async () => {
+    store.replaceBoard("mc", [boardCard(42, { size: "M" })]);
+    const base = DEFAULT_PROFILES[0] as Profile;
+    const r = reviewOfPush({
+      state: "queued",
+      profile: {
+        profile: { ...base, reviewer: { role: "RETRO", depth: "light" } },
+        route: { by: "size", size: "M" },
+        hash: "h",
+      },
+    });
+    const { sup } = make({
+      extraSeat: {
+        id: "retro-2",
+        role: "RETRO",
+        accountId: "claude-main",
+        model: REVIEW_FULL_MODEL,
+        lightModel: "haiku",
+        area: [],
+        mode: "scratch",
+      },
+    });
+    expect(store.moveQueuedReview(r.reviewId, "retro-2", 2)).toBe(true);
+    expect(store.setReviewState(r.reviewId, ["queued"], "starting", { at: 2 })).toBe(true);
+
+    sup.start();
+    const { runId } = await sup.startReview("retro-2", r.reviewId);
+
+    expect(store.run(runId)?.model).toBe(REVIEW_FULL_MODEL);
+  });
+
+  it.each([
+    { label: "docs", current: true, paths: ["packages/core/src/guard.ts"], full: true },
+    { label: "chore", current: true, paths: ["apps/server/src/engine/engine.ts"], full: true },
+    { label: "docs", current: false, paths: ["packages/core/src/guard.ts"], full: false },
+    { label: "docs", current: true, paths: [], full: false },
+  ])(
+    "a moved Size S $label review selects its model from current=$current hard-rule touches $paths",
+    async ({ label, current, paths, full }) => {
+      store.replaceBoard("mc", [boardCard(42, { size: "S" })]);
+      const base = DEFAULT_PROFILES[0] as Profile;
+      const r = reviewOfPush({
+        state: "queued",
+        profile: {
+          profile: { ...base, reviewer: { role: "RETRO", depth: "light" } },
+          route: { by: "size", size: "S" },
+          hash: "h",
+        },
+      });
+      store.setRunLoop(r.author.id, {
+        ...NEW_LOOP,
+        touches: { sha: current ? r.sha : r.fork, paths, flightPowers: "superuser" },
+      });
+      const { sup } = make({
+        fetchTicket: async () => ({ ...TICKET, labels: [label] }),
+        extraSeat: {
+          id: "retro-2",
+          role: "RETRO",
+          accountId: "claude-main",
+          model: "sonnet",
+          lightModel: "haiku",
+          area: [],
+          mode: "scratch",
+        },
+      });
+      expect(store.moveQueuedReview(r.reviewId, "retro-2", 2)).toBe(true);
+      expect(store.setReviewState(r.reviewId, ["queued"], "starting", { at: 2 })).toBe(true);
+      const upsert = vi.spyOn(store, "upsertRun");
+      sup.start();
+      await sup.startReview("retro-2", r.reviewId);
+      await until(() => expect(userLines()).toHaveLength(1));
+      const written = upsert.mock.calls.find(([run]) => run.reviewId === r.reviewId);
+      const argv = recorded()[0]?.argv as string[];
+      const expected = full ? REVIEW_FULL_MODEL : "haiku";
+      expect(written?.[0].model).toBe(expected);
+      expect(argv[argv.indexOf("--model") + 1]).toBe(expected);
+      upsert.mockRestore();
+    },
+  );
 
   it("a Codex full-depth review runs on the seat's model", async () => {
     const r = reviewOfPush({

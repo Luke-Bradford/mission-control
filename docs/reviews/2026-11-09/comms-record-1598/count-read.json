@@ -1,0 +1,57 @@
+{
+  "method": "Six reads on one SQLite backup of the live hub, including new source migrations. No live writes, model calls or observed-loop actions. Only aggregates and a result hash retained.",
+  "baseline": "03ef6b5212e0fff0193f20e6bff3d226eabca2c7",
+  "candidate": "fix/1598-comms-record-server working source",
+  "sampledAt": 1794215922962,
+  "startupIncludingMigrationMs": 21.844249999999988,
+  "samples": [
+    {
+      "elapsedMs": 4.7682909999999765,
+      "tickets": 359,
+      "assignedTicketLinks": 2509,
+      "unassignedReferenceMessages": 3,
+      "bytes": 15755,
+      "sha256": "e656cbf54bac5d790c8ad6d67182518d6a400eff258c8244b9ed8b5be49e4720"
+    },
+    {
+      "elapsedMs": 3.4932079999999814,
+      "tickets": 359,
+      "assignedTicketLinks": 2509,
+      "unassignedReferenceMessages": 3,
+      "bytes": 15755,
+      "sha256": "e656cbf54bac5d790c8ad6d67182518d6a400eff258c8244b9ed8b5be49e4720"
+    },
+    {
+      "elapsedMs": 3.8427500000000236,
+      "tickets": 359,
+      "assignedTicketLinks": 2509,
+      "unassignedReferenceMessages": 3,
+      "bytes": 15755,
+      "sha256": "e656cbf54bac5d790c8ad6d67182518d6a400eff258c8244b9ed8b5be49e4720"
+    },
+    {
+      "elapsedMs": 3.0812910000000215,
+      "tickets": 359,
+      "assignedTicketLinks": 2509,
+      "unassignedReferenceMessages": 3,
+      "bytes": 15755,
+      "sha256": "e656cbf54bac5d790c8ad6d67182518d6a400eff258c8244b9ed8b5be49e4720"
+    },
+    {
+      "elapsedMs": 3.3649999999999523,
+      "tickets": 359,
+      "assignedTicketLinks": 2509,
+      "unassignedReferenceMessages": 3,
+      "bytes": 15755,
+      "sha256": "e656cbf54bac5d790c8ad6d67182518d6a400eff258c8244b9ed8b5be49e4720"
+    },
+    {
+      "elapsedMs": 3.2726670000000126,
+      "tickets": 359,
+      "assignedTicketLinks": 2509,
+      "unassignedReferenceMessages": 3,
+      "bytes": 15755,
+      "sha256": "e656cbf54bac5d790c8ad6d67182518d6a400eff258c8244b9ed8b5be49e4720"
+    }
+  ]
+}

@@ -1,0 +1,31 @@
+// @vitest-environment node
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { expect, it } from "vitest";
+import { browserSession, describeRendered } from "./browserRunner.ts";
+import { desktopFixture } from "./desktopFixtures.ts";
+const { renderAt } = browserSession();
+const output = "/tmp/mc-1397-current-page-captures";
+const telemetry = JSON.parse(readFileSync("/tmp/mc-1397-previous-page-fixture.json", "utf8"));
+mkdirSync(output, { recursive: true });
+describeRendered("Current Telemetry page comparison", () => {
+  it("captures the real App reached from Overview with fictional telemetry", async () => {
+    const captures: unknown[] = [];
+    const api = { ...desktopFixture().api, "/api/telemetry?range=6h": telemetry, "/api/telemetry?range=24h": telemetry, "/api/test-lock/history": { runs: [], today: { runs: 0, waitMs: 0 } } };
+    for (const [width, height] of [[1280, 900], [1600, 1000], [1920, 940]]) for (const theme of ["light", "dark"] as const) {
+      const page = await renderAt({ page: "test/desktopBrowser.html", width, height, colorScheme: theme, search: "?path=/overview", api });
+      try {
+        await page.box("#page-overview");
+        await page.click('a[href="/telemetry"]');
+        await page.box("#tCycle");
+        await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); }, null);
+        expect(page.errors()).toEqual([]);
+        const facts = await page.evaluate(() => ({ text: document.querySelector("#page-telemetry")?.textContent, clock: Date.now(), width: innerWidth, height: innerHeight, dpr: devicePixelRatio, zoom: visualViewport?.scale, scroll: { x: scrollX, y: scrollY }, scrollHeight: document.documentElement.scrollHeight, browser: navigator.userAgent, path: location.pathname }), null);
+        const file = `current-telemetry-${width}x${height}-${theme}.png`;
+        await page.screenshot(`${output}/${file}`);
+        captures.push({ file, ...facts, scope: "viewport", arrival: "Overview -> Telemetry", data: "Existing fictional Telemetry test fixture; comparison is structural, not a numerical before/after measurement", capturedAt: new Date().toISOString(), sha256: createHash("sha256").update(readFileSync(`${output}/${file}`)).digest("hex") });
+      } finally { await page.close(); }
+    }
+    writeFileSync(`${output}/manifest.json`, JSON.stringify({ source: "51f827e675e5ed1fe4ecfaf5d2f00428e4addbff", captures }, null, 2));
+  }, 120000);
+});

@@ -80,6 +80,7 @@ it("an operator message to a seat shows stored, wakes the seat, then shows deliv
   expect(res.statusCode).toBe(200);
   const body = res.json();
   expect(body).toMatchObject({ state: "stored", deliveredAt: null, alreadySent: false });
+  expect(body.message).toMatchObject({ at: 100_000, label: "none" });
   expect(woken).toEqual(["guido-1"]);
   const id = body.message.id as string;
   // the seat's turn takes it

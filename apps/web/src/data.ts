@@ -103,6 +103,7 @@ export const RESOURCES = {
     topic: "attention",
   }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
+  answeredAttention: { path: "/api/attention/answered", topic: "attention" },
   attention: { path: "/api/attention", topic: "attention" },
   attentionItem: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}`,
@@ -183,6 +184,16 @@ export const RESOURCES = {
   }),
   /** The stored Comms views.  Unlike the older transcript endpoint above, these include labels,
    * replies, reactions, pins and read cursors. */
+  /** The receipt of the choice made on an item (`ChoiceReceipt`); 404 when none was made. */
+  choice: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/choice`,
+    topic: "attention",
+  }),
+  /** The note shown before a reply to a message is sent (`CommsReplyRoute`). */
+  replyRoute: (messageId: string): ResourceRef => ({
+    path: `/api/comms/${enc(messageId)}/reply-route`,
+    topic: "agents",
+  }),
   commsCrew: { path: "/api/comms/crew", topic: "agents" },
   commsFlight: { path: "/api/comms/flight", topic: "agents" },
   /** A nav row's read: the conversation list and counts, no messages. */
@@ -336,10 +347,15 @@ export const ACTIONS = {
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
   /** Body `{ keys: string[] }`. */
   hold: (key: string) => `/api/attention/${enc(key)}/hold`,
+  notNow: (key: string) => `/api/attention/${enc(key)}/not-now`,
+  drop: (key: string) => `/api/attention/${enc(key)}/drop`,
+  clear: (key: string) => `/api/attention/${enc(key)}/clear`,
   releaseHold: (key: string) => `/api/attention/${enc(key)}/hold/release`,
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
+  /** Body `{ optionId, briefAt }`; answers a `ChoiceReceipt`. */
+  choose: (key: string) => `/api/attention/${enc(key)}/choose`,
   /** Body `{}`; a 404 `{ error }` when the thread is no longer open. Local only. */
   handled: (key: string) => `/api/attention/${enc(key)}/handled`,
   /** Body: the whole AwaySettings. */

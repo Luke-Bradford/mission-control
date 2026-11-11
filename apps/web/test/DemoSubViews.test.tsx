@@ -61,11 +61,14 @@ describe("Demo sub-views", () => {
     clean();
   });
 
-  it("Flight: what FLIGHT knows", async () => {
+  it("Flight: status, doing now, blockers and recent decisions on one page", async () => {
     await at("/flight");
-    await clickText(/what flight knows/i);
+    await waitFor(() => {
+      for (const name of ["Doing now", "Blockers", "Recent decisions"]) {
+        if (!document.body.textContent?.includes(name)) throw new Error(`nothing says ${name}`);
+      }
+    });
     clean();
-    expect(document.body.textContent).toMatch(/checkout cache/i);
   });
 
   it("Telemetry with a seat filter", async () => {
@@ -266,22 +269,13 @@ describe("Demo findings from round 3", () => {
   });
 });
 
-describe("Demo Comms writes", () => {
-  it("a refused decision hold says it is a demo", async () => {
+describe("Demo Needs you writes", () => {
+  it("a refused Not now action says it is a demo", async () => {
     await at("/needs-you");
-    await clickText(/^hold$/i);
-    const reason = await waitFor(() => {
-      const found = document.querySelector<HTMLInputElement>(".hold-form input[required]");
-      if (!found) throw new Error("no hold form");
-      return found;
-    });
-    await act(
-      async () => void fireEvent.change(reason, { target: { value: "Waiting for design" } }),
-    );
-    await act(async () => void fireEvent.submit(reason.closest("form") as HTMLFormElement));
+    await clickText(/^not now$/i);
     await settle();
     expect(document.body.textContent).toContain(DEMO_REFUSED);
-    expect(document.body.textContent).not.toContain("Could not hold this decision");
+    expect(document.body.textContent).not.toContain("Could not not now this item.");
   });
 
   it("shows no fault on opening a conversation, and the demo words on a refused write", async () => {

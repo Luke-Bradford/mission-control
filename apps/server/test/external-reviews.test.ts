@@ -23,6 +23,7 @@ import { ownsPr } from "../src/ownership.ts";
 import { prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const SHA = "a".repeat(40);
 const NEXT = "b".repeat(40);
@@ -81,7 +82,7 @@ function harness() {
   const writes: { path: string; body: Record<string, unknown> }[] = [];
   const gh: GhRunner = vi.fn(async (args, options) => {
     if (args.includes("POST")) {
-      const path = args[args.indexOf("POST") + 1]!;
+      const path = defined(args[args.indexOf("POST") + 1]);
       const body = JSON.parse(options.input ?? "{}");
       writes.push({ path, body });
       if (path.endsWith("/comments")) comments.push(body);
@@ -150,7 +151,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    const row = defined(store.reviewsOfRun(externalReviewKey("sample", 7))[0]);
     expect(service.wanted(row)).toBe(true);
     expect(withdrawExternalReview(store, "sample", 7)).toBe(true);
     expect(withdrawExternalReview(store, "sample", 7)).toBe(false);
@@ -175,7 +176,7 @@ describe("external PR review subjects", () => {
   it("a seeded ask keeps the in-flight review wanted, with no run here", async () => {
     const h = harness();
     await createExternalReviews(h.deps).sync();
-    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    const row = defined(store.reviewsOfRun(externalReviewKey("sample", 7))[0]);
     store.deleteSetting("external-review-ask:sample#7");
     seedExternalReviewAsks(store, 5);
     const service = createExternalReviews(h.deps);
@@ -191,7 +192,7 @@ describe("external PR review subjects", () => {
   ] as const)("Update seeds no ask for a %s review", async (_name, path) => {
     const h = harness();
     await createExternalReviews(h.deps).sync();
-    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    const row = defined(store.reviewsOfRun(externalReviewKey("sample", 7))[0]);
     let from: "queued" | "starting" | "running" = "queued";
     for (const to of path) {
       store.setReviewState(row.id, [from], to, { at: 3, runId: "retro:x", failure: "x" });
@@ -213,7 +214,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const row = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    const row = defined(store.reviewsOfRun(externalReviewKey("sample", 7))[0]);
     expect(service.wanted(row)).toBe(true);
     store.deleteSetting("external-review-ask:sample#7");
     expect(service.wanted(row)).toBe(false);
@@ -293,7 +294,9 @@ describe("external PR review subjects", () => {
     await service.sync();
     expect(store.reviewsIn(["queued"])).toHaveLength(1);
     expect(h.writes).toHaveLength(1);
-    expect(service.wanted(store.reviewsOfRun(externalReviewKey("sample", 7))[0]!)).toBe(true);
+    expect(service.wanted(defined(store.reviewsOfRun(externalReviewKey("sample", 7))[0]))).toBe(
+      true,
+    );
   });
 
   it("does not review a branch whose build run is still unfinished", async () => {
@@ -308,7 +311,7 @@ describe("external PR review subjects", () => {
     buildRun({ endedAt: 2 });
     const service = createExternalReviews(harness().deps);
     await service.sync();
-    const queued = store.reviewsOfRun(externalReviewKey("sample", 7))[0]!;
+    const queued = defined(store.reviewsOfRun(externalReviewKey("sample", 7))[0]);
     expect(service.wanted(queued)).toBe(true);
     buildRun({ id: "builder:new", endedAt: null, status: "running" });
     expect(service.wanted(queued)).toBe(false);
@@ -316,17 +319,19 @@ describe("external PR review subjects", () => {
 
   it("queues a later round, avoiding the ended author's seat, after a crew review of an older head", async () => {
     buildRun({ endedAt: 2 });
-    const crew = store.requestReview({
-      authorRunId: "builder:old",
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: NEXT,
-      epoch: 1,
-      attempt: 1,
-      round: 1,
-      at: 1,
-    })!;
+    const crew = defined(
+      store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: NEXT,
+        epoch: 1,
+        attempt: 1,
+        round: 1,
+        at: 1,
+      }),
+    );
     store.setReviewState(crew, ["queued"], "running", { runId: "retro:x", at: 2 });
     store.recordFindings(crew, "retro:x", {
       verdict: { spec: "pass", quality: "pass" },
@@ -371,7 +376,7 @@ describe("external PR review subjects", () => {
     const service = createExternalReviews(deps);
     await service.sync();
     const key = externalReviewKey("sample", 7);
-    const first = store.reviewsOfRun(key)[0]!;
+    const first = defined(store.reviewsOfRun(key)[0]);
     expect(first.seatId).toBe("retro");
     store.setReviewState(first.id, ["queued"], "running", { runId: "retro:x", at: 3 });
     store.setReviewState(first.id, ["running"], "failed", {
@@ -384,8 +389,8 @@ describe("external PR review subjects", () => {
     expect(rows.map((r) => r.seatId)).toEqual(["retro", "retro-2"]);
     // with no other seat to try, the failed review stands and nothing more is queued
     await service.sync();
-    store.setReviewState(rows[1]!.id, ["queued"], "running", { runId: "retro-2:x", at: 5 });
-    store.setReviewState(rows[1]!.id, ["running"], "failed", {
+    store.setReviewState(defined(rows[1]).id, ["queued"], "running", { runId: "retro-2:x", at: 5 });
+    store.setReviewState(defined(rows[1]).id, ["running"], "failed", {
       at: 6,
       failure: reviewBudgetFailure(1000),
     });
@@ -502,7 +507,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const old = store.reviewsIn(["queued"])[0]!;
+    const old = defined(store.reviewsIn(["queued"])[0]);
     store.upsertPullRequests("sample", [pr({ headSha: NEXT })], 2);
     h.current({
       head: { sha: NEXT, ref: "feature/sample", repo: { full_name: "example/sample" } },
@@ -555,7 +560,7 @@ describe("external PR review subjects", () => {
       };
       const service = createExternalReviews(deps);
       await service.sync();
-      const row = store.reviewsIn(["queued"])[0]!;
+      const row = defined(store.reviewsIn(["queued"])[0]);
       store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
       expect(
         store.recordFindings(row.id, "retro:review", {
@@ -597,17 +602,19 @@ describe("external PR review subjects", () => {
   it("posts the reported state of a crew review whose author run ended before it reported", async () => {
     store.upsertPullRequests("sample", [pr({ ticket: "sample#1" })], 2);
     buildRun({ endedAt: 2 });
-    const id = store.requestReview({
-      authorRunId: "builder:old",
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
     expect(
       store.recordFindings(id, "retro:review", {
@@ -634,33 +641,37 @@ describe("external PR review subjects", () => {
   it("posts a reported crew review over an earlier pending external row on the same head", async () => {
     store.upsertPullRequests("sample", [pr({ ticket: "sample#1" })], 2);
     buildRun({ endedAt: 2 });
-    const external = store.requestReview({
-      authorRunId: externalReviewKey("sample", 7),
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const external = defined(
+      store.requestReview({
+        authorRunId: externalReviewKey("sample", 7),
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(external, ["queued"], "running", { at: 4, runId: "retro:ext" });
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
     expect(h.writes.at(-1)?.body).toMatchObject({ state: "pending", context: "mc/review" });
-    const id = store.requestReview({
-      authorRunId: "builder:old",
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 3,
-      at: 5,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 3,
+        at: 5,
+      }),
+    );
     store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -681,17 +692,19 @@ describe("external PR review subjects", () => {
   ])("says why GitHub's own read holds a reported crew review: %j", async (patch) => {
     store.upsertPullRequests("sample", [pr({ ticket: "sample#1" })], 2);
     buildRun({ endedAt: 2 });
-    const id = store.requestReview({
-      authorRunId: "builder:old",
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -716,17 +729,19 @@ describe("external PR review subjects", () => {
       ticket: null,
       loop: { ...NEW_LOOP, phase: "review" },
     });
-    const id = store.requestReview({
-      authorRunId: "builder:old",
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -738,7 +753,7 @@ describe("external PR review subjects", () => {
     });
     const h = harness();
     const service = createExternalReviews(h.deps);
-    expect(service.wanted(store.review(id)!)).toBe(false);
+    expect(service.wanted(defined(store.review(id)))).toBe(false);
   });
 
   it("says nothing and posts nothing for a crew review its live author run owns", async () => {
@@ -747,17 +762,19 @@ describe("external PR review subjects", () => {
       status: "running",
       loop: { ...NEW_LOOP, phase: "review" },
     });
-    const id = store.requestReview({
-      authorRunId: "builder:old",
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: "builder:old",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -775,17 +792,19 @@ describe("external PR review subjects", () => {
   });
 
   it("says why when it leaves a reported review unposted", async () => {
-    const id = store.requestReview({
-      authorRunId: "gone:run",
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: "gone:run",
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -810,7 +829,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const row = store.reviewsIn(["queued"])[0]!;
+    const row = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(row.id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -845,7 +864,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const old = store.reviewsIn(["queued"])[0]!;
+    const old = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(old.id, ["queued"], "superseded", { at: 101 });
     await service.sync();
     const current = store.reviewsIn(["queued"]);
@@ -856,7 +875,7 @@ describe("external PR review subjects", () => {
   it("withholds a report containing disallowed text and never posts a clean status", async () => {
     const h = harness();
     await createExternalReviews(h.deps).sync();
-    const row = store.reviewsIn(["queued"])[0]!;
+    const row = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
     store.recordFindings(row.id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -874,36 +893,44 @@ describe("external PR review subjects", () => {
     );
   });
 
-  it.each(["@someone", "&#64;someone", "fixture-sensitive-key"])(
-    "keeps a disallowed review summary private: %s",
-    async (summary) => {
-      const h = harness();
-      await createExternalReviews(h.deps).sync();
-      const row = store.reviewsIn(["queued"])[0]!;
-      store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
-      store.recordFindings(row.id, "retro:review", {
-        verdict: { spec: "pass", quality: "pass" },
-        summary,
-        findings: [],
-        at: 102,
-      });
-      await createExternalReviews({
-        ...h.deps,
-        textAllowed: async (text) =>
-          prTextProblem(text, {
-            repo: "example/sample",
-            issue: 7,
-            known: ["fixture-sensitive-key"],
-            label: "QA review",
-            allowOwnRepoRefs: true,
-          }) === null,
-      }).sync();
-      expect(h.comments).toEqual([]);
-      expect(h.writes).toHaveLength(1);
-      expect(h.writes[0]?.body.state).toBe("pending");
-      expect(h.deps.log).toHaveBeenCalledWith(expect.not.stringContaining(summary));
-    },
-  );
+  it.each([
+    "@someone",
+    "&#64;someone",
+    "fixture-sensitive-key",
+    "Closes #933",
+    "Fixes #933",
+    "This does not close other/repo#933.",
+    "This does not close https://github.com/other/repo/issues/933.",
+    "This does not close #933; closes #934.",
+    "This does not close #933. @someone",
+    "This does not close #933. fixture-sensitive-key",
+  ])("keeps a disallowed review summary private: %s", async (summary) => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = defined(store.reviewsIn(["queued"])[0]);
+    store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    store.recordFindings(row.id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary,
+      findings: [],
+      at: 102,
+    });
+    await createExternalReviews({
+      ...h.deps,
+      textAllowed: async (text) =>
+        prTextProblem(text, {
+          repo: "example/sample",
+          issue: 7,
+          known: ["fixture-sensitive-key"],
+          label: "QA review",
+          allowOwnRepoRefs: true,
+        }) === null,
+    }).sync();
+    expect(h.comments).toEqual([]);
+    expect(h.writes).toHaveLength(1);
+    expect(h.writes[0]?.body.state).toBe("pending");
+    expect(h.deps.log).toHaveBeenCalledWith(expect.not.stringContaining(summary));
+  });
 
   it("keeps an unexpected publication exception out of the log", async () => {
     const h = harness();
@@ -922,50 +949,115 @@ describe("external PR review subjects", () => {
     expect(h.writes).toEqual([]);
   });
 
-  it("publishes a retained QA report through the real GitHub text check", async () => {
+  it.each(["Checked.", "This continuation does not close #933."])(
+    "publishes a retained QA report through the real GitHub text check: %s",
+    async (summary) => {
+      const h = harness();
+      await createExternalReviews(h.deps).sync();
+      const row = defined(store.reviewsIn(["queued"])[0]);
+      store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+      store.recordFindings(row.id, "retro:review", {
+        verdict: { spec: "pass", quality: "pass" },
+        summary,
+        findings: [],
+        at: 102,
+      });
+      const report: QaReport = {
+        schemaVersion: 1,
+        id: "c".repeat(64),
+        repoId: "sample",
+        github: "example/sample",
+        prNumber: 7,
+        headSha: SHA,
+        prTitle: "Sample change",
+        prUrl: "https://github.com/example/sample/pull/7",
+        branch: "feature/sample",
+        source: "native",
+        reviewer: { id: "retro", label: "retro" },
+        reviewedAt: 102,
+        registeredAt: 102,
+        nativeReviewId: row.id,
+        nativeRunId: "retro:review",
+        verdict: { spec: "pass", quality: "pass" },
+        summary,
+        worksWell: [],
+        coverage: [{ check: "scope", result: "pass", note: "A saved note names @someone." }],
+        findings: [],
+        resolutions: [],
+        tests: [],
+        limitations: [],
+        followUps: [],
+        visual: { applicability: "not_applicable", reason: "Backend only.", pairs: [] },
+        ci: { observedAt: 102, headSha: SHA, source: "github", checks: [] },
+        completeness: { state: "complete", missing: [] },
+        permalink: `/qa?repo=sample&pr=7&report=${"c".repeat(64)}`,
+      };
+      expect(store.putQaReport(report)).toBe(true);
+      const textAllowed = vi.fn(
+        async (text: string) =>
+          prTextProblem(text, {
+            repo: "example/sample",
+            issue: 7,
+            known: [],
+            label: "QA review",
+            allowOwnRepoRefs: true,
+          }) === null,
+      );
+      const publication = {
+        ...h.deps,
+        reportBaseUrl: "http://127.0.0.1:7431",
+        textAllowed,
+      };
+      await createExternalReviews(publication).sync();
+      await createExternalReviews(publication).sync();
+      expect(h.comments).toHaveLength(1);
+      expect(h.comments[0]?.body).toContain(`/api/qa-reports/${report.id}/markdown`);
+      expect(h.comments[0]?.body).not.toContain("@someone");
+      expect(report.coverage[0]?.note).toContain("@someone");
+      expect(store.qaReportForReview(row.id)).toEqual(report);
+      expect(store.review(row.id)?.summary).toBe(summary);
+      if (summary.includes("does not close")) {
+        expect(h.comments[0]?.body).toContain("does not close issue 933.");
+        expect(h.comments[0]?.body).not.toContain("does not close #933.");
+        // Ordinary PR bodies still refuse the original closing syntax; only the review's
+        // GitHub display text changes, while the retained native report stays verbatim.
+        expect(
+          prTextProblem(summary, {
+            repo: "example/sample",
+            issue: 7,
+            known: [],
+            label: "QA review",
+            allowOwnRepoRefs: true,
+          }),
+        ).toMatchObject({ problem: "notify" });
+      }
+      expect(h.writes.at(-1)?.body.state).toBe("success");
+      expect(textAllowed).toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a blocking review red after rendering its negated prose", async () => {
     const h = harness();
     await createExternalReviews(h.deps).sync();
-    const row = store.reviewsIn(["queued"])[0]!;
+    const row = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    const finding = {
+      severity: "Important" as const,
+      file: "example.ts",
+      line: 12,
+      summary: "This does not fix #933.",
+      scenario: "This cannot resolve #933.",
+      fix: "Keep the parent open until the behavior works.",
+    };
     store.recordFindings(row.id, "retro:review", {
-      verdict: { spec: "pass", quality: "pass" },
-      summary: "Checked.",
-      findings: [],
+      verdict: { spec: "fail", quality: "fail" },
+      summary: "This does not close #933.",
+      findings: [finding],
       at: 102,
     });
-    const report: QaReport = {
-      schemaVersion: 1,
-      id: "c".repeat(64),
-      repoId: "sample",
-      github: "example/sample",
-      prNumber: 7,
-      headSha: SHA,
-      prTitle: "Sample change",
-      prUrl: "https://github.com/example/sample/pull/7",
-      branch: "feature/sample",
-      source: "native",
-      reviewer: { id: "retro", label: "retro" },
-      reviewedAt: 102,
-      registeredAt: 102,
-      nativeReviewId: row.id,
-      nativeRunId: "retro:review",
-      verdict: { spec: "pass", quality: "pass" },
-      summary: "Checked.",
-      worksWell: [],
-      coverage: [{ check: "scope", result: "pass", note: "A saved note names @someone." }],
-      findings: [],
-      resolutions: [],
-      tests: [],
-      limitations: [],
-      followUps: [],
-      visual: { applicability: "not_applicable", reason: "Backend only.", pairs: [] },
-      ci: { observedAt: 102, headSha: SHA, source: "github", checks: [] },
-      completeness: { state: "complete", missing: [] },
-      permalink: `/qa?repo=sample&pr=7&report=${"c".repeat(64)}`,
-    };
-    vi.spyOn(store, "qaReportForReview").mockReturnValue(report);
-    const textAllowed = vi.fn(
-      async (text: string) =>
+    await createExternalReviews({
+      ...h.deps,
+      textAllowed: async (text) =>
         prTextProblem(text, {
           repo: "example/sample",
           issue: 7,
@@ -973,25 +1065,55 @@ describe("external PR review subjects", () => {
           label: "QA review",
           allowOwnRepoRefs: true,
         }) === null,
-    );
-    await createExternalReviews({
-      ...h.deps,
-      reportBaseUrl: "http://127.0.0.1:7431",
-      textAllowed,
     }).sync();
     expect(h.comments).toHaveLength(1);
-    expect(h.comments[0]?.body).toContain(`/api/qa-reports/${report.id}/markdown`);
-    expect(h.comments[0]?.body).not.toContain("@someone");
-    expect(report.coverage[0]?.note).toContain("@someone");
-    expect(h.writes.at(-1)?.body.state).toBe("success");
+    expect(h.comments[0]?.body).toContain("**Important** example.ts:12");
+    expect(h.comments[0]?.body).toContain("does not fix issue 933");
+    expect(h.comments[0]?.body).toContain("cannot resolve issue 933");
+    expect(store.findingsOf(row.id)[0]).toMatchObject(finding);
+    expect(h.writes.at(-1)?.body.state).toBe("failure");
+    expect(store.review(row.id)?.blocking).toBe(1);
+  });
+
+  it("never rewrites a reported command to make its text pass", async () => {
+    const h = harness();
+    await createExternalReviews(h.deps).sync();
+    const row = store.reviewsIn(["queued"])[0];
+    if (!row) throw new Error("Review was not queued");
+    store.setReviewState(row.id, ["queued"], "running", { at: 101, runId: "retro:review" });
+    const command = 'pnpm test -t "does not close #933"';
+    store.recordFindings(row.id, "retro:review", {
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked.",
+      findings: [],
+      tests: [{ command, passed: 1, failed: 0, skipped: 0, duration: 1 }],
+      at: 102,
+    });
+    const textAllowed = vi.fn(async (text: string) => {
+      expect(text).toContain(command);
+      return (
+        prTextProblem(text, {
+          repo: "example/sample",
+          issue: 7,
+          known: [],
+          label: "QA review",
+          allowOwnRepoRefs: true,
+        }) === null
+      );
+    });
+    await createExternalReviews({ ...h.deps, textAllowed }).sync();
     expect(textAllowed).toHaveBeenCalled();
+    expect(store.reviewTests(row.id)[0]?.command).toBe(command);
+    expect(h.comments).toEqual([]);
+    expect(h.writes).toHaveLength(1);
+    expect(h.writes[0]?.body.state).toBe("pending");
   });
 
   it("keeps a failed review red and does not repeatedly start paid retries", async () => {
     const h = harness();
     const service = createExternalReviews(h.deps);
     await service.sync();
-    const row = store.reviewsIn(["queued"])[0]!;
+    const row = defined(store.reviewsIn(["queued"])[0]);
     store.setReviewState(row.id, ["queued"], "failed", {
       at: 101,
       failure: "Reviewer ended without a report.",
@@ -1041,7 +1163,7 @@ describe("external PR review subjects", () => {
     const h = harness();
     await createExternalReviews({
       ...h.deps,
-      config: { ...config, repos: [{ ...config.repos[0]!, autonomy: "draft" }] },
+      config: { ...config, repos: [{ ...defined(config.repos[0]), autonomy: "draft" }] },
     }).sync();
     store.upsertPullRequests(
       "sample",
@@ -1068,17 +1190,19 @@ describe("external PR review subjects", () => {
 
 describe("current-head review read model", () => {
   function review(sha = SHA, authorRunId = externalReviewKey("sample", 7)) {
-    const id = store.requestReview({
-      authorRunId,
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 1,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId,
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 1,
+      }),
+    );
     store.setReviewState(id, ["queued"], "running", { at: 2, runId: "retro:review" });
     store.recordFindings(id, "retro:review", {
       verdict: { spec: "pass", quality: "pass" },
@@ -1095,17 +1219,19 @@ describe("current-head review read model", () => {
   });
   it("does not revive an old report when the newer queued row is superseded", () => {
     review();
-    const id = store.requestReview({
-      authorRunId: externalReviewKey("sample", 7),
-      repoId: "sample",
-      seatId: "retro",
-      prNumber: 7,
-      sha: NEXT,
-      epoch: 0,
-      attempt: 1,
-      round: 2,
-      at: 4,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: externalReviewKey("sample", 7),
+        repoId: "sample",
+        seatId: "retro",
+        prNumber: 7,
+        sha: NEXT,
+        epoch: 0,
+        attempt: 1,
+        round: 2,
+        at: 4,
+      }),
+    );
     store.setReviewState(id, ["queued"], "superseded", { at: 5 });
     expect(reviewCheckFor(store, "sample", 6)(pr({ headSha: NEXT }))).toBeNull();
   });

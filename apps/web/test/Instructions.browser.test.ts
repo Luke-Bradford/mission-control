@@ -41,7 +41,8 @@ describeRendered("Standing instructions in the actual App", () => {
                 ? "/flight#wifP"
                 : "/flight#ordersP";
           const page = await renderAt({
-            page: "test/agentV2Browser.html",
+            // The orders and crew views are panels of the tabbed page, which the one-screen page replaced.
+            page: view === "agent" ? "test/agentV2Browser.html" : "test/flightBrowser.html",
             width,
             height,
             colorScheme: theme,

@@ -1,0 +1,255 @@
+{
+  "days": 7,
+  "since": 1793608852783,
+  "runs": 890,
+  "calls": 20735,
+  "output": 14637260,
+  "cacheRead": 2901301238,
+  "cacheWrite": 151469338,
+  "reread": 3052814466,
+  "rewrites": 111,
+  "readAfterReportShare": 0.662892142662991,
+  "byRole": [
+    {
+      "role": "FLIGHT",
+      "runs": 542,
+      "calls": 7270,
+      "output": 4219211,
+      "cacheRead": 1183914252,
+      "cacheWrite": 88462897,
+      "reread": 1272393481,
+      "rewrites": 4,
+      "medianPeakContext": 171273
+    },
+    {
+      "role": "GUIDO",
+      "runs": 62,
+      "calls": 5311,
+      "output": 2722359,
+      "cacheRead": 760041469,
+      "cacheWrite": 25608105,
+      "reread": 785660536,
+      "rewrites": 78,
+      "medianPeakContext": 176450
+    },
+    {
+      "role": "INCO",
+      "runs": 30,
+      "calls": 2760,
+      "output": 2111611,
+      "cacheRead": 528189654,
+      "cacheWrite": 14086663,
+      "reread": 542282011,
+      "rewrites": 29,
+      "medianPeakContext": 232545
+    },
+    {
+      "role": "RETRO",
+      "runs": 243,
+      "calls": 5021,
+      "output": 4648069,
+      "cacheRead": 381428878,
+      "cacheWrite": 20537310,
+      "reread": 401976324,
+      "rewrites": 0,
+      "medianPeakContext": 87670
+    },
+    {
+      "role": "FAO",
+      "runs": 13,
+      "calls": 373,
+      "output": 936010,
+      "cacheRead": 47726985,
+      "cacheWrite": 2774363,
+      "reread": 50502114,
+      "rewrites": 0,
+      "medianPeakContext": 227419
+    }
+  ],
+  "flightStart": {
+    "usd": 4.139512546632482,
+    "totalUsd": 1029.5634706000044,
+    "share": 0.004020648230866307
+  },
+  "controller": null,
+  "bySource": [
+    {
+      "name": "start of run",
+      "added": 89971467,
+      "reread": 1321706385,
+      "events": 890,
+      "share": 0.4329468428953651
+    },
+    {
+      "name": "Bash",
+      "added": 20225724,
+      "reread": 918999315,
+      "events": 11649,
+      "share": 0.3010334644424474
+    },
+    {
+      "name": "unattributed",
+      "added": 14429696,
+      "reread": 267354070,
+      "events": 1674,
+      "share": 0.08757625888425019
+    },
+    {
+      "name": "Read",
+      "added": 5527955,
+      "reread": 157027731,
+      "events": 1667,
+      "share": 0.05143703711734181
+    },
+    {
+      "name": "own earlier output",
+      "added": 4133569,
+      "reread": 154215468,
+      "events": 19823,
+      "share": 0.05051583373884602
+    },
+    {
+      "name": "mc preview_browser",
+      "added": 3725498,
+      "reread": 42367231,
+      "events": 453,
+      "share": 0.013878089045978727
+    },
+    {
+      "name": "Grep",
+      "added": 1080772,
+      "reread": 30188171,
+      "events": 1019,
+      "share": 0.009888635990235772
+    },
+    {
+      "name": "ToolSearch",
+      "added": 1263712,
+      "reread": 18128094,
+      "events": 1285,
+      "share": 0.005938157789114722
+    },
+    {
+      "name": "mc comms_read",
+      "added": 660596,
+      "reread": 17388709,
+      "events": 140,
+      "share": 0.0056959599719087544
+    },
+    {
+      "name": "mc read_ticket",
+      "added": 641874,
+      "reread": 16200789,
+      "events": 256,
+      "share": 0.005306837077861252
+    }
+  ],
+  "byCommand": [
+    {
+      "name": "sed",
+      "added": 5167711,
+      "reread": 266482931,
+      "events": 2557,
+      "share": 0.2899707612948547
+    },
+    {
+      "name": "grep",
+      "added": 3305262,
+      "reread": 164612437,
+      "events": 2530,
+      "share": 0.17912139248983008
+    },
+    {
+      "name": "pnpm lint",
+      "added": 3375518,
+      "reread": 127668686,
+      "events": 632,
+      "share": 0.1389214158445809
+    },
+    {
+      "name": "python3",
+      "added": 1590771,
+      "reread": 107186921,
+      "events": 1559,
+      "share": 0.11663438617470569
+    },
+    {
+      "name": "cat",
+      "added": 1505446,
+      "reread": 79129624,
+      "events": 581,
+      "share": 0.08610411641057643
+    },
+    {
+      "name": "pnpm test:related",
+      "added": 1387041,
+      "reread": 50675832,
+      "events": 424,
+      "share": 0.05514240454031242
+    },
+    {
+      "name": "git",
+      "added": 1046448,
+      "reread": 28664121,
+      "events": 631,
+      "share": 0.031190579287863777
+    },
+    {
+      "name": "pnpm vitest",
+      "added": 460962,
+      "reread": 18962341,
+      "events": 586,
+      "share": 0.0206336834973593
+    },
+    {
+      "name": "wc",
+      "added": 405650,
+      "reread": 13915812,
+      "events": 166,
+      "share": 0.015142352962472013
+    },
+    {
+      "name": "ls",
+      "added": 292253,
+      "reread": 11187215,
+      "events": 237,
+      "share": 0.012173257169402787
+    }
+  ],
+  "hubSections": [
+    {
+      "section": "tool_results",
+      "tokens": 37971284
+    },
+    {
+      "section": "digest",
+      "tokens": 29877705
+    },
+    {
+      "section": "orders",
+      "tokens": 4434680
+    },
+    {
+      "section": "role",
+      "tokens": 3335742
+    },
+    {
+      "section": "rules",
+      "tokens": 2805805
+    },
+    {
+      "section": "lessons",
+      "tokens": 1295102
+    },
+    {
+      "section": "ticket",
+      "tokens": 461557
+    }
+  ],
+  "serializedCaptureBytes": 30419,
+  "wireVerification": {
+    "sampledAt": 1794214190169,
+    "wireBytes": 27826,
+    "comparisonCountsUnchanged": true
+  }
+}

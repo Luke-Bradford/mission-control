@@ -28,6 +28,7 @@ import type { GhRunner } from "../src/mcp/gh.ts";
 import { createEvidenceSweep, postPrEvidence } from "../src/pr-evidence/sweep.ts";
 import { createScheduler, realCollectors } from "../src/scheduler.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const NOW = Date.parse("2026-11-04T12:00:00Z");
 const HOUR = 60 * 60_000;
@@ -504,7 +505,7 @@ describe("two hubs on one repo", () => {
     const w = world();
     const cfg = config();
     const cardsOf = () =>
-      Object.fromEntries(w.cards.map((c) => [c.issueNumber, OPTION_OF[c.status]!]));
+      Object.fromEntries(w.cards.map((c) => [c.issueNumber, defined(OPTION_OF[c.status])]));
     const storeA = new Store(":memory:");
     const storeB = new Store(":memory:");
     seedWorld(storeA, w);
@@ -535,7 +536,9 @@ describe("two hubs on one repo", () => {
   it("hub A tidies, moves cards and posts evidence for its own runs", async () => {
     const w = world();
     const cfg = config();
-    const options = Object.fromEntries(w.cards.map((c) => [c.issueNumber, OPTION_OF[c.status]!]));
+    const options = Object.fromEntries(
+      w.cards.map((c) => [c.issueNumber, defined(OPTION_OF[c.status])]),
+    );
     const store = new Store(":memory:");
     seedWorld(store, w);
     seedRuns(store);

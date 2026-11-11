@@ -5,14 +5,17 @@ import {
   COMMS_TICKET,
   type CommsAgentResponse,
   type CommsMention,
-  type CommsMessage,
   type CommsMessagesResponse,
   type CommsPinsResponse,
   type CommsReactionKind,
+  type CommsReplyRoute,
+  type CommsSendState,
   type CommsTicketResponse,
   type ConfigView,
   type Crew,
   type CrewRow,
+  type FlightConversationMessage,
+  type FlightConversationPage,
   type FlightView,
 } from "@mc/core";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -21,7 +24,9 @@ import { useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
-import { FLIGHT_NO_SEAT } from "../flight/flightTypes.ts";
+import { messageStateLine, sendStateLine } from "../flight/conversation.ts";
+import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
+import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
 import { ago, dayMonth, hhmm } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
@@ -42,7 +47,7 @@ import { CommsEnd, MentionText } from "./messages.tsx";
 import { type CommsView, noticeResource, ticketForRef } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
 
-const NO_MESSAGES: CommsMessage[] = [];
+const NO_MESSAGES: FlightConversationMessage[] = [];
 
 type OpenMessage = (view: CommsView, messageId: string) => void;
 
@@ -52,10 +57,10 @@ const MENTIONS_GAP_PX = 8;
 const MENTIONS_MIN_PX = 120;
 
 /** A message's time; one from an earlier day carries its date, so old traffic never reads as today's. */
-function useMessageTime(): (at: number) => string {
+function useMessageTime(): (at: number | null) => string {
   const tz = useTz();
   return (at) => {
-    if (!tz) return "—";
+    if (!tz || at === null) return "—";
     return ago(at, Date.now(), tz) === "today"
       ? hhmm(at, tz)
       : `${dayMonth(at, tz)} ${hhmm(at, tz)}`;
@@ -71,7 +76,10 @@ function scopeFor(view: CommsView): string | null {
   return null;
 }
 
-function viewForMessage(message: CommsMessage, flightId: string | undefined): CommsView {
+function viewForMessage(
+  message: FlightConversationMessage,
+  flightId: string | undefined,
+): CommsView {
   if (message.from === COMMS_CREW || message.to === COMMS_CREW) return { kind: "crew" };
   if (
     flightId !== undefined &&
@@ -234,7 +242,13 @@ function conversationHint(view: CommsView): string {
   return "Direct messages and handoffs";
 }
 
-function MessageActions({ message, onReply }: { message: CommsMessage; onReply: () => void }) {
+function MessageActions({
+  message,
+  onReply,
+}: {
+  message: FlightConversationMessage;
+  onReply: () => void;
+}) {
   const [error, setError] = useState<string | null>(null);
   const react = (reaction: CommsReactionKind) => {
     const reason = reaction === "cant" ? window.prompt("Why can't you?")?.trim() : undefined;
@@ -285,20 +299,21 @@ function MessagePane({
   older,
   emptyText,
 }: {
-  messages: CommsMessage[];
-  lookupMessages?: CommsMessage[];
+  messages: FlightConversationMessage[];
+  lookupMessages?: FlightConversationMessage[];
   /** Older messages the route has not sent: a "Load older" control above the first message. */
   older?: OlderMessages;
   emptyText?: string | null;
   jumpId: string | null;
   onJumped: () => void;
   onOpenMessage: OpenMessage;
-  onReply: (message: CommsMessage) => void;
+  onReply: (message: FlightConversationMessage) => void;
   flightId: string | undefined;
   /** Counts CAPCOM's sends: each one brings the pane back to the latest, wherever the reader was. */
   sent?: number;
 }) {
   const time = useMessageTime();
+  const tz = useTz();
   const box = useRef<HTMLDivElement>(null);
   const followsLatest = useRef(true);
   useLayoutEffect(() => {
@@ -388,7 +403,9 @@ function MessagePane({
                     to={message.to}
                   />
                 )}
-                <MessageActions message={message} onReply={() => onReply(message)} />
+                {message.id.startsWith("comms:") && (
+                  <MessageActions message={message} onReply={() => onReply(message)} />
+                )}
               </div>
               {quote && (
                 <button
@@ -407,6 +424,20 @@ function MessagePane({
                   to={message.to}
                 />
               </div>
+              {message.operator && tz && (
+                <div
+                  className={`comms-state note${message.state ? " comms-delivery-state" : ""}`}
+                  data-testid="message-state"
+                >
+                  {message.state === "answered"
+                    ? "Answered"
+                    : message.state === "stored"
+                      ? "Stored"
+                      : message.state === "delivered"
+                        ? `Delivered ${message.deliveredAt == null ? "—" : hhmm(message.deliveredAt, "Europe/London")}`
+                        : messageStateLine(message, [...lookupMessages, ...messages], tz)}
+                </div>
+              )}
               {message.reactions.length > 0 && (
                 <div className="comms-reactions">
                   {message.reactions.map((reaction) => (
@@ -439,9 +470,12 @@ function Composer({
   prefill,
   onPrefillConsumed,
   onSent,
+  flightSeat,
 }: {
+  /** Set on the FLIGHT view: its seat (undefined while loading), for the stopped notice. */
+  flightSeat?: FlightSeat | null;
   to: string;
-  reply: CommsMessage | null;
+  reply: FlightConversationMessage | null;
   onCancelReply: () => void;
   label: string;
   placeholder: string;
@@ -452,6 +486,14 @@ function Composer({
 }) {
   const [text, setText] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [sentLine, setSentLine] = useState<string | null>(null);
+  const tz = useTz();
+  // A reply to a message from a run that has ended goes elsewhere: say so before it is sent.
+  const routeRef = reply ? RESOURCES.replyRoute(reply.id) : null;
+  const routeResource = useResource<CommsReplyRoute>(routeRef);
+  const route = routeResource.data;
+  const routeReady =
+    !reply || (route !== undefined && routeResource.error === null && !routeResource.loading);
   const consumedPrefills = useRef(new Set<number>());
   useEffect(() => {
     if (!prefill || consumedPrefills.current.has(prefill.token)) return;
@@ -462,15 +504,19 @@ function Composer({
   const send = (event: React.FormEvent) => {
     event.preventDefault();
     const value = text.trim();
-    if (!value) return;
-    void apiPost<{ message: CommsMessage }>("/api/comms", {
+    if (!value || !routeReady) return;
+    void apiPost<Partial<CommsSendState> | undefined>("/api/comms", {
       to,
       text: value,
       ...(reply ? { replyTo: reply.id } : {}),
       ...(messageRef ? { ref: messageRef } : {}),
     })
-      .then(() => {
+      .then((result) => {
         setText("");
+        setError(null);
+        setSentLine(
+          result?.state !== undefined && tz ? sendStateLine(result as CommsSendState, tz) : null,
+        );
         onCancelReply();
         hub.refetchTopic("agents");
         onSent?.();
@@ -487,6 +533,25 @@ function Composer({
           </button>
         </div>
       )}
+      {reply && route?.redirected === true && route.note !== "" && (
+        <p className="note" data-testid="reply-route-note">
+          {route.note}
+        </p>
+      )}
+      {reply &&
+        !routeReady &&
+        (routeResource.error ? (
+          <p role="alert">
+            Could not check where this reply goes. Your draft is kept.{" "}
+            <button type="button" onClick={() => routeRef && hub.refetch(routeRef.path)}>
+              Retry reply route
+            </button>
+          </p>
+        ) : (
+          <p className="note" role="status">
+            Checking where this reply goes…
+          </p>
+        ))}
       <label htmlFor="comms-compose">{label}</label>
       <div>
         <input
@@ -495,8 +560,16 @@ function Composer({
           onChange={(event) => setText(event.target.value)}
           placeholder={placeholder}
         />
-        <button type="submit">Send</button>
+        <button type="submit" disabled={!routeReady}>
+          Send
+        </button>
       </div>
+      {flightSeat !== undefined && <FlightStoppedNote seat={flightSeat} />}
+      {sentLine !== null && (
+        <p className="note" role="status" data-testid="sent-state">
+          {sentLine}
+        </p>
+      )}
       {error && <p role="alert">{error}</p>}
     </form>
   );
@@ -654,7 +727,7 @@ function StoredContacts({
   );
 }
 
-function PinnedMessage({ message }: { message: CommsMessage }) {
+function PinnedMessage({ message }: { message: FlightConversationMessage }) {
   const [error, setError] = useState<string | null>(null);
   const unpin = () => {
     void apiDelete(`/api/comms/${encodeURIComponent(message.id)}/pin`)
@@ -708,10 +781,11 @@ function ModernConversation({
     )
       setCrewEarlier(true);
   }, [view.kind, jumpId, crewEarlier, crew.data]);
-  const flight = useResource<CommsMessagesResponse>(
+  const flight = useResource<FlightConversationPage>(
     view.kind === "flight" ? noticeResource(RESOURCES.commsFlight, hideNotices) : null,
   );
-  const flightSeat = useResource<FlightView>(RESOURCES.flight).data?.seat;
+  const flightView = useResource<FlightView>(RESOURCES.flight).data;
+  const flightSeat = flightView?.seat;
   // A contact's view needs the agent's conversation list and counts, not its messages too.
   const agent = useResource<CommsAgentResponse>(
     "agentId" in view
@@ -774,7 +848,7 @@ function ModernConversation({
     ? visibleMessages.filter((message) => message.kind !== COMMS_NOTICE)
     : visibleMessages;
   const lookupMessages = [...(agent.data?.messages ?? []), ...messages];
-  const [reply, setReply] = useState<CommsMessage | null>(null);
+  const [reply, setReply] = useState<FlightConversationMessage | null>(null);
   const [sent, setSent] = useState(0);
   const replyInView = reply && messages.some((message) => message.id === reply.id) ? reply : null;
   const read = useRef(new Set<string>());
@@ -927,6 +1001,7 @@ function ModernConversation({
           messageRef={view.kind === "ticket" ? view.ref : undefined}
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
+          flightSeat={view.kind === "flight" && flightView ? flightView.seat : undefined}
           onSent={() => {
             setSent((count) => count + 1);
             if (view.kind === "contact" && view.contactId !== COMMS_CAPCOM)

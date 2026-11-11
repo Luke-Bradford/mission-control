@@ -1,0 +1,14 @@
+[
+  {
+    "phase": "before",
+    "exit": 0,
+    "coreSha256": "82335d7c53e731033702ba10bcc41840ac68e5647fe57f0875b0576c21193ab9",
+    "source": "Exact baseline needs-you-entry.ts; browser web source identical; actual baseline server/API projection in fixture JSON"
+  },
+  {
+    "phase": "after",
+    "exit": 0,
+    "coreSha256": "c9c0b1ae20cf606a72b1247195d5b3f5424b8e0d669f4756aaeb6dbd09f39688",
+    "source": "Current Clear PR with scoped empty-body correction; actual current server/API projection in fixture JSON"
+  }
+]

@@ -1,0 +1,88 @@
+{
+  "capturedAt": "2026-11-09T10:25:18.691Z",
+  "source": "private SQLite backup; no live or loop writes",
+  "reads": [
+    {
+      "ms": 212.18837500000004,
+      "bytes": 8353,
+      "sha256": "58ada4923480869f4af03c8f7e6c4d8238b364cc414e4a83287deb886a556495",
+      "chains": 9,
+      "distinctWork": 25,
+      "states": {
+        "stuck": 3,
+        "with-you": 0,
+        "moving": 6,
+        "unknown": 0
+      }
+    },
+    {
+      "ms": 42.40524999999997,
+      "bytes": 8353,
+      "sha256": "58ada4923480869f4af03c8f7e6c4d8238b364cc414e4a83287deb886a556495",
+      "chains": 9,
+      "distinctWork": 25,
+      "states": {
+        "stuck": 3,
+        "with-you": 0,
+        "moving": 6,
+        "unknown": 0
+      }
+    },
+    {
+      "ms": 41.187250000000006,
+      "bytes": 8353,
+      "sha256": "58ada4923480869f4af03c8f7e6c4d8238b364cc414e4a83287deb886a556495",
+      "chains": 9,
+      "distinctWork": 25,
+      "states": {
+        "stuck": 3,
+        "with-you": 0,
+        "moving": 6,
+        "unknown": 0
+      }
+    },
+    {
+      "ms": 43.30287500000003,
+      "bytes": 8353,
+      "sha256": "58ada4923480869f4af03c8f7e6c4d8238b364cc414e4a83287deb886a556495",
+      "chains": 9,
+      "distinctWork": 25,
+      "states": {
+        "stuck": 3,
+        "with-you": 0,
+        "moving": 6,
+        "unknown": 0
+      }
+    },
+    {
+      "ms": 41.981874999999945,
+      "bytes": 8353,
+      "sha256": "58ada4923480869f4af03c8f7e6c4d8238b364cc414e4a83287deb886a556495",
+      "chains": 9,
+      "distinctWork": 25,
+      "states": {
+        "stuck": 3,
+        "with-you": 0,
+        "moving": 6,
+        "unknown": 0
+      }
+    },
+    {
+      "ms": 40.112290999999914,
+      "bytes": 8353,
+      "sha256": "58ada4923480869f4af03c8f7e6c4d8238b364cc414e4a83287deb886a556495",
+      "chains": 9,
+      "distinctWork": 25,
+      "states": {
+        "stuck": 3,
+        "with-you": 0,
+        "moving": 6,
+        "unknown": 0
+      }
+    }
+  ],
+  "dataVersionBefore": 2,
+  "dataVersionAfter": 2,
+  "unchanged": true,
+  "identical": true
+}

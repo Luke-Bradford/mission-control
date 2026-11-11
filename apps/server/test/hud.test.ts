@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   ATTENTION_LABEL,
   type BoardItem,
@@ -56,6 +57,7 @@ import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
+import { defined } from "./defined.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -1086,6 +1088,87 @@ describe("crew seats in the rows", () => {
     run({ id: "c1", agentId: "GUIDO-1", repoId: "shop-app", ...over });
   const rowOf = (c: CcConfig, id: string) => crew(c, store, NOW).rows.find((r) => r.id === id);
 
+  it.each([false, true])(
+    "retains a referenced closed PR through the crew cache (held outside recent window: %s)",
+    (oldHeld) => {
+      const c = withCrew();
+      store.upsertRun(
+        crewRun({
+          startedAt: NOW - 3 * HOUR,
+          ticket: null,
+          prs: [{ repo: "O/SHOP-APP", number: 73 }],
+        }),
+      );
+      if (oldHeld) {
+        for (let i = 0; i < 51; i++)
+          store.upsertRun(
+            crewRun({
+              id: `newer-${i}`,
+              seq: i + 2,
+              startedAt: NOW - HOUR + i,
+              endedAt: NOW - MIN,
+              status: "ok",
+            }),
+          );
+      }
+      store.setSeatSession(seat({ state: "idle" }));
+      const referenced: PullRequestView = {
+        repoId: "shop-app",
+        number: 73,
+        title: "Preserved closed change",
+        url: "https://github.com/o/shop-app/pull/73",
+        branch: "historical/73",
+        ticket: "shop-app#91",
+        state: "closed",
+        isDraft: false,
+        review: null,
+        ci: null,
+        createdAt: NOW - 4 * HOUR,
+        updatedAt: NOW - MIN,
+        mergedAt: null,
+        headSha: null,
+        mergeable: null,
+      };
+      store.upsertPullRequests(
+        "shop-app",
+        [
+          referenced,
+          {
+            ...referenced,
+            number: 99,
+            branch: "unrelated/99",
+            title: "Unrelated historical change",
+          },
+        ],
+        NOW,
+      );
+      const db = new DatabaseSync(join(dir, "mc.sqlite"));
+      try {
+        db.prepare("UPDATE pull_requests SET checks = ? WHERE repo_id = ? AND number = ?").run(
+          "unreadable unrelated checks",
+          "shop-app",
+          99,
+        );
+      } finally {
+        db.close();
+      }
+      // First projection builds its own empty PR cache from the real Store.
+      const row = rowOf(c, "GUIDO-1");
+      expect(row?.run?.id).toBe("c1");
+      expect(row?.ticket).toBe("shop-app#91");
+      expect(row?.prs).toEqual([
+        {
+          repoId: "shop-app",
+          number: 73,
+          title: "Preserved closed change",
+          url: "https://github.com/o/shop-app/pull/73",
+          state: "closed",
+          ticket: "shop-app#91",
+        },
+      ]);
+    },
+  );
+
   it("shows a transferred run's binding without changing another seat or observed loop", () => {
     const c = withCrew();
     store.upsertRun(crewRun());
@@ -1425,7 +1508,7 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toContain("stop threshold");
     store.upsertPullRequests(
       "shop-app",
-      [{ ...store.pullRequests("shop-app")[0]!, headSha: "d".repeat(40) }],
+      [{ ...defined(store.pullRequests("shop-app")[0]), headSha: "d".repeat(40) }],
       NOW + 1,
     );
     expect(rowOf(c, "RETRO-1")?.queuedReview).toBeUndefined();
@@ -2619,6 +2702,56 @@ describe("the engine's notes in Needs you", () => {
     expect(keys()).toEqual([]);
   });
 
+  it("does not decode an unrelated closed PR's historical check payload to show an active park", () => {
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    endedRun();
+    note("blocked:r1:0", "blocked");
+    pr12("open");
+    const current = store.pullRequest("shop-app", 12);
+    if (!current) throw new Error("Missing fixture PR");
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 99, branch: "historical/99", state: "closed" }],
+      NOW,
+    );
+    const db = new DatabaseSync(join(dir, "mc.sqlite"));
+    try {
+      db.prepare("UPDATE pull_requests SET checks = ? WHERE repo_id = ? AND number = ?").run(
+        "unreadable historical checks",
+        "shop-app",
+        99,
+      );
+    } finally {
+      db.close();
+    }
+    expect(keys()).toEqual([KEY]);
+    expect(noteItems()[0]).toMatchObject({
+      ticket: "shop-app#7",
+      url: "https://github.com/o/shop-app/pull/12",
+    });
+  });
+
+  it("ignores older uses of a branch but takes the newest PR created for the ended run", () => {
+    store.replaceBoard("shop-app", [boardItem({ issueNumber: 7 })]);
+    endedRun({}, { prNumber: null });
+    note("blocked:r1:0", "blocked");
+    pr12("open");
+    const current = store.pullRequest("shop-app", 12);
+    if (!current) throw new Error("Missing fixture PR");
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 13, createdAt: NOW - 2 * HOUR, state: "closed" }],
+      NOW,
+    );
+    expect(keys()).toEqual([KEY]);
+    store.upsertPullRequests(
+      "shop-app",
+      [{ ...current, number: 14, createdAt: NOW - MIN, state: "closed" }],
+      NOW,
+    );
+    expect(keys()).toEqual([]);
+  });
+
   it("keeps an ended park while its repo's board is unread", () => {
     endedRun({}, { prNumber: null });
     note("blocked:r1:0", "blocked");
@@ -2954,6 +3087,142 @@ describe("messages are not Needs you", () => {
     expect(chatter(c, NOW + 2 * MIN)).toEqual([
       expect.objectContaining({ key, owner: "operator" }),
     ]);
+  });
+
+  it("projects a labelled FLIGHT question to CAPCOM once after its escalation delay", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const earlier = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#4",
+      text: "@CAPCOM should the earlier work wait?",
+    });
+    if (earlier === null) throw new Error("earlier message was not stored");
+    const message = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+
+    expect(
+      attentionItems(c, store, at - 1, NO_LOCK, []).filter((item) => item.text === message.text),
+    ).toEqual([expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" })]);
+    store.markCommsInboxRead("flight-1", [message.id]);
+    const items = attentionItems(c, store, at, NO_LOCK, []);
+    expect(items.filter((item) => item.text === message.text)).toEqual([
+      expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" }),
+    ]);
+    expect(items).toContainEqual(expect.objectContaining({ key: `tag:flight-1:${earlier.id}` }));
+  });
+
+  it("keeps an existing tagged brief as the single canonical projection", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const legacyKey = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key: legacyKey,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve the dependencies design?",
+      context: "The design is ready for a decision.",
+      recommendation: "Approve it.",
+      basis: "The retained legacy brief.",
+      options: TWO_OPTIONS,
+    });
+
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).filter((item) => item.text === message.text),
+    ).toEqual([expect.objectContaining({ key: legacyKey })]);
+  });
+
+  it("closes a legacy tagged duplicate only when it has a real choice", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve?",
+      context: "Ready.",
+      recommendation: "Approve.",
+      basis: "Legacy.",
+      options: TWO_OPTIONS,
+    });
+    store.claimChoice({
+      key,
+      briefAt: message.at,
+      optionId: "yes",
+      label: "Yes",
+      answer: "Go ahead.",
+      question: "Approve?",
+      ticket: "shop-app#5",
+      target: "FLIGHT-1",
+      targetKind: "flight",
+      messageId: null,
+      chosenAt: at,
+      chosenBy: "operator",
+    });
+    store.ack([key], at);
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).find((item) => item.key === key),
+    ).toBeUndefined();
+  });
+
+  it("keeps an ack-only legacy tagged duplicate answerable", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve?",
+      context: "Ready.",
+      recommendation: "Approve.",
+      basis: "Legacy.",
+      options: TWO_OPTIONS,
+    });
+    store.ack([key], at);
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).find((item) => item.key === key),
+    ).toMatchObject({ acked: false });
   });
 
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {
