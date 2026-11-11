@@ -4,6 +4,8 @@ import type { Store } from "./store.ts";
 export const MACHINE_CAPACITY_KEY = "machine-capacity";
 export const DISK_PERCENTAGE_CLEAR_HEADROOM = 1;
 export const DISK_PERCENTAGE_CLEAR_AFTER_MIN = 10;
+/** Recovery needs readings this close together; a longer gap in collection restarts the wait. */
+export const DISK_PERCENTAGE_MAX_GAP_MS = 2 * 60_000;
 const DISK_EPISODE_SETTING = "machine-capacity:disk-percentage-episode";
 export const MACHINE_CAPACITY_DEFAULTS = {
   diskFreeGb: 15,
@@ -63,9 +65,14 @@ function percentageDiskBreach(
   const since = now - DISK_PERCENTAGE_CLEAR_AFTER_MIN * 60_000;
   const anchor = samples.findLast((sample) => sample.at <= since);
   if (anchor === undefined || anchor.at <= breachedAt) return breachedAt;
-  const recovered = samples
-    .filter((sample) => sample.at >= anchor.at && sample.at <= now)
-    .every((sample) => {
+  const window = samples.filter((sample) => sample.at >= anchor.at && sample.at <= now);
+  const covered =
+    window.every(
+      (sample, i) => i === 0 || sample.at - window[i - 1].at <= DISK_PERCENTAGE_MAX_GAP_MS,
+    ) && now - window[window.length - 1].at <= DISK_PERCENTAGE_MAX_GAP_MS;
+  const recovered =
+    covered &&
+    window.every((sample) => {
       const pct = diskFreePct(sample);
       return pct !== null && pct > config.diskFreePct + DISK_PERCENTAGE_CLEAR_HEADROOM;
     });

@@ -62,4 +62,28 @@ describe("persisted percentage-disk episodes", () => {
       store.close();
     }
   });
+
+  it("restarts the ten-minute recovery after a gap in collection", () => {
+    const store = new Store(":memory:");
+    try {
+      store.addMachineSample(sample(0, 4.5));
+      expect(storedMachineCapacity(store, sample(0, 4.5).at, config).blocked).toBe(true);
+      store.addMachineSample(sample(1, 6.1));
+      expect(storedMachineCapacity(store, sample(1, 6.1).at, config).blocked).toBe(true);
+      // Collection stops for fifteen minutes, then resumes above the clear line.
+      for (let minute = 16; minute < 26; minute++) {
+        const value = sample(minute, 6.1);
+        store.addMachineSample(value);
+        expect(storedMachineCapacity(store, value.at, config).blocked).toBe(true);
+      }
+      const last = sample(26, 6.1);
+      store.addMachineSample(last);
+      expect(storedMachineCapacity(store, last.at, config)).toEqual({
+        blocked: false,
+        reason: null,
+      });
+    } finally {
+      store.close();
+    }
+  });
 });
