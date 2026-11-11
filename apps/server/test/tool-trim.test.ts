@@ -91,7 +91,11 @@ describe("trimMain", () => {
 
     it("a large failed Bash call (PostToolUseFailure) is left whole: its exit line and output stay as the CLI wrote them", () => {
       const error = `Exit code 2\n${"error: nope\n".repeat(20_000)}`;
-      const event = bash({ hook_event_name: "PostToolUseFailure", tool_response: undefined, error });
+      const event = bash({
+        hook_event_name: "PostToolUseFailure",
+        tool_response: undefined,
+        error,
+      });
       expect(trimMain(event, dir)).toBe("");
       expect(existsSync(join(dir, "toolu_1.txt"))).toBe(false);
     });
