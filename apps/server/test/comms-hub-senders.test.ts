@@ -11,8 +11,8 @@ vi.mock("../src/hud.ts", async (original) => ({
     { key: "d1", acked: false, agentId: null, ticket: "repo#1", text: "Proceed?", brief: null },
   ],
 }));
-vi.mock("../src/attention-holds.ts", async (original) => ({
-  ...(await original<typeof import("../src/attention-holds.ts")>()),
+vi.mock("../src/attention/holds.ts", async (original) => ({
+  ...(await original<typeof import("../src/attention/holds.ts")>()),
   decisionDefault: () => ({
     option: { id: "go", label: "Go", answer: "Proceed." },
     briefAt: 1,

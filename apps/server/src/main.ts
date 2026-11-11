@@ -78,7 +78,6 @@ import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
-import { branchOwned, createExternalReviews, readExternalSubject } from "./external-reviews.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
@@ -122,9 +121,10 @@ import {
 import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
-import { previewBrowserInHelper } from "./preview-browser.ts";
-import { resolvePreviewRepo } from "./preview-repo.ts";
-import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
+import { previewBrowserInHelper } from "./preview/browser.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./preview/previews.ts";
+import { resolvePreviewRepo } from "./preview/repo.ts";
+import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createQaReports } from "./qa/reports.ts";
 import {
@@ -132,7 +132,7 @@ import {
   type QueueReorderDeps,
   reorderQueue,
 } from "./queue-reorder.ts";
-import { createReviewPreviews, WEB_AREA_LABEL } from "./review-preview.ts";
+import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";

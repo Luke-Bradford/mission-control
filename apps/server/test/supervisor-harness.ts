@@ -25,7 +25,7 @@ import type { CliHold } from "../src/cli/update.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
-import type { ReviewPreviews } from "../src/review-preview.ts";
+import type { ReviewPreviews } from "../src/preview/review.ts";
 import { endKeeper } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,

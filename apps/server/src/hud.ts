@@ -90,8 +90,8 @@ import {
   partitionAttention,
   protectedDecisionItem,
   questionAskAt,
-} from "./attention-holds.ts";
-import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
+} from "./attention/holds.ts";
+import { confirmedResumeAfter, pendingRunApproval } from "./attention/subjects.ts";
 import { briefReadState, briefSourceRevision } from "./brief/source.ts";
 import { claudeVersion } from "./cli/version.ts";
 import { cloneData } from "./clone.ts";
@@ -118,9 +118,9 @@ import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
-import { loopPause } from "./loop-pause.ts";
-import { loopTries } from "./loophistory.ts";
-import { reviewCheckFor } from "./review-check.ts";
+import { loopTries } from "./loop/history.ts";
+import { loopPause } from "./loop/pause.ts";
+import { reviewCheckFor } from "./review/check.ts";
 import {
   type PrCache,
   parseTicket,
@@ -128,10 +128,10 @@ import {
   runSummary,
   runTicket,
   runTicketTitle,
-} from "./runview.ts";
+} from "./run/view.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
-import { transcriptFilePath } from "./transcript-file.ts";
+import { transcriptFilePath } from "./transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 

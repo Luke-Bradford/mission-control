@@ -7,9 +7,9 @@ import {
   type Run,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { externalReviewKey } from "../src/external-reviews.ts";
 import { nextWakeAt, wakeReasons } from "../src/flight/state.ts";
-import { prFlow, prFlowFacts, prFlowWakeTimes } from "../src/pr-flow.ts";
+import { prFlow, prFlowFacts, prFlowWakeTimes } from "../src/pr/flow.ts";
+import { externalReviewKey } from "../src/review/external.ts";
 import { Store } from "../src/store.ts";
 
 const T = Date.parse("2026-11-01T12:00:00Z");

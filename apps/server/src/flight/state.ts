@@ -118,7 +118,7 @@ import {
   machineCapacitySince,
 } from "../machine-capacity.ts";
 import { paceStartCheck, paceView } from "../pace.ts";
-import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr-flow.ts";
+import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
 import {
   closingFact,
   factsText,
@@ -126,8 +126,8 @@ import {
   questionFacts,
   subjectId,
 } from "../question-watch.ts";
+import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
-import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
@@ -150,7 +150,7 @@ interface TeamsDigestState {
   };
 }
 
-export { prFlow } from "../pr-flow.ts";
+export { prFlow } from "../pr/flow.ts";
 
 /**
  * Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. The

@@ -115,7 +115,6 @@ import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
 import { PreviewRefused } from "../src/design-preview/previews.ts";
-import { externalReviewKey } from "../src/external-review-key.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -132,6 +131,7 @@ import {
 } from "../src/mcp/tools.ts";
 import { setRunPathGrants } from "../src/path-grants.ts";
 import { ProfilesError } from "../src/profiles.ts";
+import { externalReviewKey } from "../src/review/external-key.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { runSeatGrants } from "../src/runtime/grants.ts";

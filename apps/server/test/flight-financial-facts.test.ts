@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { flightWakeCost, flightWakeWaits } from "../src/flight/cost.ts";
 import { flightView } from "../src/flight/state.ts";
-import { runSpend } from "../src/spend.ts";
+import { runSpend } from "../src/spend/spend.ts";
 import { MAX_OPEN_RUN_AGE_MS, Store } from "../src/store.ts";
 
 const MIN = 60_000;

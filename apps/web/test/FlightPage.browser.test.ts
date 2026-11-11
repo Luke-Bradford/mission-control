@@ -17,6 +17,93 @@ const SIZES = [
 const STATES: PageState[] = ["stopped", "running", "blocked"];
 
 describeRendered("FLIGHT page in a browser", () => {
+  it(
+    "moves an older decision from the main page into Records at its deep link",
+    async () => {
+      const api = { ...flightPageApi("blocked"), "/api/repos": REPOS };
+      const main = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        search: `?dock=folded&at=${encodeURIComponent("/flight")}`,
+        api,
+      });
+      await main.box("#decisions li");
+      expect(await main.evaluate(() => document.getElementById("decision-30") !== null, null)).toBe(
+        false,
+      );
+      await main.close();
+      const records = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        search: `?dock=folded&at=${encodeURIComponent("/flight#decision-30")}`,
+        api,
+      });
+      await records.box("#decision-30");
+      expect(
+        await records.evaluate(() => document.getElementById("decision-30") !== null, null),
+      ).toBe(true);
+      await records.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  for (const [width, height] of [
+    [1280, 800],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      const where = `${width}x${height}, ${theme}, Records`;
+      it(
+        `opens Records with a visible return action at ${where}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/agentV2Browser.html",
+            width,
+            height,
+            search: `?dock=folded&at=${encodeURIComponent("/flight#handlingP")}`,
+            colorScheme: theme,
+            api: {
+              ...flightPageApi("blocked"),
+              "/api/repos": REPOS,
+              "/api/prs/flow": { generatedAt: 0, repos: [] },
+              "/api/notifications": { open: [], handledToday: [] },
+              "/api/attention/held": [],
+            },
+          });
+          await page.box("#handlingP");
+          expect(page.errors()).toEqual([]);
+          const record = await page.evaluate(() => {
+            const doc = document.documentElement;
+            const title = document.querySelector(".flight-records-title")?.getBoundingClientRect();
+            const back = document.querySelector<HTMLAnchorElement>(".flight-records-title a");
+            const panel = document.getElementById("handlingP")?.getBoundingClientRect();
+            return {
+              sideScroll: doc.scrollWidth - doc.clientWidth,
+              title: title ? { width: title.width, height: title.height } : null,
+              back: back ? { text: back.textContent, href: back.getAttribute("href") } : null,
+              panel: panel ? { width: panel.width, height: panel.height } : null,
+            };
+          }, null);
+          const shots = process.env.MC_FLIGHT_RECORDS_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(join(shots, `flight-records-${width}x${height}-${theme}.png`));
+          }
+          expect(record.sideScroll, `${where}: no sideways scroll`).toBeLessThanOrEqual(0);
+          expect(record.title, `${where}: Records heading is visible`).not.toBeNull();
+          expect(record.title?.height).toBeGreaterThanOrEqual(24);
+          expect(record.back).toEqual({ text: "Back to FLIGHT", href: "/flight" });
+          expect(record.panel, `${where}: selected record panel is visible`).not.toBeNull();
+          expect(record.panel?.width).toBeGreaterThan(240);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
   for (const [width, height] of [
     [1280, 900],
     [1600, 1000],
@@ -46,12 +133,14 @@ describeRendered("FLIGHT page in a browser", () => {
               ],
             }),
           });
-          await page.box("#watchP [data-testid=held-row]");
+          await page.box("#heldWatchP [data-testid=held-row]");
           expect(page.errors()).toEqual([]);
-          expect(await page.reachable("#watchP")).toEqual([true]);
-          expect(await page.reachable("#watchP [data-testid=held-row]", "#watchP")).toEqual([true]);
+          expect(await page.reachable("#heldWatchP")).toEqual([true]);
+          expect(await page.reachable("#heldWatchP [data-testid=held-row]", "#heldWatchP")).toEqual(
+            [true],
+          );
           const text = await page.evaluate(
-            () => document.getElementById("watchP")?.textContent ?? "",
+            () => document.getElementById("heldWatchP")?.textContent ?? "",
             null,
           );
           expect(text).toContain("Watch list");
