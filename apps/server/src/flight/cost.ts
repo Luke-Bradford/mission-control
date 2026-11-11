@@ -6,7 +6,7 @@ import {
   type FlightWakeRecord,
   type FlightWakeWaits,
 } from "@mc/core";
-import { runSpend } from "../spend.ts";
+import { runSpend } from "../spend/spend.ts";
 import type { FinancialRun, Store } from "../store.ts";
 import { flightSignalHistory } from "./signals.ts";
 
