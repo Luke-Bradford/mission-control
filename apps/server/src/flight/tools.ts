@@ -407,6 +407,7 @@ import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown, recordFlightWait, waitTargetOf } from "./signals.ts";
 import {
+  compactSignals,
   crewSeatIds,
   flightArrivalSource,
   flightSeat,
@@ -542,7 +543,7 @@ const WaitOnArgs = z.strictObject({
   until: z.iso.datetime({ offset: true }),
   basis: basisArg,
 });
-const FlightStateArgs = z.strictObject({});
+const FlightStateArgs = z.strictObject({ full: z.boolean().optional() });
 const ScreenshotHudArgs = z.strictObject({ page: z.string().min(1).max(200) });
 const ReadTicketArgs = z.strictObject({
   issue: issueNumber,
@@ -2817,6 +2818,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, FlightStateArgs, args);
     if (!c.ok) return c.result;
+    const full = c.args.full === true;
     const repo = repoOf();
     if (repo)
       await refreshAuthors(store, deps.gh, crewDir(deps.dbPath), repo.id, repo.github, now());
@@ -2839,6 +2841,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return {
       text: JSON.stringify({
         ...shown,
+        signals: full ? shown.signals : compactSignals(shown.signals, now()),
         items: state.items.map((item) => {
           const thread = parsePersonKey(item.key);
           const n = thread ? store.notification(thread.id) : null;
@@ -4589,7 +4592,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       name: MC_TOOL_NAMES.flightState,
       description:
         "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and the runaway breaker; and your brief.",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      inputSchema: {
+        type: "object",
+        properties: {
+          full: {
+            type: "boolean",
+            description:
+              "List every signal, including the expired waits that are otherwise folded into one line with a count.",
+          },
+        },
+        additionalProperties: false,
+      },
       modes: [],
       grantable: ["read-only"],
       call: readState,

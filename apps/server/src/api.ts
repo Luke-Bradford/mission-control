@@ -9,6 +9,7 @@ import {
   type AccountModelsView,
   type AgentStream,
   API_PREFIX,
+  type AttentionCompactItem,
   type AttentionItem,
   type AuditRunKind,
   AWAY_SETTING,
@@ -53,6 +54,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  compactAttentionItem,
   compareDependencyChains,
   crewProfileOf,
   crewSummary,
@@ -86,6 +88,7 @@ import {
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
   isOperatorItem,
+  itemOwner,
   type LimitRow,
   LOCK_WAIT_MS,
   LOOPBACK_HOST,
@@ -777,6 +780,15 @@ const QA_DAYS_ERROR = `days must be an integer 1..${QA_RETENTION_DAYS}`;
 
 /** `GET /api/agents/:id/files/diff?path=`: one path, as the file list gives it. */
 const DiffPath = z.string().min(1).max(4096);
+
+/** `GET /api/attention` options: one owner's items, and the compact shape. */
+const AttentionListQuery = z.strictObject({
+  owner: z.string().min(1).max(100).optional(),
+  compact: z
+    .enum(["1", "true", "0", "false"])
+    .transform((v) => v === "1" || v === "true")
+    .optional(),
+});
 
 /** `GET /api/attention/answered`: the questions closed without an answer, over the last week. */
 const ANSWERED_WINDOW_MS = 7 * 24 * 60 * 60_000;
@@ -6209,17 +6221,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             }
           : item;
       };
+      // `?owner=operator` keeps one owner's items; `?compact=1` returns each as AttentionCompactItem (#1632)
       api.get(
         "/attention",
-        async (): Promise<AttentionItem[]> =>
-          sharedAttention().map((item) =>
-            // the operator's items carry their ticket and PR with titles (#1543)
-            pinnedFor(
-              item.kind === "tag" && item.text.length > 170
-                ? { ...item, text: `${item.text.slice(0, 169)}…` }
-                : item,
-            ),
-          ),
+        async (req, reply): Promise<AttentionItem[] | AttentionCompactItem[]> => {
+          const query = AttentionListQuery.safeParse(req.query);
+          if (!query.success) return reply.code(400).send({ error: "Bad owner or compact." });
+          const { owner, compact } = query.data;
+          return sharedAttention()
+            .filter((item) => owner === undefined || itemOwner(item) === owner)
+            .map((item) =>
+              // the operator's items carry their ticket and PR with titles (#1543)
+              pinnedFor(
+                item.kind === "tag" && item.text.length > 170
+                  ? { ...item, text: `${item.text.slice(0, 169)}…` }
+                  : item,
+              ),
+            )
+            .map((item) => (compact === true ? compactAttentionItem(item) : item));
+        },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
       registerBriefChoiceRoutes(api, app, deps, flightActor);

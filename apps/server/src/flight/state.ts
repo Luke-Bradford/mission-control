@@ -66,6 +66,7 @@ import {
   type FlightPark,
   type FlightScheduleView,
   type FlightSeatState,
+  type FlightSignal,
   type FlightState,
   type FlightView,
   type FlightWake,
@@ -1659,6 +1660,27 @@ export function flightWake(
       facts: JSON.parse(wakeFacts(state)) as FlightWake["facts"],
     },
   };
+}
+
+/**
+ * What `flight_state` shows of the signals by default: a wait that ended a day ago, or that FLIGHT
+ * was already told about, folds into one summary line with a count. A new or still-changing
+ * signal of any kind stays whole. `full` in the tool call lists everything (#1632).
+ */
+export function compactSignals(signals: FlightSignal[], now: number): FlightSignal[] {
+  const expired = (s: FlightSignal): boolean =>
+    s.kind === "wait_over" && (s.told === true || now - s.since > 24 * FLIGHT_HOUR_MS);
+  const folded = signals.filter(expired);
+  if (folded.length === 0) return signals;
+  return [
+    ...signals.filter((s) => !expired(s)),
+    {
+      kind: "wait_over",
+      key: "expired",
+      since: Math.min(...folded.map((s) => s.since)),
+      evidence: `${folded.length} expired waits left out; call flight_state with full: true to list them`,
+    },
+  ];
 }
 
 /** A run's park, as FLIGHT reads it; null when it is not parked. A ruling park carries the seat's last report. */
