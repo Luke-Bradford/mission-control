@@ -171,6 +171,7 @@ import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
+import type { ReviewPreviews } from "../preview/review.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -179,7 +180,6 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
-import type { ReviewPreviews } from "../preview/review.ts";
 import {
   enrichHandoff,
   handoffForBrief,

@@ -123,8 +123,9 @@ import { readHeadWebPageGraph } from "./pr-evidence/import-graph.ts";
 import { prEvidenceStore } from "./pr-evidence/store.ts";
 import { createEvidenceSweep, postPrEvidence, trustedEvidenceHead } from "./pr-evidence/sweep.ts";
 import { previewBrowserInHelper } from "./preview/browser.ts";
-import { resolvePreviewRepo } from "./preview/repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./preview/previews.ts";
+import { resolvePreviewRepo } from "./preview/repo.ts";
+import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createQaReports } from "./qa-reports.ts";
 import {
@@ -132,7 +133,6 @@ import {
   type QueueReorderDeps,
   reorderQueue,
 } from "./queue-reorder.ts";
-import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
 import { rotatingLog } from "./rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
