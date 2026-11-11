@@ -21,7 +21,7 @@ import {
 import { protectedDecisionItem, questionAskAt } from "./attention-holds.ts";
 import type { ChangeBus } from "./bus.ts";
 import type { Gql } from "./collectors/github.ts";
-import { validateCommsText } from "./comms.ts";
+import { validateCommsText } from "./comms/index.ts";
 import type { CcConfig } from "./config.ts";
 import type { RepoRulesError } from "./engine/rules.ts";
 import { flightSeat } from "./flight/seat.ts";

@@ -424,7 +424,7 @@ The controller read the live hub at commit `47c1f5bd`.
 | Needs you is mostly not questions | 10 items, 1 real decision. The rest: 3 old items from stopped loops, 3 "PR · You: review" rows, 2 notices that FLIGHT was late, 1 reminder for the controller |
 | The one real question did not stand alone | Its headline held four raw `127.0.0.1` addresses. Its options assumed the reader knew two ticket numbers |
 | Picking an option names no option | `apps/web/src/shell/ItemDetail.tsx:192`. To a seat it sends chat text. To FLIGHT it posts in the item's discussion |
-| An answer to a seat is stored, not delivered | `apps/server/src/comms.ts:118`. The seat reads it at its next turn. The route can deliver to the asking run, but the page never names the question |
+| An answer to a seat is stored, not delivered | `apps/server/src/comms/index.ts:118`. The seat reads it at its next turn. The route can deliver to the asking run, but the page never names the question |
 | A seat's question is not on its ticket | The text is in `seat_questions`, which has no ticket. Comms holds a pointer line only |
 | A question can show only pictures the hub already holds | `apps/web/src/needs/pictures.ts`. A new mockup image has nowhere to be stored |
 | At least three ways to type to FLIGHT | The fly-out posts a seat message. Comms posts a stored message. A Needs-you item posts to its own discussion |
@@ -712,7 +712,7 @@ people, and are not sent to agents.
 
 - **The hub sends each message to a seat once.** Today it attaches the newest 40 inbox messages,
   read or not, to a run's start. It attaches them again to each line it delivers between turns,
-  up to 8,000 characters (`apps/server/src/comms.ts:123`).
+  up to 8,000 characters (`apps/server/src/comms/index.ts:123`).
 - **A run starts with its ticket's decisions.** Every run on a ticket gets the ticket's answered
   questions in its start brief. Each is one line with the choice, ten at most **(controller's
   call)**. A decision is then not asked twice. A run that takes over unfinished work also gets the

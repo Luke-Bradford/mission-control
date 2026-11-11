@@ -9,7 +9,7 @@ import {
   hudColumnOf,
 } from "@mc/core";
 import { pendingRunApproval } from "../attention-subjects.ts";
-import { flightQuestionMessageId } from "../comms-question.ts";
+import { flightQuestionMessageId } from "../comms/question.ts";
 import type { CcConfig } from "../config.ts";
 import { externalMergeHold, externalPrControl } from "../external-pr-control.ts";
 import type { Store } from "../store.ts";

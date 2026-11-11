@@ -97,13 +97,13 @@ import { claudeVersion } from "./cli/version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
-import { attentionChatter, resolvedCommsReason } from "./comms.ts";
+import { attentionChatter, resolvedCommsReason } from "./comms/index.ts";
 import {
   canonicalFlightQuestionKey,
   flightQuestionChoice,
   flightQuestionMessageId,
   isFlightOperatorQuestion,
-} from "./comms-question.ts";
+} from "./comms/question.ts";
 import {
   agentIds,
   type CcConfig,
