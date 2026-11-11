@@ -780,6 +780,7 @@ function flightApi(): Record<string, unknown> {
     "/api/drafts": [],
     "/api/drafts/history": [],
     "/api/attention/held": [],
+    "/api/attention/answered": [],
     "/api/flight/incoming": { entries: [] },
     "/api/flight/schedule": { entries: [] },
     "/api/flight/ledger?status=open": {
@@ -907,6 +908,7 @@ export function demoPageAnswers(
     ...qaPrApi(tickets),
     ...ticketItems(tickets),
     "/api/qa/queue": qaQueue(tickets),
+    "/api/dependencies": [],
     "/api/audit?range=7d": auditView(),
     "/api/audit?range=24h": auditView(),
     "/api/audit?range=30d": auditView(),

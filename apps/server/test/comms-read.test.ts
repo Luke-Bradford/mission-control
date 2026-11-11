@@ -6,7 +6,7 @@ import { COMMS_TEXT_MAX, type Run } from "@mc/core";
 import { expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { threadMessages } from "../src/comms.ts";
+import { threadMessages } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems } from "../src/hud.ts";
 import { Store } from "../src/store.ts";

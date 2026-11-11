@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import type { TestLock } from "../guard/lock.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
-import { crewTokenPath, type Store } from "../store.ts";
+import { crewTokenPath } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 
 export interface RestoreDeps {
   store: Store;

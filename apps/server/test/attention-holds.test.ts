@@ -1,5 +1,5 @@
 import { afterAll, afterEach, expect, it } from "vitest";
-import { evaluateHolds, holdItem, holds, releaseHold } from "../src/attention-holds.ts";
+import { evaluateHolds, holdItem, holds, releaseHold } from "../src/attention/holds.ts";
 import { Store } from "../src/store.ts";
 
 const store = new Store(":memory:");

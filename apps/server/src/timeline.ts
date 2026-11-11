@@ -1,6 +1,6 @@
 import { type OverviewTimeline, TIMELINE_TICKS_MAX, TIMELINE_WINDOW_MS } from "@mc/core";
 import { type CcConfig, configuredAgents } from "./config.ts";
-import { loopTries } from "./loophistory.ts";
+import { loopTries } from "./loop/history.ts";
 import type { Store } from "./store.ts";
 
 type Lane = OverviewTimeline["lanes"][number];

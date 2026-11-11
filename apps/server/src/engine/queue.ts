@@ -41,7 +41,6 @@ import {
   type TicketView,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
-import { budgetBrake } from "../budget-brake.ts";
 import type { CardNow } from "../collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../collectors/usage-claude.ts";
 import {
@@ -60,6 +59,7 @@ import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import type { Store } from "../store.ts";
 import { wakeDueAsideRun } from "./aside.ts";
 import { RepoRulesError } from "./rules.ts";

@@ -17,7 +17,7 @@ import {
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { holdItem, holds } from "../src/attention-holds.ts";
+import { holdItem, holds } from "../src/attention/holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import { collectorName, FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";

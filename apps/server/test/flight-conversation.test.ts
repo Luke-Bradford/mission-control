@@ -6,7 +6,7 @@ import { OPERATOR_HEADER, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { commsInboxContext } from "../src/comms.ts";
+import { commsInboxContext } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 

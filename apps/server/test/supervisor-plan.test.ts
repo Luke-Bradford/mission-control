@@ -2,7 +2,7 @@ import "./supervisor-harness.ts";
 
 import type { Run, RunPlan } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { runView } from "../src/runview.ts";
+import { runView } from "../src/run/view.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { boardCard, make, store, TICKET } from "./supervisor-harness.ts";
 

@@ -49,9 +49,9 @@ describe("Demo sub-views", () => {
     expect(document.body.textContent).toMatch(/PR #/);
   });
 
-  it("QA: open a PR's files in the Map", async () => {
+  it("QA: opens Audit code risk for a PR's files", async () => {
     await at("/qa");
-    await clickText(/open in map with these files/i);
+    await clickText(/open code risk in audit/i);
     clean();
   });
 
@@ -82,11 +82,6 @@ describe("Demo sub-views", () => {
     });
     await act(async () => void fireEvent.change(select, { target: { value: "dev-1" } }));
     await settle();
-    clean();
-  });
-
-  it("the Map focused on a PR", async () => {
-    await at("/map/shop-app?pr=1107");
     clean();
   });
 
@@ -148,9 +143,6 @@ describe("Demo pages keep moving where a person looks", () => {
   it("a PR that appears during the scene has its reads, and the flow lists the open PRs", async () => {
     play(40);
     await at("/qa?repo=shop-app&pr=1101");
-    clean();
-    document.body.innerHTML = "";
-    await at("/map/shop-app?pr=1101");
     clean();
     const flow = getState().api["/api/prs/flow"] as { repos: { rows: { pr: number }[] }[] };
     const prs = (getState().api["/api/repos/shop-app/prs"] as { number: number }[]).map(
@@ -246,10 +238,6 @@ describe("Demo findings from round 3", () => {
     expect(document.body.textContent).not.toContain("has not touched this ticket");
     expect(document.body.textContent).not.toMatch(/Status\s*Ready/);
     document.body.innerHTML = "";
-    await at("/qa");
-    expect(document.body.textContent).not.toContain("PR #1107");
-    expect(document.body.textContent).toContain("PR #1101");
-    document.body.innerHTML = "";
     await at("/");
     expect(document.body.textContent).toMatch(/dev-7.*#201/i);
   });
@@ -269,22 +257,13 @@ describe("Demo findings from round 3", () => {
   });
 });
 
-describe("Demo Comms writes", () => {
-  it("a refused decision hold says it is a demo", async () => {
+describe("Demo Needs you writes", () => {
+  it("a refused Not now action says it is a demo", async () => {
     await at("/needs-you");
-    await clickText(/^hold$/i);
-    const reason = await waitFor(() => {
-      const found = document.querySelector<HTMLInputElement>(".hold-form input[required]");
-      if (!found) throw new Error("no hold form");
-      return found;
-    });
-    await act(
-      async () => void fireEvent.change(reason, { target: { value: "Waiting for design" } }),
-    );
-    await act(async () => void fireEvent.submit(reason.closest("form") as HTMLFormElement));
+    await clickText(/^not now$/i);
     await settle();
     expect(document.body.textContent).toContain(DEMO_REFUSED);
-    expect(document.body.textContent).not.toContain("Could not hold this decision");
+    expect(document.body.textContent).not.toContain("Could not not now this item.");
   });
 
   it("shows no fault on opening a conversation, and the demo words on a refused write", async () => {
