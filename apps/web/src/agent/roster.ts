@@ -1,5 +1,5 @@
 /** The Agents roster's rules: which seats it lists, in what order, and what each card says. */
-import { type CrewEvent, type CrewRow, ROLES } from "@mc/core";
+import { type CrewRow, type OverviewTimeline, ROLES } from "@mc/core";
 import { callSign, contextPct, isSeatFree } from "../crew.ts";
 import { cutText } from "../fmt.ts";
 
@@ -95,35 +95,49 @@ export const HOUR_MS = 60 * 60_000;
 export const STRIP_SLOTS = 120;
 export type StripKind = "turn" | "check" | "review" | "wait";
 export const STRIP_KINDS: readonly StripKind[] = ["turn", "check", "review", "wait"];
-const EVENT_KIND: Record<CrewEvent["kind"], StripKind> = {
-  commit: "turn",
-  push: "turn",
-  "pr-opened": "turn",
-  message: "turn",
-  test: "check",
+type TimelineLane = OverviewTimeline["lanes"][number];
+const SPAN_KIND: Record<TimelineLane["spans"][number]["kind"], StripKind> = {
+  turn: "turn",
+  checks: "check",
   review: "review",
-  park: "wait",
+  lock: "wait",
 };
 
-/** Where in the last hour (0 oldest, up to 1 now) a tool start or recorded event fell, one per slot and kind. */
-export function hourTicks(row: CrewRow, now: number): { at: number; kind: StripKind }[] {
+export interface StripMark {
+  /** Where it starts in the last hour: 0 the oldest edge, 1 now. */
+  at: number;
+  /** How much of the hour it covers; one slot for a tool start. */
+  len: number;
+  kind: StripKind;
+}
+
+/**
+ * The last hour of a seat's overview lane as marks: each span (a turn, checks, review, the test
+ * lock) over its length, and each tool start as one slot, one per slot and kind. No lane, no marks.
+ */
+export function hourMarks(lane: TimelineLane | undefined, now: number): StripMark[] {
+  if (!lane) return [];
   const from = now - HOUR_MS;
-  const marks = [
-    ...(row.digest?.toolStarts ?? []).map((t) => ({ t, kind: "turn" as const })),
-    ...(row.events ?? []).map((e) => ({ t: e.at, kind: EVENT_KIND[e.kind] })),
-  ];
-  // One tick per kind per slot, so a busy hour stays a bounded number of marks.
-  const seen = new Set<string>();
-  const ticks: { at: number; kind: StripKind }[] = [];
-  for (const m of marks) {
-    if (m.t < from || m.t > now) continue;
-    const slot = Math.min(STRIP_SLOTS - 1, Math.floor(((m.t - from) / HOUR_MS) * STRIP_SLOTS));
-    const key = `${slot}:${m.kind}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    ticks.push({ at: slot / STRIP_SLOTS, kind: m.kind });
+  const marks: StripMark[] = [];
+  for (const span of lane.spans) {
+    const start = Math.max(span.from, from);
+    const end = Math.min(span.to ?? now, now);
+    if (end < start || end < from) continue;
+    marks.push({
+      at: (start - from) / HOUR_MS,
+      len: Math.max(end - start, HOUR_MS / STRIP_SLOTS) / HOUR_MS,
+      kind: SPAN_KIND[span.kind],
+    });
   }
-  return ticks;
+  const seen = new Set<number>();
+  for (const t of lane.ticks) {
+    if (t < from || t > now) continue;
+    const slot = Math.min(STRIP_SLOTS - 1, Math.floor(((t - from) / HOUR_MS) * STRIP_SLOTS));
+    if (seen.has(slot)) continue;
+    seen.add(slot);
+    marks.push({ at: slot / STRIP_SLOTS, len: 1 / STRIP_SLOTS, kind: "turn" });
+  }
+  return marks;
 }
 
 /** `now`, `12m`, `3h`, `2d`: how long a seat has been in its state. */

@@ -1,4 +1,4 @@
-import type { RunDigest } from "@mc/core";
+import { crewRowSummary, type OverviewTimeline, type RunDigest } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Roster } from "../src/agent/Roster.tsx";
@@ -84,11 +84,45 @@ describe("Roster cards", () => {
   });
 });
 
+describe("the last-hour strip", () => {
+  const lanes = (agentId: string): OverviewTimeline => ({
+    from: NOW - HOUR,
+    to: NOW,
+    lanes: [
+      {
+        agentId,
+        spans: [{ kind: "checks", from: NOW - 20 * MIN, to: NOW - 10 * MIN }],
+        ticks: [NOW - 30 * MIN, NOW - 5 * MIN],
+      },
+    ],
+  });
+
+  it("shows a running seat's lane as marks and says so in words when there is none", async () => {
+    stubFetch({
+      "/api/overview/timeline": lanes("guido-2"),
+      "/api/crew?shape=summary": { rows: [idle, busy].map(crewRowSummary), firstRunToday: null },
+    });
+    render(<Roster rows={[idle, busy]} current={null} />);
+    const work = screen.getByRole("button", { name: /GUIDO-2/ });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(100);
+    });
+    const strip = within(work).getByRole("img", { name: /marks of activity/ });
+    expect(strip.querySelectorAll("i").length).toBe(3);
+    expect(strip.querySelector(".strip-check")).toBeTruthy();
+    const free = screen.getByRole("button", { name: /GUIDO-1/ });
+    const none = within(free).getByRole("img", { name: "No activity in the last hour" });
+    expect(none.getAttribute("title")).toBe("No activity in the last hour");
+    expect(none.querySelectorAll("i").length).toBe(0);
+  });
+});
+
 describe("the Agents page when idle", () => {
   it("makes no timed list requests", async () => {
     const rows = [idle, busy];
     const routes: Record<string, unknown> = {
-      "/api/crew?shape=summary": { rows, firstRunToday: null },
+      "/api/crew?shape=summary": { rows: rows.map(crewRowSummary), firstRunToday: null },
+      "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
       "/api/attention": [],
       "/api/config": CONFIG,
     };
@@ -115,7 +149,7 @@ describe("the Agents page when idle", () => {
     const lists = fetch.mock.calls
       .slice(before)
       .map(([path]) => String(path))
-      .filter((p) => /^\/api\/(crew|attention|config)/.test(p));
+      .filter((p) => /^\/api\/(crew|attention|config|overview\/timeline)/.test(p));
     expect(lists).toEqual([]);
   });
 });

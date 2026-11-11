@@ -2,7 +2,7 @@ import type { RunDigest } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import {
   contextShown,
-  hourTicks,
+  hourMarks,
   rosterGroups,
   seatClass,
   shortAge,
@@ -124,17 +124,26 @@ describe("what a card says", () => {
     expect(contextShown(dev("g", "r", { hudState: "running", digest: null }))).toBeNull();
   });
 
-  it("the last-hour strip keeps only the past hour, by kind, one mark per slot", () => {
-    const row = dev("g", "r", {
-      digest: digest({ toolStarts: [NOW - 2 * HOUR, NOW - 30 * MIN, NOW - 30 * MIN + 1] }),
-      events: [
-        { kind: "test", at: NOW - 10 * MIN },
-        { kind: "park", at: NOW - 5 * MIN },
+  it("the last-hour strip draws the overview lane: spans by kind and tool starts, only the past hour", () => {
+    const lane = {
+      agentId: "g",
+      spans: [
+        { kind: "turn" as const, from: NOW - 2 * HOUR, to: NOW - 90 * MIN },
+        { kind: "checks" as const, from: NOW - 10 * MIN, to: NOW - 8 * MIN },
+        { kind: "review" as const, from: NOW - 30 * MIN, to: null },
+        { kind: "lock" as const, from: NOW - 5 * MIN, to: NOW - 4 * MIN },
       ],
-    });
-    const ticks = hourTicks(row, NOW);
-    expect(ticks.map((t) => t.kind).sort()).toEqual(["check", "turn", "wait"]);
-    expect(ticks.every((t) => t.at >= 0 && t.at < 1)).toBe(true);
+      ticks: [NOW - 2 * HOUR, NOW - 30 * MIN, NOW - 30 * MIN + 1],
+    };
+    const marks = hourMarks(lane, NOW);
+    expect(marks.map((m) => m.kind).sort()).toEqual(["check", "review", "turn", "wait"]);
+    expect(marks.every((m) => m.at >= 0 && m.at + m.len <= 1.0001)).toBe(true);
+    const review = marks.find((m) => m.kind === "review");
+    expect(review?.len).toBeCloseTo(0.5, 2);
+  });
+
+  it("a seat with no lane has no marks", () => {
+    expect(hourMarks(undefined, NOW)).toEqual([]);
   });
 
   it("ages read in one short unit", () => {

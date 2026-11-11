@@ -205,4 +205,66 @@ describeRendered("Agents roster in a browser", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "keeps the chosen seat in the roster frame when the page narrows below 1000px",
+    async () => {
+      const page = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        search: seatAt,
+        api: rosterApi(rosterRows(25, ["alpha", "beta", "gamma"])),
+      });
+      await page.box(".seat-card");
+      await page.click('[data-seat="flight-1"]');
+      await page.press("k"); // wraps to the last seat, far down the list
+      const inFrame = () =>
+        page.evaluate(() => {
+          const f = document.querySelector(".roster-list")?.getBoundingClientRect();
+          const c = document
+            .querySelector('#roster [aria-current="true"]')
+            ?.getBoundingClientRect();
+          return !!(f && c && c.top >= f.top - 1 && c.bottom <= f.bottom + 1);
+        }, null);
+      expect(await inFrame(), "beside the content").toBe(true);
+      await page.resize(980, 800);
+      await page.evaluate(
+        () =>
+          new Promise<void>((done) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => done())),
+          ),
+        null,
+      );
+      expect(await inFrame(), "after the page narrows and the roster stacks").toBe(true);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "caps the stacked roster so the seat's content starts on the first screen at 900x900",
+    async () => {
+      const page = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 900,
+        height: 900,
+        search: seatAt,
+        api: rosterApi(rosterRows(25, ["alpha", "beta", "gamma"])),
+      });
+      await page.box(".seat-card");
+      const r = await page.evaluate(
+        () => ({
+          roster: document.querySelector("#roster")?.getBoundingClientRect().height ?? 0,
+          mainTop: document.querySelector(".agent-v2-main")?.getBoundingClientRect().top ?? 0,
+          inner: innerHeight,
+        }),
+        null,
+      );
+      expect(r.roster).toBeLessThanOrEqual(0.4 * r.inner + 1);
+      expect(r.mainTop).toBeLessThan(r.inner);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

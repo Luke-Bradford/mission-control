@@ -306,7 +306,11 @@
 @container (max-width: 1000px) {
   .agent-v2-shell {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 30%) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .agent-v2-shell > .roster {
+    height: auto;
+    max-height: min(calc(40 * var(--vh)), 360px);
   }
 }
 .agent-v2-main {

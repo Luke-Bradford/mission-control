@@ -1,4 +1,4 @@
-import type { ConfigView, Crew, CrewRow } from "@mc/core";
+import type { ConfigView, Crew, CrewRow, OverviewTimeline } from "@mc/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { callSign, seatRoleTitle, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
@@ -9,10 +9,9 @@ import { agentPath, navigate } from "../router.ts";
 import { setSelectedAgent } from "../shell/selection.ts";
 import {
   contextShown,
-  hourTicks,
+  hourMarks,
   rosterGroups,
   STRIP_KINDS,
-  STRIP_SLOTS,
   shortAge,
   workLine,
 } from "./roster.ts";
@@ -28,6 +27,7 @@ const CONTEXT_WARN_PCT = 75;
 export function Roster({ rows, current }: { rows: CrewRow[]; current: string | null }) {
   const roles = useResource<ConfigView>(RESOURCES.config).data?.crew?.roles;
   const all = useResource<Crew>(RESOURCES.crew).data?.rows;
+  const lanes = useResource<OverviewTimeline>(RESOURCES.overviewTimeline).data?.lanes;
   const groups = useMemo(() => rosterGroups(rows), [rows]);
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   const list = useRef<HTMLDivElement>(null);
@@ -47,18 +47,27 @@ export function Roster({ rows, current }: { rows: CrewRow[]; current: string | n
     });
   }, [current, currentRepo]);
 
-  // ...and brings its card into the roster's own frame, never scrolling the page around it.
+  // ...and brings its card into the roster's own frame, never scrolling the page around it. A
+  // frame that changes size (the dock opens, the window narrows) keeps the chosen seat in it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: a card appears when its group unfolds.
   useEffect(() => {
     const frame = list.current;
-    const card = [...(frame?.querySelectorAll<HTMLElement>("[data-seat]") ?? [])].find(
-      (c) => c.dataset.seat === current,
-    );
-    if (!frame || !card) return;
-    const f = frame.getBoundingClientRect();
-    const c = card.getBoundingClientRect();
-    if (c.top < f.top) frame.scrollTop -= f.top - c.top;
-    else if (c.bottom > f.bottom) frame.scrollTop += c.bottom - f.bottom;
+    if (!frame) return;
+    const keepInView = () => {
+      const card = [...frame.querySelectorAll<HTMLElement>("[data-seat]")].find(
+        (c) => c.dataset.seat === current,
+      );
+      if (!card) return;
+      const f = frame.getBoundingClientRect();
+      const c = card.getBoundingClientRect();
+      if (c.top < f.top) frame.scrollTop -= f.top - c.top;
+      else if (c.bottom > f.bottom) frame.scrollTop += c.bottom - f.bottom;
+    };
+    keepInView();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(keepInView);
+    watch.observe(frame);
+    return () => watch.disconnect();
   }, [current, folded]);
 
   return (
@@ -109,6 +118,7 @@ export function Roster({ rows, current }: { rows: CrewRow[]; current: string | n
                       row={r}
                       on={r.id === current}
                       now={now}
+                      lane={lanes?.find((l) => l.agentId === r.id)}
                       role={seatRoleTitle(r.id, all ?? rows, roles)}
                     />
                   ))}
@@ -126,17 +136,23 @@ function SeatCard({
   row,
   on,
   now,
+  lane,
   role,
 }: {
   row: CrewRow;
   on: boolean;
   now: number;
+  lane: OverviewTimeline["lanes"][number] | undefined;
   role: string | null;
 }) {
   const status = seatStatus(row);
   const work = workLine(row);
   const ctx = contextShown(row);
-  const ticks = hourTicks(row, now);
+  const marks = hourMarks(lane, now);
+  const stripText =
+    marks.length === 0
+      ? "No activity in the last hour"
+      : `${marks.length} marks of activity in the last hour`;
   const free = work.text === "Free";
   return (
     <button
@@ -182,16 +198,12 @@ function SeatCard({
           </span>
           <span className="seat-v">{percent(ctx)}</span>
           <span className="seat-lbl">1 H</span>
-          <span
-            className="seat-strip"
-            role="img"
-            aria-label={`${ticks.length} marks of activity in the last hour`}
-          >
-            {ticks.map((t) => (
+          <span className="seat-strip" role="img" aria-label={stripText} title={stripText}>
+            {marks.map((m) => (
               <i
-                key={`${t.at}:${t.kind}`}
-                className={`strip-${t.kind}`}
-                style={{ left: `${t.at * 100}%`, width: `${100 / STRIP_SLOTS}%` }}
+                key={`${m.at}:${m.kind}`}
+                className={`strip-${m.kind}`}
+                style={{ left: `${m.at * 100}%`, width: `${m.len * 100}%` }}
               />
             ))}
           </span>

@@ -1,4 +1,4 @@
-import type { CrewRow } from "@mc/core";
+import { type CrewRow, crewRowSummary, type OverviewTimeline } from "@mc/core";
 import { agentView } from "./agentV2Fixture.ts";
 import { CONFIG, crewRow, MIN, NOW } from "./fixtures.ts";
 
@@ -57,21 +57,38 @@ export function rosterRows(count: number, repos: readonly string[] = ["mission-c
               }),
               contextTokens: 40_000 + i * 11_000,
               contextWindow: 200_000,
-              toolStarts: [NOW - 50 * MIN, NOW - 20 * MIN, NOW - 3 * MIN],
             },
         contextWindow: 200_000,
-        events: free ? [] : [{ kind: "test", at: NOW - 12 * MIN }],
       }),
     );
   }
   return rows;
 }
 
+/** Each working seat's last hour, as `/api/overview/timeline` serves it. */
+export function rosterTimeline(rows: CrewRow[]): OverviewTimeline {
+  return {
+    from: NOW - 60 * MIN,
+    to: NOW,
+    lanes: rows
+      .filter((r) => r.run !== null)
+      .map((r) => ({
+        agentId: r.id,
+        spans: [
+          { kind: "turn", from: NOW - 50 * MIN, to: NOW - 40 * MIN },
+          { kind: "checks", from: NOW - 12 * MIN, to: NOW - 9 * MIN },
+        ],
+        ticks: [NOW - 45 * MIN, NOW - 20 * MIN, NOW - 3 * MIN],
+      })),
+  };
+}
+
 /** The API answers the real shell needs to show `rows` and open any of their pages. */
 export function rosterApi(rows: CrewRow[]) {
   const api: Record<string, unknown> = {
     "/api/config": CONFIG,
-    "/api/crew?shape=summary": { rows, firstRunToday: null },
+    "/api/crew?shape=summary": { rows: rows.map(crewRowSummary), firstRunToday: null },
+    "/api/overview/timeline": rosterTimeline(rows),
     "/api/attention": [],
   };
   for (const r of rows) {
