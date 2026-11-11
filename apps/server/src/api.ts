@@ -33,7 +33,6 @@ import {
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
-  COMMS_NOTICE,
   COMMS_PAGE_DEFAULT,
   COMMS_PAGE_MAX,
   COMMS_REACTIONS,
@@ -2205,14 +2204,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               store,
               flight,
               found.session.seats.map((s) => s.id),
-              { limit, before },
+              { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES },
             );
-            // The hide switch drops the hub's notices from the page; paging stays on the full record.
-            const messages =
-              notices === COMMS_HIDE_NOTICES
-                ? page.messages.filter((message) => message.kind !== COMMS_NOTICE)
-                : page.messages;
-            return { ...page, messages, flight: flightStatus };
+            return { ...page, flight: flightStatus };
           } catch (error) {
             if (error instanceof FlightConversationCursorError)
               return reply.code(400).send({ error: error.message });

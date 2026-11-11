@@ -7113,14 +7113,31 @@ export class Store {
   private flightConversationScope(
     flightId: string,
     seats: readonly string[],
+    hideNotices = false,
   ): { sql: string; args: SQLInputValue[] } {
     const targets = [...new Set([flightId, ...seats])];
+    // The hub's notices to FLIGHT belong to its conversation; its internal context rows do not.
     return {
       sql: `(((c.from_id = ? AND c.to_id = ?) OR (c.from_id = ? AND c.to_id = ?))
-      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")})))
-      AND c.sender_kind IS NOT 'hub'
-      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`,
-      args: [COMMS_CAPCOM, flightId, flightId, COMMS_CAPCOM, COMMS_CAPCOM, ...targets],
+      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")}))
+      OR (c.from_id = ? AND c.to_id = ? AND c.kind = ?))
+      AND (c.sender_kind IS NOT 'hub' OR c.kind = ?)
+      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'${
+        hideNotices ? " AND c.kind IS NOT ?" : ""
+      }`,
+      args: [
+        COMMS_CAPCOM,
+        flightId,
+        flightId,
+        COMMS_CAPCOM,
+        COMMS_CAPCOM,
+        ...targets,
+        COMMS_MC,
+        flightId,
+        COMMS_NOTICE,
+        COMMS_NOTICE,
+        ...(hideNotices ? [COMMS_NOTICE] : []),
+      ],
     };
   }
 
@@ -7131,8 +7148,9 @@ export class Store {
     limit: number,
     before?: { at: number; id: number },
     exactId?: string,
+    hideNotices = false,
   ): (CommsRow & { choice?: { label: string } })[] {
-    const scope = this.flightConversationScope(flightId, seats);
+    const scope = this.flightConversationScope(flightId, seats, hideNotices);
     const id = exactId === undefined ? null : commsMessageNumber(exactId);
     if (exactId !== undefined && id === null) return [];
     const rows = this.db
@@ -7182,8 +7200,8 @@ export class Store {
     const row = this.db
       .prepare(`SELECT COUNT(*) AS n FROM comms c
       LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
-      WHERE ${scope.sql} AND ${after}`)
-      .get(...scope.args, ...args) as Row;
+      WHERE ${scope.sql} AND c.kind IS NOT ? AND ${after}`)
+      .get(...scope.args, COMMS_NOTICE, ...args) as Row;
     return row.n as number;
   }
 

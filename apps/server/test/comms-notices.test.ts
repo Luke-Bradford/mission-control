@@ -81,9 +81,9 @@ it("a hub message is a notice; notices are never unread and ?notices=hide leaves
     ticket: null,
   });
   store.addComms({
-    from: "flight-1",
-    kind: COMMS_NOTICE,
-    to: COMMS_CAPCOM,
+    from: "MC",
+    senderKind: "hub",
+    to: "flight-1",
     text: "flight notice",
     at: 2,
     ticket: null,
@@ -107,6 +107,14 @@ it("a hub message is a notice; notices are never unread and ?notices=hide leaves
     expect(
       (await get("/api/comms/crew?history=1&notices=hide")).messages.map((m) => m.text),
     ).toEqual(["current crew message"]);
+    const flightAll = await get("/api/comms/flight");
+    expect(flightAll.messages.map((m) => m.text)).toEqual(["operator request", "flight notice"]);
+    // a notice is never unread in FLIGHT's conversation
+    expect(flightAll.unread).toBe(1);
+    // hidden before paging: a limit of one still returns the operator request
+    expect(
+      (await get("/api/comms/flight?notices=hide&limit=1")).messages.map((m) => m.text),
+    ).toEqual(["operator request"]);
     expect((await get("/api/comms/flight?notices=hide")).messages.map((m) => m.text)).toEqual([
       "operator request",
     ]);
