@@ -112,7 +112,7 @@ import {
   crewPromptPath,
   crewSkillsDir,
   crewTokenPath,
-} from "../src/store.ts";
+} from "../src/store/crew-paths.ts";
 import { crewRefusal } from "../src/update.ts";
 import { writeCodexHostileFiles } from "./fixtures/codex-hostile.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";

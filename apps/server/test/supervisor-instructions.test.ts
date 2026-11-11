@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { directionKey, readDirectionContext } from "../src/runtime/instruction-context.ts";
-import { crewPromptPath } from "../src/store.ts";
+import { crewPromptPath } from "../src/store/crew-paths.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   clone,

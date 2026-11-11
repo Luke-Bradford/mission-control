@@ -190,7 +190,6 @@ import {
 } from "../run-handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
-  ACTIVE_SEAT_STATES,
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
@@ -203,9 +202,8 @@ import {
   crewSkillsDir,
   crewTokenPath,
   crewTranscriptPath,
-  type KeeperCursor,
-  type Store,
-} from "../store.ts";
+} from "../store/crew-paths.ts";
+import { ACTIVE_SEAT_STATES, type KeeperCursor, type Store } from "../store.ts";
 import {
   AGENTS_MD_HEADING,
   BRIEF_DECISIONS_MAX,

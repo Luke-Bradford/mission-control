@@ -33,7 +33,8 @@ import { prTextProblem, readKnown } from "./mcp/tools.ts";
 import { recordRunHandoff } from "./run-handoffs.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { parseTicket } from "./runview.ts";
-import { crewDir, type Store } from "./store.ts";
+import { crewDir } from "./store/crew-paths.ts";
+import type { Store } from "./store.ts";
 
 /** What the routes need from the hub besides the store: the board, the repo rules and GitHub. */
 export interface NeedsYouDeps {

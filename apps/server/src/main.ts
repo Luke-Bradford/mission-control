@@ -135,7 +135,8 @@ import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
 import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
-import { crewDir, Store } from "./store.ts";
+import { crewDir } from "./store/crew-paths.ts";
+import { Store } from "./store.ts";
 import {
   createAutoUpdate,
   createHeldUpdateNote,

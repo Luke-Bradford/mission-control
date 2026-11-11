@@ -407,14 +407,8 @@ import {
   runView,
 } from "./runview.ts";
 import { registerInstructionRoutes } from "./standing-instructions-api.ts";
-import {
-  type CommsReadScope,
-  commsMessageNumber,
-  commsPosition,
-  crewDir,
-  crewPrBodyPath,
-  type Store,
-} from "./store.ts";
+import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
+import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import {

@@ -47,7 +47,7 @@ import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
-import { crewTokenPath } from "../src/store.ts";
+import { crewTokenPath } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {

@@ -15,7 +15,8 @@ import type { GhRunner } from "../src/mcp/gh.ts";
 import { CLI_PID_FILE, KEEPER_PID_FILE, pidAlive, readPidFile } from "../src/runtime/keeper.ts";
 import * as sessionDriver from "../src/runtime/session.ts";
 import type { Supervisor, SupervisorEvent } from "../src/runtime/supervisor.ts";
-import { crewCodexDir, crewKeeperDir, type Store } from "../src/store.ts";
+import { crewCodexDir, crewKeeperDir } from "../src/store/crew-paths.ts";
+import type { Store } from "../src/store.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {

@@ -31,7 +31,7 @@ import { DatabaseSync } from "node:sqlite";
 import { pathToFileURL } from "node:url";
 import { keeperAlive } from "./runtime/keeper.ts";
 import { compactTranscriptLine, deltaHeartbeats } from "./runtime/transcript-compact.ts";
-import { crewDirPath, crewKeeperDirPath } from "./store.ts";
+import { crewDirPath, crewKeeperDirPath } from "./store/crew-paths.ts";
 
 /** A file written to this recently may still have a writer. */
 export const COMPACT_MIN_AGE_MS = 10 * 60 * 1000;

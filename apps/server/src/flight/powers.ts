@@ -24,7 +24,7 @@ import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import type { CcConfig } from "../config.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
 import { readKnown } from "../mcp/tools.ts";
-import { crewDir } from "../store.ts";
+import { crewDir } from "../store/crew-paths.ts";
 import type { FlightToolsDeps } from "./tools.ts";
 
 type Result = McToolResult;
