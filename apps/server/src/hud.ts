@@ -93,7 +93,7 @@ import {
 } from "./attention-holds.ts";
 import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
 import { briefReadState, briefSourceRevision } from "./brief/source.ts";
-import { claudeVersion } from "./cli-version.ts";
+import { claudeVersion } from "./cli/version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";

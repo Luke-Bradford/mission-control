@@ -2,7 +2,7 @@ import "./supervisor-harness.ts";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { CliHold } from "../src/cli-update.ts";
+import { CliHold } from "../src/cli/update.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { codexModelsFor } from "../src/runtime/codex-models.ts";
 import { crewCodexDir } from "../src/store/crew-paths.ts";

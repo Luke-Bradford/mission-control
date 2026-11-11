@@ -21,7 +21,7 @@ import {
 } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
-import type { CliHold } from "../src/cli-update.ts";
+import type { CliHold } from "../src/cli/update.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";

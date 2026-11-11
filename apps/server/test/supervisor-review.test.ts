@@ -37,7 +37,7 @@ import {
   ticketInReviewText,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
-import { CliHold } from "../src/cli-update.ts";
+import { CliHold } from "../src/cli/update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { externalReviewKey } from "../src/external-reviews.ts";

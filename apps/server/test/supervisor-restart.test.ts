@@ -23,7 +23,7 @@ import {
   otherLaneText,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
-import { CliHold } from "../src/cli-update.ts";
+import { CliHold } from "../src/cli/update.ts";
 import { refillQueues, type TakeDeps, takeNext } from "../src/engine/queue.ts";
 import { createFlightWatch } from "../src/flight/watch.ts";
 import { TestLock } from "../src/guard/lock.ts";

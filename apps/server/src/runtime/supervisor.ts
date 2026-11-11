@@ -137,8 +137,8 @@ import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.t
 import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
-import type { CliHold } from "../cli-update.ts";
-import { probeClaudeVersion } from "../cli-version.ts";
+import type { CliHold } from "../cli/update.ts";
+import { probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import {
   applySeatAccount,

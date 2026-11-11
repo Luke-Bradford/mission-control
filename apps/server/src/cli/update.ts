@@ -7,7 +7,7 @@
  */
 import { execFile } from "node:child_process";
 import { realpathSync } from "node:fs";
-import { CLAUDE_COMMAND, parseCliVersion, resolveOnPath } from "./cli-version.ts";
+import { CLAUDE_COMMAND, parseCliVersion, resolveOnPath } from "./version.ts";
 
 export const CLI_UPDATES = ["off", "between_runs"] as const;
 export type CliUpdates = (typeof CLI_UPDATES)[number];

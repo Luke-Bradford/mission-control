@@ -13,11 +13,11 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { CODEX_COMMAND, CODEX_MIN_VERSION } from "@mc/core";
-import type { CliHold, ExecFn } from "./cli-update.ts";
-import { CLAUDE_COMMAND, resolveOnPath } from "./cli-version.ts";
-import type { CliCheckResult } from "./runtime/cli-check.ts";
-import { codexVersionAllowed } from "./runtime/codex-floor.ts";
-import type { Store } from "./store.ts";
+import type { CliCheckResult } from "../runtime/cli-check.ts";
+import { codexVersionAllowed } from "../runtime/codex-floor.ts";
+import type { Store } from "../store.ts";
+import type { CliHold, ExecFn } from "./update.ts";
+import { CLAUDE_COMMAND, resolveOnPath } from "./version.ts";
 
 export const AUTO_CLI_TOOLS = ["claude", "codex"] as const;
 export type AutoCliTool = (typeof AUTO_CLI_TOOLS)[number];
