@@ -695,6 +695,8 @@ export interface TicketQuestion {
   runId: string;
   seat: AgentId;
   text: string;
+  /** The attention-item key for this question's stored conversation, if it has one. */
+  discussionKey: string | null;
   at: number;
   passedAt: number | null;
   asideAt: number | null;

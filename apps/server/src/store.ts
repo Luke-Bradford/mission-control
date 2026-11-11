@@ -4891,7 +4891,9 @@ export class Store {
     before: { at: number; id: number } | null = null,
   ): TicketQuestion[] {
     const rows =
-      this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis
+      this.statement(`SELECT q.*, d.decision AS answer, d.at AS answer_at, d.basis AS answer_basis,
+        (SELECT x.item_key FROM item_discussions x WHERE x.item_key = 'ask:' || q.id LIMIT 1)
+          AS discussion_key
       FROM seat_questions q JOIN runs r ON r.id = q.run_id
       LEFT JOIN flight_decisions d ON d.id = (SELECT a.id FROM flight_decisions a
         WHERE a.question_id = q.id AND a.kind = 'answer' ORDER BY a.at DESC, a.id DESC LIMIT 1)
@@ -4908,6 +4910,7 @@ export class Store {
       runId: r.run_id as string,
       seat: r.agent_id as string,
       text: r.text as string,
+      discussionKey: r.discussion_key as string | null,
       at: r.at as number,
       passedAt: r.passed_at as number | null,
       asideAt: r.aside_at as number | null,
@@ -9719,6 +9722,14 @@ export class Store {
           messages: JSON.parse(row.messages as string) as ItemChatMessage[],
         }
       : null;
+  }
+
+  /** The newest stored conversation for an item which is no longer in attention. */
+  discussionForItem(itemKey: string): ItemDiscussion | null {
+    const row = this.db
+      .prepare("SELECT id FROM item_discussions WHERE item_key = ? ORDER BY rowid DESC LIMIT 1")
+      .get(itemKey) as Row | undefined;
+    return row ? this.discussion(itemKey, row.id as string) : null;
   }
 
   private discussionById(id: string): ItemDiscussion | null {
