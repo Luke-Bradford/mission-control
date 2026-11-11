@@ -18,7 +18,7 @@ import { type CcConfig, findHubRoot } from "../config.ts";
 import { crewDirPath } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
 import { isObj, STREAM_EVENT_PREFIX } from "../streamjson.ts";
-import { GZ_MAX_INFLATED_BYTES } from "../transcript-file.ts";
+import { GZ_MAX_INFLATED_BYTES } from "../transcript/file.ts";
 
 /** The tool whose first call marks the end of a run's real work. */
 export const REPORT_EVIDENCE_TOOL = "mcp__mc__report_evidence";

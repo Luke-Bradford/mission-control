@@ -3,8 +3,8 @@ import { type CrewVendor, inferTicket, type Run, type RunDigest } from "@mc/core
 import type { AdoptedLoop } from "../config.ts";
 import type { Store } from "../store.ts";
 import { foldTranscript, type TranscriptFacts } from "../streamjson.ts";
+import { transcriptFilePath } from "../transcript/file.ts";
 import { readNewLines } from "../transcript/tail.ts";
-import { transcriptFilePath } from "../transcript-file.ts";
 
 /** The collector-status name a loop's collector writes: `ta-loop:<id>` or `studio-loop:<id>`. */
 export const collectorName = (kind: AdoptedLoop["kind"], id: AdoptedLoop["id"]): string =>
