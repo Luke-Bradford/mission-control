@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS run_token_audit (
   run_id TEXT PRIMARY KEY, at INTEGER NOT NULL, calls INTEGER NOT NULL, peak_context INTEGER NOT NULL,
   median_context INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
   output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
-  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL
+  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL,
+  timestamps_checked INTEGER NOT NULL DEFAULT 0
 );
 -- Each finished mc tool call: when, which, and the characters sent and returned (Audit's tool rows).
 CREATE TABLE IF NOT EXISTS mcp_tool_calls (
@@ -90,7 +91,7 @@ CREATE TABLE IF NOT EXISTS mcp_tool_calls (
 CREATE INDEX IF NOT EXISTS mcp_tool_calls_at ON mcp_tool_calls(at);
 CREATE TABLE IF NOT EXISTS run_token_calls (
   run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
-  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL,
+  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL, at INTEGER,
   PRIMARY KEY (run_id, idx)
 );
 CREATE TABLE IF NOT EXISTS controller_messages (

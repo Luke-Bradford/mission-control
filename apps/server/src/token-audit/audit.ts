@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { gunzip } from "node:zlib";
 import {
+  type Run,
   type RunTokenAudit,
   TOKEN_REWRITE_MIN_WRITE,
   TOKEN_REWRITE_READ_RATIO,
@@ -17,7 +18,7 @@ import {
 import { type CcConfig, findHubRoot } from "../config.ts";
 import { crewDirPath } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
-import { isObj, STREAM_EVENT_PREFIX } from "../streamjson.ts";
+import { isObj, STREAM_EVENT_PREFIX, timeOf } from "../streamjson.ts";
 import { GZ_MAX_INFLATED_BYTES } from "../transcript/file.ts";
 
 /** The tool whose first call marks the end of a run's real work. */
@@ -59,6 +60,7 @@ interface Incoming {
 }
 interface Call extends TokenCall {
   id: string;
+  at: number | null;
   /** What arrived since the previous call. */
   incoming: Incoming[];
   /** Characters of the previous call's own output (text, thinking, tool input). */
@@ -103,11 +105,11 @@ export class TranscriptAuditor {
     const msg = isObj(ev.message) ? ev.message : null;
     if (msg === null) return;
     const content: unknown[] = Array.isArray(msg.content) ? msg.content : [];
-    if (ev.type === "assistant") this.assistant(msg, content);
+    if (ev.type === "assistant") this.assistant(msg, content, timeOf(ev.timestamp));
     else if (ev.type === "user") this.user(msg.content, content);
   }
 
-  private assistant(msg: Record<string, unknown>, content: unknown[]): void {
+  private assistant(msg: Record<string, unknown>, content: unknown[], at: number | null): void {
     const id = typeof msg.id === "string" ? msg.id : null;
     if (id === null || !isObj(msg.usage)) return;
     const u = msg.usage;
@@ -117,6 +119,7 @@ export class TranscriptAuditor {
       const cacheWrite = num(u.cache_creation_input_tokens);
       call = {
         id,
+        at,
         context: num(u.input_tokens) + cacheRead + cacheWrite,
         cacheRead,
         cacheWrite,
@@ -242,6 +245,7 @@ export class TranscriptAuditor {
         ? null
         : this.calls.slice(this.reportCall + 1).reduce((s, c) => s + c.cacheRead, 0);
     const calls: TokenCall[] = this.calls.map((c) => ({
+      at: c.at ?? null,
       context: c.context,
       cacheRead: c.cacheRead,
       cacheWrite: c.cacheWrite,
@@ -335,6 +339,27 @@ async function foldText<T>(text: string, push: (line: string) => void, done: () 
     if (++count % LINES_PER_YIELD === 0) await yieldLoop();
   }
   return done();
+}
+
+/** One run's transcript audited, or null when it is not the hub's own readable Claude transcript. */
+async function readRun(
+  files: AuditFiles,
+  dir: string,
+  run: Run,
+): Promise<ReturnType<TranscriptAuditor["finish"]> | null> {
+  if (run.vendor === "codex" || run.transcriptPath !== `${dir}/${run.id}.jsonl`) return null;
+  try {
+    const text = await readText(files, run.transcriptPath);
+    if (text === null) return null;
+    const a = new TranscriptAuditor();
+    return await foldText(
+      text,
+      (l) => a.push(l),
+      () => a.finish(),
+    );
+  } catch {
+    return null;
+  }
 }
 
 const EMPTY_AUDIT: RunTokenAudit = {
@@ -433,22 +458,7 @@ export async function auditEndedRuns(i: {
     if (batch.length === 0) break;
     for (const run of batch) {
       if (clock() - start >= budget) break outer;
-      let result: ReturnType<TranscriptAuditor["finish"]> | null = null;
-      if (run.vendor !== "codex" && run.transcriptPath === `${dir}/${run.id}.jsonl`) {
-        try {
-          const text = await readText(files, run.transcriptPath);
-          if (text !== null) {
-            const a = new TranscriptAuditor();
-            result = await foldText(
-              text,
-              (l) => a.push(l),
-              () => a.finish(),
-            );
-          }
-        } catch {
-          result = null;
-        }
-      }
+      const result = await readRun(files, dir, run);
       if (result === null || result.audit.calls === 0) {
         i.store.saveRunTokenAudit(run.id, i.now, EMPTY_AUDIT, []);
         out.empty += 1;
@@ -456,6 +466,19 @@ export async function auditEndedRuns(i: {
         i.store.saveRunTokenAudit(run.id, i.now, result.audit, result.calls);
         out.audited += 1;
       }
+      await yieldLoop();
+    }
+  }
+  // Back-fill: audits stored before call times existed are read again, once, from the transcript
+  // when it is still retained. One that cannot give times stays untimed (reported, never zero).
+  while (clock() - start < budget) {
+    const old = i.store.runsToRetimeTokens(AUDIT_BATCH);
+    if (old.length === 0) break;
+    for (const run of old) {
+      if (clock() - start >= budget) break;
+      const result = await readRun(files, dir, run);
+      if (result === null || result.audit.calls === 0) i.store.markTokenTimesChecked(run.id);
+      else i.store.saveRunTokenAudit(run.id, i.now, result.audit, result.calls);
       await yieldLoop();
     }
   }
