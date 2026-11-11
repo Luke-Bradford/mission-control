@@ -337,7 +337,6 @@ import {
   completeBriefError,
 } from "../brief/prepare.ts";
 import { BriefActionInput, BriefDecisionInput } from "../brief/schema.ts";
-import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
@@ -390,6 +389,7 @@ import { handoffTarget } from "../run/handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import { InstructionInput } from "../standing-instructions.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";

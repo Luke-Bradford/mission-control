@@ -134,7 +134,6 @@ import {
 import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
 import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
-import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli/update.ts";
@@ -189,6 +188,7 @@ import {
   recordRunHandoff,
 } from "../run/handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import {
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
