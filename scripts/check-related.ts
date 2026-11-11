@@ -1,7 +1,19 @@
 /** Resolve the comparison before Vitest: passWithNoTests must not hide an unreadable git base. */
 import { execFileSync, spawnSync } from "node:child_process";
-import { resolve } from "node:path";
+import {
+  closeSync,
+  createReadStream,
+  fstatSync,
+  mkdtempSync,
+  openSync,
+  readSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { pipeline } from "node:stream/promises";
 import { pathToFileURL } from "node:url";
+import { stripVTControlCharacters } from "node:util";
 
 export function relatedBase(cwd: string): string {
   const git = (...args: string[]) =>
@@ -16,7 +28,7 @@ export function relatedBase(cwd: string): string {
   return base;
 }
 
-export function checkRelated(cwd: string): number {
+export async function checkRelated(cwd: string): Promise<number> {
   let base: string;
   try {
     base = relatedBase(cwd);
@@ -26,13 +38,34 @@ export function checkRelated(cwd: string): number {
     );
     return 1;
   }
-  const result = spawnSync("pnpm", ["-s", "test", `--changed=${base}`], {
-    cwd,
-    stdio: "inherit",
-  });
-  if (result.error) console.error(`Affected tests could not start: ${result.error.message}`);
-  return result.status ?? 1;
+  // Keep the complete output on disk: large failures must survive without a maxBuffer limit.
+  const args = ["-s", "test", `--changed=${base}`, "--reporter=dot", "--silent=passed-only"];
+  const dir = mkdtempSync(join(tmpdir(), "mc-related-output-"));
+  const fd = openSync(join(dir, "output"), "w+", 0o600);
+  try {
+    const result = spawnSync("pnpm", args, { cwd, stdio: ["inherit", fd, fd] });
+    if (result.status === 0) {
+      const size = fstatSync(fd).size;
+      const tail = Buffer.alloc(Math.min(size, 64 * 1024));
+      readSync(fd, tail, 0, tail.length, size - tail.length);
+      const summary = stripVTControlCharacters(tail.toString())
+        .split(/\r?\n/)
+        .filter((line) =>
+          /^\s*(Test Files|Tests|Start at|Duration|No test files found)\b/.test(line),
+        )
+        .slice(-5);
+      console.log(summary.length ? summary.join("\n") : "Affected tests passed.");
+      return 0;
+    }
+    await pipeline(createReadStream(join(dir, "output")), process.stdout, { end: false });
+    if (result.error) console.error(`Affected tests could not start: ${result.error.message}`);
+    if (result.signal) console.error(`Affected tests ended on signal ${result.signal}.`);
+    return result.status ?? 1;
+  } finally {
+    closeSync(fd);
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
-  process.exitCode = checkRelated(process.cwd());
+  process.exitCode = await checkRelated(process.cwd());

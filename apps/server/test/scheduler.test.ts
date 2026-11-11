@@ -474,6 +474,53 @@ describe("scheduler", () => {
     expect(topics).toContain("limits");
   });
 
+  it("frees waiting:operator cards after a due board poll, and refreshes boards when it freed some", async () => {
+    vi.useFakeTimers();
+    const releaseWaiting = vi.fn(async () => 1);
+    const c = stubs({ github: vi.fn(async () => ({ boards: false, escalations: false })) });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: c,
+      releaseWaiting,
+    });
+    await s.tick("github");
+    expect(releaseWaiting).toHaveBeenCalledTimes(1);
+    flushEmits();
+    expect(topics).toContain("boards");
+  });
+
+  it("does not free waiting:operator cards on a preview or when GitHub cannot be reached", async () => {
+    vi.useFakeTimers();
+    const releaseWaiting = vi.fn(async () => 1);
+    const preview = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs(),
+      releaseWaiting,
+      boardWrites: false,
+    });
+    await preview.tick("github");
+    const down = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({
+        githubToken: vi.fn(async () => {
+          throw new Error("gh: could not read a GitHub token");
+        }),
+      }),
+      releaseWaiting,
+    });
+    await down.tick("github");
+    expect(releaseWaiting).not.toHaveBeenCalled();
+  });
+
   it("retries a failed githubToken on each GitHub tick until it succeeds", async () => {
     const githubToken = vi
       .fn<() => Promise<string>>()

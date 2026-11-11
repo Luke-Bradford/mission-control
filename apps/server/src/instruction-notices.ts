@@ -44,8 +44,8 @@ export function flushInstructionNotices(deps: NoticeDeps): Promise<Map<string, D
           .flatMap((s) => s.seats)
           .find((s) => seatDef(s).loop === "watch");
         if (notice.by === "flight" && !flight) continue;
-        // the notice is the hub's record of a change; FLIGHT's own change is FLIGHT's
-        const from = notice.by === "flight" ? flight!.id : COMMS_MC;
+        // The hub records the change; FLIGHT's own change is attributed to FLIGHT.
+        const from = notice.by === "flight" && flight ? flight.id : COMMS_MC;
         try {
           const message = await sendComms(
             {

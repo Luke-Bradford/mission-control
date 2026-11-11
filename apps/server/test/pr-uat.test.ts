@@ -299,6 +299,7 @@ describe("GET /api/qa/uat/:repoId/:number", () => {
   });
 
   it("quotes a branch name with shell characters and leaves tryIt.branch raw", async () => {
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: a shell-style ${IFS} in a branch name, not a template
     const odd = "x;touch${IFS}/tmp/p";
     store.upsertPullRequests("shop-app", [pr("shop-app", 41, odd)], NOW);
     const body = (await get("/api/qa/uat/shop-app/41")).json() as PrUatView;

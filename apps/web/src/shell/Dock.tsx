@@ -1,18 +1,17 @@
 import {
   type AgentStream,
-  ATTENTION_LABEL,
-  type AttentionItem,
+  type CommsMessagesResponse,
+  type CommsSendState,
   type Crew,
   flightTurnText,
 } from "@mc/core";
 import { type FormEvent, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { needsYouItems, openNeed, sortNeeds, useNeedsYou } from "../attention.ts";
 import { useNow, useTz } from "../clock.ts";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { Markdown } from "../components/Markdown.tsx";
 import { contextPct, doingLine } from "../crew.ts";
-import { ACTIONS, RESOURCES, useResource, useReviewPrs } from "../data.ts";
+import { ACTIONS, hub, RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import {
   chatRows,
   type DockRow,
@@ -20,8 +19,11 @@ import {
   kindLabel,
   type PendingMsg,
   sameMessage,
+  sendStateLine,
+  withMessageStates,
   withPending,
 } from "../flight/conversation.ts";
+import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import {
   FLIGHT_NO_SEAT,
   type FlightDecision,
@@ -30,7 +32,6 @@ import {
   flightOffText,
 } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
-import { Pill } from "../hud/Pill.tsx";
 import { BuildChips } from "./buildStatus.tsx";
 import { DockSummary } from "./DockSummary.tsx";
 import { useOlderEvents } from "./olderEvents.ts";
@@ -74,7 +75,9 @@ const flightMarkdown = (text: string): string => text.split(CAPCOM).join(`**${CA
 
 const Msg = memo(function Msg({ row, tz }: { row: DockRow; tz: string | null }) {
   const at = row.at !== null && tz !== null ? hhmm(row.at, tz) : null;
-  const pending = row.kind === "you" && row.pending === true;
+  const line = row.kind === "you" ? row.line : undefined;
+  // A message still on its way says so until the hub answers; after that its state line takes over.
+  const pending = row.kind === "you" && row.pending === true && line === undefined;
   const sender =
     row.kind === "you"
       ? "You"
@@ -102,6 +105,11 @@ const Msg = memo(function Msg({ row, tz }: { row: DockRow; tz: string | null }) 
           {row.kind === "decision" ? `${row.d.about} → ${row.d.decision}` : row.text}
         </div>
       )}
+      {line !== undefined && (
+        <div className="note" data-testid="message-state">
+          {line}
+        </div>
+      )}
     </div>
   );
 });
@@ -117,7 +125,8 @@ function Composer({
   onPrefillConsumed,
 }: {
   where: ChatPlace;
-  seat: FlightSeat | null;
+  /** FLIGHT's seat: undefined while it loads, null when none is configured. */
+  seat: FlightSeat | null | undefined;
   busy: boolean;
   err: string | null;
   onSend: (body: string) => Promise<boolean>;
@@ -127,11 +136,12 @@ function Composer({
   const [text, setText] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const used = useRef<number | null>(null);
-  const live = seat?.live === true;
+  // FLIGHT being stopped never blocks the operator: the hub keeps the message for its next start.
+  const canSend = Boolean(seat);
   const send = async (ev: FormEvent) => {
     ev.preventDefault();
     const body = text.trim();
-    if (!live || body === "") return;
+    if (!canSend || body === "") return;
     if (await onSend(body)) setText("");
   };
   useEffect(() => {
@@ -148,22 +158,21 @@ function Composer({
         ref={input}
         autoComplete="off"
         aria-label="Message FLIGHT"
-        placeholder={
-          !seat || live ? "Ask FLIGHT to assign, reprioritise or report…" : "FLIGHT is stopped"
-        }
-        title={live ? undefined : flightOffText(seat)}
+        placeholder="Ask FLIGHT to assign, reprioritise or report…"
+        title={canSend ? undefined : flightOffText(seat ?? null)}
         value={text}
         onChange={(e) => setText(e.target.value)}
-        disabled={!live}
+        disabled={!canSend}
       />
       <button
         type="submit"
         className="primary"
-        title={live ? undefined : flightOffText(seat)}
-        disabled={!live || busy}
+        title={canSend ? undefined : flightOffText(seat ?? null)}
+        disabled={!canSend || busy}
       >
         Send
       </button>
+      <FlightStoppedNote seat={seat} />
       {err !== null && (
         <p className="note err" role="alert">
           {err}
@@ -191,13 +200,10 @@ const ID_PREFIX: Record<ChatPlace, string> = { dock: "dock", comms: "chat" };
 export function FlightChat({
   where,
   active = true,
-  needsBeside = false,
   prefill,
   onPrefillConsumed,
 }: {
   where: ChatPlace;
-  /** The page beside the chat already lists what waits on you. */
-  needsBeside?: boolean;
   active?: boolean;
   prefill?: ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
@@ -211,17 +217,17 @@ export function FlightChat({
   const stream = olderEvents.stream;
   const tz = useTz();
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
-  const attentionResource = useResource<AttentionItem[]>(RESOURCES.attention);
-  const attention = attentionResource.data;
-  const crew = useResource<Crew>(RESOURCES.crew).data;
-  const asks = useMemo(() => sortNeeds(needsYouItems(attention)), [attention]);
   const [pending, setPending] = useState<PendingMsg[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const sent = useRef(0);
   const stick = useRef(true);
   const { rows, open } = useMemo(() => withPending(all, pending), [all, pending]);
-  const shown = useMemo(() => chatRows(rows), [rows]);
+  const flightComms = useResource<CommsMessagesResponse>(RESOURCES.commsFlight).data?.messages;
+  const shown = useMemo(() => {
+    const chat = chatRows(rows);
+    return tz === null ? chat : withMessageStates(chat, flightComms ?? [], tz);
+  }, [rows, flightComms, tz]);
   // Settled messages leave the list, so it does not grow for ever.
   useEffect(() => {
     if (open.length !== pending.length) setPending(open);
@@ -232,7 +238,7 @@ export function FlightChat({
   useEffect(() => {
     const el = msgs.current;
     if (active && el && stick.current) el.scrollTop = el.scrollHeight;
-  }, [count, asks.length, active]);
+  }, [count, active]);
   // Older events arrive above the reader: keep what they were reading where it was.
   const firstRow = shown[0]?.id;
   const heightBefore = useRef<{ first: string | undefined; height: number } | null>(null);
@@ -252,7 +258,7 @@ export function FlightChat({
   };
 
   const send = async (body: string): Promise<boolean> => {
-    if (!seat?.live) return false;
+    if (!seat) return false;
     const id = `p:${sent.current++}`;
     const seen = all.flatMap((r) => (r.kind === "you" && sameMessage(r.text, body) ? [r.id] : []));
     stick.current = true;
@@ -260,7 +266,14 @@ export function FlightChat({
     setBusy(true);
     setErr(null);
     try {
-      await apiPost(ACTIONS.seatMessage(seat.id), { text: body });
+      const result = await apiPost<CommsSendState | undefined>(ACTIONS.seatMessage(seat.id), {
+        text: body,
+      });
+      if (result?.state !== undefined && tz !== null) {
+        const line = sendStateLine(result, tz);
+        setPending((p) => p.map((m) => (m.id === id ? { ...m, line } : m)));
+      }
+      hub.refetch(RESOURCES.commsFlight.path);
       return true;
     } catch (e) {
       setPending((p) => p.filter((m) => m.id !== id));
@@ -273,48 +286,7 @@ export function FlightChat({
 
   return (
     <>
-      {where === "dock" && (
-        <DockSummary
-          asks={asks}
-          attention={attentionResource}
-          crew={crew}
-          canMessage={seat?.live === true}
-          hideWaiting={needsBeside}
-        />
-      )}
-      {where !== "dock" && asks.length > 0 && (
-        <div className="dwait" id={`${ID_PREFIX[where]}Waiting`}>
-          <div className="dwh">Waiting on you · {asks.length}</div>
-          {asks.map((i) => {
-            const agent = crew?.rows.find((r) => r.id === i.agentId);
-            return (
-              <div className="dask" key={i.key} data-testid="waiting-ask">
-                <Pill tone={i.kind === "decision" ? "warn" : "plain"}>
-                  {/* the not-triaging item is about FLIGHT, not a blocked seat */}
-                  {i.notTriaging ? "FLIGHT" : ATTENTION_LABEL[i.kind]}
-                </Pill>
-                <span className="min0 ellip" title={i.text}>
-                  {i.text}
-                </span>
-                {agent ? (
-                  <AgentTag bare sm id={agent.id} index={agent.index} />
-                ) : (
-                  <span>{i.agentId}</span>
-                )}
-                <span className="spacer" />
-                <button
-                  type="button"
-                  className="sm"
-                  // "FLIGHT is not triaging" lists its items on Needs you's home
-                  onClick={() => openNeed(i)}
-                >
-                  {i.notTriaging ? "Show them" : "Open"}
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {where === "dock" && <DockSummary canMessage={seat !== null} />}
       <div
         className="dmsgs"
         id={`${ID_PREFIX[where]}Msgs`}
@@ -335,7 +307,7 @@ export function FlightChat({
       </div>
       <Composer
         where={where}
-        seat={seat}
+        seat={flight === undefined ? undefined : seat}
         busy={busy}
         err={err}
         onSend={send}
@@ -402,33 +374,7 @@ export function useOverviewDockOverlay(overview: boolean, dock: ReturnType<typeo
   return overview && dock.wide && dock.visible && !dock.collapsed && covers;
 }
 
-/** From this width the Overview's side column, with Needs you in it, sits beside the open dock. */
-const OVERVIEW_BESIDE_QUERY = "(min-width: 2200px)";
-
-/** Whether the Overview shows its Needs you panel beside the dock, so the dock need not repeat it. */
-export function useNeedsBeside(overview: boolean) {
-  const [wide, setWide] = useState(
-    () => typeof matchMedia !== "undefined" && matchMedia(OVERVIEW_BESIDE_QUERY).matches,
-  );
-  useEffect(() => {
-    if (typeof matchMedia === "undefined") return;
-    const media = matchMedia(OVERVIEW_BESIDE_QUERY),
-      update = () => setWide(media.matches);
-    update();
-    media.addEventListener("change", update);
-    return () => media.removeEventListener("change", update);
-  }, []);
-  return overview && wide;
-}
-
-export function Dock({
-  coversPage = false,
-  needsBeside = false,
-}: {
-  coversPage?: boolean;
-  /** The Overview shows beside the dock, so its Needs you panel is already in view. */
-  needsBeside?: boolean;
-} = {}) {
+export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
   const { visible, wide, collapsed, toggle } = useDock();
   // Esc folds the cover from anywhere on the page, and the page behind stays usable.
   useOverlay("overview-flight", coversPage, () => setDockCollapsed(true));
@@ -436,8 +382,6 @@ export function Dock({
   const rail = useRef<HTMLButtonElement>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const drawer = visible && !wide;
-  const waitingItems = useResource<AttentionItem[]>(RESOURCES.attention);
-  const waiting = useNeedsYou().length;
   const fold = () => setDockCollapsed(!collapsed);
   useReturnFocus(drawer);
   useEffect(() => {
@@ -447,8 +391,6 @@ export function Dock({
   const seat = flight?.seat ?? null;
   const stream = useResource<AgentStream>(seat ? RESOURCES.stream(seat.id) : null).data;
   const all = useMemo(() => (seat ? dockRows(stream, NO_DECISIONS) : []), [seat, stream]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
   // The reply last seen with the dock shown; undefined until the stream first loads, so history is not "new".
   const replyIds = useMemo(
@@ -480,20 +422,6 @@ export function Dock({
     return () => setFlightUnread(0);
   }, [unread]);
 
-  const start = async () => {
-    if (!seat) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      await apiPost(ACTIONS.seatStart(seat.id), {});
-    } catch (e) {
-      setErr(failNote(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const live = seat?.live === true;
   return (
     <>
       {drawer && (
@@ -511,22 +439,12 @@ export function Dock({
             <button
               type="button"
               ref={rail}
-              aria-label={`Expand FLIGHT: ${waitingItems.data === undefined ? (waitingItems.error ? "waiting items unavailable" : "waiting items loading") : `${waiting} waiting on you${waitingItems.error ? ", last received count" : ""}`}`}
+              aria-label="Expand FLIGHT"
               aria-expanded="false"
               aria-controls="dockBody"
               onClick={fold}
             >
               <span className="dockrail-name">FLIGHT</span>
-              <span className={waiting ? "warn-t" : "fg2"} aria-hidden="true">
-                {waitingItems.data === undefined ? "…" : `◆ ${waiting}`}
-              </span>
-              <span className="dockrail-caption">
-                {waitingItems.error
-                  ? "Error"
-                  : waitingItems.data === undefined
-                    ? "Loading"
-                    : "waiting"}
-              </span>
             </button>
           </div>
           <div className="dh" id="dockHead">
@@ -535,17 +453,6 @@ export function Dock({
             </h2>
             <BuildChips panel="dock" />
             <span className="spacer" />
-            {seat && !live && (
-              <button
-                type="button"
-                className="primary sm"
-                disabled={busy}
-                onClick={() => void start()}
-              >
-                Start FLIGHT
-              </button>
-            )}
-            {collapsed && waiting > 0 && <Pill tone="warn">{`Waiting on you · ${waiting}`}</Pill>}
             {wide && !collapsed && (
               <button
                 type="button"
@@ -569,13 +476,8 @@ export function Dock({
             </button>
             <DockMeta flight={flight} />
           </div>
-          {err !== null && (
-            <p className="note err" role="alert">
-              {err}
-            </p>
-          )}
           <div className="dockbody" id="dockBody">
-            <FlightChat where="dock" active={looking} needsBeside={needsBeside} />
+            <FlightChat where="dock" active={looking} />
           </div>
         </div>
       </aside>

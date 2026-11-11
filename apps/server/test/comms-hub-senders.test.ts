@@ -50,13 +50,9 @@ beforeEach(() => {
 afterEach(() => store.close());
 
 describe("hub-written messages are the hub's, even with a FLIGHT seat configured", () => {
-  it("stores an applied decision default as MC, kind hub", async () => {
-    expect(await applyDecisionDefaults({ config, store, now: 10 })).toBe(1);
-    expect(store.commsMessage("comms:1")).toMatchObject({
-      from: "MC",
-      senderKind: "hub",
-      to: "CAPCOM",
-    });
+  it("does not manufacture a hub message from an unbound legacy default", async () => {
+    expect(await applyDecisionDefaults({ config, store, now: 10 })).toBe(0);
+    expect(store.commsMessage("comms:1")).toBeNull();
   });
 
   const deps = (senderKind: "hub" | "seat" | "controller" | "flight") => ({

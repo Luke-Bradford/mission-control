@@ -51,7 +51,8 @@ export function useNeedsCount(): NeedsCount {
 
 /** Sort order of a Needs-you list (catalogue 2.5.1): by kind, the most urgent first. */
 export function sortNeeds(items: readonly AttentionItem[]): AttentionItem[] {
-  const rank = (i: AttentionItem) => ATTENTION_KINDS.indexOf(i.kind);
+  // FLIGHT being down comes first: nothing else is triaged until it is started.
+  const rank = (i: AttentionItem) => (i.notTriaging ? -1 : ATTENTION_KINDS.indexOf(i.kind));
   return [...items].sort((a, b) => rank(a) - rank(b));
 }
 

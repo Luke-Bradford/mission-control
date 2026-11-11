@@ -1,0 +1,955 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Telemetry · Mission Control proposal mockup</title>
+<style>
+:root{color-scheme:dark;--bg:#070a0e;--surface:#0c1117;--surface-2:#131a23;--line:#1b2430;--line-2:#2a3646;--fg:#e7eaef;--fg-2:#aab2bf;--muted:#808999;--accent:#56d8e6;--accent-ink:#021417;--accent-soft:rgba(86,216,230,.14);--ok:#45c486;--warn:#f2b53a;--crit:#f1706d;--think:#b8a8f7;--scrim:rgba(5,8,12,.6);--shadow:0 10px 30px rgba(0,0,0,.45);--r1:#3fd0e8;--r2:#e6dc6e;--r3:#f5b5d0;--r4:#d55eed;--mono:"IBM Plex Mono","Cascadia Mono",Consolas,ui-monospace,monospace;--sans:"IBM Plex Sans",system-ui,sans-serif}
+[data-theme=light]{color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface-2:#eef1f5;--line:#dfe3ea;--line-2:#c6cdd8;--fg:#121720;--fg-2:#4a5465;--muted:#646e81;--accent:#0a6b7d;--accent-ink:#fff;--accent-soft:rgba(10,107,125,.1);--ok:#157246;--warn:#8d5b00;--crit:#bb2e2b;--think:#5b47c4;--scrim:rgba(20,28,40,.35);--shadow:0 10px 28px rgba(20,30,50,.16);--r1:#0e6a8a;--r2:#586018;--r3:#a2308f;--r4:#6b5b4b}
+:root{--seat-1:#3987e5;--seat-2:#e15d2a;--seat-3:#199e70;--seat-4:#a86f06;--seat-5:#fa3791;--seat-6:#008300;--seat-7:#7567cb;--seat-8:var(--r1);--seat-9:var(--r2);--seat-10:var(--r3);--seat-11:var(--r4)}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:13px/20px var(--sans);min-height:100vh}
+button,select{font:inherit;color:inherit;background:var(--surface);border:1px solid var(--line-2);border-radius:4px;min-height:24px;padding:0 8px;cursor:pointer}
+button:disabled{cursor:not-allowed;color:var(--muted);opacity:.7}
+button:not(:disabled):hover{border-color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.app{height:100vh;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr) 48px;grid-template-rows:48px 1fr 40px}
+.app.flight-open{grid-template-columns:minmax(0,1fr) 380px}
+.work{container-type:inline-size;min-width:0;min-height:0;overflow:auto;display:grid;grid-template-rows:minmax(0,1fr)}
+.top{grid-column:1/-1;display:flex;align-items:center;gap:16px;padding:0 24px 0 16px;border-bottom:1px solid var(--line);background:var(--surface);min-width:0}
+.brand{font:600 14px/20px var(--mono);letter-spacing:.08em;white-space:nowrap}
+.nav{display:flex;gap:4px;min-width:0}
+.nav a{padding:4px 8px;color:var(--fg-2);text-decoration:none;border-radius:4px;white-space:nowrap;min-height:24px}
+.nav a[aria-current=page]{color:var(--accent);background:var(--accent-soft)}
+.banner{margin-left:auto;white-space:nowrap;border:1px solid var(--warn);color:var(--warn);border-radius:4px;padding:2px 8px;font-size:12px;line-height:16px;min-width:0}
+.flight{grid-column:2;grid-row:2;border-left:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;min-width:0;min-height:0}
+.flight>button{margin:8px;min-height:32px;min-width:32px;writing-mode:vertical-rl;letter-spacing:.08em;font:600 12px/16px var(--mono)}
+.app.flight-open .flight>button{writing-mode:horizontal-tb;align-self:flex-end}
+.dock{padding:0 16px 16px;display:grid;gap:8px;align-content:start;overflow:auto;font-size:12px;line-height:16px}
+.dock h2{margin:0;font-size:14px;line-height:20px}
+.dock p{margin:0;border-left:3px solid var(--line-2);padding-left:8px;color:var(--fg-2)}
+.dock input{min-height:32px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:4px;color:var(--fg);padding:0 8px;font:inherit}
+.keys{grid-column:1/-1;display:flex;gap:16px;align-items:center;padding:0 24px;border-top:1px solid var(--line);background:var(--surface);font-size:12px;line-height:16px;color:var(--fg-2);overflow:hidden;white-space:nowrap}
+kbd{font:11px/16px var(--mono);border:1px solid var(--line-2);border-radius:4px;padding:0 4px}
+.canvas{height:100%;padding:8px 24px 16px;display:grid;grid-template-rows:40px auto 32px 56px minmax(520px,1fr);gap:8px;min-width:0}
+@container (max-width:1551px){.canvas{padding:8px 16px 16px}}
+#tabpanel{display:grid;min-height:0}
+.toolbar{display:flex;align-items:center;gap:12px;min-width:0}
+h1{font-size:20px;line-height:28px;margin:0 4px 0 0;white-space:nowrap}
+.seg{display:flex;gap:4px}
+.seg button{min-width:36px;min-height:32px}
+.seg button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+.filters{display:flex;gap:12px;align-items:center}
+.pick,.filters label{display:flex;gap:4px;align-items:center;color:var(--fg-2);font-size:12px}
+.filters select{min-height:32px;width:88px}
+.grow{flex:1}
+.toolbar .ctl{min-height:32px}
+.band{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px}
+.stat{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:8px 12px;min-width:0;display:grid;align-content:start}
+.stat-label{font-size:12px;line-height:16px;color:var(--fg-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stat-main{display:flex;align-items:baseline;gap:4px;min-width:0}
+.stat-value{font:600 20px/28px var(--sans);font-variant-numeric:tabular-nums;color:var(--fg);background:none;border:0;border-bottom:1px dotted var(--accent);border-radius:0;padding:0;min-height:24px;white-space:nowrap}
+.stat-value[data-drill=needs-build]{border-bottom-style:dashed;border-bottom-color:var(--warn)}
+.stat-value:hover{color:var(--accent)}
+.stat-unit{font-size:12px;line-height:16px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.stat-sub{font-size:12px;line-height:16px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.stat-def{display:none;position:absolute;z-index:5;top:100%;left:0;margin-top:4px;width:max-content;max-width:min(280px,calc(100vw - 48px));padding:8px 12px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:8px;box-shadow:var(--shadow);font-size:12px;line-height:16px;color:var(--fg)}
+.stat:hover .stat-def,.stat:focus-within .stat-def{display:block}
+.band .stat:nth-last-child(-n+3) .stat-def,.summary .stat:nth-last-child(-n+2) .stat-def{left:auto;right:0}
+.stat[data-stat=health] .stat-value{font-size:16px;line-height:20px;white-space:normal;text-align:left}
+.stat[data-stat=health] .stat-sub{-webkit-line-clamp:1}
+.stat-unit:empty{display:none}
+.stat.v-watch .stat-value::before{content:"◆ ";color:var(--warn)}
+.stat.v-attention .stat-value::before{content:"▲ ";color:var(--crit)}
+.stat.v-healthy .stat-value::before{content:"● ";color:var(--ok)}
+.tabsrow{display:flex;align-items:flex-end;border-bottom:1px solid var(--line);min-width:0}
+[role=tablist]{display:flex;gap:4px}
+[role=tab]{border:0;border-bottom:2px solid transparent;border-radius:4px 4px 0 0;min-height:32px;background:none;color:var(--fg-2);padding:0 16px}
+[role=tab][aria-selected=true]{color:var(--accent);border-bottom-color:var(--accent);background:var(--accent-soft)}
+.chip{margin-left:auto;align-self:center;font-size:12px;line-height:16px;padding:2px 8px;border-radius:4px;border:1px solid var(--warn);color:var(--warn);white-space:nowrap}
+.chip.crit{border-color:var(--crit);color:var(--crit)}
+.summary{display:grid;gap:8px;align-items:stretch}
+.summary .scope{padding:4px 0;font-size:12px;line-height:16px;color:var(--fg-2);display:grid;align-content:center;min-width:0}
+.summary .stat{padding:4px 12px}
+.summary .stat-main{padding-right:44px}
+.summary .stat-sub{position:absolute;bottom:8px;right:12px;display:block;white-space:nowrap}
+.summary .stat-cmp{display:none}
+.summary .notcollected{border:1px dashed var(--line-2);border-radius:8px;padding:4px 12px;font-size:12px;line-height:16px;color:var(--fg-2);display:grid;align-content:center}
+.grid{display:grid;gap:8px;min-height:0;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(256px,1fr))}
+.grid.dim{opacity:.72}
+.grid[data-n="2"]{grid-template-columns:minmax(0,1fr)}
+.grid[data-view=table]{grid-template-rows:minmax(240px,1fr)}
+.grid[data-view=table][data-n="2"]{grid-template-columns:minmax(0,3fr) minmax(0,2fr)}
+.grid[data-view=table][data-n="1"]{grid-template-columns:minmax(0,1fr)}
+.grid[data-state]{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(240px,1fr)}
+.grid[data-n="3"] .panel:first-child{grid-row:span 2}
+@container (min-width:2152px){
+ .grid[data-view=charts]:not([data-state]){grid-template-columns:repeat(3,minmax(0,1fr))}
+ .grid[data-n="4"] .panel:nth-child(1),.grid[data-n="4"] .panel:nth-child(4){grid-column:span 2}
+ .grid[data-n="3"][data-view=charts]:not([data-state]){grid-template-rows:minmax(256px,1fr)}
+ .grid[data-n="3"] .panel:first-child{grid-row:auto}
+ .grid[data-n="2"][data-view=charts]:not([data-state]){grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:minmax(256px,1fr)}
+}
+@media (min-width:3200px){html{zoom:1.5}body,.app{height:calc(100vh / 1.5);min-height:calc(100vh / 1.5)}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 16px;min-width:0;min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto;gap:8px;overflow:hidden}
+.phead{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.phead h3{margin:0;font-size:14px;line-height:20px}
+.phead .sub{font-size:12px;line-height:16px;color:var(--muted)}
+.pbody{display:flex;gap:16px;min-height:0;min-width:0}
+.pnote{margin:0;font-size:12px;line-height:16px;color:var(--fg-2);border-left:3px solid var(--line-2);padding-left:8px}
+.pnote+.pnote{margin-top:4px}
+.chart{flex:1 1 auto;min-width:0;display:grid;grid-template-columns:36px minmax(0,1fr);grid-template-rows:minmax(0,1fr) 20px}
+@container (min-width:1852px) and (max-width:2151px){.grid[data-view=charts]:not([data-n="2"]) .chart{max-width:720px}}
+.yax{position:relative}
+.yax span{position:absolute;right:8px;transform:translateY(50%);font:11px/16px var(--mono);color:var(--muted)}
+.plot{position:relative;border-left:1px solid var(--line-2);border-bottom:1px solid var(--line-2);min-height:120px}
+.plot svg{position:absolute;inset:0;width:100%;height:100%;overflow:hidden}
+.plot path,.plot rect{vector-effect:non-scaling-stroke}
+.plot .gl{position:absolute;left:0;right:0;border-top:1px solid var(--line)}
+.plot .guide{position:absolute;left:0;right:0;border-top:1px dashed var(--warn)}
+.plot .guide span{position:absolute;right:4px;top:-16px;font-size:12px;line-height:16px;color:var(--fg-2)}
+.gapband,.band-lock{position:absolute;top:0;bottom:0}
+.gapband{background:repeating-linear-gradient(135deg,transparent 0 4px,var(--line-2) 4px 5px);border-left:1px solid var(--line-2)}
+.band-lock{background:var(--warn);opacity:.16}
+.evt{position:absolute;top:0;bottom:0;border-left:1px dashed var(--think)}
+.cur{position:absolute;top:0;bottom:0;border-left:1px solid var(--fg-2);display:none;pointer-events:none}
+.xax{grid-column:2;position:relative}
+.xax span{position:absolute;top:4px;transform:translateX(-50%);font:11px/16px var(--mono);color:var(--muted);white-space:nowrap}
+.xax span.first{transform:none}.xax span.last{transform:translateX(-100%)}
+.readout{flex:0 0 148px;margin:0;padding:0;list-style:none;overflow:auto;font-size:12px;line-height:16px;min-height:0}
+.readout li{display:flex;align-items:center;gap:4px;min-height:24px}
+.readout .cell{min-width:24px;margin:0}
+.readout .cell[aria-disabled=true]{border-bottom-color:transparent;cursor:default}
+.readout .sw.st{width:16px;height:10px;border-radius:2px}
+.readout .sw{flex:none;width:12px;height:4px;border-radius:2px;background:var(--c,var(--accent))}
+.readout .sw.dash{background:none;border-top:2px dashed var(--c,var(--think));height:0;border-radius:0}
+.readout .nm{flex:1;min-width:0;overflow-wrap:anywhere;color:var(--fg-2)}
+.readout .vl{font-variant-numeric:tabular-nums;color:var(--fg)}
+.rows{flex:1;min-width:0;overflow:auto;display:grid;align-content:start;grid-auto-rows:minmax(18px,1fr)}
+.rows.few{grid-auto-rows:minmax(18px,40px)}
+.rows .r{display:grid;grid-template-columns:minmax(88px,28%) minmax(0,1fr) minmax(56px,auto);gap:8px;align-items:center;min-height:18px;font-size:12px;line-height:16px}
+.rows .lb{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg-2)}
+.rows .tr{position:relative;height:12px;background:var(--surface-2);border-radius:2px;display:flex;overflow:hidden}
+.rows .tr i{display:block;height:100%;background:var(--c,var(--accent))}
+.rows .tr i.rng{position:absolute;top:3px;height:6px;border-radius:3px;background:var(--accent)}
+.rows .tr b{position:absolute;top:0;width:2px;height:100%;background:var(--fg)}
+.rows .tr .tick{position:absolute;top:0;bottom:0;border-left:1px dashed var(--warn)}
+.rows .tr .tick.stop{border-left-color:var(--crit)}
+.rows .vl{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.rows .hist{display:block;width:72px;height:16px}
+.rows .r.q{grid-template-columns:minmax(72px,20%) minmax(0,1fr) 72px minmax(120px,auto)}
+.lanes{flex:1;min-width:0;overflow:auto;display:grid;align-content:start;grid-auto-rows:minmax(18px,1fr)}
+.lane{display:grid;grid-template-columns:72px minmax(0,1fr);gap:8px;align-items:center;min-height:18px;font-size:12px;line-height:16px}
+.lane .tr{position:relative;height:14px;background:var(--surface-2);border-radius:2px;overflow:hidden}
+.lane .sp{position:absolute;top:0;bottom:0}
+.sp.running,.sw.st-running,.rows .tr i.s-running{background:var(--ok)}
+.sp.waiting,.sw.st-waiting,.rows .tr i.s-waiting{background:repeating-linear-gradient(135deg,var(--warn) 0 3px,transparent 3px 5px);border:1px solid var(--warn)}
+.sp.parked,.sw.st-parked,.rows .tr i.s-parked{background:radial-gradient(circle,var(--fg-2) 1px,transparent 1.5px) 0 0/5px 5px,var(--surface-2)}
+.sp.idle,.sw.st-idle,.rows .tr i.s-idle{background:none;border-bottom:2px solid var(--muted);border-radius:0}
+.seat{display:inline-flex;align-items:center;gap:4px;font:600 12px/16px var(--mono);white-space:nowrap}
+.seat::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--c)}
+.cell{font:inherit;color:inherit;background:none;border:0;border-bottom:1px dotted var(--accent);border-radius:0;padding:0;min-height:24px;margin:-3px 0;white-space:nowrap}
+.cell[data-drill=needs-build]{border-bottom-style:dashed;border-bottom-color:var(--warn)}
+.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;max-width:360px;overflow-wrap:anywhere;white-space:normal}
+[data-tip]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tablewrap{flex:1;min-width:0;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:12px;line-height:16px}
+th,td{height:32px;padding:4px 8px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+th{color:var(--muted);font-weight:500;position:sticky;top:0;background:var(--surface)}
+th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
+.state{display:grid;place-content:center;justify-items:center;gap:12px;text-align:center;color:var(--fg-2);padding:32px}
+.state p{margin:0;font-size:14px}
+.skeleton{flex:1;border-radius:4px;background:linear-gradient(90deg,var(--surface-2),var(--line),var(--surface-2));opacity:.7}
+.notice{position:fixed;right:24px;bottom:24px;max-width:420px;z-index:30;background:var(--surface-2);border:1px solid var(--accent);border-radius:8px;padding:8px 12px;box-shadow:var(--shadow);font-size:13px}
+.notice:empty{display:none}
+.tip{position:fixed;left:24px;bottom:56px;max-width:min(480px,calc(100vw - 48px));z-index:30;background:var(--surface-2);border:1px solid var(--line-2);border-radius:8px;padding:8px 12px;box-shadow:var(--shadow);font-size:12px;line-height:16px;overflow-wrap:anywhere}
+.scrim{position:fixed;inset:0;background:var(--scrim);z-index:40}
+[hidden]{display:none!important}
+#dlg{position:fixed;z-index:41;top:50%;left:50%;transform:translate(-50%,-50%);width:min(720px,calc(100vw - 48px));max-height:calc(100vh - 48px);overflow:auto;background:var(--surface);border:1px solid var(--line-2);border-radius:8px;box-shadow:var(--shadow);padding:16px 24px}
+#dlg h2{font-size:14px;line-height:20px;margin:0 0 8px}
+#dlg .dlg-foot{display:flex;justify-content:flex-end;margin-top:16px}
+.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <span class="brand">MISSION CONTROL</span>
+    <nav class="nav" id="nav" aria-label="Pages"></nav>
+    <span class="banner">Proposal mockup. Every number is fictional, shaped to the hub's real ranges.</span>
+  </header>
+  <div class="work" tabindex="0" aria-label="Telemetry panels"><main class="canvas" id="canvas">
+    <div class="toolbar">
+      <h1>Telemetry</h1>
+      <div class="seg" id="range" role="group" aria-label="Range"></div>
+      <div class="filters" id="filters"></div>
+      <span class="grow"></span>
+      <div class="seg" id="view" role="group" aria-label="View">
+        <button type="button" data-view="charts">Charts</button>
+        <button type="button" data-view="table">Table</button>
+      </div>
+      <label class="pick"><span>State</span><select class="ctl" id="state" aria-label="Mockup state"></select></label>
+      <button type="button" class="ctl" id="theme">Theme</button>
+    </div>
+    <section class="band" id="band" aria-label="Health band"></section>
+    <div class="tabsrow"><div role="tablist" id="tabs" aria-label="Telemetry tabs"></div><span class="chip" id="chip" hidden></span></div>
+    <section class="summary" id="summary" aria-label="Tab summary"></section>
+    <section id="tabpanel" role="tabpanel"></section>
+  </main></div>
+  <aside class="flight" id="flight" aria-label="FLIGHT">
+    <button type="button" id="flight-toggle" aria-expanded="false" aria-controls="dock">FLIGHT</button>
+    <div class="dock" id="dock" hidden>
+      <h2>FLIGHT</h2>
+      <p>dev-2 is waiting on you: which fixture should the import test use?</p>
+      <p>Cost today is under the 7-day median. No action needed.</p>
+      <p>acct-a · 7d is at 78%. Alert at 80%.</p>
+      <input type="text" aria-label="Message FLIGHT" placeholder="Message FLIGHT" />
+    </div>
+  </aside>
+  <footer class="keys"><span><kbd>g</kbd> then <kbd>o</kbd> <kbd>f</kbd> <kbd>b</kbd> <kbd>a</kbd> <kbd>m</kbd> <kbd>c</kbd> <kbd>t</kbd> pages</span><span><kbd>f</kbd> FLIGHT</span><span><kbd>j</kbd><kbd>k</kbd> next agent</span><span><kbd>/</kbd> message agent</span><span><kbd>i</kbd> interrupt</span></footer>
+</div>
+<div class="tip" id="tip" role="tooltip" hidden></div>
+<div class="notice" id="notice" role="status" aria-live="polite"></div>
+<div class="scrim" id="scrim" hidden></div>
+<div id="dlg" role="dialog" aria-modal="true" aria-labelledby="dlg-title" tabindex="-1" hidden>
+  <h2 id="dlg-title">Runs behind this number</h2>
+  <p id="dlg-what" style="margin:0 0 8px;color:var(--fg-2)"></p>
+  <div class="tablewrap" id="dlg-table"></div>
+  <p class="pnote" style="margin-top:12px">Proposal: this list needs a new route. No crew-wide filtered runs list exists today; the agent runs route serves one seat.</p>
+  <div class="dlg-foot"><button type="button" id="dlg-close" class="primary" style="min-height:32px">Close</button></div>
+</div>
+<script>
+(function () {
+  "use strict";
+  var Q = new URLSearchParams(location.search);
+  var RANGES = ["1h", "6h", "24h", "7d"];
+  var SHOWN_RANGE = "24h";
+  var TABS = [
+    { id: "crew", label: "Crew", fixed: null, filters: ["agent"] },
+    { id: "cost", label: "Cost and tokens", fixed: null, filters: ["agent", "account", "ticket"] },
+    { id: "throughput", label: "Throughput", fixed: "Last 14 days", filters: [] },
+    { id: "quality", label: "Quality", fixed: "Last 14 days", filters: [] },
+    { id: "machine", label: "Machine", fixed: null, filters: [] }
+  ];
+  var STATES = ["normal", "loading", "empty", "error", "stale", "disconnected"];
+  var NAV = [["Ov", "Overview"], ["Fl", "FLIGHT"], ["Bd", "Board"], ["Ag", "Agents"], ["Mp", "Map"], ["Cm", "Comms"], ["Tl", "Telemetry"], ["Au", "Audit"]];
+
+  /* ---------- fictional fixtures (seeded, so every render is the same) ---------- */
+  function rng(seed) { var a = seed; return function () { a |= 0; a = (a + 0x6d2b79f5) | 0; var t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  var N = 72;
+  var SEATS = ["flight", "dev-1", "dev-2", "dev-3", "rev-1", "rev-2", "qa-1", "plan-1", "plan-2", "ops-1", "loop-1"];
+  function seatColor(i) { return "var(--seat-" + (i + 1) + ")"; }
+  var DAYS = ["22 Oct", "23 Oct", "24 Oct", "25 Oct", "26 Oct", "27 Oct", "28 Oct", "29 Oct", "30 Oct", "31 Oct", "1 Nov", "2 Nov", "3 Nov", "4 Nov"];
+  var X14 = [[0, "22 Oct"], [4, "26 Oct"], [8, "30 Oct"], [11, "2 Nov"], [13, "4 Nov"]];
+  var XT = [[0, "14:30"], [17.75, "20:30"], [35.5, "02:30"], [53.25, "08:30"], [71, "now"]];
+  function clock(i) { var m = (14 * 60 + 30 + i * 20) % 1440; return pad(Math.floor(m / 60)) + ":" + pad(m % 60); }
+  function pad(n) { return (n < 10 ? "0" : "") + n; }
+  function round1(n) { return Math.round(n * 10) / 10; }
+  function sum(a) { return a.reduce(function (x, y) { return x + (y || 0); }, 0); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]; }); }
+  function series(n, base, amp, seed, period) { var r = rng(seed); var out = []; for (var i = 0; i < n; i++) out.push(Math.max(0.5, base + amp * Math.sin((i / (period || 11)) + seed) + (r() - 0.5) * amp * 0.8)); return out; }
+  function cap100(a) { return a.map(function (v) { return Math.min(100, round1(v)); }); }
+
+  var F = {};
+  F.seatsConfigured = 11; F.seatsRunning = 9; F.waiting = 1; F.stalled = 0; F.machineWarning = false;
+  F.quota = [
+    { name: "acct-a · 5h", pct: 42, alertAt: 80, stopAt: 95, reset: "resets in 1h 40m", hist: series(N, 38, 14, 3, 9) },
+    { name: "acct-a · 7d", pct: 78, alertAt: 80, stopAt: 95, reset: "resets in 2d 4h", hist: series(N, 70, 8, 4, 30) },
+    { name: "acct-b · 5h", pct: 31, alertAt: 80, stopAt: 95, reset: "resets in 3h 5m", hist: series(N, 28, 12, 5, 8) },
+    { name: "acct-b · 7d", pct: 64, alertAt: 80, stopAt: 95, reset: "resets in 3d 9h", hist: series(N, 58, 6, 6, 28) }
+  ];
+  var WORST = Q.get("data") === "worst";
+  if (WORST) F.quota[1].pct = 96;
+  F.quota.forEach(function (q) { q.hist[N - 1] = q.pct; q.hist = cap100(q.hist); });
+  F.memFree = 62; F.cpu = 41; F.swap = 6;
+
+  F.lanes = SEATS.map(function (id, s) {
+    var r = rng(100 + s), at = 0, spans = [];
+    while (at < 1) {
+      var len = 0.04 + r() * 0.14, p = r();
+      spans.push({ st: p < 0.58 ? "running" : p < 0.74 ? "waiting" : p < 0.9 ? "idle" : "parked", from: at, to: Math.min(1, at + len) }); at += len;
+    }
+    var now = s === 9 ? "waiting" : s === 10 ? "parked" : "running";
+    spans[spans.length - 1].st = now;
+    return { id: id, color: seatColor(s), spans: spans, now: now };
+  });
+  F.time = SEATS.map(function (id, s) {
+    var r = rng(200 + s), w = 38 + Math.round(r() * 40), wt = 4 + Math.round(r() * 12), pk = Math.round(r() * 8);
+    return { id: id, color: seatColor(s), working: w, waiting: wt, parked: pk, idle: 100 - w - wt - pk };
+  });
+  F.tools = [["read file", 5120, 38, 180, 12], ["edit file", 1840, 55, 240, 9], ["search", 2210, 120, 640, 4], ["shell", 1630, 410, 4800, 61], ["test run", 214, 52000, 168000, 18], ["web fetch", 96, 760, 3900, 7], ["list files", 980, 30, 150, 1], ["subagent", 74, 41000, 190000, 6]];
+  F.subagents = [["dev-1", "explore", "08:12", "2m 10s", "182k", "ok"], ["dev-2", "review-fix", "09:40", "6m 02s", "421k", "ok"], ["dev-3", "explore", "10:03", "1m 48s", "96k", "ok"], ["rev-1", "diff-read", "11:26", "3m 31s", "240k", "ok"], ["dev-1", "explore", "12:51", "2m 09s", "174k", "failed"], ["qa-1", "browser-check", "13:34", "9m 20s", "515k", "ok"]];
+  F.capcom = { medianMin: 4.3, p90Min: 19, stopped: 2 };
+
+  F.spend = [];
+  for (var h = 0; h < 24; h++) { var hr = rng(300 + h); F.spend.push(h >= 12 && h <= 14 ? null : { plan: round1(0.4 + hr() * 0.7), build: round1(1 + hr() * 2.4), review: round1(0.3 + hr() * 1.1) }); }
+  // Hourly fixture buckets start yesterday at 14:30; the first wholly-today bucket is 10 (00:30).
+  F.costToday = Math.round(sum(F.spend.slice(10).map(function (b) { return b ? b.plan + b.build + b.review : 0; })) * 100) / 100;
+  F.cost24h = Math.round(sum(F.spend.map(function (b) { return b ? b.plan + b.build + b.review : 0; })) * 100) / 100;
+  F.costMedian7 = 41;
+  F.byTicket = [["demo#112", "Retry the nightly sync when the first attempt times out", 23.8], ["demo#104", "Split the settings page into account and workspace tabs", 19.4], ["demo#118", "Cache the owner lookup for repeated imports", 16.2], ["demo#109", "Show the import error next to the row that caused it", 13.7], ["demo#121", "Add keyboard shortcuts to the review queue", 11.9], ["demo#101", "Fix the date range on the monthly export", 9.6], ["demo#115", "Rename the archive action to match the docs", 7.8], ["demo#107", "Move the notes field above the attachments", 6.1], ["demo#123", "Stop the sidebar scrolling the page behind it", 4.4], ["demo#120", "Tidy the empty state copy", 2.7]];
+  if (WORST) {
+    F.byTicket[0][1] = new Array(301).join("x");
+    for (var w = 0; w < 40; w++) F.byTicket.push(["demo#" + (200 + w), "Extra ticket " + w + " with a title", round1(2.5 - w * 0.05)]);
+  }
+  F.tpm = { top: [series(N, 90, 40, 11, 9), series(N, 70, 30, 12, 10), series(N, 55, 25, 13, 12)], other: series(N, 60, 20, 14, 13), total: [] };
+  for (var i = 0; i < N; i++) F.tpm.total.push(F.tpm.top[0][i] + F.tpm.top[1][i] + F.tpm.top[2][i] + F.tpm.other[i]);
+  [30, 31, 32].forEach(function (k) { F.tpm.total[k] = null; F.tpm.top.forEach(function (s) { s[k] = null; }); F.tpm.other[k] = null; });
+  F.costCover = 83; F.tokenCover = 91;
+  F.totals = SEATS.slice(0, 8).map(function (id, s) { var r = rng(400 + s); return [id, s % 2 ? "acct-b" : "acct-a", s % 3 ? "model-b" : "model-a", Math.round(2000 + r() * 6000) + "k", Math.round(300 + r() * 900) + "k", Math.round(9000 + r() * 22000) + "k", Math.round(80 + r() * 15) + "%", Math.round(80 + r() * 200), Math.round(300 + r() * 900), "$" + (3 + r() * 9).toFixed(2)]; });
+
+  F.merged = [3, 5, 6, 7, 8, 4, 2, 6, 8, 9, 7, 10, 6, 7];
+  F.mergedMean = round1(sum(F.merged) / 14);
+  var cr = rng(500); F.cycleDots = [];
+  for (var d = 2; d < 14; d++) { var kk = 1 + Math.floor(cr() * 3); for (var j = 0; j < kk; j++) F.cycleDots.push({ day: d, h: round1(3 + cr() * cr() * 52) }); }
+  F.cycleP50 = []; F.cycleP85 = [];
+  for (var d2 = 0; d2 < 14; d2++) {
+    var xs = F.cycleDots.filter(function (p) { return p.day <= d2; }).map(function (p) { return p.h; }).sort(function (a, b) { return a - b; });
+    if (d2 < 2 || xs.length < 4) { F.cycleP50.push(null); F.cycleP85.push(null); }
+    else { F.cycleP50.push(xs[Math.floor(xs.length * 0.5)]); F.cycleP85.push(xs[Math.floor(xs.length * 0.85)]); }
+  }
+  F.bySize = [["XS", 3.2, 7.1, 14], ["S", 8.4, 16.5, 31], ["M", 18.3, 36.2, 29], ["L", 31.0, 61.5, 9]];
+  F.inProgress = [null, null, 4, 4, 6, 7, 5, 4, 6, 8, 9, 7, 8, 8];
+  F.tickets = F.cycleDots.slice(-12).map(function (p, i) { var t = F.byTicket[i % F.byTicket.length]; return [t[0], t[1], ["XS", "S", "M", "L"][i % 4], DAYS[p.day], p.h + " h", "$" + t[2].toFixed(2)]; });
+
+  F.ci = DAYS.map(function (_, i) { return i < 7 ? null : Math.round(72 + 24 * Math.abs(Math.sin(i * 1.7))); });
+  F.firstPass = DAYS.map(function (_, i) { return i > 10 ? null : Math.round(58 + 28 * Math.abs(Math.sin(i * 1.3 + 1))); });
+  F.rounds = DAYS.map(function (_, i) { return i > 10 ? null : round1(1.1 + 1.2 * Math.abs(Math.sin(i * 0.9 + 2))); });
+  function mean(a) { var v = a.filter(function (x) { return x !== null; }); return Math.round(sum(v) / v.length); }
+  F.ciNow = mean(F.ci); F.fpNow = mean(F.firstPass);
+  F.guard = [["outside-area edit", 31], ["protected file", 22], ["oversized change", 14], ["credential read", 9], ["unsafe delete", 7], ["network call", 6], ["lock bypass", 4], ["unreviewed merge", 2], ["unknown tool", 1]];
+  F.escaped = [["demo#88", "Export drops the last row", "found by user", "Important", "27 Oct"], ["demo#91", "Retry loops after a 404", "found in review of a later PR", "Important", "29 Oct"], ["demo#95", "Archive keeps the old label", "found by user", "Minor", "30 Oct"], ["demo#97", "Settings reset on reload", "found by user", "Critical", "31 Oct"], ["demo#99", "Sort order lost after edit", "found in QA", "Minor", "2 Nov"]];
+
+  F.cpuS = cap100(series(N, 42, 26, 21, 7)); F.memFreeS = cap100(series(N, 58, 14, 22, 15));
+  F.cpuS[N - 1] = F.cpu; F.memFreeS[N - 1] = F.memFree;
+  F.holds = [[0.1, 0.16], [0.31, 0.37], [0.55, 0.6], [0.82, 0.88]];
+  F.pressure = cap100(series(N, 34, 18, 23, 9)); F.swapS = cap100(series(N, 8, 5, 24, 17));
+  F.pressure[N - 1] = 38; F.swapS[N - 1] = F.swap;
+  F.memAgents = series(N, 13, 3, 25, 12);
+  F.memTests = series(N, 5, 4, 26, 6).map(function (v, i) { return F.holds.some(function (hd) { return i / N >= hd[0] && i / N <= hd[1]; }) ? v + 4 : 0.5; });
+  F.memOther = series(N, 4, 0.6, 27, 20);
+  F.lockRows = [["dev-2", "15:02", "0m 40s", "6m 10s", "passed"], ["dev-1", "17:44", "2m 05s", "5m 30s", "passed"], ["dev-3", "20:19", "0m 00s", "7m 02s", "failed"], ["dev-2", "23:51", "1m 12s", "6m 44s", "passed"], ["dev-1", "04:36", "0m 00s", "5m 58s", "passed"], ["qa-1", "09:08", "3m 20s", "8m 11s", "stopped"], ["dev-3", "11:27", "0m 25s", "6m 33s", "passed"], ["dev-2", "13:40", "0m 00s", "6m 05s", "passed"]];
+  F.lockWaitMin = 8;
+  F.events = [{ at: 0.28, label: "crew paused 20:50" }, { at: 0.62, label: "hub update 05:10" }];
+
+  if (WORST) ["tools", "subagents", "totals", "lockRows", "tickets", "escaped"].forEach(function (k) { var base = F[k].slice(); for (var c = 0; c < 6; c++) F[k] = F[k].concat(base); });
+
+  /* ---------- stats: label, value, unit, window, definition, drill ---------- */
+  function verdict() {
+    var q = F.quota;
+    var hit = q.filter(function (w) { return w.pct >= w.stopAt; })[0];
+    if (hit || F.machineWarning || F.stalled > 0) return ["Needs attention", hit ? hit.name + " at stop level" : F.machineWarning ? "machine at its capacity warning" : F.stalled + " seat stalled"];
+    if (q.some(function (w) { return w.pct >= w.alertAt; }) || F.waiting > 0) return ["Watch", F.seatsRunning + " of " + F.seatsConfigured + " running · " + F.waiting + " question waiting"];
+    return ["Healthy", F.seatsRunning + " of " + F.seatsConfigured + " seats running"];
+  }
+  function money(n) { return "$" + n.toFixed(2); }
+  function S(id, label, value, unit, win, def, drill, target, cmp) { return { id: id, label: label, value: value, unit: unit, window: win, def: def, drill: drill, target: target, cmp: cmp || "" }; }
+  var V = verdict(), TQ = F.quota.slice().sort(function (a, b) { return b.pct - a.pct; })[0];
+  var BAND = [
+    S("health", "Crew health", V[0], "verdict", "now", "Verdict from the rules: Needs attention for a quota at its stop level, a machine warning or a stalled or errored seat; Watch for a quota at its alert level or a waiting seat question; otherwise Healthy.", "exists", "the Needs you list", V[1]),
+    S("response", "Your response", "4m 20s", "median", "today", "Median time you took to answer a seat's question.", "needs-build", "the runs for each answered question", "14 answered"),
+    S("cost", "~Cost", money(F.costToday), "USD", "today", "API-equivalent estimate of today's spend. A subscription is not billed per token. Compared with the daily median of the last 7 days.", "needs-build", "the runs that make up today's cost", "vs " + money(F.costMedian7) + " 7-day median"),
+    S("merged", "Merged", String(F.merged[13]), "PRs", "today", "Pull requests merged today, compared with the daily mean of the last 14 days.", "exists", "Board, stage merged", "vs " + F.mergedMean.toFixed(1) + " 14-day mean"),
+    S("ci", "CI first push", String(F.ciNow), "% of merged PRs", "14d", "Share of merged PRs whose checks were green on the first push, last 14 days.", "needs-build", "the merged PRs behind this share", "since 29 Oct"),
+    S("review", "First-pass review", String(F.fpNow), "% of reviewed PRs", "14d", "Share of reviewed PRs with no blocking finding in round 1, last 14 days.", "needs-build", "the reviewed PRs behind this share", "last review 1 Nov"),
+    S("quota", "Tightest quota", String(TQ.pct), "% used", "now", "Highest used share of any account window, with its reset. Alert at 80%, stop at 95%.", "exists", "Cost and tokens, Quota used", TQ.name + " · " + TQ.reset),
+    S("machine", "Machine", String(F.memFree), "% memory free", "now", "Memory pressure free and CPU now, with the capacity warning. The warning shows below 20% memory free or above 90% CPU.", "exists", "Machine, CPU and memory", "CPU " + F.cpu + "% · no warning")
+  ];
+  var SUMMARY = {
+    crew: [
+      S("seats", "Seats running", F.seatsRunning + " of " + F.seatsConfigured, "seats", "now", "Seats with a live run, of the seats configured.", "exists", "the Agents page"),
+      S("waiting", "Waiting on you", String(F.waiting), "questions", "now", "Seat questions with no answer yet.", "exists", "the Needs you list"),
+      S("median", "Median response", F.capcom.medianMin.toFixed(1), "min", "today", "Median time you took to answer a seat's question.", "needs-build", "the runs for each answered question"),
+      S("p90", "Slowest 10%", String(F.capcom.p90Min), "min", "today", "The response time that 90% of today's answers beat.", "needs-build", "the slowest answered questions"),
+      S("stopped", "Runs you stopped", String(F.capcom.stopped), "runs", "today", "Runs you ended before they finished.", "needs-build", "the stopped runs"),
+      S("tools", "Tool calls", "12.4k", "calls", "today", "Tool calls made by all seats today.", "needs-build", "the runs with the most tool calls")
+    ],
+    cost: [
+      S("cost", "~Cost", money(F.costToday), "USD", "today", "API-equivalent estimate of today's spend.", "needs-build", "the runs that make up today's cost"),
+      S("tokens", "Tokens", "38.2M", "in + out", "today", "Input plus output tokens today. Cache reads are counted separately.", "needs-build", "the runs that make up today's tokens"),
+      S("cache", "Cache hit", "87", "% of input", "today", "Share of input tokens served from cache.", "needs-build", "the runs with the lowest cache hit"),
+      S("perticket", "~Cost per merged ticket", "$18.60", "USD", "14d", "API-equivalent cost of every run on a ticket, divided by merged tickets, last 14 days.", "exists", "Board, stage merged"),
+      S("ccover", "Cost coverage", String(F.costCover), "% of runs", "24h", "Runs that reported a cost, of all runs in the window.", "needs-build", "the runs that reported no cost"),
+      S("tcover", "Tokens coverage", String(F.tokenCover), "% of runs", "24h", "Runs that reported tokens, of all runs in the window.", "needs-build", "the runs that reported no tokens")
+    ],
+    throughput: [
+      S("mtoday", "Merged", String(F.merged[13]), "PRs", "today", "Pull requests merged today.", "exists", "Board, stage merged"),
+      S("m14", "Merged", String(sum(F.merged)), "PRs", "14d", "Pull requests merged in the last 14 days.", "exists", "Board, stage merged"),
+      S("p50", "Cycle time p50", "14.2", "hours", "14d", "Median hours from a ticket's first move into Ready to Done.", "exists", "a ticket's timeline"),
+      S("p85", "Cycle time p85", "31.8", "hours", "14d", "85% of tickets finished faster than this.", "exists", "a ticket's timeline"),
+      S("wip", "Tickets in progress", String(F.inProgress[13]), "tickets", "now", "Tickets started and not yet merged.", "exists", "Board, stage in progress"),
+      S("cpr", "Commits per run", "3.4", "commits", "14d", "Commits per finished crew run, last 14 days.", "needs-build", "the runs behind this average")
+    ],
+    quality: [
+      S("ci", "CI first push", String(F.ciNow), "% of merged PRs", "14d", "Share of merged PRs whose checks were green on the first push.", "needs-build", "the merged PRs behind this share"),
+      S("fp", "First-pass review", String(F.fpNow), "% of reviewed PRs", "14d", "Share of reviewed PRs with no blocking finding in round 1.", "needs-build", "the reviewed PRs behind this share"),
+      S("rounds", "Review rounds per PR", "1.7", "rounds", "14d", "Average review rounds before a PR merged.", "exists", "Audit, review tab"),
+      S("findings", "RETRO findings per PR", "4.2", "findings", "14d", "Average findings a reviewer recorded per PR.", "exists", "Audit, review tab"),
+      S("wait", "Human review wait", "52", "min median", "14d", "How long a finished PR waited for your review, median.", "needs-build", "the PRs that waited longest"),
+      S("sent", "PRs sent back", "6", "PRs", "14d", "PRs a reviewer sent back at least once.", "exists", "Audit, review tab")
+    ],
+    machine: [
+      S("mem", "Memory free", String(F.memFree), "% of memory", "now", "Memory pressure free now.", "needs-build", "the runs using the most memory"),
+      S("cpu", "CPU", String(F.cpu), "% of capacity", "now", "CPU in use across all cores now.", "needs-build", "the runs using the most CPU"),
+      S("swap", "Swap used", String(F.swap), "% of swap", "now", "Share of the swap file in use now.", "needs-build", "the runs using swap"),
+      S("lockwait", "Lock wait", String(F.lockWaitMin), "min", "today", "Total time seats waited for the test lock today.", "exists", "the Test lock table"),
+      S("lock", "Test lock", "dev-2", "holds it", "now", "The seat running a full test suite now, or Free.", "exists", "that seat's run trace"),
+      S("runs", "Full-suite runs", String(F.lockRows.length), "runs", "today", "Full test-suite runs under the lock today.", "exists", "the Test lock table")
+    ]
+  };
+
+  /* ---------- chart builders (SVG in a 0..100 box; labels are HTML so text never stretches) ---------- */
+  function yaxis(ticks, ymax, fmt) { return '<div class="yax">' + ticks.map(function (t) { return '<span style="bottom:' + (t / ymax * 100) + '%">' + (fmt ? fmt(t) : t) + "</span>"; }).join("") + "</div>"; }
+  function xaxis(labels, kind, n) {
+    return '<div class="xax">' + labels.map(function (l, i) {
+      var left = kind === "bars" ? (l[0] + 0.5) / n * 100 : l[0] / (n - 1) * 100;
+      return '<span class="' + (i === 0 ? "first" : i === labels.length - 1 ? "last" : "") + '" style="left:' + left + '%">' + esc(l[1]) + "</span>";
+    }).join("") + "</div>";
+  }
+  function gridLines(ticks, ymax) { return ticks.map(function (t) { return '<i class="gl" style="bottom:' + (t / ymax * 100) + '%"></i>'; }).join(""); }
+  function pathOf(vals, ymax, xf) {
+    var d = "", pen = false, shown = [];
+    vals.forEach(function (v, i) {
+      if (v === null) { pen = false; return; }
+      d += (pen ? "L" : "M") + xf(i).toFixed(2) + " " + (100 - v / ymax * 100).toFixed(2); pen = true; shown.push(round1(v));
+    });
+    return { d: d, shown: shown };
+  }
+  function gapBands(vals, n, kind) {
+    var out = "", start = -1;
+    for (var i = 0; i <= vals.length; i++) {
+      var nul = i < vals.length && vals[i] === null;
+      if (nul && start < 0) start = i;
+      if (!nul && start >= 0) {
+        var a = kind === "bars" ? start / n * 100 : (start === 0 ? 0 : (start - 0.5) / (n - 1) * 100);
+        var b = kind === "bars" ? i / n * 100 : (i === vals.length ? 100 : (i - 0.5) / (n - 1) * 100);
+        out += '<i class="gapband" style="left:' + a + "%;width:" + (b - a) + '%" title="No value recorded; not zero"></i>'; start = -1;
+      }
+    }
+    return out;
+  }
+  function overlay(o) {
+    var bands = (o.bands || []).map(function (b) { return '<i class="band-lock" style="left:' + b[0] * 100 + "%;width:" + (b[1] - b[0]) * 100 + '%" title="test lock held"></i>'; }).join("");
+    var evts = (o.events || []).map(function (e) { return '<i class="evt" style="left:' + e.at * 100 + '%" title="' + esc(e.label) + '"></i>'; }).join("");
+    var mean = o.mean !== undefined ? '<i class="guide" style="bottom:' + o.mean / o.ymax * 100 + '%"><span>14-day mean ' + o.mean.toFixed(1) + "</span></i>" : "";
+    return bands + evts + mean;
+  }
+  function wrap(kind, o, gaps, svg) {
+    return '<div class="chart" data-kind="' + kind + '" data-n="' + o.n + '"' + (gaps ? ' data-gaps="1"' : "") + ">" + yaxis(o.ticks, o.ymax, o.fmt) + '<div class="plot" data-time="' + (o.time ? 1 : 0) + '">' + gridLines(o.ticks, o.ymax) + gaps + overlay(o) + '<svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label="' + esc(o.label) + '">' + svg + '</svg><i class="cur"></i></div>' + xaxis(o.xl, kind === "bars" ? "bars" : "line", o.n) + "</div>";
+  }
+  function lineChart(o) {
+    var n = o.n, xf = function (i) { return i / (n - 1) * 100; }, svg = "", gaps = "";
+    if (o.area) {
+      var acc = new Array(n).fill(0);
+      o.series.forEach(function (s) {
+        var base = acc.slice();
+        var top = s.vals.map(function (v, i) { acc[i] += v; return acc[i]; });
+        var d = "M" + top.map(function (t, i) { return xf(i).toFixed(2) + " " + (100 - t / o.ymax * 100).toFixed(2); }).join("L") + "L" + base.map(function (b, i) { return xf(n - 1 - i).toFixed(2) + " " + (100 - base[n - 1 - i] / o.ymax * 100).toFixed(2); }).join("L") + "Z";
+        svg += '<path d="' + d + '" fill="' + s.color + '" fill-opacity=".55" stroke="' + s.color + '" stroke-width="1" data-series="' + esc(s.name) + '" data-v="' + s.vals.map(round1).join(",") + '"/>';
+      });
+    } else {
+      o.series.forEach(function (s) {
+        var p = pathOf(s.vals, o.ymax, xf);
+        svg += '<path d="' + p.d + '" fill="none" stroke="' + s.color + '" stroke-width="' + (s.w || 2) + '"' + (s.dash ? ' stroke-dasharray="4 3"' : "") + ' data-series="' + esc(s.name) + '" data-v="' + p.shown.join(",") + '"/>';
+      });
+      var g = o.series.filter(function (s) { return s.vals.some(function (v) { return v === null; }); })[0];
+      if (g) gaps = gapBands(g.vals, n, "line");
+    }
+    var out = wrap("line", o, gaps, svg + (o.extraSvg || ""));
+    return out;
+  }
+  function barChart(o) {
+    var n = o.n, svg = "", flat;
+    function rect(i, below, v, fill, name) {
+      var x0 = i / n * 100 + 100 / n * 0.15, w = 100 / n * 0.7;
+      return '<rect x="' + x0.toFixed(2) + '" y="' + (100 - (below + v) / o.ymax * 100).toFixed(2) + '" width="' + w.toFixed(2) + '" height="' + (v / o.ymax * 100).toFixed(2) + '" fill="' + fill + '" data-series="' + esc(name) + '" data-v="' + v + '"/>';
+    }
+    if (o.stack) {
+      flat = o.stack[0].vals.map(function (_, i) { return o.stack.some(function (s) { return s.vals[i] === null; }) ? null : 1; });
+      o.stack.forEach(function (s, k) {
+        s.vals.forEach(function (v, i) { if (v !== null) svg += rect(i, sum(o.stack.slice(0, k).map(function (x) { return x.vals[i]; })), v, s.color, s.name); });
+      });
+    } else {
+      flat = o.vals;
+      o.vals.forEach(function (v, i) { if (v !== null) svg += rect(i, 0, v, i === n - 1 ? "var(--accent)" : "var(--fg-2)", o.label); });
+    }
+    return wrap("bars", o, flat.some(function (v) { return v === null; }) ? gapBands(flat, n, "bars") : "", svg);
+  }
+  var READOUT_DRILLS = {
+  "crew-state": {
+    "Running": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Running seats now"
+    },
+    "Waiting": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Waiting seats now"
+    },
+    "Parked": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Parked seats now"
+    },
+    "Idle": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Idle seats now"
+    }
+  },
+  "spend": {
+    "plan": {
+      "drill": "needs-build",
+      "target": "the runs contributing to plan spend",
+      "label": "Plan spend"
+    },
+    "build": {
+      "drill": "needs-build",
+      "target": "the runs contributing to build spend",
+      "label": "Build spend"
+    },
+    "review": {
+      "drill": "needs-build",
+      "target": "the runs contributing to review spend",
+      "label": "Review spend"
+    },
+    "Total": {
+      "drill": "needs-build",
+      "target": "the runs contributing to Total spend",
+      "label": "Total spend"
+    }
+  },
+  "tpm": {
+    "Total": {
+      "drill": "needs-build",
+      "target": "all runs contributing to token rate",
+      "label": "Total tokens per minute"
+    },
+    "Other": {
+      "drill": "needs-build",
+      "target": "the other seats contributing to token rate",
+      "label": "Other tokens per minute"
+    },
+    "dev-1": {
+      "drill": "exists",
+      "target": "the Agent page for dev-1",
+      "label": "dev-1 tokens per minute"
+    },
+    "dev-2": {
+      "drill": "exists",
+      "target": "the Agent page for dev-2",
+      "label": "dev-2 tokens per minute"
+    },
+    "dev-3": {
+      "drill": "exists",
+      "target": "the Agent page for dev-3",
+      "label": "dev-3 tokens per minute"
+    }
+  },
+  "merged": {
+    "Today": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Today merged PRs"
+    },
+    "14-day mean": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "14-day mean merged PRs"
+    },
+    "Best day": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Best day merged PRs"
+    }
+  },
+  "cycle": {
+    "Ticket": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Tickets in the cycle-time plot"
+    },
+    "p50": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "p50 cycle time"
+    },
+    "p85": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "p85 cycle time"
+    }
+  },
+  "wip": {
+    "Now": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Now tickets in progress"
+    },
+    "Peak": {
+      "drill": "exists",
+      "target": "the Board",
+      "label": "Peak tickets in progress"
+    }
+  },
+  "ci": {
+    "Latest": {
+      "drill": "needs-build",
+      "target": "the PRs behind CI first-push results",
+      "label": "Latest CI first-push result"
+    },
+    "Mean": {
+      "drill": "needs-build",
+      "target": "the PRs behind CI first-push results",
+      "label": "Mean CI first-push result"
+    }
+  },
+  "first-pass": {
+    "Last recorded": {
+      "drill": "needs-build",
+      "target": "the PRs behind first-pass review results",
+      "label": "Last recorded first-pass review result"
+    },
+    "Mean": {
+      "drill": "needs-build",
+      "target": "the PRs behind first-pass review results",
+      "label": "Mean first-pass review result"
+    }
+  },
+  "rounds": {
+    "Last recorded": {
+      "drill": "needs-build",
+      "target": "the PRs behind review rounds",
+      "label": "Last recorded review rounds"
+    }
+  },
+  "cpu-mem": {
+    "CPU": {
+      "drill": "needs-build",
+      "target": "the runs using the most CPU",
+      "label": "CPU in use"
+    },
+    "Memory free": {
+      "drill": "needs-build",
+      "target": "the runs using the most memory",
+      "label": "Memory free"
+    },
+    "Lock held": {
+      "drill": "exists",
+      "target": "the test-lock history",
+      "label": "Runs holding the test lock"
+    }
+  },
+  "pressure": {
+    "Memory pressure": {
+      "drill": "needs-build",
+      "target": "the runs active during memory pressure",
+      "label": "Memory pressure"
+    },
+    "Swap used": {
+      "drill": "needs-build",
+      "target": "the runs using swap",
+      "label": "Swap used"
+    }
+  },
+  "agent-mem": {
+    "Agents": {
+      "drill": "exists",
+      "target": "the Agents page",
+      "label": "Agent memory"
+    },
+    "Test runs": {
+      "drill": "exists",
+      "target": "the test-lock history",
+      "label": "Test-run memory"
+    },
+    "Other": {
+      "drill": "needs-build",
+      "target": "the runs active during other memory use",
+      "label": "Other memory"
+    }
+  }
+};
+  function readoutHtml(panel, items, evts) {
+    return '<ul class="readout" data-scroll tabindex="0" aria-label="Legend and values">' + items.map(function (it, i) {
+      var meta = (READOUT_DRILLS[panel] || {})[it.name];
+      if (it.value !== "" && !meta) throw new Error("Missing readout target: " + panel + " / " + it.name);
+      return '<li data-i="' + i + '"><i class="sw ' + (it.dash ? "dash " : "") + (it.cls || "") + '" style="--c:' + it.color + '"></i><span class="nm" title="' + esc(it.name) + '">' + esc(it.name) + '</span><b class="vl">' + (it.value === "" ? "" : D(it.value, meta.drill, meta.target, meta.label)) + "</b></li>";
+    }).join("") + (evts || []).map(function (e) { return '<li><i class="sw dash" style="--c:var(--think)"></i><span class="nm" title="' + esc(e.label) + '">' + esc(e.label) + "</span></li>"; }).join("") + "</ul>";
+  }
+  function D(text, drill, target, label) { return '<button type="button" class="num cell" data-drill="' + drill + '" data-target="' + esc(target) + '" data-label="' + esc(label) + '" data-shown="' + esc(text) + '">' + esc(text) + "</button>"; }
+  function timeTip(t) { return t.id + ": working " + t.working + "%, waiting " + t.waiting + "%, parked " + t.parked + "%, idle " + t.idle + "%"; }
+  function lastOf(vals) { var v = vals.filter(function (x) { return x !== null; }); return v.length ? v[v.length - 1] : null; }
+  function lineReadout(list, fmt) { return list.map(function (s) { var l = lastOf(s.vals); return { name: s.name, color: s.color, dash: s.dash, value: l === null ? "—" : fmt(l) }; }); }
+
+  /* ---------- panels per tab ---------- */
+  var NOTE = {
+    cost: "Cost covers " + F.costCover + "% of runs; the rest reported none. Not counted as $0.",
+    tokens: "Tokens cover " + F.tokenCover + "% of runs; the rest reported none. Not counted as 0.",
+    review: "No review recorded since 1 Nov. The line stops there; it does not mean zero.",
+    since: function (d) { return "Collected since " + d + ". Earlier days are blank, not zero."; },
+    attempts: "Not collected yet: test attempts. Nothing is stored for this measure."
+  };
+  function P(id, title, sub, body, notes, model) { return { id: id, title: title, sub: sub, body: body, notes: notes || [], model: model || null }; }
+  function T(id, title, sub, cols, rows, nums, drill) { return { id: id, title: title, sub: sub, cols: cols, rows: rows, nums: nums || [], drill: drill || null }; }
+  function rowsOf(label, cls, rows) { return '<div class="rows ' + cls + '" data-scroll tabindex="0" aria-label="' + esc(label) + '">' + rows.join("") + "</div>"; }
+  function fmtMs(ms) { return ms >= 1000 ? (ms / 1000).toFixed(1) + " s" : ms + " ms"; }
+  var stepD = function (html) {
+    return html.replace(/<path d="M([^"]*)"/, function (m, p) {
+      var pts = p.replace(/L/g, " ").trim().split(/\s+/), d = "M" + pts[0] + " " + pts[1];
+      for (var k = 2; k < pts.length; k += 2) d += "H" + pts[k] + "V" + pts[k + 1];
+      return '<path d="' + d + '"';
+    });
+  };
+
+  function panelsFor(tab) {
+    var out = [], tables = [];
+    if (tab === "crew") {
+      var counts = { running: 0, waiting: 0, parked: 0, idle: 0 }; F.lanes.forEach(function (l) { counts[l.now]++; });
+      var lanes = '<div class="lanes" data-scroll tabindex="0" aria-label="Seat state lanes">' + F.lanes.map(function (l) {
+        return '<div class="lane"><span class="seat" style="--c:' + l.color + '">' + esc(l.id) + '</span><div class="tr" aria-label="' + esc(l.id + ", now " + l.now) + '">' + l.spans.map(function (s) { return '<i class="sp ' + s.st + '" style="left:' + s.from * 100 + "%;width:" + (s.to - s.from) * 100 + '%" title="' + esc(s.st) + '"></i>'; }).join("") + "</div></div>";
+      }).join("") + "</div>";
+      var lanesAx = '<div class="xax" style="grid-column:auto;height:20px;margin-left:80px;flex:none">' + XT.map(function (l, i, a) { return '<span class="' + (i === 0 ? "first" : i === a.length - 1 ? "last" : "") + '" style="left:' + l[0] / 71 * 100 + '%">' + l[1] + "</span>"; }).join("") + "</div>";
+      out.push(P("crew-state", "Crew state", "running, waiting, parked and idle · last 24 h", '<div class="chart" data-kind="lanes" style="display:flex;flex-direction:column;gap:4px">' + lanes + lanesAx + "</div>" + readoutHtml("crew-state", [{ name: "Running", cls: "st st-running", color: "var(--ok)", value: counts.running + " now" }, { name: "Waiting", cls: "st st-waiting", color: "var(--warn)", value: counts.waiting + " now" }, { name: "Parked", cls: "st st-parked", color: "var(--line-2)", value: counts.parked + " now" }, { name: "Idle", cls: "st st-idle", color: "var(--muted)", value: counts.idle + " now" }], F.events),
+        ["Running is solid, Waiting is hatched, Parked is dotted and Idle is an underline, so a state never rests on colour alone."]));
+      out.push(P("agent-time", "Where agent time goes", "share of today, per seat", rowsOf("Agent time by seat", "", F.time.map(function (t) {
+        return '<div class="r"><span class="seat lb" style="--c:' + t.color + '">' + esc(t.id) + '</span><div class="tr" tabindex="0" data-tip="' + esc(timeTip(t)) + '" aria-label="' + esc(timeTip(t)) + '"><i class="s-running" style="width:' + t.working + '%"></i><i class="s-waiting" style="width:' + t.waiting + '%"></i><i class="s-parked" style="width:' + t.parked + '%"></i><i class="s-idle" style="width:' + t.idle + '%"></i></div><span class="vl">' + D(t.working + "% working", "exists", "that seat's Agent page", t.id + " working share") + "</span></div>";
+      })) + readoutHtml("agent-time", [{ name: "Working", cls: "st st-running", color: "var(--ok)", value: "" }, { name: "Waiting", cls: "st st-waiting", color: "var(--warn)", value: "" }, { name: "Parked", cls: "st st-parked", color: "var(--fg-2)", value: "" }, { name: "Idle", cls: "st st-idle", color: "var(--muted)", value: "" }]), ["Same shapes as Crew state. Each bar sums to 100% of the seat's day; focus a bar for its four shares."]));
+      tables.push(T("tools", "Tool latency", "p50 and p95 per tool · today", ["Tool", "Calls", "p50", "p95", "Failed"], F.tools.map(function (t) { return [t[0], t[1], fmtMs(t[2]), fmtMs(t[3]), t[4]]; }), [1, 2, 3, 4], ["needs-build", "the calls of that tool"]));
+      tables.push(T("subagents", "Subagents", "spawned by the crew today", ["Seat", "Kind", "Started", "Took", "Tokens", "Outcome"], F.subagents, [3, 4], ["exists", "that run's trace"]));
+    }
+    if (tab === "cost") {
+      var stack = [{ name: "plan", color: "var(--think)", vals: F.spend.map(function (b) { return b ? b.plan : null; }) }, { name: "build", color: "var(--accent)", vals: F.spend.map(function (b) { return b ? b.build : null; }) }, { name: "review", color: "var(--ok)", vals: F.spend.map(function (b) { return b ? b.review : null; }) }];
+      out.push(P("spend", "Spend per hour, by step", "~USD, API-equivalent · last 24 h", barChart({ n: 24, stack: stack, ymax: 6, ticks: [0, 2, 4, 6], fmt: function (v) { return "$" + v; }, label: "~Cost per hour by step", time: true, xl: [[0, "14:30"], [6, "20:30"], [12, "02:30"], [18, "08:30"], [23, "now"]], events: F.events }) + readoutHtml("spend", stack.map(function (s) { return { name: s.name, color: s.color, value: "$" + sum(s.vals).toFixed(2) }; }).concat([{ name: "Total", color: "var(--fg)", value: money(F.cost24h) }]), F.events), [NOTE.cost], { n: 24, stack: stack, fmt: function (v) { return "$" + v.toFixed(2); } }));
+      var maxT = F.byTicket[0][2];
+      out.push(P("by-ticket", "Cost by ticket", "~USD, ranked · last 24 h", rowsOf("Cost by ticket", "", F.byTicket.map(function (t) { return '<div class="r"><span class="lb" tabindex="0" data-tip="' + esc(t[0] + " · " + t[1]) + '" aria-label="' + esc(t[0] + " · " + t[1]) + '">' + esc(t[0]) + " " + esc(t[1]) + '</span><div class="tr"><i style="width:' + t[2] / maxT * 100 + '%"></i></div><span class="vl">' + D(money(t[2]), "exists", "that ticket's timeline", t[0] + " cost") + "</span></div>"; })), ["Every run on the ticket counts: plan, build and review. Hover or focus a title for the full text."]));
+      var tpm = [{ name: "Total", color: "var(--fg)", vals: F.tpm.total }, { name: SEATS[1], color: seatColor(1), vals: F.tpm.top[0] }, { name: SEATS[2], color: seatColor(2), vals: F.tpm.top[1] }, { name: SEATS[3], color: seatColor(3), vals: F.tpm.top[2] }, { name: "Other", color: "var(--muted)", vals: F.tpm.other, dash: true }];
+      out.push(P("tpm", "Tokens per minute", "thousands · total, top 3 seats, other", lineChart({ n: N, series: tpm, ymax: 600, ticks: [0, 200, 400, 600], fmt: function (v) { return v + "k"; }, label: "Tokens per minute", time: true, xl: XT, events: F.events }) + readoutHtml("tpm", lineReadout(tpm, function (v) { return Math.round(v) + "k"; }), F.events), [NOTE.tokens], { n: N, series: tpm, fmt: function (v) { return Math.round(v) + "k"; } }));
+      out.push(P("quota", "Quota used", "each account window · history ends now", rowsOf("Quota used by window", "few", F.quota.map(function (q) {
+        var hist = '<svg class="hist" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path d="' + pathOf(q.hist, 100, function (i) { return i / (N - 1) * 100; }).d + '" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>';
+        return '<div class="r q"><span class="lb">' + esc(q.name) + '</span><div class="tr"><i style="width:' + q.pct + '%;--c:' + (q.pct >= q.stopAt ? "var(--crit)" : q.pct >= q.alertAt ? "var(--warn)" : "var(--accent)") + '"></i><span class="tick" style="left:' + q.alertAt + '%"></span><span class="tick stop" style="left:' + q.stopAt + '%"></span></div>' + hist + '<span class="vl">' + D(q.pct + "% used", "needs-build", "the runs using that window", q.name) + " · " + esc(q.reset) + "</span></div>";
+      })), ["Dashed ticks mark the alert level (80%) and the stop level (95%). The small line is the last 24 h."]));
+      tables.push(T("totals", "Totals", "per seat and model · last 24 h", ["Seat", "Account", "Model", "Input", "Output", "Cache read", "Cache hit", "Turns", "Tool calls", "~Cost"], F.totals, [3, 4, 5, 6, 7, 8, 9], ["needs-build", "that seat's runs on that model"]));
+      tables.push(T("cost-by-ticket", "Cost by ticket", "~USD, ranked · last 24 h", ["Ticket", "Title", "~Cost"], F.byTicket.map(function (t) { return [t[0], t[1], money(t[2])]; }), [2], ["exists", "that ticket's timeline"]));
+    }
+    if (tab === "throughput") {
+      out.push(P("merged", "Merged per day", "PRs · last 14 days", barChart({ n: 14, vals: F.merged, ymax: 12, ticks: [0, 4, 8, 12], label: "PRs merged per day", xl: X14, mean: F.mergedMean }) + readoutHtml("merged", [{ name: "Today", color: "var(--accent)", value: String(F.merged[13]) }, { name: "14-day mean", color: "var(--warn)", value: F.mergedMean.toFixed(1) }, { name: "Best day", color: "var(--fg-2)", value: String(Math.max.apply(null, F.merged)) }]), ["Dashed line is the 14-day daily mean."]));
+      var dotD = F.cycleDots.map(function (p) { return "M" + (p.day / 13 * 100).toFixed(2) + " " + (100 - p.h / 72 * 100).toFixed(2) + "h0"; }).join("");
+      var dotsSvg = '<path d="' + dotD + '" fill="none" stroke="var(--accent)" stroke-width="5" stroke-linecap="round" data-series="Ticket" data-v="' + F.cycleDots.map(function (p) { return p.h; }).join(",") + '"/>';
+      var cyc = [{ name: "p50", color: "var(--ok)", vals: F.cycleP50 }, { name: "p85", color: "var(--warn)", vals: F.cycleP85 }];
+      out.push(P("cycle", "Cycle time per ticket", "hours, Ready to Done · last 14 days", lineChart({ n: 14, series: cyc, ymax: 72, ticks: [0, 24, 48, 72], fmt: function (v) { return v + " h"; }, label: "Cycle time per ticket", xl: X14, extraSvg: dotsSvg }) + readoutHtml("cycle", [{ name: "Ticket", color: "var(--accent)", value: F.cycleDots.length + " dots" }, { name: "p50", color: "var(--ok)", value: "14.2 h" }, { name: "p85", color: "var(--warn)", value: "31.8 h" }]), [NOTE.since("24 Oct")]));
+      out.push(P("by-size", "Cycle time by size", "p50 to p85, hours · last 14 days", rowsOf("Cycle time by size", "few", F.bySize.map(function (s) { return '<div class="r"><span class="lb">' + s[0] + " · " + s[3] + ' tickets</span><div class="tr"><i class="rng" style="left:' + s[1] / 72 * 100 + "%;width:" + (s[2] - s[1]) / 72 * 100 + '%"></i><b style="left:' + s[1] / 72 * 100 + '%"></b></div><span class="vl">' + D(s[1] + "–" + s[2] + " h", "exists", "the tickets of that size on the Board", s[0] + " cycle time") + "</span></div>"; })), ["Each bar runs from p50 to p85; the white mark is p50. The axis is 0 to 72 hours."]));
+      var wip = [{ name: "In progress", color: "var(--accent)", vals: F.inProgress }];
+      out.push(P("wip", "Tickets in progress", "step per day · last 14 days", stepD(lineChart({ n: 14, series: wip, ymax: 12, ticks: [0, 4, 8, 12], label: "Tickets in progress", xl: X14 })) + readoutHtml("wip", [{ name: "Now", color: "var(--accent)", value: String(F.inProgress[13]) }, { name: "Peak", color: "var(--muted)", value: String(Math.max.apply(null, F.inProgress)) }]), [NOTE.since("24 Oct")]));
+      tables.push(T("tickets", "Tickets", "merged in the last 14 days", ["Ticket", "Title", "Size", "Merged", "Cycle", "~Cost"], F.tickets, [4, 5], ["exists", "that ticket's timeline"]));
+    }
+    if (tab === "quality") {
+      var ci = [{ name: "CI green first push", color: "var(--ok)", vals: F.ci }], fp = [{ name: "First-pass review", color: "var(--accent)", vals: F.firstPass }];
+      out.push(P("ci", "CI green first push", "% of merged PRs · last 14 days", lineChart({ n: 14, series: ci, ymax: 100, ticks: [0, 50, 100], fmt: function (v) { return v + "%"; }, label: "CI green on first push", xl: X14 }) + readoutHtml("ci", [{ name: "Latest", color: "var(--ok)", value: F.ci[13] + "%" }, { name: "Mean", color: "var(--muted)", value: F.ciNow + "%" }]), [NOTE.since("29 Oct")]));
+      out.push(P("first-pass", "First-pass review", "% of reviewed PRs · last 14 days", lineChart({ n: 14, series: fp, ymax: 100, ticks: [0, 50, 100], fmt: function (v) { return v + "%"; }, label: "First-pass review", xl: X14 }) + readoutHtml("first-pass", [{ name: "Last recorded", color: "var(--accent)", value: F.firstPass[10] + "%" }, { name: "Mean", color: "var(--muted)", value: F.fpNow + "%" }]), [NOTE.review]));
+      out.push(P("rounds", "Rounds per PR", "rounds, up to 4 · last 14 days", barChart({ n: 14, vals: F.rounds, ymax: 4, ticks: [0, 2, 4], label: "Review rounds per PR", xl: X14 }) + readoutHtml("rounds", [{ name: "Last recorded", color: "var(--accent)", value: String(F.rounds[10]) }]), [NOTE.review, NOTE.attempts]));
+      var gmax = F.guard[0][1];
+      out.push(P("guard", "Guard blocks by rule", "blocks · last 14 days", rowsOf("Guard blocks by rule", "", F.guard.map(function (g) { return '<div class="r"><span class="lb">' + esc(g[0]) + '</span><div class="tr"><i style="width:' + g[1] / gmax * 100 + '%;--c:var(--think)"></i></div><span class="vl">' + D(String(g[1]), "exists", "the Guard drawer", g[0]) + "</span></div>"; })), ["A block is a guard rule stopping an action; it is not a failure of the seat."]));
+      tables.push(T("escaped", "Escaped defects", "found after merge", ["Ticket", "Title", "How found", "Severity", "Found"], F.escaped, []));
+    }
+    if (tab === "machine") {
+      var ms = [{ name: "CPU", color: "var(--accent)", vals: F.cpuS }, { name: "Memory free", color: "var(--think)", vals: F.memFreeS }];
+      var pct = function (v) { return v + "%"; };
+      out.push(P("cpu-mem", "CPU and memory", "% of capacity · last 24 h", lineChart({ n: N, series: ms, ymax: 100, ticks: [0, 50, 100], fmt: pct, label: "CPU and memory free", time: true, xl: XT, bands: F.holds, events: F.events }) + readoutHtml("cpu-mem", lineReadout(ms, pct).concat([{ name: "Lock held", color: "var(--warn)", value: F.holds.length + " runs" }]), F.events), ["Shaded bands are full-suite runs under the test lock."], { n: N, series: ms, fmt: pct }));
+      var ps = [{ name: "Memory pressure", color: "var(--warn)", vals: F.pressure }, { name: "Swap used", color: "var(--fg-2)", vals: F.swapS }];
+      out.push(P("pressure", "Memory pressure and swap", "% · last 24 h", lineChart({ n: N, series: ps, ymax: 100, ticks: [0, 50, 100], fmt: pct, label: "Memory pressure and swap", time: true, xl: XT, events: F.events }) + readoutHtml("pressure", lineReadout(ps, pct), F.events), [], { n: N, series: ps, fmt: pct }));
+      var as = [{ name: "Agents", color: "var(--accent)", vals: F.memAgents }, { name: "Test runs", color: "var(--think)", vals: F.memTests }, { name: "Other", color: "var(--muted)", vals: F.memOther }];
+      var gb = function (v) { return round1(v) + " GB"; };
+      out.push(P("agent-mem", "Agent and test-run memory", "GB, stacked · last 24 h", lineChart({ n: N, series: as, area: true, ymax: 32, ticks: [0, 16, 32], fmt: function (v) { return v + " GB"; }, label: "Agent and test-run memory", time: true, xl: XT, events: F.events }) + readoutHtml("agent-mem", lineReadout(as, gb), F.events), [], { n: N, series: as, fmt: gb }));
+      tables.push(T("lock", "Test lock", "full-suite runs today", ["Seat", "Started", "Waited", "Held", "Outcome"], F.lockRows, [2, 3], ["exists", "that run's trace"]));
+    }
+    return { charts: out, tables: tables };
+  }
+
+  /* ---------- rendering ---------- */
+  var state = { tab: "crew", view: "charts", state: "normal", theme: "dark", flight: false, filters: {} };
+  var models = [];
+  function $(id) { return document.getElementById(id); }
+  function tabDef() { return TABS.filter(function (t) { return t.id === state.tab; })[0]; }
+  function readState() {
+    var t = Q.get("tab"); state.tab = TABS.some(function (x) { return x.id === t; }) ? t : "crew";
+    state.view = Q.get("view") === "table" ? "table" : "charts";
+    state.flight = Q.get("flight") === "open";
+    var s = Q.get("state"); state.state = STATES.indexOf(s) >= 0 ? s : "normal";
+    var th = Q.get("theme");
+    state.theme = th === "light" || th === "dark" ? th : (window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark");
+  }
+  function writeState() {
+    Q.set("tab", state.tab);
+    if (state.view === "table") Q.set("view", "table"); else Q.delete("view");
+    if (state.state !== "normal") Q.set("state", state.state); else Q.delete("state");
+    if (state.flight) Q.set("flight", "open"); else Q.delete("flight");
+    Q.set("theme", state.theme);
+    try { history.replaceState(null, "", location.pathname + "?" + Q.toString()); } catch (e) { /* a sandboxed frame may refuse; the page still works */ }
+  }
+  var definitionSerial = 0;
+  function statHtml(s, blank) {
+    var definitionId = "definition-" + s.id + "-" + definitionSerial++;
+    var shown = blank ? "—" : s.value, cls = "";
+    var unavailable = blank ? ' disabled aria-disabled="true"' : '';
+    if (s.id === "health" && !blank) cls = " v-" + (s.value === "Healthy" ? "healthy" : s.value === "Watch" ? "watch" : "attention");
+    var name = s.label + ": " + shown + " " + s.unit + ", " + s.window + ". " + (s.drill === "exists" ? "Opens " : "Needs a build: ") + s.target + (s.cmp && !blank ? ". " + s.cmp : "");
+    return '<div class="stat' + cls + '" data-stat="' + s.id + '"><span class="stat-label" title="' + esc(s.label) + '">' + esc(s.label) + '</span><div class="stat-main"><button type="button" class="num stat-value"' + unavailable + ' aria-describedby="' + definitionId + '" data-drill="' + s.drill + '" data-target="' + esc(s.target) + '" data-label="' + esc(s.label) + '" data-shown="' + esc(shown) + '" aria-label="' + esc(name) + '">' + esc(shown) + '</button><span class="stat-unit" title="' + esc(s.unit) + '">' + esc(s.unit) + '</span></div><div class="stat-sub" title="' + esc(blank ? "" : s.window + (s.cmp ? " · " + s.cmp : "")) + '"><span class="stat-window">' + esc(s.window) + '</span><span class="stat-cmp">' + (s.cmp && !blank ? " · " + esc(s.cmp) : "") + '</span></div><span class="stat-def" role="tooltip" id="' + definitionId + '">' + esc(s.def + " Unit: " + s.unit + ".") + "</span></div>";
+  }
+  function cellHtml(t, c, i) {
+    if (c === null || c === undefined) return "—";
+    var text = String(c);
+    if (t.nums.indexOf(i) >= 0 && t.drill) return D(text, t.drill[0], t.drill[1], t.title + ": " + t.cols[i]);
+    if (text.length > 40) return '<span class="clamp2" tabindex="0" data-tip="' + esc(text) + '" aria-label="' + esc(text) + '">' + esc(text) + "</span>";
+    return esc(text);
+  }
+  function tableHtml(t) {
+    var rows = t.rows.slice().sort(function (a, b) { return String(a[0]).localeCompare(String(b[0]), "en", { numeric: true }); });
+    return '<div class="tablewrap" data-scroll tabindex="0"><table><caption class="sr">' + esc(t.title) + "</caption><thead><tr>" + t.cols.map(function (c, i) { return "<th" + (t.nums.indexOf(i) >= 0 ? ' class="num"' : "") + (i === 0 ? ' aria-sort="ascending"' : "") + ">" + esc(c) + (i === 0 ? " ▴" : "") + "</th>"; }).join("") + "</tr></thead><tbody>" + rows.map(function (r) { return "<tr>" + r.map(function (c, i) { return "<td" + (t.nums.indexOf(i) >= 0 ? ' class="num"' : "") + ">" + cellHtml(t, c, i) + "</td>"; }).join("") + "</tr>"; }).join("") + "</tbody></table></div>";
+  }
+  function panelHtml(p, inner) {
+    return '<section class="panel" data-panel="' + p.id + '" aria-label="' + esc(p.title) + '"><div class="phead"><h3>' + esc(p.title) + '</h3><span class="sub">' + esc(p.sub) + '</span></div><div class="pbody">' + inner + "</div>" + (p.notes.length ? "<div>" + p.notes.map(function (n) { return '<p class="pnote">' + esc(n) + "</p>"; }).join("") + "</div>" : "<span></span>") + "</section>";
+  }
+  function render() {
+    document.documentElement.setAttribute("data-theme", state.theme);
+    document.querySelector(".app").classList.toggle("flight-open", state.flight);
+    $("dock").hidden = !state.flight;
+    $("flight-toggle").setAttribute("aria-expanded", String(state.flight));
+    $("flight-toggle").textContent = state.flight ? "Collapse" : "FLIGHT";
+    var def = tabDef(), blank = state.state === "loading" || state.state === "empty" || state.state === "error";
+    $("band").innerHTML = BAND.map(function (s) { return statHtml(s, blank); }).join("");
+    $("tabs").innerHTML = TABS.map(function (t) { var on = t.id === state.tab; return '<button type="button" role="tab" id="tab-' + t.id + '" aria-selected="' + on + '" aria-controls="tabpanel" tabindex="' + (on ? 0 : -1) + '" data-tab="' + t.id + '">' + t.label + "</button>"; }).join("");
+    $("range").hidden = !!def.fixed;
+    $("range").innerHTML = RANGES.map(function (r) { var on = r === SHOWN_RANGE; return '<button type="button" data-range aria-pressed="' + on + '"' + (on ? "" : ' disabled title="Mockup shows 24h"') + ">" + r + "</button>"; }).join("");
+    $("filters").innerHTML = [["agent", "Agent", ["All"].concat(SEATS)], ["account", "Account", ["All", "acct-a", "acct-b"]], ["ticket", "Ticket", ["All"].concat(F.byTicket.map(function (t) { return t[0]; }))]].map(function (f) {
+      return "<label" + (def.filters.indexOf(f[0]) < 0 ? " hidden" : "") + "><span>" + f[1] + '</span><select data-filter="' + f[0] + '">' + f[2].map(function (o) { return "<option" + (state.filters[f[0]] === o ? " selected" : "") + ">" + o + "</option>"; }).join("") + "</select></label>";
+    }).join("");
+    [].forEach.call(document.querySelectorAll("#view button"), function (b) { b.setAttribute("aria-pressed", String(b.getAttribute("data-view") === state.view)); });
+    $("state").innerHTML = STATES.map(function (s) { return '<option value="' + s + '"' + (s === state.state ? " selected" : "") + ">" + s + "</option>"; }).join("");
+    var c = $("chip");
+    if (state.state === "stale") { c.hidden = false; c.className = "chip"; c.textContent = "Figures are 7 min old."; }
+    else if (state.state === "disconnected") { c.hidden = false; c.className = "chip crit"; c.textContent = "Not connected to the hub. These figures are from 14:02."; }
+    else { c.hidden = true; c.textContent = ""; }
+    var sm = SUMMARY[state.tab], sum_ = $("summary");
+    sum_.style.gridTemplateColumns = "minmax(96px,.6fr) repeat(" + sm.length + ",minmax(0,1fr))";
+    sum_.innerHTML = '<div class="scope">' + (def.fixed ? "<b>" + def.fixed + "</b><span>Fixed window</span>" : "<b>Last 24 h</b><span>Range " + SHOWN_RANGE + "</span>") + "</div>" + sm.map(function (s) { return statHtml(s, blank); }).join("");
+    var tp = $("tabpanel"); tp.setAttribute("aria-labelledby", "tab-" + state.tab);
+    var set = panelsFor(state.tab);
+    models = [];
+    if (state.state === "loading") {
+      tp.innerHTML = '<div class="grid" data-n="' + set.charts.length + '" data-view="charts">' + set.charts.map(function (p) { return '<section class="panel" aria-busy="true"><div class="phead"><h3>' + esc(p.title) + '</h3><span class="sub">Loading…</span></div><div class="pbody"><div class="skeleton"></div></div><span></span></section>'; }).join("") + "</div>";
+    } else if (state.state === "empty") {
+      tp.innerHTML = '<div class="grid" data-state="empty" data-n="1"><section class="panel state"><p>Nothing ran in the last ' + (def.fixed ? "14 days" : SHOWN_RANGE) + '.</p><span class="pnote">Seats that start a run will appear here.</span></section></div>';
+    } else if (state.state === "error") {
+      tp.innerHTML = '<div class="grid" data-state="error" data-n="1"><section class="panel state"><p>Telemetry did not load.</p><button type="button" class="primary" data-retry style="min-height:32px">Try again</button></section></div>';
+    } else if (state.view === "table") {
+      tp.innerHTML = '<div class="grid' + (state.state === "normal" ? "" : " dim") + '" data-n="' + set.tables.length + '" data-view="table">' + set.tables.map(function (t) { return panelHtml({ id: t.id, title: t.title, sub: t.sub, notes: [] }, tableHtml(t)); }).join("") + "</div>";
+    } else {
+      tp.innerHTML = '<div class="grid' + (state.state === "normal" ? "" : " dim") + '" data-n="' + set.charts.length + '" data-view="charts">' + set.charts.map(function (p) { if (p.model) models.push({ id: p.id, model: p.model }); return panelHtml(p, p.body); }).join("") + "</div>";
+    }
+    [].forEach.call(document.querySelectorAll(".readout .vl"), function (v) { v.setAttribute("data-last", v.textContent); updateReadout(v, v.textContent); });
+  }
+  function updateReadout(value, text) {
+    var button = value.querySelector("button[data-drill]");
+    if (!button) return;
+    button.textContent = text;
+    button.setAttribute("data-shown", text);
+    button.setAttribute("aria-label", button.getAttribute("data-label") + ": " + text);
+    button.setAttribute("aria-disabled", text === "—" ? "true" : "false");
+  }
+  function setTab(id, focus) { state.tab = id; writeState(); render(); if (focus) $("tab-" + id).focus(); }
+
+  /* ---------- the shared chart cursor ---------- */
+  function cursor(e) {
+    var plot = e.target.closest && e.target.closest(".plot"); if (!plot) return;
+    var r = plot.getBoundingClientRect(), f = Math.min(1, Math.max(0, (e.clientX - r.left) / (r.width || 1)));
+    [].forEach.call(document.querySelectorAll(".plot"), function (p) {
+      if (p.getAttribute("data-time") !== "1" && p !== plot) return;
+      var cur = p.querySelector(".cur"); cur.style.display = "block"; cur.style.left = f * 100 + "%";
+      var chart = p.parentNode, kind = chart.getAttribute("data-kind"), n = +chart.getAttribute("data-n");
+      var panel = p.closest(".panel"), m = models.filter(function (x) { return x.id === panel.getAttribute("data-panel"); })[0];
+      if (!m) return;
+      var idx = Math.min(n - 1, Math.max(0, Math.round(kind === "bars" ? f * n - 0.5 : f * (n - 1))));
+      var list = m.model.series || m.model.stack || [];
+      [].forEach.call(panel.querySelectorAll(".readout li[data-i]"), function (li, i) {
+        var s = list[i], v = li.querySelector(".vl");
+        if (s) updateReadout(v, s.vals[idx] === null || s.vals[idx] === undefined ? "—" : m.model.fmt(s.vals[idx]));
+      });
+    });
+  }
+  function cursorOff() {
+    [].forEach.call(document.querySelectorAll(".cur"), function (c) { c.style.display = "none"; });
+    [].forEach.call(document.querySelectorAll(".readout .vl"), function (v) { if (v.hasAttribute("data-last")) updateReadout(v, v.getAttribute("data-last")); });
+  }
+
+  /* ---------- notice, dialog ---------- */
+  var opener = null, noticeTimer = 0;
+  function notice(text) { var n = $("notice"); n.textContent = text; clearTimeout(noticeTimer); noticeTimer = setTimeout(function () { n.textContent = ""; }, 8000); }
+  function focusables() { return [].filter.call($("dlg").querySelectorAll("button,[tabindex]:not([tabindex='-1'])"), function (el) { return !el.disabled; }); }
+  function openRuns(btn) {
+    opener = btn;
+    $("dlg-what").textContent = btn.getAttribute("data-label") + ": " + btn.getAttribute("data-shown") + ". Would list " + btn.getAttribute("data-target") + ".";
+    var runs = F.byTicket.slice(0, 6).map(function (t, i) { return [t[0], SEATS[(i % 3) + 1], clock(i * 9 + 3), (6 + i * 3) + " min", "$" + (t[2] / 4).toFixed(2)]; });
+    $("dlg-table").innerHTML = tableHtml({ title: "Runs behind this number", cols: ["Ticket", "Seat", "Started", "Took", "~Cost"], rows: runs, nums: [3, 4], drill: ["exists", "that run's trace"] });
+    $("scrim").hidden = false; $("dlg").hidden = false; $("dlg-close").focus();
+  }
+  function closeRuns() { $("dlg").hidden = true; $("scrim").hidden = true; if (opener) opener.focus(); }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target, drill = t.closest && t.closest("[data-drill]");
+    if (drill) {
+      if (drill.getAttribute("aria-disabled") === "true") { e.preventDefault(); return; }
+      var target = drill.getAttribute("data-target");
+      if (drill.getAttribute("data-drill") === "exists") notice("Opens " + target + ". This page exists today.");
+      else { notice("Needs build: a new route for " + target + "."); openRuns(drill); }
+      return;
+    }
+    var tab = t.closest && t.closest("[data-tab]"); if (tab) { setTab(tab.getAttribute("data-tab"), true); return; }
+    var v = t.closest && t.closest("#view [data-view]"); if (v) { state.view = v.getAttribute("data-view"); writeState(); render(); return; }
+    if (t.closest && t.closest("[data-retry]")) { state.state = "normal"; writeState(); render(); $("tab-" + state.tab).focus(); return; }
+    if (t.closest && t.closest("#flight-toggle")) { state.flight = !state.flight; writeState(); render(); return; }
+    if (t.id === "theme") { state.theme = state.theme === "dark" ? "light" : "dark"; writeState(); render(); return; }
+    if (t.id === "dlg-close" || t.id === "scrim") closeRuns();
+  });
+  document.addEventListener("change", function (e) {
+    if (e.target.id === "state") { state.state = e.target.value; writeState(); render(); }
+    else if (e.target.getAttribute && e.target.getAttribute("data-filter")) { state.filters[e.target.getAttribute("data-filter")] = e.target.value; notice("Mockup: filters do not change the fictional figures."); }
+  });
+  document.addEventListener("keydown", function (e) {
+    var dlg = $("dlg");
+    if (!dlg.hidden) {
+      if (e.key === "Escape") { e.preventDefault(); closeRuns(); }
+      else if (e.key === "Tab") {
+        var f = focusables(), first = f[0], last = f[f.length - 1];
+        if (!dlg.contains(document.activeElement)) { e.preventDefault(); first.focus(); }
+        else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+      return;
+    }
+    if (e.key === "f" && !e.ctrlKey && !e.metaKey && !/^(INPUT|SELECT|TEXTAREA)$/.test(e.target.tagName)) { state.flight = !state.flight; writeState(); render(); return; }
+    var tab = e.target.closest && e.target.closest('[role="tab"]');
+    if (tab) {
+      var i = TABS.map(function (x) { return x.id; }).indexOf(tab.getAttribute("data-tab")), to = -1;
+      if (e.key === "ArrowRight") to = (i + 1) % TABS.length; else if (e.key === "ArrowLeft") to = (i + TABS.length - 1) % TABS.length; else if (e.key === "Home") to = 0; else if (e.key === "End") to = TABS.length - 1;
+      if (to >= 0) { e.preventDefault(); setTab(TABS[to].id, true); }
+    }
+  });
+  document.addEventListener("mousemove", cursor);
+  document.addEventListener("mouseout", function (e) { if (e.target.closest && e.target.closest(".plot") && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest(".plot"))) cursorOff(); });
+
+  $("nav").innerHTML = NAV.map(function (n) { return '<a href="#"' + (n[1] === "Telemetry" ? ' aria-current="page"' : "") + ">" + n[1] + "</a>"; }).join("");
+  [].forEach.call(document.querySelectorAll(".nav a"), function (a) { a.addEventListener("click", function (e) { e.preventDefault(); notice("Mockup: " + a.textContent + " is a live page, not part of this proposal."); }); });
+  function showTip(e) { var el = e.target.closest && e.target.closest("[data-tip]"); if (el) { $("tip").textContent = el.getAttribute("data-tip"); $("tip").hidden = false; } }
+  function hideTip() { $("tip").hidden = true; }
+  document.addEventListener("focusin", showTip); document.addEventListener("mouseover", showTip);
+  document.addEventListener("focusout", hideTip); document.addEventListener("mouseout", hideTip);
+  readState(); writeState(); render();
+})();
+</script>
+</body>
+</html>

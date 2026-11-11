@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { controlPayload, sign } from "../src/auth.ts";
-import { FRAME_MAX, LOG_PAGE_SIZE } from "../src/limits.ts";
+import { FRAME_MAX, HELLO_TIMEOUT_MS, LOG_PAGE_SIZE } from "../src/limits.ts";
 import type { ClientMessage } from "../src/protocol.ts";
 import { makeHello } from "../src/relay-client.ts";
 import { createRoomCore } from "../src/relay-core.ts";
@@ -16,6 +16,7 @@ const transport = vi.hoisted(() => ({
   sockets: [] as { terminate(): void; peer: RelayPeer }[],
   sent: [] as ClientMessage[],
   options: [] as { maxPayload: number }[],
+  connectionDelayMs: 0,
 }));
 vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
@@ -23,6 +24,7 @@ vi.mock("ws", async () => {
     static OPEN = 1;
     readyState = 0;
     peer: RelayPeer;
+    openTimer?: ReturnType<typeof setTimeout>;
     constructor(_url: string, options: { maxPayload: number }) {
       super();
       transport.options.push(options);
@@ -32,11 +34,15 @@ vi.mock("ws", async () => {
         close: () => this.terminate(),
       };
       transport.sockets.push(this);
-      queueMicrotask(() => {
+      const open = () => {
+        if (this.readyState !== 0) return;
         this.readyState = 1;
         transport.session?.connect(this.peer);
         this.emit("open");
-      });
+      };
+      if (transport.connectionDelayMs > 0)
+        this.openTimer = setTimeout(open, transport.connectionDelayMs);
+      else queueMicrotask(open);
     }
     send(raw: string) {
       transport.sent.push(JSON.parse(raw));
@@ -44,6 +50,7 @@ vi.mock("ws", async () => {
     }
     terminate() {
       if (this.readyState === 3) return;
+      clearTimeout(this.openTimer);
       this.readyState = 3;
       transport.session?.disconnect(this.peer);
       this.emit("close");
@@ -65,6 +72,7 @@ afterEach(async () => {
   transport.options = [];
   transport.sockets = [];
   transport.session = undefined;
+  transport.connectionDelayMs = 0;
 });
 async function setup(answer?: string, backlog = 0) {
   const f = await fixture();
@@ -98,7 +106,11 @@ async function setup(answer?: string, backlog = 0) {
     answer,
   });
   for (const name of ["a", "b"] as const) daemons.push(await startDaemon(options(name)));
-  await expect.poll(() => Object.keys(daemons[0].presence("test-room")).length).toBe(2);
+  await expect
+    .poll(() => Object.keys(daemons[0].presence("test-room")).length, {
+      timeout: HELLO_TIMEOUT_MS,
+    })
+    .toBe(2);
   return { ...f, core, options, aDaemon: daemons[0], bDaemon: daemons[1] };
 }
 it("delivers through the real session/core with agent signatures and scanned bodies", async () => {
@@ -429,6 +441,9 @@ it("stops a removed room after reconnect and explains why", async () => {
 });
 
 it("stores every replay page before requesting the next and reserves receive headroom", async () => {
+  // An allowed slow handshake must complete before measuring the replay behavior.
+  transport.connectionDelayMs = 1_500;
+  expect(transport.connectionDelayMs).toBeLessThan(HELLO_TIMEOUT_MS);
   const f = await setup(undefined, LOG_PAGE_SIZE + 3);
   await expect.poll(() => f.bDaemon.read("test-room", 0, 500).length).toBe(LOG_PAGE_SIZE + 3);
   expect(f.bDaemon.read("test-room", 0, 500).map((m) => m.seq)).toEqual(

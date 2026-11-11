@@ -1,0 +1,114 @@
+{
+  "at": "2026-11-09T17:29:09.935Z",
+  "beforeHead": "9be5cf23363368109b22e83b690e766ba2fc1d48",
+  "afterHead": "fef587386285136eea3ab5a407838d69f66c7b24",
+  "beforeStoreSha256": "a4d8954a97c9c2dbb5d234a850f9fe1d741f2ad91e88b0cf93f46befee09f408",
+  "afterStoreSha256": "869b91ccbd6ec918cc71b8007e9216fd732e30967834e5a75d61fbcd3b823573",
+  "method": "Five alternating-order pairs, separate Store instances, one copied database. All configured agent threads plus CAPCOM, complete history and actual read-cursor variants. Full JSON must match. Native author checks running on the same host. This is not a whole-app idle acceptance observation.",
+  "medianMs": {
+    "before": 45.69733400000007,
+    "after": 22.019250000000056
+  },
+  "results": [
+    {
+      "pair": 0,
+      "name": "before",
+      "elapsedMs": 131.710417,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 7321
+    },
+    {
+      "pair": 0,
+      "name": "after",
+      "elapsedMs": 22.019250000000056,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 30
+    },
+    {
+      "pair": 1,
+      "name": "after",
+      "elapsedMs": 19.589875000000006,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 30
+    },
+    {
+      "pair": 1,
+      "name": "before",
+      "elapsedMs": 46.78729199999998,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 7321
+    },
+    {
+      "pair": 2,
+      "name": "before",
+      "elapsedMs": 42.4353329999999,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 7321
+    },
+    {
+      "pair": 2,
+      "name": "after",
+      "elapsedMs": 22.620666999999912,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 30
+    },
+    {
+      "pair": 3,
+      "name": "after",
+      "elapsedMs": 17.573125000000005,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 30
+    },
+    {
+      "pair": 3,
+      "name": "before",
+      "elapsedMs": 45.69733400000007,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 7321
+    },
+    {
+      "pair": 4,
+      "name": "before",
+      "elapsedMs": 44.906749999999874,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 7321
+    },
+    {
+      "pair": 4,
+      "name": "after",
+      "elapsedMs": 24.35354200000006,
+      "threads": 10,
+      "rows": 7321,
+      "bytes": 7897714,
+      "sha256": "a9d5ce11d7db3d027e6aa8294dfcbce71637afb93e758c96b094ebf6f23b33b1",
+      "actualMentionSelects": 30
+    }
+  ]
+}

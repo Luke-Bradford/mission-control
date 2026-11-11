@@ -146,6 +146,18 @@ const msg = (id: number, method: string, params?: unknown) => ({
   ...(params === undefined ? {} : { params }),
 });
 
+describe("tool call records", () => {
+  it("records each finished call with the characters sent and returned", async () => {
+    const res = await rpc(msg(1, "tools/call", { name: "echo", arguments: { a: "b" } }));
+    expect(res.statusCode).toBe(200);
+    const used = store.toolUsage(0, Date.now() + 60_000).get("echo");
+    expect(used).toEqual({
+      calls: 1,
+      chars: JSON.stringify({ a: "b" }).length + `echo ${JSON.stringify({ a: "b" })}`.length,
+    });
+  });
+});
+
 describe("a grantable tool", () => {
   const probe: McTool = {
     name: "probe",

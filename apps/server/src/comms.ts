@@ -35,6 +35,8 @@ export const COMMS_OPEN_TEXT_MAX = 280;
 export interface CommsServiceDeps {
   /** A PR-scoped thread resolved and validated by the operator API. */
   ticket?: string;
+  /** Item title resolved by the operator API for a direct message to FLIGHT. Context only. */
+  flightItem?: { to: string; title: string };
   store: Store;
   crew: () => readonly string[];
   knownSecrets: () => Promise<readonly string[]>;
@@ -42,6 +44,8 @@ export interface CommsServiceDeps {
   /** Labelled direct or tagged delivery wakes a worker; reactions never use it. */
   notify?: (to: string, text: string, from: string) => void | Promise<void>;
   seatSender?: boolean;
+  /** Internal final dispatch precondition; never accepted from message input. */
+  beforeWrite?: () => void;
   /** Wake the recipient for an unlabelled message too (the operator's own message or answer). */
   wakeUnlabelled?: boolean;
   /** False: a reply does not mention (or wake) the author of the message it answers. */
@@ -92,6 +96,11 @@ export async function sendComms(
   input: CommsSendInput,
 ): Promise<SentComms> {
   if (Array.from(input.text).length > COMMS_MESSAGE_MAX) throw new Error(commsTooLongText);
+  if (
+    input.itemKey !== undefined &&
+    (typeof input.itemKey !== "string" || input.itemKey.length > 200)
+  )
+    throw new Error("itemKey must fit 200 characters.");
   const now = deps.now?.() ?? Date.now();
   let crew = deps.crew();
   let members = new Set([...crew, COMMS_CAPCOM, COMMS_CONTROLLER]);
@@ -124,6 +133,8 @@ export async function sendComms(
   for (const found of input.text.matchAll(/(^|[^A-Za-z0-9_-])@([A-Za-z0-9_-]+)\b/g)) {
     if (members.has(found[2])) mentions.add(found[2]);
   }
+  // A direct message is for the operator even when its text has no explicit tag.
+  if (input.to === COMMS_CAPCOM) mentions.add(COMMS_CAPCOM);
   if (replyFrom !== undefined && deps.replyAuthorMention !== false) mentions.add(replyFrom);
   const notify = new Set<string>();
   if (crew.includes(input.to)) notify.add(input.to);
@@ -144,6 +155,7 @@ export async function sendComms(
           deps.senderTicket,
         ),
         text: input.text,
+        itemKey: input.itemKey,
         label: input.label,
         ref: input.ref,
         replyTo: input.replyTo,
@@ -157,7 +169,9 @@ export async function sendComms(
         : undefined,
       // an exact repeat is stored once, whoever sends it
       now - COMMS_REPEAT_WINDOW_MS,
+      from === COMMS_CAPCOM && deps.flightItem?.to === input.to ? deps.flightItem.title : undefined,
     );
+  deps.beforeWrite?.();
   // A seat's rate limit is enforced atomically before it can wake anyone.
   let stored = deps.seatSender ? storeMessage() : null;
   if (deps.seatSender && stored === null)
@@ -170,7 +184,7 @@ export async function sendComms(
   if (stored.repeat && !deps.store.commsWakeFailed(sent.id)) return { ...sent, repeat: true };
   // FYI messages wait for the recipient's next turn. Only labelled work wakes an idle seat, and
   // what the operator sends does too.
-  if (sent.label !== null || deps.wakeUnlabelled === true) {
+  if ((sent.label !== "none" && sent.label !== null) || deps.wakeUnlabelled === true) {
     try {
       for (const to of notify) await deps.notify?.(to, sent.text, sent.from);
     } catch (e) {
@@ -211,6 +225,7 @@ export function commsInboxContext(
     replyTo: row.replyTo,
     mentions: row.mentions,
     pinned: pins.has(row.id),
+    ...(row.itemKey === undefined ? {} : { itemKey: row.itemKey }),
   }));
   const heading =
     "Comms inbox (messages addressed to you, tags, replies to your messages and pins):";
@@ -459,11 +474,19 @@ export function attentionChatter(
     asked ??= store.questionTimes(agentId);
     return asked.has(m.at);
   };
+  const labelledFlightQuestion = (m: CommsThreadMessage) => {
+    if (!own) return false;
+    const stored = store.commsMessage(m.id);
+    return stored?.to === COMMS_CAPCOM && stored.label === "question";
+  };
   const lines = threadMessages(store, agentId, crew, "attention").filter(
     (m) =>
       !m.seen &&
       m.from === agentId &&
       !mirrored(m) &&
+      // A stored labelled FLIGHT-to-operator question has the durable `comms-open:` projection.
+      // Do not let its `@CAPCOM` text also join the grouped tag projection.
+      !labelledFlightQuestion(m) &&
       ((m.tagged && (!own || flightQuestion(m.text))) ||
         (!own && m.direct && flightQuestion(m.text))) &&
       resolvedCommsReason(store, m, crew && !own) === null,

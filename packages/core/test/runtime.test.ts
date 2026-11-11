@@ -110,7 +110,9 @@ describe("crewCliArgs", () => {
       args.indexOf("--append-system-prompt-file"),
     );
     expect(allowed).toEqual([...FLIGHT_FULL_BUILTINS, "mcp__mc__*"]);
-    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
+    const settingsArg = args[args.indexOf("--settings") + 1];
+    if (settingsArg === undefined) throw new Error("no --settings argument");
+    const settings = JSON.parse(settingsArg);
     expect(settings.sandbox).toEqual({ enabled: false });
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.hooks.PostToolUse).toHaveLength(1);
@@ -374,6 +376,7 @@ describe("the allowlist in phase 2b", () => {
       updateBrief: "mcp__mc__update_brief",
       editIssue: "mcp__mc__edit_issue",
       setFields: "mcp__mc__set_fields",
+      moveReview: "mcp__mc__move_review",
       operator: "mcp__mc__operator",
       ghWrite: "mcp__mc__gh_write",
       crewTidy: "mcp__mc__crew_tidy",

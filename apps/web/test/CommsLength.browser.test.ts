@@ -43,6 +43,21 @@ describeRendered("The Comms right column with message lengths in a browser", () 
             },
           });
           await page.box(".comms-length-panel");
+          await expect
+            .poll(() =>
+              page.evaluate(
+                () => document.querySelectorAll(".comms-length-list li").length,
+                undefined,
+              ),
+            )
+            .toBe(p95BySeat.length);
+          await page.evaluate(async () => {
+            await document.fonts.ready;
+            // Metrics resize the graph; observe the settled frame, rather than the old SVG size.
+            await new Promise<void>((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+            );
+          }, undefined);
           const clear = await page.evaluate(() => {
             const panel = document.querySelector(".comms-graph-panel");
             if (!panel) return false;
