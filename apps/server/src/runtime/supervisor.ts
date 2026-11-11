@@ -133,12 +133,11 @@ import {
 } from "@mc/core";
 import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
-import { boundBriefGuard, boundBriefIdentity } from "../brief-dispatch-context.ts";
-import { budgetBrake } from "../budget-brake.ts";
+import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
-import type { CliHold } from "../cli-update.ts";
-import { probeClaudeVersion } from "../cli-version.ts";
+import type { CliHold } from "../cli/update.ts";
+import { probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import {
   applySeatAccount,
@@ -171,6 +170,7 @@ import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
+import type { ReviewPreviews } from "../preview/review.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -179,7 +179,6 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
-import type { ReviewPreviews } from "../review-preview.ts";
 import {
   enrichHandoff,
   handoffForBrief,
@@ -189,8 +188,8 @@ import {
   recordRunHandoff,
 } from "../run-handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import {
-  ACTIVE_SEAT_STATES,
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
@@ -203,9 +202,8 @@ import {
   crewSkillsDir,
   crewTokenPath,
   crewTranscriptPath,
-  type KeeperCursor,
-  type Store,
-} from "../store.ts";
+} from "../store/crew-paths.ts";
+import { ACTIVE_SEAT_STATES, type KeeperCursor, type Store } from "../store.ts";
 import {
   AGENTS_MD_HEADING,
   BRIEF_DECISIONS_MAX,
@@ -4276,10 +4274,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       const subject = external ? await readSubject() : null;
       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
-      const issue = external ? subject!.ticket.number : issueOf(author!);
-      const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+      const issue = subject ? subject.ticket.number : author === null ? null : issueOf(author);
+      const head = subject
+        ? subject.sha
+        : author === null
+          ? null
+          : (store.runPush(author.id)?.sha ?? null);
       if (
-        (!external && author!.repoId !== info.repo.id) ||
+        (!external && author?.repoId !== info.repo.id) ||
         issue === null ||
         (head !== review.sha &&
           (head === null ||
@@ -4297,7 +4299,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       let ticket: TicketView | null;
       try {
-        ticket = external ? subject!.ticket : await deps.fetchTicket(info.repo, issue);
+        ticket = subject ? subject.ticket : await deps.fetchTicket(info.repo, issue);
       } catch (e) {
         throw new SupervisorError(502, `could not read ${info.repo.github}#${issue} from GitHub`, {
           cause: e,

@@ -93,6 +93,7 @@ export function flightPageApi(state: PageState, over: Record<string, unknown> = 
     "/api/settings/crew-pause": null,
     "/api/flight": view,
     "/api/attention": attention,
+    "/api/attention/held": [],
     "/api/flight/summary": flightSummary({
       session: "s1",
       headline: "The crew is shipping; one review needs attention.",

@@ -328,21 +328,20 @@ import {
   protectedDecisionItem,
   questionAskAt,
   releaseHold,
-} from "../attention-holds.ts";
+} from "../attention/holds.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
   bindCompleteBrief,
   bindPreparedBrief,
   completeBriefError,
-} from "../brief-prepare.ts";
-import { BriefActionInput, BriefDecisionInput } from "../brief-schema.ts";
-import { budgetBrake } from "../budget-brake.ts";
+} from "../brief/prepare.ts";
+import { BriefActionInput, BriefDecisionInput } from "../brief/schema.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
+import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms/index.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
@@ -351,7 +350,7 @@ import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import { seatFocus } from "../focus.ts";
-import type { Move, MoveResult } from "../github-board.ts";
+import type { Move, MoveResult } from "../github/board.ts";
 import {
   attentionItems,
   CREW_ERROR_KEY,
@@ -390,8 +389,10 @@ import { handoffTarget } from "../run-handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
 import { InstructionInput } from "../standing-instructions.ts";
-import { crewDir, type Store } from "../store.ts";
+import { crewDir } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";

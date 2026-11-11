@@ -103,6 +103,7 @@ export const RESOURCES = {
     topic: "attention",
   }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
+  answeredAttention: { path: "/api/attention/answered", topic: "attention" },
   attention: { path: "/api/attention", topic: "attention" },
   attentionItem: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}`,
@@ -346,6 +347,9 @@ export const ACTIONS = {
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
   /** Body `{ keys: string[] }`. */
   hold: (key: string) => `/api/attention/${enc(key)}/hold`,
+  notNow: (key: string) => `/api/attention/${enc(key)}/not-now`,
+  drop: (key: string) => `/api/attention/${enc(key)}/drop`,
+  clear: (key: string) => `/api/attention/${enc(key)}/clear`,
   releaseHold: (key: string) => `/api/attention/${enc(key)}/hold/release`,
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */

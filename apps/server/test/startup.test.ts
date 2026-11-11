@@ -106,8 +106,8 @@ vi.mock("../src/config.ts", async (original) => {
       boot.evidenceLive ? false : real.isPreview(...args),
   };
 });
-vi.mock("../src/preview-repo.ts", async (original) => {
-  const real = await original<typeof import("../src/preview-repo.ts")>();
+vi.mock("../src/preview/repo.ts", async (original) => {
+  const real = await original<typeof import("../src/preview/repo.ts")>();
   return {
     ...real,
     resolvePreviewRepo: (...args: Parameters<typeof real.resolvePreviewRepo>) =>

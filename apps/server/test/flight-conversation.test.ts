@@ -6,7 +6,7 @@ import { OPERATOR_HEADER, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { commsInboxContext } from "../src/comms.ts";
+import { commsInboxContext } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
@@ -133,6 +133,82 @@ it("joins both stored directions and actual turn text in chronological order wit
     "Stored FLIGHT reply",
     "Second turn reply",
   ]);
+});
+it("reports the current live FLIGHT run with its start time", async () => {
+  const startedAt = AT - 60_000;
+  const transcriptPath = join(dir, "live-flight-run.jsonl");
+  writeFileSync(transcriptPath, "");
+  store.upsertRun({
+    id: "live-flight-run",
+    agentId: FLIGHT,
+    repoId: "repo",
+    seq: 1,
+    startedAt,
+    endedAt: null,
+    status: "running",
+    sessionId: "cli",
+    model: "x",
+    branch: null,
+    ticket: null,
+    costUsd: null,
+    tokens: null,
+    transcriptPath,
+    prs: [],
+    summary: null,
+  });
+  store.setSeatSession({
+    seatId: FLIGHT,
+    runId: "live-flight-run",
+    cliSessionId: "cli",
+    state: "running",
+    reason: null,
+    worktree: null,
+    updatedAt: AT,
+    vendor: "claude",
+  });
+
+  expect((await page()).flight).toEqual({ live: true, since: startedAt, runId: "live-flight-run" });
+});
+it("reports a stopped FLIGHT run without a start time", async () => {
+  store.setSeatSession({
+    seatId: FLIGHT,
+    runId: null,
+    cliSessionId: null,
+    state: "stopped",
+    reason: null,
+    worktree: null,
+    updatedAt: AT,
+    vendor: "claude",
+  });
+
+  expect((await page()).flight).toEqual({ live: false, since: null, runId: null });
+});
+it("reports FLIGHT stopped when no FLIGHT seat is configured", async () => {
+  const crew = config.crew;
+  if (!crew) throw new Error("Fixture crew is missing");
+  const noFlight = buildApp({
+    config: {
+      ...config,
+      crew: {
+        ...crew,
+        sessions: crew.sessions.map((session) => ({
+          ...session,
+          seats: session.seats.filter((seat) => seat.role !== "FLIGHT"),
+        })),
+      },
+    },
+    store,
+    bus: new ChangeBus(),
+    now: () => AT + 100_000,
+    operatorToken: "fixture",
+  });
+  try {
+    const response = await noFlight.inject("/api/comms/flight");
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json().flight).toEqual({ live: false, since: null, runId: null });
+  } finally {
+    await noFlight.close();
+  }
 });
 it("pages before either kind of returned id without duplicates or gaps", async () => {
   const question = stored("one", AT + 1);

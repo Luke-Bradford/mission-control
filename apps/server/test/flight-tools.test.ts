@@ -144,7 +144,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { evaluateHolds, holds } from "../src/attention-holds.ts";
+import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
@@ -170,7 +170,7 @@ import {
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import type { Move, MoveResult } from "../src/github-board.ts";
+import type { Move, MoveResult } from "../src/github/board.ts";
 import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";

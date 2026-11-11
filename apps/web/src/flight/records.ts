@@ -23,7 +23,6 @@ const RECORD_PANEL: Readonly<Record<string, string>> = {
   logP: "logP",
   wifP: "wifP",
   ledgerP: "ledgerP",
-  watchP: "watchP",
   ordersP: "ordersP",
   instructionsP: "instructionsP",
   memoryP: "memoryP",

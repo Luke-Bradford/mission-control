@@ -11,8 +11,9 @@ import type { CcConfig } from "../src/config.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
-import { createQaReports, qaReportMarkdown } from "../src/qa-reports.ts";
+import { createQaReports, qaReportMarkdown } from "../src/qa/reports.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const SHA = "a".repeat(40);
 const BASE = "b".repeat(40);
@@ -984,9 +985,9 @@ describe("QA report API", () => {
         (await app.inject("/api/qa-reports?repoId=sample&prNumber=7&headSha=short")).statusCode,
       ).toBe(400);
       expect((await app.inject("/api/qa-report-assets/../../secret")).statusCode).toBe(404);
-      config.repos[0]!.id = "removed";
+      defined(config.repos[0]).id = "removed";
       expect((await app.inject(`/api/qa-reports/${report.id}`)).statusCode).toBe(404);
-      config.repos[0]!.id = "sample";
+      defined(config.repos[0]).id = "sample";
     } finally {
       await app.close();
     }

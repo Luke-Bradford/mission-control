@@ -27,10 +27,10 @@ import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CREW,
-  COMMS_LABELS,
   COMMS_QUESTION_TO_FLIGHT,
   COMMS_REACTIONS,
   COMMS_REF,
+  COMMS_SEAT_LABELS,
   carriedFrom,
   clashText,
   closesIssue,
@@ -202,9 +202,9 @@ import { cleanCodeHealth } from "../code-health/clean.ts";
 import { CodeHealthReader } from "../code-health/read.ts";
 import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
-import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms.ts";
+import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/index.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
-import { PreviewRefused } from "../design-previews.ts";
+import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { isExternalReview } from "../external-review-key.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
@@ -223,9 +223,9 @@ import {
   type PreviewJob,
   type PreviewResult,
   previewRequest,
-} from "../preview-browser.ts";
+} from "../preview/browser.ts";
 import type { ProfilesError } from "../profiles.ts";
-import { createQaReports, QaReportError, type QaReportService } from "../qa-reports.ts";
+import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
@@ -234,7 +234,8 @@ import {
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
-import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
+import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
 import { type RestoreSandboxRunner, restoreWorktreeFile } from "./restore.ts";
@@ -399,7 +400,7 @@ const CommsReadArgs = z.strictObject({
 const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
   text: text(MC_TEXT_MAX),
-  label: z.enum(COMMS_LABELS).optional(),
+  label: z.enum(COMMS_SEAT_LABELS),
   ref: z.string().regex(COMMS_REF).optional(),
   replyTo: z
     .string()
@@ -3106,17 +3107,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.commsSend,
       description:
-        "Send a message to a local seat, CAPCOM, or the crew channel. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
+        "Send a message to a local seat, CAPCOM, or the crew channel. Choose question, blocker or none explicitly; use none for handoffs and ordinary answers. Every answer must pass the answered message id as replyTo. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
       inputSchema: {
         type: "object",
         properties: {
           to: { type: "string" },
           text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
-          label: { type: "string", enum: [...COMMS_LABELS] },
+          label: { type: "string", enum: [...COMMS_SEAT_LABELS] },
           ref: { type: "string" },
-          replyTo: { type: "string", pattern: "^comms:[0-9]+$" },
+          replyTo: {
+            type: "string",
+            pattern: "^comms:[0-9]+$",
+            description:
+              "The answered message id; required for every answer. Omit only for a new message.",
+          },
         },
-        required: ["to", "text"],
+        required: ["to", "text", "label"],
         additionalProperties: false,
       },
       modes: ["writer", "read-only", "scratch"],

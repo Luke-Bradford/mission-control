@@ -35,8 +35,8 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLI_AUTO_NOTE_PREFIX } from "../src/cli-auto.ts";
-import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli-update.ts";
+import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
+import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {
@@ -57,6 +57,7 @@ import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
+import { defined } from "./defined.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -1507,7 +1508,7 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toContain("stop threshold");
     store.upsertPullRequests(
       "shop-app",
-      [{ ...store.pullRequests("shop-app")[0]!, headSha: "d".repeat(40) }],
+      [{ ...defined(store.pullRequests("shop-app")[0]), headSha: "d".repeat(40) }],
       NOW + 1,
     );
     expect(rowOf(c, "RETRO-1")?.queuedReview).toBeUndefined();
@@ -3086,6 +3087,142 @@ describe("messages are not Needs you", () => {
     expect(chatter(c, NOW + 2 * MIN)).toEqual([
       expect.objectContaining({ key, owner: "operator" }),
     ]);
+  });
+
+  it("projects a labelled FLIGHT question to CAPCOM once after its escalation delay", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const earlier = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#4",
+      text: "@CAPCOM should the earlier work wait?",
+    });
+    if (earlier === null) throw new Error("earlier message was not stored");
+    const message = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+
+    expect(
+      attentionItems(c, store, at - 1, NO_LOCK, []).filter((item) => item.text === message.text),
+    ).toEqual([expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" })]);
+    store.markCommsInboxRead("flight-1", [message.id]);
+    const items = attentionItems(c, store, at, NO_LOCK, []);
+    expect(items.filter((item) => item.text === message.text)).toEqual([
+      expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" }),
+    ]);
+    expect(items).toContainEqual(expect.objectContaining({ key: `tag:flight-1:${earlier.id}` }));
+  });
+
+  it("keeps an existing tagged brief as the single canonical projection", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const legacyKey = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key: legacyKey,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve the dependencies design?",
+      context: "The design is ready for a decision.",
+      recommendation: "Approve it.",
+      basis: "The retained legacy brief.",
+      options: TWO_OPTIONS,
+    });
+
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).filter((item) => item.text === message.text),
+    ).toEqual([expect.objectContaining({ key: legacyKey })]);
+  });
+
+  it("closes a legacy tagged duplicate only when it has a real choice", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve?",
+      context: "Ready.",
+      recommendation: "Approve.",
+      basis: "Legacy.",
+      options: TWO_OPTIONS,
+    });
+    store.claimChoice({
+      key,
+      briefAt: message.at,
+      optionId: "yes",
+      label: "Yes",
+      answer: "Go ahead.",
+      question: "Approve?",
+      ticket: "shop-app#5",
+      target: "FLIGHT-1",
+      targetKind: "flight",
+      messageId: null,
+      chosenAt: at,
+      chosenBy: "operator",
+    });
+    store.ack([key], at);
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).find((item) => item.key === key),
+    ).toBeUndefined();
+  });
+
+  it("keeps an ack-only legacy tagged duplicate answerable", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve?",
+      context: "Ready.",
+      recommendation: "Approve.",
+      basis: "Legacy.",
+      options: TWO_OPTIONS,
+    });
+    store.ack([key], at);
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).find((item) => item.key === key),
+    ).toMatchObject({ acked: false });
   });
 
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {

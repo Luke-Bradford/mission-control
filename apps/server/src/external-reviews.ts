@@ -18,7 +18,7 @@ import type { GhRunner } from "./mcp/gh.ts";
 import { ownsPr } from "./ownership.ts";
 import type { PrEvidence } from "./pr-evidence/capture.ts";
 import { postPrEvidence } from "./pr-evidence/sweep.ts";
-import { qaReportGitIndex } from "./qa-reports.ts";
+import { qaReportGitIndex } from "./qa/reports.ts";
 import type { Store } from "./store.ts";
 
 export { externalReviewKey, isExternalReview } from "./external-review-key.ts";
@@ -422,7 +422,8 @@ export function createExternalReviews(deps: {
                   !(await readExternalSubject(deps.gh, deps.cwd, repo, pr.number, pr.headSha))
                 )
                   continue;
-                if (deps.evidence) {
+                const evidence = deps.evidence;
+                if (evidence) {
                   const recorded = store.prFilePaths(repo.id, pr.number);
                   const paths =
                     pr.changedFiles != null && recorded.length === pr.changedFiles
@@ -434,22 +435,16 @@ export function createExternalReviews(deps: {
                     sha: pr.headSha,
                     paths,
                     onStored: (manifest: Parameters<typeof postPrEvidence>[3]) =>
-                      postPrEvidence(
-                        deps.gh,
-                        deps.cwd,
-                        repo.github,
-                        manifest,
-                        deps.evidence!.baseUrl,
-                      ),
+                      postPrEvidence(deps.gh, deps.cwd, repo.github, manifest, evidence.baseUrl),
                   };
-                  void deps.evidence
+                  void evidence
                     .ensure(target)
                     .catch(() =>
                       deps.log(
                         `External QA for ${repo.id}#${pr.number} could not prepare screenshots.`,
                       ),
                     );
-                  if (deps.evidence.gate(target) !== null) continue;
+                  if (evidence.gate(target) !== null) continue;
                 }
                 if (
                   !(deps.enabled?.() ?? true) ||

@@ -90,14 +90,20 @@ import {
   partitionAttention,
   protectedDecisionItem,
   questionAskAt,
-} from "./attention-holds.ts";
-import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
-import { briefReadState, briefSourceRevision } from "./brief-source.ts";
-import { claudeVersion } from "./cli-version.ts";
+} from "./attention/holds.ts";
+import { confirmedResumeAfter, pendingRunApproval } from "./attention/subjects.ts";
+import { briefReadState, briefSourceRevision } from "./brief/source.ts";
+import { claudeVersion } from "./cli/version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
-import { attentionChatter, resolvedCommsReason } from "./comms.ts";
+import { attentionChatter, resolvedCommsReason } from "./comms/index.ts";
+import {
+  canonicalFlightQuestionKey,
+  flightQuestionChoice,
+  flightQuestionMessageId,
+  isFlightOperatorQuestion,
+} from "./comms/question.ts";
 import {
   agentIds,
   type CcConfig,
@@ -112,8 +118,8 @@ import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
-import { loopPause } from "./loop-pause.ts";
-import { loopTries } from "./loophistory.ts";
+import { loopTries } from "./loop/history.ts";
+import { loopPause } from "./loop/pause.ts";
 import { reviewCheckFor } from "./review-check.ts";
 import {
   type PrCache,
@@ -1275,7 +1281,11 @@ function buildAttentionItems(
   for (const message of store.openCommsItems()) {
     const author = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === message.from);
     if (message.at < COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT) continue;
-    if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
+    const flightQuestion =
+      message.from === flightSeat(config)?.seat.id &&
+      message.to === COMMS_CAPCOM &&
+      message.label === "question";
+    if (!flightQuestion && now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
     const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
     const prNumber = /^PR (\d+)$/.exec(message.ref ?? "")?.[1];
     const flight = flightSeat(config);
@@ -1303,9 +1313,13 @@ function buildAttentionItems(
       continue;
     // FLIGHT's message for the controller is the controller's, never a stuck run the operator keeps
     const forController = message.from === flight?.seat.id && isForTheController(message.text);
+    if (flightQuestion && flightQuestionChoice(store, message.id, message.from)) continue;
     items.push({
       owner: forController ? OWNER_CONTROLLER : OWNER_OPERATOR,
-      key: `${COMMS_OPEN_PREFIX}${message.id}`,
+      key:
+        message.from === flight?.seat.id && message.to === COMMS_CAPCOM
+          ? canonicalFlightQuestionKey(store, message.id, flight.seat.id)
+          : `${COMMS_OPEN_PREFIX}${message.id}`,
       kind: message.label === "blocker" && !forController ? "blocked" : "question",
       agentId: message.from,
       repoId: repoId ?? null,
@@ -1538,7 +1552,14 @@ function buildAttentionItems(
 
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
-    const ackAt = acks.get(i.key);
+    const sourceMessageId = i.agentId ? flightQuestionMessageId(i.key, i.agentId) : null;
+    const ackAt =
+      sourceMessageId !== null &&
+      i.agentId !== null &&
+      isFlightOperatorQuestion(store, sourceMessageId, i.agentId) &&
+      flightQuestionChoice(store, sourceMessageId, i.agentId) === null
+        ? undefined
+        : acks.get(i.key);
     const askAt = brief !== undefined && brief.for !== "flight" ? (brief.askAt ?? brief.at) : 0;
     const item: AttentionItem = {
       ...i,

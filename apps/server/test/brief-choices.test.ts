@@ -11,10 +11,10 @@ import {
   type Run,
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { chooseBrief, retainedBriefChoice } from "../src/brief-choices.ts";
-import { bindCompleteBrief } from "../src/brief-prepare.ts";
-import { routineBriefChoices } from "../src/brief-routine.ts";
-import { briefReadState, briefSourceRevision } from "../src/brief-source.ts";
+import { chooseBrief, retainedBriefChoice } from "../src/brief/choices.ts";
+import { bindCompleteBrief } from "../src/brief/prepare.ts";
+import { routineBriefChoices } from "../src/brief/routine.ts";
+import { briefReadState, briefSourceRevision } from "../src/brief/source.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { applyDecisionDefaults } from "../src/decision-defaults.ts";
@@ -110,6 +110,20 @@ function source() {
   prepareFixtureGuidance(config, store, now, key);
   return key;
 }
+function flightSource() {
+  const message = store.addComms({
+    at: SENT,
+    from: "FLIGHT-1",
+    to: "CAPCOM",
+    ticket: "repo#1",
+    text: "@CAPCOM approve this direction?",
+    label: "question",
+  });
+  if (!message) throw new Error("missing message");
+  const key = `comms-open:${message.id}`;
+  prepareFixtureGuidance(config, store, now, key);
+  return { key, message };
+}
 function request(key: string, requestId = "choice-one"): BriefChoiceRequest {
   const brief = store.briefs().get(key);
   if (!brief?.binding || !brief.id) throw new Error("missing bound brief");
@@ -150,6 +164,18 @@ it("dispatches a displayed exact-run choice once and retains the real receipt", 
   await expect(
     chooseBrief(deps, key, { ...req, optionId: "hold" }, { operator: true }),
   ).rejects.toThrow(/different choice/);
+});
+it("settles FLIGHT's labelled Comms question when its canonical choice is applied", async () => {
+  const { key, message } = flightSource();
+  expect(await chooseBrief(choices(), key, request(key), { operator: true })).toMatchObject({
+    state: "applied",
+  });
+  expect(store.commsSettlement(message.id)).toMatchObject({ settledBy: "CAPCOM" });
+  expect(attentionItems(config, store, now).find((item) => item.key === key)).toBeUndefined();
+  expect(store.flightDecisions(0, 1)[0]).toMatchObject({
+    about: `Brief choice ${key}`,
+    decision: store.briefs().get(key)?.options[0]?.answer,
+  });
 });
 it("refuses replacement runs before any provider delivery or acknowledgment", async () => {
   const key = source(),

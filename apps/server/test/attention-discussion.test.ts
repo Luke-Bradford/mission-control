@@ -61,7 +61,7 @@ it("opens stable threads, refuses stale versions and keeps ended threads readabl
     409,
   );
   expect((await app.inject(`${url}?id=${first.id}`)).json()).toEqual(first);
-  expect((await app.inject(url)).statusCode).toBe(404);
+  expect((await app.inject(url)).json()).toEqual(first);
   await app.close();
 });
 

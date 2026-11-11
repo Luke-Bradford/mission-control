@@ -10,7 +10,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { bindCompleteBrief } from "../src/brief-prepare.ts";
+import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
@@ -27,9 +27,10 @@ import { grantApproval, mergeFloorScope } from "../src/flight-approvals.ts";
 import { attentionItems } from "../src/hud.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { ownsPr } from "../src/ownership.ts";
-import { prAcceptanceFor, prUat } from "../src/pr-uat.ts";
+import { prAcceptanceFor, prUat } from "../src/pr/uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const SHA = "a".repeat(40);
 const BASE = "b".repeat(40);
@@ -163,7 +164,7 @@ function harness() {
   };
   const deps = {
     config,
-    repo: config.repos[0]!,
+    repo: defined(config.repos[0]),
     store,
     bus,
     gh,
@@ -213,7 +214,7 @@ describe("external PR controller merge", () => {
     const h = harness();
     buildRun(null);
     expect((await mergeExternalPr(h.deps)).text).toContain("belongs to a crew run");
-    store.upsertRun({ ...store.run("builder:old")!, endedAt: 2 });
+    store.upsertRun({ ...defined(store.run("builder:old")), endedAt: 2 });
     expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
     expect(h.merges).toHaveLength(1);
   });
@@ -256,7 +257,7 @@ describe("external PR controller merge", () => {
     try {
       expect((await hold()).statusCode).toBe(200);
       expect(externalMergeHold(store, "sample", 7)).not.toBeNull();
-      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      store.upsertRun({ ...defined(store.run("builder:old")), endedAt: null });
       expect((await hold()).statusCode).toBe(404);
     } finally {
       await app.close();
@@ -302,7 +303,7 @@ describe("external PR controller merge", () => {
       expect((await withdraw()).statusCode).toBe(200);
       expect((await post(app)).statusCode).toBe(200);
       expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
-      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      store.upsertRun({ ...defined(store.run("builder:old")), endedAt: null });
       expect((await post(app)).statusCode).toBe(404);
     } finally {
       await app.close();
@@ -402,10 +403,10 @@ describe("external PR controller merge", () => {
     const h = harness();
     const superuser = {
       ...config,
-      repos: [{ ...config.repos[0]!, flightPowers: "superuser" as const }],
+      repos: [{ ...defined(config.repos[0]), flightPowers: "superuser" as const }],
     };
     h.deps.config = superuser;
-    h.deps.repo = superuser.repos[0]!;
+    h.deps.repo = defined(superuser.repos[0]);
     h.state.files = [
       { filename: ".github/workflows/ci.yml", status: "modified" },
       { filename: "apps/server/src/guard/rules.ts", status: "modified" },
@@ -419,7 +420,7 @@ describe("external PR controller merge", () => {
     // a linked ticket comes back with the result, for the decision's ref and the operator's link
     const linked = harness();
     linked.deps.config = superuser;
-    linked.deps.repo = superuser.repos[0]!;
+    linked.deps.repo = defined(superuser.repos[0]);
     linked.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
     linked.facts.closingIssuesReferences = [
       { number: 9, url: "https://github.com/example/sample/issues/9" },
@@ -442,7 +443,7 @@ describe("external PR controller merge", () => {
     // an always_ask label still needs the operator
     const again = harness();
     again.deps.config = superuser;
-    again.deps.repo = superuser.repos[0]!;
+    again.deps.repo = defined(superuser.repos[0]);
     again.state.rules = { ...again.state.rules, alwaysAsk: ["secret"] };
     again.wire.labels = [{ name: "secret" }];
     expect((await mergeExternalPr(again.deps)).text).toContain("requires the operator's approval");
@@ -455,18 +456,18 @@ describe("external PR controller merge", () => {
     store.upsertPullRequests("sample", [pr], 1);
     const superuser = {
       ...config,
-      repos: [{ ...config.repos[0]!, flightPowers: "superuser" as const }],
+      repos: [{ ...defined(config.repos[0]), flightPowers: "superuser" as const }],
     };
     const guarded = harness();
     guarded.deps.config = superuser;
-    guarded.deps.repo = superuser.repos[0]!;
+    guarded.deps.repo = defined(superuser.repos[0]);
     guarded.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
     expect((await mergeExternalPr(guarded.deps)).text).toContain("independent clean QA report");
     expect(guarded.merges).toHaveLength(0);
     // a PR with no protected path still rides on the real mc/review status
     const plain = harness();
     plain.deps.config = superuser;
-    plain.deps.repo = superuser.repos[0]!;
+    plain.deps.repo = defined(superuser.repos[0]);
     expect((await mergeExternalPr(plain.deps)).isError).toBeUndefined();
   });
 
@@ -533,9 +534,9 @@ describe("external PR controller merge", () => {
     "refuses missing or changed merge evidence: %s",
     async (failure) => {
       const h = harness();
-      if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+      if (failure === "ci") defined(h.facts.statusCheckRollup[0]).conclusion = "FAILURE";
       if (failure === "review") {
-        const id = store.reviewsOfPr("sample", 7)[0]!.id;
+        const id = defined(store.reviewsOfPr("sample", 7)[0]).id;
         store.setReviewState(id, ["reported"], "superseded", { at: 4 });
       }
       if (failure === "head") h.state.moveDuringFiles = true;
@@ -595,7 +596,7 @@ describe("external PR controller merge", () => {
   ] as const)(
     "FLIGHT records a run's controller check on its own runtime paths: %s repo answers %i",
     async (powers, status) => {
-      const repos = [{ ...config.repos[0]!, flightPowers: powers }];
+      const repos = [{ ...defined(config.repos[0]), flightPowers: powers }];
       store.upsertRun({
         id: "flight:1",
         agentId: "flight",

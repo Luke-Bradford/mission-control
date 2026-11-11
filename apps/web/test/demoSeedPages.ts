@@ -780,6 +780,7 @@ function flightApi(): Record<string, unknown> {
     "/api/drafts": [],
     "/api/drafts/history": [],
     "/api/attention/held": [],
+    "/api/attention/answered": [],
     "/api/flight/incoming": { entries: [] },
     "/api/flight/schedule": { entries: [] },
     "/api/flight/ledger?status=open": {
