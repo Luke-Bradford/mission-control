@@ -8,7 +8,7 @@ import {
   codexTool,
   transcriptVendor,
 } from "./transcript/codex-transcript.ts";
-import { openTranscript } from "./transcript-file.ts";
+import { openTranscript } from "./transcript/file.ts";
 import { originalBytes } from "./util.ts";
 
 export const STREAM_CHUNK_BYTES = 256 * 1024;
