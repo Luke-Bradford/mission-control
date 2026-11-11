@@ -2740,14 +2740,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+          // the same check on the same commit with nothing changed is not run again (waste alarm);
+          // a suite the guard already sends to the lock is a check too
+          if (
+            (verdict.kind === "allow" || verdict.kind === "lock") &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const rerun = await checks?.rerun?.(who.runId, command);
+            if (rerun) return answer(rerun);
+          }
           if (
             verdict.kind === "allow" &&
             body.data.tool_name === "Bash" &&
             typeof command === "string"
           ) {
-            // the same check on the same commit with nothing changed is not run again (waste alarm)
-            const rerun = await checks?.rerun?.(who.runId, command);
-            if (rerun) return answer(rerun);
             const check = await checks?.lockedBy(who.runId, command);
             if (check) verdict = { kind: "lock", command: check };
           }

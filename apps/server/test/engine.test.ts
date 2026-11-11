@@ -4020,6 +4020,52 @@ describe("the engine runs reviews", () => {
       await vi.waitFor(() => expect(h.starts).toEqual([{ seat: RETRO, id: expect.any(Number) }]));
     });
 
+    it("a queued review waits while its reviewer is in a restart storm, and is not failed", async () => {
+      store.waste.insertAlarm(
+        {
+          check: "restart-storm",
+          subject: RETRO,
+          repoId: REPO,
+          ticket: null,
+          seatId: RETRO,
+          runId: null,
+          level: 7,
+          evidence: "RETRO started 7 times in the last hour.",
+        },
+        clock,
+      );
+      await toReview();
+      await h.engine.tick();
+      expect(first()).toMatchObject({ state: "queued", seatId: RETRO });
+      expect(h.starts).toEqual([]);
+    });
+
+    it("a queued review of a change past two review rounds stays queued", async () => {
+      await toReview();
+      const review = first();
+      const author = store.run(review.authorRunId);
+      if (author === null) throw new Error("no author run");
+      const startsBefore = h.starts.length;
+      store.setReviewState(review.id, ["queued", "starting", "running"], "failed", {
+        at: clock,
+        failure: "test",
+      });
+      const third = store.requestReview({
+        authorRunId: review.authorRunId,
+        repoId: review.repoId,
+        seatId: RETRO,
+        prNumber: review.prNumber,
+        sha: review.sha,
+        epoch: review.epoch,
+        attempt: review.attempt + 1,
+        round: 3,
+        at: clock,
+      });
+      await h.engine.tick();
+      expect(store.review(third ?? 0)?.state).toBe("queued");
+      expect(h.starts).toHaveLength(startsBefore);
+    });
+
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
       addCodexReviewer();
       h.busyList = [{ seatId: "retro-cx", state: "running" }];

@@ -112,17 +112,34 @@ export interface WasteFinding {
   evidence: string;
 }
 
+/**
+ * How long a resolve silences a finding of the same or lower level. A check whose subject repeats
+ * over time (one seat, one repo) is silenced only for its own window; a ticket's or a run's subject
+ * is one episode, so its resolve holds until the cause grows (null).
+ */
+export const wasteResolveHoldMs = (check: WasteCheck): number | null =>
+  check === "restart-storm"
+    ? WASTE_THRESHOLDS.restartStormWindowMs
+    : check === "coordination-overhead"
+      ? WASTE_THRESHOLDS.coordinationWindowMs
+      : check === "ticket-churn"
+        ? WASTE_THRESHOLDS.churnWindowMs
+        : null;
+
 /** The refusal a rerun gets. */
 export const unchangedRerunText = (command: string, sha: string): string =>
   `Not run: ${command} already ran on commit ${sha.slice(0, 7)} and nothing has changed since (no commit, no edited file). Its result is recorded. Change something first, or read that result.`;
 
+/** Every start refusal a waste alarm gives begins with this; the engine reads it as a hold, not a fault. */
+export const WASTE_HELD_PREFIX = "Not started: waste alarm.";
+
 /** The refusal a start of a parked ticket gets. */
 export const wasteParkText = (ref: string, evidence: string): string =>
-  `Not started: ${ref} is parked by a waste alarm. ${evidence} FLIGHT or the operator decides what happens next.`;
+  `${WASTE_HELD_PREFIX} ${ref} is parked. ${evidence} FLIGHT or the operator decides what happens next.`;
 
 /** The refusal a start of an agent in a restart storm gets. */
 export const wasteStormText = (call: string, evidence: string): string =>
-  `Not started: ${call} is in a restart storm. ${evidence} Its restarts stop until the hour's count falls back, or the operator starts it.`;
+  `${WASTE_HELD_PREFIX} ${call} is in a restart storm. ${evidence} Its restarts stop until the hour's count falls back, or the operator starts it.`;
 
 /** The line a held review shows. */
 export const wasteReviewText = (evidence: string): string =>

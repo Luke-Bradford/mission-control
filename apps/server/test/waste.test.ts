@@ -5,6 +5,7 @@ import { type BoardItem, type PullRequestView, type Run, WASTE_THRESHOLDS } from
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { limitRows } from "../src/api.ts";
 import type { CcConfig } from "../src/config.ts";
+import { flightSignals, markFlightSignalsShown } from "../src/flight/signals.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { attentionItems } from "../src/hud.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
@@ -107,7 +108,7 @@ const mergedPr = (number: number, branch: string, mergedAt: number): PullRequest
 });
 
 const checkOn = (runId: string, command: string, sha: string, at: number, ok = false) =>
-  store.addCheckRun({ runId, command, headSha: sha, ok, at });
+  store.addCheckRun({ runId, command, headSha: sha, ok, exitCode: ok ? 0 : 1, at });
 
 describe("restart storm (7 November replay)", () => {
   it("raises an alarm within the minute tick and stops that agent's restarts", () => {
@@ -506,5 +507,75 @@ describe("the read route's report", () => {
       merged: 2,
       perMergeUsd: 4.5,
     });
+  });
+});
+
+describe("a resolve does not silence a seat for good", () => {
+  it("opens the alarm again for a later storm of the same size, ten days on", () => {
+    for (let i = 0; i < 12; i++) store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN }));
+    syncWasteAlarms(config, store, NOW);
+    const alarm = openWasteAlarms(store).find((a) => a.check === "restart-storm");
+    resolveWasteAlarm(store, alarm?.id ?? 0, NOW, "let it run");
+    syncWasteAlarms(config, store, NOW + MIN);
+    expect(restartHold(store, "guido-1")).toBeNull();
+    const later = NOW + 10 * DAY;
+    for (let i = 0; i < 9; i++) store.upsertRun(run("guido-1", { startedAt: later - i * MIN }));
+    syncWasteAlarms(config, store, later);
+    expect(restartHold(store, "guido-1")).not.toBeNull();
+  });
+
+  it("does the same for coordination overhead", () => {
+    store.upsertRun(run("flight-1", { costUsd: 500 }));
+    store.upsertRun(run("guido-1", { ticket: "mc#2", costUsd: 50 }));
+    syncWasteAlarms(config, store, NOW);
+    const alarm = openWasteAlarms(store).find((a) => a.check === "coordination-overhead");
+    resolveWasteAlarm(store, alarm?.id ?? 0, NOW, "known");
+    const later = NOW + 10 * DAY;
+    store.upsertRun(run("flight-1", { costUsd: 300, startedAt: later - MIN }));
+    store.upsertRun(run("guido-1", { ticket: "mc#3", costUsd: 50, startedAt: later - MIN }));
+    syncWasteAlarms(config, store, later);
+    expect(
+      openWasteAlarms(store).some((a) => a.check === "coordination-overhead" && a.id !== alarm?.id),
+    ).toBe(true);
+  });
+});
+
+describe("an external PR's reviews", () => {
+  it("are never held without an alarm that can lift the hold", () => {
+    for (const round of [1, 2, 3])
+      store.requestReview({
+        authorRunId: "external-pr:mc#7",
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 7,
+        sha: `s${round}`,
+        epoch: 1,
+        attempt: 1,
+        round,
+        at: NOW - MIN,
+      });
+    syncWasteAlarms(config, store, NOW);
+    expect(reviewsHeld(store, "external-pr:mc#7")).toBe(false);
+    expect(openWasteAlarms(store).filter((a) => a.check === "review-rounds")).toEqual([]);
+  });
+});
+
+describe("the waste_alarm FLIGHT signal", () => {
+  it("is raised once for an open alarm and stays told across ticks", () => {
+    for (let i = 0; i < 8; i++) store.upsertRun(run("guido-1", { startedAt: NOW - i * MIN }));
+    syncWasteAlarms(config, store, NOW);
+    const session = config.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const read = (at: number) =>
+      flightSignals({ config, store, session, seats: [], now: at }).signals.filter(
+        (s) => s.kind === "waste_alarm",
+      );
+    const first = read(NOW);
+    expect(first).toHaveLength(1);
+    expect(first[0]?.told).toBe(false);
+    markFlightSignalsShown(store, { repo: "mc", signals: first, triage: [] } as never, NOW);
+    const next = read(NOW + MIN);
+    expect(next).toHaveLength(1);
+    expect(next[0]?.told).toBe(true);
   });
 });

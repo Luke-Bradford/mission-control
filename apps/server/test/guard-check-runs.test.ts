@@ -494,6 +494,69 @@ describe("why the recorder dropped a check call", () => {
     expect(rows).toEqual([]);
   });
 
+  describe("an unchanged rerun", () => {
+    type Row = {
+      runId: string;
+      command: string;
+      headSha: string;
+      ok: boolean;
+      exitCode?: number | null;
+      at: number;
+    };
+    const withRerun = () => {
+      const refused: string[] = [];
+      const stored = (): Row[] => rows as Row[];
+      const r = createCheckRecorder({
+        store: {
+          addCheckRun: (c) => void rows.push(c),
+          latestCheckRun: (runId, command, headSha) => {
+            const found = stored()
+              .filter((x) => x.runId === runId && x.command === command && x.headSha === headSha)
+              .at(-1);
+            return found === undefined
+              ? null
+              : {
+                  headSha,
+                  invokedCommand: command,
+                  ok: found.ok,
+                  exitCode: found.exitCode ?? null,
+                  at: found.at,
+                };
+          },
+          addRerunRefusal: (_run, command) => void refused.push(command),
+        },
+        checks: async () => CHECKS,
+        state: async () => state,
+        now: () => clock,
+      });
+      return { r, refused };
+    };
+
+    it("is refused after a pass, and the refusal is recorded", async () => {
+      const { r, refused } = withRerun();
+      await r.begin(KEY, LINT);
+      await r.end(KEY, true, 0);
+      expect(await r.rerun?.("r1", LINT)).toMatch(/already ran on commit/);
+      expect(refused).toEqual([LINT]);
+    });
+
+    it("is refused after a failure that has an exit code", async () => {
+      const { r } = withRerun();
+      await r.begin(KEY, LINT);
+      await r.end(KEY, false, 1);
+      expect(await r.rerun?.("r1", LINT)).not.toBeNull();
+    });
+
+    it("is not refused after a call the Bash timeout killed: it may run again with a longer one", async () => {
+      const { r, refused } = withRerun();
+      await r.begin(KEY, LINT);
+      clock += 120_000;
+      await r.end(KEY, false);
+      expect(await r.rerun?.("r1", LINT)).toBeNull();
+      expect(refused).toEqual([]);
+    });
+  });
+
   it("says a failed call with no exit code that ran to its Bash timeout was killed by it", async () => {
     const r = recorder();
     await r.begin(KEY, LINT);

@@ -56,6 +56,7 @@ import {
   refreshOnSeatFree,
   waitedPrNumbers,
 } from "../src/scheduler.ts";
+import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
 import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
@@ -1675,6 +1676,47 @@ describe("scheduler", () => {
       await s.tick("machine");
       expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)?.at).toBe(t);
       expect(state().wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
+    });
+
+    it("the minute tick opens a restart-storm alarm for an agent with 7 starts in the hour", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      for (let i = 0; i < 7; i++)
+        store.upsertRun({
+          id: `storm-${i}`,
+          agentId: "guido-1",
+          repoId: "mc",
+          seq: i + 1,
+          startedAt: minute - i * 60_000,
+          endedAt: minute - i * 60_000 + 1000,
+          status: "ok",
+          sessionId: "cli",
+          model: "m",
+          branch: null,
+          ticket: null,
+          costUsd: null,
+          tokens: null,
+          transcriptPath: "/x",
+          prs: [],
+          summary: null,
+        });
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => minute + 1000,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({ at }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      expect(openWasteAlarms(store).map((a) => [a.check, a.subject])).toEqual([
+        ["restart-storm", "guido-1"],
+      ]);
+      expect(store.notes()).toEqual([]);
     });
 
     it("the minute tick raises no Needs-you note for a weekly pace past 100%", async () => {

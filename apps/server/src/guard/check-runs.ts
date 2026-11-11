@@ -192,7 +192,10 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         // a dirty tree is a change: the check would run on something no commit holds
         if (at === null || !at.clean) return null;
         for (const check of matched) {
-          if (d.store.latestCheckRun(runId, check, at.head) === null) continue;
+          const last = d.store.latestCheckRun(runId, check, at.head);
+          // a run that passed, or failed with an exit code, is a result. One killed by the Bash
+          // timeout, or that failed with no exit code (a missing install), is not: it may run again.
+          if (last === null || (!last.ok && last.exitCode === null)) continue;
           d.store.addRerunRefusal?.(runId, check, at.head, now());
           return unchangedRerunText(check, at.head);
         }

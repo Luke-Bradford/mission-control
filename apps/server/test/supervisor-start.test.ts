@@ -213,6 +213,59 @@ describe("startRun eligibility", () => {
     await refused(422, AWAY_QUOTA_REFUSED);
   });
 
+  describe("a waste alarm holds the hub's own starts", () => {
+    const alarm = (check: "restart-storm" | "retry-loop", subject: string, ticket?: string) =>
+      store.waste.insertAlarm(
+        {
+          check,
+          subject,
+          repoId: "mc",
+          ticket: ticket ?? null,
+          seatId: check === "restart-storm" ? subject : null,
+          runId: null,
+          level: 9,
+          evidence: "evidence line.",
+        },
+        Date.now(),
+      );
+    const flightSeat = {
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    };
+
+    it("refuses startRun and startWatch of a seat in a restart storm, and lets the operator start", async () => {
+      alarm("restart-storm", "guido-1");
+      alarm("restart-storm", "flight-1");
+      const { sup } = make({
+        rules: withRules(),
+        fetchTicket: ticketWith({}),
+        extraSeat: flightSeat,
+      });
+      sup.start();
+      const e = await refusal(sup.startRun("guido-1", 42));
+      expect(e.status).toBe(422);
+      expect(e.message).toMatch(/^Not started: waste alarm\. GUIDO-1 is in a restart storm/);
+      const w = await refusal(sup.startWatch("flight-1"));
+      expect(w.status).toBe(422);
+      expect(w.message).toMatch(/FLIGHT-1 is in a restart storm/);
+      expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
+    });
+
+    it("refuses a start of a parked ticket and starts another ticket", async () => {
+      alarm("retry-loop", "mc#42", "mc#42");
+      const claim = vi.fn(async () => {});
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}), claim });
+      sup.start();
+      const e = await refusal(sup.startRun("guido-1", 42));
+      expect(e.status).toBe(422);
+      expect(e.message).toMatch(/^Not started: waste alarm\. mc#42 is parked/);
+      expect(claim).not.toHaveBeenCalled();
+    });
+  });
+
   describe("a weekly pace past 100%", () => {
     it("never refuses a start: the account's stop_at alone limits it (32% use, 195% projection)", async () => {
       const at = Date.now();

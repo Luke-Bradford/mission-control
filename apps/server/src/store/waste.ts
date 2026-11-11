@@ -44,7 +44,7 @@ export function wasteQueries(db: DatabaseSync) {
         `SELECT c.run_id AS runId, c.command AS command, c.head_sha AS sha, COUNT(*) AS n,
            MAX(c.at) AS lastAt, r.ticket AS ticket, r.repo_id AS repoId, r.agent_id AS agentId
          FROM check_runs c JOIN runs r ON r.id = c.run_id
-         WHERE c.at >= ? GROUP BY c.run_id, c.command, c.head_sha HAVING COUNT(*) > 1`,
+         WHERE c.at >= ? AND (c.ok = 1 OR c.exit_code IS NOT NULL) GROUP BY c.run_id, c.command, c.head_sha HAVING COUNT(*) > 1`,
         since,
       ) as unknown as {
         runId: string;
@@ -121,10 +121,10 @@ export function wasteQueries(db: DatabaseSync) {
     /** The most rounds any review of this author run has reached. */
     maxRound(authorRunId: string): number {
       return (
-        (get("SELECT MAX(round) AS n FROM reviews WHERE author_run_id = ?", authorRunId)?.n as
-          | number
-          | null
-          | undefined) ?? 0
+        (get(
+          "SELECT MAX(v.round) AS n FROM reviews v JOIN runs r ON r.id = v.author_run_id WHERE v.author_run_id = ?",
+          authorRunId,
+        )?.n as number | null | undefined) ?? 0
       );
     },
 

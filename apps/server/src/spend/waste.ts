@@ -22,6 +22,7 @@ import {
   type WasteReport,
   type WasteSpend,
   type WasteWindow,
+  wasteResolveHoldMs,
   wasteThresholdText,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
@@ -344,8 +345,10 @@ export function syncWasteAlarms(config: CcConfig, store: Store, now: number): bo
   const open = new Set(stored.map((a) => `${a.check}\0${a.subject}`));
   for (const [key, f] of found) {
     if (open.has(key)) continue;
+    const hold = wasteResolveHoldMs(f.check);
     const resolved = q
       .alarms("WHERE check_id = ? AND subject = ? AND resolved_at IS NOT NULL", f.check, f.subject)
+      .filter((a) => hold === null || (a.resolvedAt ?? 0) >= now - hold)
       .reduce((n, a) => Math.max(n, a.level), -1);
     if (f.level <= resolved) continue;
     q.insertAlarm(f, now);

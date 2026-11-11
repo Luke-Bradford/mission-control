@@ -458,7 +458,7 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 
 | Check | Fires when | Then |
 | --- | --- | --- |
-| Unchanged rerun | The same configured check runs again on the same commit with a clean tree (no file changed), by one run | The hook refuses the rerun and says why (Claude hook and Codex approval); each refusal is recorded |
+| Unchanged rerun | The same configured check runs again on the same commit with a clean tree (no file changed), by one run | The hook refuses the rerun and says why (Claude hook and Codex approval); each refusal is recorded. A call killed by the Bash timeout, or a failure with no exit code, is not a result and may run again |
 | Retry loop | A ticket has 2 failed attempts, or a run has 3 carry-on resumes and no report | Parks the ticket: no new start of it (the operator's and FLIGHT's start pass) |
 | Review rounds | A change goes past 2 review rounds | Queued reviews of that change do not start |
 | Restart storm | One agent starts more than 6 times in an hour | That agent's new starts are refused (FLIGHT's seat included) until the hour's count falls back |
@@ -472,7 +472,11 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 - FLIGHT is woken once per alarm, through the `waste_alarm` signal. An alarm is not a question: it
   never reaches Needs you.
 - FLIGHT lifts a hold with `resolve_waste_alarm` (alarm id and a basis, recorded in Decided without
-  you). The alarm stays closed until its cause grows past the level it had.
+  you). The alarm stays closed until its cause grows past the level it had. For a seat's or a
+  repo's alarm (restart storm, coordination overhead, ticket churn) that silence lasts one window,
+  not for good.
+- A held start is not a fault: the engine keeps the card or the review queued and raises no
+  question. Reviews of an external PR are never held by the rounds check.
 - A hold only refuses or parks the hub's own runs. No GitHub write. A seat's live run is never
   killed by an alarm; the hold bites at the next start, resume of a review, or restart.
 - `GET /api/waste` serves what the Audit page shows: for the past day and week, spend per merged

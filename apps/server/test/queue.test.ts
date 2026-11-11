@@ -23,6 +23,8 @@ import {
   type SeatState,
   startMissingNeedsText,
   type TicketView,
+  wasteParkText,
+  wasteStormText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
@@ -401,6 +403,41 @@ describe("refillQueues", () => {
     startFails = () => null;
     await take();
     expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+
+  it("a seat in a restart storm keeps the card queued: no Needs-you question, no drop", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    await refill();
+    startFails = () => new SupervisorError(422, wasteStormText("GUIDO-1", "x"));
+    await take();
+    expect(started).toEqual([]);
+    expect(store.notes().filter((n) => n.key.startsWith("question:take-failed:"))).toEqual([]);
+    expect(issues(SERVER)).toEqual([1]);
+    startFails = () => null;
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+
+  it("a ticket a waste alarm parked is not dealt, and a held start raises no question", async () => {
+    store.replaceBoard(REPO, [card(1), card(2)]);
+    store.waste.insertAlarm(
+      {
+        check: "retry-loop",
+        subject: `${REPO}#1`,
+        repoId: REPO,
+        ticket: `${REPO}#1`,
+        seatId: null,
+        runId: null,
+        level: 2,
+        evidence: "2 failed attempts.",
+      },
+      NOW,
+    );
+    await refill();
+    expect(issues(SERVER)).toEqual([2]);
+    startFails = () => new SupervisorError(422, wasteParkText(`${REPO}#2`, "x"));
+    await take();
+    expect(store.notes().filter((n) => n.key.startsWith("question:take-failed:"))).toEqual([]);
   });
 
   it("away picks mapped safe tickets only while pickUp is enabled", async () => {
