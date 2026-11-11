@@ -169,14 +169,20 @@ const flightApi = {
 };
 
 describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
-  it.each([1280, 1600, 1920])(
-    "shows no read error and keeps the agent rows apart at %i wide",
-    async (width) => {
+  it.each([
+    [1280, 1000],
+    [1600, 1000],
+    [1920, 1000],
+    [1600, 900],
+    [1600, 700],
+  ])(
+    "shows no read error and keeps the agent rows apart at %i x %i",
+    async (width, height) => {
       mkdirSync(SHOTS, { recursive: true });
       const page = await renderAt({
         page: "test/commsBrowser.html",
         width,
-        height: 1000,
+        height,
         search: "?at=/comms",
         api: flightApi,
       });
@@ -227,7 +233,30 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
           ? rows.every((r) => r.getBoundingClientRect().bottom <= nav.bottom + 0.5)
           : false;
       }, undefined);
-      expect(navFits).toBe(true);
+      // (below 900 high the nav scrolls instead)
+      if (height >= 900) expect(navFits).toBe(true);
+      // neither list spills past the column, and each keeps at least three rows whole
+      const shared = await page.evaluate(() => {
+        const left = document.querySelector(".comms-left")?.getBoundingClientRect();
+        const panel = document.querySelector(".comms-tickets")?.getBoundingClientRect();
+        const nav = document.querySelector(".comms-nav")?.getBoundingClientRect();
+        const list = document.querySelector(".comms-ticket-list")?.getBoundingClientRect();
+        const whole = (box: DOMRect | undefined, sel: string) =>
+          box
+            ? [...document.querySelectorAll(sel)].filter((e) => {
+                const r = e.getBoundingClientRect();
+                return r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5;
+              }).length
+            : 0;
+        return {
+          ticketsInColumn: left && panel ? panel.bottom <= left.bottom + 0.5 : false,
+          ticketRows: whole(list, ".comms-ticket-list li"),
+          agentRows: whole(nav, ".comms-nav-row"),
+        };
+      }, undefined);
+      expect(shared.ticketsInColumn).toBe(true);
+      expect(shared.ticketRows).toBeGreaterThanOrEqual(3);
+      expect(shared.agentRows).toBeGreaterThanOrEqual(3);
       // the busy list shows rows, each with its message count, and no row runs past the panel
       const listed = await page.evaluate(() => {
         const panel = document.querySelector(".comms-tickets")?.getBoundingClientRect();
@@ -246,7 +275,7 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
       // the box ends inside the panel on both sides, so its border and focus ring are not clipped
       expect(tickets?.boxRight).toBeLessThanOrEqual((tickets?.panelRight ?? 0) - 0.5);
       expect(tickets?.boxLeft).toBeGreaterThanOrEqual((tickets?.panelLeft ?? 0) + 0.5);
-      await page.screenshot(join(SHOTS, `comms-flight-${width}.png`));
+      await page.screenshot(join(SHOTS, `comms-flight-${width}x${height}.png`));
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

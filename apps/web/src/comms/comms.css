@@ -960,10 +960,11 @@ a.comms-ref {
   color: var(--muted);
 }
 
-/* Who is on the line comes first: the nav takes its whole height, and the Tickets list scrolls in what is left. */
+/* The column is shared: the nav shrinks (never below Team and three agents) and scrolls; the Tickets list takes the rest. */
 .comms-left > .comms-nav {
-  flex: 0 0 auto;
-  overflow: visible;
+  flex: 0 1 auto;
+  min-height: 320px;
+  overflow-y: auto;
 }
 
 /* Tickets list: a search over one row per ticket; the number opens it, "Chat" filters the chat. */
@@ -972,7 +973,7 @@ a.comms-ref {
   flex: 1 1 0;
   flex-direction: column;
   gap: var(--sp-1);
-  min-height: 160px;
+  min-height: 280px;
   padding-bottom: var(--sp-2);
   overflow: hidden;
   background: var(--surface);
