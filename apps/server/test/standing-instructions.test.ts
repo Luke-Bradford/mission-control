@@ -4,7 +4,12 @@ import { join } from "node:path";
 import { seatInstructionBlock } from "@mc/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { rolePrompt } from "../src/runtime/brief.ts";
-import { directionKey, instructionEnvelope } from "../src/runtime/instruction-context.ts";
+import {
+  deliveredKey,
+  directionKey,
+  instructionEnvelope,
+  NO_DELIVERY,
+} from "../src/runtime/instruction-context.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
 
@@ -225,5 +230,81 @@ describe("final provider guidance snapshot", () => {
     expect(instructionEnvelope(store, seat, "run", false, "Inbox notice").text).toContain(
       "No active seat instructions.",
     );
+  });
+});
+
+describe("guidance is appended when it changes", () => {
+  const prime = () => {
+    const store = open();
+    store.setSetting(
+      directionKey("run"),
+      JSON.stringify({ sha: "a".repeat(40), text: "Direction text", restored: false }),
+    );
+    return store;
+  };
+  const deliver = (store: Store, run: string, text: string) => {
+    const e = instructionEnvelope(store, seat, run, true, text);
+    store.setSetting(deliveredKey(run), e.revision);
+    return e;
+  };
+  it("sends the complete guidance first, then a one-line stub while nothing changed", () => {
+    const store = prime();
+    store.instructions.create(null, note("Operator order"), "operator", 1);
+    const first = deliver(store, "run", "wake 1");
+    expect(first.text).toContain("Direction text");
+    expect(first.text).toContain('"text":"Operator order"');
+    const again = deliver(store, "run", "wake 2");
+    expect(again.text).toContain("Saved guidance unchanged");
+    expect(again.text).toContain("wake 2");
+    expect(again.text).not.toContain("Direction text");
+    expect(again.text).not.toContain("Operator order");
+    expect(Buffer.byteLength(again.text)).toBeLessThan(Buffer.byteLength(first.text));
+    const bytes = (e: typeof again, section: string) =>
+      e.pieces.filter((x) => x.section === section).reduce((n, x) => n + x.bytes, 0);
+    expect(bytes(again, "rules")).toBe(0);
+    expect(bytes(first, "rules")).toBeGreaterThan(0);
+  });
+  it("sends a revised order and the direction again at once, with only current orders", () => {
+    const store = prime();
+    const old = store.instructions.create(null, note("Old order"), "operator", 1).entry;
+    deliver(store, "run", "wake 1");
+    store.instructions.revoke(old.id, null, "operator", 2);
+    store.instructions.create(null, note("New order"), "operator", 3);
+    const next = deliver(store, "run", "wake 2");
+    expect(next.text).toContain('"text":"New order"');
+    expect(next.text).not.toContain('"text":"Old order"');
+    expect(next.text).toContain("Direction text");
+    expect(deliver(store, "run", "wake 3").text).toContain("Saved guidance unchanged");
+  });
+  it("sends a changed seat instruction in full", () => {
+    const store = prime();
+    deliver(store, "run", "wake 1");
+    store.instructions.create(seat.id, note("Seat rule"), "operator", 2);
+    const next = deliver(store, "run", "wake 2");
+    expect(next.text).toContain("Seat rule");
+  });
+  it("gives a new session the complete current guidance and keeps a failed send retryable", () => {
+    const store = prime();
+    store.instructions.create(null, note("Operator order"), "operator", 1);
+    deliver(store, "run", "wake 1");
+    store.setSetting(
+      directionKey("next"),
+      JSON.stringify({ sha: "b".repeat(40), text: "Next direction", restored: false }),
+    );
+    const fresh = instructionEnvelope(store, seat, "next", true, "first");
+    expect(fresh.text).toContain("Next direction");
+    expect(fresh.text).toContain('"text":"Operator order"');
+    // no marker was stored (the send failed): the next attempt is complete again
+    expect(instructionEnvelope(store, seat, "next", true, "retry").text).toContain(
+      '"text":"Operator order"',
+    );
+  });
+  it("sends everything again once after a resume clears the marker", () => {
+    const store = prime();
+    deliver(store, "run", "wake 1");
+    store.setSetting(deliveredKey("run"), NO_DELIVERY);
+    const resumed = deliver(store, "run", "resumed");
+    expect(resumed.text).toContain("Direction text");
+    expect(deliver(store, "run", "after").text).toContain("Saved guidance unchanged");
   });
 });

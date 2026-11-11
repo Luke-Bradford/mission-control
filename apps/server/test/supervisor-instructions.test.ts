@@ -84,13 +84,19 @@ it("delivers current orders after verified direction on initial, repeated, opera
     questions: "none",
   });
   await until(() => expect(userLines()).toHaveLength(3));
-  expect(userLines()[2]).toContain('"text":"Current saved order"');
+  // nothing changed since the last delivery: a one-line stub, not the orders or direction again
   expect(userLines()[2]).toContain("Original operator message");
+  expect(userLines()[2]).toContain(
+    `Saved guidance unchanged (revision ${store.instructions.revision()}`,
+  );
+  expect(userLines()[2]).not.toContain('"text":"Current saved order"');
+  expect(userLines()[2]).not.toContain("Fixture direction");
   await until(() => expect(seatState(flight.id)).toBe("idle"));
   await sup.endRunByEngine(started.runId);
   await sup.startWatch(flight.id, { first: "Rotated memory" });
   await until(() => expect(userLines()).toHaveLength(4));
   expect(userLines()[3]).toContain('"text":"Current saved order"');
+  expect(userLines()[3]).toContain("Fixture direction");
   expect(userLines()[3]).toContain("Rotated memory");
   const firstWake = store.promptWakes(started.runId)[0];
   expect(firstWake.sections.reduce((n, s) => n + s.bytes, 0)).toBe(
@@ -121,6 +127,7 @@ it("retains verified direction and orders through keeper loss and resume", async
   });
   await until(() => expect(userLines().length).toBeGreaterThanOrEqual(2));
   expect(store.getSetting(directionKey(runId))).toBe(source);
+  // the resumed session may have lost its history: the first message carries the complete guidance
   expect(userLines().at(-1)).toContain("Retained fixture direction");
   expect(userLines().at(-1)).toContain('"text":"Persistent order"');
 });

@@ -257,8 +257,10 @@ import { runSeatGrants } from "./grants.ts";
 import {
   type DeliveryEnvelope,
   DirectionContextError,
+  deliveredKey,
   directionKey,
   instructionEnvelope,
+  NO_DELIVERY,
   needsDirectionContext,
   readDirectionContext,
 } from "./instruction-context.ts";
@@ -1424,7 +1426,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } catch {
       throw noLive(l.info);
     }
-    store.setSetting(`instruction.delivered:${l.run.id}`, envelope.revision);
+    store.setSetting(deliveredKey(l.run.id), envelope.revision);
     if (pending) {
       pendingPromptVersions.delete(l.run.id);
       savePromptSections(
@@ -1761,6 +1763,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ? await deps.flightEnvironment?.()
         : undefined;
     if (stopping) throw new Error(SHUTTING_DOWN);
+    // A resumed session may have lost its history: its next delivery carries the complete guidance.
+    if (resume && seatDef(info.seat).loop === "watch" && store.getSetting(deliveredKey(run.id)))
+      store.setSetting(deliveredKey(run.id), NO_DELIVERY);
     if (seatDef(info.seat).loop === "watch" && needsDirectionContext(store, run.id)) {
       const sha = (
         await crewGit(

@@ -12,6 +12,10 @@ export interface DirectionContext {
   text: string | null;
   restored: boolean;
 }
+/** The revision of the guidance the run's session was last sent in full. */
+export const deliveredKey = (runId: string): string => `instruction.delivered:${runId}`;
+/** Stored when a session may have lost its history: the next delivery sends everything. */
+export const NO_DELIVERY = "";
 export const directionKey = (runId: string): string => `instruction.direction:${runId}`;
 export async function readDirectionContext(
   checkout: string,
@@ -102,6 +106,15 @@ export function instructionEnvelope(
       revision,
     };
   const direction = directionContext(store, runId);
+  if (store.getSetting(deliveredKey(runId)) === revision) {
+    // The session already holds this revision in full; say so rather than repeat it.
+    const stub = `[Mission Control] Saved guidance unchanged (revision ${revision}, direction ${direction.sha}); the complete text was delivered earlier in this session.\n\n# Original message and working context\n`;
+    return {
+      text: stub + text,
+      pieces: [{ section: "orders", bytes: Buffer.byteLength(stub) }],
+      revision,
+    };
+  }
   const directionBlock = `# Verified repository direction (${direction.sha}${direction.restored ? "; rebuilt on resume" : ""})\n${direction.text ?? "No docs/direction.md exists at this verified base."}`;
   const ordersBlock = `# Active operator orders\n${instructionSnapshot(store.instructions.active(null)) || "No active operator orders."}`;
   const guidance = `[Mission Control] Current saved guidance.\n${INSTRUCTION_PRECEDENCE}\n\n${directionBlock}\n\n${ordersBlock}${seatBlock ? `\n\n${seatBlock}` : ""}\n\n# Original message and working context\n`;
