@@ -7,7 +7,7 @@ import { type ChildProcess, fork } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { HUD_RENDERER_HEADER, OPERATOR_BOOTSTRAP_PATH } from "@mc/core";
-import { type HudProxy, startHudProxy } from "./flight/hud-proxy.ts";
+import { type HudProxy, startHudProxy } from "../flight/hud-proxy.ts";
 
 export const PREVIEW_DEADLINE_MS = 60_000;
 export const PREVIEW_CLOSE_MS = 1_000;
@@ -313,7 +313,7 @@ export interface PreviewHelperOptions {
   graceMs?: number;
 }
 
-const HELPER_PATH = fileURLToPath(new URL("./preview-browser-helper.ts", import.meta.url));
+const HELPER_PATH = fileURLToPath(new URL("./browser-helper.ts", import.meta.url));
 
 function killGroup(child: ChildProcess): void {
   try {

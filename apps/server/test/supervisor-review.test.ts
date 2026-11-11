@@ -42,7 +42,7 @@ import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { externalReviewKey } from "../src/external-reviews.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
-import { createReviewPreviews } from "../src/review-preview.ts";
+import { createReviewPreviews } from "../src/preview/review.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
