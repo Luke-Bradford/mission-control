@@ -5,6 +5,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import type { RailEdgeView, RailSeatView } from "./CommsRails.tsx";
 import {
+  type FeedMessage,
   type Flow,
   type Flows,
   type LastMessage,
@@ -91,6 +92,7 @@ export function waitingByPair(
       n: (before?.n ?? 0) + 1,
       ms: Math.max(before?.ms ?? 0, item.waitedMs),
       asker: longest ? from : (before?.asker ?? from),
+      owed: longest ? to : (before?.owed ?? to),
       question: longest ? (item.question ?? item.text ?? null) : (before?.question ?? null),
     });
   }
@@ -106,7 +108,10 @@ export function useChartData(rows: CrewRow[], flightId: string | undefined) {
   const links = linksResource.data?.links;
   // Live only while the links are loaded and the last read of them succeeded.
   const streaming = links !== undefined && linksResource.error === null;
-  const openItems = useResource<{ items: OpenItem[] }>(RESOURCES.commsOpen).data?.items;
+  const openResource = useResource<{ items: OpenItem[] }>(RESOURCES.commsOpen);
+  const feedResource = useResource<{ messages: FeedMessage[] }>(RESOURCES.commsFeed);
+  const openItems = openResource.data?.items;
+  const feed = feedResource.data?.messages;
   const [flows, setFlows] = useState<Flows>({ generation: 0, list: [] });
   const previousLinks = useRef<Map<string, { count: number; lastId?: string }> | null>(null);
 
@@ -154,7 +159,10 @@ export function useChartData(rows: CrewRow[], flightId: string | undefined) {
       list: flows.list.flatMap((flow) => {
         const from = canonicalEndpoint(flow.from, flight);
         const to = canonicalEndpoint(flow.to, flight);
-        return from !== to && known.has(from) && known.has(to) ? [{ ...flow, from, to }] : [];
+        // Hub notices are records about the crew, not a message from CAPCOM, so they never fire.
+        return flow.from !== MC && from !== to && known.has(from) && known.has(to)
+          ? [{ ...flow, from, to }]
+          : [];
       }),
     }),
     [flight, known, flows],
@@ -252,9 +260,32 @@ export function useChartData(rows: CrewRow[], flightId: string | undefined) {
     seats,
     edges,
     flows: canonicalFlows,
+    feed: (feed ?? [])
+      .filter((message) => message.from !== MC)
+      .map((message) => ({
+        ...message,
+        from: canonicalEndpoint(message.from, flight),
+        to: canonicalEndpoint(message.to, flight),
+      }))
+      .filter(
+        (message) =>
+          known.has(message.from) && known.has(message.to) && message.from !== message.to,
+      )
+      .sort((a, b) => b.at - a.at),
     streaming,
     hasData: links !== undefined,
+    chartError: linksResource.error !== null,
+    chartLoading: links === undefined && linksResource.error === null,
     openCount: edges.filter((e) => e.waiting !== null).length,
+    // Said in words where the waiting list would otherwise read as "nobody owes a reply".
+    waitingNote:
+      openItems === undefined
+        ? openResource.error !== null
+          ? "Couldn't read who is waiting. Retrying."
+          : "Loading who is waiting…"
+        : openResource.error !== null
+          ? "Stale · couldn't refresh who is waiting. Retrying."
+          : null,
     hubIds: [CAPCOM, flight, COMMS_CREW] as const,
   };
 }
