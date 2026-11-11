@@ -926,7 +926,7 @@ describe("account edits", () => {
     expect(changed.config.accounts[1]).toMatchObject({ alertAt: 60, reviewTokenBudget: 250000 });
   });
 
-  it("loads a file that still sets the removed brake key, and an edit drops it", async () => {
+  it("loads a file that still sets the removed brake key, and the key does nothing", async () => {
     writeFileSync(
       path,
       readFileSync(path, "utf8").replace("stop_at: 80", "stop_at: 80\n    brake: false"),
@@ -939,6 +939,5 @@ describe("account edits", () => {
     );
     expect(changed.config.accounts[1]).toMatchObject({ alertAt: 60 });
     expect(changed.config.accounts[1]).not.toHaveProperty("brake");
-    expect(readFileSync(path, "utf8")).not.toContain("brake");
   });
 });

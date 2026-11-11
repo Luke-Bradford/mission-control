@@ -1697,6 +1697,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/flight/runaway/lift"],
   ["GET", "/api/health"],
   ["GET", "/api/machine"],
+  ["GET", "/api/waste"],
   ["GET", "/api/activity"],
   ["GET", "/api/config"],
   ["POST", "/api/profiles"],

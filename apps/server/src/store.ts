@@ -809,7 +809,11 @@ export class Store {
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
     // the forecast brake's Needs-you note is gone with the brake
-    this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
+    if (
+      this.db.prepare("SELECT 1 FROM attention_notes WHERE key = 'budget-brake'").get() !==
+      undefined
+    )
+      this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
