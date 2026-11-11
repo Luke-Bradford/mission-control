@@ -49,7 +49,7 @@ const costOf = (runs: Run[]): number | null => {
  * running (`unknown`: its loop died mid-run) has no known duration, so it ends where it started
  * rather than accruing busy time until someone looks.
  */
-export const endOf = (r: Run, now: number): number =>
+export const endOf = (r: Pick<Run, "endedAt" | "status" | "startedAt">, now: number): number =>
   r.endedAt ?? (r.status === "running" ? now : r.startedAt);
 
 /** A run overlaps [since, now) when it started before now and was still going at `since`. */

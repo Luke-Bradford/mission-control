@@ -99,7 +99,7 @@ import {
 } from "@mc/core";
 import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
-import { flightQuestion } from "../comms.ts";
+import { flightQuestion } from "../comms/index.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
@@ -131,7 +131,7 @@ import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
-import { flightWakeCost, flightWakeWaits } from "./cost.ts";
+import { flightFinancialFacts, flightWakeCost, flightWakeWaits } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
@@ -431,6 +431,23 @@ function flightWakeStatus(store: Store, repo: string, live: boolean): FlightWake
   };
 }
 
+/** Cost and wait figures, read from one set of historical facts taken for this response. */
+function financialFigures(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  found: NonNullable<ReturnType<typeof flightSeat>>,
+): Pick<FlightView, "wakeCost" | "wakeWaits"> {
+  const crewIds = new Set(
+    configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : [])),
+  );
+  const facts = flightFinancialFacts(store, now, new Set([...crewIds, found.seat.id]));
+  return {
+    wakeCost: flightWakeCost(store, now, found.seat.id, crewIds, undefined, facts),
+    wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId, undefined, facts),
+  };
+}
+
 export function flightView(
   config: CcConfig,
   store: Store,
@@ -438,49 +455,17 @@ export function flightView(
   alive?: SessionAlive,
 ): FlightView {
   const found = flightSeat(config);
-  const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
-  const live = found === null ? false : flightLive(config, store, alive);
+  const seat = flightSeatView(config, store, alive);
+  const live = seat?.live ?? false;
   const decisions = store.flightDecisions(now - FLIGHT_METRICS_DAY_MS, FLIGHT_DECISIONS_SCAN_LIMIT);
   const controller = found === null ? [] : controllerDecisions(decisions);
-  const contextTokens = runId === null ? null : (store.digest(runId)?.contextTokens ?? null);
   return {
-    seat:
-      found === null
-        ? null
-        : {
-            id: found.seat.id,
-            call: seatCallSign(found.seat.id),
-            model: found.seat.model,
-            state: store.seatSession(found.seat.id)?.state ?? null,
-            live,
-            turns:
-              runId === null
-                ? null
-                : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
-            context:
-              runId === null
-                ? null
-                : {
-                    tokens: contextTokens,
-                    rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
-                    text: flightContextText(contextTokens, FLIGHT_CONTEXT_ROTATE_TOKENS),
-                  },
-          },
+    seat,
     decisions: decisions.slice(0, FLIGHT_VIEW_LIMIT),
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
     ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now, decisions) }),
-    ...(found === null
-      ? {}
-      : {
-          wakeCost: flightWakeCost(
-            store,
-            now,
-            found.seat.id,
-            new Set(configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : []))),
-          ),
-          wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId),
-        }),
+    ...(found === null ? {} : financialFigures(config, store, now, found)),
     promptWakes:
       found === null
         ? []
@@ -488,6 +473,35 @@ export function flightView(
     ...(found === null
       ? {}
       : { blocked: blockedWork(store, found.session.repoId, now, inThisLane(config)) }),
+  };
+}
+
+/** The watch seat alone, for readers that do not need FLIGHT's historical view. */
+export function flightSeatView(
+  config: CcConfig,
+  store: Store,
+  alive?: SessionAlive,
+): FlightView["seat"] {
+  const found = flightSeat(config);
+  if (found === null) return null;
+  const session = store.seatSession(found.seat.id);
+  const runId = session?.runId ?? null;
+  const contextTokens = runId === null ? null : (store.digest(runId)?.contextTokens ?? null);
+  return {
+    id: found.seat.id,
+    call: seatCallSign(found.seat.id),
+    model: found.seat.model,
+    state: session?.state ?? null,
+    live: flightLive(config, store, alive),
+    turns: runId === null ? null : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
+    context:
+      runId === null
+        ? null
+        : {
+            tokens: contextTokens,
+            rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
+            text: flightContextText(contextTokens, FLIGHT_CONTEXT_ROTATE_TOKENS),
+          },
   };
 }
 

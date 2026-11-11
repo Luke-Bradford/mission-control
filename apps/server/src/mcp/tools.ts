@@ -202,9 +202,9 @@ import { cleanCodeHealth } from "../code-health/clean.ts";
 import { CodeHealthReader } from "../code-health/read.ts";
 import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
-import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms.ts";
+import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/index.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
-import { PreviewRefused } from "../design-previews.ts";
+import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { isExternalReview } from "../external-review-key.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
@@ -223,9 +223,9 @@ import {
   type PreviewJob,
   type PreviewResult,
   previewRequest,
-} from "../preview-browser.ts";
+} from "../preview/browser.ts";
 import type { ProfilesError } from "../profiles.ts";
-import { createQaReports, QaReportError, type QaReportService } from "../qa-reports.ts";
+import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
@@ -234,7 +234,8 @@ import {
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
-import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
+import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
 import { type RestoreSandboxRunner, restoreWorktreeFile } from "./restore.ts";

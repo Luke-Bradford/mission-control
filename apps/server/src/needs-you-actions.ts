@@ -21,19 +21,20 @@ import {
 import { protectedDecisionItem, questionAskAt } from "./attention-holds.ts";
 import type { ChangeBus } from "./bus.ts";
 import type { Gql } from "./collectors/github.ts";
-import { validateCommsText } from "./comms.ts";
+import { validateCommsText } from "./comms/index.ts";
 import type { CcConfig } from "./config.ts";
 import type { RepoRulesError } from "./engine/rules.ts";
 import { flightSeat } from "./flight/seat.ts";
 import { cardProblem, closeBlocker } from "./flight/ticket-close.ts";
-import type { Move, MoveResult } from "./github-board.ts";
-import { ensureLabels } from "./github-setup.ts";
+import type { Move, MoveResult } from "./github/board.ts";
+import { ensureLabels } from "./github/setup.ts";
 import type { GhRunner } from "./mcp/gh.ts";
 import { prTextProblem, readKnown } from "./mcp/tools.ts";
 import { recordRunHandoff } from "./run-handoffs.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { parseTicket } from "./runview.ts";
-import { crewDir, type Store } from "./store.ts";
+import { crewDir } from "./store/crew-paths.ts";
+import type { Store } from "./store.ts";
 
 /** What the routes need from the hub besides the store: the board, the repo rules and GitHub. */
 export interface NeedsYouDeps {

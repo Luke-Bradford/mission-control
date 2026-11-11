@@ -184,9 +184,9 @@ import {
   awayDigest,
   readAwaySettings,
 } from "./away.ts";
-import { registerBriefChoiceRoutes } from "./brief-api.ts";
-import { checkBriefDispatch } from "./brief-dispatch.ts";
-import { boundBriefGuard } from "./brief-dispatch-context.ts";
+import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import { checkBriefDispatch } from "./brief/dispatch.ts";
+import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
@@ -224,9 +224,9 @@ import {
   sendComms,
   threadMessages,
   validateCommsText,
-} from "./comms.ts";
-import { replyRoute } from "./comms-reply.ts";
-import { commsTicketCounts } from "./comms-ticket-counts.ts";
+} from "./comms/index.ts";
+import { replyRoute } from "./comms/reply.ts";
+import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -270,7 +270,7 @@ import {
   writeCrewPause,
 } from "./crew-pause.ts";
 import { readDependencyChains } from "./dependency-chains.ts";
-import type { DesignPreviews } from "./design-previews.ts";
+import type { DesignPreviews } from "./design-preview/previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -303,6 +303,7 @@ import {
   flightLive,
   flightScheduleView,
   flightSeat,
+  flightSeatView,
   flightView,
   prFlow,
 } from "./flight/state.ts";
@@ -312,7 +313,7 @@ import {
   flightConversation,
   readFlightConversation,
 } from "./flight-conversation.ts";
-import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github/setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
@@ -330,7 +331,7 @@ import {
   seatQuestionTriage,
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
-import { loopTries } from "./loophistory.ts";
+import { loopTries } from "./loop/history.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
@@ -366,9 +367,13 @@ import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prAcceptanceFor, prUat } from "./pr-uat.ts";
-import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
+import {
+  PREVIEW_ACTIVITY_HEADER,
+  PreviewHubError,
+  type PreviewManager,
+} from "./preview/previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
-import { qaHistoryPage, qaNativeHistory } from "./qa-history.ts";
+import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
   QA_REPORT_BODY_LIMIT,
@@ -376,7 +381,7 @@ import {
   QaReportError,
   type QaReportService,
   qaReportMarkdown,
-} from "./qa-reports.ts";
+} from "./qa/reports.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
@@ -406,14 +411,8 @@ import {
   runView,
 } from "./runview.ts";
 import { registerInstructionRoutes } from "./standing-instructions-api.ts";
-import {
-  type CommsReadScope,
-  commsMessageNumber,
-  commsPosition,
-  crewDir,
-  crewPrBodyPath,
-  type Store,
-} from "./store.ts";
+import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
+import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import {
@@ -423,7 +422,7 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
-import { tokenAuditView } from "./token-audit-view.ts";
+import { tokenAuditView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript-file.ts";
 import { transcriptFootprint } from "./transcript-lifecycle.ts";
 import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
@@ -4788,11 +4787,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         },
       );
-      // Reader: apps/web/src/shell/Dock.tsx#Dock
+      // Reader: apps/web/src/data.ts#RESOURCES (the dependent web child switches seat-only readers)
       // `live` is judged from FLIGHT's session, not only its run row (#798)
-      api.get("/flight", async () =>
-        flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
-      );
+      api.get<{ Querystring: { shape?: unknown } }>("/flight", async (req, reply) => {
+        const { shape } = req.query;
+        if (shape !== undefined && shape !== "seat")
+          return reply.code(400).send({ error: "shape must be seat" });
+        const at = Date.now();
+        const alive = (id: string) => supervisor?.sessionAlive?.(id) ?? null;
+        return shape === "seat"
+          ? { seat: flightSeatView(config, store, alive) }
+          : flightView(config, store, at, alive);
+      });
       // Reader: apps/web/src/flight/PrFlowPanel.tsx (protected PR-flow panel)
       api.get("/prs/flow", async (req, reply) => {
         if (
@@ -6364,7 +6370,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return thread ?? reply.code(404).send({ error: "Unknown discussion." });
           }
           const item = currentDiscussionItem(key);
-          if (!item?.version) return reply.code(404).send({ error: "No current item." });
+          if (!item?.version) {
+            const thread = store.discussionForItem(key);
+            return thread ?? reply.code(404).send({ error: "No current item." });
+          }
           return openDiscussion({ ...item, version: item.version });
         },
       );

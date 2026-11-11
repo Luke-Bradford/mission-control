@@ -70,14 +70,75 @@ export interface TokenAuditRole {
   medianPeakContext: number;
 }
 
+/** The run that put most into a row, so the page can link the row. */
+export interface TokenAuditRunRef {
+  runId: string;
+  agentId: string;
+  ticket: string | null;
+  /** What the run put into the row: re-read tokens, or the section's tokens, or its cost in USD. */
+  value: number;
+}
+
 export interface TokenAuditNamed extends TokenCounts {
   name: string;
   share: number;
+  /** Always sent by the hub; optional so page fixtures made before it still type. */
+  topRun?: TokenAuditRunRef | null;
+}
+
+/** A figure the hub records, with the window and unit it is in; or one it does not, with why. */
+export type TokenAuditFigure<T> =
+  | { recorded: true; days: number; unit: string; value: T }
+  | { recorded: false; reason: string };
+
+/**
+ * The context budget per model call, 150,000 tokens, for every role. A placeholder chosen here:
+ * config carries no budget yet, so the figure is this constant until it does.
+ */
+export const TOKEN_CONTEXT_BUDGET = 150_000;
+/** The most runs listed over the budget. */
+export const TOKEN_AUDIT_OVER_BUDGET_RUNS = 10;
+
+export interface TokenAuditContextRole {
+  role: string;
+  calls: number;
+  p90Context: number;
+  budget: number;
+}
+
+export interface TokenAuditFlight {
+  wakes: number;
+  wakesWithNoDecision: number;
+  /** Median and 90th percentile of the context FLIGHT had when it woke. */
+  contextAtWake: TokenAuditFigure<{ median: number; p90: number; samples: number }>;
+  sessions: number;
+  sessionsPerDay: number;
+  startCost: { usd: number; totalUsd: number; share: number };
+}
+
+export interface TokenAuditFigures {
+  contextByRole: TokenAuditFigure<TokenAuditContextRole[]>;
+  overBudget: TokenAuditFigure<{
+    budget: number;
+    count: number;
+    runs: (TokenAuditRunRef & { role: string })[];
+  }>;
+  longPassingCommands: TokenAuditFigure<never>;
+  repeatedPrompt: TokenAuditFigure<never>;
+  rewriteWait: TokenAuditFigure<never>;
+  reviewRunsPerTicket: TokenAuditFigure<{ ticket: string; runs: number; latestRunId: string }[]>;
+  flight: TokenAuditFigure<TokenAuditFlight>;
+  costPerMergedPr: TokenAuditFigure<{
+    mergedPrs: number;
+    byRole: { role: string; usd: number; perPr: number; topRun: TokenAuditRunRef | null }[];
+  }>;
 }
 
 export interface TokenAuditRun {
   runId: string;
   agentId: string;
+  /** Always sent by the hub (null for a run with no ticket); optional for older fixtures. */
+  ticket?: string | null;
   role: string;
   calls: number;
   peakContext: number;
@@ -118,9 +179,11 @@ export interface TokenAuditView {
   byCommand: TokenAuditNamed[];
   topRuns: TokenAuditRun[];
   /** What the hub itself sent, by prompt section (estimated tokens). */
-  hubSections: { section: PromptSection; tokens: number }[];
+  hubSections: { section: PromptSection; tokens: number; topRun?: TokenAuditRunRef | null }[];
   /** FLIGHT's cost of starting sessions over the window; null with no FLIGHT seat. */
   flightStart: { usd: number; totalUsd: number; share: number } | null;
   /** Usage of controller sessions on this repo; null while the config switch is off. */
   controller: TokenAuditController | null;
+  /** The figures the Tokens tab lists beyond the totals above. Always sent by the hub; optional for older fixtures. */
+  figures?: TokenAuditFigures;
 }

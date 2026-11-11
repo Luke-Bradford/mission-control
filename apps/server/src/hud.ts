@@ -92,18 +92,18 @@ import {
   questionAskAt,
 } from "./attention-holds.ts";
 import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
-import { briefReadState, briefSourceRevision } from "./brief-source.ts";
-import { claudeVersion } from "./cli-version.ts";
+import { briefReadState, briefSourceRevision } from "./brief/source.ts";
+import { claudeVersion } from "./cli/version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
-import { attentionChatter, resolvedCommsReason } from "./comms.ts";
+import { attentionChatter, resolvedCommsReason } from "./comms/index.ts";
 import {
   canonicalFlightQuestionKey,
   flightQuestionChoice,
   flightQuestionMessageId,
   isFlightOperatorQuestion,
-} from "./comms-question.ts";
+} from "./comms/question.ts";
 import {
   agentIds,
   type CcConfig,
@@ -118,8 +118,8 @@ import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
-import { loopPause } from "./loop-pause.ts";
-import { loopTries } from "./loophistory.ts";
+import { loopTries } from "./loop/history.ts";
+import { loopPause } from "./loop/pause.ts";
 import { reviewCheckFor } from "./review-check.ts";
 import {
   type PrCache,
