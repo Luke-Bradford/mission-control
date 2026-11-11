@@ -123,6 +123,31 @@ describe("Comms routes", () => {
       /\b0 messages/,
     );
   });
+  it("says hub notices are hidden, not that the conversation is empty", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/agents/alpha?notices=hide": { messages: [], contacts: [], unread: 0 },
+      "/api/comms/agents/alpha?summary=1&notices=hide": { messages: [], contacts: [], unread: 0 },
+      "/api/comms/agents/alpha/contacts/MC?notices=hide": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+    });
+    render(
+      <CommsConversation
+        view={{ kind: "contact", agentId: "alpha", contactId: "MC" }}
+        hideNotices
+        row={seatRow({ id: "alpha" })}
+        jumpId={null}
+        onJumped={() => {}}
+        onOpenMessage={() => {}}
+      />,
+    );
+    await screen.findByText("No messages here besides hub notices, which are hidden.");
+    expect(screen.queryByText("No messages yet.")).toBeNull();
+  });
   it("keeps the reader's place when the conversation rerenders", async () => {
     const message = {
       id: "comms:older",

@@ -745,6 +745,9 @@ function PinnedMessage({ message }: { message: FlightConversationMessage }) {
   );
 }
 
+/** Empty with the switch on: the thread may hold notices, so never say it has nothing. */
+const HIDDEN_NOTICES_EMPTY = "No messages here besides hub notices, which are hidden.";
+
 function ModernConversation({
   view,
   hideNotices,
@@ -974,7 +977,11 @@ function ModernConversation({
       )}
       <MessagePane
         emptyText={
-          view.kind === "crew" && !crew.data && (crew.loading || crew.error) ? null : undefined
+          view.kind === "crew" && !crew.data && (crew.loading || crew.error)
+            ? null
+            : hideNotices
+              ? HIDDEN_NOTICES_EMPTY
+              : undefined
         }
         messages={messages}
         lookupMessages={lookupMessages}
