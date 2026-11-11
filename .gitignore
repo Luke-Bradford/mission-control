@@ -14,3 +14,15 @@ apps/web/.vite-guard-test-*/
 .playwright-mcp/
 # TypeScript incremental caches (packages write theirs under node_modules/.cache/tsc)
 *.tsbuildinfo
+
+# Screenshots and proof runs are kept by the hub only while a change waits for
+# review or approval, then deleted; they are not committed (operator, 11 Nov 2026).
+docs/**/*.png
+docs/**/*.jpg
+docs/**/*.webp
+!docs/prototype/**
+!docs/mockups/**
+!docs/design/**
+docs/evidence/**
+!docs/evidence/**/
+!docs/evidence/**/*.md
