@@ -22,7 +22,7 @@ import { interruptSeat, seatError } from "../agent/seat.ts";
 import { useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { SeatInstructionsDisclosure } from "../instructions/Instructions.tsx";
-import { agentPath, navigate, useSearch } from "../router.ts";
+import { useSearch } from "../router.ts";
 import { setPageKey } from "../shell/keys.ts";
 import { getSelectedAgent, setSelectedAgent, useSelectedAgent } from "../shell/selection.ts";
 import { useSessionScope } from "../shell/session.ts";
@@ -69,11 +69,6 @@ export function Agent({ id }: { id: string | null }) {
   useEffect(() => {
     if (shownId !== null && shownId !== getSelectedAgent()) setSelectedAgent(shownId);
   }, [shownId]);
-
-  // The address holds the seat: `/agent` settles on the seat it shows, so Back and a bookmark return to it.
-  useEffect(() => {
-    if (id === null && shownId !== null) navigate(agentPath(shownId), { replace: true });
-  }, [id, shownId]);
 
   // `i` interrupts a crew seat; an observed loop is never interrupted, so it says so.
   const shownKind = listed?.kind ?? null;
