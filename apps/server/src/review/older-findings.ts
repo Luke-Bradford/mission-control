@@ -1,5 +1,5 @@
 import { BLOCKING_SEVERITIES, type ReviewRow, type StoredFinding } from "@mc/core";
-import type { Store } from "./store.ts";
+import type { Store } from "../store.ts";
 
 export interface OlderFinding {
   reviewId: number;

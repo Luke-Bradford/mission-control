@@ -158,7 +158,6 @@ import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
-import { type ExternalReviews, isExternalReview } from "../external-reviews.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import {
@@ -168,6 +167,7 @@ import {
 } from "../machine-capacity.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
+import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";

@@ -206,11 +206,9 @@ import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/i
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
-import { isExternalReview } from "../external-review-key.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
-import { openOlderFindings } from "../older-findings.ts";
 import { runPathGrants } from "../path-grants.ts";
 import {
   PREVIEW_READY_WAIT_MS,
@@ -226,6 +224,8 @@ import {
 } from "../preview/browser.ts";
 import type { ProfilesError } from "../profiles.ts";
 import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
+import { isExternalReview } from "../review/external-key.ts";
+import { openOlderFindings } from "../review/older-findings.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,

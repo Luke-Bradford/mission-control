@@ -120,7 +120,7 @@ import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopTries } from "./loop/history.ts";
 import { loopPause } from "./loop/pause.ts";
-import { reviewCheckFor } from "./review-check.ts";
+import { reviewCheckFor } from "./review/check.ts";
 import {
   type PrCache,
   parseTicket,
