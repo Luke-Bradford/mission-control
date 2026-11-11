@@ -226,7 +226,7 @@ it("rebuilds a missing direction snapshot before delivering to a reattached keep
 
 it("retains a notice after failed immediate notification and delivers it once on the next real fixture turn", async () => {
   const { commsInboxContext } = await import("../src/comms.ts");
-  const { announceInstruction } = await import("../src/instruction-notices.ts");
+  const { announceInstruction } = await import("../src/instructions/notices.ts");
   const { bus } = await import("./supervisor-harness.ts");
   const { sup, cfg } = make({ inbox: (seatId, runId) => commsInboxContext(store, seatId, runId) });
   sup.start();
@@ -342,7 +342,7 @@ it.each(["saved instruction", "initial legacy focus import"])(
     const { commsInboxContext } = await import("../src/comms.ts");
     const { messageUnpausedSeat } = await import("../src/crew-pause.ts");
     const { announceInstruction, flushInstructionNotices, importInstructionFocus } = await import(
-      "../src/instruction-notices.ts"
+      "../src/instructions/notices.ts"
     );
     const { bus } = await import("./supervisor-harness.ts");
     const { sup, cfg } = make({
@@ -400,7 +400,7 @@ it.each(["saved instruction", "initial legacy focus import"])(
 
 it("rechecks a new operator pause inside the real delivery queue after notification was allowed", async () => {
   const { commsInboxContext } = await import("../src/comms.ts");
-  const { announceInstruction } = await import("../src/instruction-notices.ts");
+  const { announceInstruction } = await import("../src/instructions/notices.ts");
   const { bus } = await import("./supervisor-harness.ts");
   const { sup, cfg } = make({ inbox: (seatId, runId) => commsInboxContext(store, seatId, runId) });
   sup.start();
@@ -450,7 +450,7 @@ it.each([true, false])(
   "uses only the current run's recorded pause exception for immediate notification (%s)",
   async (matching) => {
     const { commsInboxContext } = await import("../src/comms.ts");
-    const { announceInstruction } = await import("../src/instruction-notices.ts");
+    const { announceInstruction } = await import("../src/instructions/notices.ts");
     const { bus } = await import("./supervisor-harness.ts");
     const { sup, cfg } = make({
       inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),

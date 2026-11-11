@@ -1,7 +1,7 @@
 import {
   flushInstructionNotices,
   importInstructionFocus as importConfiguredInstructionFocus,
-} from "./instruction-notices.ts";
+} from "./instructions/notices.ts";
 /**
  * Mission Control server: loads config, opens the store, starts the collectors' scheduler and serves
  * the API on 127.0.0.1:7420 (loopback only; mutating routes need the operator token in <data dir>/operator-token).

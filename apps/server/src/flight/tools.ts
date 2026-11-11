@@ -363,7 +363,8 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud.ts";
-import { announceInstruction } from "../instruction-notices.ts";
+import { announceInstruction } from "../instructions/notices.ts";
+import { InstructionInput } from "../instructions/standing.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
@@ -390,7 +391,6 @@ import { handoffTarget } from "../run-handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { InstructionInput } from "../standing-instructions.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";

@@ -225,9 +225,9 @@ import {
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
 import { externalReviewKey } from "./external-review-key.ts";
+import { StandingInstructions } from "./instructions/standing.ts";
 import { openOlderFindings } from "./older-findings.ts";
 import { qaNativeIdentity } from "./qa-history-key.ts";
-import { StandingInstructions } from "./standing-instructions.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import {
   compactFlightWake,
