@@ -44,7 +44,7 @@ import {
 } from "../router.ts";
 import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
-import { type CommsView, noticeResource, ticketForRef } from "./model.ts";
+import { type CommsView, noticeResource, ticketForRef, useNoticeResource } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
 
 const NO_MESSAGES: FlightConversationMessage[] = [];
@@ -769,8 +769,10 @@ function ModernConversation({
   const crewBase = crewEarlier
     ? { ...RESOURCES.commsCrew, path: `${RESOURCES.commsCrew.path}?history=1` }
     : RESOURCES.commsCrew;
-  const crewRef = noticeResource(crewBase, hideNotices);
-  const crew = useResource<CommsMessagesResponse>(view.kind === "crew" ? crewRef : null);
+  const crew = useNoticeResource<CommsMessagesResponse>(
+    view.kind === "crew" ? crewBase : null,
+    hideNotices,
+  );
   useEffect(() => {
     if (
       view.kind === "crew" &&
@@ -781,23 +783,24 @@ function ModernConversation({
     )
       setCrewEarlier(true);
   }, [view.kind, jumpId, crewEarlier, crew.data]);
-  const flight = useResource<FlightConversationPage>(
-    view.kind === "flight" ? noticeResource(RESOURCES.commsFlight, hideNotices) : null,
+  const flight = useNoticeResource<FlightConversationPage>(
+    view.kind === "flight" ? RESOURCES.commsFlight : null,
+    hideNotices,
   );
   const flightView = useResource<FlightView>(RESOURCES.flight).data;
   const flightSeat = flightView?.seat;
   // A contact's view needs the agent's conversation list and counts, not its messages too.
-  const agent = useResource<CommsAgentResponse>(
+  const agent = useNoticeResource<CommsAgentResponse>(
     "agentId" in view
       ? view.kind === "contact"
-        ? noticeResource(RESOURCES.commsNav(view.agentId), hideNotices)
-        : noticeResource(RESOURCES.commsAgent(view.agentId), hideNotices)
+        ? RESOURCES.commsNav(view.agentId)
+        : RESOURCES.commsAgent(view.agentId)
       : null,
+    hideNotices,
   );
-  const contact = useResource<CommsMessagesResponse>(
-    view.kind === "contact"
-      ? noticeResource(RESOURCES.commsContact(view.agentId, view.contactId), hideNotices)
-      : null,
+  const contact = useNoticeResource<CommsMessagesResponse>(
+    view.kind === "contact" ? RESOURCES.commsContact(view.agentId, view.contactId) : null,
+    hideNotices,
   );
   const ticket = useResource<CommsTicketResponse>(
     view.kind === "ticket"
@@ -961,7 +964,10 @@ function ModernConversation({
             : crewEarlier
               ? "Could not load earlier messages."
               : "Could not load current crew messages."}
-          <button type="button" onClick={() => hub.refetch(crewRef.path)}>
+          <button
+            type="button"
+            onClick={() => hub.refetch(noticeResource(crewBase, hideNotices).path)}
+          >
             Retry messages
           </button>
         </div>
