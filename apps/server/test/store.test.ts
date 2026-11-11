@@ -31,7 +31,7 @@ import {
   NEW_LOOP,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pendingRunApproval } from "../src/attention-subjects.ts";
+import { pendingRunApproval } from "../src/attention/subjects.ts";
 import { crewPromptPath, crewTranscriptPath } from "../src/store/crew-paths.ts";
 import {
   ACK_ABSENT_MS,

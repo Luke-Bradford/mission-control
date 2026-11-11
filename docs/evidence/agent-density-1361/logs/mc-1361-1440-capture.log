@@ -1,8 +1,0 @@
-file://[controller]/capture-agent-1361-1440.ts:23
- if(errors.length||writes.length||requests.length!==readsBefore||facts.bodyWidth>1441||facts.scale!==1||facts.figures!==5||facts.steps!==6)throw Error('Render/read guard failed '+key);
-                                                                                                                                                 ^
-
-Error: Render/read guard failed agent-default-1440x900-light-folded
-    at file://[controller]/capture-agent-1361-1440.ts:23:146
-
-Node.js v25.9.0

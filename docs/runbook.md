@@ -448,7 +448,7 @@ update`; unexpected exceptions keep their content private and log only the gener
 
 When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
 stops dealing and starting new developer and review runs on that account. It is the same projection
-the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/budget-brake.ts`
+the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/spend/budget-brake.ts`
 is the one function for both.
 
 - Stopped: the engine's deal, the review start, `start_seat`, and the supervisor's `startRun`
