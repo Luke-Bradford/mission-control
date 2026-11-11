@@ -57,26 +57,33 @@ Claude setting reaches it.
 
 ## How a seat reads
 
-- Search with the Grep tool, not shell `rg` (not installed in the seat shell): `pattern`, `path`
-  or `glob`, `-C 2` for context, `output_mode: count` first, and `head_limit` to bound it. Do not
-  cut a shell search short with `head` when the question is "is there any match or error": it
-  hides what comes after.
-- Read a file in ranges: the Read tool with `offset` and `limit`, for the lines the search found.
-  `sed -n 'START,ENDp'` is fine for files inside the worktree. Read the whole file only when it
-  is short or the whole is the task.
+The file tools (Read, Grep) are confined to the worktree in every seat but FLIGHT's
+(`--restricted`), and a Claude seat's `$TMPDIR` is outside it. So read by where the file is:
+
+- **Worktree files:** the Grep tool (not shell `rg`, which is not installed in the seat shell):
+  `pattern`, `path` or `glob`, `-C 2` for context, `output_mode: count` first, `head_limit` to
+  bound it. Then the Read tool with `offset` and `limit` for the lines found. Read a whole file
+  only when it is short or the whole is the task. `sed -n 'START,ENDp'` also works.
+- **Files under `$TMPDIR`** (the log-file form below, and the hub's
+  `[mc: N bytes cut; the full output is at <path>]` marker in Claude seats): shell commands only.
+  `grep -c '<pattern>' <file>` first, then `grep -n -C 2 '<pattern>' <file>`, then
+  `tail -n 80 <file>` for a failure's final summary, then `sed -n 'START,ENDp' <file>` for a
+  range. Codex seats keep their temp folder inside the worktree, where the file tools work too.
+- **The CLI's own saved-output file** (the preview's path, under the CLI's projects folder): only
+  the Read and Grep tools open it. Shell commands cannot (the sandbox refuses that folder).
+- Do not cut a shell search short with `head` when the question is "is there any match or
+  error": it hides what comes after.
 - Make a command print a summary, not a dump: `python3` that prints a count, the keys and the
   few rows that matter; not the whole structure.
 - A command that might print a lot and fail (a build, a long grep, a python3 script): send the
-  output to a file and keep the status, then search or read the file.
+  output to a file and keep the status, then read the file with the shell commands above.
   `cmd > "$TMPDIR/<name>.log" 2>&1; echo "exit=$?"`. That keeps all of the output and the exit
   status and returns a line. Do this rather than hoping the end of a failure survives the CLI's cut.
-- A result with `[mc: N bytes cut; the full output is at <path>]` or the CLI's saved-file path
-  is complete there. Open it with the Read tool (`offset`, `limit`) or the Grep tool; shell
-  commands cannot open the CLI's saved file (its folder is outside the sandbox's reads). Do not
-  re-run the command to see more.
+- A cut or saved result is complete at its path. Do not re-run the command to see more.
 - A large failure is cut to about 30000 characters in the middle and is not saved. The `Exit
-  code` line stays first but the end may be missing. Use the log-file form above for any command
-  that might fail loudly.
+  code` line stays first but the end may be missing. Use the log-file form for any command that
+  might fail loudly.
 
-The role briefs (`roles/*.md`) do not yet point here: they are hard-rule files outside the server and
-docs area, so adding this section to them waits for FLIGHT.
+Follow-up, outside this change: the role briefs (`roles/*.md`) do not yet point here. They are
+hard-rule files, so FLIGHT decided the one-line pointer ("Reading files and output: follow
+`docs/runbooks/shell-output.md#how-a-seat-reads`") is a separate change, not part of this PR.
