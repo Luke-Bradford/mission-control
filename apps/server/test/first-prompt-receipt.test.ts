@@ -1,4 +1,4 @@
-import type { Run } from "@mc/core";
+import { NEW_LOOP, type Run } from "@mc/core";
 import { afterEach, expect, it } from "vitest";
 import {
   FIRST_PROMPT_LIMIT_TOKENS,
@@ -71,8 +71,8 @@ it("reads the starts of one seat from a database, newest first", () => {
       transcriptPath: "",
       prs: [],
       summary: null,
-      loop: "watch",
-    }) as Run;
+      loop: NEW_LOOP,
+    }) satisfies Run;
   for (const [id, at, digest] of [
     ["old", 1000, 130000],
     ["new", 2000, 40000],
