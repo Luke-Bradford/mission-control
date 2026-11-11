@@ -424,7 +424,8 @@ describe("rolePrompt", () => {
   });
 
   it("keeps a yaml fence that is not the mc block, and the text after the mc block", () => {
-    const md = "A\n\n```yaml\nother: 1\n```\n\n```yaml\nmc:\n  checks: [x]\n```\n\nAfter the block.\n";
+    const md =
+      "A\n\n```yaml\nother: 1\n```\n\n```yaml\nmc:\n  checks: [x]\n```\n\nAfter the block.\n";
     const prompt = rolePrompt("Role", md);
     expect(prompt).toContain("other: 1");
     expect(prompt).not.toContain("checks: [x]");
