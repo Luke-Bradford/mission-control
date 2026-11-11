@@ -12,8 +12,8 @@ import {
   type StandingInstructionList,
 } from "@mc/core";
 import { z } from "zod";
-import type { CrewSeatConfig } from "./config.ts";
-import { seatFocus } from "./focus.ts";
+import type { CrewSeatConfig } from "../config.ts";
+import { seatFocus } from "../focus.ts";
 
 const positiveId = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const InstructionInput = z.discriminatedUnion("kind", [

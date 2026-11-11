@@ -219,10 +219,10 @@ import {
   testAttemptSource,
   testCollectionCoverage,
 } from "./code-health/test-reports.ts";
+import { StandingInstructions } from "./instructions/standing.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
-import { StandingInstructions } from "./standing-instructions.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import {
   compactFlightWake,

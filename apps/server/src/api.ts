@@ -327,6 +327,7 @@ import {
   pinned,
   seatQuestionTriage,
 } from "./hud.ts";
+import { registerInstructionRoutes } from "./instructions/api.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import {
@@ -414,7 +415,6 @@ import { runSeatGrants } from "./runtime/grants.ts";
 import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
 import { weeklyProjection } from "./spend/budget-brake.ts";
-import { registerInstructionRoutes } from "./standing-instructions-api.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
