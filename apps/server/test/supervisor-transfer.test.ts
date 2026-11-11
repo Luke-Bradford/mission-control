@@ -5,7 +5,7 @@ import { expect, it } from "vitest";
 import { CliHold } from "../src/cli-update.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { codexModelsFor } from "../src/runtime/codex-models.ts";
-import { crewCodexDir } from "../src/store.ts";
+import { crewCodexDir } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { fakeModels } from "./config-codex.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";

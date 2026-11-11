@@ -63,6 +63,7 @@ import {
   wakeSummary,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildApp } from "../src/api.ts";
 import { budgetBrake } from "../src/budget-brake.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { flightQuestion } from "../src/comms.ts";
@@ -83,8 +84,10 @@ import {
   deliveredFacts,
   flightOwnSeatIds,
   flightSeat,
+  flightSeatView,
   flightState,
   flightView,
+  flightWake,
   flightWakeHistory,
   markItemsShown,
   markPrsShown,
@@ -232,7 +235,7 @@ const noFlight = () => {
   store.setSeatSession(row("flight-1", null));
 };
 
-const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors" | "log"> = {}) => {
+const makeWatch = (over: Pick<FlightWatchDeps, "refreshAuthors" | "log" | "blocked"> = {}) => {
   watch = createFlightWatch({
     ...over,
     config,
@@ -321,6 +324,98 @@ afterEach(() => {
   watch.stop();
   vi.useRealTimers();
   rmSync(dir, { recursive: true, force: true });
+});
+
+describe("FLIGHT seat projection", () => {
+  it("keeps the full view's seat across watch and session lifecycle states", () => {
+    const flight = (cfg: CcConfig) => {
+      const entry = cfg.crew?.sessions[0]?.seats.find((candidate) => candidate.id === "flight-1");
+      if (entry === undefined) throw new Error("missing FLIGHT seat");
+      return entry;
+    };
+    const expected = (state: SeatSessionRow["state"] | null, live: boolean) => ({
+      id: "flight-1",
+      call: "FLIGHT-1",
+      model: "opus",
+      state,
+      live,
+      turns: state === null ? null : { n: 1, max: FLIGHT_MAX_WAKES + 1 },
+      context:
+        state === null
+          ? null
+          : { tokens: null, rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS, text: null },
+    });
+    const check = (want: ReturnType<typeof expected>) => {
+      expect(flightSeatView(config, store, () => alive)).toEqual(want);
+      expect(flightView(config, store, nowMs, () => alive).seat).toEqual(want);
+    };
+
+    check(expected(null, false));
+    live("flight-1", "r-flight");
+    alive = true;
+    check(expected("idle", true));
+    store.setSeatSession(row("flight-1", "r-flight", "stopped"));
+    check(expected("stopped", false));
+    store.setSeatSession(row("flight-1", "r-flight", "parked"));
+    check(expected("parked", false));
+    store.upsertRun(run("r-flight", "flight-1", { endedAt: nowMs, status: "ok" }));
+    store.setSeatSession(row("flight-1", "r-flight", "idle"));
+    check(expected("idle", false));
+    store.upsertRun(run("r-flight", "flight-1"));
+    alive = null;
+    check(expected("idle", true));
+
+    const noWatch = structuredClone(config);
+    flight(noWatch).retiring = true;
+    expect(flightSeatView(noWatch, store, () => alive)).toBeNull();
+    expect(flightView(noWatch, store, nowMs, () => alive).seat).toBeNull();
+
+    const unavailable = structuredClone(config);
+    Object.assign(flight(unavailable), {
+      modelVendor: "codex" as const,
+      model: "unknown",
+    });
+    expect(flightSeatView(unavailable, store, () => alive)).toBeNull();
+    expect(flightView(unavailable, store, nowMs, () => alive).seat).toBeNull();
+
+    const replacement = structuredClone(config);
+    flight(replacement).retiring = true;
+    const seats = replacement.crew?.sessions[0]?.seats;
+    if (seats === undefined) throw new Error("missing crew session");
+    seats.push(seat("flight-2", "FLIGHT"));
+    const replacementSeat = {
+      id: "flight-2",
+      call: "FLIGHT-2",
+      model: "opus",
+      state: null,
+      live: false,
+      turns: null,
+      context: null,
+    };
+    expect(flightSeatView(replacement, store, () => alive)).toEqual(replacementSeat);
+    expect(flightView(replacement, store, nowMs, () => alive).seat).toEqual(replacementSeat);
+  });
+
+  it("does not read decision, wake-cost, wait-chain, or prompt history", () => {
+    live("flight-1", "r-flight");
+    vi.spyOn(store, "flightDecisions").mockImplementation(() => {
+      throw new Error("decision history read");
+    });
+    vi.spyOn(store, "agentPromptWakes").mockImplementation(() => {
+      throw new Error("prompt history read");
+    });
+    vi.spyOn(store, "runsOverlapping").mockImplementation(() => {
+      throw new Error("wake cost read");
+    });
+    vi.spyOn(store, "commsTo").mockImplementation(() => {
+      throw new Error("wait-chain read");
+    });
+
+    expect(flightSeatView(config, store, () => true)).toMatchObject({
+      id: "flight-1",
+      live: true,
+    });
+  });
 });
 
 it("keeps an older unanswered discussion visible and waking after 101 newer answered threads", () => {
@@ -1928,6 +2023,160 @@ describe("the FLIGHT watcher", () => {
     }
     await watch.check();
     expect(startCalls).toEqual([]);
+  });
+
+  it.each([
+    ["5h", COMMS_CAPCOM, 0],
+    ["7d", COMMS_CONTROLLER, 8 * 60 * MIN],
+  ] as const)(
+    "starts for an unread %s operator message at the account stop, including an outage-old message",
+    async (window, from, age) => {
+      store.addUsage({
+        accountId: "claude-main",
+        window,
+        at: T0 - 1000,
+        pct: 95,
+        resetAt: T0 + 60 * MIN,
+        source: "test",
+      });
+      const message = store.addComms({
+        at: T0 - age,
+        from,
+        senderKind: from === COMMS_CAPCOM ? "operator" : "controller",
+        to: "flight-1",
+        ticket: null,
+        text: "Have you seen my messages?",
+      });
+      await watch.check();
+      expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
+      expect(startCalls[0]?.first).toContain("operator");
+      expect(flightState({ config, store, busy: [], now: nowMs }).wake?.operator).toContain(
+        message?.id.replace("comms:", ""),
+      );
+      expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual([]);
+    },
+  );
+
+  it("does not let a crew message bypass the account stop", async () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    store.addComms({ at: T0, from: "guido-1", to: "flight-1", ticket: null, text: "Please work." });
+    await watch.check();
+    expect(startCalls).toEqual([]);
+  });
+
+  it("keeps the operator's Stop when an unread message waits at the account stop", async () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    store.setSeatSession(row("flight-1", null, "stopped"));
+    store.addComms({ at: T0, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "Status?" });
+    await watch.check();
+    expect(startCalls).toEqual([]);
+  });
+
+  it("keeps one safe outage alert when an operator-message start fails", async () => {
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    store.addComms({ at: T0, from: COMMS_CAPCOM, to: "flight-1", ticket: null, text: "Status?" });
+    startFails = "private provider failure detail";
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    const down = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    expect(down).toHaveLength(1);
+    expect(down[0]?.text).toContain("message is saved");
+    expect(down[0]?.text).not.toContain(startFails);
+  });
+
+  it("keeps one outage alert when an operator request is held by a pending change", async () => {
+    let held = true;
+    makeWatch({ blocked: () => held });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    await watch.check();
+    const beforeRequest = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    expect(beforeRequest).toHaveLength(1);
+    expect(beforeRequest[0]?.text).toContain("usage stop line");
+    nowMs += MIN;
+    store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "Status?",
+    });
+    await watch.check();
+    expect(startCalls).toEqual([]);
+    const down = store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY);
+    expect(down).toHaveLength(1);
+    expect(down[0]?.text).toContain("message is saved");
+    nowMs += MIN;
+    await watch.check();
+    expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual(down);
+    held = false;
+    await watch.check();
+    expect(startCalls).toHaveLength(1);
+    expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual([]);
+  });
+
+  it("an operator POST starts FLIGHT within a minute at the usage stop", async () => {
+    // Fastify's injection uses real immediates; only the watch's timers and clock are controlled.
+    vi.useRealTimers();
+    vi.useFakeTimers({
+      toFake: ["Date", "setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    vi.setSystemTime(T0);
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: T0 - 1000,
+      pct: 95,
+      resetAt: T0 + 60 * MIN,
+      source: "test",
+    });
+    const app = buildApp({ config, store, bus, now: () => nowMs });
+    try {
+      watch.start();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(startCalls).toEqual([]);
+      const response = await app.inject({
+        method: "POST",
+        url: "/api/comms",
+        payload: { to: "flight-1", text: "Please answer my messages." },
+      });
+      expect(response.statusCode).toBe(200);
+      nowMs += FLIGHT_DEBOUNCE_MS;
+      await vi.advanceTimersByTimeAsync(FLIGHT_DEBOUNCE_MS);
+      expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
+      expect(nowMs - T0).toBeLessThan(60_000);
+      expect(startCalls[0]?.first).toContain("operator");
+      expect(startCalls[0]?.first).not.toContain("is at its usage stop line");
+    } finally {
+      await app.close();
+    }
   });
 
   it("keeps starting FLIGHT while the budget brake is on its account", async () => {
@@ -4567,7 +4816,7 @@ describe("every wake ends with each reason handled", () => {
     expect(sendCalls.at(-1)?.text.split("\n")[0]).toContain(`${FLIGHT_LEFT_HEAD} q 2`);
   });
 
-  it("keeps the operator item while the reason it lists is still undecided", async () => {
+  it("keeps the internal reminder while the reason it lists is still undecided", async () => {
     await wokeOnAQuestion();
     const q2 = ask("inco-1", "r-inco", nowMs);
     await watch.check();
@@ -4589,7 +4838,7 @@ describe("every wake ends with each reason handled", () => {
     expect(leftNotes()).toEqual([]);
   });
 
-  it("raises one operator item when the second wake leaves them again, and none before", async () => {
+  it("retains one internal reminder after the second miss and keeps it off operator attention", async () => {
     await wokeOnAQuestion();
     await watch.check();
     expect(leftNotes()).toEqual([]);
@@ -4600,12 +4849,12 @@ describe("every wake ends with each reason handled", () => {
     expect(leftNotes()).toHaveLength(1);
     expect(leftNotes()[0]).toMatchObject({ kind: "blocked", seatId: "flight-1" });
     expect(leftNotes()[0]?.text).toContain("1 question waiting for an answer");
-    // the operator sees it as itself, not as an item FLIGHT triages
+    // FLIGHT keeps its reminder, while operator attention contains only operator work.
     const item = attentionItems(config, store, nowMs).find((i) =>
       i.key.endsWith(FLIGHT_LEFT_NOTE_KEY),
     );
-    expect(item).toMatchObject({ owner: "operator" });
-    expect(item?.flightTriage).toBeUndefined();
+    expect(item).toBeUndefined();
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain(FLIGHT_LEFT_HEAD);
   });
 
   it("clears the item once a later wake's reasons are all handled", async () => {
@@ -5250,6 +5499,27 @@ describe("routine pipeline steps stay in the digest (#1239)", () => {
     expect(sendCalls[1]?.text.split("\n")[0]).toContain("operator");
   });
 
+  it("wakes for an operator message in under a minute despite the ordinary wake gap", async () => {
+    liveCrew();
+    ask();
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs += 1;
+    store.addComms({
+      at: nowMs,
+      from: COMMS_CAPCOM,
+      to: "flight-1",
+      ticket: null,
+      text: "Please answer.",
+    });
+    await watch.check();
+    expect(sendCalls).toHaveLength(1);
+    nowMs = T0 + 45_000;
+    await watch.check();
+    expect(sendCalls).toHaveLength(2);
+    expect(sendCalls[1]?.text.split("\n")[0]).toContain("operator");
+  });
+
   it("a message from the controller wakes FLIGHT as the operator's does", async () => {
     flightOnly();
     store.setSeatSession(row("guido-1", null));
@@ -5746,6 +6016,15 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
       expect(overs(T0 + 2 * MIN)).toHaveLength(1);
     };
 
+    it("keeps the full read but omits a handled wait from a fresh session's digest", () => {
+      endedWait();
+      const state = read(T0 + 4 * MIN);
+      expect(state.signals.filter((s) => s.kind === "wait_over")).toHaveLength(1);
+      const digest = flightWake(state, undefined, [], false, T0 + 4 * MIN).digest;
+      expect(digest.signals.entries.filter((s) => s.kind === "wait_over")).toEqual([]);
+      expect(state.signals.filter((s) => s.kind === "wait_over")).toHaveLength(1);
+    });
+
     it("drops out once log_decision names its signal key in about", () => {
       endedWait();
       decide({ about: `wait_over:mc#7:${T0 + MIN}` });
@@ -5758,6 +6037,15 @@ describe("what wakes FLIGHT for a free seat or an item", () => {
       recordFlightWait(store, "mc#7", { on: "its PR", until: T0 + 30 * MIN, at: T0 + 3 * MIN });
       expect(overs(T0 + 4 * MIN)).toEqual([]);
       expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
+      expect(
+        flightWake(
+          read(T0 + 4 * MIN),
+          undefined,
+          [],
+          false,
+          T0 + 4 * MIN,
+        ).digest.signals.entries.filter((s) => s.kind === "wait_over"),
+      ).toEqual([]);
     });
 
     it("drops out once an action on the target is recorded after it ended", () => {

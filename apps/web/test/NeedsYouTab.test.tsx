@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
+import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import {
   NeedsYouTab,
   NOBODY_ELSE,
@@ -8,7 +9,6 @@ import {
   NOTHING_HELD,
 } from "../src/flight/NeedsYouTab.tsx";
 import { needsGroups } from "../src/flight/needsGroups.ts";
-import { Flight } from "../src/pages/Flight.tsx";
 import { useItem } from "../src/shell/overlays.ts";
 import { stubFetch as fetchStub } from "./fetchStub.ts";
 import { brief, CONFIG, HOUR, item, NOW } from "./fixtures.ts";
@@ -53,12 +53,13 @@ describe("needsGroups", () => {
 });
 
 describe("Needs you tab", () => {
-  it("says each group is empty when nothing is in it, and Held nothing held", async () => {
+  it("says each group is empty when nothing is in it, and Watch list has nothing held", async () => {
     stubFetch({ "/api/attention": [] });
     render(<NeedsYouTab />);
     await waitFor(() => expect(panel("handlingP").textContent).toContain(NOTHING_HANDLING));
     expect(panel("waitingP").textContent).toContain(NOBODY_ELSE);
     expect(panel("heldP").textContent).toContain(NOTHING_HELD);
+    expect(panel("heldP").querySelector("h2")?.textContent).toContain("Watch list");
   });
 
   it("names what is loading in each group, rather than a bare dash", () => {
@@ -140,7 +141,7 @@ describe("Needs you tab", () => {
     expect(screen.getByTestId("open").textContent).toBe("c");
   });
 
-  it("lists Held items under their own heading, with Release", async () => {
+  it("lists Watch list items with Release", async () => {
     stubFetch({
       "/api/attention": [],
       "/api/attention/held": [
@@ -169,7 +170,7 @@ describe("Needs you tab", () => {
         item({ key: "t", kind: "tag", text: "Seat tag", owner: "flight", flightTriage: "down" }),
       ],
     });
-    render(<Flight />);
+    render(<FlightTabs />);
     expect(await screen.findByRole("link", { name: "Open Needs you" })).toBeTruthy();
     await waitFor(() => expect(panel("handlingP").textContent).toContain("Seat tag"));
     expect(document.getElementById("askP")).toBeNull();

@@ -38,7 +38,6 @@ import {
   FLIGHT_MOVED_LISTED,
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
-  FLIGHT_OPERATOR_UNREAD_MS,
   FLIGHT_OWED_MS,
   FLIGHT_PR_ENTRY_CHANGES,
   FLIGHT_RECENT_LISTED,
@@ -132,7 +131,7 @@ import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
-import { flightWakeCost, flightWakeWaits } from "./cost.ts";
+import { flightFinancialFacts, flightWakeCost, flightWakeWaits } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
@@ -432,6 +431,23 @@ function flightWakeStatus(store: Store, repo: string, live: boolean): FlightWake
   };
 }
 
+/** Cost and wait figures, read from one set of historical facts taken for this response. */
+function financialFigures(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  found: NonNullable<ReturnType<typeof flightSeat>>,
+): Pick<FlightView, "wakeCost" | "wakeWaits"> {
+  const crewIds = new Set(
+    configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : [])),
+  );
+  const facts = flightFinancialFacts(store, now, new Set([...crewIds, found.seat.id]));
+  return {
+    wakeCost: flightWakeCost(store, now, found.seat.id, crewIds, undefined, facts),
+    wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId, undefined, facts),
+  };
+}
+
 export function flightView(
   config: CcConfig,
   store: Store,
@@ -439,49 +455,17 @@ export function flightView(
   alive?: SessionAlive,
 ): FlightView {
   const found = flightSeat(config);
-  const runId = found === null ? null : (store.seatSession(found.seat.id)?.runId ?? null);
-  const live = found === null ? false : flightLive(config, store, alive);
+  const seat = flightSeatView(config, store, alive);
+  const live = seat?.live ?? false;
   const decisions = store.flightDecisions(now - FLIGHT_METRICS_DAY_MS, FLIGHT_DECISIONS_SCAN_LIMIT);
   const controller = found === null ? [] : controllerDecisions(decisions);
-  const contextTokens = runId === null ? null : (store.digest(runId)?.contextTokens ?? null);
   return {
-    seat:
-      found === null
-        ? null
-        : {
-            id: found.seat.id,
-            call: seatCallSign(found.seat.id),
-            model: found.seat.model,
-            state: store.seatSession(found.seat.id)?.state ?? null,
-            live,
-            turns:
-              runId === null
-                ? null
-                : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
-            context:
-              runId === null
-                ? null
-                : {
-                    tokens: contextTokens,
-                    rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
-                    text: flightContextText(contextTokens, FLIGHT_CONTEXT_ROTATE_TOKENS),
-                  },
-          },
+    seat,
     decisions: decisions.slice(0, FLIGHT_VIEW_LIMIT),
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
     ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now, decisions) }),
-    ...(found === null
-      ? {}
-      : {
-          wakeCost: flightWakeCost(
-            store,
-            now,
-            found.seat.id,
-            new Set(configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : []))),
-          ),
-          wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId),
-        }),
+    ...(found === null ? {} : financialFigures(config, store, now, found)),
     promptWakes:
       found === null
         ? []
@@ -489,6 +473,35 @@ export function flightView(
     ...(found === null
       ? {}
       : { blocked: blockedWork(store, found.session.repoId, now, inThisLane(config)) }),
+  };
+}
+
+/** The watch seat alone, for readers that do not need FLIGHT's historical view. */
+export function flightSeatView(
+  config: CcConfig,
+  store: Store,
+  alive?: SessionAlive,
+): FlightView["seat"] {
+  const found = flightSeat(config);
+  if (found === null) return null;
+  const session = store.seatSession(found.seat.id);
+  const runId = session?.runId ?? null;
+  const contextTokens = runId === null ? null : (store.digest(runId)?.contextTokens ?? null);
+  return {
+    id: found.seat.id,
+    call: seatCallSign(found.seat.id),
+    model: found.seat.model,
+    state: session?.state ?? null,
+    live: flightLive(config, store, alive),
+    turns: runId === null ? null : { n: flightWakes(store, runId) + 1, max: FLIGHT_MAX_WAKES + 1 },
+    context:
+      runId === null
+        ? null
+        : {
+            tokens: contextTokens,
+            rotateAt: FLIGHT_CONTEXT_ROTATE_TOKENS,
+            text: flightContextText(contextTokens, FLIGHT_CONTEXT_ROTATE_TOKENS),
+          },
   };
 }
 
@@ -707,6 +720,13 @@ function withCovered(inputs: FlightWakeInputs, covered: FlightMovedPointer[]): F
   return covered.length === 0 ? inputs : { ...inputs, movedCovered: covered };
 }
 
+/** Unread operator requests stay pending through an outage; only reading them retires this wake. */
+export function unreadOperatorComms(store: Store, flightId: string): string[] {
+  return [COMMS_CAPCOM, COMMS_CONTROLLER]
+    .flatMap((from) => store.unreadCommsFrom(from, flightId, 0))
+    .sort((a, b) => Number(a) - Number(b));
+}
+
 function wakeInputs(i: {
   /** The slow pace's check while it is on: tickets it refuses are not startable, so wake no one. */
   pace?: PaceCheck | undefined;
@@ -750,15 +770,7 @@ function wakeInputs(i: {
     .filter((x) => seen[itemFactId(x)] !== itemHash(x))
     .map(itemFactId);
   const flightId = i.flightId;
-  const operator =
-    flightId === null
-      ? []
-      : // the controller's lines wake FLIGHT as the operator's do
-        [COMMS_CAPCOM, COMMS_CONTROLLER]
-          .flatMap((from) =>
-            i.store.unreadCommsFrom(from, flightId, i.now - FLIGHT_OPERATOR_UNREAD_MS),
-          )
-          .sort((a, b) => Number(a) - Number(b));
+  const operator = flightId === null ? [] : unreadOperatorComms(i.store, flightId);
   // read by FLIGHT and still unanswered after its turn: owed until it replies
   const owed =
     flightId === null
@@ -1509,6 +1521,7 @@ export function flightWake(
   previous?: FlightWakeSnapshot,
   notes: FlightMemoryNote[] = [],
   fullRead = false,
+  now = Date.now(),
 ): { digest: FlightWake; snapshot: FlightWakeSnapshot } {
   const {
     brief,
@@ -1565,12 +1578,15 @@ export function flightWake(
       removed: [...(previous?.[list].keys() ?? [])].filter((id) => !snapshot[list].has(id)),
     };
   };
-  const signalChanges = changed(
-    "signals",
-    signals,
-    (s) => `${s.kind}:${s.key}`,
-    (s) => (s.told ? { kind: s.kind, key: s.key, told: s.told } : s),
+  // Delivery receipts survive a session handover; the per-session snapshot does not. A told
+  // episode must not become new again on the first wake. Changed reasons have a new key or
+  // are untold by the producer. Do not announce removals for entries never delivered.
+  const wakeSignals = signals.filter(
+    (signal) =>
+      !signal.told && (signal.kind !== "wait_over" || now - signal.since <= 24 * FLIGHT_HOUR_MS),
   );
+  const signalChanges = changed("signals", wakeSignals, (s) => `${s.kind}:${s.key}`);
+  signalChanges.unchanged += signals.length - wakeSignals.length;
   const memoryChanges = changed("memory", memory, (n) => `${n.kind}:${n.topic}`);
   const titles = Object.fromEntries(
     FLIGHT_MEMORY_KINDS.map((kind) => {

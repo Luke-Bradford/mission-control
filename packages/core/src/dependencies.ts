@@ -1,6 +1,18 @@
-import type { DependencyWait } from "./dependencies-model.ts";
+import type {
+  ChainNode,
+  DependencyChain,
+  DependencyEdge,
+  DependencyWait,
+  DependencyWork,
+} from "./dependencies-model.ts";
 
-export type { DependencyWait } from "./dependencies-model.ts";
+export type {
+  ChainNode,
+  DependencyChain,
+  DependencyEdge,
+  DependencyWait,
+  DependencyWork,
+} from "./dependencies-model.ts";
 
 /**
  * What a ticket waits on, read one way for every gate: GitHub's blocked-by links, the `Depends on`
@@ -195,4 +207,170 @@ export function undeclaredPrDependency(
     return { pr: n, line: issue === null ? `After PR ${n}` : `Depends on #${issue}` };
   }
   return null;
+}
+
+/**
+ * Group the complete wait graph beneath its terminal work. Strongly connected components
+ * make cycles explicit; a shared descendant appears once per root, with its other roots named.
+ * This is a read model: it neither observes waits nor changes their stored start times.
+ */
+export function dependencyChains(input: {
+  repoId: string;
+  work: readonly DependencyWork[];
+  edges: readonly DependencyEdge[];
+  now: number;
+}): DependencyChain[] {
+  const work = new Map(input.work.map((w) => [w.ref, w]));
+  const waits = new Map<string, DependencyEdge[]>();
+  const children = new Map<string, DependencyEdge[]>();
+  const unknown = (ref: string): DependencyWork => ({
+    ref,
+    title: null,
+    state: "unknown",
+    reason: "Work not read yet",
+    owner: "—",
+    seatId: null,
+  });
+  for (const edge of input.edges) {
+    for (const ref of [edge.from, edge.to]) if (!work.has(ref)) work.set(ref, unknown(ref));
+    const existing = waits.get(edge.from) ?? [];
+    const same = existing.find((e) => e.to === edge.to);
+    if (same) {
+      // A hold and a body line can name the same wait. Keep its oldest real observation.
+      if (edge.since !== null && (same.since === null || edge.since < same.since))
+        same.since = edge.since;
+      continue;
+    }
+    const copy = { ...edge };
+    waits.set(edge.from, [...existing, copy]);
+    children.set(edge.to, [...(children.get(edge.to) ?? []), copy]);
+  }
+  for (const edges of children.values()) edges.sort((a, b) => a.from.localeCompare(b.from));
+
+  let next = 0;
+  const indices = new Map<string, number>();
+  const low = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const components: string[][] = [];
+  const visit = (ref: string) => {
+    indices.set(ref, next);
+    low.set(ref, next++);
+    stack.push(ref);
+    onStack.add(ref);
+    for (const { to } of waits.get(ref) ?? []) {
+      if (!indices.has(to)) {
+        visit(to);
+        low.set(ref, Math.min(low.get(ref) as number, low.get(to) as number));
+      } else if (onStack.has(to)) {
+        low.set(ref, Math.min(low.get(ref) as number, indices.get(to) as number));
+      }
+    }
+    if (low.get(ref) !== indices.get(ref)) return;
+    const component: string[] = [];
+    let member: string;
+    do {
+      member = stack.pop() as string;
+      onStack.delete(member);
+      component.push(member);
+    } while (member !== ref);
+    components.push(component.sort());
+  };
+  for (const ref of [...work.keys()].sort()) if (!indices.has(ref)) visit(ref);
+  const componentOf = new Map(components.flatMap((c, i) => c.map((ref) => [ref, i] as const)));
+  const cyclic = new Set(
+    components.flatMap((c, i) =>
+      c.length > 1 || waits.get(c[0] as string)?.some((e) => e.to === c[0]) ? [i] : [],
+    ),
+  );
+  const roots = components.flatMap((members, i) => {
+    const terminal = members.every((ref) =>
+      (waits.get(ref) ?? []).every((e) => componentOf.get(e.to) === i),
+    );
+    // Also expose a cycle with an external wait: it cannot be freed by that wait ending.
+    return (terminal || cyclic.has(i)) && members.some((ref) => children.has(ref))
+      ? [{ ref: members[0] as string, members, component: i }]
+      : [];
+  });
+  const reaches = new Map<string, Set<string>>();
+  for (const root of roots) {
+    const seen = new Set<string>();
+    const pending = [...root.members];
+    while (pending.length) {
+      const ref = pending.pop() as string;
+      if (seen.has(ref)) continue;
+      seen.add(ref);
+      const set = reaches.get(ref) ?? new Set<string>();
+      set.add(root.ref);
+      reaches.set(ref, set);
+      for (const child of children.get(ref) ?? []) pending.push(child.from);
+    }
+  }
+  const age = (since: number | null) =>
+    since === null || !Number.isFinite(since) ? null : Math.max(0, input.now - since);
+  return roots
+    .map((root): DependencyChain => {
+      const seen = new Set<string>();
+      const durations: number[] = [];
+      const cycleRefs = new Set<string>();
+      const render = (ref: string, edge: DependencyEdge | null): ChainNode => {
+        seen.add(ref);
+        const component = componentOf.get(ref) as number;
+        if (cyclic.has(component))
+          for (const member of components[component] ?? []) cycleRefs.add(member);
+        const incomingAge = age(edge?.since ?? null);
+        if (incomingAge !== null) durations.push(incomingAge);
+        const node: ChainNode = {
+          ref,
+          title: work.get(ref)?.title ?? null,
+          edge: edge?.kind ?? null,
+          waitedMs: incomingAge,
+          alsoWaitsOn: [...(reaches.get(ref) ?? [])].filter((r) => r !== root.ref).sort(),
+          children: [],
+        };
+        for (const child of children.get(ref) ?? [])
+          if (!seen.has(child.from)) node.children.push(render(child.from, child));
+        return node;
+      };
+      const tree = render(root.ref, null);
+      // Include alternate paths and cycle back edges within this chain. A shared dependent's
+      // older wait on another root must not make this root's chain look older.
+      for (const ref of seen) {
+        for (const edge of waits.get(ref) ?? []) {
+          const waited = age(edge.since);
+          if (seen.has(edge.to) && waited !== null) durations.push(waited);
+        }
+      }
+      const fact = work.get(root.ref) as DependencyWork;
+      const descendants = [...seen].filter((ref) => ref !== root.ref).sort();
+      const frees = descendants.filter(
+        (ref) =>
+          !cyclic.has(root.component) &&
+          (waits.get(ref) ?? []).every((edge) => edge.to === root.ref),
+      );
+      return {
+        repoId: input.repoId,
+        root: tree,
+        state: cycleRefs.size ? "stuck" : fact.state,
+        reason: cycleRefs.size
+          ? `These tickets wait on each other: ${[...cycleRefs].sort().join(", ")}.`
+          : fact.reason,
+        owner: fact.owner,
+        seatId: fact.seatId,
+        longestWaitMs: durations.length ? Math.max(...durations) : null,
+        frees,
+        stillWaiting: descendants.filter((ref) => !frees.includes(ref)),
+      };
+    })
+    .sort(compareDependencyChains);
+}
+
+/** Shared order for one repository or a combined response: longest known wait first. */
+export function compareDependencyChains(a: DependencyChain, b: DependencyChain): number {
+  return (
+    Number(a.longestWaitMs === null) - Number(b.longestWaitMs === null) ||
+    (b.longestWaitMs ?? 0) - (a.longestWaitMs ?? 0) ||
+    Number(b.state === "stuck") - Number(a.state === "stuck") ||
+    a.root.ref.localeCompare(b.root.ref)
+  );
 }

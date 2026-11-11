@@ -32,6 +32,7 @@ import {
   minorMoreLine,
   NEW_LOOP,
   prEditedText,
+  type QaReport,
   type Run,
   STDERR_TEXT_MAX,
 } from "@mc/core";
@@ -1554,6 +1555,50 @@ describe("postMinorFindings", () => {
     const crew = join(dir, "crew");
     return existsSync(crew) ? readdirSync(crew).filter((f) => f.startsWith("pr-")) : [];
   };
+
+  it("publishes negated parent-completion prose without changing the retained native report", async () => {
+    store.upsertRun(R);
+    const rv = review([]);
+    const report: QaReport = {
+      schemaVersion: 1,
+      id: "c".repeat(64),
+      repoId: "mc",
+      github: "o/mc",
+      prNumber: 12,
+      headSha: SHA,
+      prTitle: "Sample change",
+      prUrl: "https://github.com/o/mc/pull/12",
+      branch: BRANCH,
+      source: "native",
+      reviewer: { id: "retro", label: "RETRO" },
+      reviewedAt: START,
+      registeredAt: START,
+      nativeReviewId: rv.id,
+      nativeRunId: "rr",
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked the bounded continuation.",
+      worksWell: ["This does not close #933."],
+      coverage: [{ check: "scope", result: "pass", note: "This does not fix #933." }],
+      findings: [],
+      resolutions: [],
+      tests: [],
+      limitations: ["This cannot resolve #933."],
+      followUps: [{ text: "This never closes #933.", disposition: "pending" }],
+      visual: { applicability: "not_applicable", reason: "Backend only.", pairs: [] },
+      ci: { observedAt: START, headSha: SHA, source: "github", checks: [] },
+      completeness: { state: "complete", missing: [] },
+      permalink: `/qa?repo=mc&pr=12&report=${"c".repeat(64)}`,
+    };
+    expect(store.putQaReport(report)).toBe(true);
+    answer();
+    expect(await createPublisher(deps()).postMinorFindings(R, rv)).toEqual({ ok: true });
+    expect(posted).toContain("does not close issue 933");
+    expect(posted).toContain("does not fix issue 933");
+    expect(posted).toContain("cannot resolve issue 933");
+    expect(posted).toContain("never closes issue 933");
+    expect(posted).toContain(`/api/qa-reports/${report.id}/markdown`);
+    expect(store.qaReportForReview(rv.id)).toEqual(report);
+  });
 
   beforeEach(() => {
     store.upsertRun(R);

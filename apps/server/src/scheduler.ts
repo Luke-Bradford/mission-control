@@ -31,6 +31,7 @@ import {
 import { codexProfile } from "./account-bindings.ts";
 import { evaluateHolds } from "./attention-holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
+import type { BriefChoiceDeps } from "./brief/choices.ts";
 import { syncBudgetBrake } from "./budget-brake.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
@@ -102,7 +103,6 @@ import {
   latestTranscriptLimits,
   UsageRateLimited,
 } from "./collectors/usage-sources.ts";
-import { raiseStalledCommsDecisions } from "./comms-decisions.ts";
 import type { CcConfig } from "./config.ts";
 import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
 import { applyDecisionDefaults } from "./decision-defaults.ts";
@@ -311,8 +311,11 @@ export interface SchedulerDeps {
   cliHold?: CliHold;
   /** The live check of an automatic CLI update, run on a seat (the supervisor's, built after the scheduler). */
   seatCheck?: SeatCheck;
-  /** Hands an applied default to the seat that asked it. */
+  /** Legacy settled-question delivery; bound defaults use defaultChoices instead. */
   deliverDefault?: (seatId: string, text: string) => Promise<void>;
+  defaultChoices?: () => BriefChoiceDeps;
+  /** Takes `waiting:operator` off cards that left the Backlog; returns how many it freed. Absent: none. */
+  releaseWaiting?: () => Promise<number>;
   /** The PRs the engine waits on in a repo (CI running, a merge queued). Default: from the loop runs. */
   waitedPrs?: (repoId: RepoId) => number[];
 }
@@ -577,14 +580,12 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         deliver: deps.deliverDefault,
       });
       if (closed > 0) bus.emit("attention");
-      const raised = raiseStalledCommsDecisions({ config, store, now: now() });
-      if (raised > 0) bus.emit("attention");
       const n = await applyDecisionDefaults({
         config,
         store,
         now: now(),
         lock: deps.lockState?.(),
-        deliver: deps.deliverDefault,
+        choices: deps.defaultChoices?.(),
       });
       if (n > 0) bus.emit("attention");
     } catch (e) {
@@ -1007,6 +1008,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           scopeLogged.add(repo.id);
         }
       }
+      // a card that left the Backlog by another hand no longer waits on the operator's question
+      if (
+        !(client instanceof Error) &&
+        boardDue &&
+        deps.boardWrites !== false &&
+        deps.releaseWaiting
+      )
+        try {
+          if ((await deps.releaseWaiting()) > 0) changed.boards = true;
+        } catch (e) {
+          deps.log?.(`release waiting:operator: ${e instanceof Error ? e.message : String(e)}`);
+        }
       if (!(client instanceof Error) && boardDue) {
         lastBoardAt = startedAt;
         boardWanted = false;

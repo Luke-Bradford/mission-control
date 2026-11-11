@@ -133,6 +133,7 @@ import {
 } from "@mc/core";
 import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
+import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
@@ -189,7 +190,6 @@ import {
 } from "../run-handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import {
-  ACTIVE_SEAT_STATES,
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
@@ -202,9 +202,8 @@ import {
   crewSkillsDir,
   crewTokenPath,
   crewTranscriptPath,
-  type KeeperCursor,
-  type Store,
-} from "../store.ts";
+} from "../store/crew-paths.ts";
+import { ACTIVE_SEAT_STATES, type KeeperCursor, type Store } from "../store.ts";
 import {
   AGENTS_MD_HEADING,
   BRIEF_DECISIONS_MAX,
@@ -697,7 +696,13 @@ export interface Supervisor {
   message(
     seatId: string,
     text: string,
-    opts: { interrupt: boolean; questions?: "all" | "unpassed" | "none"; enforcePause?: boolean },
+    opts: {
+      interrupt: boolean;
+      questions?: "all" | "unpassed" | "none";
+      enforcePause?: boolean;
+      expectedRunId?: string;
+      beforeWrite?: () => void;
+    },
   ): Promise<void>;
   interrupt(seatId: string): Promise<void>;
   /** Ends the run and leaves the seat idle for its next ticket; `hold` benches it (stopped) instead. */
@@ -1393,7 +1398,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return p;
   }
 
-  function writeLine(l: Live, text: string): DeliveryEnvelope {
+  function writeLine(l: Live, text: string, beforeWrite?: () => void): DeliveryEnvelope {
     // Reload applies focus by replacing seat objects. Never import the launch-time copy again.
     const current = findSeat(l.info.seat.id);
     if (!current)
@@ -1408,6 +1413,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       seatDef(l.info.seat).loop === "watch",
       text,
     );
+    beforeWrite?.();
     const pending = pendingPromptVersions.get(l.run.id);
     if (pending) {
       // Fail closed before any provider input. A failed send keeps the prepared identity retryable.
@@ -4268,10 +4274,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       };
       const subject = external ? await readSubject() : null;
       if (external ? !subject : author === null || author.endedAt !== null) throw notWanted;
-      const issue = external ? subject!.ticket.number : issueOf(author!);
-      const head = external ? subject!.sha : (store.runPush(author!.id)?.sha ?? null);
+      const issue = subject ? subject.ticket.number : author === null ? null : issueOf(author);
+      const head = subject
+        ? subject.sha
+        : author === null
+          ? null
+          : (store.runPush(author.id)?.sha ?? null);
       if (
-        (!external && author!.repoId !== info.repo.id) ||
+        (!external && author?.repoId !== info.repo.id) ||
         issue === null ||
         (head !== review.sha &&
           (head === null ||
@@ -4289,7 +4299,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       let ticket: TicketView | null;
       try {
-        ticket = external ? subject!.ticket : await deps.fetchTicket(info.repo, issue);
+        ticket = subject ? subject.ticket : await deps.fetchTicket(info.repo, issue);
       } catch (e) {
         throw new SupervisorError(502, `could not read ${info.repo.github}#${issue} from GitHub`, {
           cause: e,
@@ -4301,9 +4311,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // the first review's findings and FLIGHT's reason
       const secondOf = author?.loop?.flightSecondReview?.[review.sha];
       const second = secondOf?.epoch === review.epoch ? secondOf : null;
+      const touches = author?.loop?.touches;
+      const hardRuleReview = touches?.sha === review.sha && touches.paths.length > 0;
       // a Claude full-depth profile wins; a Codex seat always keeps its configured model
       const model =
-        external || second !== null || author?.profile?.profile.reviewer.depth === "full"
+        external ||
+        second !== null ||
+        hardRuleReview ||
+        author?.profile?.profile.reviewer.depth === "full"
           ? isCodex(info)
             ? info.seat.model
             : REVIEW_FULL_MODEL
@@ -4422,7 +4437,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               branch: author?.branch ?? subject?.branch ?? "",
               sha: review.sha,
             });
-      const touches = author?.loop?.touches;
       const evidence = author ? store.evidenceNotes(author.id) : [];
       const prevReply =
         prev === null
@@ -4919,6 +4933,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     text: string,
     cost?: { wake: number; pieces: readonly PromptPiece[] },
   ): Promise<SendResult> {
+    const beforeWrite = boundBriefGuard();
+    const identity = boundBriefIdentity();
+    const deliveryKey = identity ? `${key}:brief:${identity}` : key;
     if (!mayAct() || stopping) return "busy";
     const run = store.run(runId);
     if (run === null) return "gone";
@@ -4934,11 +4951,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (l.ending !== null) return "busy";
       if (!l.session.alive) return "no-session";
       if (l.inTurn) return "busy";
-      const claimed = store.claimLine(key, { runId, seatId, origin: "engine", text, at: now() });
+      beforeWrite?.();
+      const claimed = store.claimLine(deliveryKey, {
+        runId,
+        seatId,
+        origin: "engine",
+        text,
+        at: now(),
+      });
       if (!claimed) return "dup";
       try {
         const inbox = withInbox(seatId, runId, text, isResumeLineKey(key));
-        const envelope = writeLine(l, inbox.text);
+        const envelope = writeLine(l, inbox.text, beforeWrite);
         markInboxRead(seatId, inbox);
         if (cost !== undefined) {
           try {
@@ -4952,8 +4976,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             log(`${seatId}: could not record the wake's sections: ${errText(e)}`);
           }
         }
-      } catch {
-        store.dropLine(key);
+      } catch (error) {
+        store.dropLine(deliveryKey);
+        if (beforeWrite) throw error;
         return l.session.alive ? "busy" : "no-session";
       }
       return "sent";
@@ -5150,6 +5175,20 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const moving = transfers.get(seatId);
       if (moving) await moving;
       const l = liveOrRefuse(need(seatId));
+      const checkBinding = () => {
+        if (
+          opts.expectedRunId !== undefined &&
+          (l.run.id !== opts.expectedRunId ||
+            store.seatSession(seatId)?.runId !== opts.expectedRunId ||
+            store.run(opts.expectedRunId)?.endedAt !== null)
+        )
+          throw new SupervisorError(
+            409,
+            "The intended run changed or ended before message delivery.",
+          );
+        opts.beforeWrite?.();
+      };
+      checkBinding();
       return enqueue(l, async () => {
         const inbox = l.inTurn ? { text, messageIds: [] } : withInbox(seatId, l.run.id, text);
         if (opts.interrupt && l.inTurn) {
@@ -5160,7 +5199,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           const pause = pausedSeat(store, seatId);
           if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         }
-        writeLine(l, inbox.text);
+        checkBinding();
+        writeLine(l, inbox.text, checkBinding);
         markInboxRead(seatId, inbox);
         // A message answers the seat's open ask_flight questions (FLIGHT's answer, or the operator's
         // reply to FLIGHT's brief)

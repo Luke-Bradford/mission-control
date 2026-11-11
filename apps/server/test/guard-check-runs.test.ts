@@ -164,6 +164,45 @@ describe("the check recorder", () => {
     ]);
   });
 
+  it("keeps aliased checks pending until their completion is recorded", async () => {
+    let finishState: ((state: CloneState | null) => void) | undefined;
+    let readingEnd = false;
+    const r = createCheckRecorder({
+      store: { addCheckRun: (row) => void rows.push(row) },
+      checks: async () => CHECKS,
+      state: async () =>
+        readingEnd
+          ? new Promise<CloneState | null>((resolve) => {
+              finishState = resolve;
+            })
+          : state,
+    });
+    const alias = { runId: "r1", toolUseId: "codex-item" };
+    await r.begin(KEY, `${LINT} && ${TYPES}`, [alias]);
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    expect(r.pending("other-run")).toEqual([]);
+    readingEnd = true;
+    const ending = r.end(alias, true, 0);
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    r.dropRun("r1"); // A turn ending while the completed receipt is checked must not discard it.
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    finishState?.(state);
+    await ending;
+    expect(r.pending("r1")).toEqual([]);
+    expect(rows).toHaveLength(2);
+    expect(r.drops("r1")).toEqual([]);
+  });
+
+  it("clears pending checks when completion validation cannot read the clone", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    state = null;
+    await r.end(KEY, true, 0);
+    expect(r.pending("r1")).toEqual([]);
+    expect(rows).toEqual([]);
+    expect(r.drops("r1")).toMatchObject([{ reason: "unreadable", command: LINT }]);
+  });
+
   it.each([
     ["&&", `cd ${WORKTREE} && ${LINT}`],
     [";", `cd ${WORKTREE}; ${LINT}`],

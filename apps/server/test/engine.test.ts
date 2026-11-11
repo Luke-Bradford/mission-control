@@ -108,7 +108,6 @@ import {
   writerSyncConflictText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { writeCrewPause } from "../src/crew-pause.ts";
@@ -151,12 +150,12 @@ import {
   type SeatBusy,
   type SeatFacts,
   type SendResult,
-  type Supervisor,
   SupervisorError,
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { activity } from "../src/views.ts";
+import { defined } from "./defined.ts";
 
 const START = Date.parse("2026-10-21T10:00:00Z");
 const HUB = START + 30 * 60_000;
@@ -299,6 +298,8 @@ interface Harness {
   /** The supervisor has not taken the crew lock yet: its seat() refuses. */
   seatThrows: boolean;
   sent: { runId: string; key: string; text: string }[];
+  /** Boundary hook after the mock provider accepted its line, before the caller resumes. */
+  duringSend?: () => void;
   pushes: string[];
   prs: { title: string; note: string }[];
   excerpts: string[];
@@ -620,6 +621,7 @@ function harness(): Harness {
             });
             if (!claimed) return "dup";
             x.sent.push({ runId, key, text });
+            x.duringSend?.();
             return "sent";
           },
           async resumeDeferredRuns() {
@@ -854,17 +856,19 @@ describe("controller PR scratch reviews", () => {
       mergeable: null,
     };
     store.upsertPullRequests(REPO, [pr], clock);
-    const id = store.requestReview({
-      authorRunId: identity,
-      repoId: REPO,
-      seatId: RETRO,
-      prNumber: 77,
-      sha: SHA,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: clock,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: identity,
+        repoId: REPO,
+        seatId: RETRO,
+        prNumber: 77,
+        sha: SHA,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: clock,
+      }),
+    );
     h.engine = h.make({
       externalReviews: {
         sync: async () => {},
@@ -4032,6 +4036,22 @@ describe("the engine runs reviews", () => {
       await vi.waitFor(() => expect(h.starts).toEqual([{ seat: RETRO, id: expect.any(Number) }]));
     });
 
+    it("starts a FLIGHT-moved P0 review through its target budget brake only", async () => {
+      addCodexReviewer();
+      brakeAccount("claude-main");
+      brakeAccount("codex-main");
+      await toReview();
+      await h.engine.tick();
+      const review = first();
+      expect(store.moveQueuedReview(review.id, "retro-cx", clock, true)).toBe(true);
+
+      await h.engine.tick();
+
+      await vi.waitFor(() =>
+        expect(h.starts).toEqual([{ seat: "retro-cx", id: expect.any(Number) }]),
+      );
+    });
+
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
       addCodexReviewer();
       h.busyList = [{ seatId: "retro-cx", state: "running" }];
@@ -4448,6 +4468,74 @@ describe("the engine runs reviews", () => {
     }
 
     describe("FLIGHT adopts a head from outside the run", () => {
+      it("the controller adopts an inactive working run's published head at the author account stop", async () => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        seatIdle(null);
+        setLoop({
+          phase: "working",
+          aside: { worktree: "/tmp/preserved-work", wake: false },
+          flightClearedSha: SHA,
+          reviewWaivedSha: SHA,
+          carry: { from: SHA, to: SHA },
+        });
+        setPr({ ci: "pending", headSha: SHA_B });
+        store.addUsage({
+          accountId: "claude-main",
+          window: "7d",
+          at: clock,
+          pct: 96,
+          resetAt: clock + 60 * MIN,
+          source: "test",
+        });
+        expect(await h.engine.adoptPrHead(RUN, SHA_B, "Controller")).toBe(true);
+        expect(store.runPush(RUN)?.sha).toBe(SHA_B);
+        expect(loopOf()).toMatchObject({
+          phase: "ci",
+          adopted: true,
+          reviewWaivedSha: null,
+          flightClearedSha: null,
+          carry: null,
+        });
+        expect(h.wakes).toEqual([]);
+        expect(store.qaCheckReceipts(RUN, SHA_B)).toEqual([]);
+        expect(h.steps).not.toContain("merge");
+        setPr({ ci: "passing", headSha: SHA_B });
+        await h.engine.reconcileRun(RUN);
+        expect(store.reviewsOfRun(RUN)).toContainEqual(
+          expect.objectContaining({ sha: SHA_B, state: "queued" }),
+        );
+        expect(h.steps).not.toContain("merge");
+      });
+
+      it.each(["active", "dirty", "unreadable", "stopped", "parked", "merge hold"])(
+        "controller adoption preserves an %s author's work or hold",
+        async (reason) => {
+          need(config.repos[0]).flightPowers = "superuser";
+          await toReview();
+          await h.engine.reconcileRun(RUN);
+          if (reason !== "active") seatIdle(null);
+          else h.facts = { inTurn: true, resumedAt: null, rateLimitedUntil: null };
+          setLoop({ phase: "working", aside: { worktree: "/tmp/preserved-work", wake: false } });
+          setPr({ ci: "pending", headSha: SHA_B });
+          if (reason === "dirty") h.changes = ["unsaved.ts"];
+          if (reason === "unreadable")
+            h.changes = { ok: false, text: "unreadable", transient: false };
+          if (reason === "stopped") {
+            const row = need(store.seatSession(SEAT));
+            store.setSeatSession({ ...row, state: "stopped", reason: "operator stop" });
+          }
+          if (reason === "parked")
+            setLoop({ parked: { kind: "budget", reason: "budget stop", ended: false } });
+          if (reason === "merge hold")
+            setLoop({ mergeHold: { by: "CAPCOM", reason: "operator hold", at: clock } });
+          expect(await h.engine.adoptPrHead(RUN, SHA_B, "Controller")).toBe(false);
+          expect(store.runPush(RUN)?.sha).toBe(SHA);
+          expect(h.wakes).toEqual([]);
+        },
+      );
+
       it("adoptPrHead moves the run to ci on the new head, and refuses a working run", async () => {
         need(config.repos[0]).flightPowers = "superuser";
         await toReview();
@@ -5627,6 +5715,28 @@ describe("the engine runs reviews", () => {
       setLoop({ controllerCheck: { sha: SHA, from: "review", pass: false } });
       expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
       expect(loopOf().controllerCheck).toMatchObject({ sha: SHA, pass: true });
+    });
+
+    it("clears a reviewed hard-rule PR at the author's account stop without waking the author", async () => {
+      flightSeatConfig();
+      h.touches = ["apps/server/src/api.ts"];
+      h.gate = { ...need(h.gate), strays: [] };
+      await gateOpen();
+      await vi.waitFor(() => expect(loopOf().awaitingFlight).toBe(SHA));
+      await h.engine.reconcileRun(RUN);
+      seatIdle(null);
+      setLoop({ aside: { worktree: "/tmp/preserved-reviewed-work", wake: false } });
+      store.addUsage({
+        accountId: "claude-main",
+        window: "7d",
+        at: clock,
+        pct: 96,
+        resetAt: clock + 60 * MIN,
+        source: "test",
+      });
+      expect(await h.engine.clearFlight(RUN, SHA)).toBe(true);
+      expect(h.steps).toContain("merge");
+      expect(h.wakes).toEqual([]);
     });
 
     it("a commit from outside the run and stray files wait for FLIGHT, then merge", async () => {
@@ -7803,6 +7913,81 @@ describe("the engine runs reviews", () => {
   });
 });
 
+it("1389 checks a bound choice again after waiting on the real engine run chain", async () => {
+  const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
+  setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
+  let sourceChanged = false;
+  const result = withinBriefDispatch(
+    () => {
+      if (sourceChanged) throw new Error("Fixture decision source changed");
+    },
+    () => h.engine.onOperatorMessage(RUN),
+  );
+  sourceChanged = true;
+  expect((await result).lifted).toBe(false);
+  expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "ci" } });
+  expect(loopTexts()).not.toContain("resumed by CAPCOM");
+});
+it("1389 rechecks a bound source after asynchronous beforeLift without weakening ordinary resume", async () => {
+  const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
+  setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
+  let sourceChanged = false;
+  const result = await withinBriefDispatch(
+    () => {
+      if (sourceChanged) throw new Error("Fixture decision source changed");
+    },
+    () =>
+      h.engine.onOperatorMessage(RUN, "CAPCOM", {
+        beforeLift: async () => {
+          await Promise.resolve();
+          sourceChanged = true;
+          return true;
+        },
+      }),
+  );
+  expect(result.lifted).toBe(false);
+  expect(loopOf().phase).toBe("parked");
+  expect((await h.engine.onOperatorMessage(RUN)).lifted).toBe(true);
+});
+
+it.each(["controller", "uat"] as const)(
+  "1389 preserves the %s hold if source changes after awaited send-back",
+  async (kind) => {
+    const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
+    setLoop({
+      phase: "parked",
+      parked: {
+        kind: kind === "controller" ? CONTROLLER_CHECK_PARK : UAT_PARK,
+        reason: "Bound fixture hold",
+        ended: false,
+      },
+      ...(kind === "controller"
+        ? { controllerCheck: { sha: SHA, from: "ci", pass: false } }
+        : { uat: { sha: SHA, from: "ci", accepted: false } }),
+    });
+    h.sent.length = 0;
+    let current = true;
+    h.duringSend = () => {
+      current = false;
+    };
+    const result = await withinBriefDispatch(
+      () => {
+        if (!current) throw new Error("Bound source changed after provider delivery");
+      },
+      () =>
+        kind === "controller"
+          ? h.engine.controllerCheck(RUN, "fail", SHA, "Fixture failure")
+          : h.engine.uat(RUN, "send_back", SHA, "Fixture failure"),
+    );
+    expect(result.lifted).toBe(false);
+    expect(h.sent).toHaveLength(1);
+    expect(loopOf()).toMatchObject({
+      phase: "parked",
+      parked: { kind: kind === "controller" ? CONTROLLER_CHECK_PARK : UAT_PARK },
+    });
+    expect(store.comms(0).some((line) => line.text.includes("Fixture failure"))).toBe(false);
+  },
+);
 describe("designFailedIn: the head's last design verdict", () => {
   const row = (id: number, sha: string, state: ReviewRow["state"] = "reported"): ReviewRow => ({
     id,

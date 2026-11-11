@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NEW_LOOP, type Run } from "@mc/core";
@@ -120,7 +128,7 @@ function setup(mainEdit: (root: string) => void): void {
 }
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "mc-update-"));
+  dir = realpathSync(mkdtempSync(join(tmpdir(), "mc-update-")));
   store = new Store(join(dir, "mc.sqlite"));
 });
 afterEach(() => {

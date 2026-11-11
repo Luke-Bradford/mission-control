@@ -32,11 +32,10 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pendingRunApproval } from "../src/attention-subjects.ts";
+import { crewPromptPath, crewTranscriptPath } from "../src/store/crew-paths.ts";
 import {
   ACK_ABSENT_MS,
   type AgentEvent,
-  crewPromptPath,
-  crewTranscriptPath,
   MACHINE_RETENTION_MS,
   MAX_OPEN_RUN_AGE_MS,
   Store,
@@ -151,6 +150,13 @@ describe("Store", () => {
     expect(store.pullRequestOfBranch("r", "feature/y")).toEqual({ number: 5, state: "merged" });
     expect(store.pullRequestOfBranch("r", "feature/none")).toBeNull();
     expect(store.pullRequestOfBranch("other", "feature/x")).toBeNull();
+    store.upsertPullRequests("r", [{ ...pr(9, "feature/x", "closed"), createdAt: 0 }], 1);
+    expect(store.pullRequestOfBranch("r", "feature/x")).toEqual({ number: 9, state: "closed" });
+    expect(store.pullRequestOfBranch("r", "feature/x", 1)).toEqual({
+      number: 7,
+      state: "open",
+    });
+    expect(store.pullRequestOfBranch("r", "feature/x", 2)).toBeNull();
   });
 
   it("partitions batched pull requests and reuses a prepared statement", () => {
@@ -184,6 +190,35 @@ describe("Store", () => {
     const batches = store.pullRequestsForRepos(["one", "two"]);
     expect(batches.get("one")).toEqual(store.pullRequests("one"));
     expect(batches.get("two")).toEqual(store.pullRequests("two"));
+
+    store.upsertPullRequests(
+      "one",
+      [
+        { ...pr("one", 3), state: "closed" },
+        { ...pr("one", 4), state: "merged" },
+      ],
+      1,
+    );
+    store.upsertPullRequests("other", [pr("other", 5)], 1);
+    const needed = store.openAndReferencedPullRequests(
+      ["one", "two", "empty"],
+      [
+        { repoId: "one", number: 3 },
+        { repoId: "one", number: 3 },
+        { repoId: "one", number: 999 },
+        { repoId: "other", number: 5 },
+      ],
+    );
+    expect(needed.get("one")).toEqual([store.pullRequest("one", 3), store.pullRequest("one", 1)]);
+    expect(needed.get("two")).toEqual([store.pullRequest("two", 2)]);
+    expect(needed.get("empty")).toEqual([]);
+    expect(needed.has("other")).toBe(false);
+    expect(store.pullRequestLink("one", { number: 3 })).toEqual({
+      repoId: "one",
+      number: 3,
+      title: "PR 3",
+      url: "u",
+    });
 
     const raw = (store as unknown as { rawDb: DatabaseSync }).rawDb;
     const prepare = vi.spyOn(raw, "prepare");
@@ -3251,7 +3286,7 @@ describe("comms", () => {
     legacy.close();
     const migrated = new Store(legacyPath);
     try {
-      expect(migrated.commsMessage("comms:1")).toMatchObject({ text: "legacy", label: null });
+      expect(migrated.commsMessage("comms:1")).toMatchObject({ text: "legacy", label: "none" });
       expect(migrated.addComms({ ...row("new"), label: "question", ref: "#7" })).toMatchObject({
         label: "question",
         ref: "#7",
@@ -3297,6 +3332,44 @@ describe("comms", () => {
     expect(store.setCommsPinned("1", true, "CAPCOM", 1)).toBe(false);
     expect(store.commsReactions(message.id)).toEqual([]);
     expect(store.commsPins()).toEqual([]);
+  });
+
+  it("reads a full thread with bounded mention queries and unchanged complete rows", () => {
+    const expected: ReturnType<Store["threadComms"]> = [];
+    for (let index = 0; index < 520; index++) {
+      if (index % 10 === 0)
+        store.addComms({ ...row(`unrelated ${index}`, index), from: "x", to: "y" });
+      const message = store.addComms({
+        ...row(`thread ${index}`, 1000 - index),
+        from: index % 2 || index === 260 ? "reader" : "other",
+        to: index % 2 && index !== 260 ? "other" : "reader",
+        mentions: index % 3 === 0 ? ["zulu", "alpha", "alpha"] : [],
+        senderKind: "controller",
+        label: "handoff",
+        ref: "#933",
+        itemKey: `message:${index}`,
+        replyTo: expected.at(-1)?.id,
+      });
+      if (message === null) throw new Error("Fixture message was not stored");
+      expected.push(message);
+    }
+    const queries = vi.spyOn(store as unknown as { statement(sql: string): unknown }, "statement");
+    const actual = store.threadComms("reader");
+    expect(actual).toEqual(expected.slice(-500));
+    const mentionReads = queries.mock.calls.filter(([sql]) =>
+      /SELECT.*FROM comms_mentions/i.test(sql),
+    );
+    expect(mentionReads.length).toBeGreaterThan(0);
+    expect(mentionReads.length).toBeLessThanOrEqual(3);
+    queries.mockRestore();
+
+    const cursor = Number(actual[110].id.slice("comms:".length));
+    expect(store.threadComms("reader", cursor)).toEqual(
+      expected.filter((message) => Number(message.id.slice("comms:".length)) > cursor),
+    );
+    actual[0].mentions.push("not-stored");
+    expect(store.threadComms("reader")[0]).toEqual(expected.at(-500));
+    expect(store.threadComms("missing")).toEqual([]);
   });
 
   it("enforces SQL reaction and label constraints", () => {
@@ -3679,14 +3752,14 @@ it("retains complete and legacy briefs across restart without inventing checked 
     ],
     recommendedOptionId: "scope",
   };
-  store.addBrief(legacy);
-  store.addBrief(complete);
+  const legacyId = store.addBrief(legacy);
+  const completeId = store.addBrief(complete);
   store.close();
   store = new Store(join(dir, "mc.sqlite"));
   const { key: _legacyKey, ...legacyBrief } = legacy;
   const { key: _completeKey, ...completeBrief } = complete;
-  expect(store.briefs().get(legacy.key)).toEqual(legacyBrief);
-  expect(store.briefs().get(complete.key)).toEqual(completeBrief);
+  expect(store.briefs().get(legacy.key)).toEqual({ ...legacyBrief, id: legacyId });
+  expect(store.briefs().get(complete.key)).toEqual({ ...completeBrief, id: completeId });
   expect(store.briefs().get(legacy.key)?.checked).toBeUndefined();
 });
 
@@ -4457,6 +4530,37 @@ it("keeps an out-of-window held run without disturbing the newest-first order", 
   expect(grouped.get("a")?.map((r) => r.id)).toEqual(["r4", "r0"]);
   expect(grouped.get("missing")).toEqual([]);
 });
+it("preserves timestamp and sequence order, duplicate agents and held runs outside the requested agents", () => {
+  store.upsertRun(run({ id: "older", agentId: "a", seq: 1, startedAt: 1 }));
+  store.upsertRun(run({ id: "tie-low", agentId: "a", seq: 2, startedAt: 2 }));
+  store.upsertRun(run({ id: "tie-high", agentId: "a", seq: 3, startedAt: 2 }));
+  store.upsertRun(run({ id: "foreign", agentId: "b", seq: 1, startedAt: 3 }));
+  const held = ["older", "older", "tie-high", "foreign", "absent"];
+  const grouped = store.runsForAgents(["a", "a", "empty"], 1, held);
+  expect(grouped.get("a")?.map((r) => r.id)).toEqual(["tie-high", "older"]);
+  expect(grouped.get("b")?.map((r) => r.id)).toEqual(["foreign"]);
+  expect(grouped.get("empty")).toEqual([]);
+  expect(store.runsForAgents([], 1, held)).toEqual(new Map());
+  expect(
+    store
+      .runsForAgents(["a"], 0, ["older"])
+      .get("a")
+      ?.map((r) => r.id),
+  ).toEqual(["older"]);
+  expect(store.runsForAgents(["a"], -1).get("a")).toEqual([]);
+  expect(
+    store
+      .runsForAgents(["a"], 1.5)
+      .get("a")
+      ?.map((r) => r.id),
+  ).toEqual(["tie-high"]);
+});
+it("handles a large list of empty agents without dropping their entries", () => {
+  const agents = Array.from({ length: 600 }, (_, i) => `agent-${i}`);
+  const grouped = store.runsForAgents(agents, 50);
+  expect([...grouped.keys()]).toEqual(agents);
+  expect([...grouped.values()].every((runs) => runs.length === 0)).toBe(true);
+});
 it("projects historical context windows without inventing missing measurements", () => {
   store.setDigest("zero", digest({ contextWindow: 0 }));
   store.setDigest("unknown", digest({ contextWindow: null }));
@@ -4467,6 +4571,26 @@ it("projects historical context windows without inventing missing measurements",
       ["known", 200000],
     ]),
   );
+});
+it("updates cached historical context measurements and removes a value when it becomes unknown", () => {
+  store.setDigest("changing", digest({ contextWindow: null }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map());
+  store.setDigest("changing", digest({ contextWindow: 200000 }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map([["changing", 200000]]));
+  store.setDigest("changing", digest({ contextWindow: 1000000 }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map([["changing", 1000000]]));
+  store.setDigest("changing", digest({ contextWindow: null }));
+  expect(store.digestContextWindows(["changing"])).toEqual(new Map());
+});
+it("reopens a legacy digest cache with malformed history while keeping its window unknown", () => {
+  store.setDigest("known", digest({ contextWindow: 200000 }));
+  store.close();
+  const db = new DatabaseSync(join(dir, "mc.sqlite"));
+  db.exec("DROP INDEX run_digests_context_window");
+  db.prepare("INSERT INTO run_digests (run_id, digest) VALUES (?, ?)").run("malformed", "{");
+  db.close();
+  store = new Store(join(dir, "mc.sqlite"));
+  expect(store.digestContextWindows(["known", "malformed"])).toEqual(new Map([["known", 200000]]));
 });
 it("looks up canonical and closingIssues-only ticket links within their repository", () => {
   const pr = (number: number, patch: Partial<PullRequestView> = {}): PullRequestView => ({

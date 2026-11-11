@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { signDirectory, signGrant } from "../src/auth.ts";
+import { HELLO_TIMEOUT_MS } from "../src/limits.ts";
 import { newRoomKey, wrapMemberKeys, wrapRoomKey } from "../src/membership.ts";
 import type { ClientMessage } from "../src/protocol.ts";
 import { createRoomCore } from "../src/relay-core.ts";
@@ -13,6 +14,7 @@ const transport = vi.hoisted(() => ({
   session: undefined as ReturnType<typeof createRelaySession> | undefined,
   sockets: [] as { terminate(): void; peer: RelayPeer }[],
   sent: [] as ClientMessage[],
+  connectionDelayMs: 0,
 }));
 vi.mock("ws", async () => {
   const { EventEmitter } = await import("node:events");
@@ -20,6 +22,7 @@ vi.mock("ws", async () => {
     static OPEN = 1;
     readyState = 0;
     peer: RelayPeer;
+    openTimer: ReturnType<typeof setTimeout> | undefined;
     constructor() {
       super();
       this.peer = {
@@ -28,11 +31,15 @@ vi.mock("ws", async () => {
         close: () => this.terminate(),
       };
       transport.sockets.push(this);
-      queueMicrotask(() => {
+      const open = () => {
+        if (this.readyState === 3) return;
         this.readyState = 1;
         transport.session?.connect(this.peer);
         this.emit("open");
-      });
+      };
+      if (transport.connectionDelayMs)
+        this.openTimer = setTimeout(open, transport.connectionDelayMs);
+      else queueMicrotask(open);
     }
     send(raw: string) {
       transport.sent.push(JSON.parse(raw));
@@ -41,6 +48,7 @@ vi.mock("ws", async () => {
     terminate() {
       if (this.readyState === 3) return;
       this.readyState = 3;
+      clearTimeout(this.openTimer);
       transport.session?.disconnect(this.peer);
       this.emit("close");
     }
@@ -60,6 +68,7 @@ afterEach(async () => {
   transport.sent = [];
   transport.sockets = [];
   transport.session = undefined;
+  transport.connectionDelayMs = 0;
 });
 async function setup(answer?: string) {
   const f = await fixture();
@@ -97,9 +106,18 @@ async function setup(answer?: string) {
       }),
     );
   }
-  await expect.poll(() => Object.keys(daemons[0].presence("test-room")).length).toBe(2);
+  await expect
+    .poll(() => Object.keys(daemons[0].presence("test-room")).length, { timeout: HELLO_TIMEOUT_MS })
+    .toBe(2);
   return { ...f, core, aDaemon: daemons[0], bDaemon: daemons[1] };
 }
+
+it("waits for a valid delayed handshake before assessing relay attacks", async () => {
+  transport.connectionDelayMs = 1500;
+  const f = await setup();
+  expect(Object.keys(f.aDaemon.presence("test-room"))).toHaveLength(2);
+  expect(Object.keys(f.bDaemon.presence("test-room"))).toHaveLength(2);
+});
 
 it("B1: a fake relay cannot replace a grant with its own known room key", async () => {
   const f = await setup();

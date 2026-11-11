@@ -1,0 +1,11 @@
+# Held operator-message start: review 1330 rework
+
+The watcher refreshes the existing keyed outage note when a trusted operator message is held by a pending seat change. Repeated passes retain the same note and timestamp. Other outage reasons retain their original behavior. The existing regression now begins with a real quota-stop note before the operator request, then checks the safe replacement, stability and eventual successful start.
+
+The reviewer regression failed on baseline ab25650a: the existing note still blamed the usage stop. The corrected watch and routing suites pass 324 cases. Final lint, typecheck and build pass. Full local suite and fresh pushed-head CI/review are recorded separately; these images do not claim them.
+
+`fixture.json` contains the actual isolated watcher and server attention projection. It uses three overdue fictional crew blockers, a quota-stop note, a trusted operator message and a pending seat change. Each phase has exactly one operator alert and three crew-owned blockers. The retained generator starts no provider, sends no message and uses only in-memory SQLite.
+
+`capture.json` records twenty matched viewport captures: before/after, light/dark, 1280×900, 1600×1000, 1600×700, 1920×940 and 2560×1200. The repository browser harness renders production App and navigates from Overview into Needs you, using these server responses. The baseline was reconstructed now from its original watch source with the same harness. The application web tree is identical in both phases. Fonts settle before capture; DPR and zoom are 1. See the fixture/source/image hashes and individual times in the manifest.
+
+At 1600×700 in dark theme, the settled first view has one left-hand waiting item and a full readable detail panel. The new text names the pending change and saved message; all three blockers appear under the one alert. The baseline instead blames quota. Controls remain visible and the content fits horizontally. This is fixture evidence, not live provider availability or deployment proof. The temporary capture test is retained as capture-harness.ts.txt rather than adding a permanent screenshot-only test. Its four executed cases each cover five real viewports; twenty images are not twenty distinct tests.

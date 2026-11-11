@@ -27,10 +27,10 @@ import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CREW,
-  COMMS_LABELS,
   COMMS_QUESTION_TO_FLIGHT,
   COMMS_REACTIONS,
   COMMS_REF,
+  COMMS_SEAT_LABELS,
   carriedFrom,
   clashText,
   closesIssue,
@@ -234,7 +234,8 @@ import {
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
-import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
+import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
 import { type RestoreSandboxRunner, restoreWorktreeFile } from "./restore.ts";
@@ -289,6 +290,8 @@ export interface McToolsDeps {
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's check calls the hub saw start and did not count, with the reasons; none when unset. */
   checkDrops?: (runId: string) => readonly CheckDrop[];
+  /** Configured checks still executing or validating their completion. */
+  pendingChecks?: (runId: string) => readonly string[];
   /** Current local seat ids; supplied by the hub because cross-machine ids are not valid here. */
   crewIds?: () => readonly string[];
   /** Existing direct-message delivery hook. */
@@ -397,7 +400,7 @@ const CommsReadArgs = z.strictObject({
 const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
   text: text(MC_TEXT_MAX),
-  label: z.enum(COMMS_LABELS).optional(),
+  label: z.enum(COMMS_SEAT_LABELS),
   ref: z.string().regex(COMMS_REF).optional(),
   replyTo: z
     .string()
@@ -2689,9 +2692,16 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
         }
         return { text: evidenceTextText(evidenceProblemText(problem)), isError: true };
       }
+      const pending = deps.pendingChecks?.(currentRun.id) ?? [];
+      if (pending.length > 0) {
+        return {
+          text: `Evidence not recorded: these checks have no completed receipt yet: ${pending.join(", ")}. A yielded session is still running. Continue polling that session until it reports a final numeric exit code before reporting evidence or ending your turn. If polling is refused, report the blocker; do not claim a pass.`,
+          isError: true,
+        };
+      }
       store.addEvidence(currentRun.id, note, now(), { tests, testsAdded, doneWhen: answers });
       // A committed response is enough to resume parks caused by a stalled review, silence, or a
-      // refused publication. Budget, account and every other operator hold stay parked.
+      // refused or timed-out publication. Budget, account and every other operator hold stay parked.
       if (currentLoop.phase === "parked" && evidenceCanUnpark(currentLoop.parked)) {
         store.setRunLoop(currentRun.id, {
           ...currentLoop,
@@ -3097,17 +3107,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.commsSend,
       description:
-        "Send a message to a local seat, CAPCOM, or the crew channel. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
+        "Send a message to a local seat, CAPCOM, or the crew channel. Choose question, blocker or none explicitly; use none for handoffs and ordinary answers. Every answer must pass the answered message id as replyTo. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
       inputSchema: {
         type: "object",
         properties: {
           to: { type: "string" },
           text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
-          label: { type: "string", enum: [...COMMS_LABELS] },
+          label: { type: "string", enum: [...COMMS_SEAT_LABELS] },
           ref: { type: "string" },
-          replyTo: { type: "string", pattern: "^comms:[0-9]+$" },
+          replyTo: {
+            type: "string",
+            pattern: "^comms:[0-9]+$",
+            description:
+              "The answered message id; required for every answer. Omit only for a new message.",
+          },
         },
-        required: ["to", "text"],
+        required: ["to", "text", "label"],
         additionalProperties: false,
       },
       modes: ["writer", "read-only", "scratch"],

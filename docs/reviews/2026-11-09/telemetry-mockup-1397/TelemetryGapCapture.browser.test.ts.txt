@@ -1,0 +1,89 @@
+// @vitest-environment node
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { expect, it } from "vitest";
+import { browserSession, describeRendered } from "./browserRunner.ts";
+const { renderAt } = browserSession();
+const sourceSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+const proposalHtmlSha256 = createHash("sha256").update(readFileSync(new URL("../mockups/telemetry/index.html", import.meta.url))).digest("hex");
+const phase = "gap-focus-after";
+const output = `/tmp/mc-1397-captures-${phase}`;
+mkdirSync(output, { recursive: true });
+const tabs = ["crew", "cost", "throughput", "quality", "machine"];
+const cases: { tab: string; width: number; height: number; theme: "light" | "dark"; extra: string; label: string }[] = [];
+for (const [width, height] of [[1280, 900], [1600, 1000], [1920, 940]])
+  for (const theme of ["light", "dark"] as const)
+    for (const tab of tabs) cases.push({ tab, width, height, theme, extra: "", label: "normal" });
+if (phase === "gap-focus-after") {
+  for (const tab of tabs) {
+    for (const [width, height] of [[1600, 1000], [1920, 940], [2560, 1145]])
+      cases.push({ tab, width, height, theme: "dark", extra: "&flight=open", label: "dock" });
+    cases.push({ tab, width: 2560, height: 1145, theme: "dark", extra: "", label: "wide" });
+    cases.push({ tab, width: 1600, height: 700, theme: "light", extra: "", label: "short" });
+    cases.push({ tab, width: 1600, height: 1000, theme: "dark", extra: "&data=worst", label: "worst" });
+    cases.push({ tab, width: 3840, height: 2160, theme: "dark", extra: "", label: "4k" });
+  }
+  for (const state of ["loading", "empty", "error", "stale", "disconnected"])
+    cases.push({ tab: "crew", width: 1600, height: 1000, theme: "dark", extra: `&state=${state}`, label: state });
+} else cases.push({ tab: "crew", width: 3840, height: 2160, theme: "dark", extra: "", label: "4k" });
+for (const tab of tabs) for (const label of ["readout-focus", "readout-target"]) cases.push({ tab, width: 1600, height: 1000, theme: "dark", extra: "", label });
+for (const theme of ["light", "dark"] as const)
+  for (const label of ["gap-before", "gap-focus", "gap-enter", "gap-assistive-click", "gap-return", "gap-restored-action"])
+    cases.push({ tab: "cost", width: 1600, height: 1000, theme, extra: "", label });
+describeRendered("Telemetry proposal capture", () => {
+  it(`${phase} viewport matrix`, async () => {
+    const captures: unknown[] = [];
+    for (const sample of cases) {
+      const { tab, width, height, theme, extra, label } = sample;
+      const page = await renderAt({ page: "test/telemetryMockupBrowser.html", width, height, colorScheme: theme, search: `?tab=${tab}&theme=${theme}${extra}` });
+      try {
+        await page.box(".panel");
+        await page.evaluate(async () => { await document.fonts.ready; await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))); }, null);
+        if (label.startsWith("readout-")) {
+          await page.evaluate(() => document.querySelector<HTMLElement>(".readout")?.focus(), null);
+          await page.press("Tab");
+          expect(await page.evaluate(() => !!document.activeElement?.closest(".readout button"), null)).toBe(true);
+          if (label === "readout-target") await page.press("Enter");
+        }
+        if (label.startsWith("gap-")) {
+          await page.evaluate(() => document.querySelector<HTMLElement>('[data-panel="tpm"] .readout')?.focus(), null);
+          await page.press("Tab");
+          const latest = await page.evaluate(() => {
+            const button = document.activeElement as HTMLButtonElement;
+            Reflect.set(window, "__gapFocusedReadout", button);
+            return button.textContent;
+          }, null);
+          const plot = await page.box('[data-panel="tpm"] .plot');
+          await page.movePointer(plot.x + plot.width * (label === "gap-before" ? 0.1 : 31 / 71), plot.y + plot.height / 2);
+          expect(await page.evaluate(() => document.activeElement === Reflect.get(window, "__gapFocusedReadout"), null)).toBe(true);
+          if (label !== "gap-before") {
+            expect(await page.evaluate(() => (Reflect.get(window, "__gapFocusedReadout") as HTMLElement).getAttribute("aria-disabled"), null)).toBe("true");
+            if (label === "gap-enter") await page.press("Enter");
+            if (label === "gap-assistive-click") await page.evaluate(() => (Reflect.get(window, "__gapFocusedReadout") as HTMLElement).click(), null);
+            expect(await page.evaluate(() => document.querySelector<HTMLElement>("#dlg")?.hidden, null)).toBe(true);
+            if (label === "gap-return" || label === "gap-restored-action") {
+              await page.movePointer(8, 8);
+              expect(await page.evaluate(() => document.activeElement === Reflect.get(window, "__gapFocusedReadout"), null)).toBe(true);
+              expect(await page.evaluate(() => (Reflect.get(window, "__gapFocusedReadout") as HTMLElement).textContent, null)).toBe(latest);
+              if (label === "gap-restored-action") await page.press("Enter");
+            }
+          }
+        }
+        const facts = await page.evaluate(() => ({ title: document.title, gapControl: (() => {
+          const button = Reflect.get(window, "__gapFocusedReadout") as HTMLButtonElement | undefined;
+          return button ? { sameFocus: document.activeElement === button, text: button.textContent,
+            ariaDisabled: button.getAttribute("aria-disabled"), nativeDisabled: button.disabled,
+            dialogOpen: !document.querySelector<HTMLElement>("#dlg")?.hidden } : null;
+        })(), text: document.querySelector(".canvas")?.textContent, width: innerWidth, height: innerHeight, dpr: devicePixelRatio, zoom: getComputedStyle(document.documentElement).zoom, visualScale: visualViewport?.scale, scrollHeight: document.documentElement.scrollHeight, lastPanelBottom: Math.max(...[...document.querySelectorAll(".panel")].map(p=>p.getBoundingClientRect().bottom)), workBottom: document.querySelector(".work")?.getBoundingClientRect().bottom ?? 0, scrollWidth: document.documentElement.scrollWidth, scroll: { x: scrollX, y: scrollY }, rail: document.querySelector(".flight")?.getBoundingClientRect().width, fixtureClock: "Seeded fictional series ending at 14:30; no Date.now series input", browser: navigator.userAgent }), null);
+        expect(page.errors()).toEqual([]);
+        expect(facts.scrollWidth).toBeLessThanOrEqual(width);
+        if (phase === "gap-focus-after" && (width === 3840 || (width === 1600 && height === 1000))) { expect(facts.scrollHeight).toBeLessThanOrEqual(height); expect(facts.lastPanelBottom).toBeLessThanOrEqual(facts.workBottom + 1); }
+        const file = `${label}-${tab}-${width}x${height}-${theme}.png`;
+        await page.screenshot(`${output}/${file}`);
+        captures.push({ ...sample, ...facts, file, scope: "viewport", capturedAt: new Date().toISOString(), sha256: createHash("sha256").update(readFileSync(`${output}/${file}`)).digest("hex") });
+      } finally { await page.close(); }
+    }
+    writeFileSync(`${output}/manifest.json`, JSON.stringify({ phase, sourceSha, proposalHtmlSha256, captures }, null, 2));
+  }, 240000);
+});

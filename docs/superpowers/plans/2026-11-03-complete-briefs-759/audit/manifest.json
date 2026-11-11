@@ -1,0 +1,35 @@
+{
+  "at": "2026-11-03T16:04:27.344438+00:00",
+  "status": "private refinement drafts; no GitHub mutation or implementation",
+  "productBaseline": "9981a828cfd0ebcf480a08b767905d1a138a4c8a",
+  "currentMain": "d192dd83d42299dfe52aedccf2791c4ab91b0169",
+  "contractAreasUnchanged": true,
+  "validation": "static source/route/constant inspection; local links, whitespace and hashes only; no tests/render/build/provider/live actions",
+  "files": [
+    {
+      "file": "README.md",
+      "bytes": 2560,
+      "lines": 37,
+      "sha256": "eaf967dbd943cf1e7ded37b489e9ff2965d1b9f338b53f56521350de28c87ea7"
+    },
+    {
+      "file": "server-child.md",
+      "bytes": 20263,
+      "lines": 236,
+      "sha256": "87aa7852176c92e9da5829b4f14226e1e146f5988379095285072b418f6d2f34"
+    },
+    {
+      "file": "web-child.md",
+      "bytes": 13609,
+      "lines": 162,
+      "sha256": "d82dee32f06fefe0a4b3896ab23694f538bb5517c5c9da6eeb375438b244887c"
+    },
+    {
+      "file": "parent-update.md",
+      "bytes": 9033,
+      "lines": 132,
+      "sha256": "05406ceb425a48adf9d15b68028259cf02ef3ff8a490195f0463dff3183dc695"
+    }
+  ],
+  "errors": []
+}

@@ -1,7 +1,16 @@
 import { Buffer } from "node:buffer";
-import { DEFAULT_REPO_RULES, NEW_LOOP, type PullRequestView, type TicketView } from "@mc/core";
+import {
+  type AttentionBrief,
+  type BoardItem,
+  DEFAULT_REPO_RULES,
+  NEW_LOOP,
+  PR_WAIT_MS,
+  type PullRequestView,
+  type TicketView,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import {
@@ -15,11 +24,13 @@ import { externalReviewKey } from "../src/external-reviews.ts";
 import { mergeExternalPr } from "../src/flight/external-merge.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
 import { grantApproval, mergeFloorScope } from "../src/flight-approvals.ts";
+import { attentionItems } from "../src/hud.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { ownsPr } from "../src/ownership.ts";
 import { prAcceptanceFor, prUat } from "../src/pr-uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const SHA = "a".repeat(40);
 const BASE = "b".repeat(40);
@@ -153,7 +164,7 @@ function harness() {
   };
   const deps = {
     config,
-    repo: config.repos[0]!,
+    repo: defined(config.repos[0]),
     store,
     bus,
     gh,
@@ -203,7 +214,7 @@ describe("external PR controller merge", () => {
     const h = harness();
     buildRun(null);
     expect((await mergeExternalPr(h.deps)).text).toContain("belongs to a crew run");
-    store.upsertRun({ ...store.run("builder:old")!, endedAt: 2 });
+    store.upsertRun({ ...defined(store.run("builder:old")), endedAt: 2 });
     expect((await mergeExternalPr(h.deps)).isError).toBeUndefined();
     expect(h.merges).toHaveLength(1);
   });
@@ -246,7 +257,7 @@ describe("external PR controller merge", () => {
     try {
       expect((await hold()).statusCode).toBe(200);
       expect(externalMergeHold(store, "sample", 7)).not.toBeNull();
-      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      store.upsertRun({ ...defined(store.run("builder:old")), endedAt: null });
       expect((await hold()).statusCode).toBe(404);
     } finally {
       await app.close();
@@ -292,7 +303,7 @@ describe("external PR controller merge", () => {
       expect((await withdraw()).statusCode).toBe(200);
       expect((await post(app)).statusCode).toBe(200);
       expect(externalReviewAsked(store, "sample", 7, SHA)).toBe(true);
-      store.upsertRun({ ...store.run("builder:old")!, endedAt: null });
+      store.upsertRun({ ...defined(store.run("builder:old")), endedAt: null });
       expect((await post(app)).statusCode).toBe(404);
     } finally {
       await app.close();
@@ -392,10 +403,10 @@ describe("external PR controller merge", () => {
     const h = harness();
     const superuser = {
       ...config,
-      repos: [{ ...config.repos[0]!, flightPowers: "superuser" as const }],
+      repos: [{ ...defined(config.repos[0]), flightPowers: "superuser" as const }],
     };
     h.deps.config = superuser;
-    h.deps.repo = superuser.repos[0]!;
+    h.deps.repo = defined(superuser.repos[0]);
     h.state.files = [
       { filename: ".github/workflows/ci.yml", status: "modified" },
       { filename: "apps/server/src/guard/rules.ts", status: "modified" },
@@ -409,7 +420,7 @@ describe("external PR controller merge", () => {
     // a linked ticket comes back with the result, for the decision's ref and the operator's link
     const linked = harness();
     linked.deps.config = superuser;
-    linked.deps.repo = superuser.repos[0]!;
+    linked.deps.repo = defined(superuser.repos[0]);
     linked.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
     linked.facts.closingIssuesReferences = [
       { number: 9, url: "https://github.com/example/sample/issues/9" },
@@ -432,7 +443,7 @@ describe("external PR controller merge", () => {
     // an always_ask label still needs the operator
     const again = harness();
     again.deps.config = superuser;
-    again.deps.repo = superuser.repos[0]!;
+    again.deps.repo = defined(superuser.repos[0]);
     again.state.rules = { ...again.state.rules, alwaysAsk: ["secret"] };
     again.wire.labels = [{ name: "secret" }];
     expect((await mergeExternalPr(again.deps)).text).toContain("requires the operator's approval");
@@ -445,18 +456,18 @@ describe("external PR controller merge", () => {
     store.upsertPullRequests("sample", [pr], 1);
     const superuser = {
       ...config,
-      repos: [{ ...config.repos[0]!, flightPowers: "superuser" as const }],
+      repos: [{ ...defined(config.repos[0]), flightPowers: "superuser" as const }],
     };
     const guarded = harness();
     guarded.deps.config = superuser;
-    guarded.deps.repo = superuser.repos[0]!;
+    guarded.deps.repo = defined(superuser.repos[0]);
     guarded.state.files = [{ filename: ".github/workflows/ci.yml", status: "modified" }];
     expect((await mergeExternalPr(guarded.deps)).text).toContain("independent clean QA report");
     expect(guarded.merges).toHaveLength(0);
     // a PR with no protected path still rides on the real mc/review status
     const plain = harness();
     plain.deps.config = superuser;
-    plain.deps.repo = superuser.repos[0]!;
+    plain.deps.repo = defined(superuser.repos[0]);
     expect((await mergeExternalPr(plain.deps)).isError).toBeUndefined();
   });
 
@@ -523,9 +534,9 @@ describe("external PR controller merge", () => {
     "refuses missing or changed merge evidence: %s",
     async (failure) => {
       const h = harness();
-      if (failure === "ci") h.facts.statusCheckRollup[0]!.conclusion = "FAILURE";
+      if (failure === "ci") defined(h.facts.statusCheckRollup[0]).conclusion = "FAILURE";
       if (failure === "review") {
-        const id = store.reviewsOfPr("sample", 7)[0]!.id;
+        const id = defined(store.reviewsOfPr("sample", 7)[0]).id;
         store.setReviewState(id, ["reported"], "superseded", { at: 4 });
       }
       if (failure === "head") h.state.moveDuringFiles = true;
@@ -585,7 +596,7 @@ describe("external PR controller merge", () => {
   ] as const)(
     "FLIGHT records a run's controller check on its own runtime paths: %s repo answers %i",
     async (powers, status) => {
-      const repos = [{ ...config.repos[0]!, flightPowers: powers }];
+      const repos = [{ ...defined(config.repos[0]), flightPowers: powers }];
       store.upsertRun({
         id: "flight:1",
         agentId: "flight",
@@ -786,4 +797,123 @@ describe("external PR controller merge", () => {
       await app.close();
     }
   });
+});
+
+it("1389 binds an external controller choice to the actual current PR and shares its provenance reread", async () => {
+  const h = harness();
+  h.state.files = [{ filename: "apps/server/src/runtime/supervisor.ts", status: "modified" }];
+  expect((await mergeExternalPr(h.deps)).isError).toBe(true);
+  // Actual PR attention is produced for a configured-board ticket after its existing quiet wait.
+  // The earlier external merge tests also cover unlinked PRs; those have no Needs-you brief source.
+  const card: BoardItem = {
+    repoId: "sample",
+    issueNumber: 12,
+    title: "Fixture ticket",
+    status: "Ready",
+    state: "planned",
+    labels: [],
+    assignees: [],
+    priority: "P1",
+    prioritySource: "field",
+    stage: null,
+    owner: null,
+    parent: null,
+    subIssues: null,
+    blockedBy: [],
+    milestone: null,
+    size: "S",
+    url: "https://example.test/12",
+    closed: false,
+    createdAt: 1,
+    updatedAt: 1,
+    itemId: "fixture-12",
+    projectId: "fixture-project",
+  };
+  store.replaceBoard("sample", [card]);
+  store.upsertPullRequests("sample", [{ ...pr, ticket: "sample#12" }], 1);
+  h.state.clock = PR_WAIT_MS + 100;
+  const item = attentionItems(config, store, h.state.clock).find((entry) =>
+    entry.key.startsWith("pr:sample#7:"),
+  );
+  if (!item) throw new Error("Missing external controller attention source");
+  const target = { kind: "pr" as const, repoId: "sample", number: 7, sha: SHA };
+  const content: AttentionBrief = {
+    for: "operator",
+    at: h.state.clock,
+    context: "The exact external head needs an independent controller verdict.",
+    ask: "Record the independent check?",
+    did: [],
+    checked: [],
+    recommendation: "Record this exact checked head.",
+    recommendedOptionId: "pass",
+    basis: "Controlled external fixture",
+    decision: {
+      whyOperator: {
+        kind: "floor-approval",
+        explanation: "Independent controller check required.",
+      },
+      consulted: [],
+      costOfDelay: "The PR remains held.",
+      waiting: "Explicit controller evidence.",
+    },
+    options: [
+      {
+        id: "pass",
+        label: "Record pass",
+        answer: "The current head passed the independent check.",
+        consequence: "Record a controller pass; do not merge the PR.",
+        reversibility: { kind: "partly-reversible", detail: "A newer head requires a new check." },
+        action: {
+          kind: "controller-check",
+          target,
+          verdict: "pass",
+          evidence: "Fixture independent controller receipt",
+        },
+      },
+      {
+        id: "hold",
+        label: "Hold",
+        answer: "Keep this PR held.",
+        consequence: "Record only an explicit merge hold.",
+        reversibility: { kind: "reversible", detail: "The controller may release the hold." },
+        action: { kind: "merge-hold", target, action: "hold", reason: "Await explicit evidence." },
+      },
+    ],
+  };
+  const bound = await bindCompleteBrief(
+    { config, store, now: () => h.state.clock },
+    item,
+    content,
+    { seatId: "fixture-flight", runId: "fixture-run" },
+  );
+  store.addBrief({ key: item.key, ...bound });
+  const brief = store.briefs().get(item.key);
+  const app = buildApp({
+    config,
+    store,
+    bus: h.deps.bus,
+    gh: h.deps.gh,
+    now: () => h.state.clock,
+    operatorToken: TOKEN,
+    knownSecrets: async () => [],
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/attention/${encodeURIComponent(item.key)}/choice`,
+      headers: { "x-mc-operator": TOKEN },
+      payload: {
+        briefId: brief?.id,
+        sourceRevision: brief?.binding?.sourceRevision,
+        optionId: "pass",
+        requestId: "external-controller-choice",
+      },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(externalPrControl(store, "sample", 7, SHA)?.controllerPassed).toBe(true);
+    expect(h.merges).toHaveLength(0);
+    expect(store.pullRequest("sample", 7)?.state).toBe("open");
+  } finally {
+    await app.close();
+  }
 });

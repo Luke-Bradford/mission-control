@@ -48,6 +48,7 @@ clean and CI is green.
 The repo's skills are in `.claude/skills/`. Load the one that fits the work; the roles point to them.
 
 - `hud-design`: planning, building or reviewing visible interfaces, including `apps/web`, native mockups and shared styles.
+- `designing-dashboards`: the general method for any page or report that shows figures (dashboards, KPI and metrics pages, charts, reports), written for any repo or client. Here, `hud-design` and `docs/design/system.md` win where they differ. It is a copy: the source is the operator's public `skills` repository, so change it there first.
 - `plain-talk`: any text a person reads (a Comms message, a ticket, PR text, a review finding, a run report, a Needs-you brief).
 - `flight-ops`: FLIGHT loads it when a seat, PR, ticket or the hub is stuck or unclear, and after a context reset; its reference files cover each situation.
 

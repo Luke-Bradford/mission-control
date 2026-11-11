@@ -8,13 +8,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { forgetOperatorToken } from "../src/api.ts";
 import { hub, RESOURCES, streamStatus } from "../src/data.ts";
+import { FlightTabs } from "../src/flight/FlightTabs.tsx";
+import { tabForHash } from "../src/flight/tabs.ts";
 import {
   GlobalOrdersPanel,
   InstructionManager,
   instructionDrafts,
 } from "../src/instructions/Instructions.tsx";
 import { Agent } from "../src/pages/Agent.tsx";
-import { Flight, tabForHash } from "../src/pages/Flight.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { agentDensityFixture } from "./agentDensityFixture.ts";
 import { stubFetch } from "./fetchStub.ts";
@@ -406,7 +407,7 @@ it("reads status on Flight but no seat detail or full history before the owning 
     "/api/repos": [],
     "/api/prs/flow": { repos: [], generatedAt: NOW },
   });
-  render(<Flight />);
+  render(<FlightTabs />);
   await screen.findByRole("button", { name: "Active orders: 0" });
   expect(fn.mock.calls.some(([path]) => path === "/api/flight/instructions")).toBe(false);
   expect(
@@ -503,7 +504,7 @@ it("follows a filtered re-plan link into its retained revoked order through the 
     "/api/repos": [],
     "/api/prs/flow": { repos: [], generatedAt: NOW },
   });
-  render(<Flight />);
+  render(<FlightTabs />);
   fireEvent.click(screen.getByRole("tab", { name: "What FLIGHT did" }));
   const link = await screen.findByRole("link", { name: "Saved order #7 · retained reference" });
   fireEvent.change(screen.getByRole("combobox", { name: "Kind" }), {
@@ -704,7 +705,7 @@ it("opens Crew instructions as an alternative body while preserving the default 
       seats: [{ seatId: "guido-1", active: [], effectiveFocus: null, focusInstructionId: null }],
     },
   });
-  render(<Flight />);
+  render(<FlightTabs />);
   fireEvent.click(screen.getByRole("tab", { name: "Crew & board" }));
   await screen.findByRole("table", { name: "Seats" });
   expect(fn.mock.calls.some(([path]) => path === "/api/flight/instructions")).toBe(false);

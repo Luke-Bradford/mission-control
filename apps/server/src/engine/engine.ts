@@ -1,3 +1,4 @@
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief/dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -153,6 +154,7 @@ import {
 } from "@mc/core";
 import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
+import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
@@ -380,8 +382,10 @@ export interface Engine {
    * FLIGHT takes in a PR head that came from outside the run: it is recorded as the run's push
    * and the run goes back to CI on it. False when the run is not in review or ci on an open PR
    * whose head is this one, or when it already is the push.
+   * The independent controller may also recover an inactive, clean working run preserved aside.
+   * This creates no author checks and retains every explicit stop and merge hold.
    */
-  adoptPrHead(runId: string, head: string): Promise<boolean>;
+  adoptPrHead(runId: string, head: string, by?: "Controller"): Promise<boolean>;
   rerunCi(runId: string): Promise<{ ok: boolean; text: string }>;
   acceptRuling(runId: string): Promise<AcceptRulingResult>;
   /** Merges main into the run's branch now, with the engine's own merge (hub-made, never the seat's). */
@@ -630,7 +634,7 @@ export function createEngine(deps: EngineDeps): Engine {
     return loop.aside?.worktree ?? (seatRow?.runId === run.id ? (seatRow.worktree ?? null) : null);
   }
 
-  function flightHeld(run: Run): boolean {
+  function flightHeld(run: Run, action: "work" | "merge" = "work"): boolean {
     const seat = seatConfig(run.agentId);
     return (
       store.seatSession(run.agentId)?.state === "stopped" ||
@@ -642,7 +646,8 @@ export function createEngine(deps: EngineDeps): Engine {
             q.runId === run.id && (q.passedAt !== null || now() - q.at >= FLIGHT_ANSWER_WAIT_MS),
         ) ||
       seat === undefined ||
-      accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now())
+      (action === "work" &&
+        accountAtStop(config, store, runAccountId(store, run.id, seat.accountId), now()))
     );
   }
 
@@ -972,7 +977,7 @@ export function createEngine(deps: EngineDeps): Engine {
         repo?.autonomy === "merge" && activeAway(store, at, config.operator.timezone) === null,
       hardRulesSet: mergeAllowed,
       flightPowers: flightPowersOf(config, run.repoId),
-      flightHeld: flightHeld(run),
+      flightHeld: flightHeld(run, "merge"),
       floorApproved:
         pr !== null && mergeFloorApproval(store, pr.number, pr.headSha, at) !== undefined,
       card: item === undefined ? null : hudColumnOf(item),
@@ -1243,6 +1248,7 @@ export function createEngine(deps: EngineDeps): Engine {
     key: string,
     mirror: string,
   ): Promise<boolean> {
+    checkBriefDispatch();
     const row = {
       at: now(),
       // the hub's own note about a verdict; never the operator's name
@@ -1266,6 +1272,7 @@ export function createEngine(deps: EngineDeps): Engine {
       return true;
     }
     const sent = await supervisor.send(run.id, key, text);
+    checkBriefDispatch();
     // a paused seat reads it when it resumes: the verdict is recorded all the same
     if (sent !== "sent" && sent !== "dup" && !pausedSeat(store, run.agentId, run.id)) return false;
     const stored = store.addComms(row);
@@ -1380,7 +1387,7 @@ export function createEngine(deps: EngineDeps): Engine {
       flightPowersOf(config, run.repoId) === "superuser"
     ) {
       const current = store.run(run.id);
-      if (current === null || flightHeld(current)) return;
+      if (current === null || flightHeld(current, "merge")) return;
       const snap = snapshot(current, cur, now(), hardRulesSet.get(run.repoId) === true);
       if (snap === null || !gateView(snap, cur).passes) return;
     }
@@ -2607,7 +2614,8 @@ export function createEngine(deps: EngineDeps): Engine {
     // next pass requests it again for the current one
     for (const row of store.reviewsIn(["queued"])) {
       const author = store.run(row.authorRunId);
-      if (author === null || row.seatId === reviewerFor(author)?.id) continue;
+      if (author === null || store.reviewMoved(row.id) || row.seatId === reviewerFor(author)?.id)
+        continue;
       const at = now();
       if (store.setReviewState(row.id, ["queued"], "superseded", { at })) {
         store.addLoopEvent(
@@ -2638,8 +2646,11 @@ export function createEngine(deps: EngineDeps): Engine {
       const heldRun = held === null ? null : store.run(held);
       const free = heldRun === null || heldRun.endedAt !== null;
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
-      if (accountHoldsNewWork(config, store, seat.accountId, now())) continue;
+      const at = now();
+      if (accountAtStop(config, store, seat.accountId, at)) continue;
+      const braked = budgetBrake(config, store, seat.accountId, at) !== null;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
+        if (braked && !store.reviewBudgetBrakeOverride(row.id)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;
@@ -2884,6 +2895,7 @@ export function createEngine(deps: EngineDeps): Engine {
         result = { lifted: false, reason };
       };
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || loop === undefined || loop === null) return refuse("not-parked");
@@ -2986,6 +2998,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (opts?.beforeLift !== undefined && !(await opts.beforeLift()))
           return refuse("before-lift");
+        checkBriefDispatch();
         const at = now();
         const head = store.newestRunCommit(run.id)?.sha ?? null;
         const pushed = store.runPush(run.id);
@@ -3091,12 +3104,13 @@ export function createEngine(deps: EngineDeps): Engine {
           }
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
+        checkBriefDispatch();
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
         bus.emit("agents");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3107,6 +3121,7 @@ export function createEngine(deps: EngineDeps): Engine {
       };
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
@@ -3174,6 +3189,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ))
           )
             return refuse("rework-undelivered");
+          checkBriefDispatch();
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:controller-check:${held.sha}:fail`,
@@ -3186,7 +3202,7 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("agents");
         bus.emit("attention");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3197,6 +3213,7 @@ export function createEngine(deps: EngineDeps): Engine {
       };
       if (!live()) return Promise.resolve({ lifted: false, reason: "engine-off" });
       return onChain(runId, async () => {
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop) return refuse("not-parked");
@@ -3256,6 +3273,7 @@ export function createEngine(deps: EngineDeps): Engine {
             ))
           )
             return refuse("rework-undelivered");
+          checkBriefDispatch();
           store.setRunLoop(run.id, next);
           store.addLoopEvent(
             `${run.id}:${loop.epoch}:uat:${held.sha}:send-back`,
@@ -3268,7 +3286,7 @@ export function createEngine(deps: EngineDeps): Engine {
         bus.emit("agents");
         bus.emit("attention");
         result = { lifted: true };
-        await pass(run.id);
+        await withoutBriefDispatch(() => pass(run.id));
       }).then(() => result);
     },
 
@@ -3276,6 +3294,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
       return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
         if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         if (run === null || !loop || run.endedAt !== null)
@@ -3311,6 +3330,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const refuse = (text: string): MergeHoldResult => ({ ok: false, text });
       return onChainResult<MergeHoldResult>(runId, refuse("the engine hit an error"), async () => {
         if (!live()) return refuse("the loop engine is off");
+        checkBriefDispatch();
         const run = store.run(runId);
         const loop = run?.loop;
         const hold = loop?.mergeHold;
@@ -3335,7 +3355,7 @@ export function createEngine(deps: EngineDeps): Engine {
         );
         lastTransient.delete(runId);
         bus.emit("agents");
-        await pass(runId);
+        await withoutBriefDispatch(() => pass(runId));
         return { ok: true };
       });
     },
@@ -3345,7 +3365,13 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!live()) return false;
         await pass(runId);
         const run = store.run(runId);
-        if (!run?.loop || run.endedAt !== null || flightHeld(run)) return false;
+        if (
+          !run?.loop ||
+          run.endedAt !== null ||
+          flightHeld(run, "merge") ||
+          pausedSeat(store, run.agentId, run.id)
+        )
+          return false;
         const sha = run.loop.awaitingFlight;
         if (
           !sha ||
@@ -3368,17 +3394,20 @@ export function createEngine(deps: EngineDeps): Engine {
       });
     },
 
-    adoptPrHead(runId, head) {
+    adoptPrHead(runId, head, by) {
       return onChainResult(runId, false, async () => {
         if (!live()) return false;
         const run = store.run(runId);
-        const loop = run?.loop;
+        let loop = run?.loop;
         if (
           !run ||
           !loop ||
           run.endedAt !== null ||
-          flightHeld(run) ||
-          (loop.phase !== "review" && loop.phase !== "ci") ||
+          flightHeld(run, "merge") ||
+          pausedSeat(store, run.agentId, run.id) ||
+          (loop.phase !== "review" &&
+            loop.phase !== "ci" &&
+            !(by === "Controller" && loop.phase === "working" && loop.aside)) ||
           run.branch === null ||
           flightPowersOf(config, run.repoId) !== "superuser"
         )
@@ -3386,6 +3415,34 @@ export function createEngine(deps: EngineDeps): Engine {
         const pr = findPr(run, loop);
         if (pr?.state !== "open" || pr.headSha !== head || store.runPush(runId)?.sha === head)
           return false;
+        if (by === "Controller") {
+          // Recovery changes no checkout and starts no author. Preserve its unpublished work and
+          // explicit holds; a working run is eligible only from its preserved, inactive worktree.
+          const activeAuthor = () =>
+            supervisor.seat(run.agentId)?.runId === run.id &&
+            (supervisor.seatFacts(run.agentId)?.inTurn !== false ||
+              supervisor.busy().some((seat) => seat.seatId === run.agentId));
+          if (loop.parked || loop.mergeHold || activeAuthor()) return false;
+          const worktree = worktreeOf(run, loop);
+          if (worktree === null) return false;
+          const changes = await publisher.worktreeChanges(run, worktree);
+          const current = store.run(runId);
+          if (
+            !Array.isArray(changes) ||
+            changes.length > 0 ||
+            current?.endedAt !== null ||
+            current.loop?.phase !== loop.phase ||
+            current.branch !== run.branch ||
+            current.loop?.parked ||
+            current.loop?.mergeHold ||
+            activeAuthor() ||
+            flightHeld(current, "merge") ||
+            pausedSeat(store, current.agentId, current.id) ||
+            findPr(current, current.loop)?.headSha !== head
+          )
+            return false;
+          loop = current.loop;
+        }
         const at = now();
         store.addRunCommit({ runId, repoId: run.repoId, branch: run.branch, sha: head, at });
         store.setRunPush({ runId, sha: head, at });
@@ -3406,7 +3463,7 @@ export function createEngine(deps: EngineDeps): Engine {
         store.addLoopEvent(
           `${runId}:${loop.epoch}:adopted:${head}`,
           runId,
-          `FLIGHT adopted head ${head.slice(0, 7)} from outside the run`,
+          `${by ?? "FLIGHT"} adopted head ${head.slice(0, 7)} from outside the run`,
           at,
         );
         lastTransient.delete(runId);

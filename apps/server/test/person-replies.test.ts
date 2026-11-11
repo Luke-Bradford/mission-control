@@ -118,7 +118,7 @@ it("hydrates bounded earlier comments and source identity, with no assessment be
 it("round-trips legacy and structured briefs, binds drafts and never posts on generation or GET", async () => {
   const id = await draft();
   expect(id).toBeTypeOf("number");
-  store.addBrief({
+  const legacyId = store.addBrief({
     key: "legacy",
     context: "Legacy",
     recommendation: "Wait",
@@ -127,6 +127,7 @@ it("round-trips legacy and structured briefs, binds drafts and never posts on ge
     at: NOW,
   });
   expect(store.briefs().get("legacy")).toEqual({
+    id: legacyId,
     context: "Legacy",
     recommendation: "Wait",
     options: [],
@@ -470,4 +471,158 @@ it("merges bounded issue and review comment history in time order using GET only
   expect(doFetch.mock.calls.map(([url]) => String(url))).toContain(
     `${pullRoot}/12/comments?per_page=100&page=3`,
   );
+});
+
+async function boundPersonChoice(kind: "person-post" | "person-handled", teams = false) {
+  await hydrate();
+  if (teams) {
+    const n = required(store.notification("101"));
+    required(n.message).source.kind = "teams";
+    store.upsertNotifications([n], false, NOW);
+  }
+  const { attentionItems } = await import("../src/hud.ts");
+  const { bindCompleteBrief } = await import("../src/brief/prepare.ts");
+  const source = required(attentionItems(config, store, NOW).find((item) => item.key === KEY));
+  const content: AttentionBrief = {
+    ...brief(),
+    for: "operator",
+    ask: "Use the displayed reply?",
+    did: [],
+    decision: {
+      whyOperator: {
+        kind: "irreversible",
+        explanation: "The operator must approve the external reply or record copying.",
+      },
+      consulted: [],
+      costOfDelay: "The sender continues waiting.",
+      waiting: "Explicit reply approval.",
+    },
+    recommendedOptionId: "reply",
+    options: [
+      {
+        id: "reply",
+        label: teams ? "Record copied reply" : "Post reply",
+        answer: "Use the displayed reply.",
+        consequence: teams
+          ? "Record copying locally; no Teams post is performed."
+          : "Post the exact source-bound draft.",
+        reversibility: {
+          kind: "partly-reversible",
+          detail: "An external recipient may already have read a posted reply.",
+        },
+        action:
+          kind === "person-post"
+            ? { kind, replyId: "review" }
+            : { kind, how: "copied", replyId: "review" },
+      },
+      {
+        id: "handled",
+        label: "Mark handled",
+        answer: "Handle locally.",
+        consequence: "Only mark this source handled locally.",
+        reversibility: { kind: "reversible", detail: "External unread state is unchanged." },
+        action: { kind: "person-handled", how: "marked" },
+      },
+    ],
+  };
+  const bound = await bindCompleteBrief({ config, store, now: () => NOW }, source, content, {
+    seatId: "fixture-flight",
+    runId: "fixture-run",
+  });
+  store.addBrief({ key: KEY, ...bound });
+  const saved = required(store.briefs().get(KEY));
+  return {
+    briefId: saved.id,
+    sourceRevision: saved.binding?.sourceRevision,
+    optionId: "reply",
+    requestId: "person-choice",
+  };
+}
+it("1389 posts an explicit bound choice through the actual source re-read and draft service", async () => {
+  const request = await boundPersonChoice("person-post");
+  const gh = vi.fn(async () => ({ code: 0, stdout: "", stderr: "" }));
+  const app = buildApp({
+    config,
+    store,
+    bus: new ChangeBus(),
+    gh,
+    notificationRest: rest,
+    knownSecrets: async () => [],
+    now: () => NOW,
+    operatorToken: "person-operator",
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/attention/${KEY}/choice`,
+      headers: { "x-mc-operator": "person-operator" },
+      payload: request,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(response.json()).toMatchObject({ state: "applied" });
+    expect(gh).toHaveBeenCalledOnce();
+    expect(store.notification("101")?.handledAt).toBe(NOW);
+    expect(store.drafts()).toEqual([]);
+  } finally {
+    await app.close();
+  }
+});
+it("1389 refuses a source edited remotely during bound reply dispatch without posting", async () => {
+  const request = await boundPersonChoice("person-post");
+  body = "Edited remote source";
+  const gh = vi.fn();
+  const app = buildApp({
+    config,
+    store,
+    bus: new ChangeBus(),
+    gh,
+    notificationRest: rest,
+    knownSecrets: async () => [],
+    now: () => NOW,
+    operatorToken: "person-operator",
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/attention/${KEY}/choice`,
+      headers: { "x-mc-operator": "person-operator" },
+      payload: request,
+    });
+    expect(response.json()).toMatchObject({
+      state: "refused",
+      text: expect.stringContaining("Source changed"),
+    });
+    expect(gh).not.toHaveBeenCalled();
+    expect(store.notification("101")?.handledAt).toBeNull();
+    expect(store.drafts()).toHaveLength(1);
+  } finally {
+    await app.close();
+  }
+});
+it("1389 records a bound Teams copied reply locally and never posts", async () => {
+  const request = await boundPersonChoice("person-handled", true),
+    gh = vi.fn();
+  const app = buildApp({
+    config,
+    store,
+    bus: new ChangeBus(),
+    gh,
+    now: () => NOW,
+    operatorToken: "person-operator",
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/attention/${KEY}/choice`,
+      headers: { "x-mc-operator": "person-operator" },
+      payload: request,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    expect(gh).not.toHaveBeenCalled();
+    expect(notificationsView(config, store, NOW).handledToday[0]?.how).toBe(
+      "reply copied for Teams",
+    );
+  } finally {
+    await app.close();
+  }
 });

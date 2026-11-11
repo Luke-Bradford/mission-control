@@ -96,7 +96,15 @@ describe("Codex model catalog", () => {
 const EXAMPLE_SOURCE = resolve(import.meta.dirname, "../../../config.example.yaml");
 /** `crew.node` must be an executable file, and the default only exists on the author's Mac. */
 const withNode = (yaml: string) =>
-  yaml.replace("\ncrew:\n", `\ncrew:\n  node: ${process.execPath}\n`);
+  yaml
+    .replace("\ncrew:\n", `\ncrew:\n  node: ${process.execPath}\n`)
+    // The sandbox can put TMPDIR below this checkout. The fixture must not turn that into a crew
+    // worktree path, because production correctly rejects a worktree nested in the hub.
+    .replace("worktrees: ~/code/mc-crew/worktrees", "worktrees: /mc-test-nowhere/worktrees")
+    .replace(
+      "checkout: ~/code/mc-crew/mission-control",
+      "checkout: /mc-test-nowhere/mission-control",
+    );
 /** The example config, pointed at this machine's node. */
 const EXAMPLE = join(mkdtempSync(join(tmpdir(), "mc-example-")), "config.yaml");
 writeFileSync(EXAMPLE, withNode(readFileSync(EXAMPLE_SOURCE, "utf8")));
@@ -162,6 +170,22 @@ describe("loadConfig", () => {
     });
     const bad = tmpConfig((y) => `${y}\naudit:\n  other: 1\n`);
     expect(() => loadConfig(bad)).toThrow(ConfigError);
+  });
+
+  it("reads the Audit thresholds, leaving unset ones to the defaults", () => {
+    const set = tmpConfig(
+      (y) =>
+        `${y}\naudit:\n  question_wait_minutes: 30\n  controller_wait_minutes: 60\n  ticket_text_factor: 2.5\n  notice_repeats: 4\n`,
+    );
+    expect(loadConfig(set).audit).toEqual({
+      controllerSessions: false,
+      thresholds: {
+        questionWaitMs: 30 * 60_000,
+        controllerWaitMs: 60 * 60_000,
+        ticketTextFactor: 2.5,
+        noticeRepeats: 4,
+      },
+    });
   });
 
   it("reads updates.cli, defaulting to off", () => {
@@ -520,12 +544,12 @@ ${seats.join("\n")}
 
   it("loads the example config's crew, camelCased, with ~ expanded and the default max_seats", () => {
     const c = loadConfig(EXAMPLE).crew;
-    expect(c?.worktrees).toBe(join(homedir(), "code/mc-crew/worktrees"));
+    expect(c?.worktrees).toBe("/mc-test-nowhere/worktrees");
     expect(c?.maxSeats).toBe(8);
     expect(c?.sessions[0]).toMatchObject({
       id: "mission-control",
       repoId: "mission-control",
-      checkout: join(homedir(), "code/mc-crew/mission-control"),
+      checkout: "/mc-test-nowhere/mission-control",
     });
     expect(c?.sessions[0]?.seats.map((s) => [s.id, s.role, s.area])).toEqual([
       ["guido-1", "GUIDO", ["apps/server/**", "packages/core/**"]],
@@ -1155,8 +1179,7 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
     });
     const profile = dirname(profileCatalog.deps.authPath);
     writeFileSync(profileCatalog.deps.authPath, '{"tokens":{"account_id":"profile-only"}}');
-    const machineProfile = join(homedir(), ".codex");
-    mkdirSync(machineProfile, { recursive: true });
+    const machineProfile = dirname(fakeModels().deps.authPath);
     writeFileSync(join(machineProfile, "auth.json"), '{"tokens":{"account_id":"machine"}}');
     await codexModelsFor({ vendor: "codex", cliProfile: profile }).load(profileCatalog.deps);
 
@@ -1434,7 +1457,7 @@ ${seat("guido-2", "GUIDO", ', area: ["z/**"]')}
 
   it("configView carries the crew with each seat's mode, or null without one", () => {
     const v = configView(loadConfig(EXAMPLE)).crew;
-    expect(v?.worktrees).toBe(join(homedir(), "code/mc-crew/worktrees"));
+    expect(v?.worktrees).toBe("/mc-test-nowhere/worktrees");
     expect(v?.sessions[0]?.seats.map((x) => [x.id, x.role, x.mode, x.model])).toEqual([
       ["guido-1", "GUIDO", "writer", "sonnet"],
       ["inco-1", "INCO", "writer", "sonnet"],
@@ -1483,7 +1506,15 @@ describe("guard config", () => {
   it.skipIf(!existsSync(DEFAULT_CREW_NODE))(
     "defaults crew.node to the stable Homebrew path",
     () => {
-      const c = parseConfig(readFileSync(EXAMPLE_SOURCE, "utf8"), "example");
+      const c = parseConfig(
+        readFileSync(EXAMPLE_SOURCE, "utf8")
+          .replace("worktrees: ~/code/mc-crew/worktrees", "worktrees: /mc-test-nowhere/worktrees")
+          .replace(
+            "checkout: ~/code/mc-crew/mission-control",
+            "checkout: /mc-test-nowhere/mission-control",
+          ),
+        "example",
+      );
       expect(c.crew?.node).toBe("/opt/homebrew/bin/node");
     },
   );
