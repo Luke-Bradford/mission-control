@@ -10005,13 +10005,14 @@ describe("an unrestricted FLIGHT (#1015)", () => {
     it("set_fields moves no card to Backlog from outside Blocked", async () => {
       for (const status of ["Ready", "In progress", "In review", "Done"]) {
         readImpl = (n) => card(n, { labels: liveLabels, status });
-        board(card(7, { status }));
-        expect(await call("set_fields", { issue: 7, status: "Backlog" })).toHaveProperty(
-          "isError",
-          true,
-        );
+        // the store says Blocked: only the live card counts
+        board(card(7, { status: "Blocked" }));
+        const r = await call("set_fields", { issue: 7, status: "Backlog", size: "S" });
+        expect(r.isError).toBe(true);
+        expect(r.text).toContain("not in Blocked");
       }
       expect(moveCalls).toEqual([]);
+      expect(ghCalls).toEqual([]);
     });
     it("set_fields records a status move under its own kind, with no hourly cap", async () => {
       board(card(7));
