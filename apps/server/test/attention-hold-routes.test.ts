@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { holds } from "../src/attention-holds.ts";
+import { holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";

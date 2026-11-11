@@ -143,9 +143,9 @@ import { seatMayTake } from "../src/engine/queue.ts";
 import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
-import { externalReviewKey } from "../src/external-reviews.ts";
 import type { Move } from "../src/github/board.ts";
 import { attentionItems } from "../src/hud.ts";
+import { externalReviewKey } from "../src/review/external.ts";
 import {
   type SeatBusy,
   type SeatFacts,
