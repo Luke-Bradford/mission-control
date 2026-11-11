@@ -13,8 +13,8 @@ import {
   reviewFor,
   ticketWaits,
 } from "@mc/core";
-import { isExternalReview } from "./external-reviews.ts";
-import type { Store } from "./store.ts";
+import { isExternalReview } from "../external-reviews.ts";
+import type { Store } from "../store.ts";
 
 type Stage = FlightPrFlowRow["stage"];
 type Owner = NonNullable<FlightPrFlowRow["ownerKind"]>;
