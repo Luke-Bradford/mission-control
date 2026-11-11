@@ -337,11 +337,7 @@ import {
 import { registerInstructionRoutes } from "./instructions/api.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "./machine-capacity.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
@@ -4143,13 +4139,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const counts = sessions.map((s) => s.seats.length);
         const latest = machine();
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          latest === null
-            ? store.machineSamples(machineCapacitySince(now(), capacityConfig))
-            : [...store.machineSamples(machineCapacitySince(now(), capacityConfig)), latest],
-          now(),
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, now(), capacityConfig, latest);
         return {
           latest,
           warning: capacity.reason,
@@ -4608,11 +4598,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         const at = now();
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         if (capacity.blocked && b.force !== true)
           throw new SupervisorError(409, `Machine capacity held: ${capacity.reason}`);
         const loop = crewSeatDef(config, id).loop;

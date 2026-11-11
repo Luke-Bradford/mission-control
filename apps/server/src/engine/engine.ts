@@ -159,11 +159,7 @@ import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } f
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "../machine-capacity.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
@@ -2629,14 +2625,7 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     // 4. each free scratch seat starts its oldest wanted review. Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    if (
-      machineCapacity(
-        store.machineSamples(machineCapacitySince(now(), capacityConfig)),
-        now(),
-        capacityConfig,
-      ).blocked
-    )
-      return;
+    if (storedMachineCapacity(store, now(), capacityConfig).blocked) return;
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
       .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");

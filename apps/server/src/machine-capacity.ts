@@ -1,6 +1,12 @@
 import type { MachineSample } from "@mc/core";
+import type { Store } from "./store.ts";
 
 export const MACHINE_CAPACITY_KEY = "machine-capacity";
+export const DISK_PERCENTAGE_CLEAR_HEADROOM = 1;
+export const DISK_PERCENTAGE_CLEAR_AFTER_MIN = 10;
+/** Recovery needs readings this close together; a longer gap in collection restarts the wait. */
+export const DISK_PERCENTAGE_MAX_GAP_MS = 2 * 60_000;
+const DISK_EPISODE_SETTING = "machine-capacity:disk-percentage-episode";
 export const MACHINE_CAPACITY_DEFAULTS = {
   diskFreeGb: 15,
   diskFreePct: 5,
@@ -32,15 +38,94 @@ export interface MachineCapacity {
 
 /** Earliest persisted reading needed to assess a sustained breach and its recovery period. */
 export const machineCapacitySince = (now: number, config: MachineCapacityConfig): number =>
-  now - (config.loadWindowMin + config.clearAfterMin) * 60_000;
+  now -
+  (Math.max(config.loadWindowMin + config.clearAfterMin, DISK_PERCENTAGE_CLEAR_AFTER_MIN) + 1) *
+    60_000;
 
 const gb = (bytes: number): string => `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+
+const diskFreePct = (s: MachineSample): number | null =>
+  s.diskFreeBytes !== null && s.diskTotalBytes !== null && s.diskTotalBytes > 0
+    ? (s.diskFreeBytes / s.diskTotalBytes) * 100
+    : null;
+
+function percentageDiskBreach(
+  samples: readonly MachineSample[],
+  now: number,
+  config: MachineCapacityConfig,
+  persistedAt: number | null,
+): number | null {
+  let breachedAt = persistedAt;
+  for (const sample of samples) {
+    const pct = diskFreePct(sample);
+    if (sample.at <= now && pct !== null && pct < config.diskFreePct)
+      breachedAt = Math.max(breachedAt ?? -Infinity, sample.at);
+  }
+  if (breachedAt === null) return null;
+  const since = now - DISK_PERCENTAGE_CLEAR_AFTER_MIN * 60_000;
+  const anchor = samples.findLast((sample) => sample.at <= since);
+  if (anchor === undefined || anchor.at <= breachedAt) return breachedAt;
+  const window = samples.filter((sample) => sample.at >= anchor.at && sample.at <= now);
+  const covered =
+    window.every(
+      (sample, i) => i === 0 || sample.at - window[i - 1].at <= DISK_PERCENTAGE_MAX_GAP_MS,
+    ) && now - window[window.length - 1].at <= DISK_PERCENTAGE_MAX_GAP_MS;
+  const recovered =
+    covered &&
+    window.every((sample) => {
+      const pct = diskFreePct(sample);
+      return pct !== null && pct > config.diskFreePct + DISK_PERCENTAGE_CLEAR_HEADROOM;
+    });
+  return recovered ? null : breachedAt;
+}
+
+/** The persisted episode is shared by every admission caller and survives a hub restart. */
+export function storedMachineCapacity(
+  store: Pick<Store, "machineSamples" | "getSetting" | "setSetting">,
+  now: number,
+  config: MachineCapacityConfig = MACHINE_CAPACITY_DEFAULTS,
+  latest?: MachineSample | null,
+): MachineCapacity {
+  const raw = store.getSetting(DISK_EPISODE_SETTING);
+  let persistedAt: number | null = null;
+  let known = false;
+  try {
+    const saved: unknown = JSON.parse(raw ?? "null");
+    if (
+      saved !== null &&
+      typeof saved === "object" &&
+      "floor" in saved &&
+      saved.floor === config.diskFreePct &&
+      "breachedAt" in saved &&
+      (saved.breachedAt === null ||
+        (typeof saved.breachedAt === "number" &&
+          Number.isFinite(saved.breachedAt) &&
+          saved.breachedAt <= now))
+    ) {
+      known = true;
+      persistedAt = saved.breachedAt;
+    }
+  } catch {
+    // A missing or invalid setting is reconstructed from the retained readings.
+  }
+  const samples = store.machineSamples(known ? machineCapacitySince(now, config) : 0);
+  if (latest !== undefined && latest !== null) {
+    const index = samples.findIndex((sample) => sample.at === latest.at);
+    if (index === -1) samples.push(latest);
+    else samples[index] = latest;
+    samples.sort((a, b) => a.at - b.at);
+  }
+  const breachedAt = percentageDiskBreach(samples, now, config, persistedAt);
+  const state = JSON.stringify({ floor: config.diskFreePct, breachedAt });
+  if (raw !== state) store.setSetting(DISK_EPISODE_SETTING, state);
+  return machineCapacity(samples, now, config, breachedAt);
+}
 
 function immediateReason(s: MachineSample, c: MachineCapacityConfig): string | null {
   if (s.diskFreeBytes !== null && s.diskFreeBytes < c.diskFreeGb * 1024 ** 3)
     return `disk free is ${gb(s.diskFreeBytes)} (below ${c.diskFreeGb} GB)`;
-  if (s.diskFreeBytes !== null && s.diskTotalBytes !== null && s.diskTotalBytes > 0) {
-    const pct = (s.diskFreeBytes / s.diskTotalBytes) * 100;
+  const pct = diskFreePct(s);
+  if (pct !== null) {
     if (pct < c.diskFreePct) return `disk free is ${pct.toFixed(1)}% (below ${c.diskFreePct}%)`;
   }
   const swap =
@@ -74,9 +159,12 @@ export function machineCapacity(
   samples: readonly MachineSample[],
   now: number,
   config: MachineCapacityConfig = MACHINE_CAPACITY_DEFAULTS,
+  diskBreachAt: number | null = null,
 ): MachineCapacity {
   const latest = samples.at(-1);
-  if (latest === undefined) return { blocked: false, reason: null };
+  if (latest === undefined && diskBreachAt === null) return { blocked: false, reason: null };
+  if (latest === undefined)
+    return { blocked: true, reason: "disk recovery readings are not yet available" };
   const direct = immediateReason(latest, config);
   if (direct !== null) return { blocked: true, reason: direct };
   const windowMs = config.loadWindowMin * 60_000;
@@ -107,6 +195,11 @@ export function machineCapacity(
     return {
       blocked: true,
       reason: `${prior}; waiting ${config.clearAfterMin} minutes of headroom`,
+    };
+  if (percentageDiskBreach(samples, now, config, diskBreachAt) !== null)
+    return {
+      blocked: true,
+      reason: `disk free is waiting ${DISK_PERCENTAGE_CLEAR_AFTER_MIN} minutes above ${(config.diskFreePct + DISK_PERCENTAGE_CLEAR_HEADROOM).toFixed(0)}%`,
     };
   const loaded = samples.some((s) => s.at >= now - clearMs && sustainedAt(s.at));
   return loaded

@@ -364,11 +364,7 @@ import {
 } from "../hud.ts";
 import { announceInstruction } from "../instructions/notices.ts";
 import { InstructionInput } from "../instructions/standing.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "../machine-capacity.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
@@ -1597,11 +1593,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const ref = `${repo.id}#${issue}`;
     const at = now();
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    const capacity = machineCapacity(
-      store.machineSamples(machineCapacitySince(at, capacityConfig)),
-      at,
-      capacityConfig,
-    );
+    const capacity = storedMachineCapacity(store, at, capacityConfig);
     if (capacity.blocked) return fail(`the machine has insufficient headroom: ${capacity.reason}`);
     const loopKind = seatDef(cfg).loop;
     if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
@@ -3833,11 +3825,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return { text };
         }
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         if (capacity.blocked)
           return fail(`the machine has insufficient headroom: ${capacity.reason}`);
         if (row.state === "stopped")
