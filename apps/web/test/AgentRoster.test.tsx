@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Roster } from "../src/agent/Roster.tsx";
 import { hub } from "../src/data.ts";
 import { Agent } from "../src/pages/Agent.tsx";
+import { route, usePath } from "../src/router.ts";
 import { getSelectedAgent, setSelectedAgent } from "../src/shell/selection.ts";
 import { agentView } from "./agentV2Fixture.ts";
 import { stubFetch } from "./fetchStub.ts";
@@ -81,6 +82,79 @@ describe("Roster cards", () => {
     expect(screen.queryByRole("button", { name: /GUIDO-1/ })).toBeNull();
     fireEvent.click(fold);
     expect(screen.getByRole("button", { name: /GUIDO-1/ })).toBeTruthy();
+  });
+});
+
+describe("Roster states and clock", () => {
+  it("says loading, a failed load and an empty session in words, never a count of 0", () => {
+    const { rerender } = render(<Roster rows={null} current={null} />);
+    expect(screen.getByRole("status").textContent).toBe("Loading…");
+    expect(screen.getByRole("complementary", { name: "Crew roster" }).textContent).not.toContain(
+      "0 seats",
+    );
+    rerender(<Roster rows={null} current={null} error />);
+    expect(screen.getByRole("status").textContent).toBe("Could not load the crew.");
+    rerender(<Roster rows={[]} current={null} />);
+    expect(screen.getByRole("status").textContent).toBe("No seats in this session.");
+  });
+
+  it("keeps a seat's state age moving while the hub is quiet", async () => {
+    const seat = seatRow({ id: "guido-1", hudState: "idle", run: null, stateSince: NOW - 4 * MIN });
+    render(<Roster rows={[seat]} current={null} />);
+    expect(screen.getByRole("button", { name: /GUIDO-1/ }).textContent).toContain("4m");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30 * MIN);
+    });
+    expect(screen.getByRole("button", { name: /GUIDO-1/ }).textContent).toContain("34m");
+  });
+});
+
+describe("Back from the Agents tab", () => {
+  function Page() {
+    const r = route(usePath());
+    return <Agent id={r?.page === "agent" ? r.id : null} />;
+  }
+
+  it("returns to the seat that was shown at bare /agent", async () => {
+    const rows = [
+      seatRow({ id: "guido-1", index: 0, hudState: "running", digest: digest() }),
+      seatRow({ id: "guido-2", index: 1, hudState: "idle", run: null }),
+    ];
+    const routes: Record<string, unknown> = {
+      "/api/crew?shape=summary": { rows: rows.map(crewRowSummary), firstRunToday: null },
+      "/api/overview/timeline": { from: NOW - HOUR, to: NOW, lanes: [] },
+      "/api/attention": [],
+      "/api/config": CONFIG,
+    };
+    for (const r of rows) {
+      routes[`/api/agents/${r.id}`] = agentView(r);
+      routes[`/api/agents/${r.id}/stream?limit=20`] = {
+        runId: null,
+        events: [],
+        tasks: [],
+        truncated: false,
+        more: false,
+      };
+    }
+    stubFetch(routes);
+    render(<Page />);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    const card = (id: string) => document.querySelector(`#roster [data-seat="${id}"]`);
+    expect(card("guido-1")?.getAttribute("aria-current")).toBe("true");
+    fireEvent.click(card("guido-2") as Element);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(window.location.pathname).toBe("/agent/guido-2");
+    expect(card("guido-2")?.getAttribute("aria-current")).toBe("true");
+    act(() => window.history.back());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(window.location.pathname).toBe("/agent/guido-1");
+    expect(card("guido-1")?.getAttribute("aria-current")).toBe("true");
   });
 });
 

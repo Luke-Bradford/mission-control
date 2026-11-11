@@ -205,3 +205,8 @@
 .strip-wait {
   background: var(--warn);
 }
+.roster-note {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-2);
+  color: var(--muted);
+}

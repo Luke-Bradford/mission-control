@@ -1,12 +1,12 @@
 import type { ConfigView, Crew, CrewRow, OverviewTimeline } from "@mc/core";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNow } from "../clock.ts";
 import { callSign, seatRoleTitle, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { percent } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { agentPath, navigate } from "../router.ts";
-import { setSelectedAgent } from "../shell/selection.ts";
+import { chooseSeat } from "./chooseSeat.ts";
 import {
   contextShown,
   hourMarks,
@@ -24,14 +24,25 @@ const CONTEXT_WARN_PCT = 75;
  * Every seat the hub serves, by repo, each repo in the fixed seat order and foldable. The roster
  * scrolls inside its own frame and keeps the chosen seat in view; a click or Enter chooses a seat.
  */
-export function Roster({ rows, current }: { rows: CrewRow[]; current: string | null }) {
+export function Roster({
+  rows: seats,
+  current,
+  error = false,
+}: {
+  /** The seats in view; null while the crew has not loaded. */
+  rows: CrewRow[] | null;
+  current: string | null;
+  /** The crew could not be loaded and there is none to show. */
+  error?: boolean;
+}) {
+  const rows = useMemo(() => seats ?? [], [seats]);
   const roles = useResource<ConfigView>(RESOURCES.config).data?.crew?.roles;
   const all = useResource<Crew>(RESOURCES.crew).data?.rows;
   const lanes = useResource<OverviewTimeline>(RESOURCES.overviewTimeline).data?.lanes;
   const groups = useMemo(() => rosterGroups(rows), [rows]);
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   const list = useRef<HTMLDivElement>(null);
-  const now = Date.now();
+  const now = useNow();
   const active = rows.filter((r) => r.hudState !== "idle" && r.hudState !== "stopped").length;
   const currentRepo = rows.find((r) => r.id === current)?.repoId ?? null;
 
@@ -75,7 +86,9 @@ export function Roster({ rows, current }: { rows: CrewRow[]; current: string | n
       <div className="roster-head">
         <b>Crew</b>
         <span className="roster-count">
-          {active} active · {rows.length} {rows.length === 1 ? "seat" : "seats"}
+          {seats === null
+            ? "—"
+            : `${active} active · ${rows.length} ${rows.length === 1 ? "seat" : "seats"}`}
         </span>
       </div>
       <div className="roster-legend" title="Colours of the last-hour strip">
@@ -87,6 +100,15 @@ export function Roster({ rows, current }: { rows: CrewRow[]; current: string | n
         ))}
       </div>
       <div className="roster-list" ref={list}>
+        {rows.length === 0 && (
+          <p className={`roster-note${error && seats === null ? " crit-t" : ""}`} role="status">
+            {seats !== null
+              ? "No seats in this session."
+              : error
+                ? "Could not load the crew."
+                : "Loading…"}
+          </p>
+        )}
         {groups.map((g) => {
           const open = !folded.has(g.repoId);
           return (
@@ -117,6 +139,7 @@ export function Roster({ rows, current }: { rows: CrewRow[]; current: string | n
                       key={r.id}
                       row={r}
                       on={r.id === current}
+                      shown={current}
                       now={now}
                       lane={lanes?.find((l) => l.agentId === r.id)}
                       role={seatRoleTitle(r.id, all ?? rows, roles)}
@@ -135,12 +158,14 @@ export function Roster({ rows, current }: { rows: CrewRow[]; current: string | n
 function SeatCard({
   row,
   on,
+  shown,
   now,
   lane,
   role,
 }: {
   row: CrewRow;
   on: boolean;
+  shown: string | null;
   now: number;
   lane: OverviewTimeline["lanes"][number] | undefined;
   role: string | null;
@@ -160,10 +185,7 @@ function SeatCard({
       className={`seat-card${free ? " free" : ""}`}
       data-seat={row.id}
       aria-current={on}
-      onClick={() => {
-        setSelectedAgent(row.id);
-        navigate(agentPath(row.id));
-      }}
+      onClick={() => chooseSeat(row.id, shown)}
     >
       <span className="seat-bar" style={{ background: agentColor(row.index) }} aria-hidden="true" />
       <span className="seat-in">

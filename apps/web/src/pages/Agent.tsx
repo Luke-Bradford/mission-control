@@ -95,7 +95,11 @@ export function Agent({ id }: { id: string | null }) {
     <section id="page-agent" className="agent-v2">
       <h1 className="sr-only">Agents</h1>
       <div className="agent-v2-shell">
-        <Roster rows={inView} current={shownId} />
+        <Roster
+          rows={crew.data ? inView : null}
+          current={shownId}
+          error={!!crew.error && !crew.data}
+        />
         <div className="agent-v2-main">
           {handoffRun && <HandoffPanel runId={handoffRun} />}
           {traceRun && id !== null ? (

@@ -9,13 +9,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { chooseSeat } from "./agent/chooseSeat.ts";
 import { stepRoster } from "./agent/roster.ts";
 import { useNeedsCount } from "./attention.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
 import {
-  agentPath,
   FULL_WIDTH_PAGES,
   isPopout,
   itemParam,
@@ -371,8 +371,9 @@ function useShellKeys(current: Route, popout: boolean) {
               Date.now(),
             );
       if (id === null) return;
-      setSelectedAgent(id);
-      if (on.page === "agent") navigate(agentPath(id)); // the URL follows the selection
+      if (on.page === "agent")
+        chooseSeat(id, getSelectedAgent()); // the URL follows the selection
+      else setSelectedAgent(id);
     };
     return installKeys({
       // a page key leaves you where you are on that page (g b on a ticket keeps the ticket); a
