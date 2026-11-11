@@ -49,3 +49,7 @@ removed; the overview differs only in the time-dependent figures).
 
 The fixture now also carries two such dead loop runs; the tick-pair figures above (2.2 ms with no
 browser, 3.1 ms with one) include them.
+
+Status (11 Nov): copied-data samples of 4cb561a, d66eab0 and 643a5c2 measured 3.91%, 3.69% and 3.69%
+mean CPU, above the under 2% target. The last head's sample is FLIGHT's to record; if it misses,
+the next source to cut comes from its profile.
