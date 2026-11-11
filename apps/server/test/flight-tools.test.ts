@@ -4321,11 +4321,12 @@ describe("promote", () => {
     expect(moveCalls).toEqual([]);
   });
 
-  it("allows promotion when the prototype URL names this repository", async () => {
-    fetchImpl = async (n) =>
-      ticket(n, {
-        body: `${GOOD}\nPrototype: [working copy](https://github.com/o/mc/blob/main/docs/prototype/mockup.html)`,
-      });
+  it.each([
+    "https://github.com/o/mc/blob/main/docs/prototype/mockup.html",
+    "https://github.com/o/mc/blob/feature/prototype-polish/docs/prototype/mockup.html",
+    "https://raw.githubusercontent.com/o/mc/feature/prototype-polish/docs/prototype/mockup.html",
+  ])("allows promotion when the prototype URL names this repository: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
     expect((await call("promote", P())).isError).toBeUndefined();
     expect(moveCalls[0]?.column).toBe("Ready");
   });

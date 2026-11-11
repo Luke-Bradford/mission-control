@@ -5,6 +5,12 @@ const MARKDOWN_LINK = /\[([^\]]*)\]\(([^\s)]+)(?:\s+[^)]*)?\)/g;
 const HTTP_URL = /https?:\/\/[^\s)>]+/g;
 const PROTOTYPE = /\b(?:prototype|mockup)\b/i;
 
+// A Git ref may contain slashes, and without asking GitHub the ref/file boundary is ambiguous.
+// Accept one segment, or a conventional branch prefix plus one segment (feature/prototype-polish).
+const REF = "(?:(?:feature|fix|bug|bugfix|chore|docs|test|hotfix|release|refactor)/)?[^/]+";
+const GITHUB_BLOB = new RegExp(`^(?:blob|raw)/${REF}/docs/prototype/.+`);
+const RAW_FILE = new RegExp(`^${REF}/docs/prototype/.+`);
+
 function inPrototypeDirectory(link: string, github: string | undefined): boolean {
   try {
     // A relative path belongs to this repository. Resolve dot segments before trusting its directory.
@@ -21,9 +27,9 @@ function inPrototypeDirectory(link: string, github: string | undefined): boolean
     if (`${owner}/${repo}`.toLowerCase() !== github.toLowerCase()) return false;
     const route = rest.join("/");
     if (url.hostname === "github.com")
-      return /^(?:blob|raw)\/[^/]+\/docs\/prototype\/.+/.test(route);
+      return GITHUB_BLOB.test(route);
     if (url.hostname === "raw.githubusercontent.com")
-      return /^[^/]+\/docs\/prototype\/.+/.test(route);
+      return RAW_FILE.test(route);
     return false;
   } catch {
     return false;
