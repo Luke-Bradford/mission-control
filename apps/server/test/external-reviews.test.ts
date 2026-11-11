@@ -20,7 +20,7 @@ import { branchOwned, createExternalReviews, externalReviewKey } from "../src/ex
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { prTextProblem } from "../src/mcp/tools.ts";
 import { ownsPr } from "../src/ownership.ts";
-import { prUat } from "../src/pr-uat.ts";
+import { prUat } from "../src/pr/uat.ts";
 import { reviewCheckFor } from "../src/review-check.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";

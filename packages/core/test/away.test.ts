@@ -114,7 +114,7 @@ const PROBE_PATHS = [
   "apps/server/src/api.ts",
   "apps/server/src/main.ts",
   "apps/server/src/collectors/github.ts",
-  "apps/server/src/github-board.ts",
+  "apps/server/src/github/board.ts",
   "apps/server/src/claim.ts",
   "apps/server/src/update.ts",
   "apps/server/src/accounts.ts",

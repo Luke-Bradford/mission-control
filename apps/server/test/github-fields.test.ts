@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { projectFields, singleSelectField } from "../src/github-fields.ts";
+import { projectFields, singleSelectField } from "../src/github/fields.ts";
 
 describe("project field selections", () => {
   it("keeps names-only previews and ids for setup", () => {

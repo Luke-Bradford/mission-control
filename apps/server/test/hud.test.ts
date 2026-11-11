@@ -35,8 +35,8 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLI_AUTO_NOTE_PREFIX } from "../src/cli-auto.ts";
-import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli-update.ts";
+import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
+import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {

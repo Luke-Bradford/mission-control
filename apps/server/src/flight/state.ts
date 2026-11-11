@@ -99,7 +99,7 @@ import {
 } from "@mc/core";
 import { runAccountId } from "../account-bindings.ts";
 import { activeAway } from "../away.ts";
-import { flightQuestion } from "../comms.ts";
+import { flightQuestion } from "../comms/index.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
@@ -118,7 +118,7 @@ import {
   machineCapacitySince,
 } from "../machine-capacity.ts";
 import { paceStartCheck, paceView } from "../pace.ts";
-import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr-flow.ts";
+import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
 import {
   closingFact,
   factsText,
@@ -131,7 +131,7 @@ import { parseTicket } from "../runview.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
-import { flightWakeCost, flightWakeWaits } from "./cost.ts";
+import { flightFinancialFacts, flightWakeCost, flightWakeWaits } from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
@@ -150,7 +150,7 @@ interface TeamsDigestState {
   };
 }
 
-export { prFlow } from "../pr-flow.ts";
+export { prFlow } from "../pr/flow.ts";
 
 /**
  * Operator-owned items, including those temporarily routed to FLIGHT for triage or handling. The
@@ -431,6 +431,23 @@ function flightWakeStatus(store: Store, repo: string, live: boolean): FlightWake
   };
 }
 
+/** Cost and wait figures, read from one set of historical facts taken for this response. */
+function financialFigures(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  found: NonNullable<ReturnType<typeof flightSeat>>,
+): Pick<FlightView, "wakeCost" | "wakeWaits"> {
+  const crewIds = new Set(
+    configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : [])),
+  );
+  const facts = flightFinancialFacts(store, now, new Set([...crewIds, found.seat.id]));
+  return {
+    wakeCost: flightWakeCost(store, now, found.seat.id, crewIds, undefined, facts),
+    wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId, undefined, facts),
+  };
+}
+
 export function flightView(
   config: CcConfig,
   store: Store,
@@ -448,17 +465,7 @@ export function flightView(
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
     ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now, decisions) }),
-    ...(found === null
-      ? {}
-      : {
-          wakeCost: flightWakeCost(
-            store,
-            now,
-            found.seat.id,
-            new Set(configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : []))),
-          ),
-          wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId),
-        }),
+    ...(found === null ? {} : financialFigures(config, store, now, found)),
     promptWakes:
       found === null
         ? []
