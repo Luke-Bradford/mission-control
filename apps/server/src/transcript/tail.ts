@@ -1,4 +1,4 @@
-import { openTranscript, type TranscriptFile } from "../transcript-file.ts";
+import { openTranscript, type TranscriptFile } from "./file.ts";
 
 /** Most bytes a single readNewLines call will read (a single longer line is still returned whole). */
 export const MAX_READ_BYTES = 8 * 1024 * 1024;

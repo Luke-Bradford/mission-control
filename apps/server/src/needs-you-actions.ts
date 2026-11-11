@@ -30,9 +30,9 @@ import type { Move, MoveResult } from "./github/board.ts";
 import { ensureLabels } from "./github/setup.ts";
 import type { GhRunner } from "./mcp/gh.ts";
 import { prTextProblem, readKnown } from "./mcp/tools.ts";
-import { recordRunHandoff } from "./run-handoffs.ts";
+import { recordRunHandoff } from "./run/handoffs.ts";
+import { parseTicket } from "./run/view.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
-import { parseTicket } from "./runview.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import type { Store } from "./store.ts";
 

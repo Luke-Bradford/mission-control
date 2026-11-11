@@ -27,7 +27,7 @@ import {
 import { WINDOWS } from "./collectors/usage-common.ts";
 import { agentIds, type CcConfig, configuredAgents, crewSeatDef } from "./config.ts";
 import { crew } from "./hud.ts";
-import { type PrCache, runPrs, runTicket } from "./runview.ts";
+import { type PrCache, runPrs, runTicket } from "./run/view.ts";
 import { runSpend } from "./spend/spend.ts";
 import type { Store } from "./store.ts";
 import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "./views.ts";

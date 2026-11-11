@@ -16,7 +16,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
 import { crewTranscriptPath } from "../src/store/crew-paths.ts";
 import { Store } from "../src/store.ts";
-import { maintainTranscripts } from "../src/transcript-lifecycle.ts";
+import { maintainTranscripts } from "../src/transcript/lifecycle.ts";
 
 const HOUR = 60 * 60_000;
 const NOW = Date.parse("2026-10-30T12:00:00Z");

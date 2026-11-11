@@ -133,7 +133,7 @@ import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
   TRANSCRIPT_PASS_INTERVAL_MS,
-} from "./transcript-lifecycle.ts";
+} from "./transcript/lifecycle.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =
