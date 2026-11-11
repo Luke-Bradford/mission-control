@@ -26,7 +26,7 @@ describe("repository prototype links", () => {
     "https://raw.githubusercontent.com/o/mc/main/docs/prototype/mockup.html",
     "https://github.com/o/mc/blob/feature/prototype-polish/docs/prototype/mockup.html",
     "https://raw.githubusercontent.com/o/mc/feature/prototype-polish/docs/prototype/mockup.html",
-  ])("accepts a prototype in the configured repository, including slash-named branches: %s", (link) => {
+  ])("accepts a prototype in this repository, even on a slash-named branch: %s", (link) => {
     expect(prototypeLinkProblem(`Prototype: [working copy](${link})`, "o/mc")).toBeNull();
   });
 });
