@@ -114,7 +114,7 @@ import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
-import { PreviewRefused } from "../src/design-previews.ts";
+import { PreviewRefused } from "../src/design-preview/previews.ts";
 import { externalReviewKey } from "../src/external-review-key.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";

@@ -103,7 +103,7 @@ import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
 import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
-import { DesignPreviews } from "../src/design-previews.ts";
+import { DesignPreviews } from "../src/design-preview/previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as files from "../src/files.ts";
 import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";

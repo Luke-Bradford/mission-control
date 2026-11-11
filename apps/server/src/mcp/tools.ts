@@ -204,7 +204,7 @@ import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
-import { PreviewRefused } from "../design-previews.ts";
+import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { isExternalReview } from "../external-review-key.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
