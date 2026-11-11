@@ -151,7 +151,9 @@ it("accepts a checkout reached through a symlinked directory", async () => {
   try {
     expect(
       await strict(new MapConflicts(), symlink, [pr("left", left), pr("right", right)]),
-    ).toEqual([{ file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] }]);
+    ).toEqual([
+      { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
+    ]);
   } finally {
     rmSync(symlink, { force: true });
   }
