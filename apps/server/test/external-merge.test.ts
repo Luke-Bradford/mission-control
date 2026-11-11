@@ -26,7 +26,7 @@ import { grantApproval, mergeFloorScope } from "../src/flight-approvals.ts";
 import { attentionItems } from "../src/hud.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { ownsPr } from "../src/ownership.ts";
-import { prAcceptanceFor, prUat } from "../src/pr-uat.ts";
+import { prAcceptanceFor, prUat } from "../src/pr/uat.ts";
 import { reviewCheckFor } from "../src/review/check.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import { Store } from "../src/store.ts";

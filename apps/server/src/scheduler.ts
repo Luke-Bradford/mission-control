@@ -127,7 +127,7 @@ import {
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import type { Store } from "./store.ts";
-import { auditEndedRuns } from "./token-audit.ts";
+import { auditEndedRuns } from "./token-audit/audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
