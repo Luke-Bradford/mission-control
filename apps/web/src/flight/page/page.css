@@ -459,17 +459,18 @@
   gap: var(--sp-3);
   min-width: 0;
   min-height: 0;
+  /* On a short screen the column scrolls, so no panel is squeezed below its own content. */
+  overflow: auto;
 }
-.fp-left > .fp-self-start {
+.fp-left > .fp-panel {
   flex: none;
 }
-/* It sits under Doing now and gives way before the blockers do: its list scrolls. */
+/* It sits under Doing now; many orders scroll inside their own list. */
 .fp-orders {
-  flex: 0 1 auto;
+  flex: none;
 }
 .fp-orderlist {
-  flex: 0 1 auto;
-  min-height: 0;
+  flex: none;
   overflow: auto;
   max-height: calc(var(--fp-row) * 3);
 }
