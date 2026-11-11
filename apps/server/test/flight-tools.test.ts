@@ -3709,6 +3709,26 @@ describe("flight_state", () => {
       expect(JSON.stringify(over).length).toBeLessThan(1000);
     });
 
+    it("keep a wait that ended an hour ago listed on every read", async () => {
+      recordFlightWait(store, "mc#77", {
+        on: "PR 77 to merge",
+        until: NOW - 3_600_000,
+        at: NOW - 7_200_000,
+      });
+      const keys = async () =>
+        (
+          JSON.parse((await call("flight_state", {})).text) as {
+            signals: { kind: string; key: string }[];
+          }
+        ).signals
+          .filter((s) => s.kind === "wait_over")
+          .map((s) => s.key);
+      await keys();
+      const second = await keys();
+      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
+      expect(second).not.toContain("expired");
+    });
+
     it("are all listed with full: true", async () => {
       expect(await waits({ full: true })).toHaveLength(500);
     });

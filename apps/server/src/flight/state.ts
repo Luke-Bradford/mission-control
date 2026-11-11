@@ -1663,13 +1663,12 @@ export function flightWake(
 }
 
 /**
- * What `flight_state` shows of the signals by default: a wait that ended a day ago, or that FLIGHT
- * was already told about, folds into one summary line with a count. A new or still-changing
- * signal of any kind stays whole. `full` in the tool call lists everything (#1632).
+ * What `flight_state` shows of the signals by default: a wait that ended over a day ago folds into one
+ * summary line with a count. Every other signal stays whole. `full` in the tool call lists everything (#1632).
  */
 export function compactSignals(signals: FlightSignal[], now: number): FlightSignal[] {
   const expired = (s: FlightSignal): boolean =>
-    s.kind === "wait_over" && (s.told === true || now - s.since > 24 * FLIGHT_HOUR_MS);
+    s.kind === "wait_over" && now - s.since > 24 * FLIGHT_HOUR_MS;
   const folded = signals.filter(expired);
   if (folded.length === 0) return signals;
   return [
