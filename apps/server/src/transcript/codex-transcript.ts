@@ -1,8 +1,8 @@
 import { type CrewVendor, isObj, MC_MCP_SERVER } from "@mc/core";
-import { cleanText } from "./clean.ts";
-import { originalBytes, str } from "./util.ts";
+import { cleanText } from "../clean.ts";
+import { originalBytes, str } from "../util.ts";
 
-export { CODEX_APPROVAL_DECISION } from "./runtime/codex-wire.ts";
+export { CODEX_APPROVAL_DECISION } from "../runtime/codex-wire.ts";
 
 /** Bookkeeping and unknown objects do not establish a transcript's format. */
 export function transcriptVendor(
