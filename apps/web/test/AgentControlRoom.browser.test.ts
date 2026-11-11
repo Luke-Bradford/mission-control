@@ -164,7 +164,7 @@ describeRendered("Agent control room", () => {
         roster: 9,
         activityFillsWorkspace: true,
         textFits: true,
-        rosterScrolls: true,
+        rosterScrolls: false,
         activityMarks: 9,
         idleContext: true,
       });

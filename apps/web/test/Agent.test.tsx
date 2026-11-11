@@ -6,7 +6,7 @@ import { installKeys } from "../src/shell/keys.ts";
 import { getSelectedAgent } from "../src/shell/selection.ts";
 import { resetSession, setSession } from "../src/shell/session.ts";
 import { Toast } from "../src/shell/Toast.tsx";
-import { AGENT_DRAFT_KEY, readKey } from "../src/storage.ts";
+import { agentDraftKey, readKey } from "../src/storage.ts";
 import { agentView } from "./agentV2Fixture.ts";
 import { stubFetch } from "./fetchStub.ts";
 import {
@@ -142,7 +142,7 @@ describe("Agent control room", () => {
     const view = render(<Agent id="guido-1" />);
     const input = await screen.findByRole("textbox", { name: "Message this agent" });
     fireEvent.change(input, { target: { value: "Please check the guard." } });
-    await waitFor(() => expect(readKey(AGENT_DRAFT_KEY)).toBe("Please check the guard."));
+    await waitFor(() => expect(readKey(agentDraftKey("guido-1"))).toBe("Please check the guard."));
     view.rerender(<Agent id="guido-1" />);
     expect(
       ((await screen.findByRole("textbox", { name: "Message this agent" })) as HTMLInputElement)
@@ -279,7 +279,7 @@ describe("Agent control room", () => {
     fireEvent.change(await screen.findByRole("textbox", { name: "Message this agent" }), {
       target: { value: "Survive a reload." },
     });
-    await waitFor(() => expect(readKey(AGENT_DRAFT_KEY)).toBe("Survive a reload."));
+    await waitFor(() => expect(readKey(agentDraftKey("guido-1"))).toBe("Survive a reload."));
     cleanup();
     stub();
     render(<Agent id="guido-1" />);
@@ -289,7 +289,7 @@ describe("Agent control room", () => {
     ).toBe("Survive a reload.");
   });
 
-  it("keeps a typed message when another seat is chosen", async () => {
+  it("keeps each seat's typed message apart when another seat is chosen", async () => {
     const other = seat({ id: "inco-2", index: 3, displayCallSign: "INCO-2" });
     const routes = {
       "/api/crew?shape=summary": { rows: [seat(), other], firstRunToday: null },
@@ -301,14 +301,16 @@ describe("Agent control room", () => {
     fireEvent.change(await screen.findByRole("textbox", { name: "Message this agent" }), {
       target: { value: "Carry me over." },
     });
-    await waitFor(() => expect(readKey(AGENT_DRAFT_KEY)).toBe("Carry me over."));
+    await waitFor(() => expect(readKey(agentDraftKey("guido-1"))).toBe("Carry me over."));
     const roster = screen.getByRole("complementary", { name: "Seat roster" });
     fireEvent.click(within(roster).getByRole("button", { name: /INCO-2/ }));
     view.rerender(<Agent id="inco-2" />);
     await screen.findByText("INCO-2", { selector: "h2, h2 *" }).catch(() => null);
-    expect(
-      (screen.getByRole("textbox", { name: "Message this agent" }) as HTMLInputElement).value,
-    ).toBe("Carry me over.");
+    const box = () =>
+      screen.getByRole("textbox", { name: "Message this agent" }) as HTMLInputElement;
+    expect(box().value).toBe("");
+    view.rerender(<Agent id="guido-1" />);
+    expect(box().value).toBe("Carry me over.");
   });
 
   it("lists only the chosen session's seats and steps j and k within it", async () => {

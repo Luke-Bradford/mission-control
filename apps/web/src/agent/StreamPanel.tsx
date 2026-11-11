@@ -23,7 +23,7 @@ import { dur, hhmm, mss } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { toast } from "../shell/Toast.tsx";
-import { AGENT_DRAFT_KEY, readKey, writeKey } from "../storage.ts";
+import { agentDraftKey, readKey, writeKey } from "../storage.ts";
 import { reviewPark, reviewParkSha } from "./reviewPark.tsx";
 import { messageRun, messageSeat, seatError } from "./seat.ts";
 import { type Relativise, relativiser, toolResult, toolTarget } from "./toolTarget.ts";
@@ -261,7 +261,7 @@ export function SeatComposer({
   prefill?: ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
 }) {
-  const [text, setText] = useState(() => readKey(AGENT_DRAFT_KEY) ?? "");
+  const [text, setText] = useState(() => readKey(agentDraftKey(row.id)) ?? "");
   const input = useRef<HTMLInputElement>(null);
   const used = useRef<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -302,7 +302,7 @@ export function SeatComposer({
       if (parkedReview && row.run) await messageRun(row.run.id, text);
       else delivered = (await messageSeat(row, text, interrupt)).state === "delivered";
       setText("");
-      writeKey(AGENT_DRAFT_KEY, "");
+      writeKey(agentDraftKey(row.id), "");
       setReceipt("sent");
       if (delivered) window.setTimeout(() => setReceipt("read"), 0);
       toast(`Delivered to ${call}.`);
@@ -333,7 +333,7 @@ export function SeatComposer({
         value={text}
         onChange={(e) => {
           setText(e.target.value);
-          writeKey(AGENT_DRAFT_KEY, e.target.value);
+          writeKey(agentDraftKey(row.id), e.target.value);
         }}
       />
       <button type="submit" className="primary" disabled={composerDisabled}>
@@ -499,7 +499,7 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
           ))
         )}
       </div>
-      <SeatComposer row={row} />
+      <SeatComposer key={row.id} row={row} />
     </Panel>
   );
 }

@@ -22,8 +22,9 @@ export const BOARD_LAYOUT_KEY = "mc-board-layout";
 export const BOARD_VIEW_KEY = "mc-board-view";
 /** The away period whose digest this viewer acknowledged. */
 export const AWAY_DIGEST_KEY = "mc-away-digest";
-/** Unsent operator message in the Agent activity composer. It is deliberately not seat-scoped. */
+/** Unsent operator message in the Agent activity composer, one per seat. */
 export const AGENT_DRAFT_KEY = "mc-agent-draft";
+export const agentDraftKey = (seatId: string): string => `${AGENT_DRAFT_KEY}:${seatId}`;
 
 /** The command palette's last picks, newest first (a JSON list of entry ids). */
 export const PALETTE_RECENT_KEY = "mc-palette-recent";

@@ -110,7 +110,7 @@ export function Picker({
                 const age =
                   row.lastOutputAt === null
                     ? "no output"
-                    : `${dur(Math.max(0, now - row.lastOutputAt))} ago`;
+                    : dur(Math.max(0, now - row.lastOutputAt));
                 const work =
                   row.ticket !== null && row.ticketTitle
                     ? `${row.ticket} ${row.ticketTitle}`
@@ -139,10 +139,9 @@ export function Picker({
                         <AgentTag id={row.id} index={row.index} sm />
                       </span>
                       <span title={status.reason ?? status.label}>
-                        <Pill tone={status.tone}>{status.label}</Pill>
+                        <Pill tone={status.tone}>{`${status.label} · ${age}`}</Pill>
                       </span>
                     </span>
-                    <span className="agent-roster-age">{age}</span>
                     <span className="agent-roster-work" title={work}>
                       {work}
                     </span>
@@ -154,22 +153,25 @@ export function Picker({
                         />
                       </i>
                       <span>{percent(context)}</span>
-                    </span>
-                    <span
-                      className="agent-roster-strip"
-                      role="img"
-                      aria-label="Activity in the last hour"
-                    >
-                      {(row.digest?.minuteTokens ?? [])
-                        .filter(([at, tokens]) => tokens > 0 && at >= now - 3_600_000 && at <= now)
-                        .map(([at]) => (
-                          <i
-                            key={at}
-                            style={{
-                              left: `${Math.max(0, Math.min(100, ((at - (now - 3_600_000)) / 3_600_000) * 100))}%`,
-                            }}
-                          />
-                        ))}
+                      <span>1 H</span>
+                      <span
+                        className="agent-roster-strip"
+                        role="img"
+                        aria-label="Activity in the last hour"
+                      >
+                        {(row.digest?.minuteTokens ?? [])
+                          .filter(
+                            ([at, tokens]) => tokens > 0 && at >= now - 3_600_000 && at <= now,
+                          )
+                          .map(([at]) => (
+                            <i
+                              key={at}
+                              style={{
+                                left: `${Math.max(0, Math.min(100, ((at - (now - 3_600_000)) / 3_600_000) * 100))}%`,
+                              }}
+                            />
+                          ))}
+                      </span>
                     </span>
                   </button>
                 );

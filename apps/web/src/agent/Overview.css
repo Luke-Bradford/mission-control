@@ -365,10 +365,10 @@
 }
 .agent-roster-card {
   display: grid;
-  gap: var(--sp-1);
+  gap: 2px;
   width: 100%;
-  margin-top: var(--sp-1);
-  padding: var(--sp-2);
+  margin-top: 2px;
+  padding: 6px var(--sp-2);
   border: 1px solid var(--line);
   border-left: 3px solid var(--line-2);
   border-radius: var(--r);
@@ -385,7 +385,7 @@
 /* Wraps, so the state pill drops under a long name and role instead of covering it. */
 .agent-roster-card-line {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   justify-content: space-between;
   align-items: center;
   gap: var(--sp-1) var(--sp-2);
@@ -403,18 +403,15 @@
   max-width: 100%;
 }
 .agent-roster-name .ag {
-  flex-wrap: wrap;
   min-width: 0;
-  white-space: normal;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
-.agent-roster-age,
 .agent-roster-work,
 .agent-roster-context {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
-}
-.agent-roster-age {
-  color: var(--muted);
 }
 .agent-roster-work {
   overflow: hidden;
@@ -424,7 +421,7 @@
 }
 .agent-roster-context {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) 34px;
+  grid-template-columns: 24px minmax(0, 1fr) 34px 24px minmax(0, 1fr);
   gap: var(--sp-1);
   align-items: center;
   color: var(--muted);
@@ -457,14 +454,20 @@
 }
 .agent-seat-workspace {
   display: grid;
-  grid-template-rows: auto 56px minmax(0, 1fr);
+  grid-template-rows: auto var(--agent-instruments-h, 140px) minmax(0, 1fr);
   gap: var(--sp-3);
 }
 .agent-identity-band {
   min-height: 0;
 }
+/* The prototype's instrument row; its wrapped variant at 1350 px and below. */
+@media (max-width: 1350px) {
+  .agent-seat-workspace {
+    --agent-instruments-h: 168px;
+  }
+}
 .agent-reserved-instruments {
-  min-height: 56px;
+  min-height: 0;
   border-style: dashed;
 }
 .agent-reserved-right {
