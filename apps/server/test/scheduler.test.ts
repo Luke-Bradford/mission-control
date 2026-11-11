@@ -1638,7 +1638,12 @@ describe("scheduler", () => {
       reading = diskFreeGb.length - 1;
       t += 60_000;
       await s.tick("machine");
-      t += 10 * 60_000 + 1;
+      for (let minute = 1; minute < 10; minute++) {
+        t += 60_000;
+        await s.tick("machine");
+        expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeDefined();
+      }
+      t += 60_000;
       await s.tick("machine");
       expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeUndefined();
     });
