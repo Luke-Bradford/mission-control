@@ -24,7 +24,7 @@ import { waitReader } from "./dependencies.ts";
 import { refillQueues } from "./engine/queue.ts";
 import { RepoRulesError } from "./engine/rules.ts";
 import { matchesConfiguredFocus } from "./focus.ts";
-import type { MoveResult } from "./github-board.ts";
+import type { MoveResult } from "./github/board.ts";
 import { chooseRunProfile, type ProfilesError } from "./profiles.ts";
 import type { Store } from "./store.ts";
 

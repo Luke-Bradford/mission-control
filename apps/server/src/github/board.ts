@@ -9,13 +9,13 @@ import {
   STATUS_FIELD,
   seatDef,
 } from "@mc/core";
-import { type Gql, GqlError, isObj, isTransient } from "./collectors/github.ts";
-import type { CcConfig } from "./config.ts";
-import { singleSelectField } from "./github-fields.ts";
-import { readStatusField } from "./github-setup.ts";
-import { ownsPr } from "./ownership.ts";
-import { reworkReview } from "./rework.ts";
-import type { Store } from "./store.ts";
+import { type Gql, GqlError, isObj, isTransient } from "../collectors/github.ts";
+import type { CcConfig } from "../config.ts";
+import { ownsPr } from "../ownership.ts";
+import { reworkReview } from "../rework.ts";
+import type { Store } from "../store.ts";
+import { singleSelectField } from "./fields.ts";
+import { readStatusField } from "./setup.ts";
 
 /** Project, field and option ids are read again after this long. */
 export const BOARD_IDS_TTL_MS = 60 * 60_000;

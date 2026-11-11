@@ -10,8 +10,8 @@ import {
   STATUS_FIELD,
   TICKET_SIZES,
 } from "@mc/core";
-import type { Gql } from "./collectors/github.ts";
-import { projectFields } from "./github-fields.ts";
+import type { Gql } from "../collectors/github.ts";
+import { projectFields } from "./fields.ts";
 
 type FieldName =
   | typeof STAGE_FIELD

@@ -15,7 +15,7 @@ import { ChangeBus } from "../src/bus.ts";
 import type { Gql } from "../src/collectors/github.ts";
 import { commsInboxContext } from "../src/comms.ts";
 import type { CcConfig } from "../src/config.ts";
-import type { Move } from "../src/github-board.ts";
+import type { Move } from "../src/github/board.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { releaseWaitingOperator } from "../src/needs-you-actions.ts";
 import type { Supervisor } from "../src/runtime/supervisor.ts";

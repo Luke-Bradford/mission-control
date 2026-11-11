@@ -23,7 +23,7 @@ import type { CcConfig } from "../src/config.ts";
 import { createEngine, type EngineDeps } from "../src/engine/engine.ts";
 import { externalReviewAsked } from "../src/external-pr-control.ts";
 import { createExternalReviews, externalReviewKey } from "../src/external-reviews.ts";
-import { clearBoardIds, moveCard } from "../src/github-board.ts";
+import { clearBoardIds, moveCard } from "../src/github/board.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { createEvidenceSweep, postPrEvidence } from "../src/pr-evidence/sweep.ts";
 import { createScheduler, realCollectors } from "../src/scheduler.ts";
