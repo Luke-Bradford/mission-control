@@ -118,8 +118,8 @@ import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
-import { loopPause } from "./loop-pause.ts";
-import { loopTries } from "./loophistory.ts";
+import { loopTries } from "./loop/history.ts";
+import { loopPause } from "./loop/pause.ts";
 import { reviewCheckFor } from "./review-check.ts";
 import {
   type PrCache,

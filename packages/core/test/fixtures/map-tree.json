@@ -109,7 +109,7 @@
   { "path": "apps/server/src/guard/trim.ts", "lines": 67 },
   { "path": "apps/server/src/hud.ts", "lines": 1650 },
   { "path": "apps/server/src/local-notifications.ts", "lines": 317 },
-  { "path": "apps/server/src/loophistory.ts", "lines": 206 },
+  { "path": "apps/server/src/loop/history.ts", "lines": 206 },
   { "path": "apps/server/src/machine-capacity.ts", "lines": 118 },
   { "path": "apps/server/src/main.ts", "lines": 882 },
   { "path": "apps/server/src/map/conflicts.ts", "lines": 338 },
