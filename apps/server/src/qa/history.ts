@@ -1,7 +1,7 @@
 import type { QaHistoryPage, QaNativeHistory } from "@mc/core";
-import type { CcConfig } from "./config.ts";
-import { qaNativeIdentity } from "./qa-history-key.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import type { Store } from "../store.ts";
+import { qaNativeIdentity } from "./history-key.ts";
 
 const LIMITATIONS = [
   "History covers retained saved reports and completed native review records, including older heads and merged or closed PRs. It is not current deployment readiness.",
