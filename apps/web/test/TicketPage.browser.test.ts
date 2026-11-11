@@ -26,6 +26,21 @@ const events = (n: number) =>
     to: "inco-1",
     label: null,
     text: i === 0 ? LONG : `message ${i}`,
+    senderKind: i % 2 === 0 ? "flight" : "seat",
+  }));
+const questions = (n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    id: n - i,
+    runId: "r1",
+    seat: "inco-1",
+    text: i === 0 ? LONG : `Question ${n - i}: which cache?`,
+    at: 1_800_000_000_000 - i * 90_000,
+    passedAt: null,
+    asideAt: i === 3 ? 1_800_000_000_000 : null,
+    closedAt: null,
+    answer: i % 2 === 1 ? LONG : null,
+    answerAt: i % 2 === 1 ? 1_800_000_000_000 : null,
+    answerBasis: i % 2 === 1 ? "Matches the spec." : null,
   }));
 const ticket = (n: number) => ({
   repoId: "shop-app",
@@ -49,6 +64,8 @@ const ticket = (n: number) => ({
   prs: [],
   timeline: events(n),
   nextBefore: null,
+  questions: n > 0 ? questions(8) : [],
+  questionsNextBefore: null,
 });
 const qaPr = {
   number: 40,
@@ -116,6 +133,28 @@ describeRendered("The ticket page in a browser", () => {
             expect(
               (await page.reachable(".tk-event", ".tk-timeline .pb")).every(Boolean),
               `${label} events`,
+            ).toBe(true);
+            // a message's tag and text share a row, so the text is not pushed under the tag
+            const tag = await page.box(".tk-event .comms-sender-tag");
+            const text = await page.box(".tk-event .comms-sender-tag ~ .tk-line");
+            expect(Math.abs(text.y - tag.y), `${label} tag and text on one row`).toBeLessThan(
+              tag.height,
+            );
+            expect(text.x, `${label} text after the tag`).toBeGreaterThanOrEqual(tag.x + tag.width);
+            // questions and timeline both show something on the first screen, each scrolling inside
+            const firstQuestion = await page.box(".tk-question");
+            const firstEvent = await page.box(".tk-timeline .tk-event");
+            expect(
+              firstQuestion.y + firstQuestion.height,
+              `${label} first question`,
+            ).toBeLessThanOrEqual(height);
+            expect(
+              firstEvent.y + firstEvent.height,
+              `${label} first timeline row`,
+            ).toBeLessThanOrEqual(height);
+            expect(
+              (await page.unclipped(".tk-questions .pb")).every(Boolean),
+              `${label} questions`,
             ).toBe(true);
             const sums = await page.boxes(".tk-more > summary");
             expect(sums.length, label).toBeGreaterThan(0);
