@@ -89,7 +89,7 @@ describe("trimMain", () => {
       expect(JSON.parse(readFileSync(file, "utf8"))).toEqual(response);
     });
 
-    it("a large failed Bash call (PostToolUseFailure) is left whole: its exit line and output stay as the CLI wrote them", () => {
+    it("the hook leaves a large failed Bash call (PostToolUseFailure) as the CLI cut it and keeps nothing", () => {
       const error = `Exit code 2\n${"error: nope\n".repeat(20_000)}`;
       const event = bash({
         hook_event_name: "PostToolUseFailure",

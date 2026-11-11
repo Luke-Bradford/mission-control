@@ -9,8 +9,8 @@ duplicate #1567 (audit figures).
 
 | Path | Success | Failure |
 |---|---|---|
-| Claude CLI 2.1.322 | The CLI returns at most `bashOutputMaxChars` (default 30000, clamped to 4000–128000) inline. The rest is saved to a file and the seat gets a short preview and the path. The seat's Read tool opens that file. | Not capped by this setting (it names successful output only). The output and the `Exit code N` line arrive whole. |
-| Hub trim hook (#1045, Claude seats) | A result over 32 KB is cut to 8 KB head, 4 KB tail (from the last `FAIL` or `error` line for Bash) and a marker naming `<run temp root>/tool-output/<tool_use_id>.txt`, which holds the whole result. | Not run: it is a `PostToolUse` hook and a failed call fires `PostToolUseFailure`. Failure output is #1503's. |
+| Claude CLI 2.1.322 | The CLI returns at most `bashOutputMaxChars` (default 30000, clamped to 4000–128000) inline. The rest is saved to a file and the seat gets a short preview and the path. The seat's Read tool opens that file. | Not covered by this setting, and not saved. The CLI cuts a large failure to about 30000 characters with a middle cut, so the end (a build's or test's final summary) can be lost and there is no path to get it back. The `Exit code N` line stays first. (Observed in a seat: a 49 KB failing command lost its last 2,700 lines and its last line.) |
+| Hub trim hook (#1045, Claude seats) | A result over 32 KB is cut to 8 KB head, 4 KB tail (from the last `FAIL` or `error` line for Bash) and a marker naming `<run temp root>/tool-output/<tool_use_id>.txt`, which holds the whole result. | Not run: it is a `PostToolUse` hook and a failed call fires `PostToolUseFailure`. Retention for failures is by seat guidance (below); check output is #1503's. |
 | Codex seats | No hub trim hook (the folder is not made for Codex). The Codex CLI (0.154.0) has its own `tool_output_token_limit` setting; the hub does not set it. | Not evidenced. |
 
 `BASH_MAX_OUTPUT_LENGTH` is not the cap. In 2.1.322 it only sizes the read-back window; the cap
@@ -57,17 +57,26 @@ Claude setting reaches it.
 
 ## How a seat reads
 
-- Search before reading: `rg -n -C 2 '<pattern>' <path>` names the lines; add `-g '<glob>'` or a
-  directory to bound it. Do not pipe to `head` when the question is "is there any match or
-  error": `head` hides what comes after. Count first (`rg -c`), then read.
-- Read a file in ranges: the Read tool with `offset` and `limit`, or `sed -n 'START,ENDp'`, for
-  the lines the search found. Read the whole file only when it is short or the whole is the task.
+- Search with the Grep tool, not shell `rg` (not installed in the seat shell): `pattern`, `path`
+  or `glob`, `-C 2` for context, `output_mode: count` first, and `head_limit` to bound it. Do not
+  cut a shell search short with `head` when the question is "is there any match or error": it
+  hides what comes after.
+- Read a file in ranges: the Read tool with `offset` and `limit`, for the lines the search found.
+  `sed -n 'START,ENDp'` is fine for files inside the worktree. Read the whole file only when it
+  is short or the whole is the task.
 - Make a command print a summary, not a dump: `python3` that prints a count, the keys and the
   few rows that matter; not the whole structure.
+- A command that might print a lot and fail (a build, a long grep, a python3 script): send the
+  output to a file and keep the status, then search or read the file.
+  `cmd > "$TMPDIR/<name>.log" 2>&1; echo "exit=$?"`. That keeps all of the output and the exit
+  status and returns a line. Do this rather than hoping the end of a failure survives the CLI's cut.
 - A result with `[mc: N bytes cut; the full output is at <path>]` or the CLI's saved-file path
-  is complete there: Read the path with `offset` and `limit`, or `rg` it. Do not re-run the
-  command to see more.
-- A failure's output arrives whole. Read it from the top; the `Exit code` line is first.
+  is complete there. Open it with the Read tool (`offset`, `limit`) or the Grep tool; shell
+  commands cannot open the CLI's saved file (its folder is outside the sandbox's reads). Do not
+  re-run the command to see more.
+- A large failure is cut to about 30000 characters in the middle and is not saved. The `Exit
+  code` line stays first but the end may be missing. Use the log-file form above for any command
+  that might fail loudly.
 
-The role briefs (`roles/*.md`) are outside the server and docs area; carrying this section into
-them needs FLIGHT's clearance.
+The role briefs (`roles/*.md`) do not yet point here: they are hard-rule files outside the server and
+docs area, so adding this section to them waits for FLIGHT.
