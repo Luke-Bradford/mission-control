@@ -126,7 +126,7 @@ import { previewBrowserInHelper } from "./preview-browser.ts";
 import { resolvePreviewRepo } from "./preview-repo.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./previews.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
-import { createQaReports } from "./qa-reports.ts";
+import { createQaReports } from "./qa/reports.ts";
 import {
   prepareQueueReorderSnapshot,
   type QueueReorderDeps,

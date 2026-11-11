@@ -225,7 +225,7 @@ import {
   previewRequest,
 } from "../preview-browser.ts";
 import type { ProfilesError } from "../profiles.ts";
-import { createQaReports, QaReportError, type QaReportService } from "../qa-reports.ts";
+import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,

@@ -11,7 +11,7 @@ import type { CcConfig } from "../src/config.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
-import { createQaReports, qaReportMarkdown } from "../src/qa-reports.ts";
+import { createQaReports, qaReportMarkdown } from "../src/qa/reports.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
 
