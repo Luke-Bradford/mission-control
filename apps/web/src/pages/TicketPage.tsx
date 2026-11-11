@@ -1,4 +1,4 @@
-import type { TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
+import type { ItemDiscussion, TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, apiGet } from "../api.ts";
 import { useTz } from "../clock.ts";
@@ -24,6 +24,39 @@ import {
 import "../ticket/ticket.css";
 
 const dash = "—";
+
+/** What was said on a question: read-only, fetched when opened. Replying happens on Needs you. */
+function QuestionConversation({ itemKey, tz }: { itemKey: string; tz: ReturnType<typeof useTz> }) {
+  const [open, setOpen] = useState(false);
+  const res = useResource<ItemDiscussion>(open ? RESOURCES.discussion(itemKey) : null);
+  const messages = res.data?.messages;
+  return (
+    <details className="tk-convo" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>Conversation</summary>
+      {res.error && !messages ? (
+        <p className="crit-t s">Could not load the conversation.</p>
+      ) : !messages ? (
+        <p className="muted">Loading…</p>
+      ) : messages.length === 0 ? (
+        <p className="muted">No messages yet.</p>
+      ) : (
+        <ol className="tk-convo-list" aria-label="Conversation on this question">
+          {messages.map((m) => (
+            <li key={m.id}>
+              <span className="tk-when">
+                {tz ? `${dayMonth(m.at, tz)} ${hhmm(m.at, tz)}` : dash}
+              </span>
+              <strong>{m.role === "operator" ? "YOU" : "FLIGHT"}</strong>
+              <p className="tk-text">
+                <MentionText text={m.text} />
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </details>
+  );
+}
 
 function Field({ label, value }: { label: string; value: string | null }) {
   return (
@@ -256,7 +289,7 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
             </p>
           </div>
         </Panel>
-        <div className="tk-main">
+        <div className={`tk-main${questions.length > 0 ? " has-questions" : ""}`}>
           {questions.length > 0 && (
             <Panel id="questionsP" title="Questions" sub="newest first" className="tk-questions">
               <div className="pb scroll">
@@ -285,6 +318,9 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
                             </p>
                           )}
                         </div>
+                      )}
+                      {q.discussionKey && (
+                        <QuestionConversation itemKey={q.discussionKey} tz={tz} />
                       )}
                     </li>
                   ))}

@@ -77,6 +77,7 @@ const qaPr = {
 const SCENARIOS = {
   empty: ticket(0),
   many: ticket(50),
+  manyNoQuestions: { ...ticket(50), questions: [] },
   closedQa: {
     ...ticket(0),
     state: "closed",
@@ -162,6 +163,14 @@ describeRendered("The ticket page in a browser", () => {
               sums.every((b) => b.height >= 24 && b.width >= 24),
               `${label} targets`,
             ).toBe(true);
+          } else if (name === "manyNoQuestions") {
+            expect(
+              (await page.reachable(".tk-event", ".tk-timeline .pb")).every(Boolean),
+              `${label} events`,
+            ).toBe(true);
+            // with no Questions panel, the lone Timeline takes the whole column budget
+            const pb = await page.box(".tk-timeline .pb");
+            expect(pb.height, `${label} lone timeline height`).toBeGreaterThan(height * 0.6);
           } else if (name === "empty") {
             await page.box(".tk-timeline .muted"); // the empty line is shown
           }

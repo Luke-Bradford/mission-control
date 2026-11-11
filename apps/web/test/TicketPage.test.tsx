@@ -384,6 +384,7 @@ describe("questions on the ticket", () => {
     runId: "r1",
     seat: "inco-1",
     text: `Question ${id}: which cache?`,
+    discussionKey: null,
     at: 8_000,
     passedAt: null,
     asideAt: null,
@@ -449,6 +450,67 @@ describe("questions on the ticket", () => {
     expect(fn).toHaveBeenCalledWith(`${PATH}?questionsBefore=QCUR`, expect.anything());
     expect(screen.getByText("Question 10: which cache?")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Load older questions" })).toBeNull();
+  });
+
+  it("shows the conversation on a question, read-only, when it has messages", async () => {
+    const key = "question:shop-app#3349:1";
+    stubFetch({
+      "/api/config": CONFIG,
+      [PATH]: withQuestions([question(1, { discussionKey: key })]),
+      [`/api/attention/${encodeURIComponent(key)}/discussion`]: {
+        id: "d1",
+        itemKey: key,
+        version: "v1",
+        messages: [
+          {
+            id: "m1",
+            itemKey: key,
+            correlationId: "c1",
+            role: "operator",
+            text: "Which one?",
+            at: 8_100,
+          },
+          {
+            id: "m2",
+            itemKey: key,
+            correlationId: "c1",
+            role: "flight",
+            text: "The LRU one.",
+            at: 8_200,
+          },
+        ],
+      },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const p = await panel();
+    fireEvent.click(within(p).getByText("Conversation"));
+    expect(await within(p).findByText("Which one?")).toBeTruthy();
+    expect(within(p).getByText("The LRU one.")).toBeTruthy();
+    expect(within(p).queryByRole("textbox")).toBeNull();
+  });
+
+  it("says a question's conversation has no messages when it has none", async () => {
+    const key = "question:shop-app#3349:2";
+    stubFetch({
+      "/api/config": CONFIG,
+      [PATH]: withQuestions([question(2, { discussionKey: key })]),
+      [`/api/attention/${encodeURIComponent(key)}/discussion`]: {
+        id: "d2",
+        itemKey: key,
+        version: "v0",
+        messages: [],
+      },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const p = await panel();
+    fireEvent.click(within(p).getByText("Conversation"));
+    expect(await within(p).findByText("No messages yet.")).toBeTruthy();
+  });
+
+  it("offers no conversation for a question without a discussion key", async () => {
+    show(withQuestions([question(3)]));
+    const p = await panel();
+    expect(within(p).queryByText("Conversation")).toBeNull();
   });
 
   it("leaves the Questions panel out when the server sends none", async () => {
