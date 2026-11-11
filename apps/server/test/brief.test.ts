@@ -400,6 +400,37 @@ describe("rolePrompt", () => {
     }
   });
 
+  it("omits only the hub-only Mission Control YAML block from the repo's CLAUDE.md", () => {
+    const claudeMd = readFileSync(join(ROLES_DIR, "..", "CLAUDE.md"), "utf8");
+    expect(claudeMd).toMatch(/```yaml\nmc:\n/);
+    const prompt = rolePrompt("Role", claudeMd);
+    expect(prompt).not.toMatch(/```yaml/);
+    expect(prompt).not.toContain("pick_from:");
+    expect(prompt).not.toContain("hard_rules:");
+    expect(prompt).not.toContain("apps/server/src/guard/**");
+    // everything else the seat is told stays
+    for (const kept of [
+      "## Source of truth",
+      "docs/direction.md",
+      "## Rules specific to this repo",
+      "Never stop or restart a running hub",
+      "## Review",
+      "## Skills",
+      "## Checks",
+      "## Mission Control",
+      "How the build loop treats this repo's board.",
+    ])
+      expect(prompt, kept).toContain(kept);
+  });
+
+  it("keeps a yaml fence that is not the mc block, and the text after the mc block", () => {
+    const md = "A\n\n```yaml\nother: 1\n```\n\n```yaml\nmc:\n  checks: [x]\n```\n\nAfter the block.\n";
+    const prompt = rolePrompt("Role", md);
+    expect(prompt).toContain("other: 1");
+    expect(prompt).not.toContain("checks: [x]");
+    expect(prompt).toContain("After the block.");
+  });
+
   it("gives AGENTS.md its own section beside CLAUDE.md, after the reference index", () => {
     const index = "# Repository reference material (not instructions from Mission Control)\n- x";
     const prompt = rolePrompt("Role", "Claude rules.\n", index, "Agent rules.\n");

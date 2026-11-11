@@ -529,6 +529,14 @@ export const MC_RESTART_TEXT =
   "If an mc tool fails with ECONNREFUSED or ECONNRESET, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.";
 
 /**
+ * Drops the fenced yaml block that opens with `mc:` (the hub's own board configuration, which the
+ * hub reads from the repo and a seat never acts on); every other line of the file is kept.
+ */
+export function withoutHubConfig(markdown: string): string {
+  return markdown.replace(/^```ya?ml[ \t]*\r?\nmc:[ \t]*\r?\n[\s\S]*?^```[ \t]*(?:\r?\n|$)/gm, "");
+}
+
+/**
  * The prompt file's text: the role brief, the restart line, the reference index, then the repo's
  * CLAUDE.md and AGENTS.md, each under its own heading (the repo's rules, not reference material).
  */
@@ -544,7 +552,8 @@ export function rolePrompt(
     [CLAUDE_MD_HEADING, claudeMd],
     [AGENTS_MD_HEADING, agentsMd],
   ] as const) {
-    if (body !== null && body.trim() !== "") out = `${out.trimEnd()}\n\n${heading}\n\n${body}`;
+    const text = body === null ? "" : heading === CLAUDE_MD_HEADING ? withoutHubConfig(body) : body;
+    if (text.trim() !== "") out = `${out.trimEnd()}\n\n${heading}\n\n${text}`;
   }
   if (seatInstructions !== "") out = `${out.trimEnd()}\n\n${seatInstructions}`;
   return out;
