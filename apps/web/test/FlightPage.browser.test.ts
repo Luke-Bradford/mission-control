@@ -181,7 +181,7 @@ describeRendered("FLIGHT page in a browser", () => {
           const r = await page.evaluate(() => {
             const doc = document.documentElement;
             const end = document
-              .querySelector<HTMLElement>("#orders button")
+              .querySelector<HTMLElement>("#ordersP .fp-end")
               ?.getBoundingClientRect();
             const panel = document.getElementById("ordersP");
             return {

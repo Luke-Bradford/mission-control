@@ -54,9 +54,9 @@ export function FlightPage() {
         >
           Records
         </a>
+        <StandingOrders />
       </div>
       <StatusBand run={run} view={view} now={now} />
-      <StandingOrders />
       <div className="fp-mid">
         <section className="fp-panel fp-self-start" id="doingP" aria-labelledby="doingH">
           <h2 className="fp-head" id="doingH">

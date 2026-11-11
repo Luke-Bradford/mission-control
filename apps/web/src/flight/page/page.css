@@ -18,8 +18,9 @@
 .fp-title {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-4);
+  gap: var(--sp-3) var(--sp-4);
   min-height: var(--sp-5);
 }
 .fp-title h1 {
@@ -525,4 +526,30 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
   overflow-wrap: anywhere;
+}
+
+/* Standing orders sit in the title block: on a row of their own, or, on a wide short screen, in the
+   title's own row so they cost the blockers no height. */
+.fp-title > .fp-orders {
+  flex: 1 0 100%;
+}
+@media (min-width: 1500px) and (max-height: 800px) {
+  .fp-title {
+    flex-wrap: nowrap;
+  }
+  .fp-title > .fp-orders {
+    flex: 1 1 0;
+    min-width: 0;
+    order: 1;
+  }
+  .fp-title > .fp-records {
+    order: 2;
+  }
+  .fp-title > .fp-q {
+    flex: 0 8 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 }
