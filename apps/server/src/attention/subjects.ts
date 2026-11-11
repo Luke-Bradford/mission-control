@@ -1,5 +1,5 @@
 import type { PullRequestView, Run } from "@mc/core";
-import type { Store } from "./store.ts";
+import type { Store } from "../store.ts";
 
 /** A completed verdict applies only to its recorded head; a missing head cannot prove approval. */
 export function pendingRunApproval(store: Store, run: Run, knownPr?: PullRequestView): boolean {
