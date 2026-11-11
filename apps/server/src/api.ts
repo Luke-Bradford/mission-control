@@ -365,8 +365,8 @@ import {
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
+import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
-import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import {
   PREVIEW_ACTIVITY_HEADER,
   PreviewHubError,

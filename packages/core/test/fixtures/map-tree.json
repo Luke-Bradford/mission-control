@@ -129,7 +129,7 @@
   { "path": "apps/server/src/operator.ts", "lines": 26 },
   { "path": "apps/server/src/overview.ts", "lines": 349 },
   { "path": "apps/server/src/path-grants.ts", "lines": 32 },
-  { "path": "apps/server/src/pr-uat.ts", "lines": 124 },
+  { "path": "apps/server/src/pr/uat.ts", "lines": 124 },
   { "path": "apps/server/src/preview/repo.ts", "lines": 42 },
   { "path": "apps/server/src/preview/previews.ts", "lines": 236 },
   { "path": "apps/server/src/profiles.ts", "lines": 362 },
