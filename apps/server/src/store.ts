@@ -947,6 +947,12 @@ type RepoTable = keyof typeof REPO_TABLES;
 
 export type BoardMoveState = "pending" | "done" | "failed";
 
+/** A run's fields FLIGHT's cost and wait figures read, with its digest's attempt usage. */
+export interface FinancialRun
+  extends Pick<Run, "id" | "agentId" | "startedAt" | "endedAt" | "status" | "costUsd"> {
+  attemptUsage: { at: number | null; tokens: number }[];
+}
+
 /** One Status move of a run's card; `detail` is why it failed. */
 export interface BoardMove {
   id: number;
@@ -3023,9 +3029,13 @@ export class Store {
    * `sinceMs`. Newest first.
    */
   runsOverlapping(sinceMs: number, untilMs: number): Run[] {
-    const rows = this.db
+    return this.overlappingRuns("*", sinceMs, untilMs).map(toRun);
+  }
+
+  private overlappingRuns(columns: string, sinceMs: number, untilMs: number): Row[] {
+    return this.db
       .prepare(
-        `SELECT * FROM runs WHERE started_at < ?
+        `SELECT ${columns} FROM runs WHERE started_at < ?
            AND (ended_at > ?
              OR (ended_at IS NULL AND status = ? AND started_at > ?)
              OR (ended_at IS NULL AND started_at >= ?))
@@ -3038,7 +3048,48 @@ export class Store {
         untilMs - MAX_OPEN_RUN_AGE_MS,
         sinceMs,
       ) as Row[];
-    return rows.map(toRun);
+  }
+
+  /**
+   * The run and attempt-usage fields FLIGHT's cost and wait figures read, for `agentIds`' runs
+   * overlapping [since, until) (same rule and order as `runsOverlapping`). Reads only the scalar
+   * columns and each digest's usage timestamps and tokens, never the whole digest or run row.
+   */
+  financialRuns(sinceMs: number, untilMs: number, agentIds: ReadonlySet<string>): FinancialRun[] {
+    const runs = this.overlappingRuns(
+      "id, agent_id, started_at, ended_at, status, cost_usd",
+      sinceMs,
+      untilMs,
+    )
+      .filter((r) => agentIds.has(r.agent_id as string))
+      .map(
+        (r): FinancialRun => ({
+          id: r.id as string,
+          agentId: r.agent_id as string,
+          startedAt: r.started_at as number,
+          endedAt: r.ended_at as number | null,
+          status: r.status as Run["status"],
+          costUsd: r.cost_usd as number | null,
+          attemptUsage: [],
+        }),
+      );
+    const byId = new Map(runs.map((r) => [r.id, r]));
+    const ids = [...byId.keys()];
+    for (let i = 0; i < ids.length; i += DIGEST_BATCH) {
+      const batch = ids.slice(i, i + DIGEST_BATCH);
+      const rows = this.statement(
+        `SELECT d.run_id AS run_id,
+                json_extract(u.value, '$.at') AS at,
+                json_extract(u.value, '$.tokens') AS tokens
+         FROM run_digests d,
+              json_each(CASE WHEN json_valid(d.digest) THEN d.digest ELSE '{}' END,
+                        '$.attemptUsage') u
+         WHERE d.run_id IN (${batch.map(() => "?").join(", ")})
+         ORDER BY d.run_id, u.key`,
+      ).all(...batch) as { run_id: string; at: number | null; tokens: number }[];
+      for (const r of rows) byId.get(r.run_id)?.attemptUsage.push({ at: r.at, tokens: r.tokens });
+    }
+    return runs;
   }
 
   /**
