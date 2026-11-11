@@ -1646,6 +1646,14 @@ describe("scheduler", () => {
       t += 60_000;
       await s.tick("machine");
       expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeUndefined();
+
+      // A new episode is a fresh item, so it wakes FLIGHT again.
+      diskFreeGb.push(4.5);
+      reading = diskFreeGb.length - 1;
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)?.at).toBe(t);
+      expect(state().wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
     });
 
     it("raises one budget-brake alert on the minute tick and lifts it when the week resets", async () => {
