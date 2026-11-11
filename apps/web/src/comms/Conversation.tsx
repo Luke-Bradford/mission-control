@@ -389,7 +389,7 @@ function MessagePane({
             >
               <div className="comms-message-meta">
                 <span>{time(message.at)}</span>
-                <SenderTag message={message} />
+                <SenderTag from={message.from} senderKind={message.senderKind} />
                 <CommsEnd id={message.from} />
                 {message.label && (
                   <Pill tone={message.label === "blocker" ? "crit" : "neutral"}>

@@ -70,8 +70,10 @@ describe("sender tags", () => {
     expect(tagOf("m1").textContent).toBe(seatName(row.id, [row]));
   });
 
-  it("tags an older message with no stored kind from its sender", async () => {
+  it("shows no new tag on an older message with no stored kind, only its end label", async () => {
     await show([message("m1", "CAPCOM", null)]);
-    expect(tagOf("m1").textContent).toBe("YOU");
+    const bubble = document.getElementById("comms-message-m1") as HTMLElement;
+    expect(within(bubble).queryByTestId("sender-tag")).toBeNull();
+    expect(within(bubble).getByText("You")).toBeTruthy();
   });
 });

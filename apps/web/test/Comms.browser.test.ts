@@ -9,7 +9,7 @@ import {
   browserSession,
   describeRendered,
 } from "./browserRunner.ts";
-import { CONFIG, crewRow, NOW, seatRow } from "./fixtures.ts";
+import { boardItem, CONFIG, crewRow, NOW, REPOS, seatRow } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR ?? join(process.env.TMPDIR ?? "/tmp", "comms-shots");
@@ -138,8 +138,21 @@ const flightPage = {
   cursor: "comms:6",
   unread: 0,
 };
+// A busy Tickets list: 50 tickets with messages, some with long titles.
+const TALKED = Array.from({ length: 50 }, (_, i) => 3000 + i);
+const ticketTitle = (n: number) =>
+  n % 5 === 0
+    ? `Ticket ${n}: a very long title that runs past the width of the left column and must wrap or clip`
+    : `Ticket ${n}`;
 const flightApi = {
   ...api,
+  "/api/repos": REPOS,
+  "/api/boards/shop-app": TALKED.map((n) => boardItem({ issueNumber: n, title: ticketTitle(n) })),
+  "/api/boards/site-builder": [],
+  "/api/comms/ticket-counts": {
+    tickets: TALKED.map((n, i) => ({ ticket: `shop-app#${n}`, count: i + 1 })),
+    unassignedCount: 0,
+  },
   "/api/crew?shape=summary": {
     rows: [seatRow({ id: "flight-1", index: 0 }), ...seats],
     firstRunToday: null,
@@ -206,6 +219,21 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
       expect(tickets?.boxBottom).toBeLessThanOrEqual((tickets?.panelBottom ?? 0) + 0.5);
       expect(tickets?.panelTop).toBeGreaterThanOrEqual((tickets?.navBottom ?? 0) - 0.5);
       expect(tickets?.boxWidth).toBeGreaterThan(120);
+      // the busy list shows rows, each with its message count, and no row runs past the panel
+      const listed = await page.evaluate(() => {
+        const panel = document.querySelector(".comms-tickets")?.getBoundingClientRect();
+        const items = [...document.querySelectorAll(".comms-ticket-list li")];
+        return {
+          rows: items.length,
+          counts: items.filter((li) => /\d+ messages?/.test(li.textContent ?? "")).length,
+          overflow: items.filter((li) =>
+            panel ? li.getBoundingClientRect().right > panel.right + 0.5 : true,
+          ).length,
+        };
+      }, undefined);
+      expect(listed.rows).toBeGreaterThan(5);
+      expect(listed.counts).toBe(listed.rows);
+      expect(listed.overflow).toBe(0);
       // the box ends inside the panel on both sides, so its border and focus ring are not clipped
       expect(tickets?.boxRight).toBeLessThanOrEqual((tickets?.panelRight ?? 0) - 0.5);
       expect(tickets?.boxLeft).toBeGreaterThanOrEqual((tickets?.panelLeft ?? 0) + 0.5);

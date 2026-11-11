@@ -1163,6 +1163,74 @@ describe("the record, not a place to answer", () => {
   });
 });
 
+describe("FLIGHT and the controller, and the hub's conversation", () => {
+  const FLIGHT = crewRow({ id: "flight-1", kind: "crew", role: "FLIGHT" });
+  const base = (contacts: unknown[]) => ({
+    "/api/config": CONFIG,
+    "/api/attention": [],
+    "/api/crew?shape=summary": { rows: [FLIGHT], firstRunToday: null },
+    "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+    "/api/comms/crew": { messages: [] },
+    "/api/comms/flight": { messages: [], unread: 0 },
+    "/api/comms/mentions": { mentions: [] },
+    "/api/comms/pins": { messages: [] },
+    "/api/comms/agents/flight-1?summary=1": { messages: [], inbox: [], contacts },
+    "/api/comms/agents/flight-1": { messages: [], inbox: [], contacts },
+    "/api/repos": [],
+    "/api/comms/ticket-counts": { tickets: [], unassignedCount: 0 },
+  });
+  const contact = (id: string, hasMessages: boolean) => ({
+    id,
+    hasMessages,
+    count: hasMessages ? 264 : 0,
+    unread: 0,
+    lastMessage: null,
+  });
+
+  it("shows FLIGHT and the controller, linked to that conversation, when there are controller messages", async () => {
+    stubFetch(base([contact("CONTROLLER", true)]));
+    render(<Comms item={null} view={{ kind: "flight" }} />);
+    const entry = await screen.findByRole("button", { name: /FLIGHT and the controller/ });
+    fireEvent.click(entry);
+    expect(window.location.pathname).toBe("/comms/agents/flight-1/contacts/CONTROLLER");
+  });
+
+  it("leaves the entry out when there are no controller messages", async () => {
+    stubFetch(base([contact("CONTROLLER", false)]));
+    render(<Comms item={null} view={{ kind: "flight" }} />);
+    await screen.findByRole("button", { name: /FLIGHT and you/ });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /FLIGHT and the controller/ })).toBeNull(),
+    );
+  });
+
+  it("opens the hub's conversation with its stored messages", async () => {
+    const note = {
+      id: "comms:5",
+      at: NOW - MIN,
+      from: "MC",
+      to: "flight-1",
+      text: "CI failed on 341f108 in job web-core.",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+      senderKind: "hub",
+    };
+    stubFetch({
+      ...base([contact("MC", true)]),
+      "/api/comms/agents/flight-1/contacts/MC": { messages: [note] },
+    });
+    render(<Comms item={null} view={{ kind: "contact", agentId: "flight-1", contactId: "MC" }} />);
+    expect(await screen.findByText("CI failed on 341f108 in job web-core.")).toBeTruthy();
+    expect(screen.getByTestId("sender-tag").textContent).toBe("HUB");
+  });
+});
+
 describe("current crew and Earlier", () => {
   const old = {
     id: "comms:91",

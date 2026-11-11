@@ -1,10 +1,21 @@
-import type { CommsAgentResponse, CommsMessagesResponse, CrewRow } from "@mc/core";
+import {
+  COMMS_CONTROLLER,
+  type CommsAgentResponse,
+  type CommsMessagesResponse,
+  type CrewRow,
+} from "@mc/core";
 import { callSign, seatStatus } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { plural } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
-import { type CommsView, commsAgentPath, commsCrewPath, commsFlightPath } from "../router.ts";
+import {
+  type CommsView,
+  commsAgentPath,
+  commsContactPath,
+  commsCrewPath,
+  commsFlightPath,
+} from "../router.ts";
 
 /** The short area label belongs in the compact nav; path globs belong in seat detail. */
 export function commsAgentRole(row: CrewRow): string {
@@ -65,6 +76,37 @@ function CountBadges({ direct = 0, flight = 0 }: { direct?: number; flight?: num
   );
 }
 
+/** FLIGHT's conversation with the controller; offered only when it has stored messages. */
+function ControllerNavRow({
+  flightId,
+  view,
+  onNavigate,
+}: {
+  flightId: string;
+  view: CommsView;
+  onNavigate: (path: string) => void;
+}) {
+  const contact = useResource<CommsAgentResponse>(RESOURCES.commsNav(flightId)).data?.contacts.find(
+    (c) => c.id === COMMS_CONTROLLER,
+  );
+  if (!contact?.hasMessages) return null;
+  const active =
+    view.kind === "contact" && view.agentId === flightId && view.contactId === COMMS_CONTROLLER;
+  return (
+    <button
+      type="button"
+      className={`comms-nav-top${active ? " on" : ""}`}
+      onClick={() => onNavigate(commsContactPath(flightId, COMMS_CONTROLLER))}
+    >
+      <i aria-hidden="true" />
+      <span className="comms-nav-agent">
+        <b>FLIGHT and the controller</b>
+        <small title="A message count, not unread.">{plural(contact.count, "message")}</small>
+      </span>
+    </button>
+  );
+}
+
 export function CommsNav({
   rows,
   flightId,
@@ -109,6 +151,7 @@ export function CommsNav({
           <CountBadges flight={flight?.unread} />
         </span>
       </button>
+      {flightId && <ControllerNavRow flightId={flightId} view={view} onNavigate={onNavigate} />}
       <button
         type="button"
         className={`comms-nav-top${view.kind === "crew" ? " on" : ""}`}
