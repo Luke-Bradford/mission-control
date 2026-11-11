@@ -131,7 +131,7 @@ import {
   watchStartRefusedText,
   wrapExternalText,
 } from "@mc/core";
-import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
+import { accountBindingProblem, codexProfile } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import type { ChangeBus } from "../bus.ts";
@@ -216,6 +216,7 @@ import {
   ticketBrief,
   transferBrief,
   watchBrief,
+  withoutHubConfig,
 } from "./brief.ts";
 import {
   cloneGitDir,
@@ -1895,7 +1896,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           section: "rules",
           bytes:
             textBytes(references) +
-            block(CLAUDE_MD_HEADING, repoDocs?.claudeMd) +
+            // the text rolePrompt carries, not the raw file
+            block(
+              CLAUDE_MD_HEADING,
+              repoDocs?.claudeMd == null ? null : withoutHubConfig(repoDocs.claudeMd),
+            ) +
             block(AGENTS_MD_HEADING, repoDocs?.agentsMd),
         },
       ];

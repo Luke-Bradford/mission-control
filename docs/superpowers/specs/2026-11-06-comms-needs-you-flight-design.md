@@ -504,7 +504,7 @@ Every message records a sender kind: `operator`, `controller`, `flight`, `seat` 
 - FLIGHT's actions through its operator tool are recorded as FLIGHT's.
 - The hub's own messages get kind `hub`. Today some are sent as `MC` and some as `CAPCOM`. Examples, where the hub is the sender:
   `apps/server/src/crew-apply.ts:421`, `apps/server/src/engine/engine.ts:1226`,
-  `apps/server/src/decision-defaults.ts:38` and `apps/server/src/instruction-notices.ts:44`. Every
+  `apps/server/src/decision-defaults.ts:38` and `apps/server/src/instructions/notices.ts:44`. Every
   such place changes.
 - Messages stored before this change keep their old sender.
 - Rooms will add a sixth kind, for an agent on another hub.

@@ -1,12 +1,12 @@
 import { type InstructionAuthor, OPERATOR_HEADER, type StandingInstructionInput } from "@mc/core";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { AppDeps } from "./api.ts";
-import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
-import { seatFocus } from "./focus.ts";
-import { announceInstruction } from "./instruction-notices.ts";
-import { operatorTokenMatches } from "./operator.ts";
-import { InstructionError, InstructionInput, OrderInput } from "./standing-instructions.ts";
+import type { AppDeps } from "../api.ts";
+import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../flight/operator-call.ts";
+import { seatFocus } from "../focus.ts";
+import { operatorTokenMatches } from "../operator.ts";
+import { announceInstruction } from "./notices.ts";
+import { InstructionError, InstructionInput, OrderInput } from "./standing.ts";
 
 const id = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 const query = z.strictObject({

@@ -84,7 +84,7 @@ import {
   type TokenUsage,
   UAT_PARK,
 } from "@mc/core";
-import { runAccountId } from "./account-bindings.ts";
+import { runAccountId } from "./accounts/bindings.ts";
 import {
   decisionDefault,
   partitionAttention,
@@ -991,7 +991,7 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 /**
  * Hub stops that only the operator clears, by note key or key prefix: machine capacity
  * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
- * auto-rollback (cli-auto.ts) and a seat's focus import (instruction-notices.ts). hud.test.ts pins
+ * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
  * them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
@@ -1000,7 +1000,7 @@ export const HUB_STOP_KEYS = [
   `${NOTE_KEY}${BUDGET_BRAKE_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
-  // a seat's focus could not be imported: the operator's config to fix (instruction-notices.ts)
+  // a seat's focus could not be imported: the operator's config to fix (instructions/notices.ts)
   `${NOTE_KEY}instruction-focus`,
 ] as const;
 

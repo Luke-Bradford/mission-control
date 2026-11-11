@@ -59,7 +59,6 @@ const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.C
 const CommsChartPage = lazy(() =>
   import("./pages/CommsChartPage.tsx").then((m) => ({ default: m.CommsChartPage })),
 );
-const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
 const Needs = lazy(() => import("./pages/Needs.tsx").then((m) => ({ default: m.Needs })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
@@ -81,7 +80,7 @@ const TITLE = "Mission Control";
 /** The document title in Demo; the same mark as the chip, in the tab. */
 const DEMO_TITLE = `DEMO · ${TITLE}`;
 
-/** The app, remounted on a switch between Live and Demo: page state and the Map start afresh. */
+/** The app, remounted on a switch between Live and Demo so page state starts afresh. */
 export function App(
   props: { onRender?: () => void; onPageRender?: ProfilerOnRenderCallback } = {},
 ) {
@@ -314,9 +313,6 @@ function PageView({ route: r }: { route: Route }) {
       break;
     case "agent":
       page = <Agent id={r.id} />;
-      break;
-    case "map":
-      page = <MapPage repoId={r.repoId} />;
       break;
     case "comms":
       page = <Comms item={r.item} view={r.view} />;

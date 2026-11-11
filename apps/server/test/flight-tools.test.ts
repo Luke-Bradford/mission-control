@@ -158,7 +158,7 @@ import {
 import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
-import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
+import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
 import {
   flightBriefView,
   flightState,
@@ -3688,6 +3688,52 @@ describe("flight_state", () => {
     expect(Object.keys(seen)).toEqual([`ask:${id}`]);
   });
 
+  describe("500 expired waits (#1632)", () => {
+    const waits = async (args: Record<string, unknown>) => {
+      for (let i = 0; i < 500; i++)
+        recordFlightWait(store, `mc#${1000 + i}`, {
+          on: "a long wait",
+          until: NOW - 3 * 24 * 60 * 60_000,
+          at: NOW - 4 * 24 * 60 * 60_000,
+        });
+      const read = JSON.parse((await call("flight_state", args)).text) as {
+        signals: { kind: string; evidence: string }[];
+      };
+      return read.signals.filter((s) => s.kind === "wait_over");
+    };
+
+    it("fold into one summary line with the count", async () => {
+      const over = await waits({});
+      expect(over).toHaveLength(1);
+      expect(over[0]?.evidence).toContain("500 expired waits");
+      expect(JSON.stringify(over).length).toBeLessThan(1000);
+    });
+
+    it("keep a wait that ended an hour ago listed on every read", async () => {
+      recordFlightWait(store, "mc#77", {
+        on: "PR 77 to merge",
+        until: NOW - 3_600_000,
+        at: NOW - 7_200_000,
+      });
+      const keys = async () =>
+        (
+          JSON.parse((await call("flight_state", {})).text) as {
+            signals: { kind: string; key: string }[];
+          }
+        ).signals
+          .filter((s) => s.kind === "wait_over")
+          .map((s) => s.key);
+      await keys();
+      const second = await keys();
+      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
+      expect(second).not.toContain("expired");
+    });
+
+    it("are all listed with full: true", async () => {
+      expect(await waits({ full: true })).toHaveLength(500);
+    });
+  });
+
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -4299,6 +4345,54 @@ describe("promote", () => {
       "Moved mc#7 to Refinement. Recorded in Decided without you.",
     );
     expect(moveCalls[0]?.column).toBe("Refinement");
+  });
+
+  it("flags a private prototype and refuses Ready until it is copied into docs/prototype", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\nPrototype: [working copy](https://private.example/prototype)` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it.each([
+    "https://private.example/docs/prototype/mockup.html",
+    "https://github.com/another/repo/blob/main/docs/prototype/mockup.html",
+  ])("refuses promotion when a private prototype mimics the repository path: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("refuses promotion for a private link listed under a Prototype heading", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\n\n## Prototype\n\nhttps://claude.ai/public/artifacts/abc` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("promotes a ticket that mentions the mockup beside an ordinary link in this repository", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, {
+        body: `${GOOD}\nJudge the page against the mockup and [the system](https://github.com/o/mc/blob/main/docs/design/system.md).`,
+      });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
+  });
+
+  it.each([
+    "https://github.com/o/mc/blob/main/docs/prototype/mockup.html",
+    "https://github.com/o/mc/blob/feature/prototype-polish/docs/prototype/mockup.html",
+    "https://raw.githubusercontent.com/o/mc/feature/prototype-polish/docs/prototype/mockup.html",
+  ])("allows promotion when the prototype URL names this repository: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
   });
 
   it("names only what is missing, and honours the rules' needs", async () => {

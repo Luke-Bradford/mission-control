@@ -1,10 +1,10 @@
 import { COMMS_MC, type InstructionMutation, seatDef } from "@mc/core";
-import type { ChangeBus } from "./bus.ts";
-import { sendComms } from "./comms/index.ts";
-import type { CcConfig } from "./config.ts";
-import { messageUnpausedSeat } from "./crew-pause.ts";
-import type { Supervisor } from "./runtime/supervisor.ts";
-import type { Store } from "./store.ts";
+import type { ChangeBus } from "../bus.ts";
+import { sendComms } from "../comms/index.ts";
+import type { CcConfig } from "../config.ts";
+import { messageUnpausedSeat } from "../crew-pause.ts";
+import type { Supervisor } from "../runtime/supervisor.ts";
+import type { Store } from "../store.ts";
 
 /** The note key prefix of a seat's failed focus import; hud.ts lists it as a hub stop. */
 export const INSTRUCTION_FOCUS_NOTE_PREFIX = "instruction-focus";

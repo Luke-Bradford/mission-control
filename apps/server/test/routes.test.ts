@@ -13,7 +13,7 @@ const ROOT = join(import.meta.dirname, "../../..");
 const API_SRC = join(ROOT, "apps/server/src/api.ts");
 const API_SOURCES = [
   API_SRC,
-  join(ROOT, "apps/server/src/standing-instructions-api.ts"),
+  join(ROOT, "apps/server/src/instructions/api.ts"),
   join(ROOT, "apps/server/src/brief/api.ts"),
 ];
 const WEB_DATA = join(ROOT, "apps/web/src/data.ts");

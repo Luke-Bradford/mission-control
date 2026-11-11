@@ -1,7 +1,7 @@
 import {
   flushInstructionNotices,
   importInstructionFocus as importConfiguredInstructionFocus,
-} from "./instruction-notices.ts";
+} from "./instructions/notices.ts";
 /**
  * Mission Control server: loads config, opens the store, starts the collectors' scheduler and serves
  * the API on 127.0.0.1:7420 (loopback only; mutating routes need the operator token in <data dir>/operator-token).
@@ -94,11 +94,7 @@ import {
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "./machine-capacity.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -207,11 +203,7 @@ export async function main(): Promise<void> {
         capacity: () => {
           const capacityConfig = config.crew?.machineCapacity;
           const c = capacityConfig ?? MACHINE_CAPACITY_DEFAULTS;
-          return machineCapacity(
-            store.machineSamples(machineCapacitySince(Date.now(), c)),
-            Date.now(),
-            c,
-          );
+          return storedMachineCapacity(store, Date.now(), c);
         },
         exists: async (candidate) =>
           await new Promise<boolean>((resolve) => {
