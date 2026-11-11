@@ -6,6 +6,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -142,6 +143,18 @@ it("reads linked worktree objects without changing either checkout", async () =>
     { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
   ]);
   expect(contents(dir)).toEqual(before);
+});
+
+it("accepts a checkout reached through a symlinked directory", async () => {
+  const symlink = `${dir}-link`;
+  symlinkSync(dir, symlink, "dir");
+  try {
+    expect(await strict(new MapConflicts(), symlink, [pr("left", left), pr("right", right)])).toEqual([
+      { file: "file.txt", branches: ["left", "right"], shas: [left, right], prs: [null, null] },
+    ]);
+  } finally {
+    rmSync(symlink, { force: true });
+  }
 });
 
 it("skips a pair whose head the checkout has not fetched, keeping the rest of the snapshot", async () => {
