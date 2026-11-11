@@ -128,7 +128,7 @@ import {
   runSummary,
   runTicket,
   runTicketTitle,
-} from "./runview.ts";
+} from "./run/view.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
 import { transcriptFilePath } from "./transcript/file.ts";

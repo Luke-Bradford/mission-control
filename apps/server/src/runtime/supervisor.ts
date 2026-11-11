@@ -186,7 +186,7 @@ import {
   inheritedHandoffLoop,
   publicHandoff,
   recordRunHandoff,
-} from "../run-handoffs.ts";
+} from "../run/handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
 import { budgetBrake } from "../spend/budget-brake.ts";
 import {

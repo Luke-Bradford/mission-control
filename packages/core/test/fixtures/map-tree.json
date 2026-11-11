@@ -157,7 +157,7 @@
   { "path": "apps/server/src/runtime/supervisor.ts", "lines": 4538 },
   { "path": "apps/server/src/runtime/toolchain.ts", "lines": 63 },
   { "path": "apps/server/src/runtime/transcript-compact.ts", "lines": 245 },
-  { "path": "apps/server/src/runview.ts", "lines": 142 },
+  { "path": "apps/server/src/run/view.ts", "lines": 142 },
   { "path": "apps/server/src/scheduler.ts", "lines": 1392 },
   { "path": "apps/server/src/sd32.ts", "lines": 59 },
   { "path": "apps/server/src/seat-focus.ts", "lines": 28 },

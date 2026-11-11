@@ -385,7 +385,7 @@ import {
 import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
-import { handoffTarget } from "../run-handoffs.ts";
+import { handoffTarget } from "../run/handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
