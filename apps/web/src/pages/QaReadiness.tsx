@@ -19,7 +19,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { NativeQaHistory, QaHistory, QaNavigation } from "../qa/QaHistory.tsx";
 import { ArchivedQaReport, CurrentQaReport, QaReportArchive } from "../qa/QaReport.tsx";
-import { mapPath, navigate, useSearch } from "../router.ts";
+import { navigate, useSearch } from "../router.ts";
 import { useStore } from "../shell/store.ts";
 import "./qa-readiness.css";
 
@@ -419,7 +419,7 @@ function Detail({
           <div className="pb uat-stack">
             <p>
               {data?.files?.length
-                ? `${plural(data.files.length, "changed file")}. Open the Map with this PR’s files selected.`
+                ? `${plural(data.files.length, "changed file")}. Review code risk in Audit.`
                 : "Changed paths have not been captured."}
             </p>
             {data?.files?.length ? (
@@ -431,7 +431,7 @@ function Detail({
                     </li>
                   ))}
                 </ul>
-                <a href={`${mapPath(pr.repoId)}?pr=${pr.number}`}>Open in Map with these files</a>
+                <a href="/audit?tab=risk">Open code risk in Audit</a>
               </>
             ) : null}
           </div>
