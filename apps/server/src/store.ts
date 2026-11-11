@@ -240,6 +240,7 @@ import {
   toRun,
   toSample,
 } from "./store/rows.ts";
+import { SCHEMA } from "./store/schema.ts";
 import {
   ACK_ABSENT_MS,
   ACTIVE_SEAT_STATES,
@@ -284,8 +285,6 @@ import {
   type Stray,
   THREAD_COMMS_LIMIT,
 } from "./store/types.ts";
-
-import { SCHEMA } from "./store/schema.ts";
 
 export * from "./store/types.ts";
 
