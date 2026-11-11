@@ -13,7 +13,7 @@ import {
   reviewFor,
   ticketWaits,
 } from "@mc/core";
-import { isExternalReview } from "../external-reviews.ts";
+import { isExternalReview } from "../review/external.ts";
 import type { Store } from "../store.ts";
 
 type Stage = FlightPrFlowRow["stage"];

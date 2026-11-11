@@ -136,7 +136,7 @@
   { "path": "apps/server/src/prompt-cost.ts", "lines": 82 },
   { "path": "apps/server/src/queue-reorder.ts", "lines": 440 },
   { "path": "apps/server/src/repo-profile.ts", "lines": 202 },
-  { "path": "apps/server/src/review-check.ts", "lines": 34 },
+  { "path": "apps/server/src/review/check.ts", "lines": 34 },
   { "path": "apps/server/src/runtime/brief.ts", "lines": 537 },
   { "path": "apps/server/src/runtime/checkouts.ts", "lines": 2138 },
   { "path": "apps/server/src/runtime/codex-approval.ts", "lines": 212 },

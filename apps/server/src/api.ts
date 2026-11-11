@@ -282,7 +282,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -388,7 +387,8 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { reviewCheckFor } from "./review-check.ts";
+import { reviewCheckFor } from "./review/check.ts";
+import { branchOwned, readExternalSubject } from "./review/external.ts";
 import { publicHandoff } from "./run-handoffs.ts";
 import {
   adminDirOf,

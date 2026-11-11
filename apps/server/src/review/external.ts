@@ -11,17 +11,17 @@ import {
   type Run,
   type TicketView,
 } from "@mc/core";
-import type { CcConfig } from "./config.ts";
-import { externalReviewAsked } from "./external-pr-control.ts";
-import { externalReviewKey, isExternalReview } from "./external-review-key.ts";
-import type { GhRunner } from "./mcp/gh.ts";
-import { ownsPr } from "./ownership.ts";
-import type { PrEvidence } from "./pr-evidence/capture.ts";
-import { postPrEvidence } from "./pr-evidence/sweep.ts";
-import { qaReportGitIndex } from "./qa/reports.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import { externalReviewAsked } from "../external-pr-control.ts";
+import type { GhRunner } from "../mcp/gh.ts";
+import { ownsPr } from "../ownership.ts";
+import type { PrEvidence } from "../pr-evidence/capture.ts";
+import { postPrEvidence } from "../pr-evidence/sweep.ts";
+import { qaReportGitIndex } from "../qa/reports.ts";
+import type { Store } from "../store.ts";
+import { externalReviewKey, isExternalReview } from "./external-key.ts";
 
-export { externalReviewKey, isExternalReview } from "./external-review-key.ts";
+export { externalReviewKey, isExternalReview } from "./external-key.ts";
 
 /** Only fixed, non-sensitive publication failure messages use this class. */
 class ExternalReviewPublicationError extends Error {}
