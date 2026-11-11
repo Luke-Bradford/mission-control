@@ -4321,6 +4321,24 @@ describe("promote", () => {
     expect(moveCalls).toEqual([]);
   });
 
+  it("refuses promotion for a private link listed under a Prototype heading", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\n\n## Prototype\n\nhttps://claude.ai/public/artifacts/abc` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("promotes a ticket that mentions the mockup beside an ordinary link in this repository", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, {
+        body: `${GOOD}\nJudge the page against the mockup and [the system](https://github.com/o/mc/blob/main/docs/design/system.md).`,
+      });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
+  });
+
   it.each([
     "https://github.com/o/mc/blob/main/docs/prototype/mockup.html",
     "https://github.com/o/mc/blob/feature/prototype-polish/docs/prototype/mockup.html",
