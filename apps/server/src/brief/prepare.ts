@@ -9,8 +9,8 @@ import {
   type PreparedBriefAction,
   seatDef,
 } from "@mc/core";
-import { heldRun, holdCycle, protectedDecisionItem } from "../attention-holds.ts";
-import { pendingRunApproval } from "../attention-subjects.ts";
+import { heldRun, holdCycle, protectedDecisionItem } from "../attention/holds.ts";
+import { pendingRunApproval } from "../attention/subjects.ts";
 import { activeAway } from "../away.ts";
 import type { CcConfig } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";

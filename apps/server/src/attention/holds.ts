@@ -13,12 +13,12 @@ import {
   GUARD_ACK_PREFIX,
 } from "@mc/core";
 import type { z } from "zod";
-import { runAccountId } from "./account-bindings.ts";
-import type { CcConfig } from "./config.ts";
-import { accountAtStop } from "./engine/queue.ts";
-import { NOTE_KEY } from "./hud.ts";
-import type { Store } from "./store.ts";
-import { HUB_UPDATE_HELD_KEY } from "./update.ts";
+import { runAccountId } from "../account-bindings.ts";
+import type { CcConfig } from "../config.ts";
+import { accountAtStop } from "../engine/queue.ts";
+import { NOTE_KEY } from "../hud.ts";
+import type { Store } from "../store.ts";
+import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 
 const SETTING = "attention-holds";
 export function holds(store: Store): Record<string, AttentionHold> {
@@ -143,7 +143,7 @@ export function partitionAttention(
   return { items: active, held };
 }
 
-export { AttentionHoldInput } from "./attention-hold-schema.ts";
+export { AttentionHoldInput } from "./hold-schema.ts";
 
 export function attentionHoldError(e: z.ZodError): string {
   const issue = e.issues[0];
