@@ -7,6 +7,7 @@ const PROTOTYPE = /\b(?:prototype|mockup)\b/i;
 
 // A Git ref may contain slashes, and without asking GitHub the ref/file boundary is ambiguous.
 // Accept one segment, or a conventional branch prefix plus one segment (feature/prototype-polish).
+// Other slash-named refs are refused until someone copies the prototype into docs/prototype/.
 const REF = "(?:(?:feature|fix|bug|bugfix|chore|docs|test|hotfix|release|refactor)/)?[^/]+";
 const GITHUB_BLOB = new RegExp(`^(?:blob|raw)/${REF}/docs/prototype/.+`);
 const RAW_FILE = new RegExp(`^${REF}/docs/prototype/.+`);
