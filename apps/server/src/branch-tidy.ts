@@ -18,7 +18,8 @@ import type { GhRunner } from "./mcp/gh.ts";
 import { ownsBranch } from "./ownership.ts";
 import { CREW_GIT_SLOW_MS } from "./runtime/checkouts.ts";
 import { crewGit } from "./runtime/git.ts";
-import { crewDir, type Store } from "./store.ts";
+import { crewDir } from "./store/crew-paths.ts";
+import type { Store } from "./store.ts";
 
 /** A branch must have had no commit for this long before the sweep takes it. */
 export const SWEEP_MIN_AGE_MS = 24 * 60 * 60_000;

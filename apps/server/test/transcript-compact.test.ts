@@ -25,7 +25,8 @@ import {
   deltaHeartbeats,
   TRANSCRIPT_KEEP_BYTES,
 } from "../src/runtime/transcript-compact.ts";
-import { crewKeeperDir, Store } from "../src/store.ts";
+import { crewKeeperDir } from "../src/store/crew-paths.ts";
+import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 
 const MB = 1024 * 1024;

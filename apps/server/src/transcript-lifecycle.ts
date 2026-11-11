@@ -13,7 +13,8 @@ import { createGzip } from "node:zlib";
 import type { TranscriptFootprint } from "@mc/core";
 import type { TranscriptRetention } from "./config.ts";
 import { keeperAlive } from "./runtime/keeper.ts";
-import { crewDirPath, crewKeeperDirPath, type Store } from "./store.ts";
+import { crewDirPath, crewKeeperDirPath } from "./store/crew-paths.ts";
+import type { Store } from "./store.ts";
 
 export const TRANSCRIPT_PASS_INTERVAL_MS = 6 * 60 * 60_000;
 export const TRANSCRIPT_PASS_FIRST_DELAY_MS = 60_000;

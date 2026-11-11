@@ -15,7 +15,8 @@ import {
   type TokenCounts,
 } from "@mc/core";
 import { type CcConfig, findHubRoot } from "./config.ts";
-import { crewDirPath, type Store } from "./store.ts";
+import { crewDirPath } from "./store/crew-paths.ts";
+import type { Store } from "./store.ts";
 import { isObj, STREAM_EVENT_PREFIX } from "./streamjson.ts";
 import { GZ_MAX_INFLATED_BYTES } from "./transcript-file.ts";
 

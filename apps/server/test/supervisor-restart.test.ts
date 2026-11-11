@@ -46,7 +46,7 @@ import {
   crewMcpPath,
   crewPromptPath,
   crewTokenPath,
-} from "../src/store.ts";
+} from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {

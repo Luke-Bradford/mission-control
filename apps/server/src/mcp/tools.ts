@@ -234,7 +234,8 @@ import {
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
-import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
+import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
 import { type RestoreSandboxRunner, restoreWorktreeFile } from "./restore.ts";
