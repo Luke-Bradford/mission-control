@@ -444,3 +444,37 @@ fieldset.uat-actions {
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
   }
 }
+.uat-frees {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--accent-soft);
+}
+.uat-frees h3 {
+  margin: 0;
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+}
+.uat-frees p {
+  margin: 0;
+}
+.uat-frees ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+}
+.uat-frees a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  min-width: 24px;
+}
+.uat-frees-more {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}

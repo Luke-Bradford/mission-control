@@ -95,6 +95,10 @@ export const RESOURCES = {
     path: `/api/agents/${enc(id)}`,
     topic: AGENT_DETAIL_TOPICS,
   }),
+  dependencies: {
+    path: "/api/dependencies",
+    topic: ["agents", "boards", "attention", "flight"],
+  },
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
