@@ -95,6 +95,10 @@ export const RESOURCES = {
     path: `/api/agents/${enc(id)}`,
     topic: AGENT_DETAIL_TOPICS,
   }),
+  dependencies: {
+    path: "/api/dependencies",
+    topic: ["agents", "boards", "attention", "flight"],
+  },
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
@@ -500,6 +504,7 @@ const readResource = async <T>(path: string): Promise<T> => {
     return next as T;
   }
   return path === RESOURCES.prFlow.path ||
+    path === RESOURCES.dependencies.path ||
     path === RESOURCES.designPreviews.path ||
     path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)
