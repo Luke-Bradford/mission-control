@@ -276,6 +276,25 @@ describe("GET /api/audit/tokens", () => {
     store.upsertPullRequests("repo", [pr(1, "repo#1"), pr(2, "repo#2")], NOW);
     store.addFlightWake("f-1", NOW - 3 * 3_600_000, ["q"]);
     store.addFlightWake("f-1", NOW - 2 * 3_600_000, ["ci"]);
+    store.addFlightWake("f-1", NOW - 3_600_000, ["q"]);
+    // Context at a wake is the latest usage at or before it; the last entry follows every wake.
+    const usage = (at: number, context: number) => ({
+      id: `m${at}`,
+      at,
+      tokens: context,
+      usage: { input: context - 800, output: 5, cacheRead: 700, cacheCreate: 100 },
+    });
+    store.setDigest("f-1", {
+      toolCalls: 0,
+      turns: 0,
+      lastEventAt: null,
+      attemptUsage: [
+        usage(NOW - 4 * 3_600_000, 1000),
+        usage(NOW - 2.5 * 3_600_000, 5000),
+        usage(NOW - 1.2 * 3_600_000, 9000),
+        usage(NOW - 30 * 60_000, 777_777),
+      ],
+    } as never);
     store.addFlightDecision({
       at: NOW - 2 * 3_600_000 + 1000,
       kind: "answer",
@@ -318,13 +337,18 @@ describe("GET /api/audit/tokens", () => {
     expect(rev.value).toEqual([{ ticket: "repo#1", runs: 2, latestRunId: "rv-2" }]);
 
     const fl = f.flight;
-    expect(fl).toMatchObject({ recorded: true, days: 7 });
+    expect(fl).toMatchObject({ recorded: true, days: 7, unit: "wakes" });
     if (!fl.recorded) throw new Error("flight");
-    expect(fl.value.wakes).toBe(2);
-    expect(fl.value.wakesWithNoDecision).toBe(1);
+    expect(fl.value.wakes).toBe(3);
+    expect(fl.value.wakesWithNoDecision).toBe(2);
     expect(fl.value.sessions).toBe(1);
     expect(fl.value.sessionsPerDay).toBeCloseTo(1 / 7);
-    expect(fl.value.contextAtWake.recorded).toBe(false);
+    expect(fl.value.contextAtWake).toEqual({
+      recorded: true,
+      days: 7,
+      unit: "tokens",
+      value: { median: 5000, p90: 9000, samples: 3 },
+    });
     expect(fl.value.startCost).toMatchObject({ usd: expect.any(Number) });
 
     const cost = f.costPerMergedPr;
