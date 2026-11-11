@@ -6372,7 +6372,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return thread ?? reply.code(404).send({ error: "Unknown discussion." });
           }
           const item = currentDiscussionItem(key);
-          if (!item?.version) return reply.code(404).send({ error: "No current item." });
+          if (!item?.version) {
+            const thread = store.discussionForItem(key);
+            return thread ?? reply.code(404).send({ error: "No current item." });
+          }
           return openDiscussion({ ...item, version: item.version });
         },
       );

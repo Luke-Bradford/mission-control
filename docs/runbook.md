@@ -515,8 +515,10 @@ page, newest ask first (id breaks timestamp ties). The same `limit` applies; pas
 cursor as `questionsBefore` to read older questions. This leaves the existing timeline's `before`
 and `nextBefore` unchanged. Question records include run, seat, text, ask/pass/set-aside times,
 `closedAt`, and the latest recorded `answer`, `answerAt` and `answerBasis`. A run can close a
-question without answering it: the answer fields then stay null. `asideAt` retains the stored
-set-aside time, including Not now; it does not itself prove a question has an answer. Each Comms
+question without answering it: the answer fields then stay null. `discussionKey` is the question's
+`ask:<id>` key when it has a stored conversation, otherwise null; read that conversation through
+`GET /api/attention/<discussionKey>/discussion`. `asideAt` retains the stored set-aside time,
+including Not now; it does not itself prove a question has an answer. Each Comms
 timeline entry carries its recorded `senderKind`, or null for legacy unknown provenance.
 
 `GET /api/comms/ticket-counts` returns `{ tickets: [{ ticket, count }], unassignedCount }` across
