@@ -120,8 +120,7 @@ import {
 import {
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
-  machineCapacity,
-  machineCapacitySince,
+  storedMachineCapacity,
 } from "./machine-capacity.ts";
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
@@ -1303,11 +1302,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         store.addMachineSample(r.sample);
         machineMinute = minute;
         const capacityConfig = deps.config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         machineBlocked = capacity.blocked;
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
@@ -1326,7 +1321,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
                 )
                 .join("; ")
             : "unavailable";
-          store.refreshNote({
+          store.refreshNoteInEpisode({
             key: MACHINE_CAPACITY_KEY,
             kind: "flag",
             runId: null,
