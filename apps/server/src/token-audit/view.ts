@@ -12,10 +12,10 @@ import {
   type TokenAuditView,
   type TokenCounts,
 } from "@mc/core";
-import { type CcConfig, configuredAgents } from "./config.ts";
-import { flightWakeCost } from "./flight/cost.ts";
-import { flightSeat } from "./flight/seat.ts";
-import type { Store } from "./store.ts";
+import { type CcConfig, configuredAgents } from "../config.ts";
+import { flightWakeCost } from "../flight/cost.ts";
+import { flightSeat } from "../flight/seat.ts";
+import type { Store } from "../store.ts";
 
 const DAY_MS = 86_400_000;
 /** The role name shown for an observed loop, which has none. */
