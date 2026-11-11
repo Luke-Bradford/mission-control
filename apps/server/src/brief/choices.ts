@@ -6,23 +6,23 @@ import type {
   BriefChoiceReceipt,
   BriefChoiceRequest,
 } from "@mc/core";
-import { holds } from "./attention-holds.ts";
-import { briefActionRoute } from "./brief-dispatch.ts";
+import { holds } from "../attention-holds.ts";
+import type { ChangeBus } from "../bus.ts";
+import {
+  flightQuestionKeys,
+  flightQuestionMessageId,
+  isFlightOperatorQuestion,
+} from "../comms-question.ts";
+import { recordWrite, runawayTrip, watchRunaway } from "../flight/runaway.ts";
+import { briefActionRoute } from "./dispatch.ts";
 import {
   BriefActionRefused,
   BriefError,
   type BriefPreparationDeps,
   prepareBriefActions,
   validBriefActor,
-} from "./brief-prepare.ts";
-import { briefHash, briefReadState, briefSourceRevision } from "./brief-source.ts";
-import type { ChangeBus } from "./bus.ts";
-import {
-  flightQuestionKeys,
-  flightQuestionMessageId,
-  isFlightOperatorQuestion,
-} from "./comms-question.ts";
-import { recordWrite, runawayTrip, watchRunaway } from "./flight/runaway.ts";
+} from "./prepare.ts";
+import { briefHash, briefReadState, briefSourceRevision } from "./source.ts";
 
 export interface BriefChoiceDeps extends BriefPreparationDeps {
   bus?: ChangeBus;

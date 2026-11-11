@@ -1,14 +1,14 @@
 import { type BriefActor, OPERATOR_HEADER } from "@mc/core";
 import type { FastifyInstance, FastifyRequest } from "fastify";
-import type { AppDeps } from "./api.ts";
-import { type BriefChoiceDeps, chooseBrief } from "./brief-choices.ts";
-import { briefActionRoute, withinBriefDispatch } from "./brief-dispatch.ts";
-import { BriefActionRefused, BriefError } from "./brief-prepare.ts";
-import { dispatchRoutineBriefAction } from "./brief-routine.ts";
-import { BriefChoiceInput } from "./brief-schema.ts";
-import { FLIGHT_OPERATOR_ACTOR_HEADER } from "./flight/operator-call.ts";
-import { attentionItems, NO_LOCK } from "./hud.ts";
-import { prepareQueueReorderSnapshot } from "./queue-reorder.ts";
+import type { AppDeps } from "../api.ts";
+import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../flight/operator-call.ts";
+import { attentionItems, NO_LOCK } from "../hud.ts";
+import { prepareQueueReorderSnapshot } from "../queue-reorder.ts";
+import { type BriefChoiceDeps, chooseBrief } from "./choices.ts";
+import { briefActionRoute, withinBriefDispatch } from "./dispatch.ts";
+import { BriefActionRefused, BriefError } from "./prepare.ts";
+import { dispatchRoutineBriefAction } from "./routine.ts";
+import { BriefChoiceInput } from "./schema.ts";
 
 /** Only this bound path installs dispatch guards; existing direct routes keep their contracts. */
 export function registerBriefChoiceRoutes(

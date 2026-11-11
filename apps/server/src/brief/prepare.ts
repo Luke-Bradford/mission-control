@@ -9,16 +9,16 @@ import {
   type PreparedBriefAction,
   seatDef,
 } from "@mc/core";
-import { heldRun, holdCycle, protectedDecisionItem } from "./attention-holds.ts";
-import { pendingRunApproval } from "./attention-subjects.ts";
-import { activeAway } from "./away.ts";
-import { CompleteBriefContent } from "./brief-schema.ts";
-import { briefHash, briefSourceRevision } from "./brief-source.ts";
-import type { CcConfig } from "./config.ts";
-import { pausedSeat } from "./crew-pause.ts";
-import { runawayTrip } from "./flight/runaway.ts";
-import { isOperatorCall, questionWithOperator } from "./hud.ts";
-import type { Store } from "./store.ts";
+import { heldRun, holdCycle, protectedDecisionItem } from "../attention-holds.ts";
+import { pendingRunApproval } from "../attention-subjects.ts";
+import { activeAway } from "../away.ts";
+import type { CcConfig } from "../config.ts";
+import { pausedSeat } from "../crew-pause.ts";
+import { runawayTrip } from "../flight/runaway.ts";
+import { isOperatorCall, questionWithOperator } from "../hud.ts";
+import type { Store } from "../store.ts";
+import { CompleteBriefContent } from "./schema.ts";
+import { briefHash, briefSourceRevision } from "./source.ts";
 
 export class BriefError extends Error {
   readonly status: number;

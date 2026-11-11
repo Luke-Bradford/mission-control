@@ -1,4 +1,4 @@
-import { checkBriefDispatch, withoutBriefDispatch } from "../brief-dispatch-context.ts";
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief/dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`

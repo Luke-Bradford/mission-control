@@ -184,9 +184,9 @@ import {
   awayDigest,
   readAwaySettings,
 } from "./away.ts";
-import { registerBriefChoiceRoutes } from "./brief-api.ts";
-import { checkBriefDispatch } from "./brief-dispatch.ts";
-import { boundBriefGuard } from "./brief-dispatch-context.ts";
+import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import { checkBriefDispatch } from "./brief/dispatch.ts";
+import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
