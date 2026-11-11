@@ -57,7 +57,7 @@ import {
   withEngineSection,
 } from "../mcp/tools.ts";
 import { runPathGrants } from "../path-grants.ts";
-import { qaReportGitSummary } from "../qa-reports.ts";
+import { qaReportGitSummary } from "../qa/reports.ts";
 import {
   adminDirOf,
   CREW_GIT_SLOW_MS,
