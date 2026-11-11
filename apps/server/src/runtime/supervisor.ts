@@ -179,7 +179,7 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
-import type { ReviewPreviews } from "../review-preview.ts";
+import type { ReviewPreviews } from "../preview/review.ts";
 import {
   enrichHandoff,
   handoffForBrief,

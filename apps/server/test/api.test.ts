@@ -114,7 +114,7 @@ import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { CallRing } from "../src/map/ring.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
-import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/previews.ts";
+import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
 import { qaNativeIdentity } from "../src/qa-history-key.ts";
 import { recordRunHandoff } from "../src/run-handoffs.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
