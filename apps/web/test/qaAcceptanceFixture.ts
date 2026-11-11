@@ -22,6 +22,20 @@ export function qaAcceptanceFixture(count = 3) {
     uat: { sha: SHA, since: NOW - (51 - i * 12) * 3600000 },
   }));
   return {
+    // One chain rooted at the first queued PR: five refs, "+2" and two that wait on other work.
+    "/api/dependencies": [
+      {
+        repoId: "mission-control",
+        root: { ref: "PR 1011", title: null, edge: null, waitedMs: null, alsoWaitsOn: [], children: [] },
+        state: "with-you",
+        reason: "",
+        owner: "you",
+        seatId: null,
+        longestWaitMs: null,
+        frees: [1, 2, 3, 4, 5, 6, 7].map((n) => `mission-control#${1100 + n}`),
+        stillWaiting: ["mission-control#1201", "mission-control#1202"],
+      },
+    ],
     "/api/qa/queue": {
       prs: [
         ...prs,

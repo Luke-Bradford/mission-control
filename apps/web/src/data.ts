@@ -504,6 +504,7 @@ const readResource = async <T>(path: string): Promise<T> => {
     return next as T;
   }
   return path === RESOURCES.prFlow.path ||
+    path === RESOURCES.dependencies.path ||
     path === RESOURCES.designPreviews.path ||
     path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)

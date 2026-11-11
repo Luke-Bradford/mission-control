@@ -217,7 +217,7 @@ function CurrentQaReadiness() {
               key={`${keyOf(selected)}:${selected.headSha}`}
               pr={selected}
               flightId={queue.data?.flightId ?? null}
-              chains={chainsRead.error && !chainsRead.data ? null : chains}
+              chains={chainsRead.data ?? (chainsRead.error ? null : undefined)}
               enabled={connection.connected && !queue.error}
               now={now}
             />
@@ -310,8 +310,8 @@ function Detail({
 }: {
   pr: PullRequestSummary;
   flightId: string | null;
-  /** null when the dependencies read failed. */
-  chains: readonly DependencyChain[] | null;
+  /** undefined while the dependencies read loads; null when it failed. */
+  chains: readonly DependencyChain[] | null | undefined;
   enabled: boolean;
   now: number;
 }) {
@@ -365,7 +365,11 @@ function Detail({
               </div>
             </div>
           </Decide>
-          {chains ? (
+          {chains === undefined ? (
+            <p className="uat-frees" role="status">
+              Reading what this PR frees…
+            </p>
+          ) : chains ? (
             <FreesLine chain={chainFor(chains, pr)} repoId={pr.repoId} />
           ) : (
             <p className="uat-frees">Could not read what this PR frees.</p>
