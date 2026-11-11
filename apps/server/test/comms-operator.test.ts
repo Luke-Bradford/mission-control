@@ -2,7 +2,7 @@ import type { Run } from "@mc/core";
 import { expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { commsInboxContext } from "../src/comms.ts";
+import { commsInboxContext } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../src/flight/operator-call.ts";
 import { Store } from "../src/store.ts";
@@ -80,6 +80,7 @@ it("an operator message to a seat shows stored, wakes the seat, then shows deliv
   expect(res.statusCode).toBe(200);
   const body = res.json();
   expect(body).toMatchObject({ state: "stored", deliveredAt: null, alreadySent: false });
+  expect(body.message).toMatchObject({ at: 100_000, label: "none" });
   expect(woken).toEqual(["guido-1"]);
   const id = body.message.id as string;
   // the seat's turn takes it

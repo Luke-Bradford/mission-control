@@ -1,4 +1,4 @@
-import type { AttentionItem, Crew } from "@mc/core";
+import type { AttentionItem, Crew, QuestionClosure } from "@mc/core";
 import { useState } from "react";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { isNotTriaging, NotTriagingRow } from "../flight/NotTriaging.tsx";
@@ -35,11 +35,7 @@ function Open({ item, items }: { item: AttentionItem; items: readonly AttentionI
   const row = rows?.find((r) => r.id === item.agentId);
   return (
     <>
-      <QuestionBand
-        item={item}
-        row={row}
-        actions={isNotTriaging(item) ? undefined : <HoldItem itemKey={item.key} />}
-      />
+      <QuestionBand item={item} row={row} actions={<HoldItem item={item} />} />
       {isNotTriaging(item) ? (
         <div className="needs-body">
           <div className="needs-main">
@@ -61,6 +57,7 @@ function Open({ item, items }: { item: AttentionItem; items: readonly AttentionI
 export function Needs({ item }: { item: string | null }) {
   const attentionRes = useResource<AttentionItem[]>(RESOURCES.attention);
   const attention = attentionRes.data;
+  const answered = useResource<QuestionClosure[]>(RESOURCES.answeredAttention);
   const notes = useResource<NotificationsView>(RESOURCES.notifications);
   const { inRepo } = useSessionScope();
   const connection = useStore(streamStatus);
@@ -125,6 +122,8 @@ export function Needs({ item }: { item: string | null }) {
                 />
               </>
             }
+            answered={answered.data}
+            answeredError={answered.error}
             selected={current?.key ?? null}
             footer={
               handled.length > 0 && (

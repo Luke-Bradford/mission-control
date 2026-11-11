@@ -388,19 +388,26 @@
   text-decoration: none;
 }
 
-/* Hold open: the form takes its own row in the band and the band grows to hold it, so the
-   whole question stays readable above it. */
-.needs-band:has(.hold-form) {
-  max-height: none;
+.needs-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
 }
 
-.needs-hold:has(.hold-form) {
-  flex: 1 0 100%;
-  margin-left: 0;
+.needs-actions .err {
+  flex-basis: 100%;
+  margin: 0;
 }
 
-.needs-hold .hold-form {
-  max-width: 480px;
+.needs-answered {
+  padding: var(--sp-2) var(--sp-3);
+  border-top: 1px solid var(--line);
+  overflow-wrap: anywhere;
+}
+
+.needs-answered .note {
+  margin: var(--sp-1) 0 0;
 }
 
 .needs-head {

@@ -27,10 +27,10 @@ import {
   COMMS_CANT_REASON_MAX,
   COMMS_CAPCOM,
   COMMS_CREW,
-  COMMS_LABELS,
   COMMS_QUESTION_TO_FLIGHT,
   COMMS_REACTIONS,
   COMMS_REF,
+  COMMS_SEAT_LABELS,
   carriedFrom,
   clashText,
   closesIssue,
@@ -202,15 +202,13 @@ import { cleanCodeHealth } from "../code-health/clean.ts";
 import { CodeHealthReader } from "../code-health/read.ts";
 import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
-import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms.ts";
+import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/index.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
-import { PreviewRefused } from "../design-previews.ts";
+import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
-import { isExternalReview } from "../external-review-key.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
-import { openOlderFindings } from "../older-findings.ts";
 import { runPathGrants } from "../path-grants.ts";
 import {
   PREVIEW_READY_WAIT_MS,
@@ -223,9 +221,11 @@ import {
   type PreviewJob,
   type PreviewResult,
   previewRequest,
-} from "../preview-browser.ts";
+} from "../preview/browser.ts";
 import type { ProfilesError } from "../profiles.ts";
-import { createQaReports, QaReportError, type QaReportService } from "../qa-reports.ts";
+import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
+import { isExternalReview } from "../review/external-key.ts";
+import { openOlderFindings } from "../review/older-findings.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
@@ -234,7 +234,8 @@ import {
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
-import { crewDir, crewPrBodyPath, type Store } from "../store.ts";
+import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
 import { headEntryKind, worktreeEntry } from "./remove.ts";
 import { type RestoreSandboxRunner, restoreWorktreeFile } from "./restore.ts";
@@ -383,7 +384,11 @@ const PreviewBrowserArgs = z.strictObject({
     .default([]),
 });
 const COMMS_TICKET_ARG = /^(?:[^#\s]+)?#[1-9]\d*$/;
-const CommsInboxArgs = z.strictObject({ limit: z.number().int().min(1).max(100).default(50) });
+const CommsInboxArgs = z.strictObject({
+  limit: z.number().int().min(1).max(100).default(50),
+  /** History: the messages already read too. */
+  all: z.boolean().default(false),
+});
 const CommsReadArgs = z.strictObject({
   limit: z.number().int().min(1).max(100).default(50),
   /** One message in full. */
@@ -399,7 +404,7 @@ const CommsReadArgs = z.strictObject({
 const CommsSendArgs = z.strictObject({
   to: z.string().min(1),
   text: text(MC_TEXT_MAX),
-  label: z.enum(COMMS_LABELS).optional(),
+  label: z.enum(COMMS_SEAT_LABELS),
   ref: z.string().regex(COMMS_REF).optional(),
   replyTo: z
     .string()
@@ -1680,9 +1685,15 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (!parsed.success) return badArgs(parsed.error);
     if (liveRun(ctx) === null) return ENDED;
     const pinned = new Set(store.commsPins().map((row) => row.id));
-    const rows = store
+    const readable = store
       .commsInboxRun(ctx.seatId, ctx.runId)
-      .filter((row) => canReadComms(store, ctx.seatId, row, pinned))
+      .filter((row) => canReadComms(store, ctx.seatId, row, pinned));
+    // By default only what is unread or pinned; `all` brings back the read history.
+    const shown = parsed.data.all
+      ? readable
+      : readable.filter((row) => pinned.has(row.id) || !store.commsInboxRead(ctx.seatId, row.id));
+    const hiddenRead = readable.length - shown.length;
+    const rows = shown
       .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)))
       .slice(-parsed.data.limit)
       .map((row) => {
@@ -1703,7 +1714,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       ctx.seatId,
       rows.map((row) => row.id),
     );
-    return { text: JSON.stringify({ messages: rows }) };
+    return { text: JSON.stringify({ messages: rows, hiddenRead }) };
   }
 
   async function commsSend(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3094,10 +3105,17 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.commsInbox,
       description:
-        "Read this seat's inbox: messages addressed to it, messages that tag it, replies to its messages and current pins. It never includes the whole crew channel.",
+        "Read this seat's inbox: unread messages addressed to it, messages that tag it, replies to its messages, plus current pins. Messages already read are left out (hiddenRead counts them); pass all: true for the history. It never includes the whole crew channel.",
       inputSchema: {
         type: "object",
-        properties: { limit: { type: "number", minimum: 1, maximum: 100, default: 50 } },
+        properties: {
+          limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+          all: {
+            type: "boolean",
+            default: false,
+            description: "Include messages already read, not only unread ones and pins.",
+          },
+        },
         additionalProperties: false,
       },
       modes: ["writer", "read-only", "scratch"],
@@ -3106,17 +3124,22 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.commsSend,
       description:
-        "Send a message to a local seat, CAPCOM, or the crew channel. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
+        "Send a message to a local seat, CAPCOM, or the crew channel. Choose question, blocker or none explicitly; use none for handoffs and ordinary answers. Every answer must pass the answered message id as replyTo. A question that needs a decision goes to FLIGHT with mc ask_flight, not to CAPCOM.",
       inputSchema: {
         type: "object",
         properties: {
           to: { type: "string" },
           text: { type: "string", minLength: 1, maxLength: MC_TEXT_MAX },
-          label: { type: "string", enum: [...COMMS_LABELS] },
+          label: { type: "string", enum: [...COMMS_SEAT_LABELS] },
           ref: { type: "string" },
-          replyTo: { type: "string", pattern: "^comms:[0-9]+$" },
+          replyTo: {
+            type: "string",
+            pattern: "^comms:[0-9]+$",
+            description:
+              "The answered message id; required for every answer. Omit only for a new message.",
+          },
         },
-        required: ["to", "text"],
+        required: ["to", "text", "label"],
         additionalProperties: false,
       },
       modes: ["writer", "read-only", "scratch"],

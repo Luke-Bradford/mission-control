@@ -1,5 +1,7 @@
 /** Shared stored-Comms contract.  Keep the wire values here: seats and the hub use the same set. */
-export const COMMS_LABELS = ["question", "handoff", "blocker"] as const;
+export const COMMS_LABELS = ["question", "handoff", "blocker", "none"] as const;
+/** The required classification a seat or FLIGHT chooses for a Comms message. */
+export const COMMS_SEAT_LABELS = ["question", "blocker", "none"] as const;
 export const COMMS_REACTIONS = ["seen", "on_it", "done", "cant"] as const;
 export const COMMS_CREW = "crew";
 export const COMMS_RATE_LIMIT_COUNT = 30;
@@ -94,11 +96,20 @@ export interface CommsMessage {
 /** A transcript can lack a timestamp; keep that fact instead of inventing its clock time. */
 export type FlightConversationMessage = Omit<CommsMessage, "at"> & { at: number | null };
 
+/** FLIGHT's current run, when the server includes its status with the conversation. */
+export interface FlightConversationStatus {
+  live: boolean;
+  since: number | null;
+  runId: string | null;
+}
+
 export interface FlightConversationPage {
   messages: FlightConversationMessage[];
   hasMore: boolean;
   cursor: string | null;
   unread: number;
+  /** Absent from older servers that do not yet return FLIGHT's run status. */
+  flight?: FlightConversationStatus;
 }
 
 /** Where a message stands: kept by the hub, or taken by its recipient. */

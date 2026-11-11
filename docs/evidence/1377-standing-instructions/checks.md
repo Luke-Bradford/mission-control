@@ -71,10 +71,10 @@ requirement for a guidance-only wake, route inventory and authentication, and th
 
 | Contract | Implementation | Automated evidence |
 | --- | --- | --- |
-| Durable immutable entries, retained history, bounded full active lists | core standing-instructions.ts; server standing-instructions.ts; Store.instructions | 8 store/envelope tests, including restart, transactional refusal, capacity, pagination and focus precedence |
-| Operator-only orders, protected operator seat entries, declared provenance through actor completion | standing-instructions-api.ts; common api.ts hooks | 8 focused API/notice tests, plus selected existing API access/inventory tests |
+| Durable immutable entries, retained history, bounded full active lists | core standing-instructions.ts; server instructions/standing.ts; Store.instructions | 8 store/envelope tests, including restart, transactional refusal, capacity, pagination and focus precedence |
+| Operator-only orders, protected operator seat entries, declared provenance through actor completion | instructions/api.ts; common api.ts hooks | 8 focused API/notice tests, plus selected existing API access/inventory tests |
 | FLIGHT seat tools, visible audit and typed re-plan links | flight/tools.ts; core mcp.ts/runtime.ts/flight.ts; store decision mapper | Selected flight-tools and core runtime tests |
-| Short durable notices and accurate per-mutation delivery status | instruction-notices.ts and persistent notice receipts | Failed immediate notification and concurrent-recipient API fixtures; actual fake-CLI next-turn inbox test |
+| Short durable notices and accurate per-mutation delivery status | instructions/notices.ts and persistent notice receipts | Failed immediate notification and concurrent-recipient API fixtures; actual fake-CLI next-turn inbox test |
 | Verified direction and every-turn current guidance | runtime/instruction-context.ts; runtime/supervisor.ts; runtime/brief.ts | 8 fake-CLI supervisor tests; 2 store-envelope placement/order tests; prompt-cost regressions |
 | Order-change wake, failed-send retry, no fabricated or endless decisions | flight/state.ts and delivered revision bookkeeping | Selected flight-watch regression; actual failed-send/retry fake-CLI test |
 | Existing selector grammar/clear, config import, queue/start/reorder and HUD readers | canonical focus resolver; engine/queue.ts; queue-reorder.ts; hud.ts; API/tools adapters | Store/API focus tests; 112 queue, 33 reorder, 79 config-write and 150 HUD regressions |
