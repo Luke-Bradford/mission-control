@@ -11,6 +11,7 @@ import {
   EDIT_UNCONFIRMED_TEXT,
   type FlightDecision,
   type FlightDecisionKind,
+  hudColumnOf,
   LANE_LABEL_PREFIX,
   MC_TOOL_NAMES,
   PRIORITIES,
@@ -184,7 +185,8 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
 
   const SetFieldsArgs = z.strictObject({
     issue: issueNumber,
-    status: z.literal("Blocked").optional(),
+    // Ready stays promote's, which checks the ticket is complete; Backlog lets a Blocked card out
+    status: z.enum(["Blocked", "Backlog"]).optional(),
     priority: z.enum(PRIORITIES).optional(),
     size: z.enum(TICKET_SIZES).optional(),
     labels: z.array(z.string().min(1).max(100)).max(100).optional(),
@@ -193,7 +195,7 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
   });
   add(
     MC_TOOL_NAMES.setFields,
-    "Set an issue's board and issue fields in one call: status (a board column), priority, size, labels (the whole list) and milestone (a title, or null to clear). always_ask and other lanes' tickets are refused.",
+    "Set an issue's board and issue fields in one call: status (Blocked, or Backlog only for a card now in Blocked; Ready goes through promote), priority, size, labels (the whole list) and milestone (a title, or null to clear). always_ask and other lanes' tickets are refused.",
     SetFieldsArgs,
     "card",
     async (a: z.output<typeof SetFieldsArgs>, repo, ctx) => {
@@ -204,6 +206,11 @@ export function createPowerTools(h: PowerHelpers): McTool[] {
       if (found.closed) return fail("The ticket is closed.");
       const ref = `${repo.id}#${a.issue}`;
       if (store.activeTickets().has(ref)) return fail(`${ref} has a live run: end it first.`);
+      // Backlog only undoes Blocked: a card in review or in progress keeps its place
+      if (a.status === "Backlog" && hudColumnOf(found) !== "Blocked")
+        return fail(
+          `${ref} is not in Blocked; set_fields moves a card to Backlog only out of Blocked.`,
+        );
       // a lane label moves with edit_card's lane, which checks the crew's lane; not here
       const lanes = (labels: readonly string[]) =>
         labels
