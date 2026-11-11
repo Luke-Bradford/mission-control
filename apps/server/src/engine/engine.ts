@@ -164,7 +164,7 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
-import { budgetBrake } from "../spend/budget-brake.ts";
+import { reviewsHeld } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
@@ -2637,9 +2637,9 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
       const at = now();
       if (accountAtStop(config, store, seat.accountId, at)) continue;
-      const braked = budgetBrake(config, store, seat.accountId, at) !== null;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
-        if (braked && !store.reviewBudgetBrakeOverride(row.id)) continue;
+        // a change past its review rounds waits for FLIGHT's decision (waste alarm)
+        if (reviewsHeld(store, row.authorRunId)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;

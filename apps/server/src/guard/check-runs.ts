@@ -12,6 +12,7 @@ import {
   type CheckDropReason,
   type RepoRules,
   splitCommands,
+  unchangedRerunText,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { seatPlace } from "../mcp/tools.ts";
@@ -101,6 +102,11 @@ export interface CheckRecorder {
   end(key: CallKey, ok: boolean, exitCode?: number | null): Promise<void>;
   /** The configured check this shell command runs, which takes the test lock; null when none (or the rules cannot be read). */
   lockedBy(runId: string, command: string): Promise<string | null>;
+  /**
+   * The text that refuses this shell call as an unchanged rerun (the same configured check already
+   * ran on this commit and no file has changed), or null. A refusal is recorded for the waste alarm.
+   */
+  rerun?(runId: string, command: string): Promise<string | null>;
   /** The run has no call in flight (its turn ended): forget the ones that never reported an end. */
   dropRun(runId: string): void;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
@@ -114,7 +120,7 @@ const DROPS_PER_RUN = 30;
 const DROPPED_RUNS = 200;
 
 export interface CheckRecorderDeps {
-  store: Pick<Store, "addCheckRun">;
+  store: Pick<Store, "addCheckRun"> & Partial<Pick<Store, "latestCheckRun" | "addRerunRefusal">>;
   /** The run's repo's configured checks; empty when it has none (throws when its rules cannot be read). */
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
@@ -173,6 +179,26 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         return lockedCheck(command, await d.checks(runId));
       } catch (e) {
         d.log?.(`checks: could not read the checks for ${runId}: ${(e as Error).message}`);
+        return null;
+      }
+    },
+    async rerun(runId, command) {
+      try {
+        const checks = await d.checks(runId);
+        const own = d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
+        const matched = checksRun(withoutOwnCd(command, own), checks);
+        if (matched.length === 0 || d.store.latestCheckRun === undefined) return null;
+        const at = await d.state(runId);
+        // a dirty tree is a change: the check would run on something no commit holds
+        if (at === null || !at.clean) return null;
+        for (const check of matched) {
+          if (d.store.latestCheckRun(runId, check, at.head) === null) continue;
+          d.store.addRerunRefusal?.(runId, check, at.head, now());
+          return unchangedRerunText(check, at.head);
+        }
+        return null;
+      } catch (e) {
+        d.log?.(`checks: could not test a rerun for ${runId}: ${(e as Error).message}`);
         return null;
       }
     },

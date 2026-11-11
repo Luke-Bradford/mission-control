@@ -444,23 +444,43 @@ still passes the secret, notifier and HTML-reference checks before its status is
 Publication errors log a fixed, non-sensitive reason after `could not complete its queue/status
 update`; unexpected exceptions keep their content private and log only the generic failure.
 
-### Budget brake
+### Waste alarms
 
-When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
-stops dealing and starting new developer and review runs on that account. It is the same projection
-the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/spend/budget-brake.ts`
-is the one function for both.
+The hub spots spend that buys no progress, names the ticket, run or seat, and stops that loop. Pace
+alone never slows honest work: the forecast "budget brake" is gone. An account stops only at its real
+`stop_at` use. The weekly projection ("N% by reset") stays on the Overview Tokens panel as
+information (`weeklyProjection` in `apps/server/src/spend/projection.ts`). An old config that still
+sets `brake:` on an account loads; the key does nothing.
 
-- Stopped: the engine's deal, the review start, `start_seat`, and the supervisor's `startRun`
-  (refusal "Not started: the budget brake is on ..." with the projection and the reset time). An
-  operator's explicit start and a read-only reader pass.
-- Not stopped: FLIGHT's own seat, runs already in progress (they finish their step), resumes and
-  rework wakes.
-- Needs you shows one hub alert, `budget-brake`, naming each braked account, its projection, its
-  reset and when the brake lifts. The scheduler keeps it current after each usage reading and on the
-  minute tick.
-- It lifts by itself: when the projection falls back to 100% or under, or the week resets. There is
-  nothing to configure and no GitHub write.
+The checks are hub code over recorded runs, check runs and reviews (`apps/server/src/spend/waste.ts`).
+No agent runs them. The scheduler's minute tick scans, so a restart storm shows within minutes. Every
+threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
+
+| Check | Fires when | Then |
+| --- | --- | --- |
+| Unchanged rerun | The same configured check runs again on the same commit with a clean tree (no file changed), by one run | The hook refuses the rerun and says why (Claude hook and Codex approval); each refusal is recorded |
+| Retry loop | A ticket has 2 failed attempts, or a run has 3 carry-on resumes and no report | Parks the ticket: no new start of it (the operator's and FLIGHT's start pass) |
+| Review rounds | A change goes past 2 review rounds | Queued reviews of that change do not start |
+| Restart storm | One agent starts more than 6 times in an hour | That agent's new starts are refused (FLIGHT's seat included) until the hour's count falls back |
+| Cost without output | A ticket has cost over 3x the median cost of its size (recorded costs only, 3 merged tickets of the size at least) and has no merge | Alarm to FLIGHT with the runs listed |
+| Coordination overhead | FLIGHT's recorded spend passes the developers' over a day (and is at least $10) | Alarm with the split; controller tokens are named, not priced |
+| Ticket churn | Tickets opened reach tickets closed in a day (5 opened at least), a ticket reads as a half, slice or follow-up, or a parked ticket starts again | Alarm to FLIGHT naming the tickets |
+| Runs per ticket | A ticket takes more than 3 developer runs without a merge | Alarm to FLIGHT with the runs and their blocking review findings |
+
+- One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
+  ends: the ticket merges or closes, the count falls back, or the day passes.
+- FLIGHT is woken once per alarm, through the `waste_alarm` signal. An alarm is not a question: it
+  never reaches Needs you.
+- FLIGHT lifts a hold with `resolve_waste_alarm` (alarm id and a basis, recorded in Decided without
+  you). The alarm stays closed until its cause grows past the level it had.
+- A hold only refuses or parks the hub's own runs. No GitHub write.
+- `GET /api/waste` serves what the Audit page shows: for the past day and week, spend per merged
+  change and the share spent on building (developer runs); every open alarm; and, per check, its
+  threshold, how often it fired in the week and how many of those later saw a merge. A cost is
+  `null` where no run recorded one, never zero or an estimate: Codex runs record tokens but not cost,
+  so each window lists every vendor's runs, runs with a recorded cost, cost and tokens, and the
+  tokens figures (`perMergeTokens`, `buildingShareTokens`; new input, output and cache-write tokens)
+  cover both vendors. The dollar figures cover only the runs that recorded a cost.
 
 ### FLIGHT runaway breaker
 
@@ -1540,7 +1560,8 @@ named pause or attributes an unknown grant to FLIGHT.
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
-| `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. FLIGHT may pass the target budget brake only with a recorded basis that names a P0 ticket. |
+| `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. |
+| `resolve_waste_alarm` | Close an open waste alarm's hold (a parked ticket, stopped reviews, a restart storm) with a recorded basis. See Waste alarms. |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
 | `resume_seat` | Resume a seat's unfinished run after a stop, a crew pause, an error or a restart; a build or plan seat in FLIGHT's session and a run in its lane. A stop can be lifted, but a crew-pause exception covers that run only. The original pause keeps its owner and seat coverage. Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), an already live unpaused session, and a machine without headroom. A failed resume removes only its own exception and restores the stop unless the operator changed it |
 | `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |

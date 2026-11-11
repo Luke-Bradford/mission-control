@@ -1817,7 +1817,7 @@ describe("away start quota", () => {
   });
 });
 
-describe("budget brake", () => {
+describe("pace alone does not hold work", () => {
   const accountId = "claude-main";
   const HOUR = 60 * 60_000;
   /** Six hours of weekly readings; 40 -> 60 projects past 100% at the reset a day on. */
@@ -1828,23 +1828,13 @@ describe("budget brake", () => {
     ] as const)
       store.addUsage({ accountId, window: "7d", at: t, resetAt: NOW + DAY, pct, source: "test" });
   };
-  it("holds the deal while the projection passes 100% and deals again when it falls", async () => {
+  it("deals the ticket while the projection passes 100%: only the real stop holds", async () => {
     store.replaceBoard(REPO, [card(1)]);
     await refill();
     week(40, 60);
     await take();
-    expect(started).toEqual([]);
-    expect(issues(SERVER)).toEqual([1]);
-    // the projection falls back under 100%: the held ticket is dealt
-    week(10, 10, NOW + 1);
-    takeNow = NOW + 1;
-    await take();
     expect(started.map((r) => r.issue)).toEqual([1]);
-  });
-  it("lets runs in progress and resumes pass: only new deals ask the brake", () => {
-    week(40, 60);
-    expect(accountAtStop(config, store, accountId, NOW)).toBe(false);
-    expect(accountHoldsNewWork(config, store, accountId, NOW)).toBe(true);
+    expect(accountHoldsNewWork(config, store, accountId, NOW)).toBe(false);
   });
 });
 

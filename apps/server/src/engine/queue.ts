@@ -59,7 +59,6 @@ import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { budgetBrake } from "../spend/budget-brake.ts";
 import type { Store } from "../store.ts";
 import { wakeDueAsideRun } from "./aside.ts";
 import { RepoRulesError } from "./rules.ts";
@@ -727,8 +726,9 @@ export function awayQuotaReserve(
 }
 
 /**
- * Whether the account may not take on new work: at its usage stop, or its weekly projection has
- * the budget brake on. Only new deals and starts ask this; runs in progress and resumes do not.
+ * Whether the account may not take on new work: it is at its usage stop. Pace alone never holds
+ * work (the weekly projection is information only). Only new deals and starts ask this; runs in
+ * progress and resumes do not.
  */
 export function accountHoldsNewWork(
   config: CcConfig,
@@ -736,10 +736,7 @@ export function accountHoldsNewWork(
   accountId: string,
   at: number,
 ): boolean {
-  return (
-    accountAtStop(config, store, accountId, at) ||
-    budgetBrake(config, store, accountId, at) !== null
-  );
+  return accountAtStop(config, store, accountId, at);
 }
 
 const atQuotaStop = (deps: TakeDeps, accountId: string): boolean =>

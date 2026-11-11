@@ -37,11 +37,13 @@ import {
   STUCK_PARK,
   seatDef,
   WAITING_OPERATOR_LABEL,
+  WASTE_CHECK_TITLES,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import { ownsCard } from "../ownership.ts";
+import { openWasteAlarms } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -816,6 +818,16 @@ export function flightSignals(i: {
       if (closure?.by === "hub")
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
+  }
+  // a waste alarm wakes FLIGHT once: the signal keeps its told mark for as long as the alarm stands
+  for (const alarm of openWasteAlarms(store)) {
+    if (alarm.repoId !== repo) continue;
+    raise(
+      "waste_alarm",
+      String(alarm.id),
+      alarm.openedAt,
+      `${WASTE_CHECK_TITLES[alarm.check]}: ${alarm.evidence}`,
+    );
   }
   const loops = heartbeats(store).loops;
   for (const [source, loop] of Object.entries(loops)) {

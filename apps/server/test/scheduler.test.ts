@@ -1656,7 +1656,7 @@ describe("scheduler", () => {
       expect(state().wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
     });
 
-    it("raises one budget-brake alert on the minute tick and lifts it when the week resets", async () => {
+    it("the minute tick raises no Needs-you note for a weekly pace past 100%", async () => {
       const minute = Math.floor(NOW / 60_000) * 60_000;
       const resetAt = minute + 24 * 3600e3;
       for (const [at, pct] of [
@@ -1664,12 +1664,11 @@ describe("scheduler", () => {
         [minute, 60],
       ] as const)
         store.addUsage({ accountId: "claude-main", window: "7d", at, resetAt, pct, source: "t" });
-      let t = minute + 1000;
       const s = createScheduler({
         config,
         store,
         bus,
-        now: () => t,
+        now: () => minute + 1000,
         collectors: stubs({
           machine: vi.fn(async (_p, _prev, at) => ({
             sample: machineSample({ at }),
@@ -1679,13 +1678,7 @@ describe("scheduler", () => {
         }),
       });
       await s.tick("machine");
-      expect(store.notes().filter((n) => n.key === "budget-brake")).toHaveLength(1);
-      t += 60_000;
-      await s.tick("machine");
-      expect(store.notes().filter((n) => n.key === "budget-brake")).toHaveLength(1);
-      t = resetAt + 60_000;
-      await s.tick("machine");
-      expect(store.notes().find((n) => n.key === "budget-brake")).toBeUndefined();
+      expect(store.notes()).toEqual([]);
     });
 
     it.each([

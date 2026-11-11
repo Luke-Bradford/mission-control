@@ -106,7 +106,7 @@ import { attentionItems } from "../src/hud.ts";
 import { closeSettledQuestions } from "../src/question-watch.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
-import { budgetBrake } from "../src/spend/budget-brake.ts";
+import { weeklyProjection } from "../src/spend/projection.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 
@@ -2179,7 +2179,7 @@ describe("the FLIGHT watcher", () => {
     }
   });
 
-  it("keeps starting FLIGHT while the budget brake is on its account", async () => {
+  it("keeps starting FLIGHT while its account's weekly pace passes 100%", async () => {
     for (const [at, pct] of [
       [T0 - 6 * 60 * MIN, 40],
       [T0 - 1000, 60],
@@ -2192,7 +2192,7 @@ describe("the FLIGHT watcher", () => {
         resetAt: T0 + 24 * 60 * MIN,
         source: "test",
       });
-    expect(budgetBrake(config, store, "claude-main", T0)).not.toBeNull();
+    expect(weeklyProjection(store, "claude-main")?.projected).toBeGreaterThan(100);
     await watch.check();
     expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
     expect(store.notes().filter((n) => n.key === FLIGHT_DOWN_NOTE_KEY)).toEqual([]);

@@ -159,8 +159,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 CREATE INDEX IF NOT EXISTS reviews_state ON reviews(state, created_at);
 -- A FLIGHT-directed queued-review move overrides the engine's ordinary reviewer selection.
 CREATE TABLE IF NOT EXISTS review_moves (
-  review_id INTEGER PRIMARY KEY, seat_id TEXT NOT NULL, at INTEGER NOT NULL,
-  budget_brake_override INTEGER NOT NULL DEFAULT 0
+  review_id INTEGER PRIMARY KEY, seat_id TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS review_findings (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, author_run_id TEXT NOT NULL, pos INTEGER NOT NULL,
@@ -435,6 +434,14 @@ CREATE TABLE IF NOT EXISTS notifications (
   updated_at INTEGER NOT NULL, last_read_at INTEGER, unread INTEGER NOT NULL,
   first_seen_at INTEGER NOT NULL, handled_at INTEGER, handled_how TEXT, handled_through INTEGER
 );
+-- Waste alarms: spend that bought no progress, one per check and subject while it stands. Open until
+-- the cause ends (closed_at) or FLIGHT or the operator resolves the hold with a basis (resolved_at).
+CREATE TABLE IF NOT EXISTS waste_alarms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, check_id TEXT NOT NULL, subject TEXT NOT NULL, repo_id TEXT,
+  ticket TEXT, seat_id TEXT, run_id TEXT, level INTEGER NOT NULL, evidence TEXT NOT NULL,
+  opened_at INTEGER NOT NULL, closed_at INTEGER, resolved_at INTEGER, basis TEXT
+);
+CREATE INDEX IF NOT EXISTS waste_alarms_subject ON waste_alarms(check_id, subject, opened_at);
 -- Worktree paths a crew start is making (worktree add, then the install); one still here at the
 -- next start was left half-made, and is removed and made again.
 CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER NOT NULL);

@@ -283,6 +283,7 @@ import {
   type Stray,
   THREAD_COMMS_LIMIT,
 } from "./store/types.ts";
+import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
 
 export * from "./store/types.ts";
 
@@ -807,7 +808,8 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
-    this.addColumn("review_moves", "budget_brake_override", "INTEGER NOT NULL DEFAULT 0");
+    // the forecast brake's Needs-you note is gone with the brake
+    this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
@@ -1234,6 +1236,21 @@ export class Store {
       at: r.at as number,
       data: JSON.parse(r.data as string) as Record<string, unknown>,
     }));
+  }
+
+  /** The waste checks' queries and the alarms table (spend/waste.ts). */
+  get waste(): ReturnType<typeof wasteQueries> {
+    return wasteQueries(this.db);
+  }
+
+  /** A check call the hook refused as an unchanged rerun (same run, command and commit). */
+  addRerunRefusal(runId: string, command: string, sha: string, at: number): void {
+    this.appendAttempt(runId, RERUN_REFUSED_ATTEMPT, at, { command, sha, at });
+  }
+
+  /** A run resumed with the hub's "carry on" line (kind `resume`), counted by the retry-loop check. */
+  addResumeAttempt(runId: string, at: number): void {
+    this.appendAttempt(runId, RESUME_ATTEMPT, at, { at });
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
@@ -4886,7 +4903,7 @@ export class Store {
   }
 
   /** Moves a queued review to another review seat; true only when it was still queued. */
-  moveQueuedReview(id: number, seatId: string, at: number, budgetBrakeOverride = false): boolean {
+  moveQueuedReview(id: number, seatId: string, at: number): boolean {
     let moved = false;
     this.transaction(() => {
       moved =
@@ -4895,10 +4912,8 @@ export class Store {
           .run(seatId, id).changes === 1;
       if (moved)
         this.db
-          .prepare(
-            "INSERT OR REPLACE INTO review_moves (review_id, seat_id, at, budget_brake_override) VALUES (?, ?, ?, ?)",
-          )
-          .run(id, seatId, at, Number(budgetBrakeOverride));
+          .prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)")
+          .run(id, seatId, at);
     });
     return moved;
   }
@@ -4906,14 +4921,6 @@ export class Store {
   /** Whether FLIGHT assigned the queued review to its current seat. */
   reviewMoved(id: number): boolean {
     return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
-  }
-
-  /** Whether FLIGHT explicitly passed the target account's budget brake for this review. */
-  reviewBudgetBrakeOverride(id: number): boolean {
-    const row = this.db
-      .prepare("SELECT budget_brake_override FROM review_moves WHERE review_id = ?")
-      .get(id) as { budget_brake_override?: number } | undefined;
-    return row?.budget_brake_override === 1;
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */

@@ -3991,8 +3991,8 @@ describe("the engine runs reviews", () => {
       expect(reviewerOf(config, "guido-1", undefined, { store, now: clock })?.id).toBe("retro-cx");
     });
 
-    /** Weekly readings that project past 100% by the reset a day on. */
-    const brakeAccount = (accountId: string): void => {
+    /** Weekly readings that project past 100% by the reset a day on (195% in the ticket's replay). */
+    const overPace = (accountId: string): void => {
       for (const [at, pct] of [
         [clock - 6 * 60 * MIN, 40],
         [clock, 60],
@@ -4006,50 +4006,18 @@ describe("the engine runs reviews", () => {
           source: "test",
         });
     };
-    const liftBrake = (accountId: string): void =>
-      store.addUsage({
-        accountId,
-        window: "7d",
-        at: clock + 1,
-        pct: 10,
-        resetAt: clock + 24 * 60 * MIN,
-        source: "test",
-      });
 
-    it("reviewerOf gives the next reviewer while the first one's account has the budget brake on", () => {
+    it("reviewerOf keeps the first reviewer while its account's projection passes 100%", () => {
       addCodexReviewer();
-      const at = { store, now: clock };
-      brakeAccount("codex-main");
-      expect(reviewerOf(config, "guido-1", undefined, at)?.id).toBe(RETRO);
-      liftBrake("codex-main");
-      expect(reviewerOf(config, "guido-1", undefined, at)?.id).toBe("retro-cx");
+      overPace("codex-main");
+      expect(reviewerOf(config, "guido-1", undefined, { store, now: clock })?.id).toBe("retro-cx");
     });
 
-    it("a queued review waits while its reviewer's account has the budget brake on, then starts", async () => {
-      brakeAccount("claude-main");
+    it("a queued review starts although its reviewer's account is on a pace past 100%", async () => {
+      overPace("claude-main");
       await toReview();
-      await h.engine.tick();
-      expect(first()).toMatchObject({ state: "queued", seatId: RETRO });
-      expect(h.starts).toEqual([]);
-      liftBrake("claude-main");
       await h.engine.tick();
       await vi.waitFor(() => expect(h.starts).toEqual([{ seat: RETRO, id: expect.any(Number) }]));
-    });
-
-    it("starts a FLIGHT-moved P0 review through its target budget brake only", async () => {
-      addCodexReviewer();
-      brakeAccount("claude-main");
-      brakeAccount("codex-main");
-      await toReview();
-      await h.engine.tick();
-      const review = first();
-      expect(store.moveQueuedReview(review.id, "retro-cx", clock, true)).toBe(true);
-
-      await h.engine.tick();
-
-      await vi.waitFor(() =>
-        expect(h.starts).toEqual([{ seat: "retro-cx", id: expect.any(Number) }]),
-      );
     });
 
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {

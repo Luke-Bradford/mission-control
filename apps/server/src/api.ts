@@ -160,6 +160,7 @@ import {
   type UpdateLog,
   type UsageSample,
   type VersionInfo,
+  type WasteReport,
   watchStartRefusedText,
 } from "@mc/core";
 import Fastify, {
@@ -417,7 +418,8 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import { weeklyProjection } from "./spend/budget-brake.ts";
+import { weeklyProjection } from "./spend/projection.ts";
+import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
@@ -2741,6 +2743,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             body.data.tool_name === "Bash" &&
             typeof command === "string"
           ) {
+            // the same check on the same commit with nothing changed is not run again (waste alarm)
+            const rerun = await checks?.rerun?.(who.runId, command);
+            if (rerun) return answer(rerun);
             const check = await checks?.lockedBy(who.runId, command);
             if (check) verdict = { kind: "lock", command: check };
           }
@@ -4125,6 +4130,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
         return tokenAuditView(store, config, now(), days);
       });
+      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
+      api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
         const footprint =

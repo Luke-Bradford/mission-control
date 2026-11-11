@@ -124,7 +124,7 @@ import {
 } from "./machine-capacity.ts";
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
-import { syncBudgetBrake } from "./spend/budget-brake.ts";
+import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
 import { auditEndedRuns } from "./token-audit/audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
@@ -1157,7 +1157,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const acct of config.accounts) {
         await guarded(usageCollector(acct.id), () => usageFor(acct));
       }
-      if (syncBudgetBrake(config, store, now())) emit("attention");
       emit("limits", "health");
     },
     maintenance: async () => {
@@ -1333,8 +1332,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         } else {
           store.clearNote(MACHINE_CAPACITY_KEY, at);
         }
-        // The week's reset lifts the brake without a new reading
-        syncBudgetBrake(deps.config, store, at);
+        // Waste alarms are read once a minute: a restart storm shows within minutes. They never
+        // raise a Needs-you item; FLIGHT is woken once per alarm.
+        try {
+          syncWasteAlarms(deps.config, store, at);
+        } catch (e) {
+          deps.log?.(`waste alarms: ${e instanceof Error ? e.message : String(e)}`);
+        }
         emit("attention");
       }
     },
