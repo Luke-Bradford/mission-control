@@ -174,10 +174,10 @@ describeRendered("FLIGHT page in a browser", () => {
             colorScheme: theme,
             api: flightPageApi("blocked"),
           });
-          await page.box("#orders li");
+          await page.box("#ordersP .fp-ofirst");
           await page.box("#doing .fp-age");
           expect(page.errors()).toEqual([]);
-          expect(await page.reachable("#orders button", "#ordersP")).toEqual([true]);
+          expect(await page.reachable("#ordersP .fp-end", "#ordersP")).toEqual([true]);
           const r = await page.evaluate(() => {
             const doc = document.documentElement;
             const end = document
@@ -203,6 +203,87 @@ describeRendered("FLIGHT page in a browser", () => {
           expect(r.text).toContain("Review only: no new builds");
           expect(r.text).toContain("Ends: not set");
           expect(r.decisions).toBeGreaterThanOrEqual(3);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  // Live-like load: long orders, five Doing now lines, four held items. The orders strip must be
+  // wholly on the first screen, with its setter, time and end inside it.
+  for (const [width, height] of [
+    [1280, 800],
+    [1600, 900],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      it(
+        `keeps the orders strip on the first screen with long orders at ${width}x${height} in ${theme}`,
+        async () => {
+          const long = (id: number) => ({
+            id,
+            at: NOW - 2 * 24 * 60 * 60_000,
+            revokedAt: null,
+            source: "saved",
+            seatId: null,
+            by: "operator",
+            kind: "text",
+            text: "y".repeat(300),
+          });
+          const held = [1, 2, 3, 4].map((n) =>
+            item({
+              key: `hold:${n}`,
+              text: `Wait for CI ${n}.`,
+              hold: {
+                reason: "CI is running",
+                condition: { kind: "manual" },
+                by: "flight-1",
+                at: NOW,
+              },
+            }),
+          );
+          const base = flightPageApi("busy");
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: {
+              ...base,
+              "/api/attention/held": held,
+              "/api/flight/orders?limit=1": {
+                active: [long(1), long(2)],
+                history: [],
+                nextCursor: null,
+              },
+            },
+          });
+          await page.box("#ordersP .fp-ofirst");
+          const r = await page.evaluate(() => {
+            const box = (el: Element | null) => el?.getBoundingClientRect() ?? null;
+            const strip = box(document.querySelector("#ordersP .fp-ostrip"));
+            const meta = box(document.querySelector("#ordersP .fp-meta"));
+            const end = box(document.querySelector("#ordersP .fp-end"));
+            const inside = (a: DOMRect | null, b: DOMRect | null) =>
+              a !== null &&
+              b !== null &&
+              a.top >= b.top - 1 &&
+              a.bottom <= b.bottom + 1 &&
+              a.right <= b.right + 1;
+            return {
+              stripInViewport:
+                strip !== null && strip.top >= 0 && strip.bottom <= window.innerHeight,
+              metaInStrip: inside(meta, strip),
+              endInStrip: inside(end, strip),
+              height: strip?.height ?? 0,
+            };
+          }, null);
+          expect(r.stripInViewport).toBe(true);
+          expect(r.metaInStrip).toBe(true);
+          expect(r.endInStrip).toBe(true);
+          expect(r.height).toBeLessThanOrEqual(48);
           await page.close();
         },
         BROWSER_TEST_TIMEOUT_MS,

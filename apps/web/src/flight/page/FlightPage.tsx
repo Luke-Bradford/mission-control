@@ -56,24 +56,22 @@ export function FlightPage() {
         </a>
       </div>
       <StatusBand run={run} view={view} now={now} />
+      <StandingOrders />
       <div className="fp-mid">
-        <div className="fp-left">
-          <section className="fp-panel fp-self-start" id="doingP" aria-labelledby="doingH">
-            <h2 className="fp-head" id="doingH">
-              Doing now
-            </h2>
-            {summary.data ? (
-              <DoingNowList lines={doingLines(run, summary.data)} />
-            ) : (
-              <Pending
-                what="what FLIGHT is doing"
-                error={summary.error}
-                resource={RESOURCES.flightSummary}
-              />
-            )}
-          </section>
-          <StandingOrders />
-        </div>
+        <section className="fp-panel fp-self-start" id="doingP" aria-labelledby="doingH">
+          <h2 className="fp-head" id="doingH">
+            Doing now
+          </h2>
+          {summary.data ? (
+            <DoingNowList lines={doingLines(run, summary.data)} />
+          ) : (
+            <Pending
+              what="what FLIGHT is doing"
+              error={summary.error}
+              resource={RESOURCES.flightSummary}
+            />
+          )}
+        </section>
         <section className="fp-panel" id="blockersP" aria-labelledby="blockersH">
           <h2 className="fp-head" id="blockersH">
             Blockers

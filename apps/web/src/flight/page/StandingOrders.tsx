@@ -7,7 +7,8 @@ import { rel } from "../../fmt.ts";
 import { Pending } from "../Pending.tsx";
 
 /** The hub stores no end time for an order or a pause: both run until someone ends them. */
-export const ENDS_UNSET = "Ends: not set, runs until you end it";
+export const ENDS_UNSET = "Ends: not set";
+const ENDS_TITLE = "The hub stores no end time: the order runs until someone ends it.";
 
 /** One order in force, as the panel shows it. */
 interface OrderRow {
@@ -39,7 +40,8 @@ const fromPause = (p: CrewPause): OrderRow => ({
   end: () => apiPost(ACTIONS.crewPause, { seats: null }),
 });
 
-function OrderLine({ row, now, tz }: { row: OrderRow; now: number; tz: string | null }) {
+/** Ends an order through its route; asks first, and says why when it fails. */
+function EndControl({ row }: { row: OrderRow }) {
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
@@ -58,13 +60,7 @@ function OrderLine({ row, now, tz }: { row: OrderRow; now: number; tz: string | 
     }
   };
   return (
-    <li>
-      <span className="fp-w fp-one" title={row.text}>
-        <b>{row.text}</b>{" "}
-        <span>
-          Set by {row.by} · {tz === null ? "time not known" : rel(row.at, now, tz)} · {ENDS_UNSET}
-        </span>
-      </span>
+    <>
       {failure && (
         <span role="alert" className="fp-err">
           Not ended: {failure}
@@ -84,46 +80,107 @@ function OrderLine({ row, now, tz }: { row: OrderRow; now: number; tz: string | 
           {row.endLabel}
         </button>
       )}
+    </>
+  );
+}
+
+function Meta({ row, now, tz }: { row: OrderRow; now: number; tz: string | null }) {
+  return (
+    <span className="fp-meta" title={ENDS_TITLE}>
+      Set by {row.by} · {tz === null ? "time not known" : rel(row.at, now, tz)} · {ENDS_UNSET}
+    </span>
+  );
+}
+
+/** Longer than this, the order text gets a Show all button. */
+const LONG_ORDER = 120;
+
+/** One order in the full list: the text clamped (with a button for all of it), then its meta that never truncates. */
+function OrderLine({ row, now, tz }: { row: OrderRow; now: number; tz: string | null }) {
+  const [all, setAll] = useState(false);
+  return (
+    <li>
+      <span className="fp-w fp-ocol">
+        <b className={all ? undefined : "fp-clamp"} title={row.text}>
+          {row.text}
+        </b>
+        <Meta row={row} now={now} tz={tz} />
+        {row.text.length > LONG_ORDER && (
+          <button
+            type="button"
+            className="sm fp-showall"
+            aria-expanded={all}
+            onClick={() => setAll(!all)}
+          >
+            {all ? "Show less" : "Show all"}
+          </button>
+        )}
+      </span>
+      <EndControl row={row} />
     </li>
   );
 }
 
 /**
  * What the operator has ordered that is still in force: each standing order and the crew pause, who
- * set it, when, when it ends and one action to end it. Nothing is hidden: an order nobody has
- * ended keeps showing, so a held board is never a mystery.
+ * set it, when, when it ends and one action to end it. A one-line strip under the status band
+ * always shows the first order whole in meta and end; "Show all" opens every order over the page
+ * without moving it. Nothing is hidden: an order nobody has ended keeps showing, so a held board is
+ * never a mystery.
  */
 export function StandingOrders() {
   const orders = useResource<StandingInstructionList>(RESOURCES.flightOrders);
   const pause = useResource<CrewPause | null>(RESOURCES.crewPause);
   const now = useNow();
   const tz = useTz();
+  const [open, setOpen] = useState(false);
   const rows: OrderRow[] = [
     ...(pause.data ? [fromPause(pause.data)] : []),
     ...(orders.data?.active ?? []).map(fromInstruction),
   ];
+  const first = rows[0];
   const loading = orders.data === undefined || pause.data === undefined;
   return (
     <section className="fp-panel fp-orders" id="ordersP" aria-labelledby="ordersH">
-      <h2 className="fp-head" id="ordersH">
-        Standing orders
-        <span className="fp-sub">
-          {loading
-            ? "loading"
-            : rows.length === 0
-              ? "No orders in force"
-              : `${rows.length} in force`}
-        </span>
-      </h2>
-      {orders.data === undefined && orders.error ? (
-        <Pending what="standing orders" error={orders.error} resource={RESOURCES.flightOrders} />
-      ) : rows.length > 0 ? (
+      <div className="fp-ostrip">
+        <h2 className="fp-ohead" id="ordersH">
+          Standing orders
+          <span className="fp-sub">
+            {loading
+              ? "loading"
+              : rows.length === 0
+                ? "No orders in force"
+                : `${rows.length} in force`}
+          </span>
+        </h2>
+        {orders.data === undefined && orders.error ? (
+          <Pending what="standing orders" error={orders.error} resource={RESOURCES.flightOrders} />
+        ) : first ? (
+          <>
+            <b className="fp-one fp-ofirst" title={first.text}>
+              {first.text}
+            </b>
+            <Meta row={first} now={now} tz={tz} />
+            <EndControl row={first} />
+            <button
+              type="button"
+              className="sm"
+              aria-expanded={open}
+              aria-controls="orders"
+              onClick={() => setOpen(!open)}
+            >
+              {open ? "Hide list" : `Show all (${rows.length})`}
+            </button>
+          </>
+        ) : null}
+      </div>
+      {open && first && (
         <ul className="fp-lines fp-orderlist" id="orders">
           {rows.map((row) => (
             <OrderLine key={row.key} row={row} now={now} tz={tz} />
           ))}
         </ul>
-      ) : null}
+      )}
     </section>
   );
 }

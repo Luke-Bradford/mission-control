@@ -452,39 +452,77 @@
   white-space: nowrap;
 }
 
-/* Standing orders: a compact strip above the working panels; many orders scroll inside it. */
-.fp-left {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-  min-width: 0;
-  min-height: 0;
-  /* On a short screen the column scrolls, so no panel is squeezed below its own content. */
-  overflow: auto;
-}
-.fp-left > .fp-panel {
-  flex: none;
-}
-/* It sits under Doing now; many orders scroll inside their own list. */
+/* Standing orders: one 40 px strip under the status band; the full list opens over the page. */
 .fp-orders {
   flex: none;
+  position: relative;
+  overflow: visible;
 }
-.fp-orderlist {
+.fp-ostrip {
+  height: var(--fp-row);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  min-width: 0;
+}
+.fp-ohead {
   flex: none;
-  overflow: auto;
-  max-height: calc(var(--fp-row) * 3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+  color: var(--fg);
+}
+.fp-ofirst {
+  flex: 1;
+  font-weight: 600;
+}
+.fp-meta {
+  flex: none;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  white-space: nowrap;
 }
 .fp-end {
   flex: none;
   display: inline-flex;
   gap: var(--sp-2);
-  margin-left: auto;
 }
-/* An order may be long: two lines show, the rest is in the title and on the Records tab. */
-.fp-orderlist .fp-one {
+/* Over the page, not in its flow: opening the list moves nothing. */
+.fp-orderlist {
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  max-height: calc(var(--fp-row) * 5);
+  overflow: auto;
+}
+.fp-orderlist li {
+  align-items: flex-start;
+}
+.fp-ocol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-items: flex-start;
+  overflow-wrap: anywhere;
+}
+.fp-ocol .fp-meta {
   white-space: normal;
+}
+/* An order may be long: two lines show; Show all opens the rest. */
+.fp-clamp {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+  overflow: hidden;
   overflow-wrap: anywhere;
 }

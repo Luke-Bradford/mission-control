@@ -178,23 +178,43 @@ describe("Standing orders", () => {
     );
     render(<Flight />);
     const panel = await screen.findByRole("region", { name: /^Standing orders/ });
-    const rows = await waitFor(() => {
-      const r = panel.querySelectorAll("li");
-      expect(r.length).toBe(2);
-      return [...r];
-    });
-    const first = rows[1]?.textContent ?? "";
-    expect(first).toContain("Review only. No new builds.");
-    expect(first).toContain("Set by operator");
-    expect(first).toContain("5 h ago");
-    expect(first).toContain("Ends: not set");
+    // the strip shows the first order whole in meta and end
+    await waitFor(() => expect(panel.textContent).toContain("Quiet hours"));
+    expect(within(panel).getAllByRole("button", { name: /Resume crew/ }).length).toBe(1);
+    fireEvent.click(within(panel).getByRole("button", { name: /Show all \(2\)/ }));
+    const rows = [...panel.querySelectorAll("li")];
+    expect(rows.length).toBe(2);
+    const order = rows[1]?.textContent ?? "";
+    expect(order).toContain("Review only. No new builds.");
+    expect(order).toContain("Set by operator");
+    expect(order).toContain("5 h ago");
+    expect(order).toContain("Ends: not set");
     expect(within(rows[1] as HTMLElement).getByRole("button", { name: /End order/ })).toBeTruthy();
     const second = rows[0]?.textContent ?? "";
     expect(second).toContain("Crew paused");
-    expect(second).toContain("Quiet hours");
     expect(
       within(rows[0] as HTMLElement).getByRole("button", { name: /Resume crew/ }),
     ).toBeTruthy();
+  });
+
+  it("keeps the setter, time and end outside the clamped text of a long order", async () => {
+    const long = "x".repeat(300);
+    stubFetch(
+      flightPageApi("running", {
+        "/api/flight/orders?limit=1": { ...orders, active: [order(8, long, NOW - 2 * HOUR)] },
+      }),
+    );
+    render(<Flight />);
+    const panel = await screen.findByRole("region", { name: /^Standing orders/ });
+    fireEvent.click(await within(panel).findByRole("button", { name: /Show all/ }));
+    const li = panel.querySelector("li") as HTMLElement;
+    const clamp = li.querySelector(".fp-clamp") as HTMLElement;
+    expect(clamp.contains(li.querySelector(".fp-meta"))).toBe(false);
+    expect(li.querySelector(".fp-meta")?.textContent).toContain("Set by operator");
+    const more = within(li).getByRole("button", { name: "Show all" });
+    fireEvent.click(more);
+    expect(li.querySelector(".fp-clamp")).toBeNull();
+    expect(within(li).getByRole("button", { name: "Show less" })).toBeTruthy();
   });
 
   it("ends an order through the revoke route after a confirm", async () => {
