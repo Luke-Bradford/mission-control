@@ -46,7 +46,7 @@ import {
   realCliOps,
   type SeatCheck,
   settlePending,
-} from "./cli-auto.ts";
+} from "./cli/auto.ts";
 import {
   CLI_COLLECTOR,
   CLI_NOTE_KEY,
@@ -60,7 +60,7 @@ import {
   cliFailedText,
   NOT_A_CASK,
   realExec,
-} from "./cli-update.ts";
+} from "./cli/update.ts";
 import { collectorName, DIGEST_RETENTION_MS, FOLD_WINDOW_MS } from "./collectors/common.ts";
 import { collectFlow } from "./collectors/flow.ts";
 import {
