@@ -244,8 +244,7 @@ async function assertCheckout(worktree: string): Promise<void> {
   const [inside, root] = stdout.trim().split("\n");
   if (inside !== "true" || !root) throw new Error("checkout is not a Git worktree");
   const [actualRoot, actualWorktree] = await Promise.all([realpath(root), realpath(worktree)]);
-  if (actualRoot !== actualWorktree)
-    throw new Error("checkout is not a Git worktree");
+  if (actualRoot !== actualWorktree) throw new Error("checkout is not a Git worktree");
 }
 
 /** A git failure's first line, for the log; never sent to the page. */
