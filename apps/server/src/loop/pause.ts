@@ -1,7 +1,7 @@
-import { isPaused } from "./collectors/ta-loop.ts";
-import type { AdoptedLoop } from "./config.ts";
-import { existsNoted } from "./file-deps.ts";
-import type { Store } from "./store.ts";
+import { isPaused } from "../collectors/ta-loop.ts";
+import type { AdoptedLoop } from "../config.ts";
+import { existsNoted } from "../file-deps.ts";
+import type { Store } from "../store.ts";
 
 /** Whether a watched loop is paused, and the issue that pauses it when its config names one. */
 export interface LoopPause {

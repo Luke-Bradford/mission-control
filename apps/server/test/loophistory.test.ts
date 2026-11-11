@@ -10,7 +10,7 @@ import {
   reviewedEventText,
 } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { loopTries } from "../src/loophistory.ts";
+import { loopTries } from "../src/loop/history.ts";
 
 const RUN = "r1";
 const T0 = 1_000_000;

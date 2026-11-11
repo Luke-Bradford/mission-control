@@ -331,7 +331,7 @@ import {
   seatQuestionTriage,
 } from "./hud.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
-import { loopTries } from "./loophistory.ts";
+import { loopTries } from "./loop/history.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
