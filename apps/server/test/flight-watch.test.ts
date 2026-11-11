@@ -66,7 +66,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { budgetBrake } from "../src/budget-brake.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { flightQuestion } from "../src/comms.ts";
+import { flightQuestion } from "../src/comms/index.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import * as retrospective from "../src/flight/retrospective.ts";

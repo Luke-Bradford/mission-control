@@ -12,7 +12,7 @@ import {
   flightQuestionKeys,
   flightQuestionMessageId,
   isFlightOperatorQuestion,
-} from "../comms-question.ts";
+} from "../comms/question.ts";
 import { recordWrite, runawayTrip, watchRunaway } from "../flight/runaway.ts";
 import { briefActionRoute } from "./dispatch.ts";
 import {

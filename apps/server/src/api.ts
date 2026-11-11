@@ -224,9 +224,9 @@ import {
   sendComms,
   threadMessages,
   validateCommsText,
-} from "./comms.ts";
-import { replyRoute } from "./comms-reply.ts";
-import { commsTicketCounts } from "./comms-ticket-counts.ts";
+} from "./comms/index.ts";
+import { replyRoute } from "./comms/reply.ts";
+import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -369,7 +369,7 @@ import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
-import { qaHistoryPage, qaNativeHistory } from "./qa-history.ts";
+import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
   QA_REPORT_BODY_LIMIT,
@@ -377,7 +377,7 @@ import {
   QaReportError,
   type QaReportService,
   qaReportMarkdown,
-} from "./qa-reports.ts";
+} from "./qa/reports.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,

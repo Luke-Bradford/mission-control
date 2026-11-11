@@ -28,12 +28,12 @@ import {
   scanText,
 } from "@mc/core";
 import { z } from "zod";
-import { parseChecks } from "./collectors/github.ts";
-import type { CcConfig } from "./config.ts";
-import type { HudShotStore } from "./flight/hud-store.ts";
-import type { GhRunner } from "./mcp/gh.ts";
-import type { PrEvidenceStore } from "./pr-evidence/store.ts";
-import type { Store } from "./store.ts";
+import { parseChecks } from "../collectors/github.ts";
+import type { CcConfig } from "../config.ts";
+import type { HudShotStore } from "../flight/hud-store.ts";
+import type { GhRunner } from "../mcp/gh.ts";
+import type { PrEvidenceStore } from "../pr-evidence/store.ts";
+import type { Store } from "../store.ts";
 
 export const QA_REPORT_BODY_LIMIT = 256 * 1024;
 const SHA = /^[a-f0-9]{40}$/;

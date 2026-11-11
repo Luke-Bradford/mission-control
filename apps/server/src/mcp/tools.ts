@@ -202,7 +202,7 @@ import { cleanCodeHealth } from "../code-health/clean.ts";
 import { CodeHealthReader } from "../code-health/read.ts";
 import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
-import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms.ts";
+import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/index.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
@@ -225,7 +225,7 @@ import {
   previewRequest,
 } from "../preview-browser.ts";
 import type { ProfilesError } from "../profiles.ts";
-import { createQaReports, QaReportError, type QaReportService } from "../qa-reports.ts";
+import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
 import {
   adminDirOf,
   COMMIT_ADD_PATHSPEC,
