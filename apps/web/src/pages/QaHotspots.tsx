@@ -2,6 +2,7 @@ import type { ConfigView, Crew, RepoView } from "@mc/core";
 import { useMemo, useState } from "react";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { plural } from "../fmt.ts";
 import { HistoryLens, ReviewLens } from "../lenses/lenses.tsx";
 import { useRepoGraph } from "../qa/useRepoGraph.ts";
 import { MAP_REPO_KEY, readKey } from "../storage.ts";
@@ -16,11 +17,20 @@ export function QaHotspots() {
     () =>
       repos.data
         ? repos.data.flatMap((repo) => {
+            const sessions = config.data?.crew?.sessions.filter((s) => s.repoId === repo.id) ?? [];
+            const rows = crew.data?.rows.filter(
+              (row) => row.kind === "crew" && row.role !== "FLIGHT" && row.repoId === repo.id,
+            );
+            // Until crew data arrives, count the configured seats that run (not watchers or retiring).
             const seats =
-              crew.data?.rows.filter((row) => row.kind === "crew" && row.repoId === repo.id)
-                .length ?? 0;
-            return config.data?.crew?.sessions.some((session) => session.repoId === repo.id)
-              ? [{ id: repo.id, label: `${repo.id} · ${seats} crew seats` }]
+              rows?.length ??
+              sessions.reduce(
+                (n, s) =>
+                  n + s.seats.filter((seat) => !seat.retiring && seat.loop !== "watch").length,
+                0,
+              );
+            return sessions.length > 0
+              ? [{ id: repo.id, label: `${repo.id} · ${plural(seats, "crew seat")}` }]
               : [];
           })
         : [],
