@@ -1,7 +1,7 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
-import type { Store } from "./store.ts";
+import type { Store } from "../store.ts";
 
 export interface CliBinding {
   vendor: "claude" | "codex";

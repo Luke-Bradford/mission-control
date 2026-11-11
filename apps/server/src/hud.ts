@@ -84,7 +84,7 @@ import {
   type TokenUsage,
   UAT_PARK,
 } from "@mc/core";
-import { runAccountId } from "./account-bindings.ts";
+import { runAccountId } from "./accounts/bindings.ts";
 import {
   decisionDefault,
   partitionAttention,

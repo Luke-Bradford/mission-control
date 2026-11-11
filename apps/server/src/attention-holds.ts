@@ -13,7 +13,7 @@ import {
   GUARD_ACK_PREFIX,
 } from "@mc/core";
 import type { z } from "zod";
-import { runAccountId } from "./account-bindings.ts";
+import { runAccountId } from "./accounts/bindings.ts";
 import type { CcConfig } from "./config.ts";
 import { accountAtStop } from "./engine/queue.ts";
 import { NOTE_KEY } from "./hud.ts";

@@ -1,10 +1,10 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import type { CliAccountStatus } from "@mc/core";
-import { type CliBinding, codexProfile } from "./account-bindings.ts";
-import { isObj } from "./collectors/usage-common.ts";
-import { usageProviderEnv } from "./collectors/usage-sources.ts";
-import { CodexModels } from "./runtime/codex-models.ts";
+import { type CliBinding, codexProfile } from "./bindings.ts";
+import { isObj } from "../collectors/usage-common.ts";
+import { usageProviderEnv } from "../collectors/usage-sources.ts";
+import { CodexModels } from "../runtime/codex-models.ts";
 
 type Account = CliBinding & { id: string };
 export type AccountModels = {
