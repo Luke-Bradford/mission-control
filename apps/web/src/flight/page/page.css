@@ -181,10 +181,10 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 4fr);
-  /* The row holding Doing now and Blockers keeps its heading, column head and two blocker rows
-     whatever the Watch list below it asks for. */
+  /* The row holding Doing now and Blockers keeps its heading, column head, two blocker rows and the
+     "more below" foot whatever the Watch list below it asks for. */
   grid-template-rows: minmax(
-      calc(var(--fp-row) + var(--sp-6) + var(--sp-6) * 2 + var(--sp-5) * 2),
+      calc(var(--fp-row) + var(--sp-6) * 4 + var(--sp-5) * 2 + var(--sp-1)),
       1fr
     );
   gap: var(--sp-3);
