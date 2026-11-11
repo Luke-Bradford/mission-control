@@ -293,6 +293,41 @@ describeRendered("Comms chart, rendered", () => {
   );
 
   it(
+    "draws no light at the canvas corner while it waits its turn or after it has arrived",
+    async () => {
+      const api = crewApi(9);
+      const links = api["/api/comms/links"].links;
+      const page = await renderAt({
+        page: "test/commsBrowser.html",
+        width: 1920,
+        height: 940,
+        api,
+      });
+      await page.box(".comms-node");
+      await new Promise((r) => setTimeout(r, 3_000));
+      (links[0] as { count: number }).count += 3;
+      await page.evaluate(() => window.__refetchAgents(), null);
+      await page.box(".comms-particle");
+      const parked = () =>
+        page.evaluate(() => {
+          const c = document.querySelector(".comms-rails-canvas")?.getBoundingClientRect();
+          if (!c) return -1;
+          return [...document.querySelectorAll(".comms-particle")].filter((el) => {
+            const r = el.getBoundingClientRect();
+            const near = Math.hypot(r.x + r.width / 2 - c.x, r.y + r.height / 2 - c.y) <= 8;
+            return near && Number.parseFloat(getComputedStyle(el).opacity) > 0;
+          }).length;
+        }, null);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(await parked()).toBe(0);
+      await new Promise((r) => setTimeout(r, 1_200));
+      expect(await parked()).toBe(0);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
     "does no work at idle, and little during a burst of 20 messages",
     async () => {
       const api = crewApi(11);

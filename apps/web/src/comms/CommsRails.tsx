@@ -840,7 +840,9 @@ export function CommsRails({
           >
             <g className="comms-particles">
               {particles.map((p) => (
-                <circle key={p.id} className="comms-particle" r={3.5} fill={p.color}>
+                // Hidden outside its own interval: the opacity animation below overrides this while the
+                // light runs, so one waiting its turn or already arrived is not drawn at (0, 0).
+                <circle key={p.id} className="comms-particle" r={3.5} fill={p.color} opacity={0}>
                   <animateMotion path={p.d} dur={`${PARTICLE_MS}ms`} begin={`${p.begin}s`} />
                   <animate
                     attributeName="opacity"

@@ -396,3 +396,16 @@ it("keeps every name clear of every other name, hub pill and wait mark", () => {
     for (const b of pts.slice(i + 1))
       expect(Math.abs(a.x - b.x) >= 60 || Math.abs(a.y - b.y) >= 20).toBe(true);
 });
+
+it("keeps every light invisible outside its own interval, so none waits at the corner", () => {
+  const v = view(3);
+  v.rerender(
+    <CommsRails
+      {...v.props}
+      flows={{ generation: 1, list: [{ from: "dev-1", to: "dev-2", n: 3 }] }}
+    />,
+  );
+  const dots = [...document.querySelectorAll(".comms-particle")];
+  expect(dots).toHaveLength(3);
+  for (const dot of dots) expect(dot.getAttribute("opacity")).toBe("0");
+});
