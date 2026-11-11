@@ -45,7 +45,10 @@ function Row({ item, current }: { item: AttentionItem; current: boolean }) {
           <MarkdownInline text={questionOf(item)} max={120} />
         </span>
       )}
-      <span className="needs-row-who s">{`Asked by ${askerOf(item, callSign)}`}</span>
+      <span className="needs-row-who s">
+        {`Asked by ${askerOf(item, callSign)}`}
+        {item.ticket !== null && ` · ${item.ticket}`}
+      </span>
     </a>
   );
 }
@@ -68,17 +71,29 @@ function Group({ title, n, children }: { title: string; n: number; children: Rea
 export function NeedsList({
   asks,
   defaulted,
+  alerts = [],
+  controls,
   selected,
   footer,
 }: {
   asks: readonly AttentionItem[];
   defaulted: readonly AttentionItem[];
+  /** Hub alerts: not questions, so they are not in the question count. */
+  alerts?: readonly AttentionItem[];
+  /** Above the groups: the filters and order. */
+  controls?: React.ReactNode;
   selected: string | null;
   /** Under the groups: what was handled today. */
   footer?: React.ReactNode;
 }) {
   return (
     <nav className="needs-list" aria-label="Waiting on you">
+      {controls}
+      <Group title="Alerts" n={alerts.length}>
+        {alerts.map((i) => (
+          <Row key={i.key} item={i} current={i.key === selected} />
+        ))}
+      </Group>
       <Group title="Waiting on you" n={asks.length}>
         {asks.map((i) => (
           <Row key={i.key} item={i} current={i.key === selected} />
