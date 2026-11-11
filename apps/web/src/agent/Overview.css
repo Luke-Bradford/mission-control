@@ -288,14 +288,26 @@
   max-height: 480px;
 }
 #page-agent.agent-v2 {
-  --roster-w: clamp(340px, 20vw, 420px);
+  container-type: inline-size;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+/* The roster sits beside the content when the page is wide enough for both, else above it. */
+.agent-v2-shell {
+  --roster-w: clamp(300px, 20cqw, 420px);
   display: grid;
   grid-template-columns: var(--roster-w) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   gap: var(--sp-3);
-  min-height: 0;
   height: 100%;
-  overflow: hidden;
+  min-height: 0;
+}
+@container (max-width: 1000px) {
+  .agent-v2-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 30%) minmax(0, 1fr);
+  }
 }
 .agent-v2-main {
   display: flex;
@@ -305,17 +317,6 @@
   min-height: 0;
   overflow-y: auto;
   padding-bottom: var(--sp-4);
-}
-@media (max-width: 1350px) {
-  #page-agent.agent-v2 {
-    --roster-w: 300px;
-  }
-}
-@media (max-width: 900px) {
-  #page-agent.agent-v2 {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: minmax(0, 40%) minmax(0, 1fr);
-  }
 }
 @media (max-width: 1350px) {
   .agent-v2-columns {
