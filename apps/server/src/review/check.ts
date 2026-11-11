@@ -5,9 +5,9 @@ import {
   type ReviewRow,
   reviewCheckOf,
 } from "@mc/core";
-import { externalControlReason } from "./external-pr-control.ts";
-import { isExternalReview } from "./external-reviews.ts";
-import type { Store } from "./store.ts";
+import { externalControlReason } from "../external-pr-control.ts";
+import type { Store } from "../store.ts";
+import { isExternalReview } from "./external.ts";
 
 /**
  * A PR's review state for the API: the repo's queued reviews are read once, then each open PR is

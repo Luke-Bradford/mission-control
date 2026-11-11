@@ -155,7 +155,6 @@ import { waitReader } from "../dependencies.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
-import { type ExternalReviewSubject, isExternalReview } from "../external-reviews.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
@@ -165,7 +164,6 @@ import { TRIM_ENTRY } from "../guard/trim.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
-import { openOlderFindings } from "../older-findings.ts";
 import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
@@ -179,6 +177,8 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
+import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
+import { openOlderFindings } from "../review/older-findings.ts";
 import {
   enrichHandoff,
   handoffForBrief,
