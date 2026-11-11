@@ -103,7 +103,7 @@ this list. It stops at the first step that fits:
    question (rule 4). The test: someone new to the project could answer it from that page alone.
 
 **Protected items always reach the operator.** These are the items the hub already protects
-(`protectedDecisionItem`, `apps/server/src/attention-holds.ts:197`): approvals, the safety stop,
+(`protectedDecisionItem`, `apps/server/src/attention/holds.ts:186`): approvals, the safety stop,
 merging a change to the files that steer the crew, an Update only a person can run, an account at
 its limit. FLIGHT adds a brief. It cannot hold back, return or withdraw the protected source.
 The 8 November amendment lets it withdraw its own brief only; the source and its stop remain.
@@ -928,7 +928,7 @@ Each of these is a change, stated so nobody finds it by surprise.
 | #1453: Enter rule on the Needs you boxes | Unchanged until the fly-out mockup settles one rule |
 | The roadmap, decision 1: one Needs-you set, counted the same everywhere | The count narrows to open questions, and the page shows only those. Held items and timed defaults leave the page; alerts have their chip |
 | Timed defaults (#741, `apps/server/src/decision-defaults.ts`) | Retired for questions to the operator. FLIGHT decides or asks |
-| Hold on a Needs-you item (#638: `apps/web/src/needs/HoldItem.tsx`, `holdItem` in `apps/server/src/attention-holds.ts`) | Becomes **Not now** and **Drop** for the operator. FLIGHT's own holds (its hold tool, and holds set through `brief_item`) move to its watch list |
+| Hold on a Needs-you item (#638: `apps/web/src/needs/HoldItem.tsx`, `holdItem` in `apps/server/src/attention/holds.ts`) | Becomes **Not now** and **Drop** for the operator. FLIGHT's own holds (its hold tool, and holds set through `brief_item`) move to its watch list |
 | The roadmap, plan item 7: notices only for briefed asks and "FLIGHT is down" | Two more alerts send a notice: an Update the operator must run, and an account at its limit |
 | The role files: use `comms_read` for missed crew context | Read by ticket |
 

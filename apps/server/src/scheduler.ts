@@ -29,7 +29,7 @@ import {
   usageCollector,
 } from "@mc/core";
 import { codexProfile } from "./account-bindings.ts";
-import { evaluateHolds } from "./attention-holds.ts";
+import { evaluateHolds } from "./attention/holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
 import { syncBudgetBrake } from "./budget-brake.ts";

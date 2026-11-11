@@ -170,13 +170,14 @@ import { z } from "zod";
 import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
 import { AsideAnswerChanged, AsideAnswerUnconfirmed, answerAsideQuestion } from "./aside-answer.ts";
+import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
   holdItem,
   nothingForOperator,
   releaseHold,
-} from "./attention-holds.ts";
+} from "./attention/holds.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -191,7 +192,6 @@ import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
-import { clearAttentionItem } from "./clear-attention.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -365,8 +365,8 @@ import {
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
+import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
-import { prAcceptanceFor, prUat } from "./pr-uat.ts";
 import {
   PREVIEW_ACTIVITY_HEADER,
   PreviewHubError,
