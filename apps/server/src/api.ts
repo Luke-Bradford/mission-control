@@ -224,9 +224,9 @@ import {
   sendComms,
   threadMessages,
   validateCommsText,
-} from "./comms.ts";
-import { replyRoute } from "./comms-reply.ts";
-import { commsTicketCounts } from "./comms-ticket-counts.ts";
+} from "./comms/index.ts";
+import { replyRoute } from "./comms/reply.ts";
+import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,

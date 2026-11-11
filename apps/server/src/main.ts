@@ -51,7 +51,7 @@ import {
   githubToken,
   makeGql,
 } from "./collectors/github.ts";
-import { commsInboxContext } from "./comms.ts";
+import { commsInboxContext } from "./comms/index.ts";
 import {
   ConfigError,
   configuredAgents,
