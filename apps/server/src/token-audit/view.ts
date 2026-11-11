@@ -217,7 +217,11 @@ export function tokenAuditWindowView(
     gaps.push(
       `${plural(untimedRuns, "run", "runs")} in the window ${untimedRuns === 1 ? "has" : "have"} calls stored without a time (made before call times were kept, and the transcript could not give them)`,
     );
-  const gapped = pendingRuns + untimedRuns > 0;
+  if (unreadRuns > 0)
+    gaps.push(
+      `${plural(unreadRuns, "run", "runs")} in the window ${unreadRuns === 1 ? "has" : "have"} no readable transcript (Codex, observed loop or missing file)`,
+    );
+  const gapped = pendingRuns + untimedRuns + unreadRuns > 0;
   const coverage: TokenAuditCoverage = {
     status: !gapped ? "complete" : rows.length > 0 ? "partial" : "unavailable",
     pendingRuns,

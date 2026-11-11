@@ -127,7 +127,11 @@ import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { syncBudgetBrake } from "./spend/budget-brake.ts";
 import type { Store } from "./store.ts";
-import { auditEndedRuns } from "./token-audit/audit.ts";
+import {
+  auditEndedRuns,
+  TOKEN_AUDIT_FIRST_DELAY_MS,
+  TOKEN_AUDIT_INTERVAL_MS,
+} from "./token-audit/audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
@@ -145,6 +149,7 @@ export type Job =
   | "usage"
   | "maintenance"
   | "transcripts"
+  | "tokenAudit"
   | "machine"
   | "prs"
   | "flow"
@@ -165,6 +170,7 @@ export const JOBS: readonly Job[] = [
   "usage",
   "maintenance",
   "transcripts",
+  "tokenAudit",
   "machine",
   "prs",
   "flow",
@@ -910,6 +916,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       recordStatus("sessions", true, null);
     });
 
+  /** Reads ended runs' transcripts for the token audit; a failure is logged, never thrown. */
+  const runTokenAudit = async () => {
+    try {
+      const a = await (c.tokenAudit ?? auditEndedRuns)({ store, config, now: now() });
+      if (a.audited || a.controllerSessions)
+        deps.log?.(`token audit: ${a.audited} runs, ${a.controllerSessions} controller sessions`);
+    } catch (e) {
+      deps.log?.(`token audit failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
   const jobs: Record<Job, () => Promise<void>> = {
     ta: async () => {
       for (const loop of config.loops.filter((l) => l.kind === "ta-loop")) {
@@ -1256,14 +1272,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           `backfill: ${r.folded} runs in ${Math.round(performance.now() - t0)} ms, ${r.left} left`,
         );
       }),
+    tokenAudit: runTokenAudit,
     transcripts: async () => {
-      try {
-        const a = await (c.tokenAudit ?? auditEndedRuns)({ store, config, now: now() });
-        if (a.audited || a.controllerSessions)
-          deps.log?.(`token audit: ${a.audited} runs, ${a.controllerSessions} controller sessions`);
-      } catch (e) {
-        deps.log?.(`token audit failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
+      await runTokenAudit();
       const r = await (c.transcripts ?? maintainTranscripts)({
         store,
         now: now(),
@@ -1389,6 +1400,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     usage: config.poll.usageMinutes * 60_000,
     maintenance: MAINTENANCE_INTERVAL_MS,
     transcripts: TRANSCRIPT_PASS_INTERVAL_MS,
+    tokenAudit: TOKEN_AUDIT_INTERVAL_MS,
     machine: MACHINE_INTERVAL_MS,
     prs: PR_SWEEP_MS,
     flow: FLOW_INTERVAL_MS,
@@ -1405,6 +1417,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_FIRST_DELAY_MS,
     backfill: BACKFILL_FIRST_DELAY_MS,
     transcripts: TRANSCRIPT_PASS_FIRST_DELAY_MS,
+    tokenAudit: TOKEN_AUDIT_FIRST_DELAY_MS,
   };
 
   const refreshBoards = () => {

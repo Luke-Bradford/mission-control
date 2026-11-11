@@ -171,7 +171,7 @@ export interface TokenAuditController {
 }
 
 /**
- * How far an event window is covered. `complete`: every run that overlaps the window has timed
+ * How far an event window is covered. `complete`: every run that overlaps the window is read and has timed
  * calls stored, so zero calls is a true zero. `partial`: some run's calls are missing or untimed.
  * `unavailable`: gaps exist and no timed call is in the window, so the totals say nothing.
  */
@@ -181,7 +181,7 @@ export interface TokenAuditCoverage {
   pendingRuns: number;
   /** Audited runs overlapping the window whose calls carry no time (older than call times). */
   untimedRuns: number;
-  /** Runs overlapping the window with no readable transcript (Codex, observed loops, gone files). */
+  /** Runs overlapping the window with no readable transcript (Codex, observed loops, gone files): their calls are unknown. */
   unreadRuns: number;
   /** What is missing, in words; null when `complete`. */
   reason: string | null;

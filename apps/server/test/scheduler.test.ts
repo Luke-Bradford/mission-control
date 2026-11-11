@@ -55,6 +55,7 @@ import {
   waitedPrNumbers,
 } from "../src/scheduler.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
+import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
 import * as views from "../src/views.ts";
 
@@ -244,6 +245,26 @@ describe("scheduler", () => {
     await s.tick("transcripts");
     expect(order).toEqual(["tokenAudit", "transcripts"]);
     expect(log).toHaveBeenCalledWith("token audit failed: disk gone");
+  });
+
+  it("reads ended runs for the token audit every ten minutes, apart from the six-hourly transcripts pass", async () => {
+    vi.useFakeTimers();
+    const tokenAudit = vi.fn(async () => ({ audited: 0, empty: 0, controllerSessions: 0 }));
+    const transcripts = vi.fn(async () => ({ gzipped: 0, deleted: 0, skippedLive: 0, failed: [] }));
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts, tokenAudit }),
+    });
+    s.start();
+    await vi.advanceTimersByTimeAsync(TOKEN_AUDIT_FIRST_DELAY_MS);
+    expect(tokenAudit).toHaveBeenCalledTimes(1);
+    expect(transcripts).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(TOKEN_AUDIT_INTERVAL_MS);
+    expect(tokenAudit.mock.calls.length).toBeGreaterThanOrEqual(2);
+    s.stop();
   });
 
   it("starts transcript maintenance after one minute, then every six hours", async () => {

@@ -66,6 +66,9 @@ interface Frame {
   out: number;
   /** A tool the call used; its result arrives before the next call. */
   tool?: { name: string; chars: number };
+  /** Cache figures; by default one hundred written and the rest read. */
+  cacheRead?: number;
+  cacheWrite?: number;
 }
 
 /** A transcript whose assistant frames carry a timestamp, as the hub's own transcript files do. */
@@ -101,8 +104,8 @@ const transcript = (frames: Frame[]): string[] => {
               : [{ type: "tool_use", id: `t${i}`, name: f.tool.name, input: {} }],
           usage: {
             input_tokens: 0,
-            cache_read_input_tokens: f.context - 100,
-            cache_creation_input_tokens: 100,
+            cache_read_input_tokens: f.cacheRead ?? f.context - 100,
+            cache_creation_input_tokens: f.cacheWrite ?? 100,
             output_tokens: f.out,
           },
         },
@@ -258,6 +261,47 @@ describe("GET /api/audit/tokens?hours=", () => {
     const both = await get<TokenAuditView>("/api/audit/tokens?hours=1");
     expect(both.calls).toBe(2);
     expect(both.coverage).toMatchObject({ status: "partial", untimedRuns: 1 });
+  });
+
+  it("does not call a window complete while a run that made calls could not be read", async () => {
+    // An observed loop's run, stored with no calls: it ran in the window, but what it used is unknown.
+    store.upsertRun(run("r-loop", "dev-1", NOW - 40 * MIN, { endedAt: NOW - 5 * MIN }));
+    const { audit } = auditTranscript([]);
+    store.saveRunTokenAudit("r-loop", NOW, audit, []);
+    const v = await get<TokenAuditView>("/api/audit/tokens?hours=1");
+    expect(v.calls).toBe(0);
+    expect(v.coverage?.status).not.toBe("complete");
+    expect(v.coverage).toMatchObject({ status: "unavailable", unreadRuns: 1 });
+    expect(v.coverage?.reason).toContain("no readable transcript");
+  });
+
+  it("counts a cache rewrite in the window against the call before it, even one outside the window", async () => {
+    const frames: Frame[] = [
+      { at: NOW - 3 * HOUR, id: "w1", context: 100_000, out: 1 },
+      // First call in the window: writes over 20,000 and reads under half of 100,000: a rewrite.
+      {
+        at: NOW - 30 * MIN,
+        id: "w2",
+        context: 100_000,
+        out: 1,
+        cacheWrite: 30_000,
+        cacheRead: 10_000,
+      },
+      // Reads nearly all of the previous context: not a rewrite.
+      {
+        at: NOW - 10 * MIN,
+        id: "w3",
+        context: 100_000,
+        out: 1,
+        cacheWrite: 30_000,
+        cacheRead: 90_000,
+      },
+    ];
+    save(run("r-rw", "dev-1", NOW - 3 * HOUR), frames);
+    const v = await get<TokenAuditView>("/api/audit/tokens?hours=1");
+    expect(v.calls).toBe(2);
+    expect(v.rewrites).toBe(1);
+    expect(v.byRole.find((r) => r.role === "developer")?.rewrites).toBe(1);
   });
 
   it("refuses an hours value outside 1..24, or sent with days", async () => {

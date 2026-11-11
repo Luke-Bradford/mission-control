@@ -30,6 +30,12 @@ const AUDIT_BATCH = 25;
 const LINES_PER_YIELD = 2000;
 /** A pass stops starting new runs after this long. */
 export const TOKEN_AUDIT_BUDGET_MS = 20_000;
+/**
+ * Ended runs are read this often, so the past hour is covered soon after a run ends (the
+ * transcripts job, every six hours, reads any left, before it gzips).
+ */
+export const TOKEN_AUDIT_INTERVAL_MS = 10 * 60_000;
+export const TOKEN_AUDIT_FIRST_DELAY_MS = 30_000;
 /** How far back the pass looks for ended runs it has not read. */
 export const TOKEN_AUDIT_LOOKBACK_MS = 365 * 86_400_000;
 /** A controller session file untouched this long is a finished session. */
