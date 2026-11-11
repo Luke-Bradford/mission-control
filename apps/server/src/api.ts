@@ -170,6 +170,7 @@ import { z } from "zod";
 import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
 import { AsideAnswerChanged, AsideAnswerUnconfirmed, answerAsideQuestion } from "./aside-answer.ts";
+import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -191,7 +192,6 @@ import { weeklyProjection } from "./budget-brake.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
-import { clearAttentionItem } from "./attention/clear.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
