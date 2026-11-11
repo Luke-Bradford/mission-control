@@ -442,3 +442,35 @@
   gap: var(--sp-1);
   padding: var(--sp-4);
 }
+/* A line's age: a fixed right-hand column so the ages line up down the list. */
+.fp-age {
+  flex: none;
+  margin-left: auto;
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Standing orders: a compact strip above the working panels; many orders scroll inside it. */
+.fp-orders {
+  flex: none;
+}
+.fp-orderlist {
+  flex: none;
+  max-height: calc(var(--fp-row) * 3);
+}
+.fp-end {
+  flex: none;
+  display: inline-flex;
+  gap: var(--sp-2);
+  margin-left: auto;
+}
+/* An order may be long: two lines show, the rest is in the title and on the Records tab. */
+.fp-orderlist .fp-one {
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+}

@@ -10,7 +10,9 @@ import { flightRun } from "../Situation.tsx";
 import { BlockersList } from "./BlockersPanel.tsx";
 import { buildBlockers } from "./blockers.ts";
 import { DoingNowList, doingLines } from "./DoingNow.tsx";
+import { changedSomething } from "./decisionEffect.ts";
 import { DecisionRows, newestFirst } from "./RecentDecisions.tsx";
+import { StandingOrders } from "./StandingOrders.tsx";
 import { StatusBand } from "./StatusBand.tsx";
 import "./page.css";
 
@@ -32,7 +34,7 @@ export function FlightPage() {
   const view = flight.data;
   const run = flightRun(view, pause);
   const blockers = buildBlockers(attention.data, view, run, now);
-  const decisions = newestFirst(view?.decisions ?? []);
+  const decisions = newestFirst((view?.decisions ?? []).filter(changedSomething));
   const board = PAGE_PATHS.board;
   return (
     <section id="page-flight" className="fp">
@@ -54,6 +56,7 @@ export function FlightPage() {
         </a>
       </div>
       <StatusBand run={run} view={view} now={now} />
+      <StandingOrders />
       <div className="fp-mid">
         <section className="fp-panel fp-self-start" id="doingP" aria-labelledby="doingH">
           <h2 className="fp-head" id="doingH">

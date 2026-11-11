@@ -158,6 +158,58 @@ describeRendered("FLIGHT page in a browser", () => {
     }
   }
 
+  for (const [width, height] of [
+    [1280, 800],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      it(
+        `shows the standing order, its end action and ages at ${width}x${height} in ${theme}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: flightPageApi("blocked"),
+          });
+          await page.box("#orders li");
+          await page.box("#doing .fp-age");
+          expect(page.errors()).toEqual([]);
+          expect(await page.reachable("#orders button", "#ordersP")).toEqual([true]);
+          const r = await page.evaluate(() => {
+            const doc = document.documentElement;
+            const end = document
+              .querySelector<HTMLElement>("#orders button")
+              ?.getBoundingClientRect();
+            const panel = document.getElementById("ordersP");
+            return {
+              sideScroll: doc.scrollWidth - doc.clientWidth,
+              clipped: panel ? panel.scrollHeight > panel.clientHeight + 1 : true,
+              end: end ? { w: end.width, h: end.height } : null,
+              text: panel?.textContent ?? "",
+              decisions: document.querySelectorAll("#decisions li").length,
+            };
+          }, null);
+          const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(join(shots, `flight-orders-${width}x${height}-${theme}.png`));
+          }
+          expect(r.sideScroll).toBeLessThanOrEqual(0);
+          expect(r.clipped).toBe(false);
+          expect(r.end?.h).toBeGreaterThanOrEqual(24);
+          expect(r.text).toContain("Review only: no new builds");
+          expect(r.text).toContain("Ends: not set");
+          expect(r.decisions).toBeGreaterThanOrEqual(3);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
   for (const [width, height] of SIZES) {
     for (const state of STATES) {
       for (const theme of ["dark", "light"] as const) {
