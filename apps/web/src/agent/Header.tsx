@@ -122,14 +122,16 @@ export function SeatControls({
 }
 
 /** Starts an idle crew seat on a Ready ticket in its configured repository. */
-/** Ready tickets in the order the queue takes them: Priority first, then oldest. */
+/** Ready tickets in the order the queue takes them: Priority first, then oldest by creation time. */
 export function assignable(items: readonly BoardItem[]): BoardItem[] {
   return items
     .filter((item) => !item.closed && cardColumn(item) === "Ready")
     .sort(
       (a, b) =>
         priorityRank(a.priority ?? labelPriority(a.labels)) -
-          priorityRank(b.priority ?? labelPriority(b.labels)) || a.issueNumber - b.issueNumber,
+          priorityRank(b.priority ?? labelPriority(b.labels)) ||
+        a.createdAt - b.createdAt ||
+        a.issueNumber - b.issueNumber,
     );
 }
 

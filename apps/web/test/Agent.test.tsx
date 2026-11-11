@@ -413,6 +413,21 @@ describe("Agent control room", () => {
       expect(JSON.parse(call?.[1]?.body as string)).toEqual({ issue: 5 });
     });
 
+    it("orders equal-priority tickets by creation time, not issue number", async () => {
+      const f = stub(seat({ hudState: "idle", run: null }), {
+        "/api/boards/shop-app": [
+          ready(12, { priority: "P0", createdAt: NOW - 1 * MIN }),
+          ready(90, { priority: "P0", createdAt: NOW - 60 * MIN }),
+        ],
+        "POST /api/seats/guido-1/start": { runId: "r-13" },
+      });
+      render(<Agent id="guido-1" />);
+      fireEvent.click(await screen.findByRole("button", { name: "Assign #90" }));
+      await screen.findByText("Assign confirmed.");
+      const call = f.mock.calls.find(([path]) => path === "/api/seats/guido-1/start");
+      expect(JSON.parse(call?.[1]?.body as string)).toEqual({ issue: 90 });
+    });
+
     it("lets the operator pick another Ready ticket", async () => {
       const f = stub(seat({ hudState: "idle", run: null }), {
         "/api/boards/shop-app": [ready(5, { priority: "P0" }), ready(9, { priority: "P2" })],

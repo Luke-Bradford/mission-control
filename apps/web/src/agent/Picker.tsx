@@ -47,25 +47,30 @@ export function Picker({
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([repo, seats]) => [repo, [...seats].sort(compareRosterSeats)] as const);
   }, [rows]);
+  const chosenRepo = rows.find((row) => row.id === current)?.repoId ?? null;
+  const chosenOpen = chosenRepo !== null && openRepos.has(chosenRepo);
+  // Reveal the chosen card once its repo is open, and again whenever layout shifts under it.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `rows` re-runs it when seats arrive
   useEffect(() => {
     const card = currentCard.current;
     const list = picker.current;
-    if (!current || !card || !list) return;
+    if (!current || !card || !list || !chosenOpen) return;
     const reveal = () => {
-      const bounds = list.getBoundingClientRect();
-      const chosen = card.getBoundingClientRect();
-      if (chosen.height === 0) return;
-      if (chosen.top < bounds.top) list.scrollTop += chosen.top - bounds.top;
-      else if (chosen.bottom > bounds.bottom) list.scrollTop += chosen.bottom - bounds.bottom;
+      if (card.getBoundingClientRect().height === 0) return;
+      card.scrollIntoView({ block: "nearest", inline: "nearest" });
     };
     reveal();
+    const frame = requestAnimationFrame(() => requestAnimationFrame(reveal));
     // The scroll cue and loaded fonts can change the list after selection first renders.
-    if (typeof ResizeObserver === "undefined") return;
+    if (typeof ResizeObserver === "undefined") return () => cancelAnimationFrame(frame);
     const observer = new ResizeObserver(reveal);
     observer.observe(list);
     observer.observe(card);
-    return () => observer.disconnect();
-  }, [current]);
+    return () => {
+      cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [current, chosenOpen, rows]);
   useEffect(() => {
     const repo = rows.find((row) => row.id === current)?.repoId;
     if (repo) setOpenRepos((open) => (open.has(repo) ? open : new Set(open).add(repo)));

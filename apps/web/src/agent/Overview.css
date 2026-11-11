@@ -376,23 +376,36 @@
   color: inherit;
   text-align: left;
   cursor: pointer;
+  scroll-margin: var(--sp-2);
 }
 .agent-roster-card.on {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent);
 }
+/* Wraps, so the state pill drops under a long name and role instead of covering it. */
 .agent-roster-card-line {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  gap: var(--sp-2);
+  gap: var(--sp-1) var(--sp-2);
   min-width: 0;
+}
+.agent-roster-card-line > :last-child {
+  flex: none;
+  margin-left: auto;
 }
 .agent-roster-name {
   display: flex;
   align-items: center;
   gap: var(--sp-1);
   min-width: 0;
+  max-width: 100%;
+}
+.agent-roster-name .ag {
+  flex-wrap: wrap;
+  min-width: 0;
+  white-space: normal;
 }
 .agent-roster-age,
 .agent-roster-work,

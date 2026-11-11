@@ -283,6 +283,7 @@ describeRendered("Agent control room", () => {
         card.click();
       }, null);
       await page.box('.agent-identity-band[aria-label="agent-24 details"]');
+      await page.evaluate(() => new Promise((resolve) => window.setTimeout(resolve, 50)), null);
       expect(
         await page.evaluate(() => {
           const current = document
@@ -510,6 +511,37 @@ describeRendered("Agent control room", () => {
           null,
         ),
       ).toBe("Survive a reload.");
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps each roster card's state pill clear of its seat name and role at 1280 px",
+    async () => {
+      const page = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        api,
+      });
+      await page.box(".agent-roster-card");
+      expect(
+        await page.evaluate(() => {
+          const hit = (a: DOMRect, b: DOMRect) =>
+            a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+          return [...document.querySelectorAll<HTMLElement>(".agent-roster-card")].map((card) => {
+            const pill = card.querySelector(".agent-roster-card-line > :last-child");
+            const parts = card.querySelectorAll(".agent-roster-name .ag > span");
+            return (
+              !!pill &&
+              [...parts].every(
+                (part) => !hit(part.getBoundingClientRect(), pill.getBoundingClientRect()),
+              )
+            );
+          });
+        }, null),
+      ).not.toContain(false);
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
