@@ -26,7 +26,14 @@ export function qaAcceptanceFixture(count = 3) {
     "/api/dependencies": [
       {
         repoId: "mission-control",
-        root: { ref: "PR 1011", title: null, edge: null, waitedMs: null, alsoWaitsOn: [], children: [] },
+        root: {
+          ref: "PR 1011",
+          title: null,
+          edge: null,
+          waitedMs: null,
+          alsoWaitsOn: [],
+          children: [],
+        },
         state: "with-you",
         reason: "",
         owner: "you",

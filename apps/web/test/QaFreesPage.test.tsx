@@ -87,7 +87,9 @@ it("does not say nothing waits while the dependencies read is still loading", as
   const fetcher = stubFetch(routes);
   const answer = fetcher.getMockImplementation();
   fetcher.mockImplementation((input: string, init?: RequestInit) =>
-    input === "/api/dependencies" ? new Promise<Response>(() => {}) : (answer?.(input, init) as never),
+    input === "/api/dependencies"
+      ? new Promise<Response>(() => {})
+      : (answer?.(input, init) as never),
   );
   render(<QaReadiness />);
   expect(await screen.findByText("Reading what this PR frees…")).toBeTruthy();
