@@ -1,5 +1,7 @@
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AttentionMaterials } from "@mc/core";
 import { expect, it } from "vitest";
@@ -40,7 +42,7 @@ it("retains a Markdown packet and rewrites its raster image links", async () => 
           )
         : Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
     checkout: () => "/fixture",
-    assetsDir: mkdtempSync(join(process.cwd(), ".mc-tmp/materials-")),
+    assetsDir: mkdtempSync(join(tmpdir(), "materials-")),
     now: () => 1000,
   });
   const saved = await service.register("tag:sample", {
@@ -64,7 +66,7 @@ it("retains a Markdown packet and rewrites its raster image links", async () => 
       path.endsWith(".md")
         ? Buffer.from("[Escape](../outside.png)")
         : Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    assetsDir: mkdtempSync(join(process.cwd(), ".mc-tmp/materials-escape-")),
+    assetsDir: mkdtempSync(join(tmpdir(), "materials-escape-")),
   });
   await expect(escaping.register("tag:sample", input)).rejects.toMatchObject({ status: 400 });
   const forged = createAttentionMaterials({
@@ -74,13 +76,13 @@ it("retains a Markdown packet and rewrites its raster image links", async () => 
     checkout: () => "/fixture",
     git: async (_checkout, _commit, path) =>
       path.endsWith(".md") ? Buffer.from("![Forged](fake.png)") : Buffer.from("not an image"),
-    assetsDir: mkdtempSync(join(process.cwd(), ".mc-tmp/materials-forged-")),
+    assetsDir: mkdtempSync(join(tmpdir(), "materials-forged-")),
   });
   await expect(forged.register("tag:sample", input)).rejects.toMatchObject({ status: 400 });
 });
 
 it("keeps retained bytes after reopening storage and marks a rebriefed packet historical", async () => {
-  const dir = mkdtempSync(join(process.cwd(), ".mc-tmp/materials-store-"));
+  const dir = mkdtempSync(join(tmpdir(), "materials-store-"));
   let brief = 1;
   const make = (store: Store) =>
     createAttentionMaterials({
@@ -114,7 +116,7 @@ it("keeps retained bytes after reopening storage and marks a rebriefed packet hi
 });
 
 it("requires the operator token for material API reads and writes", async () => {
-  const dir = mkdtempSync(join(process.cwd(), ".mc-tmp/materials-api-"));
+  const dir = mkdtempSync(join(tmpdir(), "materials-api-"));
   const store = new Store(join(dir, "mc.sqlite"));
   const app = buildApp({
     store,
@@ -205,24 +207,76 @@ it("requires the operator token for material API reads and writes", async () => 
   rmSync(dir, { recursive: true, force: true });
 });
 
-it("imports the full committed layout packet with its seventeen linked PNGs", async () => {
-  const service = createAttentionMaterials({
-    store: memoryStore(),
-    config: { repos: [{ id: "mission-control" }] } as never,
-    item: () => ({ repoId: "mission-control", brief: { id: 9 } }),
-    checkout: () => process.cwd(),
-    assetsDir: mkdtempSync(join(process.cwd(), ".mc-tmp/materials-real-")),
+it("imports the full retained layout packet from a self-contained Git fixture", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "materials-real-"));
+  const checkout = join(dir, "repo");
+  const sourcePath = "docs/reviews/2026-11-10/comms-1513-proposal/README.md";
+  const sourceDir = join(checkout, "docs/reviews/2026-11-10/comms-1513-proposal");
+  mkdirSync(sourceDir, { recursive: true });
+  cpSync(new URL("./fixtures/attention-materials-proposal/", import.meta.url), sourceDir, {
+    recursive: true,
   });
-  const packet = await service.register("tag:flight-1:comms:2984", {
-    repoId: "mission-control",
-    sourceCommit: "33230f9ef1371e9e7d99ebcf3adbf92cfdecfdc2",
-    sourcePath: "docs/reviews/2026-11-10/comms-1513-proposal/README.md",
-    label: "Comms layout proposal",
-  });
-  expect(packet.images).toHaveLength(17);
-  expect(packet.images.slice(0, 2).map((image) => image.label)).toEqual(["Before", "Proposal"]);
-  expect(
-    packet.images.reduce((total, image) => total + (service.asset(image.id)?.bytes.length ?? 0), 0),
-  ).toBe(2629557);
-  expect(createHash("sha256").update(packet.markdown).digest("hex")).toHaveLength(64);
+  const git = (...args: string[]) =>
+    execFileSync("git", ["-c", "core.hooksPath=/dev/null", "-C", checkout, ...args], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        GIT_AUTHOR_DATE: "2026-11-10T00:00:00Z",
+        GIT_COMMITTER_DATE: "2026-11-10T00:00:00Z",
+      },
+    }).trim();
+  try {
+    git("init", "--quiet");
+    git("add", "docs");
+    git(
+      "-c",
+      "user.name=Materials fixture",
+      "-c",
+      "user.email=fixture@example.invalid",
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "-qm",
+      "Retained layout fixture",
+    );
+    const sourceCommit = git("rev-parse", "HEAD");
+    const expected: {
+      markdownSha256: string;
+      referencedImages: { path: string; sha256: string }[];
+    } = JSON.parse(readFileSync(join(sourceDir, "provenance.json"), "utf8"));
+    expect(
+      createHash("sha256")
+        .update(readFileSync(join(checkout, sourcePath)))
+        .digest("hex"),
+    ).toBe(expected.markdownSha256);
+    const service = createAttentionMaterials({
+      store: memoryStore(),
+      config: { repos: [{ id: "mission-control" }] } as never,
+      item: () => ({ repoId: "mission-control", brief: { id: 9 } }),
+      checkout: () => checkout,
+      assetsDir: join(dir, "assets"),
+    });
+    const packet = await service.register("tag:flight-1:comms:2984", {
+      repoId: "mission-control",
+      sourceCommit,
+      sourcePath,
+      label: "Comms layout proposal",
+    });
+    expect(packet.sourceCommit).toBe(sourceCommit);
+    expect(packet.images).toHaveLength(17);
+    expect(packet.images.slice(0, 2).map((image) => image.label)).toEqual(["Before", "Proposal"]);
+    expect(
+      packet.images.reduce(
+        (total, image) => total + (service.asset(image.id)?.bytes.length ?? 0),
+        0,
+      ),
+    ).toBe(2629557);
+    for (const image of packet.images) {
+      const original = expected.referencedImages.find((ref) => image.path.endsWith(`/${ref.path}`));
+      expect(image.sha256).toBe(original?.sha256);
+    }
+    expect(createHash("sha256").update(packet.markdown).digest("hex")).toHaveLength(64);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

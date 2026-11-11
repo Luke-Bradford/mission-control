@@ -2730,6 +2730,8 @@ describe("local access", () => {
         continue;
       }
       if (
+        url === "/api/attention-material-assets/:id" ||
+        url === "/api/attention/unknown/materials" ||
         url === "/api/attention/unknown" ||
         url === "/api/attention/unknown/clear" ||
         /^\/api\/attention\/unknown\/choo?[si]/.test(url)
