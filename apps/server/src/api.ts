@@ -892,6 +892,8 @@ export const ACCOUNT_STATUS_CACHE_MS = 60_000;
 
 const NOTIFICATION_RECONCILE_MS = 1000;
 const HUD_MEMO_MS = 2_000;
+/** An unchanged store, lock and login is not reconciled for notifications again before this. */
+const NOTIFICATION_REPEAT_MS = 60_000;
 /** Longest a map payload is reused: the backstop for fields that age without any input changing. */
 const MAP_CACHE_MS = 15_000;
 /** Longest a built map tree is kept without a head change: its history window ends at a fixed time. */
@@ -1610,13 +1612,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
+  let reconciled: { at: number; basis: string } | undefined;
+  // A skipped look is retried when the minute is up, so an item that came due on the clock alone
+  // does not wait for an unrelated event.
+  let repeatTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleNotifications = () => {
     if (notificationTimer !== undefined || reconcilingNotifications) return;
     notificationTimer = setTimeout(() => {
       notificationTimer = undefined;
       reconcilingNotifications = true;
       try {
-        reconcileNotifications();
+        // The same store, lock and login as the last reconcile, under a minute ago, would build
+        // the same items: only the clock-only ones turn over, and they do so by the minute.
+        const basisNow = () =>
+          JSON.stringify([
+            store.readVersion(),
+            deps.lock?.state() ?? NO_LOCK,
+            deps.hubLogin?.() ?? null,
+          ]);
+        const at = now();
+        if (
+          reconciled === undefined ||
+          reconciled.basis !== basisNow() ||
+          at < reconciled.at ||
+          at - reconciled.at >= NOTIFICATION_REPEAT_MS
+        ) {
+          reconcileNotifications();
+          // after the reconcile: its own writes are not a change
+          reconciled = { at, basis: basisNow() };
+        } else if (repeatTimer === undefined) {
+          repeatTimer = setTimeout(
+            () => {
+              repeatTimer = undefined;
+              scheduleNotifications();
+            },
+            Math.max(0, reconciled.at + NOTIFICATION_REPEAT_MS - at),
+          );
+          repeatTimer.unref();
+        }
       } finally {
         reconcilingNotifications = false;
       }
@@ -1665,6 +1698,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     unsubscribeNotifications();
     stopMapRing?.();
     clearTimeout(notificationTimer);
+    clearTimeout(repeatTimer);
     for (const end of [...streams]) end();
   });
 

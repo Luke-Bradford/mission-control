@@ -13,6 +13,21 @@ describe("TopicGate", () => {
     expect(gate.changed("agents")).toBe(false);
   });
 
+  it("builds nothing while the topic's basis is unchanged, and again once it moves or is reset", () => {
+    let basis = "a";
+    let builds = 0;
+    const gate = new TopicGate({ agents: () => ++builds }, { agents: () => basis });
+    expect(gate.changed("agents")).toBe(true);
+    expect(gate.changed("agents")).toBe(false);
+    expect(builds).toBe(1);
+    basis = "b";
+    expect(gate.changed("agents")).toBe(true);
+    expect(builds).toBe(2);
+    gate.reset();
+    expect(gate.changed("agents")).toBe(true);
+    expect(builds).toBe(3);
+  });
+
   it("always passes a topic with no content function", () => {
     const gate = new TopicGate({});
     expect(gate.changed("boards")).toBe(true);

@@ -777,9 +777,12 @@ export class Store {
     this.db.prepare("DELETE FROM checkouts_pending WHERE path = ?").run(path);
   }
 
+  /** Status rewrites that changed only a time, which `readVersion` does not count. */
+  private timestampOnlyWrites = 0;
+
   /** Cache token for local writes and commits made by another SQLite connection. */
   readVersion(): string {
-    return `${this.db.prepare("SELECT total_changes() AS n").get()?.n}:${this.db.prepare("PRAGMA data_version").get()?.data_version}`;
+    return `${Number(this.db.prepare("SELECT total_changes() AS n").get()?.n) - this.timestampOnlyWrites}:${this.db.prepare("PRAGMA data_version").get()?.data_version}`;
   }
 
   private closed = false;
@@ -2081,6 +2084,22 @@ export class Store {
   }
 
   /** True while a run has not ended and is not set aside (waiting on a review, CI or a merge). */
+  /**
+   * True when one of these agents has an open run that is not set aside and started at or after
+   * `since`: a run left open for longer is a dead row, not work in progress.
+   */
+  hasActiveRunOf(agentIds: readonly string[], since: number): boolean {
+    if (agentIds.length === 0) return false;
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM runs WHERE ended_at IS NULL AND started_at >= ? AND agent_id IN (${agentIds.map(() => "?").join(",")})
+             AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1`,
+        )
+        .get(since, ...agentIds) !== undefined
+    );
+  }
+
   hasActiveRun(): boolean {
     return (
       this.db
@@ -2554,6 +2573,28 @@ export class Store {
   }
 
   /**
+   * Settled-done moves at or after `since`, plus each card's latest done move before it (what a
+   * card's column was at `since`), oldest first.
+   */
+  doneBoardMovesFrom(since: number): BoardMove[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.id, m.run_id, m.repo_id, m.issue, m.board_column, m.state, m.detail, m.at
+           FROM board_moves m
+           JOIN (SELECT repo_id, issue, MAX(at) AS at FROM board_moves
+                  WHERE state = 'done' AND at < ? GROUP BY repo_id, issue) last
+             ON m.repo_id = last.repo_id AND m.issue = last.issue AND m.at = last.at
+          WHERE m.state = 'done'
+         UNION ALL
+         SELECT id, run_id, repo_id, issue, board_column, state, detail, at
+           FROM board_moves WHERE state = 'done' AND at >= ?
+         ORDER BY at, id`,
+      )
+      .all(since, since) as Row[];
+    return rows.map((r) => this.boardMoveOf(r));
+  }
+
+  /**
    * Whether a real run in this store moved the issue's card to a column (done). Rows under
    * `pr:` and `dep:` ids have no run, so another hub's moves never count.
    */
@@ -2906,6 +2947,7 @@ export class Store {
   /** True when any stored row changed. */
   replaceBoard(repoId: RepoId, items: BoardItem[]): boolean {
     return this.changed("board_items", repoId, () => {
+      this.boardViews.delete(repoId);
       const before = new Map(
         (
           this.db
@@ -2982,6 +3024,25 @@ export class Store {
       .all(repoId) as Row[];
     return rows.map(toBoardItem);
   }
+
+  /**
+   * The board for a caller that only reads it: the same cards as `board`, read once and kept
+   * (frozen) until the board is replaced or another connection commits, so a page that reads the
+   * board every few seconds does not rebuild every card each time.
+   */
+  boardView(repoId: RepoId): readonly Readonly<BoardItem>[] {
+    const version = String(this.db.prepare("PRAGMA data_version").get()?.data_version);
+    const kept = this.boardViews.get(repoId);
+    if (kept && kept.version === version) return kept.cards;
+    const cards = this.board(repoId).map((card) => Object.freeze(card));
+    Object.freeze(cards);
+    this.boardViews.set(repoId, { version, cards });
+    return cards;
+  }
+  private boardViews = new Map<
+    RepoId,
+    { version: string; cards: readonly Readonly<BoardItem>[] }
+  >();
 
   /** One board card from the last read, else null. */
   boardItem(repoId: RepoId, issueNumber: number): BoardItem | null {
@@ -4687,7 +4748,7 @@ export class Store {
   setOffset(path: string, offset: number): void {
     this.db
       .prepare(
-        "INSERT INTO file_offsets (path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = excluded.offset",
+        "INSERT INTO file_offsets (path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = excluded.offset WHERE file_offsets.offset != excluded.offset",
       )
       .run(path, offset);
   }
@@ -4695,6 +4756,13 @@ export class Store {
   /** Records a collector's status; `last_ok_at` moves on success and is kept through failures. */
   setStatus(collector: string, ok: boolean, error: string | null): void {
     const at = Date.now();
+    // The same result again moves only its time. That is no news to a view built from the store:
+    // `readVersion` leaves it out, so a tick that found nothing new does not drop every view.
+    const kept = this.db
+      .prepare("SELECT ok, error FROM collector_status WHERE collector = ?")
+      .get(collector) as { ok: number; error: string | null } | undefined;
+    if (kept !== undefined && kept.ok === (ok ? 1 : 0) && kept.error === error)
+      this.timestampOnlyWrites++;
     this.db
       .prepare(
         `INSERT INTO collector_status (collector, ok, error, at, last_ok_at, failing_since)

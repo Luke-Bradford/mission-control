@@ -932,10 +932,12 @@ describe("scheduler", () => {
           await s.stop();
         });
 
-        it("records state changes from the summary crew while no browser is connected and a run is open", async () => {
+        // A loop's state turns with its run's output, which the state inputs do not read; a crew
+        // seat's turns with its session row, which they do (see the next test).
+        it("records state changes from the summary crew while no browser is connected and a loop's run is open", async () => {
           store.upsertRun({
             id: "open",
-            agentId: "seat-guido",
+            agentId: "shop-app-ta",
             repoId: "shop-app",
             seq: 1,
             startedAt: NOW,
@@ -972,6 +974,81 @@ describe("scheduler", () => {
           const calls = vi.mocked(hud.crew).mock.calls.slice(before);
           expect(calls.length).toBeGreaterThan(0);
           expect(calls.every((call) => call[5] === true)).toBe(true);
+        });
+
+        it("counts a loop's run left open for over a day as dead: its ticks go quiet", async () => {
+          store.upsertRun({
+            id: "dead",
+            agentId: "shop-app-ta",
+            repoId: "shop-app",
+            seq: 1,
+            startedAt: NOW - 30 * 86_400_000,
+            endedAt: null,
+            status: "running",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: null,
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/dead.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          const before = vi.mocked(hud.crew).mock.calls.length;
+          at = NOW + 15_000;
+          await s.tick("ta");
+          expect(vi.mocked(hud.crew).mock.calls.length).toBe(before);
+          expect(store.run("dead")?.endedAt).toBeNull();
+        });
+
+        it("reads no crew on quiet ticks while a crew seat's run is open and the seat is unchanged", async () => {
+          store.upsertRun({
+            id: "open-seat",
+            agentId: "seat-guido",
+            repoId: "shop-app",
+            seq: 1,
+            startedAt: NOW,
+            endedAt: null,
+            status: "running",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: "shop-app#1",
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/y.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          const before = vi.mocked(hud.crew).mock.calls.length;
+          at = NOW + 15_000;
+          await s.tick("ta");
+          at = NOW + 30_000;
+          await s.tick("ta");
+          expect(vi.mocked(hud.crew).mock.calls.length).toBe(before);
         });
 
         it("records a loop's error while no browser is connected and no run is open", async () => {
@@ -3264,4 +3341,115 @@ it("emits attention at the earliest triage deadline and cancels the timer on sto
   topics.length = 0;
   await vi.advanceTimersByTimeAsync(1000);
   expect(topics).toEqual([]);
+});
+
+describe("quiet loop ticks", () => {
+  const quiet = (hasViewClients: () => boolean) =>
+    createScheduler({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      collectors: stubs(),
+      hasViewClients,
+    });
+  let clock = NOW;
+  beforeEach(() => {
+    clock = NOW;
+  });
+
+  it.each([false, true])(
+    "repeats no ack or hold sweep within a minute while nothing was written (browser: %s)",
+    async (viewed) => {
+      const crew = vi.spyOn(hud, "crew");
+      const attention = vi.spyOn(hud, "attentionItems");
+      const s = quiet(() => viewed);
+      for (const job of ["ta", "studio", "ta", "studio"] as const) await s.tick(job);
+      const reads = crew.mock.calls.length + attention.mock.calls.length;
+      clock = NOW + 15_000;
+      await s.tick("studio");
+      clock = NOW + 30_000;
+      await s.tick("ta");
+      expect(crew.mock.calls.length + attention.mock.calls.length).toBe(reads);
+      clock = NOW + 61_000;
+      await s.tick("ta");
+      expect(crew.mock.calls.length + attention.mock.calls.length).toBeGreaterThan(reads);
+    },
+  );
+
+  it("reads the crew for a running agent at most once a minute while its inputs are unchanged", async () => {
+    const row = { id: "shop-app-ta", kind: "loop", loopKind: "ta-loop", hudState: "running" };
+    const reads = vi
+      .spyOn(hud, "crew")
+      .mockReturnValue({ rows: [row] as unknown as CrewRow[], firstRunToday: null });
+    const debug: string[] = [];
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      collectors: stubs(),
+      hasViewClients: () => false,
+      debug: (line) => debug.push(line),
+    });
+    for (const job of ["ta", "studio", "ta", "studio"] as const) await s.tick(job);
+    const settled = reads.mock.calls.length;
+    for (const offset of [15_000, 30_000, 45_000]) {
+      clock = NOW + offset;
+      await s.tick("ta");
+    }
+    expect(reads.mock.calls.length).toBe(settled);
+    clock = NOW + 61_000;
+    await s.tick("ta");
+    expect(reads.mock.calls.length).toBeGreaterThan(settled);
+    expect(debug.some((line) => line.includes("shop-app-ta is running"))).toBe(true);
+  });
+
+  it("sweeps again at once after a write, and when a date hold comes due", async () => {
+    const attention = vi.spyOn(hud, "attentionItems");
+    const s = quiet(() => false);
+    await s.tick("ta");
+    await s.tick("ta");
+    const quietReads = attention.mock.calls.length;
+    holdItem(store, "ask:soon", "Waiting", { kind: "date", at: NOW + 20_000 }, "operator", NOW);
+    clock = NOW + 15_000;
+    await s.tick("ta");
+    expect(holds(store)["ask:soon"]?.releasedAt).toBeUndefined();
+    clock = NOW + 20_000;
+    await s.tick("ta");
+    expect(holds(store)["ask:soon"]?.releasedAt).toBe(NOW + 20_000);
+    expect(attention.mock.calls.length).toBeGreaterThanOrEqual(quietReads);
+  });
+});
+
+describe("triage look", () => {
+  it("reads attention again only when the store, config or FLIGHT changed, or a minute passed", async () => {
+    vi.useFakeTimers();
+    let clock = NOW;
+    const attention = vi.spyOn(hud, "attentionItems");
+    const s = createScheduler({ config, store, bus, now: () => clock, collectors: stubs() });
+    try {
+      s.start();
+      await vi.advanceTimersByTimeAsync(3_000);
+      bus.emit("attention"); // one look at the settled store
+      const settled = attention.mock.calls.length;
+      clock += 5_000;
+      bus.emit("attention");
+      bus.emit("boards");
+      expect(attention.mock.calls.length).toBe(settled);
+      store.setSetting("triage-test", "x");
+      bus.emit("attention");
+      const written = attention.mock.calls.length;
+      expect(written).toBeGreaterThan(settled);
+      bus.emit("config");
+      expect(attention.mock.calls.length).toBeGreaterThan(written);
+      const configured = attention.mock.calls.length;
+      clock += 61_000;
+      bus.emit("attention");
+      expect(attention.mock.calls.length).toBeGreaterThan(configured);
+    } finally {
+      await s.stop();
+      vi.useRealTimers();
+    }
+  });
 });
