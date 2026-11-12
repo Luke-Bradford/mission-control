@@ -6,7 +6,7 @@ import { Pending } from "../flight/Pending.tsx";
 import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { followLink, needsYouPath } from "../router.ts";
-import { askerOf, questionOf, titleOf } from "./QuestionBand.tsx";
+import { askerIdOf, askerOf, questionOf, titleOf } from "./QuestionBand.tsx";
 
 /** Times tick here, in the row's child, so the list is not rebuilt each second. */
 function RowAge({ at }: { at: number }) {
@@ -24,7 +24,7 @@ function Row({ item, current }: { item: AttentionItem; current: boolean }) {
   const to = needsYouPath(item.key);
   // the band's name for the asker, so the list and the open item agree
   const callSign = useResource<Crew>(RESOURCES.crew).data?.rows.find(
-    (r) => r.id === item.agentId,
+    (r) => r.id === askerIdOf(item),
   )?.displayCallSign;
   return (
     <a

@@ -16,7 +16,13 @@ export const questionOf = (item: AttentionItem): string => item.brief?.ask?.trim
  * Needs you's entry rules (#1543) make sure an item has one or the other.
  */
 export const titleOf = (item: AttentionItem): string =>
-  plainTitle(item.pinned?.ticket?.title) ?? plainTitle(item.pinned?.pr?.title) ?? questionOf(item);
+  plainTitle(item.brief?.title) ??
+  plainTitle(item.pinned?.ticket?.title) ??
+  plainTitle(item.pinned?.pr?.title) ??
+  questionOf(item);
+
+/** The seat the page names as the asker: the server's `asker`, else the seat behind the item. */
+export const askerIdOf = (item: AttentionItem): string | null => item.asker ?? item.agentId;
 
 /**
  * Who asks: the seat or loop behind the item, else FLIGHT when it briefed the question, else the
@@ -25,7 +31,7 @@ export const titleOf = (item: AttentionItem): string =>
 export const askerOf = (item: AttentionItem, callSign?: string | null): string =>
   item.alert || needsYouAlert(item)
     ? "the hub"
-    : (callSign ?? item.agentId ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub"));
+    : (callSign ?? askerIdOf(item) ?? (item.brief?.for === "operator" ? "FLIGHT" : "the hub"));
 
 /** The recommended option's label, when the brief names one. */
 export function recommendedLabel(item: AttentionItem): string | null {
