@@ -5623,6 +5623,25 @@ describe("brief_item", () => {
       });
       await refused({ key: "note:chatter:mc#7:a:b" }, /dismiss_item/);
     });
+    it("lets a money decision through whatever the seat's words say", async () => {
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "r-guido",
+        text: "Should I merge the PR that raises the plan price to 12 pounds, or wait for you?",
+        at: NOW,
+      });
+      const fields = B({ key: `ask:${id}`, ask: "Raise the plan price to 12 pounds now?" });
+      expect(
+        await call("brief_item", {
+          ...fields,
+          decision: {
+            ...(fields.decision as Record<string, unknown>),
+            whyOperator: { kind: "money", explanation: "It changes what customers pay." },
+          },
+        }),
+      ).toEqual({ text: BRIEFED_TEXT });
+    });
     it("refuses a seat's question that FLIGHT's sync_main settles", async () => {
       live("guido-1", "r-guido", { ticket: "mc#7" });
       const id = store.addQuestion({

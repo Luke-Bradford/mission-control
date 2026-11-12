@@ -2962,11 +2962,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (hold && protectedDecisionItem(store, item, config, at)) return fail(PROTECTED_ITEM_REFUSED);
     // an item FLIGHT holds a tool for is FLIGHT's to settle, never the operator's (#1510)
     if (structured.for === "operator" && !hubAlert(item, store)) {
+      // a money, security, irreversible or floor decision is the operator's whatever the seat's words
+      const ownCall = ["money", "security-exception", "irreversible", "floor-approval"].includes(
+        structured.decision?.whyOperator?.kind ?? "",
+      );
       // the item's key names a hub-internal note outright; its words only suggest a tool, and a
       // protected item's words never override the operator's stop
       const tool =
         flightToolFor({ key: item.key, kind: item.kind, text: "" }) ??
-        (protectedDecisionItem(store, item, config, at)
+        (protectedDecisionItem(store, item, config, at) || ownCall
           ? null
           : flightToolFor({ key: item.key, kind: item.kind, text: item.text }));
       if (tool !== null)

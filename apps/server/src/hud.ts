@@ -56,6 +56,7 @@ import {
   lockBlockedText,
   loopText,
   modeOfSeat,
+  needsYouAlert,
   needsYouEntryFaults,
   OPERATOR_CALL_KINDS,
   OWNER_CONTROLLER,
@@ -1728,13 +1729,15 @@ function buildAttentionItems(
   // A seat's question reaches the operator only as FLIGHT's own question about a product choice, so
   // the page never shows the seat as the asker (#1510). `agentId` stays the seat: the question's
   // answer and its Not now and Drop checks still read it.
+  const crewIds = new Set(crewSeatIds(config));
   const asFlights = (item: AttentionItem): AttentionItem =>
     flightId !== null &&
     item.owner === OWNER_OPERATOR &&
-    item.kind === "question" &&
-    item.key.startsWith("ask:") &&
     item.brief?.for === "operator" &&
-    item.agentId !== flightId
+    item.agentId !== null &&
+    item.agentId !== flightId &&
+    crewIds.has(item.agentId) &&
+    !needsYouAlert(item)
       ? { ...item, asker: flightId }
       : item;
   const checked = partition.items.map(entryCheck).map(asFlights);

@@ -3520,6 +3520,36 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(all(late).find((item) => item.key === key)).toBeUndefined();
   });
 
+  it("names FLIGHT as the asker of a seat's Comms blocker briefed for the operator (#1510)", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "shop-app#706",
+      text: "May I merge main into the branch?",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    store.addBrief({
+      key,
+      context: "A seat needs a product call from you.",
+      ask: "One lane per customer?",
+      recommendation: "Yes.",
+      options: TWO_OPTIONS,
+      basis: "product direction",
+      at: current,
+      for: "operator",
+    });
+    expect(all(current).find((item) => item.key === key)).toMatchObject({
+      owner: "operator",
+      asker: "flight-1",
+      agentId: "guido-1",
+    });
+  });
+
   it("does not raise a Comms item that predates the rollout cutoff", () => {
     flight();
     const message = store.addComms({

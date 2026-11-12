@@ -43,7 +43,7 @@ export const BRIEF_ENTRY_REFUSED =
 
 /** Text that means an agent pasted machine output instead of writing for a person. */
 const RAW_TEXT: readonly [RegExp, string][] = [
-  [/https?:\/\//i, "a web address (put links in the ticket or PR, not the question)"],
+  [/https?:\/\//i, "a web address (put links in links, not the question)"],
   [/\b[\w-]+:[\w./#-]+:\d{10,}\b/, "a raw signal id such as kind:key:1793825335003"],
   [/\b\d{12,}\b/, "a raw timestamp"],
 ];
