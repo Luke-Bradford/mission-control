@@ -1615,6 +1615,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos"],
   ["GET", "/api/previews"],
   ["GET", "/api/design-previews"],
+  ["GET", "/api/disk-use"],
   ["POST", "/api/design-previews/41/open", {}],
   ["POST", "/api/previews", { pr: 41 }],
   ["DELETE", "/api/previews/41", {}],
