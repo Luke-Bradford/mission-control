@@ -1503,6 +1503,8 @@ describe("startReview", () => {
       const { sup } = make({ scratchRetro: true, extraSeat: FLIGHT_SEAT });
       sup.start();
       const { runId } = await sup.startReview("retro", r.reviewId);
+      // the engine marks it running; the reviewer then reports
+      store.setReviewState(r.reviewId, ["starting"], "running", { at: 2, runId });
       expect(
         store.recordFindings(r.reviewId, runId, {
           verdict: { spec: "pass", quality: "pass" },
