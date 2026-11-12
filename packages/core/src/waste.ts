@@ -201,13 +201,31 @@ export interface WasteSpend {
   }[];
 }
 
+/**
+ * One 24-hour bucket of FLIGHT's own activity: how often it woke, how often it decided to wait, and
+ * its share of the new tokens every run used. The share is null when no run recorded tokens.
+ */
+export interface FlightDay {
+  since: number;
+  wakes: number;
+  waits: number;
+  flightTokens: number;
+  totalTokens: number;
+  tokenShare: number | null;
+}
+
 /** What GET /waste serves. */
 export interface WasteReport {
   at: number;
   spend: WasteSpend[];
   alarms: WasteAlarm[];
   checks: WasteCheckRow[];
+  /** FLIGHT's wakes, waits and token share per day, oldest first, the last bucket ending at `at`. */
+  flight: FlightDay[];
 }
+
+/** How many 24-hour buckets of FLIGHT's activity the report keeps. */
+export const FLIGHT_ACTIVITY_DAYS = 14;
 
 /** The threshold of each check in words. */
 export const wasteThresholdText = (check: WasteCheck): string => {

@@ -27,7 +27,6 @@ import {
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_OPEN,
-  FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
   FLIGHT_MEMORY_HEADING,
@@ -43,7 +42,6 @@ import {
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
-  FLIGHT_REWAKE_MS,
   FLIGHT_STARTABLE,
   FLIGHT_STATE_DECISION_MAX,
   FLIGHT_STATE_TEXT_MAX,
@@ -329,9 +327,8 @@ export function recordFlightWake(store: Store, repo: string, at: number, wokeOn:
   store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify(record));
 }
 
-/** The fact category a wake cause names: "q (1)" is q; a re-wake for left reasons is "left". */
-const causeReason = (cause: string): string =>
-  cause.startsWith(FLIGHT_LEFT_HEAD) ? "left" : cause.replace(/ \(\d+\)$/, "");
+/** The fact category a wake cause names: "q (1)" is q. */
+const causeReason = (cause: string): string => cause.replace(/ \(\d+\)$/, "");
 
 /** Stores a wake on its run, with the fact categories (not the counts) that caused it. */
 export function recordWakeReasons(
@@ -405,8 +402,9 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
 }
 
 /**
- * The next wake the state schedules: the hourly re-wake backstop while work is pending, or a
- * planned entry, or the end of the batch window while routine facts wait in it (`batchAt`).
+ * The next wake the state schedules: a deadline on one fact (a PR-flow time, a planned entry, an
+ * idle seat's period), or the end of the batch window while routine facts wait in it (`batchAt`).
+ * Nothing re-wakes FLIGHT on a timer for pending work: a fact that has not changed stays silent.
  */
 export function nextWakeAt(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
@@ -415,7 +413,6 @@ export function nextWakeAt(
   batchAt?: number,
 ): number | null {
   const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
-  if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
   if (s.wake?.idle) times.push(idleWakeAt(s.wake.idle));
   if (batchAt !== undefined) times.push(batchAt);
@@ -2082,7 +2079,7 @@ export function leftWakeText(
   }
   const parts = [...groups.values()].map((g) => `${g.n} ${g.n === 1 ? g.one : g.many}`);
   const things = left.length === 1 ? "1 thing" : `${left.length} things`;
-  return `FLIGHT was woken at ${clockHm(wokeAt, timeZone)} about ${things} and left ${left.length === 1 ? "it" : "them"} undecided after two tries: ${parts.join(", ")}.`;
+  return `FLIGHT was woken at ${clockHm(wokeAt, timeZone)} about ${things} and left ${left.length === 1 ? "it" : "them"} undecided; it will not be woken again for them: ${parts.join(", ")}.`;
 }
 
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */

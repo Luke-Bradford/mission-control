@@ -8715,6 +8715,15 @@ export class Store {
     return rows.map(toFlightDecision);
   }
 
+  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
+  flightWaitTimes(since: number): number[] {
+    return (
+      this.db
+        .prepare("SELECT at FROM flight_decisions WHERE kind = 'wait' AND at >= ? ORDER BY at")
+        .all(since) as { at: number }[]
+    ).map((r) => r.at);
+  }
+
   /** The decisions of one kind about one ticket, newest first. */
   flightDecisionsAbout(kind: FlightDecisionKind, ref: string): FlightDecision[] {
     const rows = this.db

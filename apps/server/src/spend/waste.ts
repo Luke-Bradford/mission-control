@@ -4,6 +4,8 @@
  * (the `waste_alarm` signal), and Audit shows it.
  */
 import {
+  FLIGHT_ACTIVITY_DAYS,
+  type FlightDay,
   type Run,
   seatCallSign,
   seatDef,
@@ -492,5 +494,41 @@ export function wasteReport(config: CcConfig, store: Store, now: number): WasteR
     spend: WASTE_WINDOWS.map((w) => spendFor(config, store, w, now)),
     alarms: openWasteAlarms(store),
     checks,
+    flight: flightActivity(config, store, now),
   };
+}
+
+/** FLIGHT's wakes, waits and token share in each of the last FLIGHT_ACTIVITY_DAYS 24-hour buckets. */
+function flightActivity(config: CcConfig, store: Store, now: number): FlightDay[] {
+  const since = now - FLIGHT_ACTIVITY_DAYS * 24 * HOUR_MS;
+  const agents = agentInfo(config);
+  const days: FlightDay[] = Array.from({ length: FLIGHT_ACTIVITY_DAYS }, (_, i) => ({
+    since: since + i * 24 * HOUR_MS,
+    wakes: 0,
+    waits: 0,
+    flightTokens: 0,
+    totalTokens: 0,
+    tokenShare: null,
+  }));
+  const bucket = (at: number): FlightDay | undefined =>
+    at > now
+      ? undefined
+      : days[Math.min(FLIGHT_ACTIVITY_DAYS - 1, Math.floor((at - since) / (24 * HOUR_MS)))];
+  for (const w of store.flightWakes(since)) {
+    const d = bucket(w.at);
+    if (d !== undefined) d.wakes += 1;
+  }
+  for (const at of store.flightWaitTimes(since)) {
+    const d = bucket(at);
+    if (d !== undefined) d.waits += 1;
+  }
+  for (const r of store.waste.runsSince(since)) {
+    const d = bucket(r.startedAt);
+    if (d === undefined) continue;
+    const tk = runTokens(r);
+    d.totalTokens += tk;
+    if (agents.get(r.agentId)?.loop === "watch") d.flightTokens += tk;
+  }
+  for (const d of days) d.tokenShare = d.totalTokens === 0 ? null : d.flightTokens / d.totalTokens;
+  return days;
 }
