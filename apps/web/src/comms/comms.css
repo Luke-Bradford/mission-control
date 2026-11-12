@@ -997,6 +997,13 @@ a.comms-ref {
   border-radius: var(--r);
 }
 
+/* A tall window gives the list room for five one-line rows (head, search, rows, footer); the nav shrinks to pay for it. */
+@media (min-height: 900px) {
+  .comms-tickets {
+    min-height: 300px;
+  }
+}
+
 .comms-tickets > :not(.comms-section-head, .comms-ticket-list) {
   margin: 0 var(--sp-2);
 }
