@@ -476,7 +476,7 @@ describeRendered("FLIGHT page in a browser", () => {
               total: rows.length,
               whole: whole.length,
               rowHeight: whole[0]?.getBoundingClientRect().height ?? 0,
-              more: document.querySelector(".fp-more")?.textContent ?? "",
+              more: document.querySelector("#blockers .fp-more")?.textContent ?? "",
               act: (() => {
                 const a = document.querySelector<HTMLElement>("#blockers .fp-brow .fp-act");
                 return {
@@ -601,7 +601,7 @@ describeRendered("FLIGHT page in a browser", () => {
               decTop: box("#decisionsP")?.top ?? 0,
               whole: whole.length,
               total: rows.length,
-              more: document.querySelector(".fp-more")?.textContent ?? "",
+              more: document.querySelector("#blockers .fp-more")?.textContent ?? "",
               columns: ["fp-what", "fp-act"].map(
                 (c) =>
                   first?.querySelector<HTMLElement>(`.${c}`)?.getBoundingClientRect().width ?? 0,
