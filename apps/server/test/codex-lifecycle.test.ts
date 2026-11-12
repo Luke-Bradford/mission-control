@@ -283,12 +283,17 @@ describe("Codex lifecycle without a socket", () => {
     expect(h.events).toEqual([]);
     h.line({
       method: "item/completed",
-      params: { item: { id: "item", type: "commandExecution" } },
+      params: { item: { id: "item", type: "commandExecution", status: "completed", exitCode: 1 } },
     });
     h.caughtUp();
     await h.session.ready;
     expect(h.approve).not.toHaveBeenCalled();
-    expect(h.events).toContainEqual({ kind: "tool-result", toolUseId: "key-resolved", ok: false });
+    expect(h.events).toContainEqual({
+      kind: "tool-result",
+      toolUseId: "key-resolved",
+      ok: false,
+      exitCode: 1,
+    });
     h.session.detach();
   });
 
@@ -350,9 +355,14 @@ describe("Codex lifecycle without a socket", () => {
     await vi.waitFor(() => expect(h.write).toHaveBeenCalledTimes(2));
     h.line({
       method: "item/completed",
-      params: { item: { id: "item", type: "commandExecution" } },
+      params: { item: { id: "item", type: "commandExecution", status: "completed", exitCode: 1 } },
     });
-    expect(h.events).toContainEqual({ kind: "tool-result", toolUseId: "key-open", ok: false });
+    expect(h.events).toContainEqual({
+      kind: "tool-result",
+      toolUseId: "key-open",
+      ok: false,
+      exitCode: 1,
+    });
     h.session.detach();
   });
 });
