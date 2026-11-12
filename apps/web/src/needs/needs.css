@@ -442,7 +442,7 @@
 
 .needs-control {
   display: grid;
-  gap: 2px;
+  gap: var(--sp-1);
   min-width: 0;
   flex: 1 1 120px;
 }
