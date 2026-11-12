@@ -1291,6 +1291,18 @@ export interface AttentionBrief {
    * crew error, a stray, FLIGHT's own question.
    */
   ticket?: string;
+  /** One line, at most 90 characters: what the operator reads in the list (#1510). */
+  title?: string;
+  /** P0, P1 or P2: the main ticket's, else the one FLIGHT stated. */
+  priority?: string;
+  /** Other tickets (`repo#n`) the question touches. */
+  related?: string[];
+  /** For a question with no ticket: the repo it is about and why there is none. */
+  noTicket?: { repo: string; reason: string };
+  /** Links, so the question and title carry no raw address. */
+  links?: { label: string; url: string }[];
+  /** The question is about how something looks: it needs a picture or a branch preview. */
+  looks?: boolean;
   original?: string;
   assessment?: string;
   did?: { action: string; refs: string[] }[];
@@ -1320,6 +1332,11 @@ export interface AttentionItem {
   key: string;
   kind: AttentionKind;
   agentId: AgentId | null;
+  /**
+   * Who the operator's page names as the asker (#1510): FLIGHT's seat id on a seat's question
+   * FLIGHT briefed for the operator, where `agentId` still names the seat. Absent: use `agentId`.
+   */
+  asker?: AgentId;
   repoId: RepoId | null;
   text: string;
   /** The live tool of a stall, so the client renders `{m:ss} in {tool}` without parsing text. */

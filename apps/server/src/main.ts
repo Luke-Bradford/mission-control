@@ -870,6 +870,12 @@ export async function main(): Promise<void> {
 
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    ...(designPreviews === undefined
+      ? {}
+      : {
+          hasPreview: (repoId: string, ticket: number) =>
+            repoId === previewRepoId && designPreviews.list().some((v) => v.ticket === ticket),
+        }),
     operator: operatorCall(() => hubApp, operatorToken),
     tidy: createCrewTidy({ config, store, pruneLocal: () => branchTidy.pruneLocal() }),
     hudShots,

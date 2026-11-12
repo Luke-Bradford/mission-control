@@ -87,6 +87,7 @@ export function briefLinks(item: AttentionItem): { label: string; url: string }[
     const rest = text.replace(IMAGE, " ").replace(LINK, " ");
     for (const m of rest.matchAll(BARE)) add(m[0], m[0]);
   }
+  for (const l of item.brief?.links ?? []) add(l.label.trim() || l.url, l.url);
   for (const ref of item.brief?.person?.related ?? []) if (ref.url) add(ref.label, ref.url);
   return out;
 }
