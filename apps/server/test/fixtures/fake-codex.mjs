@@ -31,7 +31,6 @@ const threadId = "codex-thread-1";
 let turn = 0;
 let handshakes = 0;
 let active = null;
-let lastActive = null;
 const requests = new Map();
 const timers = new Set();
 const later = (fn, ms) => {
@@ -43,7 +42,6 @@ const later = (fn, ms) => {
 };
 const endTurn = (status = "completed") => {
   notify("turn/completed", { threadId, turn: { id: active?.turnId, status } });
-  lastActive = active;
   active = null;
 };
 const completeItem = (scenario, itemId, type) => {
@@ -76,8 +74,15 @@ rl.on("line", (line) => {
     // A held-item exit happens after the actual acceptance, not an arbitrary pre-approval timer.
     if (scenario.exitAccepted && message.result?.decision === "accept") process.exit(1);
     if (scenario.resolved) notify("serverRequest/resolved", { threadId, requestId: id });
-    if (scenario.endTurnWithNoItem) later(() => endTurn(), 10);
-    else if (!scenario.holdItem)
+    if (scenario.endTurnWithNoItem) {
+      later(() => endTurn(), 10);
+      // a command that outlives its turn: its item completes after the turn has ended
+      if (scenario.lateItemMs)
+        later(
+          () => completeItem({ ...scenario, holdTurn: true }, itemId, type),
+          scenario.lateItemMs,
+        );
+    } else if (!scenario.holdItem)
       later(() => completeItem(scenario, itemId, type), scenario.itemDelayMs ?? 10);
     return;
   }
@@ -169,16 +174,6 @@ rl.on("line", (line) => {
     if (scenario.completeItem && active) {
       say({ id, result: {} });
       completeItem(active.scenario, active.itemId, active.type);
-      return;
-    }
-    // a command that outlived its turn: its item completes after the turn has ended
-    if (scenario.completeLateItem && lastActive) {
-      say({ id, result: {} });
-      completeItem(
-        { ...lastActive.scenario, holdTurn: true, exitCode: scenario.exitCode },
-        lastActive.itemId,
-        lastActive.type,
-      );
       return;
     }
     if (scenario.turnError) {

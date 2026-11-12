@@ -362,11 +362,12 @@ describe("Codex session", () => {
         command: "pnpm -s test",
         holdItem: true,
         endTurnWithNoItem: true,
+        lateItemMs: 150,
+        exitCode: 0,
         params: { approvalId: "appr-1" },
       }),
     );
     await until(() => expect(events.some((e) => e.kind === "result")).toBe(true));
-    session.send(JSON.stringify({ completeLateItem: true, exitCode: 0 }));
     await until(() =>
       expect(events).toContainEqual({
         kind: "tool-result",
