@@ -101,13 +101,15 @@ export function wasteQueries(db: DatabaseSync) {
       }[];
     },
 
-    /** Each changed author run's review rounds so far, from `since`. */
+    /** Each author run's review rounds so far: every open PR, and unrecorded PRs from `since`. */
     reviewRounds(since: number) {
       return all(
         `SELECT v.author_run_id AS runId, v.pr_number AS pr, MAX(v.round) AS rounds,
-           r.ticket AS ticket, r.repo_id AS repoId, r.agent_id AS agentId
+           r.ticket AS ticket, r.repo_id AS repoId, r.agent_id AS agentId, p.state AS prState
          FROM reviews v JOIN runs r ON r.id = v.author_run_id
-         WHERE v.created_at >= ? GROUP BY v.author_run_id, v.pr_number`,
+         LEFT JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number
+         WHERE p.state = 'open' OR (p.state IS NULL AND v.created_at >= ?)
+         GROUP BY v.author_run_id, v.pr_number`,
         since,
       ) as unknown as {
         runId: string;
@@ -116,14 +118,18 @@ export function wasteQueries(db: DatabaseSync) {
         ticket: string | null;
         repoId: string;
         agentId: string;
+        /** The PR's own state, null when the PR is not recorded. */
+        prState: string | null;
       }[];
     },
 
-    /** The most rounds any review of this author run has reached. */
+    /** The most rounds any review of this author run has reached on a PR that is still open (or unrecorded). */
     maxRound(authorRunId: string): number {
       return (
         (get(
-          "SELECT MAX(v.round) AS n FROM reviews v JOIN runs r ON r.id = v.author_run_id WHERE v.author_run_id = ?",
+          `SELECT MAX(v.round) AS n FROM reviews v JOIN runs r ON r.id = v.author_run_id
+           LEFT JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number
+           WHERE v.author_run_id = ? AND (p.state IS NULL OR p.state = 'open')`,
           authorRunId,
         )?.n as number | null | undefined) ?? 0
       );

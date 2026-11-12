@@ -822,6 +822,8 @@ export function flightSignals(i: {
   // a waste alarm wakes FLIGHT once: the signal keeps its told mark for as long as the alarm stands
   for (const alarm of openWasteAlarms(store)) {
     if (alarm.repoId !== repo) continue;
+    // a refused rerun is already fixed by the hook: Audit records it, FLIGHT is not woken
+    if (alarm.check === "unchanged-rerun") continue;
     raise(
       "waste_alarm",
       String(alarm.id),

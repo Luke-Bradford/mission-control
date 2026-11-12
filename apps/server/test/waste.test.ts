@@ -307,6 +307,39 @@ describe("review rounds", () => {
   });
 });
 
+describe("review rounds on a sliced ticket", () => {
+  it("alarms for the open slice when a sibling slice of the ticket has merged", () => {
+    store.upsertPullRequests(
+      "mc",
+      [
+        { ...mergedPr(10, "slice-1", NOW - DAY), ticket: "mc#5" },
+        { ...mergedPr(11, "slice-2", NOW), ticket: "mc#5", state: "open", mergedAt: null },
+      ],
+      NOW,
+    );
+    const r = run("guido-1", { ticket: "mc#5", branch: "slice-2" });
+    store.upsertRun(r);
+    for (const round of [1, 2, 3])
+      store.requestReview({
+        authorRunId: r.id,
+        repoId: "mc",
+        seatId: "retro-1",
+        prNumber: 11,
+        sha: `s${round}`,
+        epoch: 1,
+        attempt: 1,
+        round,
+        at: NOW - 10 * DAY,
+      });
+    syncWasteAlarms(config, store, NOW);
+    expect(reviewsHeld(store, r.id)).toBe(true);
+    expect(openWasteAlarms(store).find((a) => a.check === "review-rounds")).toMatchObject({
+      subject: r.id,
+      level: 3,
+    });
+  });
+});
+
 describe("alarms that only alarm", () => {
   it("flags a ticket that passes three runs without a merge, with its runs and findings", () => {
     for (let i = 0; i < 4; i++)
@@ -588,6 +621,19 @@ describe("the waste_alarm FLIGHT signal", () => {
     const next = read(NOW + MIN);
     expect(next).toHaveLength(1);
     expect(next[0]?.told).toBe(true);
+  });
+
+  it("does not wake FLIGHT for an unchanged rerun the hook already refused", () => {
+    const r = run("guido-1", { ticket: "mc#1596" });
+    store.upsertRun(r);
+    for (let i = 0; i < 3; i++)
+      store.addRerunRefusal(r.id, "pnpm -s lint", "abc1234def", NOW - i * MIN);
+    syncWasteAlarms(config, store, NOW);
+    expect(openWasteAlarms(store).map((a) => a.check)).toContain("unchanged-rerun");
+    const session = config.crew?.sessions[0];
+    if (session === undefined) throw new Error("no session");
+    const signals = flightSignals({ config, store, session, seats: [], now: NOW }).signals;
+    expect(signals.filter((s) => s.kind === "waste_alarm")).toEqual([]);
   });
 });
 

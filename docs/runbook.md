@@ -469,8 +469,9 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 
 - One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
   ends: the ticket merges or closes, the count falls back, or the day passes.
-- FLIGHT is woken once per alarm, through the `waste_alarm` signal. An alarm is not a question: it
-  never reaches Needs you.
+- FLIGHT is woken once per alarm, through the `waste_alarm` signal, except an unchanged-rerun alarm:
+  the hook has already refused that rerun, so Audit records it and FLIGHT is not woken. An alarm is
+  not a question: it never reaches Needs you.
 - FLIGHT lifts a hold with `resolve_waste_alarm` (alarm id and a basis, recorded in Decided without
   you). The alarm stays closed until its cause grows past the level it had. For a seat's or a
   repo's alarm (restart storm, coordination overhead, ticket churn) that silence lasts one window,

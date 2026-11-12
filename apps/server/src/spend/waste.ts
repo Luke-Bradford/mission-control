@@ -184,7 +184,9 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
 
   // Review rounds: a change past two rounds.
   for (const r of q.reviewRounds(now - SCAN_DAYS * 24 * HOUR_MS)) {
-    if (r.rounds <= t.reviewRounds || (r.ticket !== null && done(r.ticket))) continue;
+    // the PR's own state decides; a sibling slice's merge must not hide this change's rounds
+    if (r.rounds <= t.reviewRounds) continue;
+    if (r.prState === null && r.ticket !== null && done(r.ticket)) continue;
     out.push({
       check: "review-rounds",
       subject: r.runId,
