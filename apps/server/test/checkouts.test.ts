@@ -1962,19 +1962,24 @@ describe("review scratch checkouts", () => {
       "package.json plus pnpm-lock.yaml (PR 1640)",
       { "package.json": `${PKG}\n`, "pnpm-lock.yaml": `${EMPTY_LOCK}\n` },
     ],
-  ])("a PR head that changes %s is reviewed read-only, with nothing installed", async (_n, files) => {
-    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
-    git(seed, "push", "-q", "origin", "main");
-    const { head } = pr(files);
-    const install = vi.fn(async () => {});
-    const s = await prepareScratch(scratchInput(head), install);
-    expect(install).not.toHaveBeenCalled();
-    expect(s.installNote).toMatch(
-      new RegExp(`^Reviewed, not installed: the PR head ${head.slice(0, 7)} changes .*; Mission Control won't install from it$`),
-    );
-    expect(existsSync(scratchPath())).toBe(true);
-    expect(existsSync(join(scratchPath(), "node_modules"))).toBe(false);
-  });
+  ])(
+    "a PR head that changes %s is reviewed read-only, with nothing installed",
+    async (_n, files) => {
+      commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+      git(seed, "push", "-q", "origin", "main");
+      const { head } = pr(files);
+      const install = vi.fn(async () => {});
+      const s = await prepareScratch(scratchInput(head), install);
+      expect(install).not.toHaveBeenCalled();
+      expect(s.installNote).toMatch(
+        new RegExp(
+          `^Reviewed, not installed: the PR head ${head.slice(0, 7)} changes .*; Mission Control won't install from it$`,
+        ),
+      );
+      expect(existsSync(scratchPath())).toBe(true);
+      expect(existsSync(join(scratchPath(), "node_modules"))).toBe(false);
+    },
+  );
 
   describe("writeReviewInputs", () => {
     const read = (f: string) => readFileSync(join(scratchPath(), f), "utf8");
