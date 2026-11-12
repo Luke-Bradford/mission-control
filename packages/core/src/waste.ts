@@ -17,6 +17,8 @@ export const WASTE_CHECKS = [
   "coordination-overhead",
   "ticket-churn",
   "runs-per-ticket",
+  "failed-review-rounds",
+  "clearance-waiting",
 ] as const;
 export type WasteCheck = (typeof WASTE_CHECKS)[number];
 
@@ -30,6 +32,8 @@ export const WASTE_CHECK_TITLES: Record<WasteCheck, string> = {
   "coordination-overhead": "Coordination overhead",
   "ticket-churn": "Ticket churn",
   "runs-per-ticket": "Runs per ticket",
+  "failed-review-rounds": "Failed review rounds",
+  "clearance-waiting": "Clearance waiting",
 };
 
 export const WASTE_THRESHOLDS = Object.freeze({
@@ -41,6 +45,12 @@ export const WASTE_THRESHOLDS = Object.freeze({
   retryResumes: 3,
   /** A change past this many review rounds stops its reviews. */
   reviewRounds: 2,
+  /** An open PR with this many failed review rounds is raised to FLIGHT; its reviews go on. */
+  failedReviewRounds: 2,
+  /** A hard-rule PR waiting this long on FLIGHT's clearance is raised to FLIGHT. */
+  clearanceAlarmMs: 2 * HOUR_MS,
+  /** The same wait shows on the Audit waste route from this long. */
+  clearanceAuditMs: DAY_MS,
   /** A ticket without a merge that has cost this many times the median cost of its size. */
   costFactor: 3,
   /** Merged tickets of a size needed before its median means anything. */
@@ -89,6 +99,8 @@ export const WASTE_ACTIONS: Record<WasteCheck, WasteAction> = {
   "coordination-overhead": "alarm",
   "ticket-churn": "alarm",
   "runs-per-ticket": "alarm",
+  "failed-review-rounds": "alarm",
+  "clearance-waiting": "alarm",
 };
 
 /** One waste alarm as the hub keeps it. */
@@ -201,13 +213,50 @@ export interface WasteSpend {
   }[];
 }
 
+/**
+ * One 24-hour bucket of FLIGHT's own activity: how often it woke, how often it decided to wait, and
+ * its share of the new tokens every run used. The share is null when no run recorded tokens.
+ */
+export interface FlightDay {
+  since: number;
+  wakes: number;
+  waits: number;
+  flightTokens: number;
+  totalTokens: number;
+  tokenShare: number | null;
+}
+
 /** What GET /waste serves. */
 export interface WasteReport {
   at: number;
   spend: WasteSpend[];
   alarms: WasteAlarm[];
   checks: WasteCheckRow[];
+  /** FLIGHT's wakes, waits and token share per day, oldest first, the last bucket ending at `at`. */
+  flight: FlightDay[];
+  /** The latest daily retrospective's counts; null before the first one. */
+  counts: WasteCounts | null;
 }
+
+/** What the daily retrospective counts over its window, for the Audit page. */
+export interface WasteCounts {
+  /** The retrospective's day, `YYYY-MM-DD`, and when it was counted. */
+  day: string;
+  at: number;
+  since: number;
+  ticketsOpened: number;
+  ticketsClosed: number;
+  /** Tickets that had a run in the window, and the runs on the busiest ticket (null with none). */
+  ticketsWithRuns: number;
+  runsPerTicket: { mean: number | null; max: number | null; maxTicket: string | null };
+  /** Reviews that reported in the window, and how many of them failed. */
+  reviewRounds: { reported: number; failed: number };
+  /** Hours the crew's seats stood idle in the window. */
+  idleSeatHours: number;
+}
+
+/** How many 24-hour buckets of FLIGHT's activity the report keeps. */
+export const FLIGHT_ACTIVITY_DAYS = 14;
 
 /** The threshold of each check in words. */
 export const wasteThresholdText = (check: WasteCheck): string => {
@@ -229,5 +278,9 @@ export const wasteThresholdText = (check: WasteCheck): string => {
       return "tickets opened reach tickets closed in a day, a split ticket, or a parked ticket starting";
     case "runs-per-ticket":
       return `more than ${t.runsPerTicket} runs without a merge`;
+    case "failed-review-rounds":
+      return `${t.failedReviewRounds} failed review rounds on an open PR`;
+    case "clearance-waiting":
+      return `a hard-rule PR waiting ${t.clearanceAlarmMs / HOUR_MS} hours on FLIGHT's clearance`;
   }
 };

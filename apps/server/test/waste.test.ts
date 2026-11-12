@@ -532,7 +532,7 @@ describe("the read route's report", () => {
       costUsd: 10,
     });
     expect(week?.merged).toBe(0);
-    expect(report.checks.map((c) => c.check)).toHaveLength(8);
+    expect(report.checks.map((c) => c.check)).toHaveLength(10);
   });
 
   it("divides by the changes merged in the window", () => {
@@ -551,6 +551,56 @@ describe("the read route's report", () => {
       merged: 2,
       perMergeUsd: 4.5,
     });
+  });
+});
+
+describe("FLIGHT's activity per day on the read route", () => {
+  const wait = (at: number) =>
+    store.addFlightDecision({
+      at,
+      kind: "wait",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "mc#1: waiting on CI",
+      decision: "waiting",
+      basis: "b",
+    });
+  const tokens = (n: number) => ({ input: n, output: 0, cacheRead: 0, cacheCreate: 0 });
+
+  it("counts wakes, waits and FLIGHT's share of tokens in each 24-hour bucket", () => {
+    store.upsertRun(run("flight-1", { startedAt: NOW - 2 * HOUR, tokens: tokens(300) }));
+    store.upsertRun(run("guido-1", { startedAt: NOW - 3 * HOUR, tokens: tokens(700) }));
+    store.upsertRun(run("flight-1", { startedAt: NOW - 30 * HOUR, tokens: tokens(100) }));
+    for (const at of [NOW - HOUR, NOW - 2 * HOUR, NOW - 3 * HOUR, NOW - 30 * HOUR])
+      store.addFlightWake("r1", at, ["q"]);
+    for (const at of [NOW - HOUR, NOW - 30 * HOUR, NOW - 31 * HOUR]) wait(at);
+    // a decision that is not a wait is not counted
+    store.addFlightDecision({
+      at: NOW - HOUR,
+      kind: "note",
+      seatId: null,
+      targetRunId: null,
+      ref: null,
+      questionId: null,
+      about: "a",
+      decision: "d",
+      basis: "b",
+    });
+    const days = wasteReport(config, store, NOW).flight;
+    expect(days).toHaveLength(14);
+    expect(days.at(-1)?.since).toBe(NOW - DAY);
+    expect(days.at(-1)).toMatchObject({
+      wakes: 3,
+      waits: 1,
+      flightTokens: 300,
+      totalTokens: 1000,
+    });
+    expect(days.at(-1)?.tokenShare).toBeCloseTo(0.3);
+    expect(days.at(-2)).toMatchObject({ wakes: 1, waits: 2, flightTokens: 100, totalTokens: 100 });
+    expect(days.at(-2)?.tokenShare).toBe(1);
+    expect(days[0]).toMatchObject({ wakes: 0, waits: 0, totalTokens: 0, tokenShare: null });
   });
 });
 

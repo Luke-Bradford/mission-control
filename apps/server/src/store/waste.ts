@@ -123,6 +123,54 @@ export function wasteQueries(db: DatabaseSync) {
       }[];
     },
 
+    /**
+     * Open PRs with reported reviews that failed (blocking findings or a failed verdict), and how
+     * many; the PR's latest author run names the seat.
+     */
+    failedReviewRounds() {
+      return all(
+        `SELECT v.repo_id AS repoId, v.pr_number AS pr, COUNT(*) AS rounds,
+           (SELECT x.author_run_id FROM reviews x WHERE x.repo_id = v.repo_id AND x.pr_number = v.pr_number
+              ORDER BY x.created_at DESC, x.id DESC LIMIT 1) AS runId
+         FROM reviews v JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number
+         WHERE p.state = 'open' AND v.state = 'reported'
+           AND (v.blocking > 0 OR json_extract(v.verdict, '$.spec') = 'fail'
+                OR json_extract(v.verdict, '$.quality') = 'fail')
+         GROUP BY v.repo_id, v.pr_number`,
+      ) as unknown as { repoId: string; pr: number; rounds: number; runId: string }[];
+    },
+
+    /** Each agent's state when `since` began: its latest recorded change before it. */
+    agentStatesBefore(since: number): Map<string, string> {
+      return new Map(
+        all(
+          `SELECT agent_id, to_state FROM agent_events e
+           WHERE at < ? AND at = (SELECT MAX(at) FROM agent_events WHERE agent_id = e.agent_id AND at < ?)`,
+          since,
+          since,
+        ).map((r) => [r.agent_id as string, r.to_state as string]),
+      );
+    },
+
+    /** Open runs waiting on FLIGHT's clearance, and since when (the latest wait recorded for the run). */
+    clearanceWaits() {
+      return all(
+        `SELECT r.id AS runId, r.agent_id AS agentId, r.repo_id AS repoId, r.ticket AS ticket,
+           json_extract(r.loop, '$.prNumber') AS pr,
+           (SELECT a.at FROM run_attempts a WHERE a.run_id = r.id AND a.kind = 'wait'
+              ORDER BY a.id DESC LIMIT 1) AS since
+         FROM runs r
+         WHERE r.ended_at IS NULL AND json_extract(r.loop, '$.awaitingFlight') IS NOT NULL`,
+      ) as unknown as {
+        runId: string;
+        agentId: string;
+        repoId: string;
+        ticket: string | null;
+        pr: number | null;
+        since: number | null;
+      }[];
+    },
+
     /** The most rounds any review of this author run has reached on a PR that is still open (or unrecorded). */
     maxRound(authorRunId: string): number {
       return (
