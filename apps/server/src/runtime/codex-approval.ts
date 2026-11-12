@@ -282,6 +282,15 @@ export function createCodexApprover(i: {
         }
       }
     }
-    return signal.aborted ? refuse("codex-allowlist") : "accept";
+    if (signal.aborted) {
+      // declined after the call was noted: nothing will run, so nothing may keep waiting for it
+      if (typeof id === "string" || typeof id === "number") {
+        const key = { runId: i.runId, toolUseId: String(id) };
+        i.checks?.abandon?.(key);
+        i.lock.release(key);
+      }
+      return refuse("codex-allowlist");
+    }
+    return "accept";
   };
 }

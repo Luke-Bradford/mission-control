@@ -119,7 +119,9 @@ export interface CheckRecorder {
   admit?(key: CallKey, command: string): Promise<string | null>;
   /** Releases an admission whose command will not start. */
   cancel?(key: CallKey): void;
-  /** A turn ended. Only a normal Codex hand-back can keep waiting for an item completion. */
+  /** Drops an approved call that will not run after all (its approval was cancelled), with its admission. */
+  abandon?(key: CallKey): void;
+  /** A turn ended. Only a normal Codex hand-back can keep waiting for an item completion, until its deadline. */
   dropRun(runId: string, options?: { keepWatching?: boolean }): void;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
@@ -141,6 +143,8 @@ export interface CheckRecorderDeps {
   worktree?: (runId: string) => Promise<string | null>;
   now?: () => number;
   log?: (line: string) => void;
+  /** A call kept past its turn's end ran out its time: free what it held (the test lock). */
+  release?: (key: CallKey) => void;
 }
 
 interface StartedCall {
@@ -152,8 +156,14 @@ interface StartedCall {
   startedAt: number;
   timeoutMs: number;
   worktree: string | null;
+  /** Set when a turn ended with the call still running: past this the hub stops waiting for its exit. */
+  keptUntil?: number;
 }
 
+const callKey = (id: string): CallKey => {
+  const [runId = "", toolUseId = ""] = id.split("\0");
+  return { runId, toolUseId };
+};
 const callId = (k: CallKey): string => `${k.runId}\0${k.toolUseId}`;
 
 export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
@@ -191,6 +201,17 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     if (rest.length === 0) dropped.delete(runId);
     else dropped.set(runId, rest);
   };
+  /** Forgets kept calls whose deadline has passed: their command can no longer be running. */
+  const sweep = (): void => {
+    const t = now();
+    for (const call of new Set(started.values())) {
+      if (call.keptUntil === undefined || t < call.keptUntil) continue;
+      const ids = [...started].filter(([, c]) => c === call).map(([id]) => id);
+      for (const id of ids) started.delete(id);
+      noteDrop(call.runId, "timeout", call.matched, call.head, call.command);
+      for (const id of ids) d.release?.(callKey(id));
+    }
+  };
   const cancel = (key: CallKey): void => {
     for (const [checkout, admission] of admitted) {
       if (callId(admission.key) === callId(key)) admitted.delete(checkout);
@@ -206,6 +227,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
     },
     async running(runId, command) {
+      sweep();
       try {
         const checks = await d.checks(runId);
         if (lockedCheck(command, checks) === null && !testCommand(command)) return null;
@@ -223,6 +245,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     async admit(key, command) {
       const epoch = epochOf(key.runId);
+      sweep();
       try {
         const checks = await d.checks(key.runId);
         if (lockedCheck(command, checks) === null && !testCommand(command)) return null;
@@ -245,6 +268,12 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     cancel(key) {
       cancel(key);
+    },
+    abandon(key) {
+      cancel(key);
+      const call = started.get(callId(key));
+      if (call === undefined) return;
+      for (const [id, c] of started) if (c === call) started.delete(id);
     },
     async begin(key, command, aliases = [], options = {}) {
       const epoch = epochOf(key.runId);
@@ -381,7 +410,19 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     dropRun(runId, options = {}) {
       // Codex can hand a turn back while its command keeps running. Its later item completion is
       // still the only result that can cover the commit this call started on.
-      if (options.keepWatching) return;
+      if (options.keepWatching) {
+        // the command may outlive its turn, but not its own timeout: then nothing will report it
+        let soonest = Number.POSITIVE_INFINITY;
+        for (const call of new Set(started.values())) {
+          if (call.runId !== runId) continue;
+          call.keptUntil ??=
+            call.startedAt +
+            Math.min(call.timeoutMs || CHECK_BASH_TIMEOUT_MS, CHECK_BASH_TIMEOUT_MS);
+          soonest = Math.min(soonest, call.keptUntil);
+        }
+        if (Number.isFinite(soonest)) setTimeout(sweep, Math.max(0, soonest - now()) + 1).unref();
+        return;
+      }
       epochs.set(runId, epochOf(runId) + 1);
       const calls = [...new Set(started.values())].filter((call) => call.runId === runId);
       for (const [id, call] of started) if (call.runId === runId) started.delete(id);

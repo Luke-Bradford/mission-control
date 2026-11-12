@@ -70,6 +70,28 @@ describe("a Codex seat's check records", () => {
   });
 });
 
+describe("a Codex command handed back before it exits", () => {
+  it("keeps its lock and its record, and counts no result for it", async () => {
+    const command = "pnpm -s lint";
+    const rows: unknown[] = [];
+    const checks = createCheckRecorder({
+      store: { addCheckRun: (row) => void rows.push(row) },
+      checks: async () => [command],
+      state: async () => ({ head: "a".repeat(40), clean: true }),
+    });
+    const lock = new TestLock({ holds: store });
+    const { sup } = codexSupervisor({ command, holdTurn: true }, { checks, lock });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    // the item completes (no exit code) shortly after its approval
+    await new Promise((done) => setTimeout(done, 300));
+    expect(lock.state().holder?.runId).toBe(runId);
+    expect(await checks.running?.(runId, command)).toBe(command);
+    expect(rows).toEqual([]);
+    await sup.endRunByEngine(runId);
+  });
+});
+
 describe("a Codex seat's test-lock outcome (#1411)", () => {
   it.each([
     ["pnpm -s test", 0, "pass"],

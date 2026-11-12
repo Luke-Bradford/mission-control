@@ -361,6 +361,26 @@ describe("Codex check records", () => {
     ]);
   });
 
+  it("forgets a noted check and frees its lock when the approval is cancelled after the note", async () => {
+    const abandoned: unknown[] = [];
+    const cancel = new AbortController();
+    const checks: CheckRecorder = {
+      ...recorder().checks,
+      begin: async () => cancel.abort(),
+      abandon: (k) => void abandoned.push(k),
+    };
+    const lock = new TestLock();
+    const h = approver("writer", [], undefined, checks, lock);
+    const answer = await h.approve(
+      request("pnpm -s typecheck", { itemId: "item-1", approvalId: "appr-1" }),
+      undefined,
+      cancel.signal,
+    );
+    expect(answer).not.toBe("accept");
+    expect(abandoned).toEqual([{ runId: "run", toolUseId: "appr-1" }]);
+    expect(lock.state().holder).toBeNull();
+  });
+
   it("takes the test lock for a configured check, and refuses it while another seat holds the lock", async () => {
     const { checks } = recorder();
     const lock = new TestLock();

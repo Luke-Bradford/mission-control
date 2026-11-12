@@ -402,6 +402,38 @@ describe("the check recorder", () => {
     expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, TYPES)).toBeNull();
   });
 
+  it("stops waiting for a kept call once its deadline passes, and frees what it held", async () => {
+    let t = 99;
+    const freed: unknown[] = [];
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void rows.push(c) },
+      checks: async () => checks,
+      state: async () => state,
+      worktree: async () => WORKTREE,
+      now: () => t,
+      release: (k) => void freed.push(k),
+    });
+    await r.begin(KEY, LINT, [{ runId: "r1", toolUseId: "item-1" }]);
+    r.dropRun("r1", { keepWatching: true }); // no end ever comes
+    const other = { runId: "r1", toolUseId: "t2" };
+    expect(await r.admit?.(other, TYPES)).toBe(LINT);
+    r.cancel?.(other);
+    t += CHECK_BASH_TIMEOUT_MS + 1;
+    expect(await r.admit?.(other, TYPES)).toBeNull();
+    expect(freed).toEqual([KEY, { runId: "r1", toolUseId: "item-1" }]);
+    expect(r.drops("r1")).toMatchObject([{ reason: "timeout", command: LINT }]);
+    expect(rows).toEqual([]);
+  });
+
+  it("forgets a call whose approval was cancelled after it was noted", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT, [{ runId: "r1", toolUseId: "item-1" }]);
+    r.abandon?.(KEY);
+    expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, TYPES)).toBeNull();
+    await r.end({ runId: "r1", toolUseId: "item-1" }, true, 0);
+    expect(rows).toEqual([]);
+  });
+
   it("keeps two runs' calls with the same tool id apart", async () => {
     const r = recorder();
     await r.begin({ runId: "r1", toolUseId: "t" }, LINT);

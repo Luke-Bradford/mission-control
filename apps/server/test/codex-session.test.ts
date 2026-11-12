@@ -287,14 +287,12 @@ describe("Codex session", () => {
       expect(events).toContainEqual({
         kind: "tool-result",
         toolUseId: "command-approval",
-        ok: false,
         wrapped: false,
       }),
     );
     expect(events).toContainEqual({
       kind: "tool-result",
       toolUseId: "item-1",
-      ok: false,
       wrapped: false,
     });
     expect(recorded()).toContainEqual({ id: "approval-1", result: { decision: "accept" } });
@@ -303,7 +301,7 @@ describe("Codex session", () => {
   it.each([
     [0, true],
     [1, false],
-    [undefined, false],
+    [undefined, undefined],
   ])("says a command that exited %s ended ok = %s", async (exitCode, ok) => {
     const { session, events } = start();
     session.send(JSON.stringify({ command: "pnpm -s lint", exitCode }));
@@ -312,7 +310,7 @@ describe("Codex session", () => {
       {
         kind: "tool-result",
         toolUseId: "item-1",
-        ok,
+        ...(ok === undefined ? {} : { ok }),
         ...(exitCode === undefined ? {} : { exitCode }),
         wrapped: false,
       },
@@ -356,6 +354,29 @@ describe("Codex session", () => {
       expect(checks.drops("run")).toEqual([]);
     },
   );
+
+  it("reports a command that finishes after its turn ended under the approval key too", async () => {
+    const { session, events } = start();
+    session.send(
+      JSON.stringify({
+        command: "pnpm -s test",
+        holdItem: true,
+        endTurnWithNoItem: true,
+        params: { approvalId: "appr-1" },
+      }),
+    );
+    await until(() => expect(events.some((e) => e.kind === "result")).toBe(true));
+    session.send(JSON.stringify({ completeLateItem: true, exitCode: 0 }));
+    await until(() =>
+      expect(events).toContainEqual({
+        kind: "tool-result",
+        toolUseId: "appr-1",
+        ok: true,
+        exitCode: 0,
+        wrapped: false,
+      }),
+    );
+  });
 
   it("marks a command that pipes past the check as wrapped (#1411)", async () => {
     const { session, events } = start();

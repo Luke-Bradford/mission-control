@@ -499,6 +499,7 @@ export async function main(): Promise<void> {
     state: cloneState(config, store),
     worktree: seatWorktree(store),
     log: (line) => log(line),
+    release: (key) => lock.release(key),
   });
   // Crew runs only on a server that may (the live hub, or a preview told MC_CREW=1), only with a
   // crew config, and only where the guard hook can be found.

@@ -31,6 +31,7 @@ const threadId = "codex-thread-1";
 let turn = 0;
 let handshakes = 0;
 let active = null;
+let lastActive = null;
 const requests = new Map();
 const timers = new Set();
 const later = (fn, ms) => {
@@ -42,6 +43,7 @@ const later = (fn, ms) => {
 };
 const endTurn = (status = "completed") => {
   notify("turn/completed", { threadId, turn: { id: active?.turnId, status } });
+  lastActive = active;
   active = null;
 };
 const completeItem = (scenario, itemId, type) => {
@@ -167,6 +169,16 @@ rl.on("line", (line) => {
     if (scenario.completeItem && active) {
       say({ id, result: {} });
       completeItem(active.scenario, active.itemId, active.type);
+      return;
+    }
+    // a command that outlived its turn: its item completes after the turn has ended
+    if (scenario.completeLateItem && lastActive) {
+      say({ id, result: {} });
+      completeItem(
+        { ...lastActive.scenario, holdTurn: true, exitCode: scenario.exitCode },
+        lastActive.itemId,
+        lastActive.type,
+      );
       return;
     }
     if (scenario.turnError) {
