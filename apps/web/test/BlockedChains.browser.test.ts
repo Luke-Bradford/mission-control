@@ -97,7 +97,7 @@ describeRendered("Blocked chains in a browser", () => {
                 seatsHeight: seats.getBoundingClientRect().height,
                 headers: [...panel.querySelectorAll("th")].map((th) => th.textContent),
               };
-            });
+            }, undefined);
             expect(m.pageOverflow, label).toBeLessThanOrEqual(0);
             expect(m.sideways, label).toBeLessThanOrEqual(0);
             expect(m.panelHeight, label).toBeGreaterThanOrEqual(PANEL_MIN - 0.5);
