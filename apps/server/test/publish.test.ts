@@ -16,8 +16,10 @@ import {
   AWAY_WRITES_REFUSED,
   CI_EXCERPT_LINES,
   CI_EXCERPT_MAX,
+  CI_FAILED_TEXT,
   DEFAULT_AWAY,
   EVIDENCE_HEADING,
+  fillLoopText,
   MC_PR_BODY_MAX,
   MC_PR_BODY_REFUSED,
   MC_PR_EDIT_FAILED,
@@ -30,6 +32,7 @@ import {
   minorMoreLine,
   NEW_LOOP,
   prEditedText,
+  type QaReport,
   type Run,
   STDERR_TEXT_MAX,
 } from "@mc/core";
@@ -37,6 +40,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import {
   CI_LOG_UNREADABLE,
+  ciLogBody,
   cleanLog,
   createPublisher,
   EARLIER_PR_OPEN,
@@ -136,7 +140,13 @@ const deps = (over: Partial<McToolsDeps> = {}): McToolsDeps => ({
 });
 
 const list =
-  (...prs: { number: number; createdAt: string }[]) =>
+  (
+    ...prs: {
+      number: number;
+      createdAt: string;
+      closingIssuesReferences?: { number: number; url?: string }[];
+    }[]
+  ) =>
   () => ({
     code: 0,
     stdout: JSON.stringify(prs),
@@ -272,6 +282,45 @@ describe("openPr", () => {
     });
   });
 
+  it("adopts the earlier PR of the run this run received a handoff from, whatever its seat", async () => {
+    store.upsertRun(
+      run({
+        id: "r0",
+        agentId: "other-seat",
+        startedAt: START - 1_000,
+        endedAt: START - 500,
+        status: "ok",
+        loop: { ...NEW_LOOP, prNumber: 29 },
+      }),
+    );
+    store.recordHandoff({
+      runId: "r0",
+      repoId: "mc",
+      ticket: "mc#7",
+      fromSeat: "other-seat",
+      at: START - 400,
+      goal: "g",
+      done: [],
+      left: [],
+      next: "n",
+      branch: BRANCH,
+      worktree: null,
+      gitStatus: [],
+      gitState: "ready",
+      findings: [],
+      messages: [],
+      acceptedBy: null,
+      acceptedRunId: null,
+    });
+    expect(store.claimHandoff("r0", "t")).toBe(true);
+    expect(store.acceptHandoff("r0", "t", "guido-1", "r1")).toBe(true);
+    ghAnswers = [list({ number: 29, createdAt: "2026-10-20T10:00:00Z" })];
+    expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+      ok: true,
+      prNumber: 29,
+    });
+  });
+
   it("does not adopt a same-seat PR from a run that ended after this one started", async () => {
     store.upsertRun(
       run({
@@ -287,6 +336,84 @@ describe("openPr", () => {
       ok: false,
       text: EARLIER_PR_OPEN,
       transient: false,
+    });
+  });
+
+  describe("a PR opened outside any run", () => {
+    const OUTSIDE = {
+      number: 29,
+      createdAt: "2026-10-20T10:00:00Z",
+      closingIssuesReferences: [{ number: 7, url: "https://github.com/o/mc/issues/7" }],
+    };
+
+    it("adopts the single open PR that closes the run's ticket when no run recorded it", async () => {
+      ghAnswers = [list(OUTSIDE)];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: true,
+        prNumber: 29,
+      });
+      expect(tools.openDraftPr).not.toHaveBeenCalled();
+    });
+
+    it("refuses a PR on the branch that closes another ticket", async () => {
+      ghAnswers = [
+        list({
+          ...OUTSIDE,
+          closingIssuesReferences: [{ number: 8, url: "https://github.com/o/mc/issues/8" }],
+        }),
+      ];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+        transient: false,
+      });
+    });
+
+    it("refuses a PR that closes an issue with the same number in another repository", async () => {
+      ghAnswers = [
+        list({
+          ...OUTSIDE,
+          closingIssuesReferences: [{ number: 7, url: "https://github.com/someone/else/issues/7" }],
+        }),
+      ];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+        transient: false,
+      });
+    });
+
+    it("refuses a PR that closes no ticket", async () => {
+      ghAnswers = [list({ ...OUTSIDE, closingIssuesReferences: [] })];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toMatchObject({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+      });
+    });
+
+    it("refuses a PR that a live run of another seat has recorded", async () => {
+      store.upsertRun(
+        run({
+          id: "r0",
+          agentId: "other-seat",
+          startedAt: START - 1_000,
+          loop: { ...NEW_LOOP, prNumber: 29 },
+        }),
+      );
+      ghAnswers = [list(OUTSIDE)];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toEqual({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+        transient: false,
+      });
+    });
+
+    it("refuses when two PRs are open on the branch", async () => {
+      ghAnswers = [list(OUTSIDE, { ...OUTSIDE, number: 30 })];
+      expect(await createPublisher(deps()).openPr(run(), TICKET, "n")).toMatchObject({
+        ok: false,
+        text: EARLIER_PR_OPEN,
+      });
     });
   });
 
@@ -343,7 +470,7 @@ describe("openPr: the branch has moved on, and a PR that cannot be named", () =>
       "--repo=o/mc",
       `--head=${BRANCH}`,
       "--state=open",
-      "--json=number,createdAt",
+      "--json=number,createdAt,closingIssuesReferences",
     ]);
   });
 
@@ -534,8 +661,8 @@ describe("ciExcerpt", () => {
     for (const section of out.split("\n\n")) {
       expect(section).toMatch(/^[a-z]+:\n\S/);
     }
-    // the first run's text takes the whole budget: the second run gets no header, and its log is
-    // not read at all
+    // each run left gets an equal part of what is left: a first run with a huge log cannot take
+    // the second run's room, and the whole stays inside the cap
     ghCalls = [];
     ghAnswers = [
       runs(
@@ -543,10 +670,14 @@ describe("ciExcerpt", () => {
         { databaseId: 2, name: "x".repeat(CI_EXCERPT_MAX), conclusion: "failure" },
       ),
       () => ({ code: 0, stdout: "y".repeat(CI_EXCERPT_MAX * 2) }),
+      () => ({ code: 0, stdout: "z".repeat(CI_EXCERPT_MAX * 2) }),
     ];
     const full = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
     expect(Buffer.byteLength(full)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
-    expect(ghCalls.filter((c) => c[1] === "view")).toHaveLength(1);
+    expect(ghCalls.filter((c) => c[1] === "view")).toHaveLength(2);
+    const [one, two] = full.split("\n\n");
+    expect(Buffer.byteLength(one ?? "")).toBeLessThanOrEqual(CI_EXCERPT_MAX / 2);
+    expect(two).toContain("z");
   });
 
   it("fills the budget exactly across sections when the first does not use it all", async () => {
@@ -591,6 +722,354 @@ describe("ciExcerpt", () => {
     ];
     expect(await createPublisher(deps()).ciExcerpt("o/mc", SHA)).toBe(CI_LOG_UNREADABLE);
     expect(CI_LOG_UNREADABLE).toBe("(the CI log could not be read)");
+  });
+
+  /** The log a failed web-core job prints, in vitest's order: stderr, `×` lines, then the failures. */
+  const vitestLog = (n: number, job = "web-core") => {
+    const line = (text: string) => `${job}\tRun vitest\t2026-11-05T04:59:02.0350000Z ${text}`;
+    const names = Array.from(
+      { length: n },
+      (_, i) => `test/pages/page-${i}.test.ts > page ${i} > ${"shows the thing ".repeat(5)}${i}`,
+    );
+    return {
+      names,
+      log: [
+        ...Array.from({ length: 6000 }, (_, i) => line(` ✓ test/ok${i}.test.ts (3 tests) 12ms`)),
+        line("stderr | test/pages/page-0.test.ts"),
+        ...Array.from({ length: 15 }, (_, i) => line(`Error: noise ${i}`)),
+        ...Array.from({ length: 20 }, (_, i) => line(` × test/x${i}.test.ts > x ${i}  4ms`)),
+        ...names.flatMap((name, i) => [
+          line(` FAIL  ${name}`),
+          line(`AssertionError: expected ${i} to be ${i + 1}`),
+          line(" ❯ test/pages/page.test.ts:12:5"),
+          line("     12|   expect(a).toBe(b)"),
+        ]),
+        line(" Test Files  1 failed (1)"),
+        ...Array.from({ length: 3000 }, (_, i) => line(` ✓ later${i}.test.ts 1ms`)),
+      ].join("\n"),
+    };
+  };
+  const seatText = (excerpt: string) =>
+    fillLoopText(CI_FAILED_TEXT, { sha7: SHA.slice(0, 7) }) + excerpt;
+
+  it("holds every FAIL name and its error line of a web-core-sized log, ahead of noise and passing lines", async () => {
+    const { names, log } = vitestLog(25);
+    ghAnswers = [
+      runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+      () => ({
+        code: 0,
+        stdout: `${log}\ncheck\tVerify\tZ Error: Process completed with exit code 1.`,
+      }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    const seen = seatText(out);
+    expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+    names.forEach((name, i) => {
+      expect(seen).toContain(`FAIL  ${name}`);
+      expect(seen).toContain(`AssertionError: expected ${i} to be ${i + 1}`);
+    });
+    expect(seen).not.toContain("exit code 1");
+    const lastFail = seen.lastIndexOf("FAIL  ");
+    expect(lastFail).toBeLessThan(seen.indexOf("Error: noise"));
+    expect(lastFail).toBeLessThan(seen.indexOf("✓"));
+    expect(seen).not.toContain("× test/x");
+  });
+
+  it("keeps the failing lines of every job ahead of any job's passing lines", async () => {
+    const job = (name: string, n: number) => [
+      `${name}\tRun\t2026-11-05T04:59:02.0Z  FAIL  ${name}.test.ts > case ${n}`,
+      `${name}\tRun\t2026-11-05T04:59:02.0Z AssertionError: ${name} expected ${n}`,
+      ...Array.from(
+        { length: 12 },
+        (_, i) => `${name}\tRun\t2026-11-05T04:59:02.0Z  ✓ ${name} ok ${i}`,
+      ),
+    ];
+    const log = [...job("web-core", 1), ...job("server (1)", 2), ...job("server (2)", 3)].join(
+      "\n",
+    );
+    ghAnswers = [
+      runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+      () => ({ code: 0, stdout: log }),
+    ];
+    const seen = seatText(await createPublisher(deps()).ciExcerpt("o/mc", SHA));
+    for (const n of [
+      "web-core.test.ts > case 1",
+      "server (1).test.ts > case 2",
+      "server (2).test.ts > case 3",
+    ])
+      expect(seen).toContain(n);
+    expect(seen).toContain("AssertionError: server (2) expected 3");
+    expect(seen.lastIndexOf("FAIL")).toBeLessThan(seen.indexOf("✓"));
+  });
+
+  it("keeps a typed error line under its FAIL name", async () => {
+    const log = [
+      "web-core\tRun\t2026-11-05T04:59:02.0Z  FAIL  a.test.ts > x",
+      "web-core\tRun\t2026-11-05T04:59:02.0Z TypeError: boom",
+      ...Array.from({ length: 20 }, (_, i) => `web-core\tRun\t2026-11-05T04:59:02.0Z  other ${i}`),
+    ].join("\n");
+    ghAnswers = [
+      runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+      () => ({ code: 0, stdout: log }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out).toContain("FAIL  a.test.ts > x\nTypeError: boom");
+  });
+
+  it("puts the real job's lines ahead of the summary job's when several failed", async () => {
+    const log = [
+      "web-core\tRun\t2026-11-05T04:59:02.0Z  FAIL  a.test.ts > it works",
+      "web-core\tRun\t2026-11-05T04:59:02.0Z AssertionError: expected 1 to be 2",
+      'check\tVerify\t2026-11-05T04:59:03.0Z test "failure" = success',
+      "check\tVerify\t2026-11-05T04:59:03.0Z Error: needs failed",
+      "check\tVerify\t2026-11-05T04:59:03.0Z Error: Process completed with exit code 1.",
+    ].join("\n");
+    ghAnswers = [
+      runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+      () => ({ code: 0, stdout: log }),
+    ];
+    const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    expect(out).toBe(
+      "CI:\n[web-core]\nFAIL  a.test.ts > it works\nAssertionError: expected 1 to be 2",
+    );
+  });
+
+  describe("ranking a failed log", () => {
+    const L = (text: string, job = "web-core") => `${job}\tRun\t2026-11-05T04:59:02.0Z ${text}`;
+    const excerpt = async (lines: string[]) => {
+      ghAnswers = [
+        runs({ databaseId: 1, name: "CI", conclusion: "failure" }),
+        () => ({ code: 0, stdout: lines.join("\n") }),
+      ];
+      return createPublisher(deps()).ciExcerpt("o/mc", SHA);
+    };
+
+    it("keeps an error line under each FAIL name, even when the words repeat", async () => {
+      const out = await excerpt(
+        [1, 2, 3].flatMap((i) => [
+          L(` FAIL  a.test.ts > t${i}`),
+          L("AssertionError: expected true to be false"),
+        ]),
+      );
+      expect(out.match(/AssertionError/g)).toHaveLength(3);
+    });
+
+    it("keeps one job's console output from pushing out another job's FAIL names", async () => {
+      const out = await excerpt([
+        L(" FAIL  a.test.ts > one"),
+        L("AssertionError: expected 1 to be 2"),
+        L(" FAIL  a.test.ts > two"),
+        L("AssertionError: expected 2 to be 3"),
+        L("stderr | a.test.ts"),
+        ...Array.from({ length: 300 }, (_, i) => L(`Warning: ${"w".repeat(100)} ${i}`)),
+        L(" FAIL  s.test.ts > only one", "server (1)"),
+        L("AssertionError: expected 3 to be 4", "server (1)"),
+      ]);
+      expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+      expect(out).toContain("FAIL  s.test.ts > only one");
+      expect(out.indexOf("only one")).toBeLessThan(out.indexOf("Warning:"));
+    });
+
+    it("says how many failing lines it left out, and keeps each job's first failure", async () => {
+      const out = await excerpt([
+        ...Array.from({ length: 60 }, (_, i) => [
+          L(` FAIL  test/pages/page-${i}.test.ts > ${"shows the thing ".repeat(6)}${i}`),
+          L(`AssertionError: expected ${i} to be ${i + 1}`),
+        ]).flat(),
+        L(" FAIL  s.test.ts > only one", "server (1)"),
+        L("AssertionError: expected x to be y", "server (1)"),
+      ]);
+      expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+      expect(out).toContain("only one");
+      expect(out).toMatch(/\[\d+ more failing lines in web-core not shown; inspect the CI log\.\]/);
+      expect(out).not.toMatch(/more failing lines in server/);
+      // cut at a line end: every FAIL name has its assertion line
+      expect(out.match(/FAIL/g)?.length).toBe(out.match(/AssertionError/g)?.length);
+    });
+
+    it("keeps the paths and rules of Biome diagnostics with their × lines", async () => {
+      const out = await excerpt(
+        [
+          "apps/server/src/zz.ts:2:34 lint/suspicious/noDoubleEquals  FIXABLE  ━━━━━━━━━━━━━",
+          "  × Using == may be unsafe if you are relying on type coercion.",
+          "  i Unsafe fix: Use ===.",
+          ...Array.from({ length: 30 }, (_, i) => `  line ${i}`),
+        ].map((t) => L(t, "validate")),
+      );
+      expect(out).toContain(
+        "apps/server/src/zz.ts:2:34 lint/suspicious/noDoubleEquals  FIXABLE  ━━━━━━━━━━━━━\n× Using == may be unsafe",
+      );
+    });
+
+    it("drops × lines when the job has a FAIL line, and keeps them when it has none", async () => {
+      const withFail = await excerpt([L(" × test/x.test.ts > x 4ms"), L(" FAIL  a.test.ts > t")]);
+      expect(withFail).not.toContain("× test/x");
+      const without = await excerpt([L(" × test/x.test.ts > x 4ms"), L(" ✓ ok")]);
+      expect(without).toContain("× test/x.test.ts > x");
+    });
+
+    it("does not rank a console block's Error: line, inside the FAIL window, as a cause", async () => {
+      const out = await excerpt([
+        L(" FAIL  a.test.ts > t"),
+        L("stderr | a.test.ts"),
+        L("Error: console noise"),
+        L("AssertionError: expected 1 to be 2"),
+        L(" FAIL  b.test.ts > u"),
+        L("AssertionError: expected 2 to be 3"),
+      ]);
+      expect(out.indexOf("FAIL  b.test.ts")).toBeLessThan(out.indexOf("Error: console noise"));
+    });
+
+    it("puts type errors ahead of passing lines, jobs with more failures first, and caps at 100 lines", async () => {
+      const out = await excerpt([
+        ...Array.from({ length: 30 }, (_, i) => L(` ok ${i}`, "typecheck")),
+        L("src/a.ts(1,2): error TS2345: bad", "typecheck"),
+        L(" FAIL  a.test.ts > t", "few"),
+        ...Array.from({ length: 150 }, (_, i) => L(`src/b${i}.ts(1,2): error TS2322: bad`, "many")),
+      ]);
+      expect(out.indexOf("error TS2345")).toBeLessThan(out.indexOf("ok 29"));
+      expect(out.indexOf("[many]")).toBeLessThan(out.indexOf("[typecheck]"));
+      expect(out.match(/error TS2322/g)).toHaveLength(100);
+      expect(out).toContain("[50 more failing lines in many not shown; inspect the CI log.]");
+    });
+    it("ranks only a line that starts with FAIL, never a passing test or code line that says it", async () => {
+      const out = await excerpt([
+        ...Array.from({ length: 120 }, (_, i) =>
+          L(` ✓ a${i}.test.ts > shows the FAILED badge 1ms`),
+        ),
+        L(" FAIL  b.test.ts > real"),
+        L("AssertionError: real"),
+        L('  9| it("shows the FAILED badge", () => {'),
+      ]);
+      expect(out).toContain("FAIL  b.test.ts > real");
+      expect(out).toContain("AssertionError: real");
+      expect(out.indexOf("FAIL  b.test.ts")).toBeLessThan(out.indexOf("✓"));
+      const marks = await excerpt([L(" ✓ a > FAIL badge 1ms"), L(" × b.test.ts > b 3ms")]);
+      expect(marks).toContain("× b.test.ts > b");
+    });
+
+    it("never goes past its room, down to a few bytes, with notices to count", () => {
+      const lines = [
+        ...Array.from({ length: 60 }, (_, i) => [
+          L(` FAIL  test/page-${i}.test.ts > ${"shows the thing ".repeat(6)}${i}`),
+          L(`AssertionError: expected ${i} to be ${i + 1}`),
+        ]).flat(),
+        ...[1, 2, 3, 4].flatMap((n) => [
+          L(` FAIL  s${n}.test.ts > one`, `server (${n})`),
+          L("AssertionError: no", `server (${n})`),
+        ]),
+      ].join("\n");
+      for (const room of [10, 60, 100, 200, 333, 1000, 4000, 8192]) {
+        expect(Buffer.byteLength(ciLogBody(lines, room))).toBeLessThanOrEqual(room);
+      }
+      for (let room = 150; room < 700; room += 7) {
+        expect(Buffer.byteLength(ciLogBody(lines, room))).toBeLessThanOrEqual(room);
+      }
+    });
+
+    it("stays inside the cap across two failed runs, the second with four failing jobs", async () => {
+      const first = Array.from({ length: 60 }, (_, i) => [
+        L(` FAIL  test/page-${i}.test.ts > ${"shows the thing ".repeat(6)}${i}`),
+        L(`AssertionError: expected ${i} to be ${i + 1}`),
+      ])
+        .flat()
+        .join("\n");
+      const second = [1, 2, 3, 4]
+        .flatMap((n) => [
+          L(` FAIL  s${n}.test.ts > one`, `server (${n})`),
+          L("AssertionError: no", `server (${n})`),
+        ])
+        .join("\n");
+      ghAnswers = [
+        runs(
+          { databaseId: 1, name: "a", conclusion: "failure" },
+          { databaseId: 2, name: "b", conclusion: "failure" },
+        ),
+        () => ({ code: 0, stdout: first }),
+        () => ({ code: 0, stdout: second }),
+      ];
+      const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+      expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+    });
+
+    it("gives a later run's failures room ahead of an earlier run's console output", async () => {
+      const first = [
+        L(" FAIL  a.test.ts > first run failure"),
+        L("AssertionError: first"),
+        L("stderr | a.test.ts"),
+        ...Array.from({ length: 300 }, (_, i) => L(`Warning: ${"w".repeat(100)} ${i}`)),
+      ].join("\n");
+      const second = [
+        L(" FAIL  s.test.ts > second run failure", "server (1)"),
+        L("AssertionError: second", "server (1)"),
+      ].join("\n");
+      ghAnswers = [
+        runs(
+          { databaseId: 1, name: "a", conclusion: "failure" },
+          { databaseId: 2, name: "b", conclusion: "failure" },
+        ),
+        () => ({ code: 0, stdout: first }),
+        () => ({ code: 0, stdout: second }),
+      ];
+      const out = await createPublisher(deps()).ciExcerpt("o/mc", SHA);
+      expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+      expect(out).toContain("FAIL  s.test.ts > second run failure");
+      expect(out).toContain("AssertionError: second");
+    });
+
+    it("reads a huge console log in well under a second per hundred thousand lines", () => {
+      const lines = [
+        L(" FAIL  a.test.ts > t"),
+        L("AssertionError: x"),
+        L("stderr | a"),
+        ...Array.from({ length: 150_000 }, (_, i) => L(`console line number ${i} of the run`)),
+      ].join("\n");
+      const at = Date.now();
+      const out = ciLogBody(lines, CI_EXCERPT_MAX);
+      expect(Date.now() - at).toBeLessThan(5000);
+      expect(out).toContain("FAIL  a.test.ts > t");
+    });
+
+    it("prints a FAIL name once and does not attach a later error to it", async () => {
+      const out = await excerpt([
+        L(" FAIL  a.test.ts > t"),
+        L("AssertionError: first"),
+        L(" FAIL  a.test.ts > t"),
+        L("AssertionError: later"),
+      ]);
+      expect(out.match(/FAIL/g)).toHaveLength(1);
+      expect(out.indexOf("later")).toBeGreaterThan(out.indexOf("[web-core: console]"));
+    });
+
+    it("tails the real job's lines, not the summary job's, when no line ranks as failing", async () => {
+      const out = await excerpt([
+        ...Array.from({ length: 200 }, (_, i) => L(`build step ${i}`, "validate")),
+        L('test "failure" = success', "check"),
+        ...Array.from({ length: 4 }, (_, i) => L(`check line ${i}`, "check")),
+      ]);
+      expect(out).toContain("build step 120");
+      expect(out).toContain("build step 199");
+      expect(out).not.toContain('test "failure"');
+    });
+
+    it("prints a repeated type error once", async () => {
+      const out = await excerpt([
+        L("src/a.ts(1,2): error TS2345: bad", "typecheck"),
+        L("src/a.ts(1,2): error TS2345: bad", "typecheck"),
+      ]);
+      expect(out.match(/error TS2345/g)).toHaveLength(1);
+    });
+
+    it("caps × lines at 100, counts the rest, and puts them ahead of console output", async () => {
+      const out = await excerpt([
+        L("stderr | a"),
+        L("console first"),
+        ...Array.from({ length: 150 }, (_, i) => L(` × test/x${i}.test.ts > x 4ms`)),
+      ]);
+      expect(out.match(/× test\/x/g)).toHaveLength(100);
+      expect(out).toContain("[50 more failing lines in web-core not shown; inspect the CI log.]");
+      expect(out.indexOf("× test/x")).toBeLessThan(out.indexOf("console first"));
+    });
   });
 
   it("asks for a 16 MiB log buffer", async () => {
@@ -1076,6 +1555,50 @@ describe("postMinorFindings", () => {
     const crew = join(dir, "crew");
     return existsSync(crew) ? readdirSync(crew).filter((f) => f.startsWith("pr-")) : [];
   };
+
+  it("publishes negated parent-completion prose without changing the retained native report", async () => {
+    store.upsertRun(R);
+    const rv = review([]);
+    const report: QaReport = {
+      schemaVersion: 1,
+      id: "c".repeat(64),
+      repoId: "mc",
+      github: "o/mc",
+      prNumber: 12,
+      headSha: SHA,
+      prTitle: "Sample change",
+      prUrl: "https://github.com/o/mc/pull/12",
+      branch: BRANCH,
+      source: "native",
+      reviewer: { id: "retro", label: "RETRO" },
+      reviewedAt: START,
+      registeredAt: START,
+      nativeReviewId: rv.id,
+      nativeRunId: "rr",
+      verdict: { spec: "pass", quality: "pass" },
+      summary: "Checked the bounded continuation.",
+      worksWell: ["This does not close #933."],
+      coverage: [{ check: "scope", result: "pass", note: "This does not fix #933." }],
+      findings: [],
+      resolutions: [],
+      tests: [],
+      limitations: ["This cannot resolve #933."],
+      followUps: [{ text: "This never closes #933.", disposition: "pending" }],
+      visual: { applicability: "not_applicable", reason: "Backend only.", pairs: [] },
+      ci: { observedAt: START, headSha: SHA, source: "github", checks: [] },
+      completeness: { state: "complete", missing: [] },
+      permalink: `/qa?repo=mc&pr=12&report=${"c".repeat(64)}`,
+    };
+    expect(store.putQaReport(report)).toBe(true);
+    answer();
+    expect(await createPublisher(deps()).postMinorFindings(R, rv)).toEqual({ ok: true });
+    expect(posted).toContain("does not close issue 933");
+    expect(posted).toContain("does not fix issue 933");
+    expect(posted).toContain("cannot resolve issue 933");
+    expect(posted).toContain("never closes issue 933");
+    expect(posted).toContain(`/api/qa-reports/${report.id}/markdown`);
+    expect(store.qaReportForReview(rv.id)).toEqual(report);
+  });
 
   beforeEach(() => {
     store.upsertRun(R);

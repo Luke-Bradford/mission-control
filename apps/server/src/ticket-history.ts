@@ -130,6 +130,8 @@ export interface TicketHistoryInput {
   repoOfSender: (from: string) => string | null;
   before: { at: number; key: string } | null;
   limit: number;
+  /** Independent cursor for the additive question page. */
+  questionsBefore?: { at: number; id: number } | null;
 }
 
 /**
@@ -159,10 +161,14 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
       SOURCE_LIMIT,
     )
     .filter((m) => m.ticket === ref || i.singleRepo || i.repoOfSender(m.from) === repoId);
+  const choices = store.choicesOnTicket(ref, SOURCE_LIMIT);
+  const questionRows = store.ticketQuestions(repoId, ref, i.limit + 1, i.questionsBefore ?? null);
+  const questions = questionRows.slice(0, i.limit);
+  const lastQuestion = questions.at(-1);
   if (
     card === null &&
     i.issue === null &&
-    runs.length + prs.length + decisions.length + comms.length === 0
+    runs.length + prs.length + decisions.length + comms.length + choices.length === 0
   )
     return null;
 
@@ -223,6 +229,19 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
       to: m.to,
       label: m.label,
       text: m.text,
+      senderKind: m.senderKind ?? null,
+    });
+  for (const c of choices)
+    events.push({
+      key: `choice:${c.key}:${c.briefAt}`,
+      at: c.chosenAt,
+      // shown as a decision, which the Ticket page already draws
+      kind: "decision",
+      id: 0,
+      decisionKind: "choice",
+      about: c.question,
+      decision: `${c.chosenBy[0]?.toUpperCase()}${c.chosenBy.slice(1)} chose "${c.label}".`,
+      basis: `Delivered to ${c.target}.`,
     });
   events.sort(newestFirst);
 
@@ -247,10 +266,16 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
     doneWhen: body === null ? [] : doneWhenChecklist(body),
     body,
     bodyTruncated: i.issue?.bodyTruncated ?? false,
+    prototypeProblem: i.issue?.prototypeProblem ?? null,
     githubError: i.githubError,
     runs: runs.map(runView),
     prs,
     timeline,
     nextBefore: rest.length > timeline.length && last !== undefined ? encodeCursor(last) : null,
+    questions,
+    questionsNextBefore:
+      questionRows.length > questions.length && lastQuestion !== undefined
+        ? encodeCursor({ at: lastQuestion.at, key: `question:${lastQuestion.id}` })
+        : null,
   };
 }

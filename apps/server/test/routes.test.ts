@@ -11,7 +11,11 @@ import { Store } from "../src/store.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const API_SRC = join(ROOT, "apps/server/src/api.ts");
-const API_SOURCES = [API_SRC, join(ROOT, "apps/server/src/standing-instructions-api.ts")];
+const API_SOURCES = [
+  API_SRC,
+  join(ROOT, "apps/server/src/instructions/api.ts"),
+  join(ROOT, "apps/server/src/brief/api.ts"),
+];
 const WEB_DATA = join(ROOT, "apps/web/src/data.ts");
 
 /** A route as the server registers it: `GET /api/crew`, `POST /api/seats/:id/start`. */
@@ -220,12 +224,12 @@ describe("the route table", () => {
 
   it("names the live readers for attention hold and dismiss routes", () => {
     const readers = readerComments();
-    expect(readers.get("GET /api/attention/held")).toContain("apps/web/src/flight/AskedOfYou.tsx");
+    expect(readers.get("GET /api/attention/held")).toContain("apps/web/src/pages/Needs.tsx");
     expect(readers.get("POST /api/attention/:key/hold")).toContain(
-      "apps/web/src/comms/Decisions.tsx",
+      "apps/web/src/needs/HoldItem.tsx",
     );
     expect(readers.get("POST /api/attention/:key/hold/release")).toContain(
-      "apps/web/src/flight/AskedOfYou.tsx",
+      "apps/web/src/flight/HeldNeeds.tsx",
     );
     expect(readers.get("POST /api/attention/:key/dismiss")).toContain(
       "apps/web/src/comms/answer.ts",

@@ -48,6 +48,14 @@ async function setup(
 }
 afterEach(() => vi.unstubAllGlobals());
 
+/** Pressing Transfer account without a usable choice sends nothing and says why. */
+async function refused(fetch: { mock: { calls: unknown[][] } }) {
+  fireEvent.click(screen.getByRole("button", { name: "Transfer account" }));
+  const summary = await screen.findByRole("region", { name: "Fix before transferring" });
+  expect(document.activeElement).toBe(summary);
+  expect(fetch.mock.calls.some(([path]) => path === "/api/seats/guido-1/transfer")).toBe(false);
+}
+
 it("filters compatible accounts, shows CLI availability and hints without a login flow", async () => {
   const fetch = await setup();
   const select = (await screen.findByRole("combobox", { name: "Account" })) as HTMLSelectElement;
@@ -57,9 +65,7 @@ it("filters compatible accounts, shows CLI availability and hints without a logi
   expect(screen.getByRole("status").textContent).toContain("GUIDO-1: pick another codex account.");
   fireEvent.change(select, { target: { value: "comet" } });
   expect(screen.getByText(/Sign in with the codex CLI on this machine/)).toBeTruthy();
-  expect(
-    (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
-  ).toBe(true);
+  await refused(fetch);
   expect(fetch.mock.calls.every(([, init]) => !init?.method)).toBe(true);
   expect(screen.queryByRole("dialog")).toBeNull();
   fireEvent.keyDown(select, { key: "Escape" });
@@ -120,6 +126,8 @@ it.each([
   );
   fireEvent.submit(screen.getByRole("form", { name: "Switch account" }));
   expect((await screen.findByRole("alert")).textContent).toMatch(/seat is busy|transfer failed/);
+  const summary = await screen.findByRole("region", { name: /Not transferred|Result unknown/ });
+  expect(document.activeElement).toBe(summary);
   expect(screen.getByTitle(/^orbit ·/)).toBeTruthy();
 });
 
@@ -142,14 +150,12 @@ it.each([
   { status: [] },
   { status: [{ accountId: "nova", provider: "codex", status: "unknown" }] },
 ])("does not transfer when CLI availability is unknown or missing", async ({ status }) => {
-  await setup(undefined, status);
+  const fetch = await setup(undefined, status);
   fireEvent.change(screen.getByRole("combobox", { name: "Account" }), {
     target: { value: "nova" },
   });
   await screen.findByText(/Sign in with the codex CLI/);
-  expect(
-    (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
-  ).toBe(true);
+  await refused(fetch);
 });
 
 it("excludes same-provider Claude accounts because the server cannot isolate their logins", async () => {
@@ -208,9 +214,7 @@ it.each([true, false])("forces fresh CLI readings on retry (success: %s)", async
       expect.objectContaining({ method: "POST" }),
     ),
   );
-  expect(
-    (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
-  ).toBe(true);
+  await refused(fetch);
   expect(screen.getByText("Checking accounts…")).toBeTruthy();
   await act(async () => {
     checked = success;
@@ -231,9 +235,7 @@ it.each([true, false])("forces fresh CLI readings on retry (success: %s)", async
     );
   } else {
     expect((await screen.findByRole("alert")).textContent).toContain("CLI check failed");
-    expect(
-      (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+    await refused(fetch);
   }
   expect(screen.getByTitle(/^orbit ·/)).toBeTruthy();
   expect(fetch.mock.calls.some(([path]) => path === "/api/seats/guido-1/transfer")).toBe(false);
@@ -242,4 +244,82 @@ it.each([true, false])("forces fresh CLI readings on retry (success: %s)", async
       ([path]) => path === "/api/accounts/other/check" || path === "/api/accounts/orbit/check",
     ),
   ).toBe(false);
+});
+
+it("shows the current account above the choice, and a submit with no choice says why", async () => {
+  const fetch = await setup();
+  const form = await screen.findByRole("form", { name: "Switch account" });
+  expect(form.textContent).toContain("Current account: orbit");
+  expect(screen.getByRole("button", { name: "Transfer account" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+  await refused(fetch);
+  expect(screen.getByRole("region", { name: "Fix before transferring" }).textContent).toContain(
+    "Choose an account to transfer to.",
+  );
+  expect(fetch.mock.calls.some(([path]) => path === "/api/seats/guido-1/transfer")).toBe(false);
+});
+
+it("a lost connection says the result is unknown and keeps the choice", async () => {
+  const fetch = await setup();
+  const original = fetch.getMockImplementation();
+  if (!original) throw new Error("Missing fetch stub");
+  fetch.mockImplementation((path, init) =>
+    init?.method === "POST"
+      ? Promise.reject(new TypeError("Failed to fetch"))
+      : original(path, init),
+  );
+  const select = (await screen.findByRole("combobox", { name: "Account" })) as HTMLSelectElement;
+  fireEvent.change(select, { target: { value: "nova" } });
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  fireEvent.submit(screen.getByRole("form", { name: "Switch account" }));
+  const summary = await screen.findByRole("region", { name: "Result unknown" });
+  expect(summary.textContent).toContain("The result is unknown");
+  expect(select.value).toBe("nova");
+});
+
+it("a double submit sends one transfer", async () => {
+  const fetch = await setup();
+  const original = fetch.getMockImplementation();
+  if (!original) throw new Error("Missing fetch stub");
+  fetch.mockImplementation((path, init) =>
+    init?.method === "POST" ? new Promise(() => {}) : original(path, init),
+  );
+  fireEvent.change(await screen.findByRole("combobox", { name: "Account" }), {
+    target: { value: "nova" },
+  });
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("button", { name: "Transfer account" }) as HTMLButtonElement).disabled,
+    ).toBe(false),
+  );
+  const form = screen.getByRole("form", { name: "Switch account" });
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  expect(
+    fetch.mock.calls.filter(
+      ([path, init]) => path === "/api/seats/guido-1/transfer" && init?.method === "POST",
+    ),
+  ).toHaveLength(1);
+});
+
+it("a transfer that worked does not keep an earlier 'Fix before transferring'", async () => {
+  const fetch = await setup();
+  await refused(fetch);
+  fireEvent.change(await screen.findByRole("combobox", { name: "Account" }), {
+    target: { value: "nova" },
+  });
+  await waitFor(() =>
+    expect(screen.queryByRole("region", { name: "Fix before transferring" })).toBeNull(),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Transfer account" }));
+  expect(await screen.findByText(/resumed on nova/)).toBeTruthy();
+  // the crew refetch moves the seat to nova, which is no longer a choice
+  fireEvent.change(screen.getByRole("combobox", { name: "Account" }), { target: { value: "" } });
+  expect(screen.queryByRole("region", { name: "Fix before transferring" })).toBeNull();
 });

@@ -14,7 +14,8 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { observeWaits, patchReleased, type ReleasedWait } from "../dependencies.ts";
-import type { Move, MoveResult } from "../github-board.ts";
+import type { Move, MoveResult } from "../github/board.ts";
+import { ownsCard } from "../ownership.ts";
 import type { Store } from "../store.ts";
 import type { RepoRulesError } from "./rules.ts";
 
@@ -88,6 +89,8 @@ async function release(
     const card = store.board(repo.id).find((c) => c.issueNumber === issue);
     if (card === undefined || card.closed || hudColumnOf(card) !== "Blocked") {
       patchReleased(store, repo.id, released.ref, released.at, { moved: true });
+    } else if (!ownsCard(store, repo.id, issue)) {
+      // a card no run of this hub touched is another hub's (or a person's) to release
     } else {
       const rules = await d.rules(repo.id);
       const ticket = rules instanceof Error ? null : await d.fetchTicket(repo, issue);

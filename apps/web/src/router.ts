@@ -59,10 +59,10 @@ export type SetupTab = (typeof SETUP_TABS)[number];
 
 export type Page =
   | "overview"
+  | "needs"
   | "flight"
   | "board"
   | "agent"
-  | "map"
   | "comms"
   | "qa"
   | "telemetry"
@@ -79,50 +79,59 @@ export type CommsView =
 
 export type Route =
   | { page: "overview" }
+  /** Needs you: a list and the open item (`/needs-you/:key`); no key shows the first one. */
+  | { page: "needs"; item: string | null }
   | { page: "flight" }
   | { page: "board"; repoId: string | null; ticket: number | null }
   /** One ticket as Mission Control knows it (`/tickets/:repo/:number`); the Board tab stays lit. */
   | { page: "ticket"; repoId: string; number: number }
   | { page: "agent"; id: string | null }
-  /** The Crew Activity Map of one repo; `/map` alone picks the repo and redirects. */
-  | { page: "map"; repoId: string | null }
   | { page: "comms"; item: string | null; view: CommsView }
+  /** The Comms chart on its own, filling the window (`/comms/chart`); the Comms tab stays lit. */
+  | { page: "commsChart" }
   | { page: "telemetry" }
   | { page: "qa" }
   | { page: "audit" }
   | { page: "setup"; tab: SetupTab };
 
 /** The header tab a route belongs under: a ticket is the Board's. */
-export const tabOf = (r: Route): Page => (r.page === "ticket" ? "board" : r.page);
+export const tabOf = (r: Route): Page =>
+  r.page === "ticket" ? "board" : r.page === "commsChart" ? "comms" : r.page;
 
 /**
  * Pages that take the whole width beside no FLIGHT dock; `f` opens FLIGHT in Comms there. The FLIGHT
  * page is one: it says what the dock would, so the dock stays out of its way.
  */
-export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["flight"]);
+export const FULL_WIDTH_PAGES: ReadonlySet<Page> = new Set<Page>(["flight", "needs"]);
 
 /** Each page's own path (the header tabs and `g` keys go here). */
-export const PAGE_PATHS: Record<Page, string> = HUD_PAGE_PATHS;
+const { map: _removedMapPath, ...HUD_PAGE_PATHS_WITHOUT_MAP } = HUD_PAGE_PATHS;
+export const PAGE_PATHS: Record<Page, string> = {
+  ...HUD_PAGE_PATHS_WITHOUT_MAP,
+  needs: "/needs-you",
+};
 
 const enc = encodeURIComponent;
-/** The panel that holds Needs you: Plan › Operator actions until #766 builds FLIGHT › Needs you. */
-export const NEEDS_YOU_PANEL = "askP";
-
-/** Needs you's home, where the header's button, the FLIGHT pulse and every "all of it" link lead. */
-export const NEEDS_YOU_PATH = `${PAGE_PATHS.flight}#${NEEDS_YOU_PANEL}`;
+/** Needs you's home, where the header's tab, the FLIGHT pulse and every "all of it" link lead. */
+export const NEEDS_YOU_PATH = PAGE_PATHS.needs;
+/** FLIGHT page fragments that held the asks before they had a page; they now lead to it. */
+export const LEGACY_NEEDS_HASHES: readonly string[] = ["#askP", "#defaultsP"];
 
 export const agentPath = (id: string): string => `/agent/${enc(id)}`;
 /** Full loop diagnostics for one agent run, opened from Agent, Board and Audit evidence. */
 export const tracePath = (agentId: string, runId: string): string =>
   `${agentPath(agentId)}?trace=${enc(runId)}`;
 export const boardPath = (repoId: string): string => `/board/${enc(repoId)}`;
-export const mapPath = (repoId: string): string => `/map/${enc(repoId)}`;
 /** The ticket page: the form, and what the crew did on it. GitHub is one link on it. */
 export const ticketPath = (repoId: string, issueNumber: number): string =>
   `/tickets/${enc(repoId)}/${issueNumber}`;
 /** An attention item's key, e.g. `esc:shop-app#3227` (its `#` is encoded, so it is not a hash). */
 export const itemPath = (key: string): string => `/comms/${enc(key)}`;
+/** One item open on the Needs you page. */
+export const needsYouPath = (key: string): string => `${PAGE_PATHS.needs}/${enc(key)}`;
 export const commsFlightPath = (): string => "/comms";
+/** The Comms chart popped out to its own window; the filter rides in `?focus=`. */
+export const COMMS_CHART_PATH = "/comms/chart";
 export const commsCrewPath = (): string => "/comms/crew";
 export const commsTicketPath = (ref: string, ticket?: string | null): string =>
   `/comms/tickets/${enc(ref)}${ticket && COMMS_TICKET.test(ticket) ? `?ticket=${enc(ticket)}` : ""}`;
@@ -214,6 +223,9 @@ export function route(path: string, search = ""): Route | null {
   const [pathname, query = search] = path.split("?", 2);
   const p = bare(pathname ?? path);
   if (p === "/") return { page: "overview" };
+  if (p === "/needs-you") return { page: "needs", item: null };
+  const need = withId(path, "needs-you");
+  if (need?.id) return { page: "needs", item: need.id };
   if (p === "/flight") return { page: "flight" };
   if (p === "/telemetry") return { page: "telemetry" };
   if (p === "/audit") return { page: "audit" };
@@ -226,9 +238,8 @@ export function route(path: string, search = ""): Route | null {
   if (page) return { page: "ticket", ...page };
   const agent = withId(path, "agent");
   if (agent) return { page: "agent", id: agent.id };
-  const map = withId(path, "map");
-  if (map) return { page: "map", repoId: map.id };
   if (p === "/comms") return { page: "comms", item: null, view: { kind: "flight" } };
+  if (p === COMMS_CHART_PATH) return { page: "commsChart" };
   if (p === "/comms/crew") return { page: "comms", item: null, view: { kind: "crew" } };
   const commsTicket = /^\/comms\/tickets\/([^/]+)$/.exec(p);
   if (commsTicket) {
@@ -280,7 +291,7 @@ const GLOSSARY = `${setupPath("sources")}#glossary`;
  */
 export function legacyRedirect(path: string, hash = ""): string | null {
   const p = bare(path);
-  if (p === "/needs-you" || p === "/needs") return NEEDS_YOU_PATH;
+  if (p === "/needs") return NEEDS_YOU_PATH;
   if (p === "/cto") return PAGE_PATHS.flight;
   if (p === "/metrics") return PAGE_PATHS.telemetry;
   if (p === "/agents" || p === "/loops") return PAGE_PATHS.overview;
@@ -291,6 +302,6 @@ export function legacyRedirect(path: string, hash = ""): string | null {
   const agent = withId(path, "agents") ?? withId(path, "loops");
   if (agent?.id) return agentPath(agent.id);
   const need = withId(path, "needs");
-  if (need?.id) return itemPath(`esc:${need.id}`);
+  if (need?.id) return needsYouPath(`esc:${need.id}`);
   return null;
 }

@@ -42,8 +42,20 @@ export interface ReleasedWait {
 
 export interface WaitRecord {
   /** Each waiting ticket: its open waits (refs) and when the hub first saw it wait. */
-  waiting: Record<string, { open: string[]; unread?: string[]; since: number }>;
+  waiting: Record<
+    string,
+    { open: string[]; unread?: string[]; since: number; sinceByRef?: Record<string, number> }
+  >;
   released: ReleasedWait[];
+}
+
+/** Each edge retains its first observation; legacy entries fall back to their recorded set start. */
+export function observedWaitSince(
+  entry: WaitRecord["waiting"][string] | undefined,
+  ref: string,
+): number | null {
+  if (!entry?.open.includes(ref)) return null;
+  return entry.sinceByRef?.[ref] ?? entry.since;
 }
 
 export const WAIT_RECORD_SETTING = "dependency-waits";
@@ -91,6 +103,9 @@ export function observeWaits(
       open: waits.map((w) => w.ref),
       ...(unread.length > 0 ? { unread } : {}),
       since: record.waiting[ref]?.since ?? now,
+      sinceByRef: Object.fromEntries(
+        waits.map((wait) => [wait.ref, observedWaitSince(record.waiting[ref], wait.ref) ?? now]),
+      ),
     };
   }
   const released = record.released.filter((r) => now - r.at < WAIT_RELEASED_KEEP_MS);
@@ -136,11 +151,13 @@ export function blockedWork(
 
 /**
  * "mc#1015 merged: mc#1139, mc#1142 unblocked": one line per set of waits that ended together.
- * `verb` is "merged" for a PR or an issue a merged PR closed, else "closed".
+ * `verb` is "merged" for a PR or an issue a merged PR closed, else "closed". A card `owned` says
+ * false for (no run of this hub touched it) is not released by the hub, so its line says it stays Blocked.
  */
 export function releasedLines(
   released: readonly ReleasedWait[],
   verb: (ref: string) => string,
+  owned: (ref: string) => boolean = () => true,
 ): { ref: string; at: number; text: string }[] {
   const groups = new Map<string, ReleasedWait[]>();
   for (const r of released) {
@@ -151,12 +168,27 @@ export function releasedLines(
     const first = rs[0];
     if (first === undefined) return [];
     const said = [...new Set(first.resolved)].map((d) => `${d} ${verb(d)}`).join(", ");
+    const line = (group: ReleasedWait[], tail: string) => {
+      const head = group[0];
+      return head === undefined
+        ? []
+        : [
+            {
+              ref: head.ref,
+              at: Math.max(...group.map((r) => r.at)),
+              text: `${said}: ${group.map((r) => r.ref).join(", ")} ${tail}`,
+            },
+          ];
+    };
     return [
-      {
-        ref: first.ref,
-        at: Math.max(...rs.map((r) => r.at)),
-        text: `${said}: ${rs.map((r) => r.ref).join(", ")} unblocked`,
-      },
+      ...line(
+        rs.filter((r) => owned(r.ref)),
+        "unblocked",
+      ),
+      ...line(
+        rs.filter((r) => !owned(r.ref)),
+        "stays Blocked: no run of this hub has touched it, so the hub does not release it",
+      ),
     ];
   });
 }

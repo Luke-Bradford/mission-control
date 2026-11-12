@@ -39,6 +39,7 @@ function routes(
     machine?: unknown;
     lock?: TestLockState;
     limits?: LimitRow[];
+    mentions?: unknown[];
   } = {},
 ) {
   return stubFetch({
@@ -51,6 +52,7 @@ function routes(
     "/api/repos": REPOS,
     "/api/config": over.config ?? CONFIG,
     "/api/flight": { seat: null, decisions: [] },
+    "/api/comms/mentions": { mentions: over.mentions ?? [] },
   });
 }
 
@@ -64,19 +66,30 @@ afterEach(() => {
 });
 
 describe("Header chat button", () => {
-  it("badges the Needs-you count, briefed or not, and names it", async () => {
+  it("badges only the unread messages to the operator, not the Needs-you items", async () => {
+    const mention = (id: string, seen: boolean) => ({
+      seen,
+      message: { id, from: "inco-1", to: "CAPCOM", text: "hello", at: NOW },
+    });
     routes({
       attention: [
         item({ key: "esc:a#1", brief: brief() }),
         item({ key: "esc:a#2", brief: brief() }),
         item({ key: "esc:a#3" }),
-        item({ key: "esc:a#4", owner: "flight", brief: brief() }),
       ],
+      mentions: [mention("1", false), mention("2", false), mention("3", true)],
     });
     render(<Header page="board" />);
-    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 3 waiting on you" });
-    expect(btn.querySelector(".dock-unread")?.textContent).toBe("3");
-    expect(screen.getByRole("button", { name: /^Needs you 3:/ })).toBeTruthy();
+    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 2 unread to you" });
+    expect(btn.querySelector(".dock-unread")?.textContent).toBe("2");
+    expect(screen.getByRole("link", { name: "Needs you: 3 waiting" })).toBeTruthy();
+  });
+
+  it("shows no badge for Needs-you items alone", async () => {
+    routes({ attention: [item({ key: "esc:a#1", brief: brief() })] });
+    render(<Header page="board" />);
+    const quiet = await screen.findByRole("button", { name: "FLIGHT chat" });
+    expect(quiet.querySelector(".dock-unread")).toBeNull();
   });
 
   it("shows no badge for unread replies alone", async () => {
@@ -97,10 +110,10 @@ describe("Header", () => {
     const links = within(screen.getByRole("navigation", { name: "Pages" })).getAllByRole("link");
     expect(links.map((a) => a.textContent)).toEqual([
       "Overview",
+      "Needs you …",
       "Flight",
       "Board",
       "Agents",
-      "Map",
       "Comms",
       "QA",
       "Telemetry",
@@ -108,10 +121,10 @@ describe("Header", () => {
     ]);
     expect(links.map((a) => a.getAttribute("href"))).toEqual([
       "/",
+      "/needs-you",
       "/flight",
       "/board",
       "/agent",
-      "/map",
       "/comms",
       "/qa",
       "/telemetry",
@@ -147,49 +160,29 @@ describe("Header", () => {
       ],
     });
     render(<Header page="overview" />);
-    const btn = await screen.findByRole("button", { name: /^Needs you 2:/ });
+    const btn = await screen.findByRole("link", { name: "Needs you: 2 waiting" });
     expect(btn.querySelector(".lamp.crit")).not.toBeNull();
-    for (const name of [
-      /^Overview/,
-      /^Flight/,
-      /^Board/,
-      /^Agents/,
-      /^Map/,
-      /^Comms/,
-      /^Telemetry/,
-    ])
+    for (const name of [/^Overview/, /^Flight/, /^Board/, /^Agents/, /^Comms/, /^Telemetry/])
       expect(within(tab(name)).queryByRole("img")).toBeNull();
   });
 
-  it("clicking Needs you while already there brings Operator actions back into view", async () => {
-    routes({ attention: [item({ key: "a" })] });
-    window.history.replaceState(null, "", "/flight#askP");
-    const panel = document.createElement("section");
-    panel.id = "askP";
-    panel.scrollIntoView = vi.fn();
-    document.body.append(panel);
-    render(<Header page="flight" />);
-    fireEvent.click(await screen.findByRole("button", { name: /^Needs you 1:/ }));
-    expect(panel.scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
-    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
-    panel.remove();
+  it("the Needs you tab opens the page and says how many wait", async () => {
+    routes({ attention: [item({ key: "a" }), item({ key: "b", acked: true })] });
+    render(<Header page="overview" />);
+    const tab = await screen.findByRole("link", { name: "Needs you: 2 waiting" });
+    expect(tab.textContent).toBe("Needs you 2");
+    expect(tab.className).toBe("needs-tab has");
+    expect(tab.getAttribute("title")).toBe("Everything waiting on you · 1 not acknowledged");
+    fireEvent.click(tab);
+    expect(window.location.pathname + window.location.hash).toBe("/needs-you");
     window.history.replaceState(null, "", "/");
   });
 
-  it("counts what needs you and says whether any is unacknowledged", async () => {
-    routes({ attention: [item({ key: "a" }), item({ key: "b", acked: true })] });
-    render(<Header page="overview" />);
-    const btn = await screen.findByRole("button", {
-      name: "Needs you 2: 2 things, some not yet acknowledged. Opens FLIGHT's Operator actions.",
-    });
-    expect(btn.textContent).toBe("Needs you 2");
-    expect(btn.className).toBe("needs-btn has");
-    expect(btn.title).toBe(
-      "Everything waiting on you (FLIGHT › Plan › Operator actions) · 1 not acknowledged",
-    );
-    fireEvent.click(btn);
-    // FLIGHT › Needs you until #766 builds it: Plan › Operator actions.
-    expect(window.location.pathname + window.location.hash).toBe("/flight#askP");
+  it("marks the tab current on the Needs you page", async () => {
+    routes({ attention: [item({ key: "a" })] });
+    render(<Header page="needs" />);
+    const tab = await screen.findByRole("link", { name: "Needs you: 1 waiting" });
+    expect(tab.getAttribute("aria-current")).toBe("page");
   });
 
   it("counts only the operator's items; one with no owner counts", async () => {
@@ -202,20 +195,20 @@ describe("Header", () => {
       ],
     });
     render(<Header page="overview" />);
-    const btn = await screen.findByRole("button", { name: /^Needs you 2:/ });
+    const btn = await screen.findByRole("link", { name: "Needs you: 2 waiting" });
     expect(btn.textContent).toBe("Needs you 2");
   });
 
   it("the Needs-you pill exposes one title: the lamp inside adds none", async () => {
     routes({ attention: [item({ key: "a" })] });
     const { unmount } = render(<Header page="overview" />);
-    const btn = await screen.findByRole("button", { name: /^Needs you 1/ });
+    const btn = await screen.findByRole("link", { name: /^Needs you: 1/ });
     expect(btn.querySelector(".lamp.warn")).not.toBeNull();
     expect(btn.querySelectorAll("[title]")).toHaveLength(0);
     unmount();
     routes({ attention: [] });
     render(<Header page="overview" />);
-    const zero = await screen.findByRole("button", { name: /^Needs you 0/ });
+    const zero = await screen.findByRole("link", { name: "Needs you: nothing waiting" });
     expect(zero.querySelector(".lamp.off")).not.toBeNull();
     expect(zero.querySelectorAll("[title]")).toHaveLength(0);
   });
@@ -223,17 +216,13 @@ describe("Header", () => {
   it("all acknowledged, and nothing at all", async () => {
     routes({ attention: [item({ acked: true })] });
     const { unmount } = render(<Header page="overview" />);
-    const acked = await screen.findByRole("button", {
-      name: "Needs you 1: 1 thing. Opens FLIGHT's Operator actions.",
-    });
-    expect(acked.title).toBe("Everything waiting on you (FLIGHT › Plan › Operator actions)"); // none to explain
+    const acked = await screen.findByRole("link", { name: "Needs you: 1 waiting" });
+    expect(acked.title).toBe("Everything waiting on you"); // none to explain
     unmount();
     routes({ attention: [] });
     render(<Header page="overview" />);
-    const zero = await screen.findByRole("button", {
-      name: "Needs you 0: nothing. Opens FLIGHT's Operator actions.",
-    });
-    expect(zero.className).toBe("needs-btn");
+    const zero = await screen.findByRole("link", { name: "Needs you: nothing waiting" });
+    expect(zero.className).toBe("needs-tab");
     expect(within(zero).getByRole("img").className).toBe("lamp off");
   });
 

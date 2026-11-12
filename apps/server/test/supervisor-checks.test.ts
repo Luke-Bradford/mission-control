@@ -3,8 +3,12 @@ import "./supervisor-harness.ts";
 
 import { describe, expect, it } from "vitest";
 import type { CheckRecorder } from "../src/guard/check-runs.ts";
+import { TestLock } from "../src/guard/lock.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
-import { seatState, until } from "./supervisor-harness.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+import { seatState, store, until } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 const spy = () => {
   const calls: unknown[][] = [];
@@ -14,6 +18,7 @@ const spy = () => {
     lockedBy: async () => null,
     dropRun: (runId) => void calls.push(["drop", runId]),
     drops: () => [],
+    pending: () => [],
   };
   return { calls, checks };
 };
@@ -42,4 +47,21 @@ describe("a Codex seat's check records", () => {
       await sup.endRunByEngine(runId);
     },
   );
+});
+
+describe("a Codex seat's test-lock outcome (#1411)", () => {
+  it.each([
+    ["pnpm -s test", 0, "pass"],
+    ["pnpm -s test", 1, "fail"],
+    // tail's status, not the suite's: never pass
+    ["pnpm -s test | tail -5", 0, "done"],
+    ["pnpm -s test | tail -5", 1, "fail"],
+  ])("ends the lock row for `%s` with exit %s as %s", async (command, exitCode, outcome) => {
+    const lock = new TestLock({ holds: store });
+    const { sup } = codexSupervisor({ command, exitCode }, { lock });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(store.lockRuns(0)[0]?.outcome).toBe(outcome));
+    await sup.endRunByEngine(runId);
+  });
 });

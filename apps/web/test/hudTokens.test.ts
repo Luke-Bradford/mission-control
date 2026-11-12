@@ -25,6 +25,7 @@ const LINE_TOKENS = {
   "--lh": "20px",
   "--lh-s": "16px",
   "--lh-micro": "16px",
+  "--lh-axis": "14px",
 } as const;
 const SPACING_TOKENS = {
   "--sp-1": "4px",
@@ -184,8 +185,6 @@ describe("readable content is at least 12px", () => {
     ["flight/flight.css", ".wif-checkpoint"],
     ["lenses/lenses.css", ".map-lens"],
     ["lenses/lenses.css", ".map-conflict-detail"],
-    ["map/map.css", ".map-results"],
-    ["map/map.css", ".map-results button"],
     ["components/config/Glossary.css", ".gloss code"],
   ] as const;
 

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   GUARD_HOOK_EVENTS,
@@ -6,6 +7,9 @@ import {
   MC_WRITER_TOOLS,
 } from "../src/guard.ts";
 import {
+  CHECK_BASH_TIMEOUT_MS,
+  CHECK_NO_START_TEXT,
+  checkDropText,
   crewMcpConfig,
   MC_MCP_SERVER,
   MC_MCP_TIMEOUT_MS,
@@ -106,7 +110,9 @@ describe("crewCliArgs", () => {
       args.indexOf("--append-system-prompt-file"),
     );
     expect(allowed).toEqual([...FLIGHT_FULL_BUILTINS, "mcp__mc__*"]);
-    const settings = JSON.parse(args[args.indexOf("--settings") + 1]!);
+    const settingsArg = args[args.indexOf("--settings") + 1];
+    if (settingsArg === undefined) throw new Error("no --settings argument");
+    const settings = JSON.parse(settingsArg);
     expect(settings.sandbox).toEqual({ enabled: false });
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     expect(settings.hooks.PostToolUse).toHaveLength(1);
@@ -254,6 +260,7 @@ describe("the allowlist in phase 2b", () => {
     for (const t of [
       MC_TOOLS.commit,
       MC_TOOLS.syncMain,
+      MC_TOOLS.publishPreview,
       MC_TOOLS.askFlight,
       MC_TOOLS.reportEvidence,
     ]) {
@@ -309,6 +316,7 @@ describe("the allowlist in phase 2b", () => {
       commit: "mcp__mc__commit",
       push: "mcp__mc__push",
       prBody: "mcp__mc__pr_body",
+      publishPreview: "mcp__mc__publish_preview",
       draftPr: "mcp__mc__draft_pr",
       draftReply: "mcp__mc__draft_reply",
       track: "mcp__mc__track",
@@ -319,6 +327,8 @@ describe("the allowlist in phase 2b", () => {
       recall: "mcp__mc__recall",
       holdItem: "mcp__mc__hold_item",
       releaseHold: "mcp__mc__release_hold",
+      returnQuestion: "mcp__mc__return_question",
+      withdrawQuestion: "mcp__mc__withdraw_question",
       screenshotHud: "mcp__mc__screenshot_hud",
       previewBrowser: "mcp__mc__preview_browser",
       askFlight: "mcp__mc__ask_flight",
@@ -366,6 +376,7 @@ describe("the allowlist in phase 2b", () => {
       updateBrief: "mcp__mc__update_brief",
       editIssue: "mcp__mc__edit_issue",
       setFields: "mcp__mc__set_fields",
+      moveReview: "mcp__mc__move_review",
       operator: "mcp__mc__operator",
       ghWrite: "mcp__mc__gh_write",
       crewTidy: "mcp__mc__crew_tidy",
@@ -383,10 +394,13 @@ describe("the allowlist in phase 2b", () => {
 
   it("turns background Bash off, so a timed-out suite is killed rather than kept running", () => {
     expect(CREW_CLI_ENV).toEqual({
+      BASH_MAX_TIMEOUT_MS: "2700000",
       CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
       DISABLE_AUTOUPDATER: "1",
+      // marks every crew seat's environment, so tests that need what a seat denies can tell (#1411)
+      MC_SEAT_SANDBOX: "1",
     });
   });
 
@@ -399,6 +413,24 @@ describe("the allowlist in phase 2b", () => {
     expect(PNPM_STORE_ENV).toBe("pnpm_config_store_dir");
     expect(PNPM_STORE_DIR_NAME).toBe(".pnpm-store");
     expect(MC_TMP_DIR_NAME).toBe(".mc-tmp");
+  });
+});
+
+describe("the Bash limit a check gets", () => {
+  it("gives the CLI the same limit seats are told to use", () => {
+    expect(CHECK_BASH_TIMEOUT_MS).toBe(45 * 60_000);
+    expect(CREW_CLI_ENV.BASH_MAX_TIMEOUT_MS).toBe(String(CHECK_BASH_TIMEOUT_MS));
+  });
+
+  it("names that limit in the refusals and the role prompts", () => {
+    const limit = String(CHECK_BASH_TIMEOUT_MS);
+    const drop = { command: "c", head: "a".repeat(40), invoked: "c", at: 0 };
+    expect(checkDropText({ ...drop, reason: "timeout" })).toContain(`set to ${limit}`);
+    expect(CHECK_NO_START_TEXT).toContain(`set to ${limit}`);
+    for (const role of ["GUIDO", "INCO"]) {
+      const text = readFileSync(new URL(`../../../roles/${role}.md`, import.meta.url), "utf8");
+      expect(text).toContain(`Bash \`timeout\` to ${limit}`);
+    }
   });
 });
 
@@ -709,6 +741,8 @@ describe("crew constants", () => {
           "recall",
           "hold_item",
           "release_hold",
+          "return_question",
+          "withdraw_question",
           "edit_issue",
           "set_fields",
           "operator",
@@ -841,6 +875,8 @@ describe("mc tool grants", () => {
       "recall",
       "hold_item",
       "release_hold",
+      "return_question",
+      "withdraw_question",
       "edit_issue",
       "set_fields",
       "operator",

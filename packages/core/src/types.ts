@@ -1,9 +1,26 @@
+import type { AttentionHold } from "./attention-model.ts";
 import type { Owner, Stage } from "./board-model.ts";
+
+export type {
+  AttentionHold,
+  AttentionHoldCondition,
+  AttentionWaitCondition,
+} from "./attention-model.ts";
+
+import type {
+  BriefAction,
+  BriefBinding,
+  BriefChoiceReceipt,
+  BriefDecisionContext,
+  BriefReadState,
+} from "./briefs.ts";
 import type { CrewPause } from "./crew-pause.ts";
 import type { CatchUpKind, FlightNotTriagingCause } from "./flight-model.ts";
 import type { FlightPowers } from "./guard-model.ts";
 import type { RunHandoff } from "./handoff.ts";
 import type { AttentionKind, AttentionOwner, HudColumn, HudState } from "./hud-model.ts";
+import type { NeedsYouOffer } from "./needs-you-actions.ts";
+import type { PaceView } from "./pace.ts";
 import type { ProfileStepPhase, RunProfile } from "./profiles-model.ts";
 import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { DefectRefs, DefectVia, PrFileInput } from "./qa-flow-model.ts";
@@ -144,6 +161,8 @@ export interface RunLoop {
   awayBugDecision?: { headSha: string; about: string; testPaths: string[] } | null;
   awaitingFlight?: string | null;
   flightClearedSha?: string | null;
+  /** FLIGHT adopted a head from outside the run: every later head of the run waits for FLIGHT's clearance too. */
+  adopted?: boolean;
   /**
    * FLIGHT's independent second review of a blocking floor review, one per head: the epoch it
    * runs in, the account of the review it checks (the second runs on another), and FLIGHT's reason.
@@ -186,8 +205,13 @@ export interface RunLoop {
   reviewReplyTo?: number | null;
   /** The passing review whose Minor list the PR body carries, and how many it listed. */
   prBody?: { reviewId: number; minor: number } | null;
-  /** Off its seat while in review; `wake`: rework or a park is due, so it goes back first. */
-  aside?: { worktree: string; wake: boolean } | null;
+  /**
+   * Off its seat while in review; `wake`: rework or a park is due, so it goes back first.
+   * `displaced`: it left to make way for rework on the seat (a pushed run holds a refused newer
+   * commit), so that rework comes back before it.
+   * `ask`: the operator question this run waits on; the run wakes once it is answered.
+   */
+  aside?: { worktree: string; wake: boolean; displaced?: true; ask?: number } | null;
   /**
    * The engine's reads for the pushed sha: origin's default-branch tip, whether it is an ancestor
    * of `sha`, whether every commit in `sha --not mainSha` is in run_commits, and the changed
@@ -428,13 +452,15 @@ export interface PrCheck {
   name: string; // a check run's name, or a status's context
   kind: "check" | "status";
   state: "passing" | "failing" | "pending";
+  /** The hub declined this status rather than a check run failing. */
+  skipped?: boolean;
   conclusion: string; // a check run's conclusion (its status until done); a status's state
   attempt: number | null; // the Actions run attempt; null for a status or a non-Actions run
   url: string | null;
 }
 
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
-export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
+export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt" | "skipped">;
 
 /**
  * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.
@@ -442,6 +468,19 @@ export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt"
  * previews for that repo, a checkout is set and the PR is open. `preview` is the running one, or
  * null; the web offers "Start preview" when `previewable && preview === null`.
  */
+/** A branch's built web app, kept to show as the real app in Demo (the operator opens it from Needs you). */
+export interface DesignPreviewView {
+  /** The repo the preview was published for; ticket numbers are only unique within one repo. */
+  repoId: RepoId;
+  ticket: number;
+  branch: string;
+  sha: string;
+  publishedAt: number;
+  pr: number | null;
+  running: boolean;
+  url: string;
+}
+
 export interface PullRequestPreviewFacts {
   previewable: boolean;
   preview: { pr: number; branch: string; port: number; url: string; startedAt: number } | null;
@@ -586,6 +625,10 @@ export interface AgentView {
   stateSince: number;
   currentRun: RunSummary | null;
   paused: boolean;
+  /** The issue that pauses the loop (`repo#number`, from its config) while it holds; else null. */
+  pausedBy?: string | null;
+  /** The pause issue's page on GitHub, when its repo is configured. */
+  pausedByUrl?: string | null;
   sourceError: string | null;
   /** The loop's own latest STOP note (studio loop), e.g. `stopped: quota ...`; display only. */
   note: string | null;
@@ -742,6 +785,8 @@ export interface AgentStream {
   lastOutputAt: number | null;
   /** Why there are no events (`no runs yet`, `transcript not found`), else null. */
   reason: string | null;
+  /** FLIGHT only: messages the operator has not read in either Comms or the fly-out. */
+  unread?: number;
 }
 
 /**
@@ -802,10 +847,18 @@ interface LimitRowBase {
  * little history", not "not filling"). Optional because older hubs omit it; the web treats a
  * missing value as ready.
  */
+/** One allowance reading: used percent at a time, oldest first. */
+export interface LimitPoint {
+  at: number;
+  pct: number;
+}
+
 export type LimitRow =
   | (LimitRowBase & {
       window: "7d";
       projected: number | null;
+      /** This window's readings, at most one an hour, for a burn-up. */
+      history?: LimitPoint[];
       stopForecast: number | null;
       fullAt: number | null;
     })
@@ -1023,6 +1076,10 @@ export interface CrewRow {
     reason: string;
   } | null;
   paused: boolean;
+  /** The issue that pauses the loop (`repo#number`, from its config) while it holds; else null. */
+  pausedBy?: string | null;
+  /** The pause issue's page on GitHub, when its repo is configured. */
+  pausedByUrl?: string | null;
   note: string | null;
   stop: DriverStop | null;
   sourceError: string | null;
@@ -1189,19 +1246,60 @@ export interface BriefOption {
   description?: string;
   label: string;
   answer: string;
+  consequence?: string;
+  reversibility?: { kind: "reversible" | "partly-reversible" | "irreversible"; detail: string };
+  action?: BriefAction;
 }
 
 /** FLIGHT's brief on a Needs-you item: what it is, what FLIGHT recommends, and the options. */
+/** How a question left Needs you without an answer. */
+export type QuestionClosureKind =
+  | "cleared"
+  | "returned"
+  | "withdrawn"
+  | "ticket-closed"
+  | "pr-merged"
+  | "pr-closed"
+  | "run-ended";
+/** A question closed without an answer, with the reason; shown under Answered. */
+export interface QuestionClosure {
+  key: string;
+  /** When the ask began: the question's `at`, a brief's `askAt ?? at`, or the item's `at`. */
+  askAt: number;
+  kind: QuestionClosureKind;
+  reason: string;
+  /** A seat id, or "hub". */
+  by: string;
+  question: string;
+  ticket: string | null;
+  /** Whether the operator had it in Needs you. */
+  operator: boolean;
+  at: number;
+}
+
 export interface AttentionBrief {
+  /** Server-owned identity and binding; absent on historical/unbound records. */
+  id?: number;
+  decision?: BriefDecisionContext;
+  binding?: BriefBinding;
+  state?: BriefReadState;
+  choice?: BriefChoiceReceipt;
   /** Missing on briefs written before triage routing was introduced. */
   for?: "operator" | "flight";
+  /**
+   * The ticket (`repo#n`) the question is about, when the item has none of its own (#1543): a
+   * crew error, a stray, FLIGHT's own question.
+   */
+  ticket?: string;
   original?: string;
   assessment?: string;
   did?: { action: string; refs: string[] }[];
   ask?: string;
   /** When this ask was first briefed, on a rebrief with the same ask; absent: it began at `at`. */
   askAt?: number;
-  /** Stored at briefing time; its absence means this brief predates decision defaults. */
+  /** Who wrote this brief: FLIGHT's brief_item, or the hub's own raising. */
+  by?: "flight" | "hub";
+  /** Stored by briefs before operator questions lost their timed default; never written now. */
   defaultAt?: number;
   catchUp?: BriefCatchUp;
   checked?: BriefCheck[];
@@ -1244,8 +1342,28 @@ export interface AttentionItem {
   owner?: AttentionOwner;
   /** FLIGHT's brief, once it has written one. */
   brief?: AttentionBrief;
+  /**
+   * What else the operator can do with this question (#1534): set it aside (`not-now`) or close
+   * its ticket (`drop`). Present only on an unprotected question with a crew ticket.
+   */
+  offers?: NeedsYouOffer[];
   flightTriage?: "waiting" | "handling" | "missed" | "down";
   triageDueAt?: number;
+  /**
+   * Why the Needs you entry check sent this item back to FLIGHT, in words (#1543). Present only on
+   * an item that would otherwise have been the operator's.
+   */
+  returned?: string[];
+  /** Set by `/api/attention` on a hub alert (#1543): the hub raised it, whatever seat it names. */
+  alert?: true;
+  /**
+   * The ticket and PR the item is about, with their titles, for the operator's page (#1543). Each
+   * part is absent when the hub does not know it.
+   */
+  pinned?: {
+    ticket?: { ref: string; title: string | null; url: string | null };
+    pr?: { ref: string; number: number; title: string; url: string };
+  };
   /** When a recommended option applies; absent means no automatic default. */
   defaultDueAt?: number;
   /**
@@ -1423,6 +1541,8 @@ export interface OverviewTimeline {
     agentId: string;
     spans: { kind: "turn" | "checks" | "lock" | "review"; from: number; to: number | null }[];
     ticks: number[];
+    /** Input and output tokens per minute across every run in the window, oldest first. */
+    tokens?: [number, number][];
   }[];
 }
 
@@ -1448,6 +1568,8 @@ export interface OverviewSummary {
     needsYou: { count: number; overHour: number; series?: number[] };
   };
   pipeline: PipelineStage[];
+  /** The operator's slow pace while it is on, else null (normal). */
+  pace?: PaceView | null;
   /** Missing minute samples are null, rather than zero utilization. */
   machine: {
     cpu: (number | null)[];
@@ -1473,25 +1595,15 @@ export interface PipelineCard {
   ci: ("pass" | "fail" | "pending")[];
   since: number;
   who: string | null;
-}
-
-export type AttentionHoldCondition =
-  | { readonly kind: "date"; readonly at: number }
-  | { readonly kind: "ticket"; readonly ticket: string }
-  | { readonly kind: "crew" }
-  | { readonly kind: "manual" };
-
-/** Conditions only FLIGHT files (with `brief_item`'s hold): a PR's CI reaching a state, or another item resolving. */
-export type AttentionWaitCondition =
-  | { readonly kind: "ci"; readonly pr: string; readonly state: "passing" | "failing" }
-  | { readonly kind: "item"; readonly key: string };
-
-export interface AttentionHold {
-  reason: string;
-  condition: AttentionHoldCondition | AttentionWaitCondition;
-  by: string;
-  at: number;
-  releasedAt?: number;
+  /** The board item's Priority and Size, when the ticket has them. */
+  priority?: string | null;
+  size?: string | null;
+  /**
+   * Set while the PR's newest review found blocking problems on its current head: the ticket
+   * is in rework (In progress with its seat), or Ready after its run ended, and has been reviewed.
+   * `seat` is the seat running the ticket now, else the reviewed run's author; `seatBusy` is true while that seat is running.
+   */
+  rework?: { round: number; blockers: number; seat: string | null; seatBusy: boolean };
 }
 
 /** One finished engine tick, as `/api/health` serves it. */

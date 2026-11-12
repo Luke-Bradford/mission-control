@@ -6,8 +6,8 @@ import { bytes, hhmm, percent, plural, rel } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { MACHINE_CHART_HEIGHT, machineAreaGeometry } from "./chartGeometry.ts";
+import { HistoryDataTable } from "./HistoryDataTable.tsx";
 import { LockBox } from "./LockBox.tsx";
-import { HistoryDataTable } from "./OverviewHistoryPanel.tsx";
 
 const GIB = 2 ** 30;
 /** At or under this much free memory another agent does not fit. */

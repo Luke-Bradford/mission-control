@@ -2,7 +2,7 @@
 
 Read this for an Overview, operational dashboard, or a substantial panel-layout change. Use the existing HUD tokens and accessibility rules.
 
-Your job is to arrive with one reasoned design, so the operator doesn't have to direct the layout. Published guidance gives principles but no widths, so the defaults below come from this operator's requests and from renders of this app. Use them to fill in the panel budget described below, and depart from a default when you can say why. Counting tests is not a design verdict.
+Your job is to arrive with one reasoned design, so the operator doesn't have to direct the layout. Published guidance gives principles but no widths. The defaults below come from this operator's requests and from renders of this app. Depart from a default when you can say why. Counting tests is not a design verdict.
 
 ## What this operator asked for
 
@@ -10,113 +10,133 @@ Treat these as the brief. Later operator steering overrides them.
 
 - "I want to get to a point where you or claude is telling me how it should look and its better than I imagined."
 - "The page needs to be scrolled to see everything, so not really an overview."
+- "does the size of a form allow us to determine how they should fit on the overall dashboard."
+- "why is everything the same width for visuals that don't need to be that wide?" and "Forms should be the right size, adequate."
+- "Avoiding clutter and truncation of course. But ensuring the important information we should expect to see at a glance is there and we can make decisions from what is visible."
+- "surely these are individual columns just showing the numbers as a metric, kpi."
 - "we don't have to drop content, we just need to make it fit better, which needs a redesign."
 - "I still don't think some of the graphs are detailed enough." Earlier work was also corrected for removing time axes and peak values, and for dropping token capacity and the activity log.
-- "the seat should be about 2/3 of the page width" and "We should have more info in the seats than the forms on the right."
-- "why is everything the same width for visuals that don't need to be that wide?" and "Forms should be the right size, adequate."
+- "looks nice, well formed, good use of space. Interesting to demo."
+- "This page should support click throughs to the relevant areas where supported."
 - 4K and 1080p must both work in the same view: "needs to ideally accomodate both renders."
-- The seats' column spacing is accepted. Don't trade it away for a layout template.
+
+**The approved Overview (4 November 2026).** Left: Crew, with a one-hour activity lane per seat on one clock, over a full Board. Right, in the operator's order: Needs you, Mac, Tokens, Activity. The Board and Activity take the spare height. There is no KPI strip or Timeline, and the operator agreed those drops. Use it as a worked example, not a template.
 
 ## Compose in this order
 
-1. **Name the question and the reader.** Overview: what is running, what is stuck, what is limiting us and what should happen next.
-2. **Rank every visual: primary, supporting or drill-down.** One primary. Carbon's rule applies: the most important data should "occupy the largest area". Drill-down stays one click away.
-3. **Allocate space by rank**, using the defaults below, before styling anything.
-4. **Sketch it at the real viewports** with rough real text, not boxes. Reject any shape where a supporting panel outranks the primary.
-5. **Render it busy.** Use a normal working crew, long ticket titles and active charts. An idle render hides both crowded columns and columns that stay empty.
-6. **Look at the whole page first and ask what the operator would still have to explain.** Fix that, then measure.
+1. **Name the question and the reader.** Overview: what is running, what is stuck, what is limiting us and what should happen next. If the current page is the problem, design from these questions, not from its panels.
+2. **Inventory each visual.** List its fields, source, unit, freshness, normal row count, actions and full-detail route. A field existing does not earn it a card, and two cards should not repeat one summary.
+3. **Rank every visual: primary, supporting or drill-down.** One primary. Carbon's rule applies: the most important data should "occupy the largest area". Drill-down stays one click away.
+4. **Size each panel from its content**, as described below, before styling anything.
+5. **Sketch it at the real viewports** with rough real text, not boxes. Reject any shape where a supporting panel outranks the primary.
+6. **Render it busy.** Use a normal working crew, real ticket counts, long titles and active charts. An idle render hides crowded columns, and a tall Board with few cards looks empty.
+7. **Look at the whole page first and ask what the operator would still have to explain.** Fix that, then measure.
 
-## Allocation defaults
+## Size each panel from its content
 
-| Region | Default | Why |
+Panel size decides the layout, so work out sizes first. Text and row sizes come from `docs/design/system.md`: 13 px body text, 40 px table rows (32 compact), 16 px panel padding. For each panel, write down:
+
+1. **Width.** Render its longest realistic row, using the schema's limits for names, figures and units, and measure it. That row plus padding is its preferred width. Also note its minimum, where it still reads, and its maximum, where more width shows nothing new.
+2. **Height.** Its normal row count times its row height, plus its title row.
+3. **What extra space buys.** If another row or column adds nothing, cap the panel. If it adds something, the panel may take spare space.
+
+Then build the page from those numbers:
+
+- Stack each column in rank order. Use the fewest columns that keep the primary and next action on the first screen.
+- The supporting column is as wide as its widest panel. The primary takes what remains, usually 60–75% of the canvas.
+- If the supporting column leaves the primary below its minimum, shorten that panel's content or move the panel. Don't squeeze both.
+- Exactly one region per column takes spare height, or the column leaves a hole on tall screens. Choose the one with the most rows that don't fit. Both columns end level.
+- A short column shouldn't wait for the tallest panel in the other column to show its next panel.
+
+Then write the vertical budget at each viewport: header + gutters + panels + gaps. Name the panels and normal rows that must be on the first screen. If a column doesn't fit, tighten padding, merge duplicates and shorten labels. Propose moving something only after that, and don't shrink text.
+
+Record the reference CSS viewport, browser zoom, OS scaling, FLIGHT rail state and app chrome before building. If the operator's exact setup is unknown, state your assumption first. Don't choose a convenient reference after rendering, and don't swap in a different height for a named viewport.
+
+**Worked example.** On the approved Overview at 1920 wide, Crew's fixed columns add up to 660 px before gaps: state 88, seat 168, step 104, lane 168, then 44, 40 and 48 for numbers. Work takes the rest. From 1440 px of Crew width, as at 2560, the lane grows to 224 and more number columns appear, so the fixed columns reach 888 px. Beside it, one-line rows and 3:1 plots set the right column at 560 px at 1920 wide and 640 px at 2560. Crew's 40 px rows don't gain from spare height, so it stays content height and its row list scrolls past 60% of the viewport height.
+
+## Defaults by form
+
+| Form | Default | Why |
 | --- | --- | --- |
-| Primary table | 60–70% of the canvas width | It carries the most fields and answers the page's main question |
-| Supporting column | The rest, one column; panels sized to their content | Compact status doesn't improve by getting wider |
-| Summary strip | One row, at most 96 px | It should be scanned in one pass; shrink the tiles before adding a second row |
-| Log or long list | Flexes vertically in the primary column, showing as many one-line rows as fit | It gains from every extra row, and it prevents a hole at the bottom of the page |
-| Everything else | Height set by content | Stretched panels create empty boxes and flat charts |
+| Table | Identity, state and number columns get their longest realistic value and no more. One text column takes the rest, up to a readable limit. Past that limit, add the next most useful column | Keeps related values together; a status at the far side of a wide cell reads as a separate column |
+| Numbers in a table | Each measure gets its own column with a bare number. The header carries the label, unit and window | "Used 12k of 200k" in a cell is slow to scan and can't line up |
+| Board | One column per workflow stage, in order; the title row shows the count; each stage scrolls its own cards. Cards show id, title, size, priority and CI. Use the wide column and give it spare height | More height shows more cards. A squeezed stage has been a review finding here, so check the smallest width |
+| Log or long list | One-line rows, in whichever column has room. Give it spare height | It gains from every extra row and fills holes |
+| Needs-attention list | One row per item, content height, cap the rows and link to the rest | It must stay above the fold |
+| Sparkline | 16–32 px tall inside a row | A trend cue only |
+| Labelled plot | 320–720 px wide, roughly 3:1 to 5:1. Labels don't touch the next plot. Past 720 px, add series, not length | Comparison needs readable axes |
+| Vendor allowance | One plot per vendor, each on its own scale: allowance used so far against the weekly reset, then tokens per minute | A shared axis flattens the smaller vendor |
+| Stat tiles | Avoid. Put a figure in the head of the panel it explains. Use a strip only if no panel can carry the figure: one row, at most 96 px | Lone numbers lack context |
 
-**Fit by condensing, not removing.** Moving a figure or chart detail off the page counts as dropping it unless the operator has agreed. Merge duplicates, shorten labels and tighten panels first. If something still has to move, propose it and say why.
+Three token measures differ and need their own labels: context capacity (one seat's working memory), provider allowance (the vendor's limit) and throughput (tokens per minute). Don't repeat them to fill space. Keep real units, denominators, and stale and unknown states. Don't fabricate a series or silently change a unit.
 
-One region in each column absorbs leftover height: the log or long list in the primary column, and in the supporting column whichever panel gains most from more rows. Without one, the column leaves a hole on tall screens. Align both columns' bottom edges.
+**Truncation.** Numbers, units, states, identifiers and actions never truncate. Free text such as a ticket title or log line may end in an ellipsis. Its full text must be reachable by keyboard. In a table cell, wrap to at most two lines before the ellipsis. Nothing clips without an ellipsis, and a critical warning stays visible.
 
-**Tables.** Give identity, state and number columns their longest realistic value and no more. One text column takes the remaining width, up to a readable limit. When the table is wider than that, add the next most useful column instead of widening the text. Keep related values next to each other: a status at the far side of a wide cell reads as a separate column.
+**Removing things.** Condense first. A redesign may then move or remove figures, axes and panels, but the operator agrees first. Put a "dropped or moved" list in the proposal, saying where each item goes. A build never drops one quietly.
 
-**Charts.** A sparkline is 16–32 px tall inside a row. A labelled plot needs 320–720 px of width at roughly 3:1 to 5:1, with labels that don't touch the neighbouring plot. Past 720 px, show more series or comparisons rather than a longer line.
+**Accepted parts.** Keep what the operator has accepted until they replace it. Don't trade it for a layout template.
 
 **Repeated controls.** If six tiles each say "History →", make each tile the link. Repeated words are the first thing to remove when a page feels crowded.
 
+## What looks good here
+
+- **One clock, one grid.** Rows in a table share columns. Time-based marks share one axis, so the eye can compare seats without reading labels.
+- **Quiet surfaces.** Flat panels, hairline rules and tight padding. No glows, shadows or panel-sized colour fills.
+- **Colour carries meaning.** Use it for state and seat identity. Everything else stays neutral, so a warning stands out.
+- **Figures sit where they explain something.** A count in a panel's title row beats a tile across the page.
+- **The page visibly lives.** Ages and lanes keep moving when the crew is quiet. Clock ticks must not rebuild the page.
+- **Names lead somewhere.** A seat opens its agent, a ticket opens its form, a log line opens what it refers to. Where no route exists, use plain text.
+- **It holds attention.** Show it busy. If nothing on the page rewards a second look, say so.
+
+Whitespace groups information. Check for wasted interior space and for crowding. Prefer fewer containers and captions over reducing every gap.
+
 ## Viewports: use the real ones
 
-A viewport is what the page actually gets, after browser toolbars, tabs and the taskbar. A 1080p monitor gives roughly 1920×940, less with a bookmarks bar, so rendering "1920×1080" tests a window nobody has. On 4 November 2026 a build that fitted 1920×1080 scrolled by 137 px at 1920×940, the likely reason the operator kept having to scroll after checks passed.
+A viewport is what the page actually gets, after browser toolbars, tabs and the taskbar. A 1080p monitor gives roughly 1920×940, less with a bookmarks bar, so rendering "1920×1080" tests a window nobody has. On 4 November 2026 a build that fitted 1920×1080 scrolled by 137 px at 1920×940.
+
+For a dashboard, this table comes first. The general widths in the [checklist](../SKILL.md) still apply as smaller views.
 
 | Case | CSS viewport | Must hold |
 | --- | --- | --- |
 | Operator's usual desktop (4K at 150%, measured from their screenshots) | 2560×1145 to 2560×1250 | All primary and supporting panels without page scrolling |
 | 1080p monitor | 1920×940 | Primary, next action and capacity without page scrolling |
 | True 4K at 100% | 3840×2160 | Scale up first, see below |
-| FLIGHT open | Each of the above less the rail | Recompose; a drawer is acceptable if panels would be crushed |
+| FLIGHT open | Each of the above less the rail | Recompose; a drawer is acceptable if panels would be crushed, and it keeps drafts and focus |
 
-"Without page scrolling" is about the page: a named list may still scroll inside its panel. Test both ends of a range. Keep the ticket's smaller and short views too. Ask the operator for `innerWidth` and `innerHeight` if these look out of date.
+"Without page scrolling" is about the page: a named list may still scroll inside its panel. Test both ends of a range, with FLIGHT folded and open.
 
-**Above about 3200 CSS px, scale before adding.** At 100% on a 4K monitor, 13 px text is very small and the panels fill only part of the page. Prefer scaling the interface so the page composes like its 2560 layout, and add panels only if they answer a further question. On 4 November `zoom: 1.5` on the root reproduced the 2560 composition, but the lower panels overflowed and clipped, so fix heights that depend on the viewport as part of the scaling. Re-render whichever method you use.
+Also check 1920×1080, 2560×1440, 1280 and 1600 wide, 1600×700, a 1920×1080 viewport at device scale 2, light and dark, and the ticket's own views. These extras don't replace a row. Device scale changes raster density, not layout width. A 4K display can expose 1920 CSS px at 200% OS scale, so monitor resolution alone tells you little. Ask the operator for `innerWidth` and `innerHeight` if these look out of date.
+
+**Show scrollbars in renders.** Playwright's headless Chromium hides them, which hides the width they take and any overflow. Launch with `ignoreDefaultArgs: ["--hide-scrollbars"]`.
+
+**From 3300 CSS px, scale before adding.** At 100% on a 4K monitor, 13 px text is very small and the panels fill only part of the page. The app sets `zoom: 1.5` on the root, so at 3840 wide the page composes like its 2560 layout. Add panels only if they answer a further question. Check outside margins and holes between regions; more rows and cards are options, not proof of useful adaptation.
+
+Zoom multiplies viewport units, so size with `--vh` and `--dvh`, which divide by the zoom. `getBoundingClientRect` returns zoomed pixels, so code that measures and then writes pixels must use client sizes.
+
+**Narrower screens.** Recompose the grid before shrinking text or moving essential status below the page. The Overview's right column drops to 480 px below 1700 wide, and the columns stack below 1500. Avoid a fixed-width primary beside an unlimited `1fr` stack.
+
+## Review the operator's task, not only geometry
+
+Inspect settled full-page screenshots before crops. Use one source-shaped dataset for before and after, and label fictional versus copied data. Ask whether the operator can find active and held work, remaining capacity, system constraints and the next useful action without page scrolling.
+
+Record panel bounds and the first visible content, plus a verdict on hierarchy, column allocation, chart shape, padding and useful information per region. A dashboard that loses its primary information from the first screen fails, however far it can be scrolled. That is an Important finding. More screenshots or hashes don't repair that.
+
+Use the [visual QA workflow](../../../../docs/runbooks/visual-qa.md) to carry this budget into the plan, rendered review and saved report.
 
 ## What has already failed here
 
 - Primary capped at 1200 px beside an unbounded secondary column: at 4K the secondary reached 2508 px and Crew 33.8% of the canvas.
 - Every panel the same width, whatever it held.
-- Machine stacked about 800 px tall, pushing Pipeline off the screen.
-- Pipeline promoted above seats without anyone asking.
+- Machine stacked about 800 px tall, pushing the Board off the screen.
+- Board promoted above seats without anyone asking.
 - Passing on geometry, then the operator rejecting the composition, more than once.
+- Fixing the seats' share of the page first and fitting the rest around it, when the operator's complaint was forms on the right wider than their content.
 - A branch with 4,147 added lines of product code and 86,450 added lines of evidence. Keep evidence small enough that someone will read it, and spend the effort on the page.
+- The Needs you page (PR 1465, #1529) merged with its design failed three rounds running, accepted at the review cap. The builder never saw it; the screenshot evidence photographed every page but this one. On the operator's screen the list rows overlapped, because Overview's `.needs-row` stayed loaded after visiting Overview and every test opened `/needs-you` directly. Half the list was items for the controller and raw hub alarms. Arrive the way the operator does, and judge whether each item belongs to the reader.
 
-## Start with decisions and data
+## References
 
-State the operator questions the initial view must answer. Inventory each visual's actual fields, source, unit, freshness, normal row count, actions and full-detail route. Distinguish essential status from analytical depth. A field's existence does not require a separate card, and two cards should not repeat the same summary.
-
-Preserve explicitly accepted parts. If the operator says the seats' column spacing is right, make that a retained constraint. Do not trade it away to satisfy a new layout template. Explain any proposed movement or progressive disclosure; keep full content and keyboard access. A critical warning, identifier or action must remain apparent.
-
-## Budget the real viewport
-
-Record the reference CSS viewport, browser zoom, OS scaling, dock state and actual application chrome before implementation, together with the essential fields and normal row count. Where the operator’s exact setup is unavailable, state the assumed reference explicitly and retain the supported viewport matrix; do not choose a convenient reference after rendering. Physical monitor resolution alone is insufficient: a 4K display can expose a 1920 CSS-pixel viewport at 200% OS scale. Device scale 2 changes raster density for a given CSS viewport; it does not change that viewport’s layout width or simulate browser zoom.
-
-For the supported views, write a vertical budget: header + gutters + summary strip + main operational regions + gaps + footer. Identify exactly which panels and normal rows belong above the fold. Default operational status should not require searching a long page. Large histories and exceptional fifty-row lists can have named, visible internal scrolling; their availability is not proof that the overview itself fits.
-
-For Mission Control, examine every row of the viewport table above with FLIGHT folded and expanded. Also check 1920×1080, 2560×1440 and a 1920×1080 viewport at device scale 2; these extras don't replace any row. Keep required smaller/short views from the ticket. Do not substitute a different height for a named acceptance viewport.
-
-## Size by purpose
-
-Give each visual an explained minimum, preferred range and maximum width. Derive a table minimum from its meaningful columns, readable values and actions. Give a text log enough line length. Size a chart for comparisons and readable labels, rather than stretching a tiny plot across leftover space. Bound a compact status summary even on a large display.
-
-At wider breakpoints, use additional useful columns, comparisons or rows. Avoid a fixed-width primary table beside an unlimited `1fr` stack. At narrower breakpoints, deliberately recompose the grid before shrinking text, squeezing every panel, or moving essential status below the page. Consider a drawer/overlay when an expanded assistant cannot coexist with the operational canvas at adequate widths; preserve drafts and focus.
-
-Whitespace should group information and establish hierarchy. Check both wasted interior space and crowded content. Prefer fewer competing containers and captions over reducing every gap. Do not force all panels to the same dimensions when they answer different questions.
-
-Plan the relationship between columns as well as each panel. A short side stack should not wait for
-the tallest unrelated column before exposing its next useful content. Keep comparison regions aligned
-with the main grid. Showing a selected history and repeating it in another grid needs a concrete task
-reason; available height alone is insufficient. At true 4K, inspect both outside margins and holes
-between regions. More rows, larger charts and more cards are options, not evidence of useful adaptation.
-
-## Separate monitoring from investigation
-
-An overview needs immediately legible status, exceptions, capacity and next actions. Full raw samples, extensive provenance and historical investigation need an obvious route, not automatic expansion into every card. Preserve real units, denominators, stale/unknown states and access to the underlying data.
-
-Use a sparkline for a trend cue, a larger labelled plot for comparison, and a table for exact values. Do not silently change units, fabricate series or confuse context capacity, provider allowance and token throughput. Avoid duplicating these measures merely to fill space.
-
-## Review the operator's task, not only geometry
-
-Inspect settled full-view screenshots before focused crops. Use the same source-shaped dataset for before/after comparisons and label fictional versus copied/live data. Ask whether the operator can find active/held work, remaining capacity, system constraints and the next useful action without page scrolling in the normal reference case.
-
-Record panel bounds and initial visible content, plus an actual qualitative verdict about hierarchy, column allocation, chart shape, padding and useful information per region. An unclipped panel below the fold can still fail the page's purpose. More screenshots or hashes do not repair that failure.
-
-A dashboard that loses its declared primary operational information from the normal first screen fails the purpose check and should receive an Important finding. Do not call it a design pass solely because every item can eventually be scrolled to. Preserve genuine baseline strengths while proposing one reasoned design, rather than making the operator discover each composition problem.
-
-Use the [visual QA workflow](../../../../docs/runbooks/visual-qa.md) to carry this budget into the plan,
-rendered review and saved report. A whole-page composition verdict must explain useful allocation,
-not merely confirm that panels fit.
-
-Primary references, checked 4 November 2026; these inform judgment rather than replace the local brief. Those we could read give no grid widths or wide-screen rules, and the third-party agent skill we could read in full was tokens and a checklist, so the defaults above are ours:
+Checked 4 November 2026. These inform judgment and don't replace the brief. Those we could read give no grid widths or wide-screen rules, so the defaults above are ours.
 
 - [Carbon: Dashboards](https://www.carbondesignsystem.com/building-blocks/data-visualization/dashboards)
 - [Microsoft: dashboard design](https://learn.microsoft.com/en-us/power-bi/create-reports/service-dashboards-design-tips)

@@ -1,6 +1,6 @@
 import { type OverviewTimeline, TIMELINE_TICKS_MAX, TIMELINE_WINDOW_MS } from "@mc/core";
 import { type CcConfig, configuredAgents } from "./config.ts";
-import { loopTries } from "./loophistory.ts";
+import { loopTries } from "./loop/history.ts";
 import type { Store } from "./store.ts";
 
 type Lane = OverviewTimeline["lanes"][number];
@@ -85,7 +85,17 @@ export function overviewTimeline(config: CcConfig, store: Store, now: number): O
     }
     byAgent.get(run.agentId)?.ticks.push(...(digests.get(run.id)?.toolStarts ?? []));
   }
+  const minutes = new Map<string, Map<number, number>>();
+  for (const run of sources.runs) {
+    for (const [at, tokens] of digests.get(run.id)?.minuteTokens ?? []) {
+      if (at < from || at > now) continue;
+      const seat = minutes.get(run.agentId) ?? new Map<number, number>();
+      seat.set(at, (seat.get(at) ?? 0) + tokens);
+      minutes.set(run.agentId, seat);
+    }
+  }
   for (const lane of lanes) {
+    lane.tokens = [...(minutes.get(lane.agentId) ?? [])].sort((a, b) => a[0] - b[0]);
     lane.spans = mergeSpans(lane.spans);
     lane.ticks = lane.ticks
       .filter((at) => at >= from && at <= now)

@@ -1,3 +1,4 @@
+import type { CommsSenderKind } from "./comms.ts";
 import type { ProfileStep, ReviewDepth } from "./profiles-model.ts";
 import type { ReportedTest, ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort } from "./runtime.ts";
@@ -283,6 +284,8 @@ export interface TicketView {
   closedAt?: number | null;
   /** Plain text as written on GitHub, cut at 20 000 characters (`bodyTruncated`). */
   body: string;
+  /** Why a prototype link is not available to the crew, or null when every prototype is in-repo. */
+  prototypeProblem?: string | null;
   /**
    * The ticket's controller-check section, found on the full body before it was cut; null when
    * it has none. Absent: the reader did not look (use `body`).
@@ -677,8 +680,34 @@ export type TicketEvent = { key: string; at: number } & (
       decision: string;
       basis: string;
     }
-  | { kind: "comms"; id: string; from: string; to: string; label: string | null; text: string }
+  | {
+      kind: "comms";
+      id: string;
+      from: string;
+      to: string;
+      label: string | null;
+      text: string;
+      senderKind?: CommsSenderKind | null;
+    }
 );
+
+/** A stored seat question and its latest recorded answer, without inventing an answer on run end. */
+export interface TicketQuestion {
+  id: number;
+  runId: string;
+  seat: AgentId;
+  text: string;
+  /** The attention-item key for this question's stored conversation, if it has one. */
+  discussionKey: string | null;
+  at: number;
+  passedAt: number | null;
+  asideAt: number | null;
+  /** Includes closure without an answer, such as the asking run ending. */
+  closedAt: number | null;
+  answer: string | null;
+  answerAt: number | null;
+  answerBasis: string | null;
+}
 
 /** `GET /api/tickets/:repoId/:number`: everything Mission Control knows about one ticket. */
 export interface TicketHistory {
@@ -698,6 +727,8 @@ export interface TicketHistory {
   /** The body as written, cut by the collector; null when GitHub was unreachable. */
   body: string | null;
   bodyTruncated: boolean;
+  /** Why a linked prototype is unavailable to the crew, or null when every prototype is in-repo. */
+  prototypeProblem?: string | null;
   /** Why the body is missing; null when GitHub answered. */
   githubError: string | null;
   runs: TicketRunView[];
@@ -708,6 +739,10 @@ export interface TicketHistory {
   timeline: TicketEvent[];
   /** Pass as `before` for the next page; null on the last. */
   nextBefore: string | null;
+  /** Independently paged seat questions, including answered and set-aside ones. */
+  questions?: TicketQuestion[];
+  /** Pass as questionsBefore; null on the last question page. */
+  questionsNextBefore?: string | null;
 }
 
 /** One comms message on a PR's readiness card. */

@@ -1,5 +1,5 @@
 import "./temp-home.ts";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { type ConfigView, type Crew, OPERATOR_HEADER } from "@mc/core";
@@ -8,6 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppDeps } from "../src/api.ts";
 import type { CodexModels, ModelDeps } from "../src/runtime/codex-models.ts";
 import { fakeModels, MODEL_PAGES } from "./config-codex.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 const boot = vi.hoisted(() => ({
   app: null as FastifyInstance | null,
@@ -103,8 +106,8 @@ vi.mock("../src/config.ts", async (original) => {
       boot.evidenceLive ? false : real.isPreview(...args),
   };
 });
-vi.mock("../src/preview-repo.ts", async (original) => {
-  const real = await original<typeof import("../src/preview-repo.ts")>();
+vi.mock("../src/preview/repo.ts", async (original) => {
+  const real = await original<typeof import("../src/preview/repo.ts")>();
   return {
     ...real,
     resolvePreviewRepo: (...args: Parameters<typeof real.resolvePreviewRepo>) =>
@@ -260,6 +263,30 @@ describe("mixed hub startup", () => {
     expect(boot.serving).toBe(true);
     expect(boot.discoveryStarted).toBe(true);
     await expect(boot.app?.close()).resolves.toBeUndefined();
+  });
+
+  const plantStaleWork = (): string[] => {
+    const work = join(dir, "data/pr-evidence-work");
+    const leftovers = [join(work, "capture-x"), join(work, "sides/abc")];
+    for (const path of leftovers) mkdirSync(path, { recursive: true });
+    return leftovers;
+  };
+
+  it("clears a dead capture's work folder when the live hub starts", async () => {
+    const leftovers = plantStaleWork();
+    boot.evidenceLive = true;
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    expect(leftovers.map((path) => existsSync(path))).toEqual([false, false]);
+  });
+
+  it("leaves the work folder alone in a preview hub, which never captures", async () => {
+    const leftovers = plantStaleWork();
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    expect(leftovers.map((path) => existsSync(path))).toEqual([true, true]);
   });
 
   it("connects stream counts to scheduler client presence", async () => {

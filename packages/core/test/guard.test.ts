@@ -3,6 +3,7 @@ import {
   BACKGROUND_SUITE_TEXT,
   closesIssue,
   codexCommand,
+  DETACHED_HEAD,
   decodeCharRefs,
   engineHitText,
   FREE_SUITE_HINT,
@@ -18,6 +19,7 @@ import {
   type GuardContext,
   type GuardEvent,
   guardDecision,
+  inertNegatedClosingRefs,
   isFullSuite,
   MC_WRITER_TOOLS,
   REREAD_MIN_BYTES,
@@ -170,6 +172,13 @@ describe("FLIGHT's full profile", () => {
     expect(ruleOf(bash("git commit -m x"), { ...flightFull, flightGitBranch: () => null })).toBe(
       "merge-push",
     );
+    // a detached HEAD moves no branch: FLIGHT merges main into a PR branch from one
+    expect(
+      guardDecision(bash("git merge origin/main"), {
+        ...flightFull,
+        flightGitBranch: () => DETACHED_HEAD,
+      }),
+    ).toEqual({ kind: "allow" });
   });
 
   it.each([
@@ -1902,6 +1911,44 @@ describe("guard targeted fix 3 (Plan 7a review): vitest arguments after --", () 
   });
 });
 
+describe("negated closing references in review prose", () => {
+  it.each([
+    ["This does not close #933.", "This does not close issue 933."],
+    ["This never fixes #933.", "This never fixes issue 933."],
+    ["This cannot resolve #933.", "This cannot resolve issue 933."],
+    ["This doesn't close #933.", "This doesn't close issue 933."],
+    ["This isn’t fixed #933.", "This isn’t fixed issue 933."],
+    ["NOT\nCLOSES: **#933**", "NOT\nCLOSES: **issue 933**"],
+  ])("renders %s without a closing command", (original, rendered) => {
+    expect(inertNegatedClosingRefs(original)).toBe(rendered);
+    expect(
+      firstPrNotifier(original, { repo: "o/mc", issue: 7, allowOwnRepoRefs: true }),
+    ).not.toBeNull();
+    expect(
+      firstPrNotifier(rendered, { repo: "o/mc", issue: 7, allowOwnRepoRefs: true }),
+    ).toBeNull();
+    expect(firstPrNotifier(rendered, { repo: "o/mc", issue: 7 })).toBeNull();
+  });
+
+  it.each([
+    "Closes #933",
+    "This not only fixes #933",
+    "Not: this closes #933",
+    "This does not close #933; fixes #934",
+    "This does not close other/repo#933",
+    "This does not close https://github.com/other/repo/issues/933",
+    "This does not close #933. @someone",
+  ])("retains the ordinary refusal for %s", (text) => {
+    expect(
+      firstPrNotifier(inertNegatedClosingRefs(text), {
+        repo: "o/mc",
+        issue: 7,
+        allowOwnRepoRefs: true,
+      }),
+    ).not.toBeNull();
+  });
+});
+
 describe("firstPrNotifier (Task 9)", () => {
   const pr = (text: string) => firstPrNotifier(text, { repo: "o/mc", issue: 42 });
 
@@ -2922,6 +2969,7 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     // an expansion, glob or EQUALS word as the runner's first word
     "npx $X open .",
     'npx "$X" open .',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell syntax under test, not a template
     "npx ${X} open .",
     "npx $(echo -y) open .",
     "npx `echo -y` open .",

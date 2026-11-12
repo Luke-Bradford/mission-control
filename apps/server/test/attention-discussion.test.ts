@@ -61,11 +61,11 @@ it("opens stable threads, refuses stale versions and keeps ended threads readabl
     409,
   );
   expect((await app.inject(`${url}?id=${first.id}`)).json()).toEqual(first);
-  expect((await app.inject(url)).statusCode).toBe(404);
+  expect((await app.inject(url)).json()).toEqual(first);
   await app.close();
 });
 
-it("retries failed sends once and does not resend a successful message", async () => {
+it("keeps a reply FLIGHT could not take, retries it, and does not resend a delivered one", async () => {
   const message = vi.fn().mockRejectedValueOnce(new Error("busy")).mockResolvedValue(undefined);
   const supervisor = {
     status: () => ({ enabled: true, note: null }),
@@ -76,7 +76,10 @@ it("retries failed sends once and does not resend a successful message", async (
   const first = (await app.inject(url)).json();
   const payload = { version: first.version, messageId: "ask", text: "Why?" };
   const send = () => app.inject({ method: "POST", url, payload });
-  expect((await send()).statusCode).toBe(503);
+  // the first push to FLIGHT fails: the reply is stored and waits for FLIGHT's wake
+  expect((await send()).statusCode).toBe(200);
+  expect(store.pendingDiscussions()).toHaveLength(1);
+  expect(store.discussionSent(first.id, "ask")).toBe(false);
   expect((await send()).statusCode).toBe(200);
   expect((await send()).statusCode).toBe(200);
   expect(message).toHaveBeenCalledTimes(2);
@@ -95,6 +98,24 @@ it("retries failed sends once and does not resend a successful message", async (
       })
     ).statusCode,
   ).toBe(403);
+  await app.close();
+});
+
+it("stores a reply when the crew is off or FLIGHT is not running, for its next wake", async () => {
+  const supervisor = {
+    status: () => ({ enabled: false, note: "off" }),
+  } as unknown as Supervisor;
+  const app = buildApp({ config, store, bus: new ChangeBus(), supervisor });
+  const url = "/api/attention/note:blocked:demo/discussion";
+  const first = (await app.inject(url)).json();
+  const sent = await app.inject({
+    method: "POST",
+    url,
+    payload: { version: first.version, messageId: "ask", text: "Why?" },
+  });
+  expect(sent.statusCode).toBe(200);
+  expect(sent.json().messages.map((m: { text: string }) => m.text)).toContain("Why?");
+  expect(store.pendingDiscussions().map((t) => t.id)).toEqual([first.id]);
   await app.close();
 });
 
@@ -143,4 +164,30 @@ it("opens with the catalogue recommendation and replaces a changed brief", async
   ).toBe(409);
   expect((await app.inject(`${url}?id=${first.id}`)).json()).toEqual(first);
   await app.close();
+});
+
+it("opens a discussion on an operator's item they have already read (#1543)", async () => {
+  // no FLIGHT seat: the note is the operator's as it stands
+  const app = buildApp({ config: { ...config, crew: undefined }, store, bus: new ChangeBus() });
+  const key = "note:blocked:demo";
+  store.ack([key], 5);
+  const res = await app.inject(`/api/attention/${key}/discussion`);
+  expect(res.statusCode).toBe(200);
+  expect(res.json().id).toEqual(expect.any(String));
+});
+
+it("marks the hub's alerts on /api/attention, and only them (#1543)", async () => {
+  const app = buildApp({ config: { ...config, crew: undefined }, store, bus: new ChangeBus() });
+  store.raiseNote({
+    key: "hub-update-held",
+    kind: "blocked",
+    runId: null,
+    seatId: "guido-1",
+    repoId: null,
+    text: "Update waits for you.",
+    at: 2,
+  });
+  const items = (await app.inject("/api/attention")).json() as { key: string; alert?: true }[];
+  expect(items.find((i) => i.key === "note:hub-update-held")?.alert).toBe(true);
+  expect(items.find((i) => i.key === "note:blocked:demo")?.alert).toBeUndefined();
 });

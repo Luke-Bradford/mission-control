@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CHECK_BASH_TIMEOUT_MS } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   type CloneState,
@@ -85,7 +86,15 @@ describe("lockedCheck", () => {
 describe("the check recorder", () => {
   const HEAD = "a".repeat(40);
   const KEY = { runId: "r1", toolUseId: "t1" };
-  let rows: { runId: string; command: string; headSha: string; ok: boolean; at: number }[];
+  const WORKTREE = "/work/trees/guido-1-9";
+  let rows: {
+    runId: string;
+    command: string;
+    invokedCommand?: string | undefined;
+    headSha: string;
+    ok: boolean;
+    at: number;
+  }[];
   let state: CloneState | null;
   let checks: readonly string[];
   const recorder = () =>
@@ -93,6 +102,7 @@ describe("the check recorder", () => {
       store: { addCheckRun: (c) => void rows.push(c) },
       checks: async () => checks,
       state: async () => state,
+      worktree: async () => WORKTREE,
       now: () => 99,
     });
 
@@ -152,6 +162,92 @@ describe("the check recorder", () => {
         at: 99,
       },
     ]);
+  });
+
+  it("keeps aliased checks pending until their completion is recorded", async () => {
+    let finishState: ((state: CloneState | null) => void) | undefined;
+    let readingEnd = false;
+    const r = createCheckRecorder({
+      store: { addCheckRun: (row) => void rows.push(row) },
+      checks: async () => CHECKS,
+      state: async () =>
+        readingEnd
+          ? new Promise<CloneState | null>((resolve) => {
+              finishState = resolve;
+            })
+          : state,
+    });
+    const alias = { runId: "r1", toolUseId: "codex-item" };
+    await r.begin(KEY, `${LINT} && ${TYPES}`, [alias]);
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    expect(r.pending("other-run")).toEqual([]);
+    readingEnd = true;
+    const ending = r.end(alias, true, 0);
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    r.dropRun("r1"); // A turn ending while the completed receipt is checked must not discard it.
+    expect(r.pending("r1")).toEqual([LINT, TYPES]);
+    finishState?.(state);
+    await ending;
+    expect(r.pending("r1")).toEqual([]);
+    expect(rows).toHaveLength(2);
+    expect(r.drops("r1")).toEqual([]);
+  });
+
+  it("clears pending checks when completion validation cannot read the clone", async () => {
+    const r = recorder();
+    await r.begin(KEY, LINT);
+    state = null;
+    await r.end(KEY, true, 0);
+    expect(r.pending("r1")).toEqual([]);
+    expect(rows).toEqual([]);
+    expect(r.drops("r1")).toMatchObject([{ reason: "unreadable", command: LINT }]);
+  });
+
+  it.each([
+    ["&&", `cd ${WORKTREE} && ${LINT}`],
+    [";", `cd ${WORKTREE}; ${LINT}`],
+    ["; with a trailing slash", `cd ${WORKTREE}/; ${LINT}`],
+    ["a quoted path", `cd "${WORKTREE}" && ${LINT}`],
+  ])("counts a check run after a cd into the seat's own worktree with %s", async (_n, command) => {
+    const r = recorder();
+    await r.begin(KEY, command);
+    await r.end(KEY, true);
+    expect(rows.map((x) => [x.command, x.invokedCommand, x.headSha])).toEqual([
+      [LINT, command, HEAD],
+    ]);
+  });
+
+  it.each([
+    ["a cd into another path", `cd /work/trees/other; ${LINT}`],
+    ["a cd into another path with &&", `cd /work/trees/other && ${LINT}`],
+    ["a cd into a sibling that shares the prefix", `cd ${WORKTREE}-2; ${LINT}`],
+    ["a cd into a subdirectory", `cd ${WORKTREE}/apps && ${LINT}`],
+    ["a sleep", `sleep 1; ${LINT}`],
+    ["a pipe", `${LINT} | tee x`],
+    ["a cd and then a second command", `cd ${WORKTREE}; true; ${LINT}`],
+    ["a cd and a check followed by another command", `cd ${WORKTREE}; ${LINT}; true`],
+    ["a cd and a pipe", `cd ${WORKTREE}; ${LINT} | tee x`],
+    ["a cd after the check", `${LINT}; cd ${WORKTREE}`],
+    ["a cd and an or", `cd ${WORKTREE} || ${LINT}`],
+    ["a cd to a variable", `cd $HOME; ${LINT}`],
+  ])("does not count a check run after %s", async (_n, command) => {
+    const r = recorder();
+    await r.begin(KEY, command);
+    await r.end(KEY, true);
+    expect(rows).toEqual([]);
+  });
+
+  it("counts nothing after a cd when the worktree is unknown", async () => {
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void rows.push(c) },
+      checks: async () => CHECKS,
+      state: async () => state,
+      worktree: async () => null,
+      now: () => 99,
+    });
+    await r.begin(KEY, `cd ${WORKTREE}; ${LINT}`);
+    await r.end(KEY, true);
+    expect(rows).toEqual([]);
   });
 
   it("records a failed call as ok = false", async () => {
@@ -418,6 +514,75 @@ describe("why the recorder dropped a check call", () => {
     clock += 3_000;
     await r.end({ runId: "r1", toolUseId: "t2" }, false);
     expect(r.drops("r1")).toEqual([]);
+  });
+
+  describe("a check that runs past ten minutes", () => {
+    const LONG = 11 * 60_000;
+    const options = { timeoutMs: CHECK_BASH_TIMEOUT_MS };
+
+    it("counts it when it exits 0 on the clean commit it started on", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], options);
+      clock += LONG;
+      await r.end(KEY, true);
+      expect(rows).toMatchObject([{ command: LINT, headSha: HEAD, ok: true }]);
+      expect(r.drops("r1")).toEqual([]);
+    });
+
+    it("does not count a call the CLI stopped at the limit", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], options);
+      clock += CHECK_BASH_TIMEOUT_MS;
+      await r.end(KEY, false);
+      expect(rows).toMatchObject([{ ok: false, exitCode: null }]);
+      expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+    });
+
+    it("reads a longer timeout as the limit the CLI cuts it to", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], { timeoutMs: 2 * CHECK_BASH_TIMEOUT_MS });
+      clock += CHECK_BASH_TIMEOUT_MS;
+      await r.end(KEY, false);
+      expect(reasons(r)).toEqual([["timeout", LINT, HEAD]]);
+    });
+
+    it("does not count a real failure, and gives it no timeout reason", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], options);
+      clock += LONG;
+      await r.end(KEY, false, 1);
+      expect(rows).toMatchObject([{ ok: false, exitCode: 1 }]);
+      expect(r.drops("r1")).toEqual([]);
+    });
+
+    it("does not count it when the head moved or the tree changed", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], options);
+      clock += LONG;
+      state = { head: "b".repeat(40), clean: true };
+      await r.end(KEY, true);
+      expect(reasons(r)).toEqual([["head-moved", LINT, HEAD]]);
+      state = { head: HEAD, clean: true };
+      await r.begin({ runId: "r1", toolUseId: "t2" }, LINT, [], options);
+      clock += LONG;
+      state = { head: HEAD, clean: false };
+      await r.end({ runId: "r1", toolUseId: "t2" }, true);
+      expect(reasons(r)).toContainEqual(["dirty-end", LINT, HEAD]);
+      expect(rows).toEqual([]);
+    });
+
+    it("does not count a background call or one whose end the hub never saw", async () => {
+      const r = recorder();
+      await r.begin(KEY, LINT, [], { ...options, background: true });
+      clock += LONG;
+      await r.end(KEY, true);
+      expect(reasons(r)).toEqual([["background", LINT, HEAD]]);
+      await r.begin({ runId: "r1", toolUseId: "t2" }, LINT, [], options);
+      clock += LONG;
+      r.dropRun("r1");
+      expect(reasons(r)).toContainEqual(["turn-ended", LINT, HEAD]);
+      expect(rows).toEqual([]);
+    });
   });
 
   it("says the clone could not be read", async () => {

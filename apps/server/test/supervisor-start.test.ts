@@ -24,6 +24,7 @@ import {
   AWAY_SETTING,
   type BoardItem,
   CANNOT_START,
+  CHECK_BASH_TIMEOUT_MS,
   CODEX_PNPM_STORES_DIR,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
@@ -53,6 +54,7 @@ import {
   NEW_LOOP,
   notOnBoardText,
   otherLaneText,
+  PACE_SETTING,
   PNPM_STORE_ENV,
   type Profile,
   pathGrantProblem,
@@ -62,6 +64,7 @@ import {
   type RepoRules,
   researchText,
   retiringText,
+  SEAT_SANDBOX_ENV,
   SHARED_PNPM_STORE_NAME,
   START_NO_RULES,
   startClosedText,
@@ -109,9 +112,10 @@ import {
   crewPromptPath,
   crewSkillsDir,
   crewTokenPath,
-} from "../src/store.ts";
+} from "../src/store/crew-paths.ts";
 import { crewRefusal } from "../src/update.ts";
 import { writeCodexHostileFiles } from "./fixtures/codex-hostile.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   BRANCH,
   boardCard,
@@ -142,6 +146,8 @@ import {
   untilGone,
   userLines,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 vi.mock("node:os", async (importOriginal) => {
   const original = await importOriginal<typeof import("node:os")>();
@@ -207,6 +213,43 @@ describe("startRun eligibility", () => {
     await refused(422, AWAY_QUOTA_REFUSED);
   });
 
+  describe("the budget brake", () => {
+    const brake = () => {
+      const at = Date.now();
+      for (const [t, pct] of [
+        [at - 6 * 3_600_000, 40],
+        [at, 60],
+      ] as const)
+        store.addUsage({
+          accountId: "claude-main",
+          window: "7d",
+          at: t,
+          resetAt: at + 86_400_000,
+          pct,
+          source: "test",
+        });
+    };
+    it("refuses a new start while the weekly projection passes 100%", async () => {
+      brake();
+      const claim = vi.fn(async () => {});
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}), claim });
+      sup.start();
+      const e = await refusal(sup.startRun("guido-1", 42));
+      expect(e.status).toBe(422);
+      expect(e.message).toMatch(
+        /^Not started: the budget brake is on\. GUIDO-1's account claude-main/,
+      );
+      expect(claim).not.toHaveBeenCalled();
+      expect(store.seatSession("guido-1")).toBeNull();
+    });
+    it("lets the operator's explicit start through", async () => {
+      brake();
+      const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+      sup.start();
+      expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
+    });
+  });
+
   it("allows the operator's manual start while away with pickUp off and unknown quota", async () => {
     store.setSetting(
       AWAY_SETTING,
@@ -214,6 +257,31 @@ describe("startRun eligibility", () => {
     );
     const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
     sup.start();
+    const started = await sup.startRun("guido-1", 42, { operator: true });
+    expect(started.runId).toBeTruthy();
+  });
+
+  it("holds a start for the slow pace unless the operator makes it, and holds FLIGHT's operator route", async () => {
+    const at = Date.now();
+    store.setSetting(
+      PACE_SETTING,
+      JSON.stringify({
+        on: true,
+        until: at + 3_600_000,
+        since: at - 1,
+        labels: ["bug"],
+        maxStarts: 2,
+        note: "weekend",
+      }),
+    );
+    await refused(
+      422,
+      "Slow pace (weekend) is on and starts only tickets labelled bug: mc#42 waits.",
+    );
+    const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
+    sup.start();
+    const e = await refusal(sup.startRun("guido-1", 42, { operator: true, holdPace: true }));
+    expect(e.message).toMatch(/^Slow pace/);
     const started = await sup.startRun("guido-1", 42, { operator: true });
     expect(started.runId).toBeTruthy();
   });
@@ -807,6 +875,52 @@ describe("startRun", () => {
     expect(run?.transcriptPath).toBe(join(dir, "db", "crew", `${out.runId}.jsonl`));
   });
 
+  it("starts a run on a ticket with the ticket's answered questions in its brief", async () => {
+    const { sup } = make();
+    sup.start();
+    store.upsertRun({
+      id: "old-run",
+      agentId: "retro",
+      repoId: "mc",
+      seq: 1,
+      startedAt: 1,
+      endedAt: 2,
+      status: "ok",
+      sessionId: null,
+      model: "haiku",
+      // no branch: a run that left one would start the next as a handoff
+      branch: null,
+      ticket: "mc#42",
+      costUsd: null,
+      tokens: null,
+      transcriptPath: "",
+      prs: [],
+      summary: null,
+    });
+    const asked = store.addQuestion({
+      agentId: "retro",
+      runId: "old-run",
+      text: "Which store shape?",
+      at: 1,
+    });
+    store.answerQuestion(asked, 3);
+    store.addFlightDecision({
+      at: 3,
+      kind: "answer",
+      seatId: "retro",
+      targetRunId: null,
+      ref: null,
+      questionId: asked,
+      about: "Which store shape?",
+      decision: "Use one table, repo#n keys.",
+      basis: "operator call",
+    });
+    await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).toContain("Already decided on this ticket");
+    expect(userLines()[0]).toContain("- Which store shape? -> Use one table, repo#n keys.");
+  });
+
   it("passes no --effort for a seat without one", async () => {
     const { sup } = make();
     sup.start();
@@ -854,10 +968,12 @@ describe("startRun", () => {
       "CLAUDE_CODE_TMPDIR",
       "SHELL",
       "TERM",
+      "BASH_MAX_TIMEOUT_MS",
       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR",
       "CLAUDE_CODE_DISABLE_BACKGROUND_TASKS",
       "CLAUDE_CODE_SUBPROCESS_ENV_SCRUB",
       "DISABLE_AUTOUPDATER",
+      SEAT_SANDBOX_ENV,
       ...Object.keys(CREW_PNPM_ENV),
       PNPM_STORE_ENV,
       "UV_NO_SYNC",
@@ -870,6 +986,7 @@ describe("startRun", () => {
       "PYTEST_ADDOPTS",
     ]);
     expect(env.DISABLE_AUTOUPDATER).toBe("1");
+    expect(env.BASH_MAX_TIMEOUT_MS).toBe(String(CHECK_BASH_TIMEOUT_MS));
     // macOS adds __CF_USER_TEXT_ENCODING to every process's environment
     const extra = Object.keys(env).filter(
       (k) => !allowed.has(k) && k !== "__CF_USER_TEXT_ENCODING",
@@ -1004,6 +1121,31 @@ describe("startRun", () => {
     const text = readFileSync(promptPath, "utf8");
     expect(text.startsWith(readFileSync(join(HUB_ROLES, "GUIDO.md"), "utf8").trimEnd())).toBe(true);
     expect(text).toContain(`${CLAUDE_MD_HEADING}\n\nRepo rule: keep tests green.\n`);
+  });
+
+  it("measures the rules section on the CLAUDE.md text the prompt carries, without the mc block", async () => {
+    writeFileSync(
+      join(clone, "CLAUDE.md"),
+      "Repo rule.\n\n```yaml\nmc:\n  pick_from: [Ready]\n```\n",
+    );
+    git(clone, "add", "CLAUDE.md");
+    git(clone, "commit", "-qm", "Add mc block");
+    git(join(dir, "origin.git"), "fetch", clone, "main:main");
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const prompt = readFileSync(crewPromptPath(dbPath, runId), "utf8");
+    expect(prompt).not.toContain("pick_from");
+    expect(prompt).toContain(`${CLAUDE_MD_HEADING}\n\nRepo rule.\n`);
+    const rules = store.promptWakes(runId)[0]?.sections.find((x) => x.section === "rules");
+    const references = prompt.slice(
+      prompt.indexOf("# Repository reference material"),
+      prompt.indexOf(`\n\n${CLAUDE_MD_HEADING}`),
+    );
+    expect(rules?.bytes).toBe(
+      textBytes(references) + textBytes(`\n\n${CLAUDE_MD_HEADING}\n\nRepo rule.\n\n`),
+    );
   });
 
   it("indexes repo references and leaves them readable without loading repo hooks", async () => {
@@ -3182,7 +3324,7 @@ import(${JSON.stringify(fixture)});
   });
 
   it("releases an accepted test lock when its process exits mid-item", async () => {
-    const { sup, lock } = codex({ command: "pnpm -s test", holdItem: true, exitPending: true });
+    const { sup, lock } = codex({ command: "pnpm -s test", holdItem: true, exitAccepted: true });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
     await untilCodex(() => expect(decision()).toBe("accept"));

@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import {
   ANSWER_OWN_QUESTION,
   AREA_LABEL_PREFIX,
+  type AttentionBrief,
   type AttentionItem,
   AWAY_BUG_VERIFIED,
   AWAY_PLANNER_REFUSED,
@@ -20,6 +21,7 @@ import {
   awayBugDecisionAbout,
   type BoardItem,
   BRIEF_CLEARED_DECISION,
+  BRIEF_ENTRY_REFUSED,
   BRIEF_INPUT_MAX,
   BRIEF_ITEM_DESCRIPTION,
   BRIEF_KEY_MAX,
@@ -33,14 +35,18 @@ import {
   briefSavedDecision,
   briefSavedText,
   briefTooLongText,
+  budgetBrakeText,
   CATCH_UP_KINDS,
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
   CLOSE_DESCRIPTION,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  CODE_HEALTH_FLIGHT_REVIEW_DAYS,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMENTED_DECISION,
   COMMS_MESSAGE_MAX,
+  COMMS_OPEN_PREFIX,
   CONTROLLER_CHECK_HEADING,
   CREATE_NO_REPO,
   CREW_LANES,
@@ -99,9 +105,6 @@ import {
   FLIGHT_BRIEF_TITLES,
   FLIGHT_CI_LOG_LINES,
   FLIGHT_CI_LOG_MAX,
-  FLIGHT_CLOSE_DEPENDENT_READ_BATCH,
-  FLIGHT_CLOSE_SEARCH_LIMIT,
-  FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_DECISION_MAX,
   FLIGHT_FIELD_MAX,
   FLIGHT_GH_PATH_MAX,
@@ -127,6 +130,10 @@ import {
   FLIGHT_NOT_TRIAGING_KEY,
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_NOTED,
+  FLIGHT_POINTER_FED_KINDS,
+  FLIGHT_POINTER_KINDS,
+  FLIGHT_POINTER_TARGET_MAX,
+  FLIGHT_POINTERS_MAX,
   FLIGHT_PR_CHECKS_LISTED,
   FLIGHT_PR_FILES_LISTED,
   FLIGHT_STARTABLE,
@@ -138,9 +145,10 @@ import {
   type FlightDecisionKind,
   type FlightLedgerEntry,
   type FlightMoveColumn,
+  type FlightPointerKind,
   type FlightPrRead,
   FORGET_DESCRIPTION,
-  flightFloorBlocked,
+  flightClearanceReasons,
   GH_READ_BAD_PATH,
   GH_READ_DESCRIPTION,
   GH_READ_NOT_FOUND,
@@ -174,12 +182,15 @@ import {
   ledgerNextText,
   ledgerNoKeyText,
   ledgerOwnerText,
+  ledgerPointerText,
+  ledgerPointerUnfedText,
   ledgerTitleText,
   MC_FLIGHT_ONLY,
   MC_RUN_ENDED,
   MC_TEXT_MAX,
   MC_TICKET_READERS_ONLY,
   MC_TOOL_NAMES,
+  METRIC_IDS,
   mcToolHitText,
   messageAboutText,
   missingNeedsText,
@@ -195,6 +206,7 @@ import {
   moveWrongColumnText,
   NEW_LOOP,
   NOT_ON_BOARD,
+  needsYouEntryFaults,
   noOpenQuestionText,
   notAcceptedText,
   notDevRunText,
@@ -221,6 +233,7 @@ import {
   PROMOTE_ENGINE_OFF,
   PROMOTE_NO_GITHUB,
   PROMOTE_NO_RULES,
+  PROTECTED_ITEM_REFUSED,
   type Profile,
   type ProfileOverride,
   parkNotYoursText,
@@ -232,6 +245,8 @@ import {
   planUnclosedText,
   promoteDraftText,
   promoteOffText,
+  QUESTION_REASON_MAX,
+  questionClosedText,
   READ_CI_LOG_DESCRIPTION,
   READ_NO_GITHUB,
   READ_NO_ISSUE,
@@ -242,7 +257,7 @@ import {
   READY_LABEL,
   RECALL_DESCRIPTION,
   REMEMBER_DESCRIPTION,
-  type RepoId,
+  RETURN_NOT_SEAT_QUESTION,
   type RepoRules,
   RUN_ID_NEEDS_UNPARK,
   type Run,
@@ -250,6 +265,8 @@ import {
   rerunStartedDecision,
   rerunStartedText,
   retiredBriefText,
+  returnedQuestionText,
+  returnedText,
   rulingAcceptedDecision,
   rulingAcceptedText,
   rulingRefusedDecision,
@@ -290,12 +307,18 @@ import {
   undeclaredPrDependency,
   unknownLabelText,
   untrackedText,
+  WAITING_OPERATOR_LABEL,
   WAITS_ON_ONLY_BACKLOG,
+  WITHDRAW_NOT_YOURS,
+  WITHDRAW_SEAT_QUESTION,
+  waitingOperatorPromoteText,
+  waitingOperatorStartText,
   withControllerCheckItem,
+  withdrawnText,
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -303,40 +326,45 @@ import {
   holdCycle,
   holdItem,
   protectedDecisionItem,
+  questionAskAt,
   releaseHold,
-} from "../attention-holds.ts";
+} from "../attention/holds.ts";
 import { activeAway } from "../away.ts";
+import {
+  type BriefPreparationDeps,
+  bindCompleteBrief,
+  bindPreparedBrief,
+  completeBriefError,
+} from "../brief/prepare.ts";
+import { BriefActionInput, BriefDecisionInput } from "../brief/schema.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
-import { type CcConfig, crewSeatDef, SEAT_ID } from "../config.ts";
+import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms/index.ts";
+import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
-import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
 import { seatFocus } from "../focus.ts";
-import type { Move, MoveResult } from "../github-board.ts";
+import type { Move, MoveResult } from "../github/board.ts";
 import {
   attentionItems,
   CREW_ERROR_KEY,
   crew,
+  hubAlert,
   isOperatorCall,
   NO_CLI_VERSION,
   NO_LOCK,
   NOTE_KEY,
   questionWithOperator,
 } from "../hud.ts";
-import { announceInstruction } from "../instruction-notices.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "../machine-capacity.ts";
+import { announceInstruction } from "../instructions/notices.ts";
+import { InstructionInput } from "../instructions/standing.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
@@ -351,13 +379,17 @@ import {
   seatPlace,
   text,
 } from "../mcp/tools.ts";
+import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
+import { prototypeLinkProblem } from "../prototype-links.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
+import { handoffTarget } from "../run/handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { InstructionInput } from "../standing-instructions.ts";
-import { crewDir, type Store } from "../store.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
+import { crewDir } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
@@ -366,20 +398,25 @@ import { HUD_SCREENSHOT_MAX_BYTES, hudRenderRequest } from "./hud-render.ts";
 import { HUD_SHOT_REF_PREFIX, type HudShotStore } from "./hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView } from "./ledger.ts";
 import { FlightMemoryInput, FlightMemoryTopic } from "./memory.ts";
+import { recordExternalMerge } from "./merged-line.ts";
 import { createPowerTools, type PowerHelpers } from "./powers.ts";
 import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
-import { markFlightSignalsShown, recordFlightWait } from "./signals.ts";
+import { markFlightSignalsShown, recordFlightWait, waitTargetOf } from "./signals.ts";
 import {
+  compactSignals,
+  crewSeatIds,
   flightArrivalSource,
   flightSeat,
   flightState,
   markItemsShown,
+  markPointersShown,
   markPrsShown,
   operatorItems,
   ownReply,
   stalledSeats,
 } from "./state.ts";
+import { cardProblem as cardProblemOf, closeBlocker } from "./ticket-close.ts";
 import type { CrewTidy } from "./tidy.ts";
 
 export interface FlightToolsDeps {
@@ -393,6 +430,8 @@ export interface FlightToolsDeps {
     move: string,
     above: string,
   ) => Promise<{ ok: boolean; text: string }>;
+  /** Side-effect-free validation/snapshot of FLIGHT's own queue judgment. */
+  prepareQueueReorder?: BriefPreparationDeps["prepareQueue"];
   /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
   areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
   /** Refresh the wake baseline when FLIGHT receives a full state mid-turn. */
@@ -422,7 +461,12 @@ export interface FlightToolsDeps {
         Partial<
           Pick<
             Engine,
-            "clearFlight" | "rerunCi" | "holdMerge" | "releaseMergeHold" | "controllerCheck"
+            | "clearFlight"
+            | "adoptPrHead"
+            | "rerunCi"
+            | "holdMerge"
+            | "releaseMergeHold"
+            | "controllerCheck"
           >
         >)
     | null;
@@ -496,7 +540,7 @@ const WaitOnArgs = z.strictObject({
   until: z.iso.datetime({ offset: true }),
   basis: basisArg,
 });
-const FlightStateArgs = z.strictObject({});
+const FlightStateArgs = z.strictObject({ full: z.boolean().optional() });
 const ScreenshotHudArgs = z.strictObject({ page: z.string().min(1).max(200) });
 const ReadTicketArgs = z.strictObject({
   issue: issueNumber,
@@ -508,6 +552,14 @@ const BriefOptionArgs = z.strictObject({
   label: text(BRIEF_LABEL_MAX),
   answer: text(BRIEF_INPUT_MAX),
   description: text(MC_TEXT_MAX).optional(),
+  consequence: text(BRIEF_INPUT_MAX).optional(),
+  reversibility: z
+    .strictObject({
+      kind: z.enum(["reversible", "partly-reversible", "irreversible"]),
+      detail: text(BRIEF_INPUT_MAX),
+    })
+    .optional(),
+  action: BriefActionInput.optional(),
 });
 const StructuredBriefArgs = z.strictObject({
   catchUp: z
@@ -557,6 +609,12 @@ const BriefItemArgs = z
     ...StructuredBriefArgs.shape,
     key: z.string().min(1).max(BRIEF_KEY_MAX),
     for: z.enum(["operator", "flight"]).default("operator"),
+    decision: BriefDecisionInput.optional(),
+    /** The ticket the question is about, for an item with none of its own (#1543). */
+    ticket: z
+      .string()
+      .regex(/^[A-Za-z0-9._-]{1,100}#[1-9]\d{0,9}$/)
+      .optional(),
     assessment: text(BRIEF_INPUT_MAX).optional(),
     context: text(BRIEF_INPUT_MAX).optional(),
     did: z
@@ -567,7 +625,7 @@ const BriefItemArgs = z
         }),
       )
       .max(20)
-      .default([]),
+      .optional(),
     ask: text(BRIEF_INPUT_MAX).optional(),
     recommendation: text(BRIEF_INPUT_MAX),
     options: z.array(BriefOptionArgs).min(BRIEF_OPTIONS_MIN).max(BRIEF_OPTIONS_MAX).optional(),
@@ -669,6 +727,19 @@ const TrackArgs = z.strictObject({
     .nullable()
     .optional(),
   priority: z.enum(PRIORITIES).nullable().optional(),
+  pointers: z
+    .array(
+      z.strictObject({
+        kind: z.enum(FLIGHT_POINTER_KINDS),
+        target: z
+          .string()
+          .regex(/^[^\s]+$/)
+          .max(FLIGHT_POINTER_TARGET_MAX),
+      }),
+    )
+    .max(FLIGHT_POINTERS_MAX)
+    .nullable()
+    .optional(),
   basis: basisArg,
 });
 const UntrackArgs = z.strictObject({
@@ -707,6 +778,16 @@ const AnswerArgs = z.strictObject({
   basis: basisArg,
 });
 /** The old pass shape, refused with the brief_item call that replaces it (#758). */
+const ReturnQuestionArgs = z.strictObject({
+  key: z.string().min(1).max(BRIEF_KEY_MAX),
+  missing: text(QUESTION_REASON_MAX),
+  basis: basisArg,
+});
+const WithdrawQuestionArgs = z.strictObject({
+  key: z.string().min(1).max(BRIEF_KEY_MAX),
+  reason: text(QUESTION_REASON_MAX),
+  basis: basisArg,
+});
 const PassArgs = z.looseObject({
   question_id: z.number().int().min(1),
   pass_to_operator: z.literal(true),
@@ -947,6 +1028,9 @@ function issuesQuery(label: boolean, assignee: boolean, after: boolean): string 
   return `query(${vars.join(", ")}) { repository(owner: $owner, name: $name) { issues(${filters.join(", ")}) { pageInfo { hasNextPage endCursor } nodes { number title labels(first: 20) { nodes { name } } assignees(first: 10) { nodes { login } } projectItems(first: 10) { nodes { project { number } status: fieldValueByName(name: "Status") { ... on ProjectV2ItemFieldSingleSelectValue { name } } } } } } } }`;
 }
 
+/** What recommendationId means; the tier list is read from core so the text cannot drift. */
+export const CODE_HEALTH_RECOMMENDATION_ID_DESCRIPTION = `A code-health recommendation. An accepted one links its work. A proposed one whose rule is in FLIGHT's tier (${CODE_HEALTH_FLIGHT_TIER_RULES.join(", ")}) is accepted for you: owner FLIGHT, review in ${CODE_HEALTH_FLIGHT_REVIEW_DAYS} days, your basis recorded. Any other proposed one is refused until the operator accepts it. Durable link and recovery prevent duplicate work on retry.`;
+
 /** Each repo's last create_ticket or comment_ticket call: one at a time, so the duplicate check holds. */
 const ticketQueue = new Map<string, Promise<unknown>>();
 /** Chrome is host-wide and expensive: every FLIGHT session shares one render slot. */
@@ -1091,6 +1175,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return { text: e instanceof Error ? e.message : "Comms pin refused.", isError: true };
     }
   };
+  /** The wake FLIGHT's current run is in, for a decision made now; nothing when none is on record. */
+  const wakeOf = (): { wakeId?: string } => {
+    const found = flightSeat(config);
+    const runId = found === null ? null : store.seatSession(found.seat.id)?.runId;
+    const wakeId = runId == null ? null : store.latestFlightWakeId(runId);
+    return wakeId === null ? {} : { wakeId };
+  };
   const record = (
     at: number,
     d: Pick<FlightDecision, "kind" | "about" | "decision" | "basis"> &
@@ -1102,6 +1193,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       targetRunId: null,
       ref: null,
       questionId: null,
+      ...wakeOf(),
       ...d,
       about: cut(d.about, FLIGHT_ABOUT_MAX),
       decision: cut(d.decision, FLIGHT_DECISION_MAX),
@@ -1159,7 +1251,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function waitOn(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, WaitOnArgs, args);
     if (!c.ok) return c.result;
-    const { target, on, until, basis } = c.args;
+    const { on, until, basis } = c.args;
+    const target = waitTargetOf(c.args.target);
     const at = now();
     const untilMs = Date.parse(until);
     if (untilMs <= at) return fail("Not recorded: until is already past.");
@@ -1256,17 +1349,21 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     try {
       await deps.supervisor.message(q.agentId, answerMessageText(answer), {
         interrupt: false,
-        questions: "unpassed",
+        questions: "none",
       });
     } catch (e) {
       return fail(notSentText(e instanceof Error ? e.message : String(e)));
     }
-    // Passed without a brief (before #758): the message closed unpassed questions only, so hand
-    // this one back and close it too, once the answer is delivered.
-    if (q.passedAt !== null && store.unpassQuestion(id)) store.answerQuestion(id, at);
+    // The message closes no question: only this one, once the answer is delivered, so the seat's
+    // other open questions wait for their own answers. One passed without a brief (before #758)
+    // is handed back first.
+    if (q.passedAt !== null) store.unpassQuestion(id);
+    store.answerQuestion(id, at);
+    bus.emit("attention");
     store.addComms({
       at,
       from: ctx.seatId,
+      senderKind: "flight",
       to: q.agentId,
       ticket: store.run(q.runId)?.ticket ?? null,
       text: Array.from(answer).length > COMMS_MESSAGE_MAX ? FLIGHT_ANSWER_COMMS_POINTER : answer,
@@ -1282,6 +1379,199 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     bus.emit("flight");
     return { text: answeredText(call) };
+  }
+
+  /** The attention item with this key, held or not; undefined when it has left Needs you. */
+  const itemByKey = (key: string): AttentionItem | undefined => {
+    const lock = deps.lockState?.() ?? NO_LOCK;
+    const rows = crew(config, store, now(), lock, NO_CLI_VERSION).rows;
+    return attentionItems(config, store, now(), lock, rows, deps.login, true).find(
+      (i) => i.key === key,
+    );
+  };
+
+  /** Sends a seat's question back to its asking run, with what is missing. */
+  async function returnQuestion(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, ReturnQuestionArgs, args);
+    if (!c.ok) return c.result;
+    const { key, missing, basis } = c.args;
+    const item = itemByKey(key);
+    const at = now();
+    // before anything else: a protected item always reaches the operator. A Comms question in its
+    // first minutes is no item yet, so it is judged as the item it will become.
+    const pending = key.startsWith(COMMS_OPEN_PREFIX)
+      ? store.openCommsItems().find((m) => `${COMMS_OPEN_PREFIX}${m.id}` === key)
+      : undefined;
+    const judged: AttentionItem | undefined =
+      item ??
+      (pending === undefined
+        ? undefined
+        : ({
+            key,
+            kind: pending.label === "blocker" ? "blocked" : "question",
+            agentId: pending.from,
+            repoId:
+              config.crew?.sessions.find((s) => s.seats.some((x) => x.id === pending.from))
+                ?.repoId ?? null,
+            text: pending.text,
+            tool: null,
+            at: pending.at,
+            url: null,
+            escalationId: null,
+            ticket: pending.ticket,
+            owner: "operator",
+            acked: false,
+          } as AttentionItem));
+    if (judged !== undefined && protectedDecisionItem(store, judged, config, at))
+      return fail(PROTECTED_ITEM_REFUSED);
+    const ask = /^ask:([1-9]\d*)$/.exec(key);
+    const comms = key.startsWith(COMMS_OPEN_PREFIX) ? key.slice(COMMS_OPEN_PREFIX.length) : null;
+    if (ask === null && comms === null) return fail(RETURN_NOT_SEAT_QUESTION);
+    let seatId: string;
+    let runId: string | null;
+    let question: string;
+    let askAt: number;
+    let ticket: string | null;
+    if (ask !== null) {
+      const id = Number(ask[1]);
+      const q = store.question(id);
+      if (q === null || q.answeredAt !== null || seatCfg(q.agentId) === undefined)
+        return fail(noOpenQuestionText(id));
+      if (q.agentId === ctx.seatId) return fail(RETURN_NOT_SEAT_QUESTION);
+      seatId = q.agentId;
+      runId = q.runId;
+      question = q.text;
+      askAt = q.at;
+      ticket = store.run(q.runId)?.ticket ?? null;
+      if (unendedRun(seatId)?.id !== runId) return fail(askerRunEndedText(seatCallSign(seatId)));
+    } else {
+      const message = store.openCommsItems().find((m) => `${m.id}` === comms);
+      if (message === undefined || seatCfg(message.from) === undefined)
+        return fail(RETURN_NOT_SEAT_QUESTION);
+      if (message.from === ctx.seatId) return fail(RETURN_NOT_SEAT_QUESTION);
+      seatId = message.from;
+      runId = unendedRun(seatId)?.id ?? null;
+      if (runId === null) return fail(askerRunEndedText(seatCallSign(seatId)));
+      question = message.text;
+      askAt = item === undefined ? message.at : questionAskAt(item, item.brief);
+      ticket = message.ticket;
+    }
+    const call = seatCallSign(seatId);
+    try {
+      await deps.supervisor.message(seatId, returnedQuestionText(missing), {
+        interrupt: false,
+        questions: "none",
+      });
+    } catch (e) {
+      return fail(notSentText(e instanceof Error ? e.message : String(e)));
+    }
+    store.closeQuestion({
+      key,
+      askAt,
+      kind: "returned",
+      reason: missing,
+      by: ctx.seatId,
+      question,
+      ticket,
+      operator: item?.owner === OWNER_OPERATOR,
+      at,
+    });
+    if (comms !== null) store.settleCommsItem(comms, ctx.seatId, missing, at);
+    bus.emit("attention");
+    store.addComms({
+      at,
+      from: ctx.seatId,
+      senderKind: "flight",
+      to: seatId,
+      ticket,
+      text: returnedQuestionText(missing),
+    });
+    bus.emit("agents");
+    record(at, {
+      kind: "return",
+      seatId,
+      questionId: ask === null ? null : Number(ask[1]),
+      about: `${call}: ${question}`,
+      decision: missing,
+      basis,
+    });
+    bus.emit("flight");
+    return { text: returnedText(call) };
+  }
+
+  /** Takes a question FLIGHT wrote for the operator off Needs you, with a one-line reason. */
+  async function withdrawQuestion(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, WithdrawQuestionArgs, args);
+    if (!c.ok) return c.result;
+    const { key, reason, basis } = c.args;
+    const item = itemByKey(key);
+    const at = now();
+    if (item !== undefined && protectedDecisionItem(store, item, config, at)) {
+      if (item.brief?.by !== "flight" || !store.withdrawFlightBrief(key))
+        return fail(PROTECTED_ITEM_REFUSED);
+      bus.emit("attention");
+      record(at, {
+        kind: "withdraw",
+        ref: item.ticket,
+        about: item.brief.ask || item.text,
+        decision: reason,
+        basis,
+      });
+      bus.emit("flight");
+      return { text: "Brief withdrawn. The underlying question and its protections remain." };
+    }
+    if (key.startsWith("ask:")) return fail(WITHDRAW_SEAT_QUESTION);
+    if (item === undefined) return fail("Not withdrawn: that question is no longer open.");
+    const wrote =
+      (item.brief?.for === "operator" && item.brief.by === "flight") ||
+      (item.kind === "tag" && ownReply(item, flightSeat(config)?.seat.id ?? null));
+    if (!wrote) return fail(WITHDRAW_NOT_YOURS);
+    const question = item.brief?.ask || item.text;
+    store.closeQuestion({
+      key,
+      askAt: questionAskAt(item, item.brief),
+      kind: "withdrawn",
+      reason,
+      by: ctx.seatId,
+      question,
+      ticket: item.ticket,
+      operator: item.owner === OWNER_OPERATOR,
+      at,
+    });
+    const comms = key.startsWith(COMMS_OPEN_PREFIX) ? key.slice(COMMS_OPEN_PREFIX.length) : null;
+    const message = comms === null ? undefined : store.commsMessage(comms);
+    if (comms !== null) store.settleCommsItem(comms, ctx.seatId, reason, at);
+    // the seat whose live run is on the item is told
+    const noteRun = store.notes().find((n) => `${NOTE_KEY}${n.key}` === key)?.runId ?? null;
+    const seatId =
+      message?.from ?? (noteRun === null ? null : (store.run(noteRun)?.agentId ?? null));
+    if (seatId !== null && seatId !== ctx.seatId && unendedRun(seatId) !== null) {
+      const told = questionClosedText(question, reason);
+      try {
+        await deps.supervisor.message(seatId, told, { interrupt: false, questions: "none" });
+        store.addComms({
+          at,
+          from: ctx.seatId,
+          senderKind: "flight",
+          to: seatId,
+          ticket: item.ticket,
+          text: told,
+        });
+      } catch {
+        // the closure stands; the seat is not told
+      }
+    }
+    bus.emit("attention");
+    record(at, {
+      kind: "withdraw",
+      ...(seatId === null ? {} : { seatId }),
+      ref: item.ticket,
+      about: question,
+      decision: reason,
+      basis,
+    });
+    bus.emit("flight");
+    return { text: withdrawnText(key) };
   }
 
   async function startSeat(
@@ -1303,11 +1593,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const ref = `${repo.id}#${issue}`;
     const at = now();
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    const capacity = machineCapacity(
-      store.machineSamples(machineCapacitySince(at, capacityConfig)),
-      at,
-      capacityConfig,
-    );
+    const capacity = storedMachineCapacity(store, at, capacityConfig);
     if (capacity.blocked) return fail(`the machine has insufficient headroom: ${capacity.reason}`);
     const loopKind = seatDef(cfg).loop;
     if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
@@ -1324,6 +1610,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (accountAtStop(config, store, cfg.accountId, at)) {
       return fail(accountStoppedText(call, cfg.accountId));
     }
+    const brake = budgetBrake(config, store, cfg.accountId, at);
+    if (brake !== null) return fail(budgetBrakeText(call, brake, config.operator.timezone));
     // The card as it is now: the cached board is only refreshed by the poll, so a ticket closed or
     // moved since would otherwise be started on its old column. A card that cannot be read fails closed.
     let card: BoardItem | undefined;
@@ -1343,6 +1631,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       !(handoff && (column === "In review" || column === "In progress"))
     )
       return fail(wrongColumnText(ref, column));
+    // the operator set it aside with a question: starting it would undo that
+    if (card.labels.includes(WAITING_OPERATOR_LABEL)) return fail(waitingOperatorStartText(ref));
     // the previous run's PR: a ticket is not started again while one is open on it
     const openPr = store
       .pullRequests(repo.id)
@@ -1373,8 +1663,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if ("refusal" in chosen) return fail(chosen.refusal);
     const board = store.board(repo.id);
     const away = activeAway(store, now(), config.operator.timezone);
+    const pace = paceStartCheck(store, config, now());
     const refusal = eligibleToStart({
       ...(away ? { away: { pickUp: away.may.pickUp, flight: true } } : {}),
+      ...(pace ? { pace } : {}),
       repoId: repo.id,
       issue,
       card,
@@ -1496,6 +1788,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     store.addComms({
       at: now(),
       from: ctx.seatId,
+      senderKind: "flight",
       to: seat,
       ticket: ref,
       text: `Assigned ${ref}: ${card.title}`,
@@ -1549,7 +1842,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return startSeat(
       ctx,
       { seat: c.args.seat, issue: c.args.issue, basis: c.args.reason },
-      { fromSeat: source.agentId, branch: source.branch },
+      {
+        fromSeat: source.agentId,
+        // the open PR's head is the branch to push to; it can differ from the ended run's
+        branch: handoffTarget(store, {
+          runId: source.id,
+          repoId: repo.id,
+          ticket: ref,
+          branch: source.branch,
+          worktree: null,
+        }).branch,
+      },
     );
   }
 
@@ -1621,6 +1924,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           knownSecrets: deps.knownSecrets,
           now: () => at,
           seatSender: false,
+          senderKind: "flight",
           notify: async (to, _text) => {
             // A set-aside run has no seat to message, and FLIGHT only wakes its addressee.
             if (to !== seat || (lift !== null && !lift.onSeat)) return;
@@ -1892,6 +2196,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         ? column === "Ready" || column === "Refinement"
         : column === "Backlog" || (column === "Refinement" && to === "Ready");
     if (!allowed) return fail(moveWrongColumnText(ref, column));
+    // the operator set it aside with a question: it moves when they answer or move the card
+    if (to !== "Backlog" && card.labels.includes(WAITING_OPERATOR_LABEL))
+      return fail(waitingOperatorPromoteText(ref));
     if (store.activeTickets().has(ref)) return fail(moveHasRunText(ref));
     if (waitsOn !== undefined) {
       const waited = store.pullRequests(repo.id).find((p) => p.number === waitsOn);
@@ -1900,7 +2207,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (to === "Ready") {
       let body: string;
       try {
-        body = (await deps.fetchTicket(repo, issue))?.body ?? "";
+        const ticket = await deps.fetchTicket(repo, issue);
+        body = ticket?.body ?? "";
+        const prototypeProblem =
+          ticket?.prototypeProblem ?? prototypeLinkProblem(body, repo.github);
+        if (prototypeProblem !== null) return fail(`Not moved: ${ref} ${prototypeProblem}`);
       } catch {
         return fail(PROMOTE_NO_GITHUB);
       }
@@ -2046,7 +2357,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         workReady = false,
         workAttempt = false;
       if (recommendationId) {
-        const recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
+        let recommendation = store.codeHealthRecommendation(repo.id, recommendationId);
+        // FLIGHT accepts a proposal of its own tier by filing its work; every other rule waits for the operator.
+        if (
+          recommendation?.state.kind === "proposed" &&
+          CODE_HEALTH_FLIGHT_TIER_RULES.includes(recommendation.rule)
+        ) {
+          try {
+            recommendation = store.flightAcceptCodeHealth(
+              repo.id,
+              recommendationId,
+              ctx.seatId,
+              basis,
+              now(),
+            );
+          } catch {
+            return fail("That recommendation changed while FLIGHT accepted it. Read it again.");
+          }
+        }
         if (
           !recommendation ||
           !(
@@ -2309,13 +2637,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
 
   /** The always_ask and lane refusals of edit_card, for any card a tool names. */
   function cardProblem(card: BoardItem, rules: RepoRules): string | null {
-    const lane = config.crew?.lane;
-    if (rules.alwaysAsk.some((g) => card.labels.some((l) => globMatches(g, l, true))))
-      return "this is an always_ask ticket";
-    const lanes = card.labels.filter((l) => l.startsWith(LANE_LABEL_PREFIX));
-    if (lanes.length > 1 || (lane && lanes.length === 1 && lanes[0] !== `lane:${lane}`))
-      return "this ticket belongs to another lane or has conflicting lanes";
-    return null;
+    return cardProblemOf(config, card, rules);
   }
 
   /** add_controller_check's act (see superTool): the powers, Away and engine checks are made. */
@@ -2383,7 +2705,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (held === null || !held.split("\n").some((l) => l.trim() === `- ${a.item.trim()}`))
       return refuse("the edit could not be confirmed on GitHub; read the ticket");
     return {
-      text: `Added to ${CONTROLLER_CHECK_HEADING} on ${ref}: ${cut(a.item, 120)}${edit.removed ? " (moved from Done when)" : ""}. The engine now holds its PR for the controller.`,
+      text: `Added to ${CONTROLLER_CHECK_HEADING} on ${ref}: ${cut(a.item, 120)}${edit.removed ? " (moved from Done when)" : ""}. The engine now holds its PR until you record the check's verdict.`,
     };
   }
 
@@ -2432,89 +2754,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return refuse("the replacement must be an open ticket on this repo's board");
     const nextProblem = unfit(next);
     if (nextProblem !== null) return refuse(`the replacement: ${nextProblem}`);
-    if (store.activeTickets().has(ref)) return refuse("the ticket has a live run");
-    if (
-      store
-        .pullRequests(repo.id)
-        .some(
-          (p) =>
-            p.state === "open" && (p.ticket === ref || p.closingIssues?.includes(a.issue) === true),
-        )
-    )
-      return refuse("the ticket has an open PR");
-    const blocked = cards.filter(
-      (c) => !c.closed && c.blockedBy.some((b) => !b.closed && b.ref === ref),
+    const closable = await closeBlocker(
+      { store, gh: deps.gh, dbPath: deps.dbPath, fetchTicket: deps.fetchTicket, log: deps.log },
+      "close_ticket",
+      repo,
+      card,
     );
-    if (blocked.length > 0)
-      return refuse(
-        `open tickets are blocked by it (${blocked.map((c) => `${repo.id}#${c.issueNumber}`).join(", ")}); closing it would unblock them`,
-      );
-    if (card.subIssues && card.subIssues.done < card.subIssues.total)
-      return refuse("the ticket has open sub-issues");
-    // "Depends on #N" in a waiting ticket's body also holds it back; an unreadable body fails closed
-    const waiting = cards.filter(
-      (c) =>
-        !c.closed &&
-        c.issueNumber !== a.issue &&
-        (["Backlog", "Ready", "Refinement", "Blocked"] as string[]).includes(hudColumnOf(c)),
-    );
-    // one search for the tickets that mention the number; only those are read
-    const searched = await ghRead("close_ticket", [
-      "search",
-      "issues",
-      String(a.issue),
-      `--repo=${repo.github}`,
-      "--state=open",
-      "--match=body",
-      "--json=number",
-      `--limit=${String(FLIGHT_CLOSE_SEARCH_LIMIT)}`,
-    ]);
-    let mentioning: Set<number> | null = null;
-    if (searched.ok) {
-      try {
-        const found: unknown = JSON.parse(searched.stdout);
-        if (Array.isArray(found) && found.length < FLIGHT_CLOSE_SEARCH_LIMIT)
-          mentioning = new Set(found.map((f) => asNum(asRecord(f).number)));
-      } catch {
-        // unreadable: fails closed below
-      }
-    }
-    if (mentioning === null) return refuse("could not search the open tickets for dependents");
-    const candidates = waiting.filter((c) => mentioning.has(c.issueNumber));
-    const bodies: (TicketView | null)[] = [];
-    for (let i = 0; i < candidates.length; i += FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
-      bodies.push(
-        ...(await Promise.all(
-          candidates
-            .slice(i, i + FLIGHT_CLOSE_DEPENDENT_READ_BATCH)
-            .map((c) => read(c.issueNumber)),
-        )),
-      );
-    const dependents: string[] = [];
-    for (const [i, t] of bodies.entries()) {
-      if (t === null || t.bodyTruncated) return refuse("a waiting ticket's body could not be read");
-      if (dependsOn(t.body).includes(a.issue))
-        dependents.push(`${repo.id}#${candidates[i]?.issueNumber}`);
-    }
-    if (dependents.length > 0)
-      return refuse(
-        `open tickets depend on it (${dependents.join(", ")}); closing it would unblock them`,
-      );
-    let target: TicketView | null;
+    if ("refusal" in closable) return refuse(closable.refusal);
+    const target = closable.target;
     let replacementTicket: TicketView | null;
     try {
-      [target, replacementTicket] = await Promise.all([
-        deps.fetchTicket(repo, a.issue),
-        deps.fetchTicket(repo, replacement),
-      ]);
+      replacementTicket = await deps.fetchTicket(repo, replacement);
     } catch {
       return refuse("GitHub is unreachable");
     }
-    if (target?.state !== "open") return refuse("the ticket is not open");
-    if (target.pullRequests.some((pr) => pr.state === "open"))
-      return refuse("the ticket has an open PR");
-    if (target.subIssues.some((sub) => sub.state === "open"))
-      return refuse("the ticket has open sub-issues");
     if (replacementTicket?.state !== "open") return refuse("the replacement is not an open issue");
     // gh posts the comment, then closes: the two are not atomic. The card's move to Done is #50.
     const startedAt = now();
@@ -2562,6 +2815,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, FlightStateArgs, args);
     if (!c.ok) return c.result;
+    const full = c.args.full === true;
     const repo = repoOf();
     if (repo)
       await refreshAuthors(store, deps.gh, crewDir(deps.dbPath), repo.id, repo.github, now());
@@ -2578,11 +2832,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     markPrsShown(store, state);
     markItemsShown(store, state);
     markRetrospectiveShown(store, state);
+    markPointersShown(store, config, state, now());
     deps.seen?.(ctx.runId, state);
     const { wake: _wake, ...shown } = state;
     return {
       text: JSON.stringify({
         ...shown,
+        signals: full ? shown.signals : compactSignals(shown.signals, now()),
         items: state.items.map((item) => {
           const thread = parsePersonKey(item.key);
           const n = thread ? store.notification(thread.id) : null;
@@ -2641,8 +2897,26 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (hold && key === FLIGHT_NOT_TRIAGING_KEY) return fail(HOLD_NOT_TRIAGING_REFUSED);
     const assessment = structured.assessment ?? context;
     if (assessment === undefined) return fail("Give assessment (or legacy context).");
+    const named = structured.ticket?.split("#")[0];
+    if (named !== undefined && !config.repos.some((r) => r.id === named))
+      return fail(
+        `Not briefed: ticket ${structured.ticket} names no repo of this hub. Use repo#n with one of: ${config.repos.map((r) => r.id).join(", ")}.`,
+      );
     if (structured.for === "operator" && structured.ask === undefined)
       return fail("Give a non-empty ask when passing an item to the operator.");
+    const candidate = {
+      ...structured,
+      context: assessment,
+      assessment,
+      recommendation,
+      options: options ?? [],
+      basis,
+      at: now(),
+    };
+    if (structured.for === "operator") {
+      const problem = completeBriefError(candidate);
+      if (problem) return fail(problem);
+    }
     const ids = (options ?? []).flatMap((o) => (o.id ? [o.id] : []));
     if (
       new Set(ids).size !== ids.length ||
@@ -2656,8 +2930,36 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const item = operatorItems(config, store, at, deps.login, undefined, deps.lockState?.()).find(
       (i) => i.key === key,
     );
-    if (item === undefined || ownReply(item, flightSeat(config)?.seat.id ?? null)) {
+    // FLIGHT's own @CAPCOM question reaches the operator only through its brief (#1543)
+    if (
+      item === undefined ||
+      (structured.for !== "operator" && ownReply(item, flightSeat(config)?.seat.id ?? null))
+    ) {
       return fail(briefNoItemText(key));
+    }
+    // a protected item always reaches the operator: it is briefed, never held back
+    if (hold && protectedDecisionItem(store, item, config, at)) return fail(PROTECTED_ITEM_REFUSED);
+    // the Needs you entry check (#1543), at the source: a brief that would not reach the operator
+    // is refused here, with what it lacks, so FLIGHT fixes it in one try
+    if (structured.for === "operator" && !hubAlert(item, store)) {
+      const faults = needsYouEntryFaults(
+        {
+          ...item,
+          brief: {
+            for: "operator",
+            ask: structured.ask ?? "",
+            context: assessment,
+            recommendation,
+            options: options ?? [],
+            basis,
+            at,
+            ...(structured.ticket === undefined ? {} : { ticket: structured.ticket }),
+            ...(structured.person === undefined ? {} : { person: structured.person }),
+          },
+        },
+        crewSeatIds(config),
+      );
+      if (faults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${faults.join("; ")}.`);
     }
     if (structured.for === "flight") {
       if (isOperatorCall(item, store))
@@ -2687,42 +2989,87 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     // whether the operator already had this item with FLIGHT's brief, before this one replaces it
     const prior = store.briefs().get(key);
     const wasOperators = prior !== undefined && prior.for !== "flight";
+    let briefedAt = at;
     try {
-      store.addBrief({
-        ...structured,
-        key,
-        original: originalItemText(item).slice(0, BRIEF_INPUT_MAX),
-        assessment,
-        context: assessment,
+      const content = {
+        ...candidate,
+        by: "flight" as const,
+        original: originalItemText(item),
         ask: structured.ask ?? "",
-        recommendation,
-        options: options ?? [],
-        basis,
         at,
-        defaultEligible: !protectedDecisionItem(store, item, config, at),
-      });
-    } catch {
-      return fail("Source changed; refresh the item before drafting.");
-    }
-    // A seat's question goes to the operator only this way (#758): briefed, it is passed, so the
-    // engine holds its run for the operator's answer, and the pass is in Decided without you.
-    const ask = /^ask:(\d+)$/.exec(key);
-    const question = ask === null ? null : store.question(Number(ask[1]));
-    // Kept for FLIGHT, a passed question is FLIGHT's again: answer_question can close it, and the
-    // engine no longer holds its run for the operator.
-    if (structured.for === "flight" && question !== null && question.passedAt !== null)
-      store.unpassQuestion(question.id);
-    // Handed to the operator now (passed here, or passed earlier without a brief): record the pass.
-    if (structured.for === "operator" && question !== null && !wasOperators) {
-      if (question.passedAt === null) store.passQuestion(question.id, at);
-      record(at, {
-        kind: "pass",
-        seatId: question.agentId,
-        questionId: question.id,
-        about: `${seatCallSign(question.agentId)}: ${question.text}`,
-        decision: PASSED_DECISION,
-        basis,
-      });
+      };
+      const bound: AttentionBrief =
+        structured.for === "operator"
+          ? await bindCompleteBrief(
+              {
+                config,
+                store,
+                now,
+                prepareQueue: deps.prepareQueueReorder,
+                actor: { seatId: ctx.seatId, runId: ctx.runId },
+              },
+              item,
+              content,
+              { seatId: ctx.seatId, runId: ctx.runId },
+            )
+          : content;
+      briefedAt = now();
+      store.addPreparedBrief(
+        () => ({
+          ...(bound.binding
+            ? bindPreparedBrief(
+                { config, store, now },
+                item,
+                { ...bound, at: briefedAt },
+                bound.binding.preparedBy,
+                bound.binding.actions,
+              )
+            : bound),
+          key,
+          at: briefedAt,
+          defaultEligible: !protectedDecisionItem(store, item, config, briefedAt),
+        }),
+        () => {
+          const ask = /^ask:(\d+)$/.exec(key);
+          const question = ask ? store.question(Number(ask[1])) : null;
+          if (structured.for === "flight" && question?.passedAt !== null && question)
+            store.unpassQuestion(question.id);
+          if (
+            structured.for === "operator" &&
+            structured.decision?.whyOperator &&
+            question &&
+            !wasOperators
+          ) {
+            if (question.passedAt === null) store.passQuestion(question.id, briefedAt);
+            record(briefedAt, {
+              kind: "pass",
+              seatId: question.agentId,
+              questionId: question.id,
+              about: `${seatCallSign(question.agentId)}: ${question.text}`,
+              decision: PASSED_DECISION,
+              basis,
+            });
+          }
+          if (
+            hold &&
+            !holdItem(
+              store,
+              key,
+              recommendation.slice(0, 1000),
+              hold.condition,
+              "FLIGHT",
+              briefedAt,
+            )
+          )
+            throw new Error(HOLD_CYCLE_REFUSED);
+        },
+      );
+    } catch (error) {
+      return fail(
+        error instanceof Error
+          ? error.message
+          : "Source changed; refresh the item before drafting.",
+      );
     }
     if (structured.person) {
       const match = /^person:(\d+):(\d+)$/.exec(key);
@@ -2739,13 +3086,12 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           arrivalId: n.id,
           version: structured.person.source.revision,
           arrivedAt: n.updatedAt,
-          at,
+          at: briefedAt,
           text: n.title,
           outcome: drafted ? "Reply drafted" : "Asked of you",
           detail: recommendation,
         });
     }
-    if (hold) holdItem(store, key, recommendation.slice(0, 1000), hold.condition, "FLIGHT", at);
     bus.emit("attention");
     bus.emit("flight");
     return {
@@ -2815,6 +3161,68 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     } catch {
       return { value: null, stderr: "" };
     }
+  }
+
+  /**
+   * merge_pr on a run that is not awaiting FLIGHT because the PR's head came from outside the run
+   * (a seat's other worktree, a person, a bot): FLIGHT adopts the head as the run's push, so CI and
+   * RETRO check it, instead of leaving the PR with no way out. The ordinary refusal otherwise.
+   */
+  async function adoptOutsideHead(
+    run: Run,
+    a: z.output<typeof PrBasisArgs>,
+    repo: CcConfig["repos"][number],
+    ctx: McToolContext,
+  ): Promise<Result> {
+    const no = () => fail("No awaiting-flight run PR in your lane.");
+    const phase = run.loop?.phase;
+    if (
+      !deps.engine?.adoptPrHead ||
+      (phase !== "review" && phase !== "ci") ||
+      flightPowersOf(config, repo.id) !== "superuser"
+    )
+      return no();
+    const { value } = await ghObject("merge_pr", [
+      "pr",
+      "view",
+      String(a.pr),
+      `--repo=${repo.github}`,
+      "--json=headRefOid,headRefName,isCrossRepository,state",
+    ]);
+    const head = value?.headRefOid;
+    if (
+      value?.state !== "OPEN" ||
+      value.isCrossRepository !== false ||
+      value.headRefName !== run.branch ||
+      typeof head !== "string" ||
+      !/^[a-f0-9]{40}$/.test(head) ||
+      head === store.runPush(run.id)?.sha
+    )
+      return no();
+    const known = await readKnown(deps, "merge_pr");
+    const problem = await textProblem(
+      ctx,
+      "merge_pr",
+      repo.github,
+      a.pr,
+      [{ label: "basis", text: a.basis }],
+      known,
+    );
+    if (problem) return fail(problem);
+    if (held(store.run(run.id) ?? run, "merge")) return fail("Run is held.");
+    if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
+    if (!(await deps.engine.adoptPrHead(run.id, head)))
+      return fail("The merge gates changed; refresh the PR.");
+    const text = `PR #${a.pr}'s head ${head.slice(0, 7)} came from outside the run. FLIGHT adopted it; CI and RETRO now check it. Call merge_pr again when it awaits you.`;
+    record(now(), {
+      kind: "sync",
+      about: `PR #${a.pr}`,
+      ref: run.ticket,
+      targetRunId: run.id,
+      decision: text,
+      basis: a.basis,
+    });
+    return { text };
   }
 
   async function readPr(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3015,6 +3423,20 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       !CREW_LANES.some((lane) => a.owner === `${LANE_LABEL_PREFIX}${lane}`)
     )
       return fail(ledgerOwnerText(a.owner));
+    const repoIds = config.repos.map((r) => r.id);
+    const pointable: Record<FlightPointerKind, (t: string) => boolean> = {
+      pr: (t) => /^[^#\s]+#[1-9]\d*$/.test(t) && repoIds.includes(t.slice(0, t.lastIndexOf("#"))),
+      ticket: (t) =>
+        /^[^#\s]+#[1-9]\d*$/.test(t) && repoIds.includes(t.slice(0, t.lastIndexOf("#"))),
+      seat: (t) => session.seats.some((s) => s.id === t),
+      repo: (t) => repoIds.includes(t),
+      person: (t) => LOGIN.test(t),
+      metric: (t) => (METRIC_IDS as readonly string[]).includes(t),
+    };
+    for (const p of a.pointers ?? []) {
+      if (!FLIGHT_POINTER_FED_KINDS.includes(p.kind)) return fail(ledgerPointerUnfedText(p.kind));
+      if (!pointable[p.kind](p.target)) return fail(ledgerPointerText(p.kind, p.target));
+    }
     const at = now();
     const entries = store.flightLedger(session.id);
     const old = entries.find((e) => e.key === a.key);
@@ -3030,6 +3452,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       due: a.due === undefined ? (old?.due ?? null) : a.due,
       refs: a.refs === undefined ? (old?.refs ?? []) : (a.refs ?? []),
       priority: a.priority === undefined ? (old?.priority ?? null) : a.priority,
+      ...(a.pointers === undefined
+        ? old?.pointers === undefined
+          ? {}
+          : { pointers: old.pointers }
+        : {
+            pointers: (a.pointers ?? []).map((p) => {
+              const kept = old?.pointers?.find((o) => o.kind === p.kind && o.target === p.target);
+              return kept ?? { ...p, changedAt: null, change: null, readAt: null };
+            }),
+          }),
       createdAt: old?.createdAt ?? at,
       updatedAt: at,
       outcome: null,
@@ -3237,7 +3669,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       ctx: McToolContext,
     ) => Promise<Result>,
     inputSchema: object = z.toJSONSchema(schema),
-    options: { engine?: boolean; records?: boolean } = {},
+    options: { engine?: boolean; records?: boolean; refusals?: boolean } = {},
   ): McTool {
     return {
       name,
@@ -3261,7 +3693,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           // close_ticket records its own decision (ref, title, URL) once a write has landed.
           if (
             kind !== "close" &&
-            options.records !== false &&
+            (options.records !== false || (options.refusals === true && result.isError)) &&
             (kind !== "rerun" || !result.isError)
           )
             record(now(), { kind, about: name, decision: result.text, basis: c.args.basis });
@@ -3273,8 +3705,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     };
   }
 
-  function held(run: Run): boolean {
-    return heldRun(store, config, now(), run, repoOf()?.id);
+  function held(run: Run, action: "work" | "merge" = "work"): boolean {
+    return heldRun(store, config, now(), run, repoOf()?.id, { action });
   }
   function prRun(pr: number): Run | null {
     const repo = repoOf();
@@ -3290,7 +3722,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           r.loop?.prNumber === pr &&
           r.branch === row?.branch,
       );
-    if (!run || !row || isRefusal(devRun(run.id)) || held(run)) return null;
+    if (!run || !row || isRefusal(devRun(run.id)) || held(run, "merge")) return null;
     return inRunLane(run) ? run : null;
   }
   function inRunLane(run: Run): boolean {
@@ -3305,8 +3737,42 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   const ResumeSeatArgs = z.strictObject({ seat: z.string().regex(SEAT_ID), basis: basisArg });
+  const MoveReviewArgs = z.strictObject({
+    reviewId: z.number().int().positive(),
+    seat: z.string().regex(SEAT_ID),
+    basis: basisArg,
+  });
+  const P0_TICKET_BASIS = /(?:\bP0\b.*\b[^\s#]+#[1-9]\d*\b|\b[^\s#]+#[1-9]\d*\b.*\bP0\b)/;
 
   const superTools = [
+    superTool(
+      MC_TOOL_NAMES.moveReview,
+      "Move one queued review to a named review seat. The target account must not be at its usage stop. A budget-brake pass needs a basis that names a P0 ticket; the basis is recorded. The queued review keeps its head, round and review model rule.",
+      MoveReviewArgs,
+      "status",
+      async (a) => {
+        const review = store.review(a.reviewId);
+        if (review === null) return fail("Queued review not found.");
+        if (review.state !== "queued") return fail("Review is no longer queued.");
+        const target = seatCfg(a.seat);
+        if (target === undefined) return fail(notInSessionText(a.seat));
+        if (target.id === review.seatId)
+          return fail(`${seatCallSign(target.id)} already has this review.`);
+        if (seatDef(target).loop !== "review" || modeOfSeat(target) !== "scratch")
+          return fail(`${seatCallSign(a.seat)} is not a review seat.`);
+        if (target.retiring) return fail(`${seatCallSign(target.id)} is retiring.`);
+        if (seatUnavailable(target)) return fail(`${seatCallSign(target.id)} is unavailable.`);
+        const at = now();
+        if (accountAtStop(config, store, target.accountId, at))
+          return fail(accountStoppedText(seatCallSign(a.seat), target.accountId));
+        const brakeOverride = budgetBrake(config, store, target.accountId, at) !== null;
+        if (brakeOverride && !P0_TICKET_BASIS.test(a.basis))
+          return fail("The target account's budget brake needs a basis that names a P0 ticket.");
+        if (!store.moveQueuedReview(review.id, target.id, at, brakeOverride))
+          return fail("Review is no longer queued.");
+        return { text: `Moved queued review ${review.id} to ${seatCallSign(target.id)}.` };
+      },
+    ),
     superTool(
       MC_TOOL_NAMES.resumeSeat,
       "Resume a seat's unfinished run when no live session holds it (after a stop, a crew pause, an error or a restart). A stop can be lifted; a crew-pause exception applies only to this unfinished run, including a live session that is paused. The original pause keeps covering other work. A failed resume removes its own exception and restores the stop unless the operator changed it. Refuses budget, account, Away-quota, machine-capacity and held runs.",
@@ -3359,11 +3825,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return { text };
         }
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         if (capacity.blocked)
           return fail(`the machine has insufficient headroom: ${capacity.reason}`);
         if (row.state === "stopped")
@@ -3442,7 +3904,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.mergePr,
-      "Clear a crew PR for engine merge, or merge an eligible controller PR without inventing an author run. Exact-head QA, CI, repository approvals, acceptance and holds remain required.",
+      "Clear a crew PR for engine merge on any path (your own tools, access, CLAUDE.md and .github/** included), or merge an eligible PR with no unfinished crew run without inventing an author run. When the PR's head came from outside the run, it adopts that head so CI and RETRO check it. Exact-head QA, CI, always_ask approvals, acceptance and holds remain required. Each merge that needed your call is logged as a merge decision on the FLIGHT page, with its reasons; the hub sends no message.",
       PrBasisArgs,
       "merge",
       async (a, repo, ctx) => {
@@ -3467,36 +3929,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             fetchTicket: deps.fetchTicket,
           });
           if (!result.isError)
-            record(now(), {
-              kind: "merge",
-              about: `External PR #${a.pr}`,
-              decision: result.text,
-              basis: a.basis,
-              seatId: ctx.seatId,
-            });
+            recordExternalMerge(
+              { record: (d) => record(now(), d) },
+              {
+                pr: a.pr,
+                repoId: repo.id,
+                text: result.text,
+                basis: a.basis,
+                seatId: ctx.seatId,
+                ...(result.paths === undefined ? {} : { paths: result.paths }),
+                ...(result.ticket === undefined ? {} : { ticket: result.ticket }),
+              },
+            );
           return result;
         }
-        if (!run.loop?.awaitingFlight || !deps.engine?.clearFlight)
-          return fail("No awaiting-flight run PR in your lane.");
+        if (!deps.engine?.clearFlight) return fail("No awaiting-flight run PR in your lane.");
+        if (!run.loop?.awaitingFlight) return adoptOutsideHead(run, a, repo, ctx);
         const sha = run.loop.awaitingFlight;
-        const protectsFlight = run.loop.touches?.paths.some((path) =>
-          FLIGHT_CONTROLLER_CHECK_PATHS.some((pattern) => globMatches(pattern, path, true)),
-        );
-        if (
-          protectsFlight &&
-          !(run.loop.controllerCheck?.sha === sha && run.loop.controllerCheck.pass)
-        )
-          return fail(
-            "An independent controller must record a passing check on this head before FLIGHT clears its runtime or approval rules.",
-          );
-        // CLAUDE.md and .github/** are the repo's rules: only a controller's approval for this head lifts them
-        const approval = flightFloorBlocked(run.loop)
-          ? mergeFloorApproval(store, a.pr, sha, now())
-          : undefined;
-        if (flightFloorBlocked(run.loop) && approval === undefined)
-          return fail(
-            `This PR touches CLAUDE.md or .github/**, which are the repo's rules. A controller approves the merge with POST /api/flight/approvals { rule: "merge-floor", scope: "${mergeFloorScope(a.pr, sha.slice(0, 12))}", until, reason }; then call merge_pr again.`,
-          );
+        const reasons = flightClearanceReasons(run.loop, sha);
         const { value } = await ghObject("merge_pr", [
           "pr",
           "view",
@@ -3533,19 +3983,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           known,
         );
         if (problem) return fail(problem);
-        if (held(store.run(run.id) ?? run)) return fail("Run is held.");
+        if (held(store.run(run.id) ?? run, "merge")) return fail("Run is held.");
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         if (!(await deps.engine.clearFlight(run.id, sha)))
           return fail("The merge gates changed; refresh the PR.");
-        if (approval !== undefined) {
-          record(now(), {
-            kind: "approval",
-            about: `merge_pr #${a.pr}`,
-            decision: `Used the controller's approval (${approval.reason}) to clear PR #${a.pr} past the repo rules.`,
-            basis: a.basis,
-            targetRunId: run.id,
-          });
-        }
+        record(now(), {
+          kind: "merge",
+          about: `PR #${a.pr}`,
+          ref: run.ticket,
+          targetRunId: run.id,
+          decision: `Cleared PR #${a.pr} at ${sha.slice(0, 7)}${reasons.length > 0 ? `: ${reasons.join("; ")}` : ""}`,
+          basis: a.basis,
+        });
         if (activeAway(store, now(), config.operator.timezone)) return fail(AWAY_WRITES_REFUSED);
         const posted = await deps.gh(
           [
@@ -3562,10 +4011,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           text: `Cleared PR #${a.pr}; the engine handles the merge.${posted.code !== 0 ? " Could not post the clearance basis." : ""}`,
         };
       },
+      z.toJSONSchema(PrBasisArgs),
+      // a landed merge logs its own decision with the run and ticket; a refusal is logged as any other
+      { records: false, refusals: true },
     ),
     superTool(
       MC_TOOL_NAMES.settlePark,
-      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds.`,
+      `Settle a parked run: lift a stuck park, request a fresh RETRO review, accept findings, or send them for rework. For a blocking review on floor-enforcing paths, which you cannot accept past, second_review starts one independent review on the most capable model and another reviewer account; its verdict decides (once per head), and your basis is its reason. Rework grants a further review round and waits for a seat on another run; an optional short note follows RETRO's findings to the seat. Never overrides budgets, accounts, hard-rule floors or operator holds. Accept is refused when the last review failed the design check: only the operator accepts that.`,
       SettleArgs,
       "settle",
       async (a) => {
@@ -3577,7 +4029,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         if (!run.loop?.parked) return fail("Run is not parked.");
         const kinds =
           a.action === "lift"
-            ? ["stuck"]
+            ? ["stuck", "gate"]
             : a.action === "rereview"
               ? ["review", "review-ruling", "review-failed"]
               : ["review", "review-ruling"];
@@ -3618,6 +4070,15 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             text: `Settled ${run.id}: second_review requested; the first review held (${said}). A fresh review on the most capable model, on another reviewer account, decides.`,
           };
         }
+        if (a.action === "accept")
+          record(now(), {
+            kind: "settle",
+            about: run.id,
+            ref: run.ticket,
+            targetRunId: run.id,
+            decision: `Accepted the review findings on PR #${run.loop.prNumber ?? "?"}`,
+            basis: a.basis,
+          });
         return { text: `Settled ${run.id}: ${a.action}.` };
       },
     ),
@@ -3876,6 +4337,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.login,
         ).find((i) => i.key === a.key);
         if (waiting === undefined) return fail("Item is no longer waiting.");
+        if (protectedDecisionItem(store, waiting, config, now()))
+          return fail(PROTECTED_ITEM_REFUSED);
         if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
           return fail(HOLD_CYCLE_REFUSED);
         bus.emit("attention");
@@ -4054,6 +4517,22 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       call: answerQuestion,
     },
     {
+      name: MC_TOOL_NAMES.returnQuestion,
+      description: `Send a seat's question back to the run that asked it, with what is missing, when you cannot explain it to the operator or answer it yourself. missing is 1-${QUESTION_REASON_MAX} characters. A protected item (an approval, flag, rate limit, or a hold on the operator's rules) cannot be returned.`,
+      inputSchema: z.toJSONSchema(ReturnQuestionArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: returnQuestion,
+    },
+    {
+      name: MC_TOOL_NAMES.withdrawQuestion,
+      description: `Take a question you wrote for the operator off Needs you when it no longer stands, with a one-line reason of at most ${QUESTION_REASON_MAX} characters. Only a question you wrote yourself, and never a protected item; a seat's question is answered or returned instead.`,
+      inputSchema: z.toJSONSchema(WithdrawQuestionArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: withdrawQuestion,
+    },
+    {
       name: MC_TOOL_NAMES.startSeat,
       description: START_SEAT_DESCRIPTION,
       inputSchema: objectSchema(
@@ -4106,7 +4585,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       name: MC_TOOL_NAMES.flightState,
       description:
         "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and the runaway breaker; and your brief.",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      inputSchema: {
+        type: "object",
+        properties: {
+          full: {
+            type: "boolean",
+            description:
+              "List every signal, including the expired waits that are otherwise folded into one line with a count.",
+          },
+        },
+        additionalProperties: false,
+      },
       modes: [],
       grantable: ["read-only"],
       call: readState,
@@ -4174,8 +4663,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           recommendationId: {
             type: "string",
             pattern: "^chr_[a-f0-9]{32}$",
-            description:
-              "Optional accepted code-health recommendation. Durable link and recovery prevent duplicate work on retry.",
+            description: CODE_HEALTH_RECOMMENDATION_ID_DESCRIPTION,
           },
           title: { type: "string", minLength: 1, maxLength: FLIGHT_TICKET_TITLE_MAX },
           body: { type: "string", minLength: 1, maxLength: TICKET_BODY_MAX },
@@ -4229,7 +4717,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.addControllerCheck,
-      `Add one item under a ticket's ${CONTROLLER_CHECK_HEADING} so the engine holds its PR for the controller (creating the section when missing); an identical Done when line moves there. Only that section and line change. Refuses a closed ticket. It can only add a hold.`,
+      `Add one item under a ticket's ${CONTROLLER_CHECK_HEADING} so the engine holds its PR until a verdict is recorded (creating the section when missing); an identical Done when line moves there. Only that section and line change. Refuses a closed ticket. It can only add a hold.`,
       AddControllerCheckArgs,
       "card",
       addControllerCheck,
@@ -4454,6 +4942,8 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.recall,
     MC_TOOL_NAMES.holdItem,
     MC_TOOL_NAMES.releaseHold,
+    MC_TOOL_NAMES.returnQuestion,
+    MC_TOOL_NAMES.withdrawQuestion,
   ]);
   return flightTools.map((tool) => ({
     ...tool,

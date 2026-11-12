@@ -26,13 +26,10 @@ describe("Overview layout (hud.css)", () => {
       String.raw`\.flight-notebook-index a`,
       String.raw`\.flight-note-heading h3 a`,
       String.raw`\.flight-markdown-source summary`,
-      String.raw`\.comms-spider-legend \.away`,
       String.raw`\.seg button`,
       String.raw`\.comms-section-head \.comms-needs-link`,
       String.raw`\.comms-mentions-panel header button`,
       String.raw`\.comms-ref`,
-      String.raw`\.map-results button`,
-      String.raw`\.map-timeline-controls button`,
     ]) {
       expect(rule(selector), selector).toMatch(/font(?:-size)?: (?:600 )?var\(--fs-s\)/);
     }
@@ -42,7 +39,6 @@ describe("Overview layout (hud.css)", () => {
     for (const selector of [
       String.raw`\.ph \.act \.ph-link`,
       String.raw`\.flight-markdown-source summary`,
-      String.raw`\.comms-spider-legend \.away`,
       String.raw`\.comms-section-head \.comms-needs-link`,
     ]) {
       const action = rule(selector);
@@ -50,7 +46,6 @@ describe("Overview layout (hud.css)", () => {
       expect(action, selector).toContain("align-items: center");
       expect(action, selector).toContain("min-height: 24px");
     }
-    expect(rule(String.raw`\.comms-spider-legend \.away`)).toContain("min-width: 24px");
     expect(rule(String.raw`\.tip-state`)).toContain("font-size: var(--fs-s)");
     expect(rule(String.raw`\.comms-ref`)).not.toContain("font-size: var(--fs-micro)");
   });
@@ -66,7 +61,6 @@ describe("Overview layout (hud.css)", () => {
     expect(css).toMatch(
       /\.overview-primary,\s*\.overview-secondary \{[^}]*display: flex;[^}]*flex-direction: column/,
     );
-    expect(css).toContain("margin-top: calc(var(--crew-height, 0px) + var(--sp-3))");
     expect(rule("#agentsList")).toContain("overflow-y: auto");
     expect(rule("#agentsList")).toContain("overflow-x: auto");
     expect(rule("#agentsList")).toContain("max-height: calc(12 * var(--table-row))");
@@ -127,9 +121,11 @@ describe("Overview layout (hud.css)", () => {
     expect(shell).not.toContain("margin: 0 auto");
   });
 
-  it("wraps the header before its desktop contents fit and keeps tabs within their row", () => {
+  it("wraps the header before its desktop contents fit and never shrinks the tabs", () => {
     const desktop = css.match(/@media \(min-width: 1280px\) \{\s*\.top \{([^}]*)\}/)?.[1] ?? "";
-    expect(desktop).toContain("flex-wrap: nowrap");
+    // from 1280 the tabs keep their full width; the status meters wrap below them when they don't fit
+    expect(desktop).not.toContain("flex-wrap: nowrap");
+    expect(css).toMatch(/@media \(min-width: 1280px\) \{[\s\S]*?\.tabs \{\s*flex: none;/);
     expect(rule(String.raw`\.top`)).toContain("flex-wrap: wrap");
     expect(rule(String.raw`\.tabs`)).toContain("overflow-x: auto");
     expect(rule(String.raw`\.tabs`)).toContain("max-width: 100%");

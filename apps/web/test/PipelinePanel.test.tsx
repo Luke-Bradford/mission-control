@@ -5,6 +5,7 @@ import { hub } from "../src/data.ts";
 import { cardTitle, PipelinePanel } from "../src/overview/PipelinePanel.tsx";
 import { setSession } from "../src/shell/session.ts";
 import { stubFetch } from "./fetchStub.ts";
+import { crewRow, METRICS_VIEW, OVERVIEW } from "./fixtures.ts";
 
 const stages: PipelineStage["stage"][] = [
   "ready",
@@ -31,9 +32,100 @@ const pipeline: PipelineStage[] = stages.map((stage, i) => ({
     },
   ],
 }));
-const summary = (p = pipeline) => ({ pipeline: p }) as OverviewSummary;
+const summary = (p = pipeline) => ({ ...OVERVIEW, pipeline: p }) as OverviewSummary;
 
 describe("Pipeline", () => {
+  it("is the Board: head figures from the metrics registry, then a stage per lane with its cards", async () => {
+    stubFetch({
+      "/api/overview": summary(),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    const { container } = render(<PipelinePanel />);
+    await screen.findByRole("region", { name: "Ready" });
+    const title = container.querySelector("#pipelineP h2 a");
+    expect(title?.textContent).toBe("Board");
+    expect(title?.getAttribute("href")).toBe("/board");
+    await waitFor(() =>
+      expect(container.querySelector('[data-metric="inProgress"]')?.textContent).toBe("4"),
+    );
+    expect(container.querySelector('[data-metric="merged"]')?.textContent).toBe("6");
+    expect(container.querySelector('[data-metric="cycleTime"]')?.textContent).toBeTruthy();
+    expect(container.querySelector("#pipelineP .ph")?.textContent).toContain("CI 92% of 10 runs");
+    expect(container.querySelector("#pipelineP .ph")?.textContent).toContain("1 red now");
+    expect(
+      [...container.querySelectorAll(".board-stage")].map((stage) =>
+        stage.getAttribute("aria-label"),
+      ),
+    ).toEqual(["Ready", "Building · checks", "In review", "Merging", "Done · 24h"]);
+    expect(screen.queryByText("Done today")).toBeNull();
+    expect(container.textContent).not.toContain("total");
+  });
+
+  it("shows the rework label on a building card, queued when its seat is busy, reviewed on a Ready card", async () => {
+    const facts = { round: 2, blockers: 1, seat: "guido-2", seatBusy: false };
+    const card = (ticket: number, rework: typeof facts) => ({
+      repoId: "sample-app",
+      ticket,
+      title: `Ticket ${ticket}`,
+      pr: 1432,
+      ci: [],
+      since: now - 120_000,
+      who: null,
+      rework,
+    });
+    stubFetch({
+      "/api/overview": summary([
+        { stage: "ready", count: 1, oldestAt: now, cards: [card(1, facts)] },
+        {
+          stage: "building",
+          count: 2,
+          oldestAt: now,
+          cards: [card(2, facts), card(3, { ...facts, seatBusy: true })],
+        },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    render(<PipelinePanel />);
+    expect(await screen.findByText("Reviewed · 1 blocker · PR 1432")).toBeTruthy();
+    expect(screen.getByText("Rework · round 2 · 1 blocker · GUIDO-2")).toBeTruthy();
+    expect(screen.getByText("Rework · queued for GUIDO-2")).toBeTruthy();
+    // the Ready card's label names the PR, so its meta line does not repeat it
+    expect(screen.getAllByText(/PR 1432/)).toHaveLength(3);
+  });
+
+  it("a seat busy on this very ticket is working it: the full label, not queued", async () => {
+    stubFetch({
+      "/api/overview": summary([
+        {
+          stage: "building",
+          count: 1,
+          oldestAt: now,
+          cards: [
+            {
+              repoId: "sample-app",
+              ticket: 3,
+              title: "Ticket 3",
+              pr: 1432,
+              ci: [],
+              since: now - 120_000,
+              who: "guido-2",
+              rework: { round: 2, blockers: 1, seat: "guido-2", seatBusy: true },
+            },
+          ],
+        },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": {
+        rows: [crewRow({ id: "guido-2", repoId: "sample-app", ticket: "sample-app#3" })],
+      },
+    });
+    render(<PipelinePanel />);
+    expect(await screen.findByText("Rework · round 2 · 1 blocker · GUIDO-2")).toBeTruthy();
+    expect(screen.queryByText(/queued/)).toBeNull();
+  });
+
   it("opens cards on their ticket page while lane links keep their Board stage filter", async () => {
     const ready = pipeline[0] as PipelineStage;
     const building = pipeline[1] as PipelineStage;
@@ -45,7 +137,7 @@ describe("Pipeline", () => {
         {
           ...ready,
           count: 10,
-          // The overview endpoint limits each stage to its chip capacity.
+          // The overview endpoint limits each stage to its card capacity.
           cards: Array.from({ length: 8 }, (_, i) => ({
             ...card,
             ticket: i + 1,
@@ -56,59 +148,96 @@ describe("Pipeline", () => {
         { ...building, count: 1, cards: [{ ...card, ticket: 20, title: "Building ticket" }] },
         { ...checks, count: 1, cards: [{ ...card, ticket: 21, title: "Checked ticket" }] },
       ]),
+      "/api/metrics": METRICS_VIEW,
       "/api/crew?shape=summary": { rows: [{ id: "seat-1", displayCallSign: "INCO", index: 3 }] },
     });
     render(<PipelinePanel />);
 
     const readyLane = await screen.findByRole("region", { name: "Ready" });
-    // Overview is a bounded summary: one real example, with every omission counted.
-    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(1);
-    expect(within(readyLane).getByText("10 total · 9 not shown")).toBeTruthy();
-    expect(within(readyLane).queryByRole("button")).toBeNull();
+    // Every card the endpoint sent is listed, and the rest are counted with a link to the Board.
+    expect(within(readyLane).getAllByText(/Ready ticket/)).toHaveLength(8);
+    expect(readyLane.querySelector("h3 .num")?.textContent).toBe("10");
+    expect(within(readyLane).getByRole("link", { name: "2 more on the Board" })).toBeTruthy();
+    expect(
+      within(readyLane).getByRole("link", { name: "2 more on the Board" }).getAttribute("href"),
+    ).toBe("/board?stage=ready");
     expect(within(readyLane).getByRole("link", { name: "Ready" }).getAttribute("href")).toBe(
       "/board?stage=ready",
     );
-    expect(within(readyLane).getAllByText("INCO")).toHaveLength(1);
+    expect(within(readyLane).getAllByText("INCO")).toHaveLength(8);
     expect(readyLane.querySelector(".pipeline-assignee i")?.getAttribute("style")).toContain(
       "--c: var(--seat-4)",
     );
-    expect(
-      within(readyLane)
-        .getByRole("link", { name: /Ready ticket 1/ })
-        .getAttribute("href"),
-    ).toBe("/tickets/sample-app/1");
+    const first = within(readyLane).getByRole("link", { name: /Ready ticket 1/ });
+    expect(first.getAttribute("href")).toBe("/tickets/sample-app/1");
+    expect(first.classList.contains("board-card")).toBe(true);
+    // The checks: three marks, and the count in words.
+    const marks = first.querySelector(".ci-marks");
+    expect(marks?.getAttribute("aria-label")).toBe("CI: 1 of 3 passed, 1 failed");
+    expect([...(marks?.children ?? [])].map((mark) => mark.className)).toEqual([
+      "ci-pass",
+      "ci-fail",
+      "ci-pending",
+    ]);
 
+    // Building and checks share one lane, with the stage figures added.
     const progressLane = screen.getByRole("region", { name: "Building · checks" });
     expect(within(progressLane).getByText("Building ticket")).toBeTruthy();
-    expect(within(progressLane).queryByText("Checked ticket")).toBeNull();
-    expect(within(progressLane).getByText("2 total · 1 not shown")).toBeTruthy();
+    expect(within(progressLane).getByText("Checked ticket")).toBeTruthy();
+    expect(progressLane.querySelector("h3 .num")?.textContent).toBe("2");
     expect(within(progressLane).getAllByRole("link")[0]?.getAttribute("href")).toBe(
       "/board?stage=progress",
     );
-    // An empty lane stays on the page as a narrow, labelled column with its Board link.
+    // An empty lane says so and keeps its Board link.
     const reviewLane = screen.getByRole("region", { name: "In review" });
-    expect(reviewLane.classList.contains("empty")).toBe(true);
-    expect(within(reviewLane).getByText("0 total")).toBeTruthy();
-    expect(within(reviewLane).getAllByRole("link")).toHaveLength(1);
-    expect(readyLane.classList.contains("empty")).toBe(false);
+    expect(within(reviewLane).queryByText("No tickets here.")).toBeNull();
+    expect(reviewLane.querySelector(".board-cards")).toBeNull();
+    expect(reviewLane.querySelector(".board-card")).toBeNull();
+    expect(within(reviewLane).getByRole("link", { name: "In review" })).toBeTruthy();
   });
 
-  it("collapses empty lanes and refetches the selected session on SSE invalidation", async () => {
+  it("says when the Board could not load", async () => {
+    stubFetch({
+      "/api/overview": () => ({ status: 500, body: { error: "down" } }),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    render(<PipelinePanel />);
+    expect((await screen.findByRole("status")).textContent).toBe("Board could not load.");
+  });
+
+  it("shows empty lanes with their counts and refetches the selected session on SSE invalidation", async () => {
     setSession("session-1");
     let data = summary(stages.map((stage) => ({ stage, count: 0, oldestAt: null, cards: [] })));
-    stubFetch({ "/api/overview?session=session-1": () => ({ status: 200, body: data }) });
+    stubFetch({
+      "/api/overview?session=session-1": () => ({ status: 200, body: data }),
+      "/api/metrics": METRICS_VIEW,
+    });
     const { container } = render(<PipelinePanel />);
-    await waitFor(() =>
-      expect(container.querySelectorAll(".pipeline-stage.empty")).toHaveLength(5),
-    );
-    expect(container.querySelectorAll(".pipeline-chip")).toHaveLength(0);
-    expect(screen.getAllByText("0 total · empty")).toHaveLength(5);
-    expect(container.querySelectorAll(".pipeline-empty")).toHaveLength(0);
+    await waitFor(() => expect(container.querySelectorAll(".board-stage.empty")).toHaveLength(5));
+    expect(screen.queryByText("No tickets here.")).toBeNull();
+    expect(container.querySelector(".board-cards")).toBeNull();
+    // Empty stages are as wide as their heads.
+    expect(
+      (container.querySelector(".board-stages") as HTMLElement).style.getPropertyValue(
+        "--board-cols",
+      ),
+    ).toBe("auto auto auto auto auto");
+    expect([...container.querySelectorAll("h3 .num")].map((el) => el.textContent)).toEqual([
+      "0",
+      "0",
+      "0",
+      "0",
+      "0",
+    ]);
+    expect(container.querySelectorAll(".board-card")).toHaveLength(0);
+    expect(container.querySelector(".board-oldest")).toBeNull();
     data = summary();
     await act(async () => {
       hub.refetchTopic("boards");
     });
     expect(await screen.findByText(/Ticket 1/)).toBeTruthy();
+    expect(container.querySelector(".board-oldest")?.textContent).toBe("oldest 2m");
   });
 });
 
@@ -120,5 +249,104 @@ describe("cardTitle", () => {
     expect(cardTitle({ ticket: 1047, pr: null, title: "#1047 Board lanes" })).toBe("Board lanes");
     expect(cardTitle({ ticket: 12, pr: 20, title: "Fix #12 and (#99)" })).toBe("Fix #12 and (#99)");
     expect(cardTitle({ ticket: 7, pr: null, title: "(#7)" })).toBe("(#7)");
+  });
+
+  it("drops a ticket from In review once the same ticket is in Done, and the lane count follows", async () => {
+    const card = (ticket: number, title: string) => ({
+      repoId: "sample-app",
+      ticket,
+      title,
+      pr: null,
+      ci: [] as ("pass" | "fail" | "pending")[],
+      since: now - 120_000,
+      who: null,
+    });
+    stubFetch({
+      "/api/overview": summary([
+        {
+          stage: "review",
+          count: 2,
+          oldestAt: now - 120_000,
+          cards: [card(7, "Merged already"), card(8, "Still open")],
+        },
+        { stage: "merged", count: 1, oldestAt: now - 60_000, cards: [card(7, "Merged already")] },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    render(<PipelinePanel />);
+    const review = await screen.findByRole("region", { name: "In review" });
+    expect(within(review).queryByText(/Merged already/)).toBeNull();
+    expect(within(review).getByText(/Still open/)).toBeTruthy();
+    expect(review.querySelector("h3 .num")?.textContent).toBe("1");
+    expect(
+      within(screen.getByRole("region", { name: "Done · 24h" })).getByText(/Merged already/),
+    ).toBeTruthy();
+  });
+
+  it("keeps a new open pull request in review when an earlier pull request of the ticket merged", async () => {
+    const card = (pr: number) => ({
+      repoId: "sample-app",
+      ticket: 7,
+      title: "Staged ticket",
+      pr,
+      ci: [] as ("pass" | "fail" | "pending")[],
+      since: now - 120_000,
+      who: null,
+    });
+    stubFetch({
+      "/api/overview": summary([
+        { stage: "review", count: 1, oldestAt: now - 120_000, cards: [card(20)] },
+        { stage: "merged", count: 1, oldestAt: now - 60_000, cards: [card(19)] },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    render(<PipelinePanel />);
+    const review = await screen.findByRole("region", { name: "In review" });
+    expect(within(review).getByText(/Staged ticket/)).toBeTruthy();
+    expect(review.querySelector("h3 .num")?.textContent).toBe("1");
+  });
+
+  it("gives a stage with tickets the width and an empty one only its head", async () => {
+    stubFetch({
+      "/api/overview": summary([
+        { stage: "ready", count: 0, oldestAt: null, cards: [] },
+        { stage: "review", count: 1, oldestAt: now - 120_000, cards: pipeline[3].cards },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    const { container } = render(<PipelinePanel />);
+    await screen.findByText(/Ticket 4/);
+    const board = container.querySelector(".board-stages") as HTMLElement;
+    expect(board.style.getPropertyValue("--board-cols")).toBe("auto auto minmax(0, 1fr) auto auto");
+  });
+});
+
+describe("Pipeline card checks", () => {
+  it("shows many checks as a count that names the failures", async () => {
+    const many = Array.from({ length: 8 }, (_, i) => (i === 6 ? "fail" : "pass")) as (
+      | "pass"
+      | "fail"
+    )[];
+    stubFetch({
+      "/api/overview": summary([
+        {
+          stage: "review",
+          count: 1,
+          oldestAt: now - 120_000,
+          cards: [{ ...pipeline[3].cards[0], ci: many }],
+        },
+      ]),
+      "/api/metrics": METRICS_VIEW,
+      "/api/crew?shape=summary": { rows: [] },
+    });
+    const { container } = render(<PipelinePanel />);
+    await screen.findByText(/Ticket 4/);
+    const count = container.querySelector(".ci-count");
+    expect(count?.textContent).toBe("✗ CI 7/8");
+    expect(count?.getAttribute("aria-label")).toBe("CI: 7 of 8 passed, 1 failed");
+    expect(container.querySelector(".ci-marks")).toBeNull();
   });
 });

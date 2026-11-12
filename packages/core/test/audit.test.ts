@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   AUDIT_EXPECTED_TOKENS_DEFAULT,
+  AUDIT_KIND_TIERS,
+  AUDIT_TIERS,
+  auditTier,
   classifyOveruse,
   groupOveruse,
   overusePrevention,
@@ -113,5 +116,35 @@ describe("overusePrevention and groupOveruse", () => {
         { runId: "b", cause: "wide-ticket" },
       ]),
     ).toEqual([]);
+  });
+});
+
+describe("audit risk tiers", () => {
+  it("gives each item kind its fixed tier", () => {
+    expect(AUDIT_KIND_TIERS).toEqual({
+      "cli-update": "auto",
+      "cli-update-failed": "flight",
+      "cli-update-major": "go-ahead",
+      "code-health-proposal": "acknowledge",
+      "audit-finding": "acknowledge",
+      flake: "flight",
+      "pr-size-outlier": "flight",
+    });
+    for (const [kind, tier] of Object.entries(AUDIT_KIND_TIERS)) {
+      expect(auditTier(kind)).toBe(tier);
+      expect(AUDIT_TIERS).toContain(tier);
+    }
+  });
+
+  it("makes a kind it does not know Go-ahead, never Auto", () => {
+    expect(auditTier("something-new")).toBe("go-ahead");
+    expect(auditTier("")).toBe("go-ahead");
+    expect(auditTier("constructor")).toBe("go-ahead");
+    expect(auditTier("__proto__")).toBe("go-ahead");
+  });
+
+  it("keeps cli-update the only Auto kind", () => {
+    const auto = Object.entries(AUDIT_KIND_TIERS).filter(([, t]) => t === "auto");
+    expect(auto.map(([k]) => k)).toEqual(["cli-update"]);
   });
 });

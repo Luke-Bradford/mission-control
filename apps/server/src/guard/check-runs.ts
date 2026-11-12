@@ -7,6 +7,7 @@ import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import {
   CHECK_BASH_TIMEOUT_DEFAULT_MS,
+  CHECK_BASH_TIMEOUT_MS,
   type CheckDrop,
   type CheckDropReason,
   type RepoRules,
@@ -17,9 +18,9 @@ import { seatPlace } from "../mcp/tools.ts";
 import { adminDirOf, COMMIT_ADD_PATHSPEC } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import type { Store } from "../store.ts";
+import { NOT_PLAIN, plainCall } from "./plain-call.ts";
 
-/** A command that chains, pipes, or runs on after a failure can pass without the check passing. */
-const NOT_PLAIN = /[|;\n\r]/;
+export { plainCall };
 
 /**
  * The configured checks this shell command runs: split on `&&` only, and the call counts only when
@@ -32,6 +33,23 @@ export function checksRun(command: string, checks: readonly string[]): string[] 
   const segments = command.split("&&").map((s) => s.trim());
   if (segments.some((s) => !checks.includes(s))) return [];
   return checks.filter((c) => segments.includes(c));
+}
+
+/** A leading `cd <path>` joined to the rest by `&&` or `;`; the path is bare, or in single or double quotes. */
+const LEADING_CD = /^\s*cd\s+(?:"([^"$`\\]*)"|'([^']*)'|([^\s"'$`\\&;|<>()*?[\]{}~]+))\s*(?:&&|;)/;
+
+/**
+ * The command with a leading `cd` into the seat's own worktree taken off. The seat's shell starts in
+ * its worktree, so that `cd` changes nothing the check sees (and with `;` the status is still the
+ * check's own). A `cd` anywhere else, or into any other path, is left in place and so counts for nothing.
+ */
+export function withoutOwnCd(command: string, worktree: string | null): string {
+  const m = worktree === null ? null : LEADING_CD.exec(command);
+  if (m === null || worktree === null) return command;
+  const path = (m[1] ?? m[2] ?? m[3] ?? "").replace(/\/+$/, "");
+  return path !== "" && path === worktree.replace(/\/+$/, "")
+    ? command.slice(m[0].length)
+    : command;
 }
 
 /**
@@ -87,6 +105,8 @@ export interface CheckRecorder {
   dropRun(runId: string): void;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
+  /** Configured checks still executing or validating their completion, once per command. */
+  pending(runId: string): readonly string[];
 }
 
 /** How many dropped calls the recorder keeps for one run, and for how many runs. */
@@ -99,6 +119,8 @@ export interface CheckRecorderDeps {
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
   state: (runId: string) => Promise<CloneState | null>;
+  /** The run's seat worktree, or null when unknown (a leading `cd` then counts for nothing). */
+  worktree?: (runId: string) => Promise<string | null>;
   now?: () => number;
   log?: (line: string) => void;
 }
@@ -118,6 +140,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   const now = d.now ?? Date.now;
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, StartedCall>();
+  const finishing = new Set<StartedCall>();
   /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
   const dropped = new Map<string, CheckDrop[]>();
   const noteDrop = (
@@ -156,7 +179,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     async begin(key, command, aliases = [], options = {}) {
       try {
         const checks = await d.checks(key.runId);
-        const matched = checksRun(command, checks);
+        const own = d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
+        const matched = checksRun(withoutOwnCd(command, own), checks);
         if (matched.length === 0) {
           // a configured check inside a chain, a pipe or a list is not counted: say so
           const inside = lockedCheck(command, checks);
@@ -186,7 +210,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
           command,
           head: at.head,
           startedAt: now(),
-          timeoutMs: options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
+          // the CLI cuts a longer `timeout` down to its limit
+          timeoutMs: Math.min(
+            options.timeoutMs ?? CHECK_BASH_TIMEOUT_DEFAULT_MS,
+            CHECK_BASH_TIMEOUT_MS,
+          ),
         };
         started.set(callId(key), call);
         for (const alias of aliases) started.set(callId(alias), call);
@@ -197,6 +225,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     async end(key, ok, exitCode = null) {
       const call = started.get(callId(key));
       if (call === undefined) return;
+      finishing.add(call);
       for (const [id, startedCall] of started) if (startedCall === call) started.delete(id);
       try {
         const at = await d.state(key.runId);
@@ -231,6 +260,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
         }
       } catch (e) {
         d.log?.(`checks: could not record for ${key.runId}: ${(e as Error).message}`);
+      } finally {
+        finishing.delete(call);
       }
     },
     dropRun(runId) {
@@ -246,6 +277,15 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     drops(runId) {
       return dropped.get(runId) ?? [];
+    },
+    pending(runId) {
+      return [
+        ...new Set(
+          [...started.values(), ...finishing]
+            .filter((call) => call.runId === runId)
+            .flatMap((call) => call.matched),
+        ),
+      ];
     },
   };
 }
@@ -278,6 +318,16 @@ export function cloneState(
       ...COMMIT_ADD_PATHSPEC,
     ]);
     return { head, clean: dirty.trim() === "" };
+  };
+}
+
+/** A run's seat worktree, or null when it has none. */
+export function seatWorktree(
+  store: Pick<Store, "run" | "seatSession">,
+): (runId: string) => Promise<string | null> {
+  return async (runId) => {
+    const run = store.run(runId);
+    return run === null ? null : (store.seatSession(run.agentId)?.worktree ?? null);
   };
 }
 

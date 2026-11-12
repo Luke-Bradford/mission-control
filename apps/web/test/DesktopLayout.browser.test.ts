@@ -9,6 +9,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { type DesktopScenario, desktopFixture, desktopQaFixture } from "./desktopFixtures.ts";
+import { NOW } from "./fixtures.ts";
 import { qaReportFixture } from "./qaReportFixture.ts";
 
 const { renderAt } = browserSession();
@@ -54,7 +55,6 @@ async function shellMetrics(page: RenderedPage) {
       smallControls,
       selected: document.activeElement?.id,
       collapsed: dock?.classList.contains("collapsed"),
-      summaryItems: document.querySelectorAll(".dock-summary-item").length,
       panelHead: document.querySelector(".ph h2")
         ? getComputedStyle(document.querySelector(".ph h2") as Element).fontSize
         : null,
@@ -95,19 +95,19 @@ describeRendered("Approved compact desktop shell", () => {
             await ready(page, "#page-overview");
             const initial = await shellMetrics(page);
             expect(initial.docWidth).toBeLessThanOrEqual(width);
-            expect(initial.gutter).toBe(width < 1600 ? 16 : 24);
+            expect(initial.gutter).toBe(12);
             expect(initial.gap).toBe(initial.gutter);
             expect(initial.collapsed).toBe(width < 2200);
             expect(initial.dockWidth).toBe(width < 2200 ? 48 : 380);
             expect(initial.panelHead).toBe("14px");
             expect(initial.panelPadding).toEqual([width < 2200 ? "8px" : "12px", "16px"]);
-            expect(initial.rows.every((height) => height === (width < 2200 ? 32 : 40))).toBe(true);
+            expect(initial.rows.every((height) => height >= 40)).toBe(true);
             await capture(page, `desktop-${width}x${height}-${scheme}-default-after`);
             if (width < 2200) await page.click(".dockrail button");
-            await page.boxes(".dock-summary-item");
             const expanded = await shellMetrics(page);
-            expect(expanded.dockWidth).toBe(380);
-            expect(expanded.summaryItems).toBe(3);
+            expect(expanded.dockWidth).toBe(
+              width < 1500 ? 380 : width < 1700 ? 540 : width < 2200 ? 620 : 380,
+            );
             expect(expanded.smallControls).toEqual([]);
             if (width < 2200) expect(expanded.selected).toBe("dockHeading");
             expect(
@@ -119,20 +119,6 @@ describeRendered("Approved compact desktop shell", () => {
             ).toBe(true);
             expect(page.errors()).toEqual([]);
             await capture(page, `desktop-${width}x${height}-${scheme}-expanded-after`);
-            if (height === 700) {
-              const scroll = await page.evaluate(() => {
-                const summary = document.querySelector<HTMLElement>(".dock-summary");
-                const next = document.querySelector<HTMLButtonElement>(".dock-next button");
-                next?.focus();
-                return {
-                  overflow: summary ? getComputedStyle(summary).overflowY : null,
-                  scrollable: summary ? summary.scrollHeight > summary.clientHeight : false,
-                  moved: (summary?.scrollTop ?? 0) > 0,
-                };
-              }, undefined);
-              expect(scroll).toEqual({ overflow: "auto", scrollable: true, moved: true });
-              await capture(page, `desktop-${width}x${height}-${scheme}-focused-scroll-after`);
-            }
             receipts.push({
               viewport: [width, height],
               scheme,
@@ -244,9 +230,9 @@ describeRendered("Approved compact desktop shell", () => {
               () => document.querySelector(".dock-summary")?.textContent ?? "",
               undefined,
             );
-            if (scenario === "empty") expect(summary).toContain("Nothing is waiting");
+            if (scenario === "empty") expect(summary).toContain("has not recorded a headline");
             if (scenario === "many") {
-              expect(summary).toContain("View all 50 waiting items");
+              expect(summary).not.toContain("waiting");
               const log = await page.evaluate(() => {
                 const element = document.querySelector<HTMLElement>(".dmsgs");
                 return {
@@ -273,7 +259,7 @@ describeRendered("Approved compact desktop shell", () => {
                 ),
               ).toBe(100);
             }
-            if (scenario === "loading") expect(summary).toContain("Loading waiting items");
+            if (scenario === "loading") expect(summary).toContain("Loading FLIGHT's headline");
             if (scenario === "error") expect(summary).toContain("could not refresh");
             if (scenario === "stale") expect(summary).toContain("Stale headline");
             if (scenario === "disconnected") expect(summary).toContain("Disconnected");
@@ -286,13 +272,74 @@ describeRendered("Approved compact desktop shell", () => {
                 ),
               ).toBeGreaterThan(140);
             }
-            expect((await shellMetrics(page)).summaryItems).toBeLessThanOrEqual(3);
             expect((await shellMetrics(page)).smallControls).toEqual([]);
             expect(page.errors()).toEqual([]);
             await capture(page, `desktop-state-${scenario}-1600x700-${scheme}-after`);
           } finally {
             await page.close();
           }
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps a very long message to the operator inside the dock, cut with an ellipsis",
+    async () => {
+      for (const scheme of ["light", "dark"] as const) {
+        const api = {
+          ...desktopFixture("one").api,
+          "/api/comms/mentions": {
+            mentions: [
+              {
+                seen: false,
+                message: {
+                  id: "comms:1",
+                  from: "flight-1",
+                  to: "CAPCOM",
+                  text: "x".repeat(300),
+                  at: NOW,
+                },
+              },
+            ],
+          },
+        };
+        const page = await renderAt({
+          page: "test/desktopBrowser.html",
+          width: 1600,
+          height: 700,
+          colorScheme: scheme,
+          search: "?state=one",
+          api,
+        });
+        try {
+          await ready(page);
+          await page.click(".dockrail button");
+          await page.boxes(".dock-message");
+          const m = await page.evaluate(() => {
+            const summary = document.querySelector(".dock-summary") as HTMLElement;
+            const edge = summary.getBoundingClientRect().right;
+            const link = document.querySelector(".dock-message") as HTMLElement;
+            const name = link.querySelector("b") as HTMLElement;
+            const text = link.querySelector("span") as HTMLElement;
+            const headline = document.querySelector(".dock-headline-text, .dock-headline");
+            return {
+              linkRight: link.getBoundingClientRect().right,
+              edge,
+              cut: text.scrollWidth > text.clientWidth,
+              nameHeight: name.getBoundingClientRect().height,
+              nameLine: parseFloat(getComputedStyle(name).lineHeight),
+              headlineRight: headline?.getBoundingClientRect().right ?? 0,
+            };
+          }, undefined);
+          expect(m.linkRight).toBeLessThanOrEqual(m.edge + 0.5);
+          expect(m.cut, "the long text is cut, not spilled").toBe(true);
+          expect(m.nameHeight).toBeLessThanOrEqual(m.nameLine + 1);
+          expect(m.headlineRight).toBeLessThanOrEqual(m.edge + 0.5);
+          expect(page.errors()).toEqual([]);
+        } finally {
+          await page.close();
         }
       }
     },
@@ -382,12 +429,11 @@ describeRendered("Approved compact desktop shell", () => {
   );
 
   it(
-    "preserves the shared shell on QA, Audit, Map, Comms, Telemetry, Board, Agent, Overview and Setup",
+    "preserves the shared shell on QA, Audit, Comms, Telemetry, Board, Agent, Overview and Setup",
     async () => {
       for (const [name, path] of [
         ["QA", "/qa"],
         ["Audit", "/audit"],
-        ["Map", "/map/shop-app"],
         ["Comms", "/comms"],
         ["Telemetry", "/telemetry"],
         ["Board", "/board"],
@@ -407,7 +453,7 @@ describeRendered("Approved compact desktop shell", () => {
           try {
             await ready(page, "main h1");
             expect((await shellMetrics(page)).docWidth, name).toBeLessThanOrEqual(1600);
-            expect((await shellMetrics(page)).gutter).toBe(24);
+            expect((await shellMetrics(page)).gutter).toBe(12);
             expect(page.errors(), name).toEqual([]);
             if (name === "Comms") {
               expect(

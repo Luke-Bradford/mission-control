@@ -21,11 +21,11 @@ import {
 } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
-import type { CliHold } from "../src/cli-update.ts";
+import type { CliHold } from "../src/cli/update.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
-import type { ReviewPreviews } from "../src/review-preview.ts";
+import type { ReviewPreviews } from "../src/preview/review.ts";
 import { endKeeper } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
@@ -309,6 +309,9 @@ function make(
     externalReviewSubject?: SupervisorDeps["externalReviewSubject"];
     fileContext?: SupervisorDeps["fileContext"];
     command?: string;
+    /** The fake CLI script to run in place of fake-claude.mjs. */
+    fake?: string;
+    cliCheckTimeoutMs?: number;
     codexCommand?: string;
     codexAuthPath?: string;
     worktrees?: string;
@@ -384,8 +387,11 @@ function make(
     codexCommand: over.codexCommand,
     codexAuthPath,
     commandArgs:
-      over.command === undefined ? [FAKE, "--record", recordFile, ...(over.extraArgs ?? [])] : [],
+      over.command === undefined
+        ? [over.fake ?? FAKE, "--record", recordFile, ...(over.extraArgs ?? [])]
+        : [],
     resumeWindowMs: over.resumeWindowMs ?? 500,
+    ...(over.cliCheckTimeoutMs === undefined ? {} : { cliCheckTimeoutMs: over.cliCheckTimeoutMs }),
     fetchTicket,
     flightEnvironment: over.flightEnvironment,
     ...(over.externalReviewSubject === undefined

@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mission Control · FLIGHT page mockup</title>
+    <style>
+      /* Tokens copied from apps/web/src/hud.css (dark and light). Spacing 4/8/12/16/24/32/48; type 20/28, 14/20, 13/20, 12/16, 11/16. */
+      :root{color-scheme:dark;--bg:#070a0e;--surface:#0c1117;--surface-2:#131a23;--line:#1b2430;--line-2:#2a3646;--fg:#e7eaef;--fg-2:#aab2bf;--muted:#808999;--accent:#56d8e6;--ok:#45c486;--warn:#f2b53a;--crit:#f1706d;--think:#b8a8f7;--crit-soft:rgba(240,107,104,.15);--sans:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;--mono:"IBM Plex Mono","Cascadia Mono",Consolas,ui-monospace,monospace;--display:"Barlow Semi Condensed","Arial Narrow","IBM Plex Sans",sans-serif;--sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;--sp-7:48px;--rail:48px}
+      :root[data-theme="light"]{color-scheme:light;--bg:#f3f5f8;--surface:#fff;--surface-2:#eef1f5;--line:#dfe3ea;--line-2:#c6cdd8;--fg:#121720;--fg-2:#4a5465;--muted:#646e81;--accent:#0a6b7d;--ok:#157246;--warn:#8d5b00;--crit:#bb2e2b;--think:#5b47c4;--crit-soft:rgba(196,48,45,.1)}
+      body.flight{--rail:380px}
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      /* Shell sizes measured on the live app: 49 px top bar, 30 px footer, 12 px gutters, 48 px folded rail. */
+      body{margin:0;background:var(--bg);color:var(--fg);font:13px/20px var(--sans);overflow:hidden;display:flex;flex-direction:column}
+      a{color:var(--accent);text-decoration:none}
+      a:focus-visible,button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+      button{font:inherit;color:var(--fg);background:var(--surface-2);border:1px solid var(--line-2);border-radius:3px;min-height:24px;min-width:24px;padding:0 var(--sp-2);cursor:pointer}
+      button[aria-pressed="true"]{background:color-mix(in srgb,var(--accent) 14%,transparent);border-color:var(--accent)}
+      .mono{font-family:var(--mono)} .muted{color:var(--muted)} .fg2{color:var(--fg-2)}
+      .ok{color:var(--ok)} .warn{color:var(--warn)} .crit{color:var(--crit)} .think{color:var(--think)}
+      .top{flex:none;height:49px;padding:0 var(--sp-4);border-bottom:1px solid var(--line);background:var(--surface);display:flex;align-items:center;gap:var(--sp-4)}
+      .brand{font:700 19px/24px var(--display);letter-spacing:.12em}
+      .nav{display:flex;gap:var(--sp-1)}.nav a{padding:0 var(--sp-2);color:var(--fg-2);min-height:24px;display:inline-flex;align-items:center}
+      .health{margin-left:auto;display:flex;gap:var(--sp-4);align-items:center;font:12px/16px var(--mono);color:var(--fg-2)}
+      .health [aria-current]{box-shadow:inset 0 -2px 0 var(--accent)}
+      .shell{flex:1;min-height:0;padding:var(--sp-3);display:grid;grid-template-columns:minmax(0,1fr) var(--rail);gap:var(--sp-3)}
+      .keys{flex:none;height:30px;padding:0 var(--sp-4);border-top:1px solid var(--line);display:flex;align-items:center;gap:var(--sp-4);font:12px/16px var(--mono);color:var(--muted)}
+      .dock{background:var(--surface);border:1px solid var(--line);border-radius:3px;overflow:hidden;min-width:0}
+      .dock .rail{display:flex;flex-direction:column;align-items:center;gap:var(--sp-2);padding:var(--sp-3) 0}
+      .dock .rail b{writing-mode:vertical-rl;font:600 12px/16px var(--mono);letter-spacing:.1em;color:var(--accent)}
+      .dock .open{display:none}
+      body.flight .dock .rail{display:none} body.flight .dock .open{display:block}
+      .dock p{margin:0;padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--line);font-size:12px;line-height:16px}
+      /* The page: title row, status band, then Doing now beside Blockers, then Recent decisions. Spare height goes to the rows, never to a gap. */
+      main{min-height:0;min-width:0;display:flex;flex-direction:column;gap:var(--sp-3)}
+      .title{flex:none;display:flex;align-items:center;gap:var(--sp-4);min-height:28px}
+      .title h1{margin:0;font:600 20px/28px var(--display);letter-spacing:.04em}
+      .title .q{color:var(--fg-2)}
+      .title .board{display:inline-block;line-height:24px;min-height:24px;min-width:24px;vertical-align:middle}
+      .switch{margin-left:auto;display:flex;gap:var(--sp-1);align-items:center}
+      .switch .lbl{font:11px/16px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-right:var(--sp-1)}
+      .panel{background:var(--surface);border:1px solid var(--line);border-radius:3px;min-width:0;min-height:0;overflow:hidden;display:flex;flex-direction:column}
+      .head{flex:none;height:40px;padding:0 var(--sp-4);display:flex;align-items:center;gap:var(--sp-2);border-bottom:1px solid var(--line);font:600 14px/20px var(--sans)}
+      .head .sub{color:var(--muted);font:12px/16px var(--mono);font-weight:400}
+      .head .end{margin-left:auto}
+      /* Status band: four stats, each with label, value, definition (window and unit). */
+      .band{flex:none;display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr;background:var(--surface);border:1px solid var(--line);border-radius:3px}
+      .stat{padding:var(--sp-3) var(--sp-4);border-left:1px solid var(--line);min-width:0;display:flex;flex-direction:column;gap:var(--sp-1)}
+      .stat:first-child{border-left:0}
+      .k{font:11px/16px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+      .v{font:600 20px/28px var(--mono);font-variant-numeric:tabular-nums;display:flex;align-items:baseline;gap:var(--sp-2);flex-wrap:wrap}
+      .v small{font:400 12px/16px var(--mono);color:var(--fg-2)}
+      .d{font-size:12px;line-height:16px;color:var(--fg-2)}
+      .state{display:inline-flex;align-items:center;gap:var(--sp-2)}
+      .state::before{content:"";width:10px;height:10px;border-radius:50%;background:var(--ok);align-self:center}
+      .state.stopped{color:var(--crit)} .state.stopped::before{background:none;border:2px solid var(--crit);border-radius:2px}
+      .state.running{color:var(--ok)}
+      .start{border-color:var(--crit);color:var(--crit);font-weight:600;min-height:28px}
+      .meter{height:4px;border-radius:2px;background:var(--line);overflow:hidden}
+      .meter i{display:block;height:100%;background:var(--accent)}
+      /* Middle row and decisions share the spare height; rows stretch up to a cap. */
+      .mid{flex:0 0 auto;display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:var(--sp-3)}
+      .lines{list-style:none;margin:0;padding:0;flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
+      .lines li{flex:0 0 auto;min-height:40px;display:flex;align-items:center;gap:var(--sp-3);padding:var(--sp-2) var(--sp-4);border-bottom:1px solid var(--line)}
+      .lines li:last-child{border-bottom:0}
+      .lines li[hidden]{display:none}
+      .lines .t{flex:none;width:48px;font:12px/16px var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+      .lines .w{min-width:0}
+      .lines .w b{font-weight:600}
+      .lines .w span{color:var(--fg-2)}
+      .dec{flex:1 1 0}
+      .dec .lines li{min-height:36px}
+      .bhead,.brow{display:grid;grid-template-columns:minmax(0,5fr) 128px 80px minmax(0,6fr);column-gap:var(--sp-4);padding:0 var(--sp-4);align-items:center}
+      .bhead{flex:none;height:32px;border-bottom:1px solid var(--line);font:11px/16px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+      .bhead .r,.brow .wait{text-align:right}
+      .brow{flex:0 0 auto;min-height:72px;padding-top:var(--sp-2);padding-bottom:var(--sp-2)}
+      .brow .what b{display:block;font-weight:600}
+      .brow .what span,.brow .act{color:var(--fg-2)}
+      .owner{justify-self:start;font:12px/16px var(--mono);padding:0 var(--sp-2);border-radius:3px;color:var(--fg-2);background:color-mix(in srgb,var(--fg-2) 14%,transparent)}
+      .owner.operator{color:var(--warn);background:color-mix(in srgb,var(--warn) 14%,transparent)}
+      .owner.ci{color:var(--crit);background:color-mix(in srgb,var(--crit) 14%,transparent)}
+      .wait{font:600 13px/20px var(--mono);font-variant-numeric:tabular-nums}
+      .empty{flex:1;display:flex;flex-direction:column;justify-content:flex-start;gap:var(--sp-1);padding:var(--sp-4)}
+      .empty b{font-weight:600}
+    </style>
+  </head>
+  <body>
+    <!-- Fictional data throughout: names, times, counts, costs and PR numbers are illustration only.
+         States: ?state=blocked (default, three blockers), ?state=running (no blockers), ?state=stopped.
+         ?theme=light for light, ?flight=1 for the open FLIGHT rail. The switch on the page changes state without a reload. -->
+    <header class="top">
+      <div class="brand">MISSION CONTROL</div>
+      <nav class="nav" aria-label="Pages"><a href="#">Overview</a><a href="#">Board</a><a href="#">Agents</a><a href="#">Map</a><a href="#">Comms</a><a href="#">QA</a><a href="#">Telemetry</a><a href="#">Audit</a></nav>
+      <div class="health"><span>CREW <b class="ok">3 working</b></span><button id="flightBtn" type="button" aria-pressed="false" aria-current="page">FLIGHT</button><button id="themeBtn" type="button">Light</button><span>12:53</span></div>
+    </header>
+
+    <div class="shell">
+      <main id="page-flight">
+        <div class="title">
+          <h1>FLIGHT</h1>
+          <span class="q">Is FLIGHT working, what is it doing, and what blocks it? PR flow is on the <a class="board" href="#">Board</a>.</span>
+          <div class="switch" role="group" aria-label="Mockup state">
+            <span class="lbl">Show</span>
+            <button type="button" data-state="stopped" aria-pressed="false">Stopped</button>
+            <button type="button" data-state="running" aria-pressed="false">Running</button>
+            <button type="button" data-state="blocked" aria-pressed="false">Three blockers</button>
+          </div>
+        </div>
+        <section class="band" id="band" aria-label="FLIGHT status"></section>
+        <div class="mid">
+          <section class="panel" id="doingPanel" aria-labelledby="doingH">
+            <div class="head" id="doingH">Doing now <span class="sub" id="doingSub"></span></div>
+            <ul class="lines" id="doing"></ul>
+          </section>
+          <section class="panel" id="blockersPanel" aria-labelledby="blockersH">
+            <div class="head" id="blockersH">Blockers <span class="sub" id="blockersSub"></span></div>
+            <div id="blockers" class="lines" style="overflow:auto"></div>
+          </section>
+        </div>
+        <section class="panel dec" id="decPanel" aria-labelledby="decH">
+          <div class="head" id="decH">Recent decisions <span class="sub" id="decSub">newest first</span></div>
+          <ul class="lines" id="decisions"></ul>
+        </section>
+      </main>
+      <aside class="dock" aria-label="FLIGHT dock">
+        <div class="rail"><b>FLIGHT</b><span class="crit mono" style="font-size:12px" id="railN"></span></div>
+        <div class="open"><div class="head">FLIGHT <span class="sub">watching 11 seats</span></div><p id="dockLine"></p></div>
+      </aside>
+    </div>
+    <footer class="keys"><span>g f FLIGHT</span><span>f dock</span><span>? help</span></footer>
+
+    <script>
+      const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      const q = new URLSearchParams(location.search);
+      const STATES = ["stopped", "running", "blocked"];
+      // The stopped view is the same data, 3h41m earlier: the last decision is at the moment FLIGHT stopped.
+      const NOW_MIN = 12 * 60 + 53;
+      const STOP_MIN = 9 * 60 + 12;
+      const clock = (m) => String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0");
+
+      const BLOCKERS = [
+        { what: "Operator answer on away-mode wording", detail: "Two readings fit the ticket", owner: "Operator", cls: "operator", wait: "3h 10m", act: "Asked in Needs you at 09:43. Carrying on with the tickets that do not depend on it." },
+        { what: "PR 1560 fails web-core in CI", detail: "First push, one test", owner: "CI", cls: "ci", wait: "42m", act: "Re-running the failed job once. If it fails again, the output goes back to INCO-1." },
+        { what: "GUIDO-1 waits for the test lock", detail: "Held by RETRO-1's full run", owner: "RETRO-1 (seat)", cls: "", wait: "18m", act: "Watching. At 30 minutes it asks RETRO-1 to release the lock." },
+      ];
+      const STOPPED_BLOCKER = { what: "FLIGHT is stopped", detail: "The hub restarted at 09:12", owner: "Operator", cls: "operator", wait: "3h 41m", act: "Nothing. Nothing runs until you press Start FLIGHT; seats keep working on their current tickets." };
+
+      const DOING = {
+        running: [
+          ["Reviewing the queue", "4 PRs in review, 2 waiting on CI"],
+          ["Watching the test lock", "GUIDO-1 has waited 7 minutes behind RETRO-1"],
+          ["Checking PR 1560", "against its Done when list"],
+          ["Promoting 2 Backlog tickets", "both have a Size and Done when"],
+        ],
+        blocked: [
+          ["Waiting on your answer", "away-mode wording; other tickets carry on"],
+          ["Re-running web-core", "on PR 1560, once"],
+          ["Watching the test lock", "GUIDO-1 has waited 18 minutes behind RETRO-1"],
+          ["Promoting 2 Backlog tickets", "both have a Size and Done when"],
+          ["Checking PR 1558", "against its Done when list"],
+        ],
+        stopped: [
+          ["Nothing.", "FLIGHT stopped at 09:12 when the hub restarted"],
+          ["Last thing it did:", "asked RETRO-1 to review PR 1558"],
+          ["Seats carry on", "with their current tickets; nothing new is assigned"],
+        ],
+      };
+      const DECISIONS = [
+        [4, "Sent PR 1560 back to INCO-1", "review found 2 Important issues"],
+        [15, "Re-ran web-core on PR 1558", "the failing test looked like a flake"],
+        [26, "Held GUIDO-2's next ticket", "it needs the test lock GUIDO-1 holds"],
+        [44, "Promoted a ticket to Ready", "it had a Size and every Done when line"],
+        [70, "Asked you about the away-mode wording", "two readings fit the ticket"],
+        [96, "Started a new session", "context passed 70%, so it handed over"],
+        [131, "Moved a merged ticket to Done", "PR merged, CI green"],
+        [158, "Left a ticket in Backlog", "it has no Size"],
+        [190, "Re-asked RETRO-1 for a review", "the first one covered an older head"],
+        [224, "Paused a loop after three failed pushes", "the same check failed each time"],
+        [251, "Moved a ticket back to Ready", "its seat was stopped before it started"],
+        [283, "Answered a seat's question from the ticket", "the ticket already said which file"],
+        [320, "Held a merge", "CI had not finished on the current head"],
+        [356, "Started the day's first session", "the hub came up with open work"],
+        [391, "Skipped a Backlog ticket", "its Done when line was missing"],
+        [428, "Told a seat to rebase", "main had moved under its branch"],
+        [466, "Marked a review round clean", "no Critical or Important findings left"],
+        [505, "Asked a seat to split a large ticket", "it touched three areas"],
+        [547, "Cleared a stale hold", "the PR it waited on had merged"],
+        [590, "Handed over to a new session", "context passed 70% again"],
+      ];
+
+      let state = STATES.includes(q.get("state")) ? q.get("state") : "blocked";
+
+      function band(s) {
+        const stopped = s === "stopped";
+        const first = stopped
+          ? `<span class="state stopped">Stopped</span><button type="button" class="start">Start FLIGHT</button>`
+          : `<span class="state running">Running</span>`;
+        const firstD = stopped
+          ? "Stopped since 09:12 (3h 41m). Nothing is deciding or assigning."
+          : "Running since 06:12 (6h 41m). A new session starts when context fills.";
+        const cells = [
+          ["FLIGHT", first, firstD, "status"],
+          ["Cost per hour", stopped ? `$0.00<small>per hour</small>` : `$1.84<small>per hour</small>`, "API-equivalent cost of FLIGHT's sessions over the last 60 minutes, in dollars. Not a bill.", ""],
+          ["Sessions per hour", stopped ? `0<small>sessions</small>` : `3<small>sessions</small>`, "FLIGHT sessions started in the last 60 minutes. A handover starts a new one.", ""],
+          ["Context size", stopped ? `—<small>no session open</small>` : `74.2k<small>of 200k · 37%</small>`, "Tokens in the current session's latest reading, against the 200k limit.", ""],
+        ];
+        return cells.map(([k, v, d, id], i) =>
+          `<div class="stat"${id ? ` id="${id}"` : ""}><div class="k">${k}</div><div class="v">${v}</div>${i === 3 && !stopped ? `<div class="meter" aria-hidden="true"><i style="width:37%"></i></div>` : ""}<div class="d">${d}</div></div>`).join("");
+      }
+
+      // Show as many decisions as fit the panel, newest first, so no row stretches and no space is left blank.
+      function fitDecisions() {
+        const list = document.getElementById("decisions");
+        const rows = [...list.children];
+        for (const li of rows) { li.hidden = false; li.style.borderBottom = ""; }
+        let n = rows.length;
+        while (n > 3) {
+          // Measure the candidate as the final visible row, with no trailing divider. Keeping
+          // its divider during the fit check can discard a whole row that would otherwise fit.
+          rows[n - 1].style.borderBottom = "0";
+          if (list.scrollHeight <= list.clientHeight + 1) break;
+          rows[n - 1].style.borderBottom = "";
+          rows[--n].hidden = true;
+        }
+        if (rows[n - 1]) rows[n - 1].style.borderBottom = "0";
+        document.getElementById("decSub").textContent = `last ${n} · newest first`;
+      }
+      window.addEventListener("resize", fitDecisions);
+
+      function render() {
+        const end = state === "stopped" ? STOP_MIN : NOW_MIN;
+        document.getElementById("band").innerHTML = band(state);
+        const doing = DOING[state];
+        document.getElementById("doingSub").textContent = state === "stopped" ? "last known" : `${doing.length} things`;
+        document.getElementById("doing").innerHTML = doing.map(([a, b]) =>
+          `<li><span class="w"><b>${esc(a)}</b> <span>${esc(b)}</span></span></li>`).join("");
+        const rows = state === "blocked" ? BLOCKERS : state === "stopped" ? [STOPPED_BLOCKER] : [];
+        document.getElementById("blockersSub").textContent = rows.length ? `${rows.length} · longest wait first` : "none";
+        document.getElementById("blockers").innerHTML = rows.length
+          ? `<div class="bhead"><span>Blocker</span><span>Owner</span><span class="r">Waited ↓</span><span>What FLIGHT is doing</span></div>` +
+            rows.map((b) => `<div class="brow"><div class="what"><b>${esc(b.what)}</b><span>${esc(b.detail)}</span></div><span class="owner ${b.cls}">${esc(b.owner)}</span><span class="wait">${esc(b.wait)}</span><span class="act">${esc(b.act)}</span></div>`).join("")
+          : `<div class="empty"><b class="ok">Nothing is blocking FLIGHT</b><span class="fg2">If something stalls, it appears here with its owner and how long it has waited.</span></div>`;
+        document.getElementById("decisions").innerHTML = DECISIONS.map(([ago, a, why]) =>
+          `<li><span class="t">${clock(end - ago)}</span><span class="w"><b>${esc(a)}</b> <span>${esc(why)}</span></span></li>`).join("");
+        fitDecisions();
+        document.getElementById("railN").textContent = state === "stopped" ? "!" : String(rows.length || "");
+        document.getElementById("dockLine").innerHTML = state === "stopped" ? "<b class='crit'>Stopped</b>" : `<b>${rows.length ? rows.length + " blocked" : "Running"}</b>`;
+        for (const b of document.querySelectorAll(".switch [data-state]")) b.setAttribute("aria-pressed", String(b.dataset.state === state));
+        document.title = `Mission Control · FLIGHT page mockup (${state})`;
+      }
+
+      const setFlight = (on) => { document.body.classList.toggle("flight", on); document.getElementById("flightBtn").setAttribute("aria-pressed", String(on)); };
+      const setTheme = (x) => { document.documentElement.dataset.theme = x; document.getElementById("themeBtn").textContent = x === "dark" ? "Light" : "Dark"; };
+      setTheme(q.get("theme") === "light" ? "light" : "dark");
+      setFlight(q.get("flight") === "1");
+      document.getElementById("flightBtn").addEventListener("click", () => setFlight(!document.body.classList.contains("flight")));
+      document.getElementById("themeBtn").addEventListener("click", () => setTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark"));
+      document.querySelector(".switch").addEventListener("click", (e) => {
+        const b = e.target.closest("[data-state]");
+        if (b) { state = b.dataset.state; render(); }
+      });
+      render();
+    </script>
+  </body>
+</html>

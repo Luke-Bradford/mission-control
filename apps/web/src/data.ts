@@ -24,14 +24,37 @@ import {
   unpackMap,
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
-import { apiGet, apiOperatorGet } from "./api.ts";
-import { shareMap } from "./map/structural.ts";
+import { apiGet, apiOperatorGet, openStream, type StreamSource } from "./api.ts";
 import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
   data: T | undefined;
   error: Error | null;
   loading: boolean;
+}
+
+/** Preserve unchanged repository-analysis data across a refetch. */
+function shareMap(previous: MapSnapshot | undefined, next: MapSnapshot): MapSnapshot {
+  if (!previous || previous.repoId !== next.repoId) return next;
+  const out = { ...next };
+  for (const key of [
+    "tree",
+    "rules",
+    "imports",
+    "hist",
+    "seats",
+    "findings",
+    "conflicts",
+    "conflictsUnchecked",
+  ] as const) {
+    if (previous[key] === next[key] || JSON.stringify(previous[key]) === JSON.stringify(next[key]))
+      Object.assign(out, { [key]: previous[key] });
+  }
+  return Object.keys(out).every(
+    (key) => out[key as keyof MapSnapshot] === previous[key as keyof MapSnapshot],
+  )
+    ? previous
+    : out;
 }
 
 /**
@@ -72,6 +95,10 @@ export const RESOURCES = {
     path: `/api/agents/${enc(id)}`,
     topic: AGENT_DETAIL_TOPICS,
   }),
+  dependencies: {
+    path: "/api/dependencies",
+    topic: ["agents", "boards", "attention", "flight"],
+  },
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
@@ -103,6 +130,7 @@ export const RESOURCES = {
     topic: "attention",
   }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
+  answeredAttention: { path: "/api/attention/answered", topic: "attention" },
   attention: { path: "/api/attention", topic: "attention" },
   attentionItem: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}`,
@@ -168,6 +196,11 @@ export const RESOURCES = {
     path: `/api/code-health/recommendations?repo=${enc(repo)}&cursor=${enc(cursor)}`,
     topic: ["agents", "flight"],
   }),
+  /** Where each run's tokens went; read on opening and on Refresh, not on every crew event. */
+  tokenAudit: (days: number): ResourceRef => ({
+    path: `/api/audit/tokens?days=${days}`,
+    topic: null,
+  }),
   audit: (range: string): ResourceRef => ({
     path: `/api/audit?range=${enc(range)}`,
     topic: "agents",
@@ -178,6 +211,16 @@ export const RESOURCES = {
   }),
   /** The stored Comms views.  Unlike the older transcript endpoint above, these include labels,
    * replies, reactions, pins and read cursors. */
+  /** The receipt of the choice made on an item (`ChoiceReceipt`); 404 when none was made. */
+  choice: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/choice`,
+    topic: "attention",
+  }),
+  /** The note shown before a reply to a message is sent (`CommsReplyRoute`). */
+  replyRoute: (messageId: string): ResourceRef => ({
+    path: `/api/comms/${enc(messageId)}/reply-route`,
+    topic: "agents",
+  }),
   commsCrew: { path: "/api/comms/crew", topic: "agents" },
   commsFlight: { path: "/api/comms/flight", topic: "agents" },
   /** A nav row's read: the conversation list and counts, no messages. */
@@ -200,6 +243,10 @@ export const RESOURCES = {
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
   commsMetrics: { path: "/api/comms/metrics", topic: "agents" },
   commsChatter: { path: "/api/comms/chatter", topic: "agents" },
+  /** Unanswered questions and blockers, with their text; waiting is drawn from these. */
+  commsOpen: { path: "/api/comms/open", topic: "agents" },
+  /** The last 24h's messages one by one (the chart's side pane); an older hub answers 404. */
+  commsFeed: { path: "/api/comms/feed", topic: "agents" },
   stream: (agentId: string): ResourceRef => ({
     path: dockStreamPath(agentId),
     topic: "agents",
@@ -225,6 +272,8 @@ export const RESOURCES = {
     topic: null,
   }),
   escalations: { path: "/api/escalations", topic: "escalations" },
+  /** The branch builds the hub keeps to show; the server drops one when its PR closes. Read once per visit. */
+  designPreviews: { path: "/api/design-previews", topic: null },
   /** Who holds the full-suite lock and who waits; the server emits "guard" when that changes. */
   testLockHistory: { path: "/api/test-lock/history", topic: "guard" },
   testLock: { path: "/api/test-lock", topic: "guard" },
@@ -325,10 +374,15 @@ export const ACTIONS = {
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
   /** Body `{ keys: string[] }`. */
   hold: (key: string) => `/api/attention/${enc(key)}/hold`,
+  notNow: (key: string) => `/api/attention/${enc(key)}/not-now`,
+  drop: (key: string) => `/api/attention/${enc(key)}/drop`,
+  clear: (key: string) => `/api/attention/${enc(key)}/clear`,
   releaseHold: (key: string) => `/api/attention/${enc(key)}/hold/release`,
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
   dismiss: (key: string) => `/api/attention/${enc(key)}/dismiss`,
+  /** Body `{ optionId, briefAt }`; answers a `ChoiceReceipt`. */
+  choose: (key: string) => `/api/attention/${enc(key)}/choose`,
   /** Body `{}`; a 404 `{ error }` when the thread is no longer open. Local only. */
   handled: (key: string) => `/api/attention/${enc(key)}/handled`,
   /** Body: the whole AwaySettings. */
@@ -449,7 +503,10 @@ const readResource = async <T>(path: string): Promise<T> => {
     mapSnapshots.set(path, next);
     return next as T;
   }
-  return path === RESOURCES.prFlow.path || path.startsWith("/api/code-health")
+  return path === RESOURCES.prFlow.path ||
+    path === RESOURCES.dependencies.path ||
+    path === RESOURCES.designPreviews.path ||
+    path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)
     : apiGet<T>(path);
 };
@@ -749,9 +806,10 @@ class Hub {
   /**
    * Forget cached data (the tests' reset between cases: the hub is a module singleton).
    * Requests still in flight are abandoned: their responses are dropped when they arrive.
-   * What is still on screen is fetched again at once, rather than left idle until the next event.
+   * What is still on screen is fetched again at once, rather than left idle until the next event,
+   * unless `refetch` is false (a switch between Live and Demo: the new tree fetches for itself).
    */
-  clear(): void {
+  clear({ refetch = true }: { refetch?: boolean } = {}): void {
     mapSnapshots.clear();
     this.generation++;
     for (const e of this.entries.values()) {
@@ -763,7 +821,7 @@ class Hub {
       e.activityTimer = undefined;
       this.set(e, IDLE);
     }
-    this.refetchAll();
+    if (refetch) this.refetchAll();
   }
 }
 
@@ -877,7 +935,7 @@ const STREAM_OPEN_TIMEOUT_MS = 10_000;
  * is refused it retries after a pause.
  */
 export function startStream(): () => void {
-  let es: EventSource | null = null;
+  let es: StreamSource | null = null;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let connectedBefore = false;
   let stopped = false;
@@ -895,7 +953,7 @@ export function startStream(): () => void {
 
   const connect = () => {
     if (stopped) return;
-    const source = new EventSource("/api/stream");
+    const source = openStream("/api/stream");
     es = source;
     source.addEventListener("open", () => {
       if (stopped || source !== es || source.readyState !== EventSource.OPEN) return;

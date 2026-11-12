@@ -111,7 +111,9 @@ describe("persistent item discussion", () => {
 it("keeps the fly-out and composer within a narrow screen", () => {
   const css = readStyles();
   expect(css.match(/\.flyout \{([^}]*)\}/)?.[1]).toContain("width: min(540px, 100%)");
-  expect(css.match(/#discuss \.panel \{([^}]*)\}/)?.[1]).toContain("max-height: 86vh");
+  expect(css.match(/#discuss \.panel \{([^}]*)\}/)?.[1]).toContain(
+    "max-height: calc(86 * var(--vh))",
+  );
   expect(css.match(/#dsDiscussionForm \{([^}]*)\}/)?.[1]).toContain("flex-wrap: wrap");
   expect(css.match(/#dsDiscussionForm input \{([^}]*)\}/)?.[1]).toContain("min-width: 0");
   expect(css.match(/#discuss \.item-body \{([^}]*)\}/)?.[1]).toContain("overflow: auto");

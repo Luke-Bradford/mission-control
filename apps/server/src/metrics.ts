@@ -6,7 +6,7 @@ import {
   startOfLocalDay,
 } from "@mc/core";
 import { inProgressOf, pipelineStages } from "./overview.ts";
-import { runSpend } from "./spend.ts";
+import { runSpend } from "./spend/spend.ts";
 import type { Store } from "./store.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
@@ -33,7 +33,7 @@ export function metricsView(store: Store, now: number, scope: MetricsScope): Met
     runs,
     prs,
     pipelineRepos: new Set(scope.pipelineRepoIds),
-    midnight,
+    doneSince: midnight,
   });
 
   // Merged counts the crew sessions' repos; the observed loops' own repos are a separate figure.

@@ -1,15 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub } from "../src/data.ts";
+import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import {
   NeedsYouTab,
   NOBODY_ELSE,
-  NOTHING_DEFAULTED,
   NOTHING_HANDLING,
   NOTHING_HELD,
 } from "../src/flight/NeedsYouTab.tsx";
 import { needsGroups } from "../src/flight/needsGroups.ts";
-import { Flight } from "../src/pages/Flight.tsx";
 import { useItem } from "../src/shell/overlays.ts";
 import { stubFetch as fetchStub } from "./fetchStub.ts";
 import { brief, CONFIG, HOUR, item, NOW } from "./fixtures.ts";
@@ -54,19 +53,19 @@ describe("needsGroups", () => {
 });
 
 describe("Needs you tab", () => {
-  it("says each group is empty when nothing is in it, and Held nothing held", async () => {
+  it("says each group is empty when nothing is in it, and Watch list has nothing held", async () => {
     stubFetch({ "/api/attention": [] });
     render(<NeedsYouTab />);
-    await waitFor(() => expect(panel("defaultsP").textContent).toContain(NOTHING_DEFAULTED));
-    expect(panel("handlingP").textContent).toContain(NOTHING_HANDLING);
+    await waitFor(() => expect(panel("handlingP").textContent).toContain(NOTHING_HANDLING));
     expect(panel("waitingP").textContent).toContain(NOBODY_ELSE);
     expect(panel("heldP").textContent).toContain(NOTHING_HELD);
+    expect(panel("heldP").querySelector("h2")?.textContent).toContain("Watch list");
   });
 
   it("names what is loading in each group, rather than a bare dash", () => {
     stubFetch({ "/api/attention": [] });
     render(<NeedsYouTab />);
-    for (const id of ["defaultsP", "handlingP", "waitingP"]) {
+    for (const id of ["handlingP", "waitingP"]) {
       expect(panel(id).textContent).toContain("Loading what needs you…");
       expect(panel(id).querySelector("[aria-busy='true']")).not.toBeNull();
     }
@@ -93,50 +92,6 @@ describe("Needs you tab", () => {
     attentionOk = true;
     fireEvent.click(within(panel("handlingP")).getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(panel("handlingP").textContent).toContain(NOTHING_HANDLING));
-  });
-
-  it("lists the asks with their full brief open, which Hide folds, never an ask with a default", async () => {
-    stubFetch({
-      "/api/attention": [
-        item({
-          key: "decision:a",
-          kind: "decision",
-          text: "Pick a window",
-          brief: brief({ assessment: "Two windows fit.", recommendation: "Take Friday" }),
-        }),
-        item({ key: "decision:d", text: "Defaulted ask", defaultDueAt: NOW + HOUR }),
-      ],
-    });
-    render(<NeedsYouTab />);
-    const asks = await screen.findAllByTestId("ask-row");
-    expect(asks).toHaveLength(1);
-    expect(asks[0]?.textContent).toContain("Pick a window");
-    expect(asks[0]?.textContent).toContain("Two windows fit.");
-    fireEvent.click(within(asks[0] as HTMLElement).getByRole("button", { name: "Hide brief" }));
-    expect(asks[0]?.textContent).not.toContain("Two windows fit.");
-    fireEvent.click(within(asks[0] as HTMLElement).getByRole("button", { name: "Full brief" }));
-    expect(asks[0]?.textContent).toContain("Two windows fit.");
-  });
-
-  it("lists what FLIGHT will do unless you object, with the recommendation and when", async () => {
-    stubFetch({
-      "/api/attention": [
-        item({
-          key: "decision:d",
-          text: "Defaulted ask",
-          defaultDueAt: NOW + 2 * HOUR,
-          brief: brief({ recommendation: "Take Friday" }),
-        }),
-      ],
-    });
-    render(<NeedsYouTab />);
-    await waitFor(() =>
-      expect(panel("defaultsP").textContent).toContain(
-        "Recommended: Take Friday · applies in 2h 00m",
-      ),
-    );
-    expect(panel("defaultsP").textContent).toContain("Defaulted ask");
-    expect(panel("askP").textContent).not.toContain("Defaulted ask");
   });
 
   it("lists what FLIGHT is handling with its note, and labels items waiting on a down FLIGHT", async () => {
@@ -186,7 +141,7 @@ describe("Needs you tab", () => {
     expect(screen.getByTestId("open").textContent).toBe("c");
   });
 
-  it("lists Held items under their own heading, with Release", async () => {
+  it("lists Watch list items with Release", async () => {
     stubFetch({
       "/api/attention": [],
       "/api/attention/held": [
@@ -202,7 +157,7 @@ describe("Needs you tab", () => {
     expect(within(panel("heldP")).getByRole("button", { name: "Release" })).toBeTruthy();
   });
 
-  it("sends FLIGHT not triaging to its listed items, in the asks", async () => {
+  it("lists what FLIGHT holds for an unstarted FLIGHT as handling, and leads to Needs you", async () => {
     stubFetch({
       "/api/attention": [
         item({
@@ -215,10 +170,9 @@ describe("Needs you tab", () => {
         item({ key: "t", kind: "tag", text: "Seat tag", owner: "flight", flightTriage: "down" }),
       ],
     });
-    render(<Flight />);
-    expect(
-      await within(panel("askP")).findByText(/FLIGHT is stopped: 1 waiting since 12:55\./),
-    ).toBeTruthy();
-    expect(panel("handlingP").textContent).toContain("Seat tag");
+    render(<FlightTabs />);
+    expect(await screen.findByRole("link", { name: "Open Needs you" })).toBeTruthy();
+    await waitFor(() => expect(panel("handlingP").textContent).toContain("Seat tag"));
+    expect(document.getElementById("askP")).toBeNull();
   });
 });

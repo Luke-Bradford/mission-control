@@ -4,6 +4,7 @@ import {
   type AttentionBrief,
   type AttentionItem,
   type BoardItem,
+  type BriefQueuePreparation,
   DEFAULT_PROFILES,
   eligibleToStart,
   globMatches,
@@ -16,12 +17,14 @@ import {
   type TicketView,
 } from "@mc/core";
 import { activeAway } from "./away.ts";
+import { bindPreparedBrief } from "./brief/prepare.ts";
+import { briefHash } from "./brief/source.ts";
 import { type CcConfig, type CrewSeatConfig, seatInput, seatUnavailable } from "./config.ts";
 import { waitReader } from "./dependencies.ts";
 import { refillQueues } from "./engine/queue.ts";
 import { RepoRulesError } from "./engine/rules.ts";
 import { matchesConfiguredFocus } from "./focus.ts";
-import type { MoveResult } from "./github-board.ts";
+import type { MoveResult } from "./github/board.ts";
 import { chooseRunProfile, type ProfilesError } from "./profiles.ts";
 import type { Store } from "./store.ts";
 
@@ -41,7 +44,7 @@ export interface QueueReorderDeps {
 
 export class QueueReorderError extends Error {}
 
-const PREFIX = "queue-reorder:";
+export const PREFIX = "queue-reorder:";
 interface Proposal {
   seat: string;
   repoId: string;
@@ -218,15 +221,57 @@ function approvalItem(
     owner: "operator",
     brief: {
       for: "operator",
+      by: "hub",
       original: text,
       context: text,
       ask: text,
-      recommendation: "Approve or deny the Priority swap.",
+      assessment: text,
+      did: [],
+      checked: [
+        {
+          source: "Current board and queue",
+          finding: "Both cards and their allocation were validated before this proposal.",
+        },
+      ],
+      recommendation: "Approve the displayed Priority swap if this is the intended delivery order.",
+      recommendedOptionId: "approve",
+      decision: {
+        whyOperator: {
+          kind: "floor-approval",
+          explanation:
+            "This stored Priority proposal requires an explicit approval; a timer must not approve it.",
+        },
+        consulted: [],
+        waiting: "Until you explicitly approve or deny this proposal.",
+        costOfDelay:
+          "The current queue order remains unchanged. No delivery-time estimate is available.",
+      },
       basis: "Ready queue and board Priority snapshot.",
       at,
       options: [
-        { id: "approve", label: "Approve", answer: "Approve" },
-        { id: "deny", label: "Deny", answer: "Deny" },
+        {
+          id: "approve",
+          label: "Approve",
+          answer: "Approve",
+          consequence: "Swap the two displayed board Priority values after revalidation.",
+          reversibility: {
+            kind: "reversible",
+            detail:
+              "The recorded prior Priority values can be restored if the cards remain eligible.",
+          },
+          action: { kind: "queue-proposal", key: `note:${key}`, action: "approve" },
+        },
+        {
+          id: "deny",
+          label: "Deny",
+          answer: "Deny",
+          consequence: "Keep the current order and settle this proposal without board writes.",
+          reversibility: {
+            kind: "reversible",
+            detail: "A new proposal can be made from the current queue.",
+          },
+          action: { kind: "queue-proposal", key: `note:${key}`, action: "deny" },
+        },
       ],
     },
   };
@@ -262,6 +307,46 @@ async function prepareQueueReorder(
   return { key, p };
 }
 
+/** Validates FLIGHT's direct intent without recording or resolving a human approval proposal. */
+export async function prepareQueueReorderSnapshot(
+  deps: QueueReorderDeps,
+  seatId: string,
+  move: string,
+  above: string,
+): Promise<BriefQueuePreparation> {
+  const { p } = await prepareQueueReorder(deps, seatId, move, above);
+  const prior = (card: BoardItem) => ({
+    repoId: card.repoId,
+    issue: card.issueNumber,
+    priority: card.priority ?? refuse("Priority unavailable."),
+  });
+  return {
+    proof: await queueProof(deps, p),
+    reversibleState: { kind: "priority-swap", before: [prior(p.cards[0]), prior(p.cards[1])] },
+  };
+}
+
+async function queueProof(deps: QueueReorderDeps, p: Proposal): Promise<string> {
+  const rules = await deps.rules(p.repoId);
+  if (rules instanceof RepoRulesError) return refuse("Cannot read eligibility rules.");
+  return briefHash({
+    seat: p.seatSnapshot,
+    rules,
+    cards: p.cards.map((card) => ({
+      repoId: card.repoId,
+      issue: card.issueNumber,
+      itemId: card.itemId,
+      projectId: card.projectId,
+      priority: card.priority,
+      prioritySource: card.prioritySource,
+      labels: [...card.labels].sort(),
+      column: hudColumnOf(card),
+      size: card.size,
+      closed: card.closed,
+    })),
+  });
+}
+
 export async function proposeQueueReorder(
   deps: QueueReorderDeps,
   seatId: string,
@@ -270,16 +355,40 @@ export async function proposeQueueReorder(
 ) {
   const { key, p } = await prepareQueueReorder(deps, seatId, moveRef, aboveRef);
   const item = approvalItem(key, p, deps.now());
-  deps.store.addBrief({ key: item.key, ...item.brief });
-  deps.store.saveQueueReorder(key, JSON.stringify(p), item.at, {
+  const note = {
     key,
-    kind: "approval",
+    kind: "approval" as const,
     seatId: null,
     repoId: p.repoId,
     runId: null,
     text: item.text,
     at: item.at,
-  });
+  };
+  deps.store.addQueueReorderBrief(key, JSON.stringify(p), note, () =>
+    bindPreparedBrief(
+      { config: deps.config, store: deps.store, now: deps.now },
+      { ...item, ticket: null },
+      item.brief,
+      { service: "queue-proposal" },
+      item.brief.options.flatMap((option) =>
+        option.action && option.id
+          ? [
+              {
+                optionId: option.id,
+                action: option.action,
+                defaultable: false,
+                effect:
+                  option.id === "approve"
+                    ? "Approve this Priority proposal"
+                    : "Leave this queue order unchanged",
+              },
+            ]
+          : [],
+      ),
+    ),
+  );
+  const saved = deps.store.briefs().get(item.key);
+  if (saved) item.brief = saved;
   return { item };
 }
 
@@ -289,12 +398,14 @@ export async function reorderQueue(
   seatId: string,
   moveRef: string,
   aboveRef: string,
+  beforeWrite?: () => void,
+  expectedProof?: string,
 ) {
   const { key, p } = await prepareQueueReorder(deps, seatId, moveRef, aboveRef);
   // The pending proposal is an internal recovery record, not an operator approval: no brief, no note.
   deps.store.saveQueueReorder(key, JSON.stringify(p), deps.now());
   try {
-    return await resolveQueueReorder(deps, key, "approve");
+    return await resolveQueueReorder(deps, key, "approve", beforeWrite, expectedProof);
   } catch (e) {
     // Refused before any write: drop the record, so it can never be approved later.
     const raw = deps.store.getSetting(key);
@@ -310,15 +421,23 @@ export function resolveQueueReorder(
   deps: QueueReorderDeps,
   itemKey: string,
   action: "approve" | "deny",
+  beforeWrite?: () => void,
+  expectedProof?: string,
 ) {
   const run = (approvals.get(deps.store) ?? Promise.resolve())
     .catch(() => undefined)
-    .then(() => resolve(deps, itemKey, action));
+    .then(() => resolve(deps, itemKey, action, beforeWrite, expectedProof));
   approvals.set(deps.store, run);
   return run;
 }
 
-async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve" | "deny") {
+async function resolve(
+  deps: QueueReorderDeps,
+  itemKey: string,
+  action: "approve" | "deny",
+  beforeWrite?: () => void,
+  expectedProof?: string,
+) {
   const key = itemKey.startsWith("note:") ? itemKey.slice(5) : itemKey;
   if (!key.startsWith(PREFIX)) refuse("Unknown queue approval.");
   const raw = deps.store.getSetting(key);
@@ -331,6 +450,7 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
     deps.store.setSetting(key, JSON.stringify(p));
   };
   if (action === "deny") {
+    beforeWrite?.();
     p.state = "denied";
     deps.store.saveQueueReorder(key, JSON.stringify(p), deps.now(), undefined, key);
     return { ok: true, text: "Left the order as it is." };
@@ -358,6 +478,8 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
   const cards: [BoardItem, BoardItem] = [find(p.cards[0]), find(p.cards[1])];
   await validate(deps, p.seat, cards, board);
   await validateAllocation(deps, p.seat, cards, board);
+  if (expectedProof && (await queueProof(deps, { ...p, cards })) !== expectedProof)
+    refuse("The prepared queue rules or Priority snapshot changed; refresh this FYI.");
   const latestSeat = seatOf(deps, p.seat);
   if (
     latestSeat.session.repoId !== p.repoId ||
@@ -372,6 +494,7 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
   )
     refuse("Seat or queue changed; propose again.");
   gate(deps, seatOf(deps, p.seat).seat, p.repoId);
+  beforeWrite?.();
   // Persist before the first external write. A crash or uncertain response must never replay it.
   const recoveryKey = `${key}:recovery`;
   const recoveryText = `Priority swap incomplete or unconfirmed for ${p.repoId}#${cards[0].issueNumber} and ${p.repoId}#${cards[1].issueNumber}. Refresh the board and check both Priority values. Before approval: ${p.repoId}#${cards[0].issueNumber} ${cards[0].priority}; ${p.repoId}#${cards[1].issueNumber} ${cards[1].priority}. Restore these on the board if needed, then queue the move again. This record will not write again.`;
@@ -389,7 +512,7 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
       text: recoveryText,
       at: deps.now(),
     },
-    key,
+    beforeWrite ? undefined : key,
   );
   try {
     const swaps = [
@@ -397,6 +520,7 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
       [cards[1], cards[0].priority],
     ] as const;
     for (const [card, priority] of swaps) {
+      beforeWrite?.();
       const result = await deps.edit(p.repoId, card.issueNumber, {
         priority: priority ?? refuse("Priority unavailable."),
       });
@@ -429,12 +553,14 @@ async function resolve(deps: QueueReorderDeps, itemKey: string, action: "approve
     if (moveAt < 0 || aboveAt <= moveAt) throw new Error("Queue order unconfirmed.");
     p.state = "approved";
     deps.store.saveQueueReorder(key, JSON.stringify(p), deps.now(), undefined, recoveryKey);
+    deps.store.clearNote(key, deps.now());
     return {
       ok: true,
       text: `Changed Priority on the board. ${p.seatSnapshot.displayCallSign ?? seatCallSign(p.seat)} takes ${p.repoId}#${cards[0].issueNumber} first now.`,
     };
   } catch {
     save("failed");
+    deps.store.clearNote(key, deps.now());
     return { ok: false, text: recoveryText };
   }
 }

@@ -71,6 +71,8 @@ rl.on("line", (line) => {
     if (!requested) return;
     requests.delete(id);
     const { scenario, itemId, type } = requested;
+    // A held-item exit happens after the actual acceptance, not an arbitrary pre-approval timer.
+    if (scenario.exitAccepted && message.result?.decision === "accept") process.exit(1);
     if (scenario.resolved) notify("serverRequest/resolved", { threadId, requestId: id });
     if (scenario.endTurnWithNoItem) later(() => endTurn(), 10);
     else if (!scenario.holdItem)
@@ -190,6 +192,35 @@ rl.on("line", (line) => {
     };
     if (scenario.startDelayMs) later(announceTurn, scenario.startDelayMs);
     else announceTurn();
+    // the CLI-update check's line: read the file in the cwd with a command, say what is in it
+    const checkRead = /Read the file (\S+) in the current directory/.exec(
+      params.input?.[0]?.text ?? "",
+    );
+    if (checkRead) {
+      later(() => {
+        const content = readFileSync(join(process.cwd(), checkRead[1]), "utf8");
+        notify("item/completed", {
+          threadId,
+          turnId,
+          item: {
+            id: `check-cmd-${turn}`,
+            type: "commandExecution",
+            status: "completed",
+            exitCode: 0,
+            command: `cat ${checkRead[1]}`,
+            cwd: process.cwd(),
+            aggregatedOutput: content,
+          },
+        });
+        notify("item/completed", {
+          threadId,
+          turnId,
+          item: { id: `check-msg-${turn}`, type: "agentMessage", text: content },
+        });
+        endTurn(configured.failed ? "failed" : "completed");
+      }, 20);
+      return;
+    }
     if (scenario.stderr) process.stderr.write(`${scenario.stderr}\n`);
     if (scenario.plan) notify("turn/plan/updated", { threadId, turnId, ...scenario.plan });
     if (scenario.usage)

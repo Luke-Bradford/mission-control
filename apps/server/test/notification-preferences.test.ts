@@ -300,7 +300,7 @@ it("notifies only above 90 percent and only once per quota crossing", async () =
   }
 });
 
-it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM opted in", async () => {
+it("notifies FLIGHT's @CAPCOM question only once briefed for the operator, never narration (#1543)", async () => {
   await app.close();
   const crewConfig: CcConfig = {
     ...config,
@@ -345,7 +345,7 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM 
   bus.emit("agents");
   // messages are not Needs you: narration and FLIGHT's summaries raise nothing to notify
   expect(await events()).toEqual([]);
-  store.addComms({
+  const raw = store.addComms({
     at: Date.now(),
     from: "demo-seat",
     to: "peer",
@@ -353,19 +353,29 @@ it("notifies FLIGHT's @CAPCOM question, not direct-line narration, with @CAPCOM 
     text: "@CAPCOM review this?",
   });
   bus.emit("agents");
-  expect(await events()).toMatchObject([{ category: "capcom", text: "@CAPCOM review this?" }]);
-  bus.emit("agents");
-  expect(await events()).toHaveLength(1);
-  p.categories.capcom = false;
-  await app.inject({ method: "POST", url: "/api/notification-preferences", payload: p });
-  store.addComms({
-    at: Date.now(),
-    from: "demo-seat",
-    to: "peer",
-    ticket: null,
-    text: "@CAPCOM suppressed?",
-  });
-  bus.emit("agents");
+  // #1543: FLIGHT's raw @CAPCOM question does not reach Needs you, so it raises nothing
+  expect(await events()).toEqual([]);
+  // briefed for the operator, complete, it does, and notifies once as a question asked of the
+  // operator; the @CAPCOM category covers raw tags only on a hub with no FLIGHT seat
+  const briefIt = (id: string | number | undefined) =>
+    store.addBrief({
+      key: `tag:demo-seat:${id}`,
+      for: "operator",
+      ask: "Review the change now, or after the release?",
+      ticket: "demo#7",
+      context: "The change is ready to review.",
+      recommendation: "Review now.",
+      options: [
+        { label: "Now", answer: "Review PR 7 now." },
+        { label: "Later", answer: "Review after the release." },
+      ],
+      basis: "PR 7",
+      at: Date.now(),
+    });
+  briefIt(raw?.id);
+  bus.emit("attention");
+  expect(await events()).toMatchObject([{ category: "asks" }]);
+  bus.emit("attention");
   expect(await events()).toHaveLength(1);
 });
 
@@ -521,7 +531,7 @@ it("notifies a briefed ask and FLIGHT going down, not stalls, PRs, blocked runs 
   // FLIGHT's own triage (a brief for FLIGHT) is not an ask of the operator
   store.addBrief({
     key: "note:raw",
-    context: "c",
+    context: "The crew asked a question and waits for your answer.",
     recommendation: "r",
     options: [],
     basis: "b",
@@ -784,7 +794,8 @@ it("does not notify again when FLIGHT rotates while an item is late (#758)", asy
     at: Date.now() - 30 * 60_000,
   });
   bus.emit("attention");
-  expect(await events()).toMatchObject([{ category: "flightDown" }]);
+  // a late wake is FLIGHT's own watch (#1537): it notifies nobody
+  expect(await events()).toEqual([]);
   // the run ends for a fresh session and the watch starts the next a minute later
   store.upsertRun({
     ...flightRun("f1", Date.now() - 3_600_000),
@@ -801,7 +812,7 @@ it("does not notify again when FLIGHT rotates while an item is late (#758)", asy
     updatedAt: Date.now(),
   });
   bus.emit("attention");
-  expect(await events()).toHaveLength(1);
+  expect(await events()).toHaveLength(0);
   vi.setSystemTime(new Date("2026-10-23T12:01:00Z"));
   store.upsertRun(flightRun("f2", Date.now()));
   store.setSeatSession({
@@ -815,7 +826,7 @@ it("does not notify again when FLIGHT rotates while an item is late (#758)", asy
   });
   bus.emit("attention");
   expect((await app.inject("/api/attention")).json()[0].notTriaging.cause).toBe("late");
-  expect(await events()).toHaveLength(1);
+  expect(await events()).toHaveLength(0);
 });
 
 it("adopts the new notification versions on Update without replaying open items", async () => {

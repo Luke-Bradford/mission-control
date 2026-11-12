@@ -116,6 +116,8 @@ export interface CardProps {
   statusOutOfDate: string | null;
   /** The card's "You:" chip, from its Needs-you items; null when none. */
   you: CardYou | null;
+  /** Its review found blocking problems: the rework line (`reworkLabel`); null when not. */
+  rework?: string | null;
 }
 
 /**
@@ -151,6 +153,7 @@ export const Card = memo(function Card({
   when,
   statusOutOfDate,
   you,
+  rework = null,
 }: CardProps) {
   cardRenderProbe.onRender?.(ticketRef(item));
   const col = cardColumn(item);
@@ -178,6 +181,11 @@ export const Card = memo(function Card({
             Trace
           </a>
         )}
+      </span>
+    ),
+    rework && (
+      <span key="rework" className="xs warn-t">
+        {rework}
       </span>
     ),
     !agent &&

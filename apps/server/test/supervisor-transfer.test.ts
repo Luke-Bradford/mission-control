@@ -2,12 +2,13 @@ import "./supervisor-harness.ts";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
-import { CliHold } from "../src/cli-update.ts";
+import { CliHold } from "../src/cli/update.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { codexModelsFor } from "../src/runtime/codex-models.ts";
-import { crewCodexDir } from "../src/store.ts";
+import { crewCodexDir } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { fakeModels } from "./config-codex.ts";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
   dbPath,
   dir,
@@ -18,6 +19,8 @@ import {
   store,
   until,
 } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 function setup(scenario: Record<string, unknown> = {}) {
   const made = codexSupervisor(scenario);

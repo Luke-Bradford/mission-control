@@ -1,8 +1,12 @@
 /**
  * Branch tidying. GitHub's delete-on-merge removes a branch only when its PR merges, so the hub
- * removes the rest: a crew branch whose PR closed unmerged (`closedPass`), and any branch with no
- * open PR, no live run and no commit for a day (`sweep`). It also drops the local branches of the
- * seat clones that are merged or whose remote is gone (`pruneLocal`).
+ * removes the rest: a branch with no open PR, no live run, no commit for a day and a tip a merged PR
+ * carried as its head (`sweep`). It also drops the local branches of the seat clones that are merged
+ * or whose remote is gone (`pruneLocal`).
+ *
+ * Only a branch one of this hub's own work runs worked on is ever deleted (that includes a run that
+ * adopted a branch already on origin, whose tip must still be merged): a second hub on the same repo
+ * has runs this store cannot see, so a branch with no run here is not proven unused.
  *
  * The one GitHub write is `DELETE /git/refs/heads/<branch>`. A branch is deleted only after
  * reads that all succeeded: a failed read skips the repo, never guesses.
@@ -11,16 +15,17 @@ import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { CcConfig } from "./config.ts";
 import type { GhRunner } from "./mcp/gh.ts";
-import { RUN_BRANCH } from "./mcp/tools.ts";
+import { ownsBranch } from "./ownership.ts";
 import { CREW_GIT_SLOW_MS } from "./runtime/checkouts.ts";
 import { crewGit } from "./runtime/git.ts";
-import { crewDir, type Store } from "./store.ts";
+import { crewDir } from "./store/crew-paths.ts";
+import type { Store } from "./store.ts";
 
 /** A branch must have had no commit for this long before the sweep takes it. */
 export const SWEEP_MIN_AGE_MS = 24 * 60 * 60_000;
 /** The sweep runs this often. */
 export const SWEEP_EVERY_MS = 24 * 60 * 60_000;
-/** The closed-PR pass and the local prune run this often. */
+/** The local prune runs this often. */
 export const TIDY_EVERY_MS = 10 * 60_000;
 /** Branches under this prefix are never touched. */
 export const KEEP_PREFIX = "archive/";
@@ -33,6 +38,8 @@ export interface RemoteBranch {
   name: string;
   /** The tip commit's date; null when GitHub gave none. */
   committedAt: number | null;
+  /** The tip commit's SHA; null when GitHub gave none. */
+  sha: string | null;
 }
 
 /** Whether the hub must leave `branch` alone: the default branch, `archive/*`, or the repo's keep-list. */
@@ -56,9 +63,7 @@ export interface BranchTidyDeps {
 }
 
 export interface BranchTidy {
-  /** Deletes the branches of crew PRs that closed unmerged; the branches deleted, as `repo:branch`. */
-  closedPass(): Promise<string[]>;
-  /** Deletes every branch with no open PR, no live run and no commit for 24 hours. */
+  /** Deletes every branch with no open PR, no live run, no commit for 24 hours and a merged tip. */
   sweep(): Promise<string[]>;
   /** Fetches each seat clone and drops its local branches that are merged or gone. */
   pruneLocal(): Promise<string[]>;
@@ -68,7 +73,7 @@ const REFS_QUERY = `query($owner: String!, $name: String!, $after: String) {
   repository(owner: $owner, name: $name) {
     defaultBranchRef { name }
     refs(refPrefix: "refs/heads/", first: 100, after: $after) {
-      nodes { name target { ... on Commit { committedDate } } }
+      nodes { name target { ... on Commit { oid committedDate } } }
       pageInfo { hasNextPage endCursor }
     }
   }
@@ -104,7 +109,7 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
       let repository: {
         defaultBranchRef?: { name?: unknown } | null;
         refs?: {
-          nodes?: { name?: unknown; target?: { committedDate?: unknown } | null }[];
+          nodes?: { name?: unknown; target?: { oid?: unknown; committedDate?: unknown } | null }[];
           pageInfo?: { hasNextPage?: unknown; endCursor?: unknown };
         };
       } | null;
@@ -123,7 +128,8 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
       for (const n of refs.nodes) {
         if (typeof n?.name !== "string") continue;
         const at = Date.parse(String(n.target?.committedDate));
-        branches.push({ name: n.name, committedAt: Number.isNaN(at) ? null : at });
+        const sha = typeof n.target?.oid === "string" ? n.target.oid : null;
+        branches.push({ name: n.name, committedAt: Number.isNaN(at) ? null : at, sha });
       }
       if (refs.pageInfo?.hasNextPage !== true) {
         return defaultBranch === null ? null : { defaultBranch, branches };
@@ -173,8 +179,6 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
   function liveBranches(repoId: string): Set<string> {
     const out = new Set<string>();
     for (const run of deps.store.runsActiveSince(Number.MAX_SAFE_INTEGER)) {
-      // a run parked on a closed PR holds nothing: its PR is gone and nothing lifts that park
-      if (run.loop?.parked?.kind === "pr-closed") continue;
       if (run.repoId === repoId && run.endedAt === null && run.branch !== null) out.add(run.branch);
     }
     for (const h of deps.store.latestHandoffs(repoId))
@@ -207,8 +211,10 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
           continue;
         }
         const live = liveBranches(repo.id);
+        // another hub on this repo has runs this store cannot see: only a branch our own run made is ours
         for (const b of listed.branches) {
           if (
+            !ownsBranch(deps.store, repo.id, b.name) ||
             isKept(b.name, listed.defaultBranch, repo.keepBranches ?? []) ||
             open.has(b.name) ||
             live.has(b.name) ||
@@ -286,26 +292,25 @@ export function createBranchTidy(deps: BranchTidyDeps): BranchTidy {
   }
 
   return {
-    async closedPass() {
-      const closed = new Map<string, Set<string>>();
-      for (const repo of deps.config.repos) {
-        const set = new Set<string>();
-        for (const pr of deps.store.pullRequests(repo.id)) {
-          if (pr.state === "closed" && RUN_BRANCH.test(pr.branch)) set.add(pr.branch);
-        }
-        closed.set(repo.id, set);
-      }
-      return tidy(
-        (b, repoId) => closed.get(repoId)?.has(b.name) === true,
-        "its PR closed unmerged",
-      );
-    },
-
     async sweep() {
       const cutoff = now() - SWEEP_MIN_AGE_MS;
+      // a branch's tip is merged only when a merged PR of that branch had this very commit as its head:
+      // an idle branch with other commits may hold work nothing else has
+      const merged = new Map<string, Set<string>>();
+      for (const repo of deps.config.repos) {
+        const tips = new Set<string>();
+        for (const pr of deps.store.pullRequests(repo.id)) {
+          if (pr.state === "merged") tips.add(`${pr.branch}@${pr.headSha}`);
+        }
+        merged.set(repo.id, tips);
+      }
       return tidy(
-        (b) => b.committedAt !== null && b.committedAt <= cutoff,
-        "no open PR, no live run, no commit for 24 hours",
+        (b, repoId) =>
+          b.committedAt !== null &&
+          b.committedAt <= cutoff &&
+          b.sha !== null &&
+          merged.get(repoId)?.has(`${b.name}@${b.sha}`) === true,
+        "no open PR, no live run, no commit for 24 hours, its tip merged",
       );
     },
 

@@ -4,20 +4,26 @@ import {
   type AttentionItem,
   type AttentionKind,
   type AttentionOwner,
+  isOperatorItem,
   type NeedsYou,
   needsYouItems,
 } from "@mc/core";
 import { RESOURCES, useResource } from "./data.ts";
-import { NEEDS_YOU_PANEL, NEEDS_YOU_PATH, navigate } from "./router.ts";
+import { NEEDS_YOU_PATH, navigate, needsYouPath } from "./router.ts";
+import { openItem } from "./shell/overlays.ts";
+
+/** Go to the Needs you page. */
+export function openNeedsYou(): void {
+  navigate(NEEDS_YOU_PATH);
+}
 
 /**
- * Go to Needs you's home. Already there (the URL is the same, so navigating does nothing), it
- * brings the panel back into view instead.
+ * Open one waiting item: on the Needs you page when it is the operator's (or not yet triaged),
+ * else in the flyout, as before.
  */
-export function openNeedsYou(): void {
-  if (window.location.pathname + window.location.hash === NEEDS_YOU_PATH) {
-    document.getElementById(NEEDS_YOU_PANEL)?.scrollIntoView?.({ block: "nearest" });
-  } else navigate(NEEDS_YOU_PATH);
+export function openNeed(item: AttentionItem): void {
+  if (isOperatorItem(item) || item.notTriaging) navigate(needsYouPath(item.key));
+  else openItem(item.key);
 }
 
 /** Lives in @mc/core so the server's Overview history counts the same set (#762). */
@@ -31,9 +37,22 @@ export function useNeedsYou(): NeedsYou {
   return needsYouItems(useResource<AttentionItem[]>(RESOURCES.attention).data);
 }
 
+/** The Needs you count as every page shows it; an unknown count is never 0. */
+export type NeedsCount =
+  | { state: "loading" | "error"; items: readonly AttentionItem[]; n: null }
+  | { state: "ready"; items: readonly AttentionItem[]; n: number };
+
+export function useNeedsCount(): NeedsCount {
+  const res = useResource<AttentionItem[]>(RESOURCES.attention);
+  if (res.data === undefined) return { state: res.error ? "error" : "loading", items: [], n: null };
+  const items = needsYouItems(res.data);
+  return { state: "ready", items, n: items.length };
+}
+
 /** Sort order of a Needs-you list (catalogue 2.5.1): by kind, the most urgent first. */
 export function sortNeeds(items: readonly AttentionItem[]): AttentionItem[] {
-  const rank = (i: AttentionItem) => ATTENTION_KINDS.indexOf(i.kind);
+  // FLIGHT being down comes first: nothing else is triaged until it is started.
+  const rank = (i: AttentionItem) => (i.notTriaging ? -1 : ATTENTION_KINDS.indexOf(i.kind));
   return [...items].sort((a, b) => rank(a) - rank(b));
 }
 

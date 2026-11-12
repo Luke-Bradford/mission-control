@@ -12,13 +12,13 @@ import {
   type AttentionOwner,
   agentState,
   type BoardItem,
+  BUDGET_BRAKE_KEY,
   CI_TRIES,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   COMMS_OPEN_PREFIX,
-  CONTROLLER_CHECK_PARK,
   type Crew,
   type CrewAsideRun,
   type CrewLoop,
@@ -41,12 +41,12 @@ import {
   FLIGHT_TRIAGE_WAIT_MS,
   type FlightNotTriagingCause,
   fixesSent,
-  flightFloorBlocked,
   flightNotTriagingText,
   hardRulesBySettingKey,
   hudState,
   isCleanupNoteKey,
   isFlakeNoteKey,
+  isForTheController,
   isHardRulesFlagKey,
   isNoReportNoteKey,
   LOCK_WAITING_TEXT,
@@ -55,6 +55,7 @@ import {
   lockBlockedText,
   loopText,
   modeOfSeat,
+  needsYouEntryFaults,
   OPERATOR_CALL_KINDS,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
@@ -83,15 +84,26 @@ import {
   type TokenUsage,
   UAT_PARK,
 } from "@mc/core";
-import { runAccountId } from "./account-bindings.ts";
-import { decisionDefault, partitionAttention, protectedDecisionItem } from "./attention-holds.ts";
-import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
-import { claudeVersion } from "./cli-version.ts";
+import { runAccountId } from "./accounts/bindings.ts";
+import {
+  decisionDefault,
+  partitionAttention,
+  protectedDecisionItem,
+  questionAskAt,
+} from "./attention/holds.ts";
+import { confirmedResumeAfter, pendingRunApproval } from "./attention/subjects.ts";
+import { briefReadState, briefSourceRevision } from "./brief/source.ts";
+import { claudeVersion } from "./cli/version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
-import { isPaused } from "./collectors/ta-loop.ts";
-import { attentionChatter, resolvedCommsReason } from "./comms.ts";
+import { attentionChatter, resolvedCommsReason } from "./comms/index.ts";
+import {
+  canonicalFlightQuestionKey,
+  flightQuestionChoice,
+  flightQuestionMessageId,
+  isFlightOperatorQuestion,
+} from "./comms/question.ts";
 import {
   agentIds,
   type CcConfig,
@@ -105,9 +117,10 @@ import { reviewerOf } from "./engine/engine.ts";
 import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
-import { flightLive, flightSeat, ownReply } from "./flight/state.ts";
-import { loopTries } from "./loophistory.ts";
-import { reviewCheckFor } from "./review-check.ts";
+import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
+import { loopTries } from "./loop/history.ts";
+import { loopPause } from "./loop/pause.ts";
+import { reviewCheckFor } from "./review/check.ts";
 import {
   type PrCache,
   parseTicket,
@@ -115,10 +128,10 @@ import {
   runSummary,
   runTicket,
   runTicketTitle,
-} from "./runview.ts";
+} from "./run/view.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
-import { transcriptFilePath } from "./transcript-file.ts";
+import { transcriptFilePath } from "./transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
@@ -131,6 +144,10 @@ export const NOTE_KEY = "note:";
 const AGENT_RUNS = 50;
 /** No lock: the default for callers that have none (a preview, a test). */
 export const NO_LOCK: TestLockState = { holder: null, waiting: [] };
+
+/** When the seat's current run took the test lock; null when it does not hold it. */
+const lockHeldSince = (lock: TestLockState, row: SeatSessionRow | null): number | null =>
+  row?.runId != null && lock.holder?.runId === row.runId ? lock.holder.since : null;
 
 /** A transcript's mtime (whole ms), or null when the run has none or the file is gone. */
 export function transcriptMtime(path: string): number | null {
@@ -170,6 +187,12 @@ function crewFields(
   };
 }
 
+/** A repo's GitHub slug by its id, for links the hub builds. */
+const githubOf =
+  (config: CcConfig) =>
+  (repoId: string): string | undefined =>
+    config.repos.find((r) => r.id === repoId)?.github;
+
 /** The driver stop the collector stored, else null (also when the stored text is not a stop). */
 function readStop(store: Store, loopId: string): DriverStop | null {
   const raw = store.getSetting(driverStopKey(loopId));
@@ -202,7 +225,7 @@ export function stateInputs(config: CcConfig, store: Store): string {
         status.get(collectorName(loop.kind, loop.id))?.ok,
         status.get(collectorName(loop.kind, loop.id))?.error,
         status.get(noteCollectorName(loop.kind, loop.id))?.error,
-        loop.kind === "ta-loop" ? isPaused(loop) : false,
+        loopPause(loop, store, githubOf(config)),
         loop.kind === "studio-loop" ? store.getSetting(driverStopKey(loop.id)) : null,
         // a late line can turn the newest ended run blocked
         store.runs(agent.id, 1).map((r) => [r.id, r.status, r.endedAt]),
@@ -238,7 +261,7 @@ function loopViews(
       : null;
     if (agent.kind === "crew") {
       const waiting = seatRow?.runId != null && inLine.has(seatRow.runId);
-      const hud = crewHudState(seatRow, lastOutput, now, waiting);
+      const hud = crewHudState(seatRow, lastOutput, now, waiting, lockHeldSince(lock, seatRow));
       const reason =
         seatUnavailable(agent.seat) ??
         (hud === "waiting" ? LOCK_WAITING_TEXT : (seatRow?.reason ?? null));
@@ -259,6 +282,7 @@ function loopViews(
         stateSince: seatRow?.updatedAt ?? (latest ? (latest.endedAt ?? latest.startedAt) : 0),
         currentRun: latest ? runSummary(latest) : null,
         paused: false,
+        pausedBy: null,
         sourceError: hud === "error" ? (reason ?? "seat error") : null,
         // The seat's reason is its doing line, unless it is already the error text.
         note: hud === "error" ? null : reason,
@@ -270,7 +294,7 @@ function loopViews(
     const loop = agent.loop;
     const st = status.get(collectorName(loop.kind, loop.id));
     const sourceError = st && !st.ok ? (st.error ?? "collector failed") : null;
-    const paused = loop.kind === "ta-loop" ? isPaused(loop) : false;
+    const { paused, by: pausedBy, url: pausedByUrl } = loopPause(loop, store, githubOf(config));
     // Only a title marker (`[operator-decision]` / `[loop-blocked]` / `[mvp-ready]`) means the
     // loop waits on the operator; a label-only escalation is listed in Needs you and nothing more.
     const waitingOnOperator = escalations.some(
@@ -289,6 +313,8 @@ function loopViews(
       stateSince: since,
       currentRun: latest ? runSummary(latest) : null,
       paused,
+      pausedBy,
+      pausedByUrl,
       sourceError,
       note,
       stop,
@@ -315,7 +341,7 @@ function reviewOf(
   prs?: readonly PullRequestView[],
 ): CrewRow["review"] {
   if (branch === null) return null;
-  const open = (prs ?? store.pullRequests(repoId))
+  const open = (prs ?? store.openPullRequests(repoId))
     .filter((p) => p.state === "open" && p.branch === branch)
     .sort((a, b) => b.number - a.number)[0];
   if (!open) return null;
@@ -600,7 +626,17 @@ function buildCrew(
   });
   const digestByRun = store.digests(latestRunIds);
   const contextWindows = store.digestContextWindows(allRuns.map((run) => run.id));
-  const pullRequests = store.pullRequestsForRepos(config.repos.map((repo) => repo.id));
+  const asideAll = store.asideRuns();
+  const referencedPrs = [...allRuns, ...asideAll].flatMap((run) =>
+    run.prs.flatMap((pr) => {
+      const repo = config.repos.find((repo) => repo.github.toLowerCase() === pr.repo.toLowerCase());
+      return repo ? [{ repoId: repo.id, number: pr.number }] : [];
+    }),
+  );
+  const pullRequests = store.openAndReferencedPullRequests(
+    config.repos.map((repo) => repo.id),
+    referencedPrs,
+  );
   for (const [repoId, rows] of pullRequests)
     prCache.set(repoId, new Map(rows.map((row) => [row.number, row])));
   const crewLoop = (run: Run, ticket: string | null): CrewLoop | null => {
@@ -625,7 +661,6 @@ function buildCrew(
     };
   };
   const eventIndex = summary ? null : runEventsIndex(store, now);
-  const asideAll = store.asideRuns();
   const reviewsInFlight = store.reviewsIn(REVIEWING);
   const queuedReviews = new Map<string, ReviewRow>();
   for (const review of reviewsInFlight) {
@@ -655,6 +690,7 @@ function buildCrew(
               view.lastOutputAt,
               now,
               seatRow?.runId != null && lock.waiting.some((w) => w.runId === seatRow.runId),
+              lockHeldSince(lock, seatRow),
             )
           : hudState({
               state: view.state,
@@ -744,6 +780,9 @@ function buildCrew(
               };
             })()),
         paused: view.paused,
+        ...(view.pausedBy
+          ? { pausedBy: view.pausedBy, pausedByUrl: view.pausedByUrl ?? null }
+          : {}),
         note: view.note,
         stop: view.stop,
         sourceError: view.sourceError,
@@ -824,7 +863,7 @@ const kindRank = (k: AttentionItem["kind"]): number => ATTENTION_KINDS.indexOf(k
 
 /** The watch's FLIGHT-down notes as items: folded into the one "FLIGHT is not triaging" item. */
 const FLIGHT_DOWN_ITEMS: ReadonlySet<string> = new Set(
-  FLIGHT_DOWN_NOTES.map((k) => `${NOTE_KEY}${k}`),
+  [...FLIGHT_DOWN_NOTES, FLIGHT_LEFT_NOTE_KEY].map((k) => `${NOTE_KEY}${k}`),
 );
 
 /**
@@ -851,26 +890,23 @@ interface FlightTriage {
 }
 
 /**
- * The operator's call (#758): FLIGHT may brief it for the operator but never keep it, and it is
- * never folded into the "FLIGHT is not triaging" item. The decision kinds, the held hub Update,
- * and a run parked on its budget or account.
+ * The operator's call (#758): FLIGHT may brief it for the operator but never keep it. Unless it is
+ * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, the
+ * held hub Update, and a run parked on its budget or account, or on the operator's acceptance.
  */
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
   if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
-  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
-  const park = note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
-  return (
-    park === "budget" || park === "account" || park === CONTROLLER_CHECK_PARK || park === UAT_PARK
-  );
+  const park = noteParkOf(item, store);
+  return park === "budget" || park === "account" || park === UAT_PARK;
 }
 
 /**
- * Kinds that, once FLIGHT misses them (or while nobody is triaging), reach the operator as
- * themselves so they notify as they always did: a stuck run, or an error a seat is stuck on, is
- * not news to fold into a count.
+ * Kinds that, once FLIGHT misses them (or while nobody is triaging), `route` keeps the operator's;
+ * unbriefed, the Needs you entry check (#1543) then folds them into the not-triaging count, which
+ * notifies in their place.
  */
 const STUCK_KINDS: readonly AttentionItem["kind"][] = [
   "stalled",
@@ -879,6 +915,100 @@ const STUCK_KINDS: readonly AttentionItem["kind"][] = [
   "lock",
   "error",
 ];
+
+/**
+ * The ticket and PR an item is about, with titles, from stored board and PR reads only
+ * (#1543): the page pins them so a number never stands alone. The PR is the item's own (a PR item
+ * or a PR address), else the open PR for its ticket.
+ */
+export function pinned(item: AttentionItem, store: Store, config: CcConfig): AttentionItem {
+  // the item's own ticket, else the one FLIGHT named in its brief
+  const ticket = item.ticket ?? item.brief?.ticket ?? null;
+  const ref = ticket === null ? null : parseTicket(ticket);
+  const card =
+    ref === null ? undefined : store.board(ref.repoId).find((b) => b.issueNumber === ref.number);
+  const key = /^pr:([^#]+)#(\d+):/.exec(item.key);
+  const address = /github\.com\/([^/]+\/[^/]+)\/pull\/(\d+)/.exec(item.url ?? "");
+  // a PR address names the GitHub repo, which maps to a configured repo id
+  const own: [string, number] | null =
+    key !== null
+      ? [key[1] as string, Number(key[2])]
+      : address !== null
+        ? [
+            config.repos.find((r) => r.github.toLowerCase() === address[1]?.toLowerCase())?.id ??
+              "",
+            Number(address[2]),
+          ]
+        : null;
+  const repoId = own !== null ? own[0] : (ref?.repoId ?? item.repoId);
+  // a PR address in a repo this hub does not have maps to "": pin no PR rather than a guess
+  const pr = !repoId
+    ? undefined
+    : own !== null
+      ? (store.pullRequestLink(repoId, { number: own[1] }) ?? undefined)
+      : ticket === null
+        ? undefined
+        : (store.pullRequestLink(repoId, { ticket }) ?? undefined);
+  if (ticket === null && pr === undefined) return item;
+  return {
+    ...item,
+    pinned: {
+      ...(ticket === null
+        ? {}
+        : { ticket: { ref: ticket, title: card?.title ?? null, url: card?.url ?? null } }),
+      ...(pr === undefined
+        ? {}
+        : {
+            pr: {
+              ref: `${pr.repoId}#${pr.number}`,
+              number: pr.number,
+              title: pr.title,
+              url: pr.url,
+            },
+          }),
+    },
+  };
+}
+
+/** Why FLIGHT's own question goes back to it after it wrote again past its brief (#1543). */
+export const FLIGHT_ASKED_AGAIN =
+  "FLIGHT asked again after this brief: brief_item one question that covers every question still open here, the earlier brief's ask included unless the operator answered it";
+
+/**
+ * Hub alerts the entry check passes that need the store to tell (#1543): the runaway breaker, and
+ * a run stopped on a budget or account limit, which only the operator can lift. The rest of the
+ * alert list is in core (`needsYouAlert`).
+ */
+export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
+  if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
+  // hub stops only the operator clears: new runs paused for the machine, the CLI held
+  if (HUB_STOP_KEYS.some((k) => item.key === k || item.key.startsWith(`${k}:`))) return true;
+  if (item.kind !== "blocked") return false;
+  const park = noteParkOf(item, store);
+  return park === "budget" || park === "account";
+}
+
+/**
+ * Hub stops that only the operator clears, by note key or key prefix: machine capacity
+ * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
+ * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
+ * them to those modules' keys.
+ */
+export const HUB_STOP_KEYS = [
+  `${NOTE_KEY}machine-capacity`,
+  // the budget brake on an account (budget-brake.ts)
+  `${NOTE_KEY}${BUDGET_BRAKE_KEY}`,
+  `${NOTE_KEY}cli:claude`,
+  `${NOTE_KEY}cli-auto`,
+  // a seat's focus could not be imported: the operator's config to fix (instructions/notices.ts)
+  `${NOTE_KEY}instruction-focus`,
+] as const;
+
+/** The park kind of the run behind a note item, if any. */
+function noteParkOf(item: Pick<AttentionItem, "key">, store: Store): string | undefined {
+  const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
+  return note?.runId ? store.run(note.runId)?.loop?.parked?.kind : undefined;
+}
 
 /** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
 const keptRaw = (item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean =>
@@ -926,6 +1056,25 @@ function flightTriage(config: CcConfig, store: Store, now: number): FlightTriage
   if (triage === null) return null;
   // items raised while the breaker held FLIGHT back get a fresh window after the lift
   return { ...triage, liveSince: Math.max(triage.liveSince, runawayLiftedAt(store)) };
+}
+
+/**
+ * How an open seat question (`ask:<id>`) is triaged now: null with no FLIGHT seat (the operator's
+ * at once), else whether FLIGHT is triaging and when its triage window for a question asked at
+ * `askedAt` ends. The same window the attention builder gives that item.
+ */
+export function seatQuestionTriage(
+  config: CcConfig,
+  store: Store,
+  now: number,
+  askedAt: number,
+): { triaging: boolean; dueAt: number } | null {
+  const triage = flightTriage(config, store, now);
+  if (triage === null) return null;
+  return {
+    triaging: triage.triaging,
+    dueAt: Math.max(askedAt, triage.liveSince) + FLIGHT_TRIAGE_WAIT_MS,
+  };
 }
 
 function flightTriageNow(config: CcConfig, store: Store, now: number): FlightTriage | null {
@@ -1012,7 +1161,7 @@ export function flightNotTriagingDueAt(config: CcConfig, store: Store, now: numb
 }
 
 /** "14:05" today, "27 Oct 14:05" before today, in the operator's timezone. */
-function sinceText(at: number, now: number, timeZone: string): string {
+export function sinceText(at: number, now: number, timeZone: string): string {
   const hm = clockHm(at, timeZone);
   if (at >= startOfLocalDay(now, timeZone)) return hm;
   const day = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone }).format(
@@ -1102,10 +1251,11 @@ function buildAttentionItems(
       const first = messages[0];
       const last = messages.at(-1);
       if (!first || !last) continue;
-      // Another agent's item is keyed on its first unread line, so a brief stays attached while it
-      // writes again until the thread is read. FLIGHT's own question is the operator's to ack, and
-      // each new one is a new ask.
-      const keyed = own ? last : first;
+      // An item is keyed on its first unread line, so a brief stays attached while its writer
+      // writes again until the thread is read. FLIGHT's own question too (#1543): it reaches Needs
+      // you only through its brief, and a new key would drop the briefed one. FLIGHT's digest lists
+      // it again when FLIGHT writes after briefing it.
+      const keyed = first;
       items.push({
         // routed below: FLIGHT's question stays the operator's; another agent's line is FLIGHT's
         // unless FLIGHT briefs it for the operator
@@ -1131,7 +1281,11 @@ function buildAttentionItems(
   for (const message of store.openCommsItems()) {
     const author = config.crew?.sessions.flatMap((s) => s.seats).find((s) => s.id === message.from);
     if (message.at < COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT) continue;
-    if (now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
+    const flightQuestion =
+      message.from === flightSeat(config)?.seat.id &&
+      message.to === COMMS_CAPCOM &&
+      message.label === "question";
+    if (!flightQuestion && now < message.at + COMMS_FLIGHT_ESCALATION_MS) continue;
     const ticket = /^(.+)#(\d+)$/.exec(message.ticket ?? "");
     const prNumber = /^PR (\d+)$/.exec(message.ref ?? "")?.[1];
     const flight = flightSeat(config);
@@ -1157,10 +1311,16 @@ function buildAttentionItems(
       ) !== null
     )
       continue;
+    // FLIGHT's message for the controller is the controller's, never a stuck run the operator keeps
+    const forController = message.from === flight?.seat.id && isForTheController(message.text);
+    if (flightQuestion && flightQuestionChoice(store, message.id, message.from)) continue;
     items.push({
-      owner: OWNER_OPERATOR,
-      key: `${COMMS_OPEN_PREFIX}${message.id}`,
-      kind: message.label === "blocker" ? "blocked" : "question",
+      owner: forController ? OWNER_CONTROLLER : OWNER_OPERATOR,
+      key:
+        message.from === flight?.seat.id && message.to === COMMS_CAPCOM
+          ? canonicalFlightQuestionKey(store, message.id, flight.seat.id)
+          : `${COMMS_OPEN_PREFIX}${message.id}`,
+      kind: message.label === "blocker" && !forController ? "blocked" : "question",
       agentId: message.from,
       repoId: repoId ?? null,
       text: message.text,
@@ -1249,6 +1409,7 @@ function buildAttentionItems(
   // A PR waits on you when it is linked to a ticket on a configured board and no agent is running
   // on that ticket (the loops merge their own PRs; see PR_WAIT_MS). A ticket whose run is still
   // open is the crew's, whether or not a seat is running on it (set aside, queued, held).
+  const unownedReviews = new Set<string>();
   const working = new Set(
     rows.filter((r) => r.run?.status === "running" && r.ticket !== null).map((r) => r.ticket),
   );
@@ -1268,7 +1429,7 @@ function buildAttentionItems(
         .filter((b) => !b.closed)
         .map((b) => `${repo.id}#${b.issueNumber}`),
     );
-    for (const pr of store.pullRequests(repo.id)) {
+    for (const pr of store.openPullRequests(repo.id).sort((a, b) => b.number - a.number)) {
       if (pr.ticket === null || !onBoard.has(pr.ticket)) continue;
       const action = prYouAction(pr, working.has(pr.ticket), now);
       if (action === null) continue;
@@ -1279,6 +1440,9 @@ function buildAttentionItems(
         loopRow && (!crewed || pr.branch === loopRow.run?.branch || pr.ticket === loopRow.ticket)
           ? loopRow
           : null;
+      // A review no run owns is FLIGHT's to route (whatever the PR's login), never the operator's.
+      const flightReview = !loopOwner && !pr.isDraft && action === "review" && flightId !== null;
+      if (flightReview) unownedReviews.add(`pr:${pr.repoId}#${pr.number}:${pr.updatedAt}`);
       items.push({
         owner: loopOwner
           ? OWNER_LOOP
@@ -1343,18 +1507,79 @@ function buildAttentionItems(
     flightTriage: "missed",
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
-  const route = (i: OwnedItem): AttentionItem => {
+  const closures = store.closedItemKeys();
+  const currentBrief = (i: OwnedItem) => {
     const saved = briefs.get(i.key);
-    // A cleared and re-raised note may reuse its key; the old triage must not keep it hidden.
-    const brief = saved?.for === "flight" && saved.at < i.at ? undefined : saved;
+    // Retain automatic hub briefs as history, without exposing them as operator questions.
+    const legacyCommsBrief =
+      i.key.startsWith(COMMS_OPEN_PREFIX) && saved?.by === "hub" && saved.for !== "flight";
+    return legacyCommsBrief ||
+      (saved && store.choice(i.key, saved.at)) ||
+      (saved && saved.at < i.at && (i.key.startsWith(NOTE_KEY) || saved.for === "flight"))
+      ? undefined
+      : saved;
+  };
+  /** The item's ask was closed without an answer: FLIGHT's own tag leaves, the rest is FLIGHT's. */
+  const closedAsk = (i: OwnedItem): boolean => {
+    const list = closures.get(i.key);
+    if (list === undefined) return false;
+    const at = questionAskAt(i, currentBrief(i));
+    // a closure covers the item as it stood: one raised again after it is a new item
+    return list.some((c) => c.askAt === at && c.at >= i.at);
+  };
+  const route = (i: OwnedItem): AttentionItem => {
+    if (closedAsk(i) && !ownReply(i, flightId)) {
+      const { brief: _closed, ...rest } = {
+        ...i,
+        acked: (acks.get(i.key) ?? -1) >= i.at,
+      } as AttentionItem;
+      if (triage === null) return rest;
+      return triaging
+        ? { ...rest, owner: OWNER_FLIGHT, flightTriage: "handling" }
+        : { ...rest, owner: OWNER_FLIGHT, flightTriage: "down" };
+    }
+    // A new note is a new ask; a stored answer retires the old brief.
+    const retained = currentBrief(i);
+    const brief = retained
+      ? {
+          ...retained,
+          state: briefReadState(config, store, { ...i, acked: false }, retained),
+          ...(retained.binding
+            ? { choice: store.briefChoice(retained.binding.epoch) ?? undefined }
+            : {}),
+        }
+      : undefined;
+
     // An ack covers the item as it was: a re-raised note, a newer line or a new or changed ask
     // for the operator is unread again.
-    const ackAt = acks.get(i.key);
+    const sourceMessageId = i.agentId ? flightQuestionMessageId(i.key, i.agentId) : null;
+    const ackAt =
+      sourceMessageId !== null &&
+      i.agentId !== null &&
+      isFlightOperatorQuestion(store, sourceMessageId, i.agentId) &&
+      flightQuestionChoice(store, sourceMessageId, i.agentId) === null
+        ? undefined
+        : acks.get(i.key);
     const askAt = brief !== undefined && brief.for !== "flight" ? (brief.askAt ?? brief.at) : 0;
     const item: AttentionItem = {
       ...i,
       ...(brief === undefined ? {} : { brief }),
-      acked: ackAt !== undefined && ackAt >= Math.max(i.at, askAt),
+      acked:
+        ackAt !== undefined &&
+        ackAt >= Math.max(i.at, askAt) &&
+        (!brief?.binding ||
+          (store.getSetting(`brief-ack:${i.key}`) === brief.binding.epoch &&
+            (((brief.choice === undefined ||
+              ["refused", "unknown", "stale", "canceled"].includes(brief.choice.state)) &&
+              brief.state?.freshness === "current") ||
+              (brief.choice?.state === "applied" &&
+                brief.choice.settledSourceRevision ===
+                  briefSourceRevision(
+                    config,
+                    store,
+                    { ...i, acked: false },
+                    brief.binding.actions.map((entry) => entry.action),
+                  ))))),
     };
     if (
       brief?.for === "operator" &&
@@ -1366,6 +1591,8 @@ function buildAttentionItems(
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
     const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
     const unansweredComms = i.key.startsWith(COMMS_OPEN_PREFIX);
+    // FLIGHT's message for the controller stays the controller's, whatever FLIGHT's triage state
+    if (unansweredComms && i.owner === OWNER_CONTROLLER) return item;
     if (unansweredComms && triage !== null) {
       if (brief !== undefined && brief.for !== "flight") return item;
       if (!triaging) return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
@@ -1389,9 +1616,10 @@ function buildAttentionItems(
     if (brief?.for === "flight" && !protectedDecisionItem(store, item, config, now))
       return { ...item, owner: OWNER_FLIGHT, flightTriage: triaging ? "handling" : "down" };
     if (i.owner !== OWNER_OPERATOR || flightAsks.has(i.key) || ownReply(i, flightId)) return item;
-    // what FLIGHT left undecided twice is the operator's, never FLIGHT's to triage
-    if (i.key === `${NOTE_KEY}${FLIGHT_LEFT_NOTE_KEY}`) return item;
     if (brief !== undefined && brief.for !== "flight") return item;
+    // FLIGHT's review queue, even when FLIGHT is not triaging: the count item carries it
+    if (unownedReviews.has(i.key) && (!live || !triaging))
+      return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
     if (!live || (!triaging && keptRaw(i, store))) return item;
     if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
@@ -1405,11 +1633,77 @@ function buildAttentionItems(
       ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
       : missed(item, triageDueAt);
   };
+  /**
+   * The Needs you entry check (#1543): with a FLIGHT seat, an operator item that is neither a hub
+   * alert nor FLIGHT's complete question goes back to FLIGHT with the reasons. Protected items
+   * included: they reach the operator through FLIGHT's brief, or, while FLIGHT is not triaging,
+   * counted under the one not-triaging alert.
+   */
+  const entryCheck = (item: AttentionItem): AttentionItem => {
+    if (triage === null || item.owner !== OWNER_OPERATOR || hubAlert(item, store)) return item;
+    // FLIGHT's own question item spans its unread lines: a brief older than the latest line
+    // answers an earlier question, so the operator would read a stale ask
+    const restated =
+      ownReply(item, flightId) &&
+      item.brief !== undefined &&
+      item.brief.for !== "flight" &&
+      item.brief.at < item.at;
+    const returned = restated
+      ? [FLIGHT_ASKED_AGAIN]
+      : needsYouEntryFaults(item, crewSeatIds(config));
+    if (returned.length === 0) return item;
+    // a default applies only to the operator's item, so a returned one carries none
+    const { defaultDueAt: _default, ...rest } = item;
+    const back: AttentionItem = { ...rest, owner: OWNER_FLIGHT, returned };
+    // restated: FLIGHT owes a new brief on a question the operator was already shown, so a
+    // missed rebrief counts under the not-triaging alert rather than going quiet
+    if (restated) {
+      // acked at or after the newest line: FLIGHT's dismiss withdraws its own question, briefed ask
+      // included, as the spec lets FLIGHT withdraw a question it wrote that is not protected
+      if (item.acked) return { ...back, flightTriage: "handling" };
+      if (!triaging) return { ...back, flightTriage: "down" };
+      // a fresh window after FLIGHT restarts or the hub updates, as for any returned item
+      const triageDueAt =
+        Math.max(item.at, item.holdReleasedAt ?? 0, triage.liveSince, hubStartedAt ?? 0) +
+        FLIGHT_TRIAGE_WAIT_MS;
+      return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
+    }
+    // FLIGHT's own line to the operator: FLIGHT wrote it, so it is never work waiting on FLIGHT
+    if (ownReply(item, flightId) || flightAsks.has(item.key))
+      return { ...back, flightTriage: "handling" };
+    // read, and FLIGHT may have dismissed it (dismiss acks): dealt with unless protected, which
+    // FLIGHT cannot dismiss, so the read was the operator's and FLIGHT still owes it a brief
+    if (item.acked && !protectedDecisionItem(store, item, config, now))
+      return { ...back, flightTriage: "handling" };
+    // nobody triaging: counted under the one alert, even an item FLIGHT kept
+    if (!triaging) return { ...back, flightTriage: "down" };
+    if (item.brief?.for === "flight") return { ...back, flightTriage: "handling" };
+    // FLIGHT's window starts when it could first see the item as its own: raised, briefed,
+    // released from a hold, FLIGHT live, or this hub started (so a rollout is not "late" at once)
+    const triageDueAt =
+      Math.max(
+        item.at,
+        item.brief?.at ?? 0,
+        item.holdReleasedAt ?? 0,
+        triage.liveSince,
+        hubStartedAt ?? 0,
+      ) + FLIGHT_TRIAGE_WAIT_MS;
+    return { ...back, flightTriage: now < triageDueAt ? "waiting" : "missed", triageDueAt };
+  };
   const result: AttentionItem[] = items
     // the watch's FLIGHT-down notes are the not-triaging item's reason, never items of their own
     .filter((i) => !FLIGHT_DOWN_ITEMS.has(i.key))
+    // A presentation refresh cannot reopen an operator-cleared ask. A new ask has its own time.
+    .filter(
+      (i) =>
+        !closures
+          .get(i.key)
+          ?.some((c) => c.kind === "cleared" && c.askAt === questionAskAt(i, currentBrief(i))),
+    )
+    // FLIGHT withdrew its own question to the operator, or the hub closed it: it has left
+    .filter((i) => !(i.kind === "tag" && ownReply(i, flightId) && closedAsk(i)))
     .sort((a, b) => kindRank(a.kind) - kindRank(b.kind) || a.at - b.at)
-    .map((i) => {
+    .map((i): AttentionItem => {
       const item = route(i);
       // Another agent's tag or direct-line question stays FLIGHT's, even untriaged, until FLIGHT
       // briefs it for the operator (ownReply keeps FLIGHT's own question tag the operator's).
@@ -1429,10 +1723,12 @@ function buildAttentionItems(
     }),
     acks,
   );
+  // last, after a released hold has handed an item back to the operator
+  const checked = partition.items.map(entryCheck);
   const shown =
     triage === null
-      ? partition.items
-      : withNotTriaging(partition.items, triage, acks, now, config.operator.timezone);
+      ? checked
+      : withNotTriaging(checked, triage, acks, now, config.operator.timezone);
   return includeHeld ? [...shown, ...partition.held] : shown;
 }
 
@@ -1471,7 +1767,8 @@ function withNotTriaging(
   const item: AttentionItem = {
     key: FLIGHT_NOT_TRIAGING_KEY,
     kind: "blocked",
-    owner: OWNER_OPERATOR,
+    // FLIGHT live but late on a wake is its own watch's business; down or stopped is the operator's
+    owner: cause === "late" ? OWNER_FLIGHT : OWNER_OPERATOR,
     agentId: triage.flightId,
     repoId: triage.repoId,
     text: flightNotTriagingText(
@@ -1520,16 +1817,13 @@ function endedParkGone(
 ): boolean {
   const loop = run.loop;
   if (loop?.phase !== "parked" || loop.parked?.kind !== "ended") return false;
-  const prs = store.pullRequests(run.repoId);
   const pr =
     loop.prNumber !== null
-      ? prs.find((p) => p.number === loop.prNumber)
+      ? store.pullRequest(run.repoId, loop.prNumber)
       : run.branch === null
-        ? undefined
-        : prs
-            .filter((p) => p.branch === run.branch && p.createdAt >= run.startedAt)
-            .sort((a, b) => b.number - a.number)[0];
-  if (pr !== undefined && pr.state !== "open") return true;
+        ? null
+        : store.pullRequestOfBranch(run.repoId, run.branch, run.startedAt);
+  if (pr !== null && pr.state !== "open") return true;
   const t = run.ticket === null ? null : parseTicket(run.ticket);
   if (!t) return false;
   if (!config.repos.some((r) => r.id === t.repoId)) return true;
@@ -1553,7 +1847,7 @@ function noteOwner(
     (isHardRulesFlagKey(n.key) || n.key.startsWith("ready:"))
   ) {
     const loop = n.runId === null ? null : store.run(n.runId)?.loop;
-    return loop && !flightFloorBlocked(loop) ? OWNER_FLIGHT : OWNER_OPERATOR;
+    return loop?.touches ? OWNER_FLIGHT : OWNER_OPERATOR;
   }
   if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key) || isNoReportNoteKey(n.key))
     return OWNER_CONTROLLER;
@@ -1631,8 +1925,8 @@ function crewItems(
   }
 
   for (const q of store.openQuestions()) {
-    out.push(
-      item({
+    out.push({
+      ...item({
         key: `ask:${q.id}`,
         kind: "question",
         agentId: q.agentId,
@@ -1640,7 +1934,9 @@ function crewItems(
         text: questionText(seatCallSign(q.agentId), q.text),
         at: q.at,
       }),
-    );
+      // the asking run's ticket: what the question is about (#1543)
+      ticket: store.run(q.runId)?.ticket ?? null,
+    });
   }
 
   // The engine's notes: blocked, ready for review, check before merging, rate-limited. Each
@@ -1659,7 +1955,7 @@ function crewItems(
     const pr =
       run?.loop?.prNumber === undefined || run.loop.prNumber === null
         ? undefined
-        : store.pullRequests(run.repoId).find((p) => p.number === run.loop?.prNumber);
+        : (store.pullRequest(run.repoId, run.loop.prNumber) ?? undefined);
     const noteItem: OwnedItem = {
       owner: noteOwner(store, n),
       key: `${NOTE_KEY}${n.key}`,

@@ -1,0 +1,19 @@
+# Review 1337 follow-up: legacy reads, delivery states and linked context
+
+A legacy FLIGHT read cursor now supplies a chronological baseline for retained turn text when no unified cursor exists. A historical reply stays read after upgrade. Per-source cursors still cover newer lines, and genuinely newer stored or transcript replies remain unread. GET creates no read, delivery or setting receipts. The mixed-history regression failed on the reviewed head with three unread instead of two, then passes after the correction.
+
+Comms now renders Stored, Delivered HH:MM in Europe/London, and Answered on operator messages. The existing browser test transitions the same message through all three states by refreshing the actual agents topic. It still verifies source ordering, unknown time, valid controls and unclipped content. The previous consumer fails the hard delivery-state assertion. Four final cases cover eight viewport/theme combinations, arriving from Overview through the Comms navigation link.
+
+The before and after folders hold 48 matched viewport PNGs: three message states, four viewports and both themes. Before uses the exact reviewed Conversation.tsx source; after uses the correction. Both use the real App and identical fictional API fixtures. captures.json records baseline, navigation, event clock, source hash, file timestamps and image hashes. These are isolated browser fixtures, not a live-provider or live-hub claim. Manual inspection of the short dark viewport confirms readable delivery text, preserved timestamps and controls. Earlier direct-Comms captures were replaced by the final navigation captures.
+
+The parent plan's S1 acceptance also requires one internal key-and-title context line for an item-linked send. The operator API resolves the current item title. Store inserts the operator line and one MC-to-FLIGHT context line in the same existing transaction; an exact repeat adds no second context. The visible conversation retains the operator's original words and itemKey, excluding the internal line. The route test verifies the returned key, exact context count, key/title content, FLIGHT inbox inclusion and visible exclusion. A forced SQLite context failure proves both lines roll back together.
+
+The complete conversation, Comms, Store and API suites pass 673 cases. Lint, workspace typecheck and build pass. No additional full local-suite pass is claimed for this existing-PR update; fresh pushed-head full CI and independent whole-branch QA remain required. The two Minor renderer findings remain logged in review 1337: shared safe Markdown and long-body presentation belong to the unstarted shared-thread work in #1621. This correction does not claim the shared-thread pages or W2 click-flow delivery.
+
+No provider, budget, hold, approval or observed-loop setting changes. Internal context is descriptive and grants no action or decision authority.
+
+## Merge the landed always-available composer
+
+The main merge preserves the reply-route readiness check and stopped notice. The new source still joins turn replies with null timestamps and source-bound controls. Delivery state is rendered once under each operator message in the existing state-line position; its server-provided Answered state takes precedence over the older stored/delivered fallback. The browser explicitly checks one state line for the message while transitioning all three states.
+
+After images are recaptured from the merged source. Before remains the exact round-one reviewed source a63e0412; after also includes the now-landed composer and receipt presentation. Metadata records this parent difference rather than presenting it as an isolated label-only comparison. The real App arrives through Overview and Comms navigation. All22 browser/conversation presentation cases and60 server conversation/Comms component cases pass. Lint, workspace types and build pass. Fresh pushed-head CI and QA remain required.

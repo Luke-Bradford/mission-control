@@ -359,13 +359,22 @@ export function crewHudState(
   now: number,
   /** The seat's run is in line for the test lock: it waits, silent, and is not stalled. */
   waitingForLock = false,
+  /**
+   * When the seat's run took the test lock; null when it holds none. Silence counts from then: the
+   * wait for the lock was not the seat's. A running Claude check writes a heartbeat every 30 s, so
+   * a holder that goes quiet after that is wedged. A Codex check writes nothing until it ends, so
+   * one past 10 minutes reads as stalled, as it did before.
+   */
+  lockHeldSince: number | null = null,
 ): HudState {
   if (row === null) return "idle";
   switch (row.state) {
     case "starting":
     case "running":
       if (waitingForLock) return "waiting";
-      return now - (lastOutputAt ?? row.updatedAt) >= STALL_MS ? "stalled" : "running";
+      return now - Math.max(lastOutputAt ?? row.updatedAt, lockHeldSince ?? 0) >= STALL_MS
+        ? "stalled"
+        : "running";
     case "idle":
       return "idle";
     case "parked":
@@ -436,8 +445,8 @@ export const FLIGHT_TRIAGE_LABEL = {
 export const OWNER_FLIGHT = "flight" satisfies AttentionOwner;
 /**
  * Kinds that are always the operator's call: FLIGHT may brief them for the operator but never keep
- * them, and once past FLIGHT's triage window (or while FLIGHT is not triaging) they reach the
- * operator as themselves, never folded into the "FLIGHT is not triaging" item (#758).
+ * them. Past FLIGHT's triage window they stay off Needs you until FLIGHT's brief passes the entry
+ * check (#1543); unbriefed, the "FLIGHT is not triaging" item counts them (#758).
  */
 export const OPERATOR_CALL_KINDS: readonly AttentionKind[] = [
   "approval",

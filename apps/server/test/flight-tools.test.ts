@@ -8,8 +8,10 @@ import {
   AWAY_QUOTA_REFUSED,
   AWAY_SETTING,
   AWAY_WRITES_REFUSED,
+  askerRunEndedText,
   type BoardItem,
   BRIEF_CLEARED_DECISION,
+  BRIEF_ENTRY_REFUSED,
   BRIEF_INPUT_MAX,
   BRIEFED_TEXT,
   blockedNoteKey,
@@ -20,6 +22,7 @@ import {
   CI_LOG_EMPTY,
   CLOSE_FAILED_DECISION,
   CLOSE_UNCONFIRMED_DECISION,
+  CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_MESSAGE_MAX,
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   ciLogText,
@@ -64,6 +67,7 @@ import {
   FLIGHT_STATE_TEXT_MAX,
   FLIGHT_UNPARK_KINDS,
   type FlightDecision,
+  flightWakeId,
   GH_READ_BAD_PATH,
   GH_READ_CUT,
   GH_READ_NOT_FOUND,
@@ -94,22 +98,26 @@ import {
   MC_TOOLS,
   NEW_LOOP,
   NOT_ON_BOARD,
-  needsSuperuserText,
   needsYouItems,
   OPERATOR_HEADER,
   openPrText,
+  PACE_SETTING,
   PROFILE_PAIR_TEXT,
+  PROTECTED_ITEM_REFUSED,
   type PullRequestView,
   passNeedsBriefText,
   pathGrantProblem,
+  questionClosedText,
   READ_NO_GITHUB,
   READ_NO_PR,
   READ_OTHER_REPO,
+  RETURN_NOT_SEAT_QUESTION,
   type RepoRules,
   type Run,
   type RunLoop,
   researchText,
   retiredBriefText,
+  returnedQuestionText,
   runawayNoteText,
   runawayRefusedText,
   runawaySameReason,
@@ -123,17 +131,23 @@ import {
   twoAreasText,
   UAT_PARK,
   untrackedText,
+  WAITING_OPERATOR_LABEL,
   WAITS_ON_ONLY_BACKLOG,
+  WITHDRAW_NOT_YOURS,
+  WITHDRAW_SEAT_QUESTION,
+  waitingOperatorPromoteText,
+  waitingOperatorStartText,
   waitsOnText,
+  withdrawnText,
   wrongAreaText,
   wrongColumnText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { evaluateHolds, holds } from "../src/attention-holds.ts";
+import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
-import { raiseStalledCommsDecisions } from "../src/comms-decisions.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -144,21 +158,29 @@ import {
 import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
-import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
-import { flightBriefView, flightTriageItems, operatorItems } from "../src/flight/state.ts";
+import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
+import {
+  flightBriefView,
+  flightState,
+  flightTriageItems,
+  operatorItems,
+  unhandledReasons,
+  wakeReasons,
+} from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import type { Move, MoveResult } from "../src/github-board.ts";
+import type { Move, MoveResult } from "../src/github/board.ts";
 import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run-handoffs.ts";
+import { recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
+import { operatorDecisionFields } from "./brief-fixture.ts";
 
 it("cuts FLIGHT text by code points without splitting non-ASCII characters", () => {
   expect(cut("🚀🚀🚀", 3)).toBe("🚀🚀🚀");
@@ -232,6 +254,8 @@ let engineCalls: unknown[][];
 let holdCalls: unknown[][];
 let clearanceCalls: unknown[][];
 let clearanceOk: boolean;
+let adoptCalls: unknown[][];
+let adoptOk: boolean;
 let rerunOk: boolean;
 let editCalls: unknown[][];
 let readImpl: (issue: number) => BoardItem | null;
@@ -342,6 +366,8 @@ beforeEach(() => {
   holdCalls = [];
   clearanceCalls = [];
   clearanceOk = true;
+  adoptCalls = [];
+  adoptOk = true;
   rerunOk = true;
   editCalls = [];
   // the live read answers with the stored card unless a test says otherwise
@@ -473,6 +499,10 @@ beforeEach(() => {
         clearanceCalls.push(args);
         return clearanceOk;
       },
+      adoptPrHead: async (...args) => {
+        adoptCalls.push(args);
+        return adoptOk;
+      },
       rerunCi: async () => ({ ok: rerunOk, text: "Reran CI." }),
       onOperatorMessage: async (...a) => {
         engineCalls.push(a);
@@ -573,6 +603,32 @@ describe("wait_on", () => {
     });
   });
 
+  it("waits on the original target when given a wait_over signal's id", async () => {
+    const r = await call("wait_on", waitArgs({ target: `wait_over:wait_over:mc#7:${NOW}:${NOW}` }));
+    expect(r.isError).toBeUndefined();
+    expect(Object.keys(flightWaits(store))).toEqual(["mc#7"]);
+    expect(store.flightDecisions(0, 10)[0]).toMatchObject({
+      ref: "mc#7",
+      about: "mc#7: waiting on its PR merging",
+    });
+  });
+
+  it.each([
+    ["items", `pr:mc#7:${NOW}`, `pr:mc#7:${NOW}`],
+    ["signals", `hub_error:loop:engine:${NOW}`, `loop:engine:${NOW}`],
+    ["signals", `merge_stalled:mc#9:1559:${NOW}`, `mc#9:1559:${NOW}`],
+  ])(
+    "keeps a reason's own key whole, so a wait on it handles the %s fact %s",
+    async (category, fact, target) => {
+      expect((await call("wait_on", waitArgs({ target }))).isError).toBeUndefined();
+      expect(Object.keys(flightWaits(store))).toEqual([target]);
+      const reasons = wakeReasons("", JSON.stringify({ [category]: [fact] }));
+      expect(unhandledReasons(store, reasons, NOW - 1, new Set(reasons.map((x) => x.id)))).toEqual(
+        [],
+      );
+    },
+  );
+
   it("refuses a time that is past or more than 7 days away, and a seat that is not FLIGHT", async () => {
     expect(
       (await call("wait_on", waitArgs({ until: new Date(NOW - 1000).toISOString() }))).isError,
@@ -654,6 +710,13 @@ describe("log_decision", () => {
     expect(seen).toEqual(["flight"]);
   });
 
+  it("stamps a decision with the id of the wake FLIGHT is in", async () => {
+    store.addFlightWake("r-flight", NOW - 5000, ["pr"], flightWakeId("r-flight", 0));
+    store.addFlightWake("r-flight", NOW - 1000, ["items"], flightWakeId("r-flight", 1));
+    await tool.call(ctx(), args());
+    expect(store.flightDecisions(0, 10)[0]?.wakeId).toBe(flightWakeId("r-flight", 1));
+  });
+
   it("refuses a seat that is not in its session", async () => {
     const r = await tool.call(ctx(), args({ seat: "nobody-9" }));
     expect(r).toEqual({
@@ -678,6 +741,160 @@ const named = (name: string): McTool => {
   return t;
 };
 const call = (name: string, a: Record<string, unknown>, c = ctx()) => named(name).call(c, a);
+
+describe("move_review", () => {
+  const queuedReview = () => {
+    engineOn = true;
+    cfg.accounts.push({ id: "codex-main", vendor: "codex", alertAt: 80, stopAt: 95 });
+    need(cfg.crew?.sessions[0]).seats.push(
+      seat("retro-cx", "RETRO", { accountId: "codex-main", mode: "scratch" }),
+    );
+    const id = store.requestReview({
+      authorRunId: "r-guido",
+      repoId: "mc",
+      seatId: "retro-1",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 3,
+      attempt: 2,
+      round: 2,
+      at: NOW,
+    });
+    if (id === null) throw new Error("review was not queued");
+    return id;
+  };
+
+  it("moves one queued review to the named review seat and records its basis", async () => {
+    const id = queuedReview();
+
+    const result = await call("move_review", {
+      reviewId: id,
+      seat: "retro-cx",
+      basis: "mc#7 P0 must not wait for the stopped reviewer",
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.text).toBe("Moved queued review 1 to RETRO-CX.");
+    expect(store.review(id)).toMatchObject({
+      seatId: "retro-cx",
+      sha: SHA,
+      epoch: 3,
+      attempt: 2,
+      round: 2,
+    });
+    expect(store.reviewMoved(id)).toBe(true);
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        about: "move_review",
+        basis: "mc#7 P0 must not wait for the stopped reviewer",
+      }),
+    ]);
+  });
+
+  it("refuses and records a target review seat whose account is at its usage stop", async () => {
+    const id = queuedReview();
+    store.addUsage({
+      accountId: "codex-main",
+      window: "7d",
+      at: NOW,
+      pct: 100,
+      resetAt: NOW + 60_000,
+      source: "test",
+    });
+
+    const result = await call("move_review", {
+      reviewId: id,
+      seat: "retro-cx",
+      basis: "mc#7 P0 must not wait for the stopped reviewer",
+    });
+
+    expect(result).toEqual({
+      text: "Not started: RETRO-CX's account codex-main is at its usage stop.",
+      isError: true,
+    });
+    expect(store.review(id)?.seatId).toBe("retro-1");
+    expect(store.flightDecisions(0, 10)).toEqual([
+      expect.objectContaining({
+        about: "move_review",
+        decision: "Not started: RETRO-CX's account codex-main is at its usage stop.",
+      }),
+    ]);
+  });
+
+  it("passes a target budget brake only with a basis that names a P0 ticket", async () => {
+    const id = queuedReview();
+    for (const [at, pct] of [
+      [NOW - 6 * 60 * 60_000, 40],
+      [NOW, 60],
+    ] as const)
+      store.addUsage({
+        accountId: "codex-main",
+        window: "7d",
+        at,
+        pct,
+        resetAt: NOW + 24 * 60 * 60_000,
+        source: "test",
+      });
+
+    expect(
+      (
+        await call("move_review", {
+          reviewId: id,
+          seat: "retro-cx",
+          basis: "priority work needs a reviewer",
+        })
+      ).isError,
+    ).toBe(true);
+    expect(store.review(id)?.seatId).toBe("retro-1");
+    expect(
+      (
+        await call("move_review", {
+          reviewId: id,
+          seat: "retro-cx",
+          basis: "mc#7 P0 must not wait for the stopped reviewer",
+        })
+      ).isError,
+    ).toBeUndefined();
+    expect(store.review(id)?.seatId).toBe("retro-cx");
+    expect(store.reviewBudgetBrakeOverride(id)).toBe(true);
+  });
+
+  it.each([
+    ["retiring", { retiring: true }, "RETRO-CX is retiring."],
+    [
+      "unavailable",
+      { modelVendor: "codex" as const, model: "unknown" },
+      "RETRO-CX is unavailable.",
+    ],
+    ["non-scratch", { mode: "writer" as const }, "RETRO-CX is not a review seat."],
+  ])("refuses a %s target review seat", async (_kind, extra, text) => {
+    const id = queuedReview();
+    const target = need(cfg.crew?.sessions[0]).seats.find((seat) => seat.id === "retro-cx");
+    if (target === undefined) throw new Error("missing RETRO-CX");
+    Object.assign(target, extra);
+
+    await expect(
+      call("move_review", {
+        reviewId: id,
+        seat: "retro-cx",
+        basis: "mc#7 P0 needs the available reviewer",
+      }),
+    ).resolves.toEqual({ text, isError: true });
+    expect(store.review(id)?.seatId).toBe("retro-1");
+  });
+
+  it("refuses the review's current seat", async () => {
+    const id = queuedReview();
+
+    await expect(
+      call("move_review", {
+        reviewId: id,
+        seat: "retro-1",
+        basis: "mc#7 P0 needs the available reviewer",
+      }),
+    ).resolves.toEqual({ text: "RETRO-1 already has this review.", isError: true });
+  });
+});
 
 describe("resume_seat", () => {
   it("does not report a stopped seat's held run as resumed when resumeRun is a no-op", async () => {
@@ -1204,6 +1421,8 @@ describe("tool list", () => {
       "wait_on",
       "read_ticket",
       "answer_question",
+      "return_question",
+      "withdraw_question",
       "start_seat",
       "reassign_ticket",
       "message_seat",
@@ -1224,6 +1443,7 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
+      "move_review",
       "resume_seat",
       "merge_pr",
       "settle_park",
@@ -1363,6 +1583,17 @@ describe("seat schema", () => {
   });
 });
 
+describe("create_ticket recommendationId", () => {
+  it("tells FLIGHT which proposed code-health rules it may accept itself", () => {
+    const props = (
+      named("create_ticket").inputSchema as { properties: Record<string, { description?: string }> }
+    ).properties;
+    for (const rule of CODE_HEALTH_FLIGHT_TIER_RULES)
+      expect(props.recommendationId?.description).toContain(rule);
+    expect(props.recommendationId?.description).toContain("operator accepts");
+  });
+});
+
 describe("seatFree", () => {
   it("is false for a seat with an unended run or named busy", () => {
     expect(seatFree(store, [], "guido-1")).toBe(true);
@@ -1474,7 +1705,8 @@ describe("read_ticket", () => {
 
 describe("answer_question", () => {
   const ask = (agentId = "guido-1", runId = "r-guido") => {
-    live(agentId, runId);
+    // the run's ticket is what the question is about; Needs you takes no question without one (#1543)
+    live(agentId, runId, { ticket: "mc#7" });
     return store.addQuestion({ agentId, runId, text: "Which lane?", at: NOW });
   };
   const A = (id: number, over: Record<string, unknown> = {}) => ({
@@ -1488,8 +1720,9 @@ describe("answer_question", () => {
     const id = ask();
     expect(await call("answer_question", A(id))).toEqual({ text: "Answered GUIDO-1." });
     expect(messageCalls).toEqual([
-      ["guido-1", "FLIGHT answers: Lane 2", { interrupt: false, questions: "unpassed" }],
+      ["guido-1", "FLIGHT answers: Lane 2", { interrupt: false, questions: "none" }],
     ]);
+    expect(store.question(id)?.answeredAt).toBe(NOW);
     expect(decisions()).toEqual([
       {
         id: 1,
@@ -1505,6 +1738,7 @@ describe("answer_question", () => {
       },
     ]);
     expect(seen).toContain("flight");
+    expect(seen).toContain("attention");
   });
 
   it("keeps a hub-assembled 1500-character question and its long answer whole", async () => {
@@ -1551,6 +1785,15 @@ describe("answer_question", () => {
       ask: "Which lane?",
       recommendation: "Lane 2.",
       basis,
+      ...operatorDecisionFields(
+        {
+          kind: "answer",
+          seatId: store.question(id)?.agentId ?? "guido-1",
+          runId: store.question(id)?.runId ?? "r-guido",
+          text: "Lane 2.",
+        },
+        "money",
+      ),
     });
 
   it("refuses a bare pass, pointing at brief_item, and changes nothing (#758)", async () => {
@@ -1701,11 +1944,39 @@ describe("answer_question", () => {
       at: NOW,
     });
     await call("answer_question", A(other));
-    expect(messageCalls.at(-1)?.[2]).toEqual({ interrupt: false, questions: "unpassed" });
-    // what the supervisor does with that option
-    store.answerQuestions("guido-1", NOW, true);
+    expect(messageCalls.at(-1)).toEqual([
+      "guido-1",
+      "FLIGHT answers: Lane 2",
+      { interrupt: false, questions: "none" },
+    ]);
     expect(store.question(passed)?.answeredAt).toBeNull();
+    expect(store.question(passed)?.passedAt).not.toBeNull();
     expect(store.question(other)?.answeredAt).toBe(NOW);
+  });
+
+  it("closes only the question it answers; the seat's other question stays open for FLIGHT", async () => {
+    const first = ask();
+    const second = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "Which branch?",
+      at: NOW + 4,
+    });
+    expect(await call("answer_question", A(first))).toEqual({ text: "Answered GUIDO-1." });
+    expect(store.question(first)?.answeredAt).toBe(NOW);
+    expect(store.question(second)?.answeredAt).toBeNull();
+    expect(store.openQuestions().map((q) => q.id)).toEqual([second]);
+    expect(JSON.parse((await call("flight_state", {})).text).questions).toMatchObject([
+      { id: second },
+    ]);
+    expect(await call("answer_question", A(second, { answer: "main" }))).toEqual({
+      text: "Answered GUIDO-1.",
+    });
+    expect(store.question(second)?.answeredAt).toBe(NOW);
+    expect(messageCalls.map((m) => m[1])).toEqual([
+      "FLIGHT answers: Lane 2",
+      "FLIGHT answers: main",
+    ]);
   });
 
   it("refuses FLIGHT's own question", async () => {
@@ -1742,6 +2013,27 @@ describe("start_seat", () => {
   beforeEach(() => {
     board(sc(7));
     fetchImpl = async (n) => ticket(n, { body: DONE });
+  });
+
+  it("holds a start for the slow pace, naming it, and starts a ticket it names", async () => {
+    store.setSetting(
+      PACE_SETTING,
+      JSON.stringify({
+        on: true,
+        until: NOW + 3_600_000,
+        since: NOW - 1,
+        labels: ["bug"],
+        maxStarts: 2,
+        note: "weekend",
+      }),
+    );
+    const held = await start();
+    expect(held.isError).toBe(true);
+    expect(held.text).toMatch(/Slow pace \(weekend\)/);
+    expect(startCalls).toEqual([]);
+    board(sc(7, { labels: ["area:server", "bug"] }));
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
   });
 
   it("reassigns an ended author's ticket through the existing start checks and logs the handoff", async () => {
@@ -1834,6 +2126,46 @@ describe("start_seat", () => {
       expect(startCalls).toEqual([]);
     },
   );
+  it("returns an ended run's open PR to a seat when the PR's head is not the run's branch", async () => {
+    cfg.crew?.sessions[0]?.seats.push(seat("guido-cx", "GUIDO", { area: ["apps/**"] }));
+    board(sc(7, { status: "In review" }));
+    store.upsertRun(
+      run("old", "guido-cx", {
+        ticket: "mc#7",
+        branch: "feature/7-local",
+        endedAt: NOW - 1000,
+        loop: { ...NEW_LOOP, prNumber: 9 },
+      }),
+    );
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "PR",
+          url: "u",
+          branch: "feature/7-pr-head",
+          ticket: "mc#7",
+          state: "open" as const,
+          isDraft: false,
+          review: null,
+          ci: "pending" as const,
+          createdAt: NOW,
+          updatedAt: NOW,
+          mergedAt: null,
+          headSha: null,
+          mergeable: null,
+        },
+      ],
+      NOW,
+    );
+    expect(
+      (await call("reassign_ticket", { issue: 7, seat: "guido-1", reason: "Fix the findings" }))
+        .isError,
+    ).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
+  });
   it.each([
     ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
     [
@@ -2111,6 +2443,34 @@ describe("start_seat", () => {
     expect(await start()).toEqual(
       refused("Not started: GUIDO-1's account claude-main is at its usage stop."),
     );
+  });
+
+  it("4b: refuses a start while the weekly projection passes 100% and starts once it falls", async () => {
+    const week = (from: number, to: number, at: number) => {
+      for (const [t, pct] of [
+        [at - 6 * 3600e3, from],
+        [at, to],
+      ] as const)
+        store.addUsage({
+          accountId: "claude-main",
+          window: "7d",
+          at: t,
+          pct,
+          resetAt: nowMs + 24 * 3600e3,
+          source: "t",
+        });
+    };
+    week(40, 60, nowMs);
+    const braked = await start();
+    expect(braked.isError).toBe(true);
+    expect(braked.text).toMatch(
+      /^Not started: the budget brake is on\. GUIDO-1's account claude-main/,
+    );
+    expect(startCalls).toEqual([]);
+    week(10, 10, nowMs + 1);
+    nowMs += 1;
+    expect((await start()).isError).toBeUndefined();
+    expect(startCalls).toHaveLength(1);
   });
 
   it("5: has no hourly cap on starts", async () => {
@@ -3328,6 +3688,52 @@ describe("flight_state", () => {
     expect(Object.keys(seen)).toEqual([`ask:${id}`]);
   });
 
+  describe("500 expired waits (#1632)", () => {
+    const waits = async (args: Record<string, unknown>) => {
+      for (let i = 0; i < 500; i++)
+        recordFlightWait(store, `mc#${1000 + i}`, {
+          on: "a long wait",
+          until: NOW - 3 * 24 * 60 * 60_000,
+          at: NOW - 4 * 24 * 60 * 60_000,
+        });
+      const read = JSON.parse((await call("flight_state", args)).text) as {
+        signals: { kind: string; evidence: string }[];
+      };
+      return read.signals.filter((s) => s.kind === "wait_over");
+    };
+
+    it("fold into one summary line with the count", async () => {
+      const over = await waits({});
+      expect(over).toHaveLength(1);
+      expect(over[0]?.evidence).toContain("500 expired waits");
+      expect(JSON.stringify(over).length).toBeLessThan(1000);
+    });
+
+    it("keep a wait that ended an hour ago listed on every read", async () => {
+      recordFlightWait(store, "mc#77", {
+        on: "PR 77 to merge",
+        until: NOW - 3_600_000,
+        at: NOW - 7_200_000,
+      });
+      const keys = async () =>
+        (
+          JSON.parse((await call("flight_state", {})).text) as {
+            signals: { kind: string; key: string }[];
+          }
+        ).signals
+          .filter((s) => s.kind === "wait_over")
+          .map((s) => s.key);
+      await keys();
+      const second = await keys();
+      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
+      expect(second).not.toContain("expired");
+    });
+
+    it("are all listed with full: true", async () => {
+      expect(await waits({ full: true })).toHaveLength(500);
+    });
+  });
+
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -3758,7 +4164,7 @@ describe("flight_state", () => {
         {
           key: "ask:1",
           kind: "question",
-          ticket: null,
+          ticket: "mc#5", // the asking run's ticket (#1543)
           text: "INCO-1 asks: Which lane?",
           ageMin: 5,
           // asked before this FLIGHT run started: its window runs from the run's start (#758)
@@ -3778,7 +4184,7 @@ describe("flight_state", () => {
         queued: 0,
         running: 0,
         waitMin: 0,
-        seats: [{ seat: "retro-1", queued: 0, running: 0, idle: true }],
+        seats: [{ seat: "retro-1", queued: 0, running: 0, waitMin: 0, idle: true }],
       },
       mergeQueue: [{ pr: 9, waitsOn: ["review"] }],
       flowHolds: [],
@@ -3894,6 +4300,15 @@ describe("promote", () => {
     expect(named("promote")).toMatchObject({ modes: [], grantable: ["read-only"] });
   });
 
+  it("refuses a waiting:operator ticket", async () => {
+    board(backlog({ labels: ["area:server", WAITING_OPERATOR_LABEL] }));
+    for (const to of ["Ready", "Refinement"]) {
+      expect(await call("promote", P({ to }))).toEqual(refused(waitingOperatorPromoteText("mc#7")));
+    }
+    expect(moveCalls).toEqual([]);
+    expect(decisions()).toEqual([]);
+  });
+
   it("moves a complete Backlog ticket to Ready and records it", async () => {
     expect(await call("promote", P())).toEqual({
       text: "Moved mc#7 to Ready. Recorded in Decided without you.",
@@ -3930,6 +4345,54 @@ describe("promote", () => {
       "Moved mc#7 to Refinement. Recorded in Decided without you.",
     );
     expect(moveCalls[0]?.column).toBe("Refinement");
+  });
+
+  it("flags a private prototype and refuses Ready until it is copied into docs/prototype", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\nPrototype: [working copy](https://private.example/prototype)` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it.each([
+    "https://private.example/docs/prototype/mockup.html",
+    "https://github.com/another/repo/blob/main/docs/prototype/mockup.html",
+  ])("refuses promotion when a private prototype mimics the repository path: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("refuses promotion for a private link listed under a Prototype heading", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\n\n## Prototype\n\nhttps://claude.ai/public/artifacts/abc` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("promotes a ticket that mentions the mockup beside an ordinary link in this repository", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, {
+        body: `${GOOD}\nJudge the page against the mockup and [the system](https://github.com/o/mc/blob/main/docs/design/system.md).`,
+      });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
+  });
+
+  it.each([
+    "https://github.com/o/mc/blob/main/docs/prototype/mockup.html",
+    "https://github.com/o/mc/blob/feature/prototype-polish/docs/prototype/mockup.html",
+    "https://raw.githubusercontent.com/o/mc/feature/prototype-polish/docs/prototype/mockup.html",
+  ])("allows promotion when the prototype URL names this repository: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
   });
 
   it("names only what is missing, and honours the rules' needs", async () => {
@@ -3998,7 +4461,7 @@ describe("promote", () => {
     rulesNow = { ...rulesNow, promoteBacklog: false };
     expect(await call("promote", P())).toEqual(
       refused(
-        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question in your reply.",
+        "Not moved: mc's rules do not let FLIGHT move tickets (promote_backlog is off); ask the operator with an @CAPCOM question, then brief the item it raises with mc brief_item.",
       ),
     );
   });
@@ -4294,6 +4757,38 @@ describe("create_ticket", () => {
     expect(store.codeHealthRecommendation("mc", recommendationId)?.workReady).toBe(true);
     expect((await call("create_ticket", C({ recommendationId }))).text).toContain("already links");
     expect(creates).toBe(1);
+  });
+  function proposed(rule: string) {
+    const id = `chr_${(rule.length.toString(16).padStart(2, "0")).repeat(16)}`;
+    upsertRecommendation(
+      (store as unknown as { db: DatabaseSync }).db,
+      {
+        id,
+        repoId: "mc",
+        rule,
+        ruleVersion: 1,
+        scope: null,
+        evidenceFingerprint: "f",
+        observation: "o",
+        proposal: "p",
+        uncertainty: "u",
+        rankingReason: "r",
+        target: { metric: "m", direction: "decrease", baseline: 5 },
+      },
+      NOW,
+    );
+    return id;
+  }
+  it("accepts a proposal of FLIGHT's own tier by filing its work, and leaves the others for the operator", async () => {
+    readImpl = (n) => card(n, { status: "" });
+    const other = proposed("recurring-correction");
+    expect((await call("create_ticket", C({ recommendationId: other }))).isError).toBe(true);
+    expect(store.codeHealthRecommendation("mc", other)?.state.kind).toBe("proposed");
+    const mine = proposed("repeatedly-changed-large-file");
+    await call("create_ticket", C({ recommendationId: mine }));
+    const row = store.codeHealthRecommendation("mc", mine);
+    expect(row?.state.kind).toBe("accepted");
+    expect(row?.linkedWork).toBe("https://github.com/o/mc/issues/42");
   });
   it("recovers a created issue marker after a lost response without a second issue write", async () => {
     const recommendationId = acceptedRecommendation();
@@ -4924,32 +5419,140 @@ describe("comment_ticket", () => {
 
 describe("brief_item", () => {
   const KEY = "note:blocked:r1:0";
+  /** The note's run carries the ticket the question is about; Needs you takes no item without one (#1543). */
+  const NOTE_RUN = "r-note";
   const raise = (key = "blocked:r1:0", over: Record<string, unknown> = {}) =>
     store.raiseNote({
       key,
       kind: "blocked",
-      runId: null,
+      runId: NOTE_RUN,
       seatId: "guido-1",
       repoId: "mc",
       text: "mc#7 parked",
       at: NOW,
       ...over,
     });
-  const B = (over: Record<string, unknown> = {}) => ({
-    key: KEY,
-    context: "mc#7 is parked since 11:00.",
-    ask: "Should I un-park it?",
-    recommendation: "Un-park it.",
-    options: [
-      { label: "Un-park", answer: "go" },
-      { label: "Leave", answer: "wait" },
-    ],
-    basis: "read the park",
-    ...over,
-  });
+  const B = (over: Record<string, unknown> = {}) => {
+    const options = (
+      Object.hasOwn(over, "options")
+        ? over.options
+        : [
+            { label: "Un-park", answer: "go" },
+            { label: "Leave", answer: "wait" },
+          ]
+    ) as { id?: string; label: string; answer: string }[] | undefined;
+    const person = over.person as
+      | { source?: { kind: string }; replies?: { id: string }[] }
+      | undefined;
+    return {
+      key: KEY,
+      context: "The seat is parked since 11:00 and waits for you.",
+      ask: "Should I un-park it?",
+      recommendation: "Un-park it.",
+      basis: "read the park",
+      did: [],
+      checked: [],
+      decision: {
+        whyOperator: {
+          kind: "product-direction",
+          explanation: "The fixture asks for a direction decision.",
+        },
+        consulted: [],
+        costOfDelay: "The fixture remains waiting.",
+        waiting: "An explicit operator answer.",
+      },
+      recommendedOptionId: options ? (options[0]?.id ?? "option-0") : undefined,
+      ...over,
+      options: options?.map((option, index) => ({
+        id: `option-${index}`,
+        consequence: "Record an explicit wait; no underlying approval or unpark is executed.",
+        reversibility: { kind: "reversible", detail: "The operator can release this wait." },
+        action: person
+          ? {
+              kind: "person-handled",
+              how: person.source?.kind === "teams" && person.replies?.[0] ? "copied" : "marked",
+              ...(person.replies?.[0] ? { replyId: person.replies[0].id } : {}),
+            }
+          : {
+              kind: "attention-hold",
+              reason: "Wait for an explicit operator decision.",
+              condition: { kind: "manual" },
+            },
+        ...option,
+      })),
+    };
+  };
   beforeEach(() => {
+    store.upsertRun(run(NOTE_RUN, "guido-1", { ticket: "mc#7" }));
     raise();
     seen.length = 0;
+  });
+
+  it("1389 refuses incomplete operator decision context before any brief or pass write", async () => {
+    const result = await call("brief_item", B({ decision: undefined }));
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("whyOperator");
+    expect(store.briefs().size).toBe(0);
+    expect(seen).toEqual([]);
+  });
+
+  it.each([
+    "ask",
+    "context",
+    "did",
+    "checked",
+    "recommendation",
+    "recommendedOptionId",
+    "decision",
+    "options",
+  ] as const)(
+    "1389 rejects missing %s on an operator brief without partial writes",
+    async (field) => {
+      const payload: Record<string, unknown> = B();
+      delete payload[field];
+      const result = await call("brief_item", payload);
+      expect(result.isError).toBe(true);
+      expect(store.briefs().size).toBe(0);
+      expect(store.drafts()).toEqual([]);
+      expect(decisions()).toEqual([]);
+      expect(seen).toEqual([]);
+    },
+  );
+  it("1389 refuses a forged FYI claim when the recommendation has no positive service proof", async () => {
+    const payload = B({ decision: { consulted: [], costOfDelay: "A brief wait." } });
+    expect((await call("brief_item", payload)).isError).toBe(true);
+    expect(store.briefs().size).toBe(0);
+    expect(seen).toEqual([]);
+  });
+  it("1389 rolls back a question pass and audit if atomic brief persistence refuses its source", async () => {
+    live("guido-1", "r-guido");
+    const id = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "A genuine operator decision?",
+      at: NOW,
+    });
+    const payload: Record<string, unknown> = B({ key: `ask:${id}`, ticket: "mc#7" });
+    payload.person = { source: { kind: "github", messageId: "missing", revision: "missing" } };
+    payload.hold = { condition: { kind: "date", at: NOW + 1000 } };
+    const result = await call("brief_item", payload);
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("Source changed");
+    expect(store.question(id)?.passedAt).toBeNull();
+    expect(store.briefs().has(`ask:${id}`)).toBe(false);
+    expect(decisions()).toEqual([]);
+    expect(holds(store)).toEqual({});
+    expect(store.drafts()).toEqual([]);
+    expect(seen).toEqual([]);
+  });
+
+  it("1389 keeps ordinary for-flight triage lightweight", async () => {
+    const result = await call(
+      "brief_item",
+      B({ for: "flight", ask: undefined, options: undefined }),
+    );
+    expect(result.isError).toBeUndefined();
+    expect(store.briefs().get(KEY)?.for).toBe("flight");
   });
 
   it("refuses to triage FLIGHT's own question tag", async () => {
@@ -4971,16 +5574,16 @@ describe("brief_item", () => {
     }
   });
 
-  it("caps the original source text in a brief", async () => {
+  it("retains the full original source text in a brief", async () => {
     raise("large", { text: "X".repeat(BRIEF_INPUT_MAX * 2) });
     await call("brief_item", B({ key: "note:large" }));
-    expect(store.briefs().get("note:large")?.original).toHaveLength(BRIEF_INPUT_MAX);
+    expect(store.briefs().get("note:large")?.original).toHaveLength(BRIEF_INPUT_MAX * 2);
   });
 
   it("stores a brief on an operator item and emits attention", async () => {
     expect(await call("brief_item", B())).toEqual({ text: BRIEFED_TEXT });
     expect(store.briefs().get(KEY)).toMatchObject({
-      context: "mc#7 is parked since 11:00.",
+      context: "The seat is parked since 11:00 and waits for you.",
       recommendation: "Un-park it.",
       options: [
         { label: "Un-park", answer: "go" },
@@ -4991,6 +5594,19 @@ describe("brief_item", () => {
     });
     expect(seen).toEqual(["attention", "flight"]);
     expect(decisions()).toEqual([]);
+  });
+
+  it("refuses a question that names a configured seat", async () => {
+    const got = await call(
+      "brief_item",
+      B({
+        ask: "Should guido-1 carry on with the sweep?",
+        context: "The seat is parked and waits.",
+      }),
+    );
+    expect(got.isError).toBe(true);
+    expect(got.text.startsWith(BRIEF_ENTRY_REFUSED)).toBe(true);
+    expect(got.text).toContain("the question has a seat id");
   });
 
   it("stores structured evidence and recommends an option by stable identity", async () => {
@@ -5150,7 +5766,18 @@ describe("brief_item", () => {
     const key = `lock:r-lock:${NOW - 30 * 60_000}`;
     const state = JSON.parse((await call("flight_state", {})).text);
     expect(state.items).toContainEqual(expect.objectContaining({ key, kind: "lock" }));
-    expect((await call("brief_item", B({ key, for: "operator" }))).isError).toBeUndefined();
+    // a lock names no ticket or PR: refused for the operator until FLIGHT names one (#1543)
+    const refused = await call("brief_item", B({ key }));
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("no ticket or PR: name it with ticket in brief_item");
+    const unknown = await call("brief_item", B({ key, ticket: "nope#7" }));
+    expect(unknown.isError).toBe(true);
+    expect(unknown.text).toContain("ticket nope#7 names no repo of this hub");
+    expect((await call("brief_item", B({ key, ticket: "mc#7" }))).isError).toBeUndefined();
+    expect(attentionItems(cfg, store, nowMs, lockNow).find((i) => i.key === key)).toMatchObject({
+      owner: "operator",
+      brief: { ticket: "mc#7" },
+    });
   });
 
   it("fills the original question and removes an answered question from triage", async () => {
@@ -5178,13 +5805,16 @@ describe("brief_item", () => {
   });
 
   it("stores the full triage brief and passes an item up immediately", async () => {
-    const long = "x".repeat(BRIEF_INPUT_MAX);
+    // the assessment is the context, and the entry check wants at least one sentence in it
+    const tail = " is a very long note, so read it.";
+    const long = "x".repeat(BRIEF_INPUT_MAX - tail.length) + tail;
     raise("full", { text: long });
     const fields = {
       for: "operator",
       assessment: long,
       did: [{ action: long, refs: ["mc#466"] }],
-      ask: long,
+      // the entry check takes a one-sentence question (#1543); the other fields stay at full length
+      ask: "Go now, or wait?",
       recommendation: long,
       options: [
         { label: "Go", answer: long },
@@ -5289,6 +5919,7 @@ describe("brief_item", () => {
   it.each(["budget", "account"])("requires passing up a %s park with a brief", async (kind) => {
     store.upsertRun(
       run("r-budget", "guido-1", {
+        ticket: "mc#7",
         loop: {
           ...NEW_LOOP,
           phase: "parked",
@@ -5334,16 +5965,16 @@ describe("brief_item", () => {
       };
       store.addStrays([stray]);
       const key = store.strays()[0]?.key;
-      expect((await call("brief_item", B({ key, for: forWhom }))).isError).toBeUndefined();
+      const briefed = await call("brief_item", B({ key, for: forWhom }));
+      // a stray names no ticket or PR, so a brief for the operator is refused (#1543) and the
+      // item stays FLIGHT's; its time stays first-seen either way
+      if (forWhom === "operator") expect(briefed.isError).toBe(true);
+      else expect(briefed.isError).toBeUndefined();
       nowMs += 1000;
       store.addStrays([{ ...stray, at: nowMs }]);
       const item = attentionItems(cfg, store, nowMs).find((i) => i.key === key);
       if (forWhom === "operator") {
-        expect(item).toMatchObject({
-          owner: "operator",
-          at: NOW,
-          brief: { for: "operator", at: NOW },
-        });
+        expect(item).toMatchObject({ owner: "flight", at: NOW });
       } else {
         expect(item).toMatchObject({
           owner: "flight",
@@ -5363,9 +5994,17 @@ describe("brief_item", () => {
     }
   });
 
-  it("keeps legacy context uncut, allows no options, and rejects oversized text", async () => {
+  it("keeps context uncut, allows no options for FLIGHT's own brief, and rejects oversized text", async () => {
     const long = "x".repeat(BRIEF_INPUT_MAX);
-    await call("brief_item", B({ context: long, options: undefined }));
+    // #1543: an operator brief with no options is refused; a brief FLIGHT keeps may have none
+    const none = await call(
+      "brief_item",
+      B({ context: long, options: undefined, recommendedOptionId: "option-0" }),
+    );
+    expect(none.isError).toBe(true);
+    expect(none.text).toContain("options");
+    expect(store.briefs().size).toBe(0);
+    await call("brief_item", B({ context: long, options: undefined, for: "flight" }));
     expect(store.briefs().get(KEY)).toMatchObject({ context: long, assessment: long, options: [] });
     for (const field of ["context", "assessment", "ask", "recommendation"]) {
       expect((await call("brief_item", B({ [field]: `${long}x` }))).isError).toBe(true);
@@ -6527,11 +7166,12 @@ it.each([
         (
           await call("brief_item", {
             key: `person:199:${NOW}`,
-            context: "Review",
+            context: "Someone asked you to review the plan and is waiting.",
             ask: "Will you review it?",
             recommendation: "Check it",
             basis: "Read message",
             person: { source, assessment: ["Needs review"] },
+            ...operatorDecisionFields({ kind: "person-handled", how: "marked" }),
           })
         ).isError,
       ).toBeUndefined();
@@ -6791,25 +7431,120 @@ describe("superuser housekeeping", () => {
     "packages/core/src/flight-access.ts",
     "roles/FLIGHT.md",
     ".claude/skills/flight-ops/SKILL.md",
-  ])("requires independent current-head controller evidence for %s", async (path) => {
+  ])("clears %s with no controller check, and logs the decision", async (path) => {
     elevated();
     runPr();
     const loop = need(store.run("r-pr")?.loop);
     store.setRunLoop("r-pr", { ...loop, touches: { sha: SHA, paths: [path] } });
-    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
-    expect(clearanceCalls).toEqual([]);
-    store.setRunLoop("r-pr", {
-      ...loop,
-      touches: { sha: SHA, paths: [path] },
-      controllerCheck: { sha: "old-head", from: "review", pass: true },
+    expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([["r-pr", SHA]]);
+    expect(decisions().filter((d) => d.kind === "merge")).toEqual([
+      expect.objectContaining({ targetRunId: "r-pr", decision: expect.stringContaining(path) }),
+    ]);
+  });
+  it("merge_pr clears a guard, .github and CLAUDE.md PR with no approval row and logs its basis", async () => {
+    elevated();
+    runPr();
+    const paths = ["apps/server/src/guard/rules.ts", ".github/workflows/ci.yml", "CLAUDE.md"];
+    const loop = need(store.run("r-pr")?.loop);
+    store.setRunLoop("r-pr", { ...loop, touches: { sha: SHA, paths } });
+    const result = await call("merge_pr", {
+      pr: 12,
+      basis: "Read the diff; the gate change is right",
+    });
+    expect(result).not.toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([["r-pr", SHA]]);
+    const merges = decisions().filter((d) => d.kind === "merge");
+    expect(merges).toHaveLength(1);
+    expect(merges[0]).toMatchObject({
+      targetRunId: "r-pr",
+      ref: "mc#7",
+      basis: "Read the diff; the gate change is right",
+    });
+    for (const path of paths) expect(merges[0]?.decision).toContain(path);
+    expect(decisions().filter((d) => d.kind === "approval")).toEqual([]);
+  });
+  it("the merge_pr description says where a merge is logged, not that the hub tells the operator", () => {
+    const description = need(tools.find((t) => t.name === "merge_pr")).description;
+    expect(description).not.toContain("tells the operator");
+    expect(description).toContain("logged as a merge decision on the FLIGHT page");
+    expect(description).toContain("the hub sends no message");
+  });
+  it("merge_pr adopts nothing on a standard repo, and logs its refusal", async () => {
+    engineOn = true;
+    runPr();
+    store.setRunPush({ runId: "r-pr", sha: SHA_B, at: NOW });
+    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), awaitingFlight: null });
+    ghImpl = async (a) => ({
+      code: 0,
+      stdout:
+        a[0] === "pr" && a[1] === "view"
+          ? JSON.stringify({
+              state: "OPEN",
+              isCrossRepository: false,
+              headRefOid: "e".repeat(40),
+              headRefName: "mc/7",
+            })
+          : "",
+      stderr: "",
     });
     expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(adoptCalls).toEqual([]);
+    // the refused call is on the ledger, as any other tool's refusal
+    expect(decisions().filter((d) => d.about === "merge_pr")).toHaveLength(1);
+  });
+  it("merge_pr keeps a quota-stopped author's reviewed PR on its crew merge path", async () => {
+    elevated();
+    runPr();
     store.setRunLoop("r-pr", {
-      ...loop,
-      touches: { sha: SHA, paths: [path] },
-      controllerCheck: { sha: SHA, from: "review", pass: true },
+      ...need(store.run("r-pr")?.loop),
+      aside: { worktree: "/tmp/preserved", wake: false },
+    });
+    const row = need(store.seatSession("guido-1"));
+    store.setSeatSession({ ...row, runId: null });
+    store.addUsage({
+      accountId: "claude-main",
+      window: "7d",
+      at: NOW,
+      pct: 96,
+      resetAt: NOW + 3_600_000,
+      source: "test",
     });
     expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([["r-pr", SHA]]);
+    expect(adoptCalls).toEqual([]);
+  });
+  it("merge_pr adopts a head that came from outside the run, once, and refuses otherwise", async () => {
+    elevated();
+    runPr();
+    const OUTSIDE = "e".repeat(40);
+    store.setRunPush({ runId: "r-pr", sha: SHA_B, at: NOW });
+    store.setRunLoop("r-pr", { ...need(store.run("r-pr")?.loop), awaitingFlight: null });
+    ghImpl = async (a) => ({
+      code: 0,
+      stdout:
+        a[0] === "pr" && a[1] === "view"
+          ? JSON.stringify({
+              state: "OPEN",
+              isCrossRepository: false,
+              headRefOid: OUTSIDE,
+              headRefName: "mc/7",
+            })
+          : "",
+      stderr: "",
+    });
+    const r = await call("merge_pr", { pr: 12 });
+    expect(r).toEqual({
+      text: `PR #12's head ${OUTSIDE.slice(0, 7)} came from outside the run. FLIGHT adopted it; CI and RETRO now check it. Call merge_pr again when it awaits you.`,
+    });
+    expect(adoptCalls).toEqual([["r-pr", OUTSIDE]]);
+    expect(decisions().find((d) => d.targetRunId === "r-pr")).toMatchObject({ kind: "sync" });
+    expect(clearanceCalls).toEqual([]);
+    // a head that is the run's own push is not adopted
+    adoptCalls.length = 0;
+    store.setRunPush({ runId: "r-pr", sha: OUTSIDE, at: NOW });
+    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
+    expect(adoptCalls).toEqual([]);
   });
   it.each(["ruling", "review-failed", "conflict"])("cannot accept a %s park", async (kind) => {
     elevated();
@@ -6893,7 +7628,8 @@ describe("superuser housekeeping", () => {
     ["head-moved", "the pushed head moved"],
     ["pr-not-open", "the PR is not open"],
     ["held", "the run is held"],
-    ["floor-enforced", "only the controller can merge it"],
+    ["floor-enforced", "use second_review or send it for rework"],
+    ["design-failed", "only the operator can accept it"],
     ["second-review-done", "second review was already requested"],
     ["no-second-reviewer", "no reviewer on another account"],
   ] as const)("settle_park says why the engine refused: %s", async (reason, text) => {
@@ -7120,16 +7856,15 @@ describe("superuser housekeeping", () => {
     ".github/actions/setup/action.yml",
     ".github/CODEOWNERS",
     "CLAUDE.md",
-  ])("merge_pr refuses %s even on a stale awaiting-flight record", async (path) => {
+  ])("merge_pr clears %s with no approval row", async (path) => {
     elevated();
     runPr();
     store.setRunLoop("r-pr", {
       ...need(store.run("r-pr")?.loop),
       touches: { sha: SHA, paths: [path] },
     });
-    expect(await call("merge_pr", { pr: 12 })).toHaveProperty("isError", true);
-    expect(clearanceCalls).toEqual([]);
-    expect(ghCalls).toEqual([]);
+    expect(await call("merge_pr", { pr: 12 })).not.toHaveProperty("isError", true);
+    expect(clearanceCalls).toEqual([["r-pr", SHA]]);
   });
   it("merge_pr refuses a PR that waits for the operator's acceptance", async () => {
     elevated();
@@ -7343,9 +8078,24 @@ describe("superuser housekeeping", () => {
     });
     if (message === null) throw new Error("message was not stored");
     const key = `comms-open:${message.id}`;
-    expect(raiseStalledCommsDecisions({ config: cfg, store, now: nowMs })).toBe(1);
+    // Preserve an already-stored fallback as history; it no longer makes this the operator's.
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "hub",
+      at: nowMs,
+      ask: "Should the crew proceed, or hold?",
+      context: "A crew member has waited for another's answer.",
+      recommendation: "Keep the work reversible.",
+      basis: "Legacy fallback.",
+      options: [
+        { id: "proceed", label: "Proceed", answer: "Proceed." },
+        { id: "hold", label: "Hold", answer: "Hold." },
+      ],
+    });
+
     expect(attentionItems(cfg, store, nowMs).find((item) => item.key === key)).toMatchObject({
-      owner: "operator",
+      owner: "flight",
     });
     expect(await call("dismiss_item", { key, basis: "The PR has merged." })).not.toHaveProperty(
       "isError",
@@ -7553,6 +8303,43 @@ describe("track", () => {
     priority: "P1",
     basis: "ticket",
   };
+
+  it("refuses a pointer target that the hub could never mark, naming the form", async () => {
+    for (const [kind, target] of [
+      ["pr", "#7"],
+      ["pr", "o/mc#7"],
+      ["pr", "nope#7"],
+      ["pr", "7"],
+      ["ticket", "mc#0"],
+    ] as const) {
+      const r = await call("track", { ...entry, pointers: [{ kind, target }] });
+      expect(r.isError, `${kind} ${target}`).toBe(true);
+      expect(r.text).toContain(`a ${kind} pointer is`);
+    }
+    expect(store.flightLedger("s1")).toEqual([]);
+    for (const [kind, target] of [
+      ["seat", "guido-1"],
+      ["repo", "mc"],
+      ["person", "octocat"],
+      ["metric", "merged"],
+    ] as const) {
+      const r = await call("track", { ...entry, pointers: [{ kind, target }] });
+      expect(r.isError, kind).toBe(true);
+      expect(r.text).toContain(`no hub event moves a ${kind} pointer`);
+    }
+    const good = [
+      { kind: "pr", target: "mc#7" },
+      { kind: "ticket", target: "mc#8" },
+    ];
+    expect((await call("track", { ...entry, pointers: good })).isError).toBeUndefined();
+  });
+
+  it("stamps the moved pointers flight_state shows as read", async () => {
+    await call("track", { ...entry, pointers: [{ kind: "pr", target: "mc#7" }] });
+    store.markFlightPointers("pr", "mc#7", "CI failing", NOW - 1000);
+    expect(JSON.parse((await call("flight_state", {})).text).moved).toHaveLength(1);
+    expect(store.movedFlightPointers("s1")).toEqual([]);
+  });
 
   it("keeps #533 ledger tools available while away", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
@@ -8684,10 +9471,12 @@ describe("attention hold tools", () => {
   const key = "note:blocked:hold-test";
   const args = { key, reason: " Waiting ", condition: { kind: "manual" } };
   beforeEach(() => {
+    // a note with a run behind it is an ordinary blocked note; with none it is the operator's
+    live("guido-1", "r-hold");
     store.raiseNote({
       key: "blocked:hold-test",
       kind: "blocked",
-      runId: null,
+      runId: "r-hold",
       seatId: null,
       repoId: null,
       text: "Choose",
@@ -8780,7 +9569,7 @@ describe("attention hold tools", () => {
     store.raiseNote({
       key: "blocked:hold-other",
       kind: "blocked",
-      runId: null,
+      runId: "r-hold",
       seatId: null,
       repoId: null,
       text: "Other",
@@ -8803,12 +9592,48 @@ describe("attention hold tools", () => {
 
 describe("brief_item with a hold (#760)", () => {
   const key = "note:blocked:wait-test";
+  /** The notes' run carries the ticket Needs you requires of an operator brief (#1543). */
+  const HOLD_RUN = "r-hold";
   const brief = (over: Record<string, unknown> = {}) => ({
     key,
     assessment: "Nothing to do yet.",
     ask: "Leave it parked?",
     recommendation: "Leave it until the condition is met.",
     basis: "read the park",
+    did: [],
+    checked: [],
+    recommendedOptionId: "wait",
+    decision: {
+      whyOperator: {
+        kind: "product-direction",
+        explanation: "The operator must choose when this work proceeds.",
+      },
+      consulted: [],
+      costOfDelay: "The work remains held.",
+      waiting: "The displayed wait condition.",
+    },
+    options: [
+      {
+        id: "wait",
+        label: "Wait",
+        answer: "Wait for the displayed condition.",
+        consequence: "Keep the item held.",
+        reversibility: { kind: "reversible", detail: "Refresh after release." },
+        action: {
+          kind: "attention-hold",
+          reason: "Wait for the operator.",
+          condition: { kind: "manual" },
+        },
+      },
+      {
+        id: "review",
+        label: "Review later",
+        answer: "Keep this decision open.",
+        consequence: "Record the decision without un-parking work.",
+        reversibility: { kind: "reversible", detail: "The decision can be superseded." },
+        action: { kind: "record-decision" },
+      },
+    ],
     ...over,
   });
   const items = (at = NOW + 1) =>
@@ -8816,10 +9641,11 @@ describe("brief_item with a hold (#760)", () => {
   const needsYou = (at = NOW + 1) =>
     operatorItems(config(), store, at, null).filter((i) => i.key === key);
   beforeEach(() => {
+    store.upsertRun(run(HOLD_RUN, "guido-1", { ticket: "mc#7" }));
     store.raiseNote({
       key: "blocked:wait-test",
       kind: "blocked",
-      runId: null,
+      runId: HOLD_RUN,
       seatId: null,
       repoId: null,
       text: "Choose",
@@ -8839,7 +9665,7 @@ describe("brief_item with a hold (#760)", () => {
       store.raiseNote({
         key: "blocked:other",
         kind: "blocked",
-        runId: null,
+        runId: HOLD_RUN,
         seatId: null,
         repoId: null,
         text: "Other",
@@ -8882,12 +9708,11 @@ describe("brief_item with a hold (#760)", () => {
       expect(needsYou(at)).toHaveLength(1);
       expect(items(at).map((i) => i.key)).toEqual([key]);
       expect(items(at)[0]?.holdReleased).toBeTruthy();
-      // a fresh brief settles it
+      // a fresh, complete brief settles it
       store.addBrief({
         ...brief(),
         original: "",
-        context: "x",
-        options: [],
+        context: "The crew asked a question and waits for your answer.",
         did: [],
         at: at + 1,
         defaultEligible: false,
@@ -8910,7 +9735,7 @@ describe("brief_item with a hold (#760)", () => {
     store.raiseNote({
       key: "blocked:other",
       kind: "blocked",
-      runId: null,
+      runId: HOLD_RUN,
       seatId: null,
       repoId: null,
       text: "Other",
@@ -9248,10 +10073,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(await call("edit_issue", { issue: 7, body: kept })).toHaveProperty("isError", true);
       expect(ghCalls).toEqual([]);
     });
-    it("set_fields leaves Ready and Backlog to promote, and keeps one area label", async () => {
+    it("set_fields leaves Ready to promote, and keeps one area label", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog"])
-        expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
+      expect(await call("set_fields", { issue: 7, status: "Ready" })).toHaveProperty(
+        "isError",
+        true,
+      );
       liveLabels = ["lane:home", "area:server"];
       expect(
         await call("set_fields", { issue: 7, labels: ["lane:home", "area:server", "area:web"] }),
@@ -9260,6 +10087,24 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         "isError",
         true,
       );
+      expect(moveCalls).toEqual([]);
+      expect(ghCalls).toEqual([]);
+    });
+    it("set_fields takes a Blocked card back to Backlog, so promote can reach it", async () => {
+      readImpl = (n) => card(n, { labels: liveLabels, status: "Blocked" });
+      board(card(7, { status: "Blocked" }));
+      expect((await call("set_fields", { issue: 7, status: "Backlog" })).isError).toBeUndefined();
+      expect(moveCalls.at(-1)).toMatchObject({ issue: 7, column: "Backlog" });
+    });
+    it("set_fields moves no card to Backlog from outside Blocked", async () => {
+      for (const status of ["Ready", "In progress", "In review", "Done"]) {
+        readImpl = (n) => card(n, { labels: liveLabels, status });
+        // the store says Blocked: only the live card counts
+        board(card(7, { status: "Blocked" }));
+        const r = await call("set_fields", { issue: 7, status: "Backlog", size: "S" });
+        expect(r.isError).toBe(true);
+        expect(r.text).toContain("not in Blocked");
+      }
       expect(moveCalls).toEqual([]);
       expect(ghCalls).toEqual([]);
     });
@@ -9272,6 +10117,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       moveCalls.length = 0;
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
       expect(moveCalls).toHaveLength(1);
+    });
+    it("stamps the status decision set_fields writes with the wake FLIGHT is in", async () => {
+      board(card(7));
+      store.addFlightWake("r-flight", NOW - 1000, ["items"], flightWakeId("r-flight", 1));
+      expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
+      expect(decisions().find((d) => d.kind === "status")?.wakeId).toBe("r-flight:1");
     });
     it("sets status, size, priority, labels and a milestone in one call", async () => {
       liveLabels = ["lane:home"];
@@ -9406,9 +10257,9 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         labels: ["lane:home", "legacy-odd", "area:server", "bug"],
       });
     });
-    it("set_fields moves a card only to Blocked", async () => {
+    it("set_fields moves a card only to Blocked or back to Backlog", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog", "Refinement", "In progress", "Done"])
+      for (const status of ["Ready", "Refinement", "In progress", "Done"])
         expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
       expect(moveCalls).toEqual([]);
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
@@ -9616,10 +10467,11 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       const briefed = await call("brief_item", {
         key: "note:ready:briefed",
         for: "operator",
-        assessment: "A product call.",
+        assessment: "A product call that only you can make.",
         ask: "Merge?",
         recommendation: "Yes.",
         basis: "the ticket",
+        ...operatorDecisionFields({ kind: "record-decision" }),
       });
       expect(briefed.isError).toBeUndefined();
       expect(await call("dismiss_item", { key: "note:ready:briefed" })).toHaveProperty(
@@ -9792,35 +10644,21 @@ describe("FLIGHT's full access (#1214)", () => {
       );
     beforeEach(elevated);
 
-    it("refuses a hard-rule path with no approval, and names how to get one", async () => {
+    it("clears a hard-rule path with no approval row, and says so on the ledger", async () => {
       floorPr(".github/workflows/ci.yml");
-      const r = await call("merge_pr", { pr: 12 });
-      expect(r.isError).toBe(true);
-      expect(r.text).toContain("/api/flight/approvals");
-      expect(clearanceCalls).toEqual([]);
-    });
-
-    it("clears the PR once a controller's approval for that head is recorded, and says so on the ledger", async () => {
-      floorPr(".github/workflows/ci.yml");
-      grant();
       expect((await call("merge_pr", { pr: 12 })).isError).toBeUndefined();
       expect(clearanceCalls).toEqual([["r-pr", SHA]]);
-      expect(decisions().find((d) => d.kind === "approval")?.decision).toContain(
-        "controller read the workflow change",
+      expect(decisions().find((d) => d.kind === "merge")?.decision).toContain(
+        ".github/workflows/ci.yml",
       );
+      expect(decisions().some((d) => d.kind === "approval")).toBe(false);
     });
 
-    it.each([
-      ["another head", { scope: `pr:12@${SHA_B.slice(0, 12)}` }],
-      ["another PR", { scope: `pr:13@${SHA.slice(0, 12)}` }],
-      ["a head named too briefly", { scope: `pr:12@${SHA.slice(0, 3)}` }],
-      ["a different rule", { rule: "repo-rules" as const }],
-      ["an expired window", { until: NOW - 1 }],
-    ])("does not take an approval for %s", async (_name, over) => {
+    it("ignores a recorded approval: FLIGHT's own call is enough", async () => {
       floorPr("CLAUDE.md");
-      grant(over);
-      expect((await call("merge_pr", { pr: 12 })).isError).toBe(true);
-      expect(clearanceCalls).toEqual([]);
+      grant({ scope: `pr:13@${SHA.slice(0, 12)}` });
+      expect((await call("merge_pr", { pr: 12 })).isError).toBeUndefined();
+      expect(clearanceCalls).toEqual([["r-pr", SHA]]);
     });
   });
 
@@ -10347,5 +11185,361 @@ describe("standing instructions and linked re-plans", () => {
     await call("revoke_instruction", { id: entry.id, basis: "Retry" });
     expect(store.flightDecisions(0, 10)).toEqual(before);
     expect(tools.some((t) => /^(?:save|revoke)_order$/.test(t.name))).toBe(false);
+  });
+});
+
+describe("return_question and withdraw_question (#1532)", () => {
+  const missing = "Say which ticket this is about and what you tried.";
+  const R = (key: string, over: Record<string, unknown> = {}) => ({
+    key,
+    missing,
+    basis: "the question names no ticket",
+    ...over,
+  });
+  const W = (key: string, over: Record<string, unknown> = {}) => ({
+    key,
+    reason: "The ticket merged.",
+    basis: "mc#7 is closed",
+    ...over,
+  });
+  const ask = (text = "Which lane?") => {
+    live("guido-1", "r-guido");
+    return store.addQuestion({ agentId: "guido-1", runId: "r-guido", text, at: NOW });
+  };
+
+  it("returns a seat's question to its live run with the reason", async () => {
+    const id = ask();
+    expect(await call("return_question", R(`ask:${id}`))).toEqual({ text: "Returned to GUIDO-1." });
+    expect(messageCalls).toEqual([
+      ["guido-1", returnedQuestionText(missing), { interrupt: false, questions: "none" }],
+    ]);
+    expect(store.question(id)?.answeredAt).toBe(NOW);
+    expect(store.questionClosure(`ask:${id}`, NOW)).toMatchObject({
+      kind: "returned",
+      reason: missing,
+      by: "flight-1",
+      question: "Which lane?",
+    });
+    expect(decisions()).toMatchObject([{ kind: "return", seatId: "guido-1", questionId: id }]);
+    expect(store.comms(0).some((m) => m.to === "guido-1" && m.text.includes(missing))).toBe(true);
+    expect(seen).toContain("attention");
+    // the asking run ends: the call is refused and stores nothing
+    const second = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r-guido",
+      text: "And the branch?",
+      at: NOW + 1,
+    });
+    store.upsertRun(run("r-guido", "guido-1", { endedAt: NOW + 2 }));
+    expect(await call("return_question", R(`ask:${second}`))).toEqual(
+      refused(askerRunEndedText("GUIDO-1")),
+    );
+    expect(messageCalls).toHaveLength(1);
+    expect(store.question(second)?.answeredAt).toBeNull();
+    expect(store.questionClosure(`ask:${second}`, NOW + 1)).toBeNull();
+  });
+
+  it("stores nothing when the seat cannot be told", async () => {
+    const id = ask();
+    messageImpl = async () => {
+      throw new Error("seat is busy");
+    };
+    expect(await call("return_question", R(`ask:${id}`))).toEqual(
+      refused("Not sent: seat is busy"),
+    );
+    expect(store.question(id)?.answeredAt).toBeNull();
+    expect(store.questionClosure(`ask:${id}`, NOW)).toBeNull();
+  });
+
+  it("refuses what is not a seat's question, and a question that is not open", async () => {
+    expect(await call("return_question", R("tag:flight-1:7"))).toEqual(
+      refused(RETURN_NOT_SEAT_QUESTION),
+    );
+    expect(await call("return_question", R("ask:999"))).toEqual(
+      refused("Not answered: there is no open question 999."),
+    );
+    expect(await call("return_question", R("ask:1", { missing: "" }))).toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(await call("return_question", R("ask:1", { missing: "x".repeat(301) }))).toHaveProperty(
+      "isError",
+      true,
+    );
+    expect(messageCalls).toEqual([]);
+  });
+
+  it("returns a seat's question the operator already had, and only FLIGHT may call it", async () => {
+    const id = ask();
+    store.passQuestion(id, NOW);
+    expect((await call("return_question", R(`ask:${id}`))).isError).toBeUndefined();
+    const other = ask("Another?");
+    expect(await call("return_question", R(`ask:${other}`), ctx("guido-1", "r-guido"))).toEqual(
+      refused(MC_FLIGHT_ONLY),
+    );
+  });
+
+  it("returns a seat's Comms question and settles it", async () => {
+    live("guido-1", "r-guido");
+    nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+    const message = store.addComms({
+      at: nowMs - 50 * 60_000,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "mc#7",
+      text: "Which branch?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    expect(await call("return_question", R(`comms-open:${message.id}`))).toEqual({
+      text: "Returned to GUIDO-1.",
+    });
+    expect(store.commsSettlement(message.id)).toMatchObject({
+      settledBy: "flight-1",
+      reason: missing,
+    });
+    expect(messageCalls).toHaveLength(1);
+  });
+
+  describe("a protected item", () => {
+    beforeEach(() => {
+      store.raiseNote({
+        key: "blocked:prot",
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "Choose",
+        at: NOW - 1,
+      });
+    });
+    const key = "note:blocked:prot";
+    it("withdraws only FLIGHT's protected brief without answering a passed seat question", async () => {
+      live("guido-1", "r-protected-question", { ticket: "mc#7" });
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "r-protected-question",
+        text: "Choose the required approval.",
+        at: NOW,
+      });
+      store.passQuestion(id, NOW);
+      const questionKey = key;
+      store.addBrief({
+        key: questionKey,
+        for: "operator",
+        by: "flight",
+        at: NOW,
+        context: "The operator must choose.",
+        ask: "Approve this direction?",
+        recommendation: "Keep waiting.",
+        basis: "Existing authority.",
+        options: [],
+      });
+      const result = await call("withdraw_question", W(questionKey));
+      expect(result.isError, result.text).toBeUndefined();
+      expect(store.briefs().has(questionKey)).toBe(false);
+      expect(store.question(id)?.answeredAt).toBeNull();
+      expect(store.question(id)?.passedAt).toBe(NOW);
+      expect(store.questionClosures(0, 10)).toEqual([]);
+      expect(store.acks().has(questionKey)).toBe(false);
+      expect(messageCalls).toEqual([]);
+      store.addBrief({
+        key: questionKey,
+        for: "operator",
+        by: "flight",
+        at: NOW + 1,
+        context: "The operator still must choose.",
+        ask: "Approve this direction?",
+        recommendation: "Keep waiting.",
+        basis: "Refreshed context.",
+        options: [],
+      });
+      expect(store.briefs().has(questionKey)).toBe(true);
+      expect(store.question(id)?.answeredAt).toBeNull();
+    });
+    it.each([
+      ["hold_item", { key, reason: "Waiting", condition: { kind: "manual" } }],
+      [
+        "brief_item",
+        {
+          ...operatorDecisionFields({ kind: "record-decision" }),
+          key,
+          assessment: "Nothing yet.",
+          ask: "Leave it?",
+          recommendation: "Leave it.",
+          basis: "read it",
+          hold: { condition: { kind: "crew" } },
+        },
+      ],
+      ["return_question", R(key)],
+      ["withdraw_question", W(key)],
+    ])("is refused by %s, storing nothing", async (name, input) => {
+      expect(await call(name, input)).toEqual(refused(PROTECTED_ITEM_REFUSED));
+      expect(store.getSetting("attention-holds")).toBeNull();
+      expect(store.briefs().size).toBe(0);
+      expect(store.questionClosures(0, 10)).toEqual([]);
+      expect(messageCalls).toEqual([]);
+      expect(decisions()).toEqual([]);
+    });
+
+    it("is refused for a Comms blocker from a seat parked on budget", async () => {
+      live("guido-1", "r-budget", {
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "budget", reason: "tokens", ended: false },
+        },
+      });
+      nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+      const message = store.addComms({
+        at: nowMs - 50 * 60_000,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#7",
+        text: "Out of budget",
+        label: "blocker",
+      });
+      if (message === null) throw new Error("message was not stored");
+      const comms = `comms-open:${message.id}`;
+      for (const [name, input] of [
+        ["return_question", R(comms)],
+        ["withdraw_question", W(comms)],
+      ] as const)
+        expect(await call(name, input)).toEqual(refused(PROTECTED_ITEM_REFUSED));
+      expect(store.commsSettlement(message.id)).toBeNull();
+      expect(messageCalls).toEqual([]);
+    });
+
+    it("is refused for a budget blocker in its first minutes, before it is an item", async () => {
+      live("guido-1", "r-budget", {
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "budget", reason: "tokens", ended: false },
+        },
+      });
+      nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+      const message = store.addComms({
+        at: nowMs - 5 * 60_000,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#7",
+        text: "Out of budget",
+        label: "blocker",
+      });
+      if (message === null) throw new Error("message was not stored");
+      expect(await call("return_question", R(`comms-open:${message.id}`))).toEqual(
+        refused(PROTECTED_ITEM_REFUSED),
+      );
+      expect(store.commsSettlement(message.id)).toBeNull();
+      expect(messageCalls).toEqual([]);
+    });
+  });
+
+  describe("withdraw_question", () => {
+    const briefed = async (key: string, by = "flight") => {
+      store.addBrief({
+        key,
+        for: "operator",
+        ...(by === "flight" ? { by: "flight" as const } : { by: "hub" as const }),
+        ask: "Merge now?",
+        assessment: "Ready.",
+        context: "The crew asked a question and waits for your answer.",
+        recommendation: "Merge.",
+        ticket: "mc#7",
+        options: [
+          { id: "a", label: "Merge", answer: "Merge it." },
+          { id: "b", label: "Wait", answer: "Wait." },
+        ],
+        basis: "read",
+        at: NOW,
+      });
+    };
+
+    it("sends a seat's question to answer_question or return_question instead", async () => {
+      const id = ask();
+      expect(await call("withdraw_question", W(`ask:${id}`))).toEqual(
+        refused(WITHDRAW_SEAT_QUESTION),
+      );
+      expect(store.question(id)?.answeredAt).toBeNull();
+    });
+
+    it("withdraws a question FLIGHT briefed for the operator, and tells the seat", async () => {
+      live("guido-1", "r-guido");
+      nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+      const message = store.addComms({
+        at: nowMs - 50 * 60_000,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#7",
+        text: "Which branch?",
+        label: "question",
+      });
+      if (message === null) throw new Error("message was not stored");
+      const key = `comms-open:${message.id}`;
+      await briefed(key);
+      expect(await call("withdraw_question", W(key))).toEqual({ text: withdrawnText(key) });
+      const closure = store.questionClosures(0, 10)[0];
+      expect(closure).toMatchObject({
+        key,
+        kind: "withdrawn",
+        reason: "The ticket merged.",
+        by: "flight-1",
+        operator: true,
+      });
+      expect(messageCalls).toEqual([
+        [
+          "guido-1",
+          questionClosedText("Merge now?", "The ticket merged."),
+          { interrupt: false, questions: "none" },
+        ],
+      ]);
+      expect(decisions()).toMatchObject([{ kind: "withdraw", decision: "The ticket merged." }]);
+      expect(operatorItems(cfg, store, nowMs, null).some((i) => i.key === key)).toBe(false);
+    });
+
+    it("refuses a question the hub briefed, and one FLIGHT did not write", async () => {
+      live("guido-1", "r-guido");
+      nowMs = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
+      const message = store.addComms({
+        at: nowMs - 50 * 60_000,
+        from: "guido-1",
+        to: "flight-1",
+        ticket: "mc#7",
+        text: "Which branch?",
+        label: "question",
+      });
+      if (message === null) throw new Error("message was not stored");
+      const key = `comms-open:${message.id}`;
+      await briefed(key, "hub");
+      expect(await call("withdraw_question", W(key))).toEqual(refused(WITHDRAW_NOT_YOURS));
+      expect(await call("withdraw_question", W("note:missing"))).toEqual(
+        refused("Not withdrawn: that question is no longer open."),
+      );
+      expect(store.questionClosures(0, 10)).toEqual([]);
+    });
+  });
+});
+
+describe("start_seat and the open-ticket list leave a waiting:operator card alone (#1532)", () => {
+  it("refuses a Backlog card with a plan and the label, and does not list it", async () => {
+    live("flight-1", "r-flight");
+    need(cfg.repos[0]).autonomy = "merge";
+    engineOn = true;
+    board(
+      card(7, {
+        status: "Backlog",
+        labels: ["area:server", WAITING_OPERATOR_LABEL],
+        size: "S",
+      }),
+    );
+    fetchImpl = async (n) =>
+      ticket(n, { body: "Body\n\n## Plan\n\nDo it\n\n## Done when\n\n- x\n" });
+    const r = await call("start_seat", { seat: "guido-1", issue: 7, basis: "b" });
+    expect(r).toEqual(refused(waitingOperatorStartText("mc#7")));
+    expect(startCalls).toEqual([]);
+    expect(
+      flightState({ config: cfg, store, busy: [], now: NOW }).tickets.map((t) => t.ref),
+    ).not.toContain("mc#7");
   });
 });

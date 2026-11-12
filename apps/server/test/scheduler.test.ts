@@ -17,7 +17,7 @@ import {
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { holdItem, holds } from "../src/attention-holds.ts";
+import { holdItem, holds } from "../src/attention/holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import { collectorName, FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
@@ -32,7 +32,9 @@ import {
 import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
 import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
+import { flightState, markItemsShown } from "../src/flight/state.ts";
 import * as hud from "../src/hud.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
   BACKFILL_BUDGET_MS,
@@ -55,6 +57,7 @@ import {
   waitedPrNumbers,
 } from "../src/scheduler.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
+import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
 import * as views from "../src/views.ts";
 
@@ -153,6 +156,7 @@ function stubs(over: Partial<Collectors> = {}): Collectors {
     rewriteSummaries: vi.fn(() => ({ rewritten: 0, done: true })),
     fillTitles: vi.fn(async () => ({ filled: 0, done: true })),
     cli: vi.fn(async () => ({ cask: false as const, found: true })),
+    cliOps: vi.fn(() => null),
     claude: vi.fn(async () => []),
     codex: vi.fn(async () => []),
     machine: vi.fn(async (_prevCpus, prev, now) => ({
@@ -209,6 +213,60 @@ describe("scheduler", () => {
       retention: TRANSCRIPT_RETENTION_DEFAULTS,
     });
     expect(log).toHaveBeenCalledWith("transcripts: 1 gzipped, 0 deleted, 0 failed");
+  });
+
+  it("runs the token audit before transcript maintenance, and maintenance runs if the audit throws", async () => {
+    const order: string[] = [];
+    const tokenAudit = vi.fn(async () => {
+      order.push("tokenAudit");
+      return { audited: 2, empty: 0, controllerSessions: 0 };
+    });
+    const transcripts = vi.fn(async () => {
+      order.push("transcripts");
+      return { gzipped: 0, deleted: 0, skippedLive: 0, failed: [] };
+    });
+    const log = vi.fn();
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts, tokenAudit }),
+      log,
+    });
+    await s.tick("transcripts");
+    expect(order).toEqual(["tokenAudit", "transcripts"]);
+    expect(tokenAudit).toHaveBeenCalledWith({ store, config, now: NOW });
+    expect(log).toHaveBeenCalledWith("token audit: 2 runs, 0 controller sessions");
+
+    order.length = 0;
+    tokenAudit.mockImplementationOnce(async () => {
+      order.push("tokenAudit");
+      throw new Error("disk gone");
+    });
+    await s.tick("transcripts");
+    expect(order).toEqual(["tokenAudit", "transcripts"]);
+    expect(log).toHaveBeenCalledWith("token audit failed: disk gone");
+  });
+
+  it("reads ended runs for the token audit every ten minutes, apart from the six-hourly transcripts pass", async () => {
+    vi.useFakeTimers();
+    const tokenAudit = vi.fn(async () => ({ audited: 0, empty: 0, controllerSessions: 0 }));
+    const transcripts = vi.fn(async () => ({ gzipped: 0, deleted: 0, skippedLive: 0, failed: [] }));
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts, tokenAudit }),
+    });
+    s.start();
+    await vi.advanceTimersByTimeAsync(TOKEN_AUDIT_FIRST_DELAY_MS);
+    expect(tokenAudit).toHaveBeenCalledTimes(1);
+    expect(transcripts).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(TOKEN_AUDIT_INTERVAL_MS);
+    expect(tokenAudit.mock.calls.length).toBeGreaterThanOrEqual(2);
+    s.stop();
   });
 
   it("starts transcript maintenance after one minute, then every six hours", async () => {
@@ -437,6 +495,53 @@ describe("scheduler", () => {
     await s.tick("github");
     flushEmits();
     expect(topics).toContain("limits");
+  });
+
+  it("frees waiting:operator cards after a due board poll, and refreshes boards when it freed some", async () => {
+    vi.useFakeTimers();
+    const releaseWaiting = vi.fn(async () => 1);
+    const c = stubs({ github: vi.fn(async () => ({ boards: false, escalations: false })) });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: c,
+      releaseWaiting,
+    });
+    await s.tick("github");
+    expect(releaseWaiting).toHaveBeenCalledTimes(1);
+    flushEmits();
+    expect(topics).toContain("boards");
+  });
+
+  it("does not free waiting:operator cards on a preview or when GitHub cannot be reached", async () => {
+    vi.useFakeTimers();
+    const releaseWaiting = vi.fn(async () => 1);
+    const preview = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs(),
+      releaseWaiting,
+      boardWrites: false,
+    });
+    await preview.tick("github");
+    const down = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({
+        githubToken: vi.fn(async () => {
+          throw new Error("gh: could not read a GitHub token");
+        }),
+      }),
+      releaseWaiting,
+    });
+    await down.tick("github");
+    expect(releaseWaiting).not.toHaveBeenCalled();
   });
 
   it("retries a failed githubToken on each GitHub tick until it succeeds", async () => {
@@ -1558,6 +1663,129 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
+    it("keeps one disk-capacity item and FLIGHT wake while headroom flaps around the percentage floor", async () => {
+      let t = Math.floor(NOW / 60_000) * 60_000;
+      const diskFreeGb = [4.5, 5.3, 4.6];
+      let reading = 0;
+      config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
+        sessions: [
+          {
+            id: "flight-session",
+            repoId: "shop-app",
+            checkout: join(dir, "checkout"),
+            seats: [
+              {
+                id: "flight-1",
+                role: "FLIGHT",
+                accountId: "claude-main",
+                model: "opus",
+                area: [],
+              },
+            ],
+          },
+        ],
+        machineCapacity: {
+          diskFreeGb: 1,
+          diskFreePct: 5,
+          swapUsedPct: 60,
+          memoryFreePct: 10,
+          loadPerCore: 1.5,
+          loadWindowMin: 5,
+          clearAfterMin: 5,
+        },
+      };
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: (diskFreeGb[reading] ?? 0) * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      const state = () => flightState({ config, store, busy: [], now: t });
+
+      await s.tick("machine");
+      const first = store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY);
+      if (first === undefined) throw new Error("machine-capacity note was not raised");
+      const firstWake = state();
+      expect(firstWake.wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
+      markItemsShown(store, firstWake);
+
+      for (reading = 1; reading < diskFreeGb.length; reading++) {
+        t += 60_000;
+        await s.tick("machine");
+      }
+
+      const notes = store.notes().filter((n) => n.key === MACHINE_CAPACITY_KEY);
+      expect(notes).toEqual([expect.objectContaining({ at: first.at })]);
+      expect(notes[0]?.text).toContain("disk free is 4.6%");
+      expect(state().wake?.fresh).toEqual([]);
+
+      diskFreeGb.push(6.1);
+      reading = diskFreeGb.length - 1;
+      t += 60_000;
+      await s.tick("machine");
+      for (let minute = 1; minute < 10; minute++) {
+        t += 60_000;
+        await s.tick("machine");
+        expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeDefined();
+      }
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeUndefined();
+
+      // A new episode is a fresh item, so it wakes FLIGHT again.
+      diskFreeGb.push(4.5);
+      reading = diskFreeGb.length - 1;
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)?.at).toBe(t);
+      expect(state().wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
+    });
+
+    it("raises one budget-brake alert on the minute tick and lifts it when the week resets", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      const resetAt = minute + 24 * 3600e3;
+      for (const [at, pct] of [
+        [minute - 6 * 3600e3, 40],
+        [minute, 60],
+      ] as const)
+        store.addUsage({ accountId: "claude-main", window: "7d", at, resetAt, pct, source: "t" });
+      let t = minute + 1000;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({ at }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      expect(store.notes().filter((n) => n.key === "budget-brake")).toHaveLength(1);
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().filter((n) => n.key === "budget-brake")).toHaveLength(1);
+      t = resetAt + 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "budget-brake")).toBeUndefined();
+    });
+
     it.each([
       ["absolute disk", { diskFreeBytes: 14 * 1024 ** 3 }, "disk free is 14.0 GB"],
       [
@@ -1604,7 +1832,7 @@ describe("scheduler", () => {
       expect(notes[0]?.text).toContain(reason);
     });
 
-    it("refreshes one capacity item when the active threshold and consumers change", async () => {
+    it("updates the capacity item without renewing its age when the active threshold changes", async () => {
       let t = NOW;
       let disk = true;
       const s = createScheduler({
@@ -2430,6 +2658,52 @@ describe("board and PR cadence", () => {
       await s.stop();
     },
   );
+
+  it.each(["github", "prs"] as const)(
+    "a preview polls on %s but never follows PRs",
+    async (job) => {
+      const c = stubs();
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => NOW,
+        collectors: c,
+        boardWrites: false,
+      });
+      await s.tick(job);
+      const poll = job === "github" ? c.github : c.prSweep;
+      expect(poll).toHaveBeenCalled();
+      expect(c.followPrs).not.toHaveBeenCalled();
+      await s.stop();
+    },
+  );
+
+  it("a preview does not follow PRs after a waited PR poll either", async () => {
+    vi.useFakeTimers({ now: NOW });
+    config.poll = { usageMinutes: 30, githubSeconds: 60, boardMinutes: 15 };
+    const c = stubs({ followPrs: vi.fn(async () => true) });
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: Date.now,
+      collectors: c,
+      waitedPrs: () => [7],
+      boardWrites: false,
+    });
+    await s.tick("github");
+    await s.tick("github");
+    expect(c.githubPrs).toHaveBeenCalled();
+    expect(c.followPrs).not.toHaveBeenCalled();
+    await s.stop();
+  });
+
+  it("main.ts hands the scheduler boardWrites: !preview", async () => {
+    const { readFileSync } = await import("node:fs");
+    const main = readFileSync(new URL("../src/main.ts", import.meta.url), "utf8");
+    expect(main).toContain("boardWrites: !preview,");
+  });
 
   it("follows PRs after a waited PR poll and emits a board move", async () => {
     vi.useFakeTimers({ now: NOW });

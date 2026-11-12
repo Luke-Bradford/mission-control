@@ -8,7 +8,8 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { nextWakeAt, wakeReasons } from "../src/flight/state.ts";
-import { prFlow, prFlowFacts, prFlowWakeTimes } from "../src/pr-flow.ts";
+import { prFlow, prFlowFacts, prFlowWakeTimes } from "../src/pr/flow.ts";
+import { externalReviewKey } from "../src/review/external.ts";
 import { Store } from "../src/store.ts";
 
 const T = Date.parse("2026-11-01T12:00:00Z");
@@ -168,7 +169,7 @@ describe("PR flow ownership and clocks", () => {
       T + 2 * M,
     );
     expect(row()).toMatchObject({
-      owner: "controller",
+      owner: "FLIGHT",
       stage: "controller check",
       ownerSince: T + 2 * M,
     });
@@ -314,6 +315,67 @@ describe("PR flow ownership and clocks", () => {
       lastActor: "controller",
       lastActionAt: T + 9 * M,
     });
+  });
+});
+
+describe("an ended run with the hub's own external review", () => {
+  const external = (clean: boolean) => {
+    const id = store.requestReview({
+      authorRunId: externalReviewKey("mc", 7),
+      repoId: "mc",
+      seatId: "retro",
+      prNumber: 7,
+      sha: "head",
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: T + 2 * M,
+    });
+    if (id === null) throw new Error("review not queued");
+    if (clean) {
+      store.setReviewState(id, ["queued"], "running", { runId: "retro:x", at: T + 3 * M });
+      store.recordFindings(id, "retro:x", {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "ok",
+        findings: [],
+        at: T + 4 * M,
+      });
+    }
+  };
+
+  it("reads a queued external review as the review stage, owned by its seat", () => {
+    store.upsertPullRequests("mc", [pr(7, { isDraft: false })], T);
+    store.upsertRun(run("author", { endedAt: T + M }));
+    external(false);
+    expect(row()).toMatchObject({ stage: "review", ownerKind: "review", owner: "retro" });
+  });
+
+  it("reads a clean external review as ready to merge", () => {
+    store.upsertPullRequests("mc", [pr(7, { isDraft: false })], T);
+    store.upsertRun(run("author", { endedAt: T + M }));
+    external(true);
+    expect(row()).toMatchObject({ stage: "merge" });
+  });
+
+  it("ignores the ended run's stale loop", () => {
+    store.upsertPullRequests("mc", [pr(7, { isDraft: false })], T);
+    store.upsertRun(
+      run("author", { endedAt: T + M, loop: { ...NEW_LOOP, phase: "review", epoch: 3 } }),
+    );
+    external(true);
+    expect(row()).toMatchObject({ stage: "merge" });
+  });
+
+  it("keeps the merge hold of the ended run as clearance", () => {
+    store.upsertPullRequests("mc", [pr(7, { isDraft: false })], T);
+    store.upsertRun(
+      run("author", {
+        endedAt: T + M,
+        loop: { ...NEW_LOOP, mergeHold: { by: "CAPCOM", reason: "wait", at: T } },
+      }),
+    );
+    external(true);
+    expect(row()).toMatchObject({ stage: "clearance" });
   });
 });
 

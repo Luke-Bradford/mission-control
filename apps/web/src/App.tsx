@@ -9,11 +9,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { chooseSeat } from "./agent/chooseSeat.ts";
+import { stepRoster } from "./agent/roster.ts";
+import { useNeedsCount } from "./attention.ts";
 import { RESOURCES, useResource } from "./data.ts";
+import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
-
 import {
-  agentPath,
   FULL_WIDTH_PAGES,
   isPopout,
   itemParam,
@@ -29,7 +31,7 @@ import {
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
 import { CommandPalette } from "./shell/CommandPalette.tsx";
-import { Dock } from "./shell/Dock.tsx";
+import { Dock, useOverviewDockOverlay } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
 import { Header } from "./shell/Header.tsx";
 import { HelpModal } from "./shell/HelpModal.tsx";
@@ -46,7 +48,7 @@ import {
 } from "./shell/overlays.ts";
 import { PopoutContext } from "./shell/popout.ts";
 import { getSelectedAgent, nextAgent, setSelectedAgent } from "./shell/selection.ts";
-import { getSession, useSessionScope } from "./shell/session.ts";
+import { getSession, inCrewSession, useSessionScope } from "./shell/session.ts";
 import { Toast, toast } from "./shell/Toast.tsx";
 
 const Agent = lazy(() => import("./pages/Agent.tsx").then((m) => ({ default: m.Agent })));
@@ -54,7 +56,10 @@ const BoardPage = lazy(() =>
   import("./pages/BoardPage.tsx").then((m) => ({ default: m.BoardPage })),
 );
 const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.Comms })));
-const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
+const CommsChartPage = lazy(() =>
+  import("./pages/CommsChartPage.tsx").then((m) => ({ default: m.CommsChartPage })),
+);
+const Needs = lazy(() => import("./pages/Needs.tsx").then((m) => ({ default: m.Needs })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
 const TicketPage = lazy(() =>
@@ -72,12 +77,47 @@ const QaReadiness = lazy(() =>
 /** The document title (index.html's); a popped-out agent is `{id} · Mission Control`. */
 const TITLE = "Mission Control";
 
+/** The document title in Demo; the same mark as the chip, in the tab. */
+const DEMO_TITLE = `DEMO · ${TITLE}`;
+
+/** The app, remounted on a switch between Live and Demo so page state starts afresh. */
+export function App(
+  props: { onRender?: () => void; onPageRender?: ProfilerOnRenderCallback } = {},
+) {
+  const demo = useDemo();
+  return <Shell key={demo ? "demo" : "live"} {...props} />;
+}
+
+/**
+ * In Demo a same-origin `/api/` link would open the real hub in a new tab: stop it, and say why.
+ */
+function useDemoLinkGuard(demo: boolean) {
+  useEffect(() => {
+    if (!demo) return;
+    const guard = (e: MouseEvent) => {
+      const link = (e.target as Element | null)?.closest?.("a[href]");
+      if (!link) return;
+      const url = new URL((link as HTMLAnchorElement).href, window.location.href);
+      if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) return;
+      e.preventDefault();
+      e.stopPropagation();
+      toast(DEMO_REFUSED);
+    };
+    document.addEventListener("click", guard, true);
+    document.addEventListener("auxclick", guard, true);
+    return () => {
+      document.removeEventListener("click", guard, true);
+      document.removeEventListener("auxclick", guard, true);
+    };
+  }, [demo]);
+}
+
 /**
  * The HUD shell: header, the page, FLIGHT's dock beside it, the footer, and the overlays; a
  * popped-out window (`?popout=1`) shows the Agent page alone. An old path is redirected to where
  * it now lives; any other unknown path goes to Overview.
  */
-export function App({
+function Shell({
   onRender,
   onPageRender,
 }: {
@@ -85,6 +125,8 @@ export function App({
   onPageRender?: ProfilerOnRenderCallback;
 } = {}) {
   onRender?.();
+  const demo = useDemo();
+  useDemoLinkGuard(demo);
   useHudReady();
   const path = usePath();
   const search = useSearch();
@@ -107,12 +149,16 @@ export function App({
     if (itemParam(window.location.search) === null) syncItem(null);
   }, [path]);
   const dock = useDock();
+  const overview = shown.page === "overview";
+  const overviewOverlay = useOverviewDockOverlay(overview, dock);
   // The approved rail is site-wide. Comms already has the conversation; the full FLIGHT view
   // keeps its own workspace instead of duplicating it beside the page.
-  const showDock = shown.page !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
+  const showDock = tabOf(shown) !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
+    overview && "overview-shell",
+    overviewOverlay && "overview-flight-overlay",
     dock.wide && !dock.visible && "dock-hidden",
     dock.visible && dock.collapsed && "dock-collapsed",
     !dock.wide && dock.visible && "dock-open",
@@ -121,17 +167,31 @@ export function App({
     .filter(Boolean)
     .join(" ");
   const agentId = shown.page === "agent" ? shown.id : null;
+  // The tab title carries the count, so a waiting ask shows from another tab or a background window.
+  const waiting = useNeedsCount().n;
   useEffect(() => {
-    if (!popout) return;
-    document.title = agentId === null ? TITLE : `${agentId} · ${TITLE}`;
+    const base = demo ? DEMO_TITLE : TITLE;
+    const lead = waiting && !demo ? `(${waiting}) ` : "";
+    document.title = popout && agentId !== null ? `${agentId} · ${base}` : `${lead}${base}`;
     return () => {
       document.title = TITLE;
     };
-  }, [popout, agentId]);
+  }, [popout, agentId, demo, waiting]);
   // Popped out (the Agent header's Pop out): the Agent page alone, with its toasts.
   if (popout) {
     return (
       <div className={`${cls} popout`}>
+        {demo && <div className="demo-frame" aria-hidden="true" />}
+        {demo && (
+          <span
+            className="demo-marker demo-marker-popout"
+            role="img"
+            aria-label={DEMO_MARKER_TEXT}
+            title={DEMO_MARKER_TEXT}
+          >
+            DEMO
+          </span>
+        )}
         <main>
           <PopoutContext.Provider value={true}>
             <Suspense fallback={<p>Loading…</p>}>
@@ -145,6 +205,7 @@ export function App({
   }
   return (
     <div className={cls}>
+      {demo && <div className="demo-frame" aria-hidden="true" />}
       {shown.page === "board" && (
         // biome-ignore lint/a11y/useValidAnchor: this fragment link moves focus to the Board heading.
         <a
@@ -171,7 +232,7 @@ export function App({
             </Suspense>
           </AwayDigest>
         </main>
-        {showDock && <Dock />}
+        {showDock && <Dock coversPage={overviewOverlay} />}
       </div>
       <Footer />
       <Toast />
@@ -238,6 +299,9 @@ function PageView({ route: r }: { route: Route }) {
     case "overview":
       page = <Overview />;
       break;
+    case "needs":
+      page = <Needs item={r.item} />;
+      break;
     case "flight":
       page = <Flight />;
       break;
@@ -250,11 +314,11 @@ function PageView({ route: r }: { route: Route }) {
     case "agent":
       page = <Agent id={r.id} />;
       break;
-    case "map":
-      page = <MapPage repoId={r.repoId} />;
-      break;
     case "comms":
       page = <Comms item={r.item} view={r.view} />;
+      break;
+    case "commsChart":
+      page = <CommsChartPage />;
       break;
     case "telemetry":
       page = <Telemetry />;
@@ -288,19 +352,28 @@ function useShellKeys(current: Route, popout: boolean) {
   useEffect(() => {
     const select = (dir: 1 | -1) => {
       const { current: on, rows: r, items: i } = latest.current;
-      const id = nextAgent(
-        r ?? [],
-        i ?? [],
-        getSession(),
-        getSelectedAgent(),
-        dir,
-        latest.current.repo,
-        latest.current.flightId,
-        Date.now(),
-      );
+      // The Agents page steps in the roster's own order, so j and k move down the list on screen.
+      const id =
+        on.page === "agent"
+          ? stepRoster(
+              (r ?? []).filter((row) => inCrewSession(getSession(), row, latest.current.repo)),
+              getSelectedAgent(),
+              dir,
+            )
+          : nextAgent(
+              r ?? [],
+              i ?? [],
+              getSession(),
+              getSelectedAgent(),
+              dir,
+              latest.current.repo,
+              latest.current.flightId,
+              Date.now(),
+            );
       if (id === null) return;
-      setSelectedAgent(id);
-      if (on.page === "agent") navigate(agentPath(id)); // the URL follows the selection
+      if (on.page === "agent")
+        chooseSeat(id, getSelectedAgent()); // the URL follows the selection
+      else setSelectedAgent(id);
     };
     return installKeys({
       // a page key leaves you where you are on that page (g b on a ticket keeps the ticket); a
@@ -313,7 +386,7 @@ function useShellKeys(current: Route, popout: boolean) {
         const { current: on, popout: isPopout } = latest.current;
         // The full FLIGHT page opens the conversation in Comms. Comms and pop-outs already own
         // their workspace; every other page has the same site-wide rail.
-        if (isPopout || on.page === "comms") return;
+        if (isPopout || tabOf(on) === "comms") return;
         if (FULL_WIDTH_PAGES.has(tabOf(on))) navigate(PAGE_PATHS.comms);
         else toggleDock();
       },

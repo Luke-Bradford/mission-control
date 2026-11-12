@@ -2,7 +2,10 @@ import "./supervisor-harness.ts";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { dir, make, TICKET, until, userLines } from "./supervisor-harness.ts";
+
+skipTestsIf(await blockedHere("crew-run"));
 
 describe("planner file context wiring", () => {
   it.each([
@@ -16,7 +19,7 @@ describe("planner file context wiring", () => {
       mkdirSync(rolesDir);
       writeFileSync(join(rolesDir, "FAO.md"), "# FAO: planner\n");
       writeFileSync(join(rolesDir, "GUIDO.md"), "# GUIDO: developer\n");
-      const body = TICKET.body + "\n\n## Files\n- `src/example.ts`",
+      const body = `${TICKET.body}\n\n## Files\n- \`src/example.ts\``,
         fileContext = vi.fn(async () => '[{"file":"src/example.ts","recommendation":"fixture"}]');
       const { sup } = make({
         rolesDir,

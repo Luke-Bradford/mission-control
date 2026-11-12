@@ -1,14 +1,13 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { mapSnapshotFixture } from "@mc/core";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentNavRow } from "../src/comms/CommsNav.tsx";
 import { hub } from "../src/data.ts";
 import { AgentTag } from "../src/hud/AgentTag.tsx";
-import { CrewMapView } from "../src/map/CrewMap.tsx";
-import { AgentActivity } from "../src/overview/AgentActivity.tsx";
+import { CrewLane } from "../src/overview/CrewLane.tsx";
 import { crewRow } from "./fixtures.ts";
+import { observedContextDigest } from "./overviewDensityFixtures.ts";
 
 const SRC = join(__dirname, "../src");
 const hudCss = readFileSync(join(SRC, "hud.css"), "utf8");
@@ -23,7 +22,12 @@ function resolve(token: string | null | undefined): string {
 }
 
 const SEAT_INDEX = 3;
-const row = crewRow({ id: "GUIDO-1", index: SEAT_INDEX });
+const NOW = Date.UTC(2026, 10, 4, 12, 30);
+const row = crewRow({
+  id: "GUIDO-1",
+  index: SEAT_INDEX,
+  digest: observedContextDigest(null, null, [[NOW - 60_000, 100]]),
+});
 
 beforeEach(() => {
   vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
@@ -35,10 +39,12 @@ afterEach(() => {
 });
 
 describe("a seat is one colour on every page", () => {
-  it("renders the same hex on Overview, Agent, Comms and Map", () => {
-    // Overview: the agent's activity trace
-    const overview = render(<AgentActivity row={row} now={Date.now()} max={10} />);
-    const trace = overview.container.querySelector("stop")?.getAttribute("stop-color");
+  it("renders the same hex on Overview, Agent and Comms", () => {
+    // Overview: the agent's activity lane
+    const overview = render(
+      <CrewLane row={row} name="GUIDO-1" lane={undefined} now={NOW} max={10} />,
+    );
+    const trace = overview.container.querySelector(".crew-lane-bar")?.getAttribute("fill");
     overview.unmount();
     // Agent: the seat's tag
     const agent = render(<AgentTag id="GUIDO-1" index={SEAT_INDEX} />);
@@ -50,25 +56,7 @@ describe("a seat is one colour on every page", () => {
     );
     const nav = comms.container.querySelector<HTMLElement>("i")?.style.background;
     comms.unmount();
-    // Map: the seat's light in the selector
-    const snapshot = structuredClone(mapSnapshotFixture);
-    snapshot.seats = [
-      {
-        ...structuredClone(mapSnapshotFixture.seats[0]),
-        seat: "GUIDO-1",
-        state: "running",
-      },
-    ];
-    render(
-      <CrewMapView snapshot={snapshot} indices={{ "GUIDO-1": SEAT_INDEX }} names={{}} work={{}} />,
-    );
-    const list = screen.getByRole("list", { name: "Seats working in this repo" });
-    const light = within(list)
-      .getAllByRole("button")[0]
-      ?.querySelector<HTMLElement>(".map-light")
-      ?.style.getPropertyValue("--light");
-
-    const hexes = [trace, tag, nav, light].map(resolve);
+    const hexes = [trace, tag, nav].map(resolve);
     expect(new Set(hexes).size).toBe(1);
   });
 

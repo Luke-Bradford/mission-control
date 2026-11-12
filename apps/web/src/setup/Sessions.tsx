@@ -15,6 +15,16 @@ import {
 import { Fragment, useEffect, useId, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
 import { useTz } from "../clock.ts";
+import {
+  ErrorSummary,
+  FieldError,
+  type FieldIssue,
+  fieldProps,
+  issueOf,
+  isUncertain,
+  UNCERTAIN_TEXT,
+  useSubmitGuard,
+} from "../components/formSupport.tsx";
 import { modelLine, seatAreaText, seatStatus, useSeatName } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
@@ -58,7 +68,22 @@ export const removedText = (call: string, s: string, backup: string) =>
   `${call} removed from s/${s}. Backup: ${backup}.`;
 export const RELOADED = "Reloaded config.yaml.";
 
-const CALL_SIGN = /^[a-z][a-z0-9-]{0,30}$/;
+export const CALL_SIGN = /^[a-z][a-z0-9-]{0,30}$/;
+const SESSION_FORM_KEY = "add-session";
+
+/** A refused or lost write: what to say, whether the server may still have acted, and where it shows. */
+interface SaveFailure {
+  text: string;
+  uncertain: boolean;
+  /** The form (or null: the page) the failure belongs to; a late one never shows in another. */
+  formKey: string | null;
+  /** Bumps per failure so a repeat of the same text still moves focus to its summary. */
+  seq: number;
+}
+const failureText = (failure: SaveFailure) =>
+  failure.uncertain ? `Not confirmed: ${failure.text}` : refusedText(failure.text);
+const seatFormKey = (form: Pick<FormState, "sessionId" | "editId">) =>
+  `${form.sessionId}:${form.editId ?? "new"}`;
 
 type SessionView = NonNullable<ConfigView["crew"]>["sessions"][number];
 type RoleView = NonNullable<NonNullable<ConfigView["crew"]>["roles"]>[number];
@@ -68,7 +93,9 @@ interface FormState {
   sessionId: string;
   editId: string | null;
   role: string;
-  id: string | null;
+  id: string;
+  /** The call sign is still the one derived from the role; typing over it stops that. */
+  idAuto: boolean;
   accountId: string;
   model: string;
   effort: CrewEffort | "";
@@ -91,7 +118,8 @@ function seatForm(
     sessionId,
     editId: editing?.id ?? null,
     role: editing?.role ?? first?.name ?? "",
-    id: null,
+    id: first ? freeCallSign(config, editing?.role ?? first.name) : "",
+    idAuto: true,
     accountId: editing?.accountId ?? account?.id ?? "",
     model:
       editing?.model ?? (account?.vendor === "codex" ? "gpt-5.6-sol" : (first?.model ?? "sonnet")),
@@ -107,6 +135,7 @@ type SaveSeats = (
   base: SeatInput[],
   seats: SeatInput[],
   toastOf: (backup: string) => string,
+  formKey?: string | null,
 ) => void;
 
 /** A row of the seats table: a seat of config.yaml, or one kept only until it is free. */
@@ -167,8 +196,9 @@ function SeatForm({
   form,
   setForm,
   busy,
-  error,
+  failure,
   onSave,
+  onCancel,
 }: {
   session: SessionView;
   config: ConfigView;
@@ -176,8 +206,9 @@ function SeatForm({
   form: FormState;
   setForm: (f: FormState | null) => void;
   busy: boolean;
-  error: string | null;
+  failure: SaveFailure | null;
   onSave: (seat: SeatInput) => void;
+  onCancel: () => void;
 }) {
   const adding = form.editId === null;
   const role = roles.find((r) => r.name === form.role);
@@ -188,15 +219,44 @@ function SeatForm({
   const status = statuses.data?.find((a) => a.accountId === form.accountId);
   const unavailable = session.seats.find((s) => s.id === form.editId)?.unavailable;
   const cliHint = unavailable || statuses.error || (status && status.status !== "logged-in");
-  const id = form.editId ?? form.id ?? freeCallSign(config, form.role);
-  const idOk = !adding || CALL_SIGN.test(id);
-  const valid = idOk && form.model.trim() !== "" && form.accountId !== "";
+  const id = form.editId ?? form.id;
   const patch = (p: Partial<FormState>) => setForm({ ...form, ...p });
+  const base = useId();
+  const ids = {
+    role: `${base}-role`,
+    sign: `${base}-sign`,
+    account: `${base}-account`,
+    model: `${base}-model`,
+    effort: `${base}-effort`,
+    area: `${base}-area`,
+    scratch: `${base}-scratch`,
+  };
+  const [attempted, setAttempted] = useState(false);
+  const [attempts, setAttempts] = useState(0);
+  // Only what applies to this role and mode: a hidden or disabled field never blocks a save.
+  const found: FieldIssue[] = [];
+  if (adding && !CALL_SIGN.test(id))
+    found.push({ id: ids.sign, message: `Call sign: ${CALL_SIGN_HINT}, starting with a letter.` });
+  if (form.accountId === "")
+    found.push({ id: ids.account, message: "Account: none is configured; add one in Accounts." });
+  if (form.model.trim() === "") found.push({ id: ids.model, message: "Model is required." });
+  const issues = attempted ? found : [];
+  const signError = issueOf(issues, ids.sign);
+  const accountError = issueOf(issues, ids.account);
+  const modelError = issueOf(issues, ids.model);
+  const loginState = statuses.error
+    ? "Could not read this machine's login state."
+    : status
+      ? status.status === "logged-in"
+        ? "Signed in on this machine."
+        : "Not signed in on this machine."
+      : null;
 
   function onRole(name: string) {
     const next = roles.find((r) => r.name === name);
     patch({
       role: name,
+      ...(form.idAuto ? { id: freeCallSign(config, name) } : {}),
       model: vendor === "codex" ? "gpt-5.6-sol" : (next?.model ?? form.model),
       scratch: false,
       area: next?.mode === "writer" ? form.area : "",
@@ -216,42 +276,88 @@ function SeatForm({
     onSave(seat);
   }
 
+  const shown = failure?.formKey === seatFormKey(form) ? failure : null;
+  const title =
+    issues.length > 0 ? "Fix before saving" : shown?.uncertain ? "Result unknown" : "Not saved";
   return (
     <form
-      className="seatform"
+      className="seatform fform fform-480"
       aria-label={adding ? `Add agent to s/${session.id}` : `Edit ${id}`}
+      noValidate
+      onKeyDown={(e) => {
+        // Esc cancels an unsent form; while a save is out it must not close the form under it.
+        if (e.key === "Escape") {
+          e.preventDefault();
+          if (!busy) onCancel();
+        }
+      }}
       onSubmit={(e) => {
         e.preventDefault();
-        if (valid && !busy) save();
+        if (busy) return;
+        setAttempted(true);
+        if (found.length > 0) {
+          setAttempts((n) => n + 1);
+          return;
+        }
+        save();
       }}
     >
-      <div className="frow">
-        <label className="s fg2">
-          Role
-          <select value={form.role} onChange={(e) => onRole(e.target.value)}>
+      <fieldset className="fgroup">
+        <legend>Identity</legend>
+        <div className="ffield">
+          <label htmlFor={ids.role}>Role</label>
+          <select
+            id={ids.role}
+            value={form.role}
+            disabled={busy}
+            onChange={(e) => onRole(e.target.value)}
+          >
+            {!roles.some((r) => r.name === form.role) && (
+              <option value={form.role}>{`${form.role} · not in config`}</option>
+            )}
             {roles.map((r) => (
               <option key={r.name} value={r.name}>
                 {`${r.name} · ${r.mode}`}
               </option>
             ))}
           </select>
-        </label>
+        </div>
         {adding ? (
-          <label className="s fg2">
-            Call sign
-            <input value={id} onChange={(e) => patch({ id: e.target.value })} />
-            {!idOk && <span className="crit-t xs">{CALL_SIGN_HINT}</span>}
-          </label>
+          <div className="ffield">
+            <label htmlFor={ids.sign}>Call sign</label>
+            <span id={`${ids.sign}-hint`} className="fhint xs">
+              {CALL_SIGN_HINT}
+            </span>
+            <input
+              {...fieldProps(ids.sign, signError, `${ids.sign}-hint`)}
+              value={id}
+              disabled={busy}
+              onChange={(e) => patch({ id: e.target.value, idAuto: false })}
+            />
+            <FieldError id={ids.sign} error={signError} />
+          </div>
         ) : (
-          <div className="s fg2">
-            Call sign
-            <div>{id}</div>
+          <div className="ffield">
+            <span>Call sign</span>
+            <div className="mono">{id}</div>
+            <span className="fhint xs">A call sign cannot change once the agent exists.</span>
           </div>
         )}
-        <label className="s fg2">
-          Account
+        <div className="ffield">
+          <label htmlFor={ids.account}>Account</label>
+          {loginState && (
+            <span id={`${ids.account}-hint`} className="fhint xs">
+              {loginState}
+            </span>
+          )}
           <select
+            {...fieldProps(
+              ids.account,
+              accountError,
+              loginState ? `${ids.account}-hint` : undefined,
+            )}
             value={form.accountId}
+            disabled={busy}
             onChange={(e) => {
               const accountId = e.target.value;
               const nextVendor = accounts.find((a) => a.id === accountId)?.vendor;
@@ -271,56 +377,95 @@ function SeatForm({
               });
             }}
           >
+            {form.accountId !== "" && !accounts.some((a) => a.id === form.accountId) && (
+              <option value={form.accountId}>{`${form.accountId} · not configured`}</option>
+            )}
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.id}
               </option>
             ))}
           </select>
-        </label>
-        <label className="s fg2">
-          Model
-          <input value={form.model} onChange={(e) => patch({ model: e.target.value })} />
-        </label>
-        <label className="s fg2">
-          Effort
-          <select
-            value={form.effort}
-            onChange={(e) => patch({ effort: e.target.value as CrewEffort | "" })}
-          >
-            <option value="">CLI default</option>
-            {CREW_EFFORTS.map((x) => (
-              <option key={x} value={x}>
-                {x}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="s fg2">
-          Area
+          <FieldError id={ids.account} error={accountError} />
+        </div>
+      </fieldset>
+      <fieldset className="fgroup">
+        <legend>Model</legend>
+        <div className="fpair">
+          <div className="ffield">
+            <label htmlFor={ids.model}>Model</label>
+            <input
+              {...fieldProps(ids.model, modelError)}
+              value={form.model}
+              disabled={busy}
+              onChange={(e) => patch({ model: e.target.value })}
+            />
+            <FieldError id={ids.model} error={modelError} />
+          </div>
+          <div className="ffield">
+            <label htmlFor={ids.effort}>Effort</label>
+            <select
+              id={ids.effort}
+              value={form.effort}
+              disabled={busy}
+              onChange={(e) => patch({ effort: e.target.value as CrewEffort | "" })}
+            >
+              <option value="">CLI default</option>
+              {CREW_EFFORTS.map((x) => (
+                <option key={x} value={x}>
+                  {x}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </fieldset>
+      <fieldset className="fgroup">
+        <legend>Work area</legend>
+        <div className="ffield">
+          <label htmlFor={ids.area}>Area</label>
+          <span id={`${ids.area}-hint`} className="fhint xs">
+            {AREA_HINT}
+          </span>
           <input
+            id={ids.area}
+            aria-describedby={`${ids.area}-hint`}
             value={form.area}
-            disabled={!writer}
+            disabled={!writer || busy}
             onChange={(e) => patch({ area: e.target.value })}
           />
-          <span className="xs muted">{AREA_HINT}</span>
-        </label>
-      </div>
-      {role?.mode === "read-only" && role.loop === "none" && (
-        <label className="s">
-          <input
-            type="checkbox"
-            checked={form.scratch}
-            onChange={(e) => patch({ scratch: e.target.checked })}
-          />{" "}
-          {SCRATCH_LABEL}
-        </label>
+        </div>
+        {role?.mode === "read-only" && role.loop === "none" && (
+          <div className="ffield ffield-check">
+            <input
+              id={ids.scratch}
+              type="checkbox"
+              checked={form.scratch}
+              disabled={busy}
+              onChange={(e) => patch({ scratch: e.target.checked })}
+            />
+            <label htmlFor={ids.scratch}>{SCRATCH_LABEL}</label>
+          </div>
+        )}
+      </fieldset>
+      <ErrorSummary
+        title={title}
+        issues={issues}
+        message={shown ? failureText(shown) : null}
+        focusKey={attempts + (shown?.seq ?? 0)}
+      >
+        {shown?.uncertain && issues.length === 0 && <p className="s">{UNCERTAIN_TEXT}</p>}
+      </ErrorSummary>
+      {busy && (
+        <p role="status" className="fstatus s">
+          {adding ? `Adding agent to s/${session.id}…` : `Saving ${id}…`}
+        </p>
       )}
-      <div className="frow">
-        <button type="submit" className="primary" disabled={!valid || busy}>
+      <div className="fact">
+        <button type="submit" className="primary" disabled={busy}>
           {adding ? "Add agent" : `Save ${id}`}
         </button>
-        <button type="button" onClick={() => setForm(null)}>
+        <button type="button" disabled={busy} onClick={onCancel}>
           Cancel
         </button>
       </div>
@@ -331,11 +476,6 @@ function SeatForm({
         </p>
       )}
       <p className="note s">{SAVE_NOTE}</p>
-      {error !== null && (
-        <p role="alert" className="crit-t s">
-          {refusedText(error)}
-        </p>
-      )}
     </form>
   );
 }
@@ -350,7 +490,8 @@ function CrewSession({
   form,
   setForm,
   busy,
-  error,
+  failure,
+  clearFailure,
   save,
   close,
 }: {
@@ -362,7 +503,8 @@ function CrewSession({
   form: FormState | null;
   setForm: (f: FormState | null) => void;
   busy: boolean;
-  error: string | null;
+  failure: SaveFailure | null;
+  clearFailure: () => void;
   save: SaveSeats;
   close: (opener: HTMLButtonElement) => void;
 }) {
@@ -398,8 +540,21 @@ function CrewSession({
     return s.area.length > 0 ? s.area.join(", ") : "whole checkout";
   };
 
-  function open(editing: SeatInput | null) {
+  // Where focus goes when an unsent form is cancelled: the button that opened it.
+  const addButton = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const restoreTo = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (mine !== null || !restoreTo.current) return;
+    const target = restoreTo.current;
+    restoreTo.current = null;
+    (target.isConnected ? target : addButton.current)?.focus();
+  });
+
+  function open(editing: SeatInput | null, from: HTMLElement) {
     setRemoving(null);
+    opener.current = from;
+    clearFailure();
     setForm(seatForm(config, session.id, editing));
   }
 
@@ -425,7 +580,8 @@ function CrewSession({
               type="button"
               disabled={roles.length === 0 || busy}
               title={roles.length === 0 ? NO_ROLES : undefined}
-              onClick={() => open(null)}
+              ref={addButton}
+              onClick={(e) => open(null, e.currentTarget)}
             >
               Add agent
             </button>
@@ -481,6 +637,7 @@ function CrewSession({
                     <button
                       type="button"
                       className="tilepick"
+                      disabled={busy}
                       aria-pressed={globsOf(mine.area).includes(`${f.name}/**`)}
                       onClick={() => toggleTile(f.name)}
                     >
@@ -556,7 +713,11 @@ function CrewSession({
                           </>
                         ) : (
                           <>
-                            <button type="button" disabled={busy} onClick={() => open(input)}>
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={(e) => open(input, e.currentTarget)}
+                            >
                               Edit
                             </button>
                             <button type="button" disabled={busy} onClick={() => setRemoving(s.id)}>
@@ -574,13 +735,18 @@ function CrewSession({
         )}
         {mine && changes && (
           <SeatForm
+            key={seatFormKey(mine)}
             session={session}
             config={config}
             roles={roles}
             form={mine}
             setForm={setForm}
             busy={busy}
-            error={error}
+            failure={failure}
+            onCancel={() => {
+              restoreTo.current = opener.current;
+              setForm(null);
+            }}
             onSave={(seat) =>
               save(
                 session,
@@ -592,13 +758,14 @@ function CrewSession({
                   mine.editId === null
                     ? addedText(nameOf(seat.id), session.id, b)
                     : savedText(nameOf(seat.id), b),
+                seatFormKey(mine),
               )
             }
           />
         )}
-        {!mine && error !== null && (
+        {!mine && failure !== null && (
           <p role="alert" className="crit-t s">
-            {refusedText(error)}
+            {failureText(failure)}
           </p>
         )}
       </div>
@@ -654,11 +821,6 @@ export function Sessions({ config }: { config: ConfigView }) {
       .replace(/[^a-z0-9-]+/g, "-")
       .replace(/^-+|-+$/g, "") ||
     "";
-  const validSession =
-    /^[a-z][a-z0-9-]{0,30}$/.test(name) &&
-    draft.source.trim() !== "" &&
-    draft.branch.trim() !== "" &&
-    draft.repoId !== "";
   // Read once on mount: Overview's Add agent arrives from another page, so Setup mounts fresh.
   const [requestedSessionId] = useState(() => addAgentParam(window.location.search));
   const [form, setForm] = useState<FormState | null>(() => {
@@ -683,7 +845,38 @@ export function Sessions({ config }: { config: ConfigView }) {
     (opener.isConnected ? opener : addSessionButton.current)?.focus();
   });
   // Where a refusal shows: a session's panel, or (null) the page, for a reload.
-  const [failure, setFailure] = useState<{ sessionId: string | null; text: string } | null>(null);
+  const [failure, setFailure] = useState<(SaveFailure & { sessionId: string | null }) | null>(null);
+  const failureSeq = useRef(0);
+  const guard = useSubmitGuard();
+  const [sessionAttempted, setSessionAttempted] = useState(false);
+  const [sessionAttempts, setSessionAttempts] = useState(0);
+  const field = useId();
+  const sessionIds = {
+    repoId: `${field}-repo-profile`,
+    source: `${field}-repo`,
+    branch: `${field}-branch`,
+    checkout: `${field}-checkout`,
+    name: `${field}-name`,
+  };
+  const sessionFound: FieldIssue[] = [];
+  if (draft.repoId === "")
+    sessionFound.push({ id: sessionIds.repoId, message: "Repo profile: choose a repo profile." });
+  if (draft.source.trim() === "")
+    sessionFound.push({
+      id: sessionIds.source,
+      message: "Repo: enter the folder of the git checkout.",
+    });
+  if (draft.branch.trim() === "")
+    sessionFound.push({ id: sessionIds.branch, message: "Branch is required." });
+  if (
+    (draft.id.trim() !== "" || draft.source.trim() !== "") &&
+    !/^[a-z][a-z0-9-]{0,30}$/.test(name)
+  )
+    sessionFound.push({
+      id: sessionIds.name,
+      message: `Name: ${CALL_SIGN_HINT}, starting with a letter, at most 31 characters.`,
+    });
+  const sessionIssues = sessionAttempted ? sessionFound : [];
   const crewSessions = allSessions.filter(
     (s) => !closed.includes(s.id) && (inSession(session, s.id) || s.id === requestedSessionId),
   );
@@ -695,7 +888,16 @@ export function Sessions({ config }: { config: ConfigView }) {
     hub.refetch(RESOURCES.crew.path);
   };
 
+  /** Record a failed write. A lost answer or server fault may still have saved, so reread first. */
+  function fail(sessionId: string | null, formKey: string | null, err: unknown) {
+    const uncertain = isUncertain(err instanceof ApiError ? err.status : undefined);
+    if (uncertain) refetch();
+    failureSeq.current += 1;
+    setFailure({ sessionId, formKey, text: errorText(err), uncertain, seq: failureSeq.current });
+  }
+
   async function addSession() {
+    if (!guard.take()) return;
     setBusy(true);
     setFailure(null);
     try {
@@ -730,15 +932,16 @@ export function Sessions({ config }: { config: ConfigView }) {
       );
       refetch();
     } catch (err) {
-      const text = errorText(err);
-      setFailure({ sessionId: null, text });
-      toast(text);
+      fail(null, SESSION_FORM_KEY, err);
+      toast(errorText(err));
     } finally {
+      guard.release();
       setBusy(false);
     }
   }
 
   async function closeSession(id: string, opener: HTMLButtonElement) {
+    if (!guard.take()) return;
     setBusy(true);
     setFailure(null);
     try {
@@ -765,11 +968,13 @@ export function Sessions({ config }: { config: ConfigView }) {
     } catch (err) {
       toast(errorText(err));
     } finally {
+      guard.release();
       setBusy(false);
     }
   }
 
-  const save: SaveSeats = async (s, base, seats, toastOf) => {
+  const save: SaveSeats = async (s, base, seats, toastOf, formKey = null) => {
+    if (!guard.take()) return;
     setBusy(true);
     setFailure(null);
     try {
@@ -781,15 +986,17 @@ export function Sessions({ config }: { config: ConfigView }) {
       setForm(null);
       refetch();
     } catch (err) {
-      setFailure({ sessionId: s.id, text: errorText(err) });
+      fail(s.id, formKey, err);
       // Another tab saved first: the next try needs the fresh base.
       if (err instanceof ApiError && err.status === 409) refetch();
     } finally {
+      guard.release();
       setBusy(false);
     }
   };
 
   async function reload() {
+    if (!guard.take()) return;
     setBusy(true);
     setFailure(null);
     try {
@@ -797,8 +1004,9 @@ export function Sessions({ config }: { config: ConfigView }) {
       toast(RELOADED);
       refetch();
     } catch (err) {
-      setFailure({ sessionId: null, text: errorText(err) });
+      fail(null, null, err);
     } finally {
+      guard.release();
       setBusy(false);
     }
   }
@@ -816,6 +1024,7 @@ export function Sessions({ config }: { config: ConfigView }) {
             onClick={(e) => {
               sessionFormOpener.current = e.currentTarget;
               setAdding(true);
+              setSessionAttempted(false);
               setFailure(null);
             }}
           >
@@ -823,68 +1032,147 @@ export function Sessions({ config }: { config: ConfigView }) {
           </button>
         ) : (
           <form
-            className="seatform sessionform"
+            className="seatform sessionform fform fform-640"
             aria-label="Add session"
+            noValidate
             onKeyDown={(e) => {
               if (e.key === "Escape" && !busy) dismissSessionForm();
             }}
             onSubmit={(e) => {
               e.preventDefault();
-              if (validSession && !busy) void addSession();
+              if (busy) return;
+              setSessionAttempted(true);
+              if (sessionFound.length > 0) {
+                setSessionAttempts((n) => n + 1);
+                return;
+              }
+              void addSession();
             }}
           >
-            <fieldset disabled={busy} className="frow">
-              <label className="s fg2">
-                Repo profile
-                <select
-                  value={draft.repoId}
-                  onChange={(e) => setDraft({ ...draft, repoId: e.target.value })}
-                >
-                  {config.repos.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.id}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="s fg2">
-                Repo
-                <input
-                  value={draft.source}
-                  onChange={(e) => setDraft({ ...draft, source: e.target.value })}
-                />
-              </label>
-              <label className="s fg2">
-                Branch
-                <input
-                  value={draft.branch}
-                  onChange={(e) => setDraft({ ...draft, branch: e.target.value })}
-                />
-              </label>
-              <label className="s fg2">
-                Checkout
-                <select
-                  value={draft.checkoutStrategy}
-                  onChange={(e) => setDraft({ ...draft, checkoutStrategy: e.target.value })}
-                >
-                  <option value="shared">use the repo folder (nothing else on it)</option>
-                  <option value="separate">make a separate checkout for this branch</option>
-                </select>
-              </label>
-              <label className="s fg2">
-                Name
-                <input
-                  value={draft.id}
-                  placeholder={name}
-                  onChange={(e) => setDraft({ ...draft, id: e.target.value })}
-                />
-              </label>
-              <button type="submit" className="primary" disabled={!validSession || busy}>
-                {busy ? "Adding session…" : "Add session"}
-              </button>
-              <button type="button" onClick={dismissSessionForm}>
-                Cancel
-              </button>
+            <fieldset disabled={busy} className="fcontent">
+              <fieldset className="fgroup">
+                <legend>Identity and source</legend>
+                <div className="fpair">
+                  <div className="ffield">
+                    <label htmlFor={sessionIds.repoId}>Repo profile</label>
+                    <select
+                      {...fieldProps(sessionIds.repoId, issueOf(sessionIssues, sessionIds.repoId))}
+                      value={draft.repoId}
+                      onChange={(e) => setDraft({ ...draft, repoId: e.target.value })}
+                    >
+                      {config.repos.map((r) => (
+                        <option key={r.id} value={r.id}>
+                          {r.id}
+                        </option>
+                      ))}
+                    </select>
+                    <FieldError
+                      id={sessionIds.repoId}
+                      error={issueOf(sessionIssues, sessionIds.repoId)}
+                    />
+                  </div>
+                  <div className="ffield">
+                    <label htmlFor={sessionIds.name}>Name</label>
+                    <input
+                      {...fieldProps(
+                        sessionIds.name,
+                        issueOf(sessionIssues, sessionIds.name),
+                        `${sessionIds.name}-hint`,
+                      )}
+                      value={draft.id}
+                      placeholder={name}
+                      onChange={(e) => setDraft({ ...draft, id: e.target.value })}
+                    />
+                    <FieldError
+                      id={sessionIds.name}
+                      error={issueOf(sessionIssues, sessionIds.name)}
+                    />
+                  </div>
+                </div>
+                <p id={`${sessionIds.name}-hint`} className="fhint muted xs">
+                  Name: leave empty to use the repo folder's name.
+                </p>
+                <div className="ffield">
+                  <label htmlFor={sessionIds.source}>Repo</label>
+                  <input
+                    {...fieldProps(sessionIds.source, issueOf(sessionIssues, sessionIds.source))}
+                    value={draft.source}
+                    onChange={(e) => setDraft({ ...draft, source: e.target.value })}
+                  />
+                  <FieldError
+                    id={sessionIds.source}
+                    error={issueOf(sessionIssues, sessionIds.source)}
+                  />
+                </div>
+                <div className="ffield">
+                  <label htmlFor={sessionIds.branch}>Branch</label>
+                  <input
+                    {...fieldProps(sessionIds.branch, issueOf(sessionIssues, sessionIds.branch))}
+                    value={draft.branch}
+                    onChange={(e) => setDraft({ ...draft, branch: e.target.value })}
+                  />
+                  <FieldError
+                    id={sessionIds.branch}
+                    error={issueOf(sessionIssues, sessionIds.branch)}
+                  />
+                </div>
+              </fieldset>
+              <fieldset className="fgroup">
+                <legend>Checkout and scope</legend>
+                <div className="ffield">
+                  <label htmlFor={sessionIds.checkout}>Checkout</label>
+                  <select
+                    id={sessionIds.checkout}
+                    value={draft.checkoutStrategy}
+                    onChange={(e) => setDraft({ ...draft, checkoutStrategy: e.target.value })}
+                  >
+                    <option value="shared">use the repo folder (nothing else on it)</option>
+                    <option value="separate">make a separate checkout for this branch</option>
+                  </select>
+                </div>
+                <p className="feffect s" data-testid="session-effect">
+                  {`Adds s/${name || "…"} on repo profile ${draft.repoId || "…"}: branch ${draft.branch.trim() || "…"} of ${draft.source.trim() || "the repo folder"}, ${
+                    draft.checkoutStrategy === "separate"
+                      ? "in a separate checkout made for it."
+                      : "which uses the repo folder as it is."
+                  }`}
+                </p>
+              </fieldset>
+              <ErrorSummary
+                title={
+                  sessionIssues.length > 0
+                    ? "Fix before saving"
+                    : failure?.uncertain
+                      ? "Result unknown"
+                      : "Not saved"
+                }
+                issues={sessionIssues}
+                message={
+                  failure?.formKey === SESSION_FORM_KEY && sessionIssues.length === 0
+                    ? failureText(failure)
+                    : null
+                }
+                focusKey={
+                  sessionAttempts + (failure?.formKey === SESSION_FORM_KEY ? failure.seq : 0)
+                }
+              >
+                {failure?.formKey === SESSION_FORM_KEY && failure.uncertain && (
+                  <p className="s">{UNCERTAIN_TEXT}</p>
+                )}
+              </ErrorSummary>
+              {busy && (
+                <p role="status" className="fstatus s">
+                  {`Adding session s/${name}…`}
+                </p>
+              )}
+              <div className="fact">
+                <button type="submit" className="primary" disabled={busy}>
+                  {busy ? "Adding session…" : "Add session"}
+                </button>
+                <button type="button" disabled={busy} onClick={dismissSessionForm}>
+                  Cancel
+                </button>
+              </div>
             </fieldset>
             <p className="note s">
               Mission Control checks it's a git checkout on that branch and lists its top folders
@@ -903,9 +1191,9 @@ export function Sessions({ config }: { config: ConfigView }) {
       {changes && changes.restartNeeded.length > 0 && (
         <p className="note wide">{restartText(changes.restartNeeded)}</p>
       )}
-      {failure?.sessionId === null && (
+      {failure?.sessionId === null && failure.formKey !== SESSION_FORM_KEY && (
         <p role="alert" className="crit-t s">
-          {refusedText(failure.text)}
+          {failureText(failure)}
         </p>
       )}
       <div className="wide">
@@ -957,7 +1245,8 @@ export function Sessions({ config }: { config: ConfigView }) {
           form={form}
           setForm={setForm}
           busy={busy}
-          error={failure?.sessionId === s.id ? failure.text : null}
+          failure={failure?.sessionId === s.id ? failure : null}
+          clearFailure={() => setFailure(null)}
           save={save}
           close={(opener) => void closeSession(s.id, opener)}
         />

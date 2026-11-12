@@ -11,10 +11,10 @@ const G_MS = 900;
 
 const G_PAGES: Record<string, Page> = {
   o: "overview",
+  n: "needs",
   f: "flight",
   b: "board",
   a: "agent",
-  m: "map",
   c: "comms",
   t: "telemetry",
   d: "audit",

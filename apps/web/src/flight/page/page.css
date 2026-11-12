@@ -1,0 +1,581 @@
+/* The FLIGHT page (mockups/flight-page): title row, status band, Doing now beside Blockers, then
+   Recent decisions in the space left. Rows keep their height and sit at the top; spare height
+   shows more rows, never a gap. */
+/* The id is the page's address; the tabbed page's flight.css styles it as a grid, so this outranks it. */
+#page-flight.fp {
+  /* A panel heading and a list line are 40 px; the Waited column is 80 px. */
+  --fp-row: calc(var(--sp-5) + var(--sp-4));
+  --fp-wait: calc(var(--sp-7) + var(--sp-6));
+  display: flex;
+  flex-direction: column;
+  grid-template: none;
+  container: none;
+  overflow: visible;
+  gap: var(--sp-3);
+  min-height: 0;
+  min-width: 0;
+}
+.fp-title {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3) var(--sp-4);
+  min-height: var(--sp-5);
+}
+.fp-title h1 {
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.fp-q {
+  color: var(--fg-2);
+}
+.fp-board {
+  display: inline-block;
+  line-height: var(--lh);
+  min-height: var(--sp-5);
+  min-width: var(--sp-5);
+  vertical-align: middle;
+}
+.fp-records {
+  margin-left: auto;
+  min-width: var(--sp-5);
+  min-height: var(--sp-5);
+  line-height: var(--lh);
+  white-space: nowrap;
+}
+.fp-err {
+  color: var(--crit);
+}
+.fp-muted {
+  color: var(--muted);
+}
+.fp-ok {
+  color: var(--ok);
+}
+
+.fp-band {
+  flex: none;
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr 1fr;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+.fp-stat {
+  padding: var(--sp-3) var(--sp-4);
+  border-left: 1px solid var(--line);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.fp-stat:first-child {
+  border-left: 0;
+}
+.fp-k {
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fp-v {
+  font: 600 var(--fs-title) / var(--lh-title) var(--mono);
+  font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.fp-v small {
+  font: 400 var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--fg-2);
+}
+.fp-v .fp-muted {
+  font: 400 var(--fs-panel) / var(--lh-title) var(--sans);
+}
+.fp-d {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+.fp-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.fp-state::before {
+  content: "";
+  width: calc(var(--sp-2) + var(--r-s));
+  height: calc(var(--sp-2) + var(--r-s));
+  border-radius: 50%;
+  background: currentColor;
+  align-self: center;
+}
+.fp-state.running {
+  color: var(--ok);
+}
+.fp-state.held {
+  color: var(--warn);
+}
+.fp-state.stopped {
+  color: var(--crit);
+}
+.fp-state.stopped::before {
+  background: none;
+  border: var(--r-s) solid currentColor;
+  border-radius: var(--r-s);
+}
+.fp-start {
+  border-color: var(--crit);
+  color: var(--crit);
+  font-weight: 600;
+  min-height: calc(var(--sp-5) + var(--sp-1));
+}
+.fp-meter {
+  height: var(--sp-1);
+  border-radius: var(--r-s);
+  background: var(--line);
+  overflow: hidden;
+}
+.fp-meter i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+}
+
+.fp-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.fp-head {
+  flex: none;
+  height: var(--fp-row);
+  padding: 0 var(--sp-4);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  border-bottom: 1px solid var(--line);
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+  color: var(--fg);
+}
+.fp-sub {
+  color: var(--muted);
+  font: 400 var(--fs-s) / var(--lh-s) var(--mono);
+}
+.fp-note {
+  padding: var(--sp-4);
+  color: var(--fg-2);
+}
+/* The middle row is as tall as its busiest list needs. When the blockers are many it gives way
+   to Recent decisions, which keeps room for its heading and three rows; the blockers then scroll. */
+.fp-mid {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 4fr);
+  /* The row holding Doing now and Blockers keeps its heading, column head, two blocker rows and the
+     "more below" foot whatever the Watch list below it asks for. */
+  grid-template-rows: minmax(
+      calc(var(--fp-row) + var(--sp-6) * 4 + var(--sp-5) * 2 + var(--sp-1)),
+      1fr
+    );
+  gap: var(--sp-3);
+}
+.fp-self-start {
+  align-self: start;
+  /* Never taller than its grid row: past that its list scrolls, with a count of what is below. */
+  max-height: 100%;
+}
+.fp-watch .drow {
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.fp-watch .drow:last-child {
+  border-bottom: 0;
+}
+@media (max-width: 1800px) {
+  .fp-mid {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+  }
+  .fp-watch {
+    grid-column: 1 / -1;
+  }
+}
+/* Where the screen is short the Watch list is capped at its heading plus three rows' height and
+   scrolls inside, with a count of what is below; a tall screen shows whole rows. */
+@media (max-width: 1800px) and (max-height: 999px) {
+  .fp-watch {
+    max-height: calc(var(--fp-row) * 4);
+  }
+}
+/* A list the panel may cut short: it scrolls inside, and the foot counts what is below. */
+.fp-sl {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fp-slbody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+@media (max-height: 800px) {
+  .fp-watch .fp-note {
+    display: none;
+  }
+}
+@media (min-width: 1400px) and (max-height: 800px) {
+  .fp-mid {
+    grid-template-columns: minmax(0, 3fr) minmax(0, 7fr) minmax(0, 3fr);
+  }
+  .fp-watch {
+    grid-column: auto;
+  }
+}
+.fp-dec {
+  flex: 1 0 calc(var(--sp-7) * 3);
+}
+
+.fp-lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.fp-lines li {
+  flex: 0 0 auto;
+  min-height: var(--fp-row);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.fp-lines li:last-child {
+  border-bottom: 0;
+}
+/* At most five lines: they size the panel and never scroll, so nothing can hide behind a scrollbar. */
+.fp-doing {
+  flex: none;
+  overflow: visible;
+}
+.fp-decisions {
+  overflow: hidden;
+}
+.fp-decisions li {
+  display: block;
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+.fp-drow {
+  width: 100%;
+  height: var(--sp-6);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fp-decisions li:last-child .fp-drow {
+  border-bottom: 0;
+}
+.fp-drow:hover,
+.fp-brow:hover {
+  background: var(--surface-2);
+}
+.fp-detail {
+  padding: var(--sp-2) var(--sp-4) var(--sp-3);
+  padding-left: calc(var(--sp-7) + var(--sp-4) + var(--sp-3));
+  color: var(--fg-2);
+}
+.fp-detail p + p {
+  margin-top: var(--sp-1);
+}
+.fp-decisions[data-open] {
+  overflow: auto;
+}
+.fp-t {
+  flex: none;
+  width: var(--sp-7);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.fp-w {
+  min-width: 0;
+}
+.fp-empty b {
+  font-weight: 600;
+}
+.fp-w b {
+  font-weight: 600;
+}
+.fp-w > span {
+  color: var(--fg-2);
+}
+.fp-one {
+  flex: 1;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.fp-blockers {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fp-brows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.fp-bhead,
+.fp-brow {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) calc(var(--sp-7) * 4) var(--fp-wait) minmax(0, 6fr);
+  column-gap: var(--sp-4);
+  padding: 0 var(--sp-4);
+  align-items: center;
+}
+.fp-bhead {
+  flex: none;
+  height: var(--sp-6);
+  border-bottom: 1px solid var(--line);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.fp-r,
+.fp-wait {
+  text-align: right;
+}
+.fp-brow {
+  width: 100%;
+  min-height: calc(var(--sp-6) + var(--sp-5));
+  padding-top: var(--sp-2);
+  padding-bottom: var(--sp-2);
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fp-brow:last-child {
+  border-bottom: 0;
+}
+.fp-what b,
+.fp-what span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fp-what b {
+  font-weight: 600;
+}
+.fp-what span,
+.fp-act {
+  color: var(--fg-2);
+}
+.fp-act {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+/* Opened: the whole text, wrapped. */
+.fp-brow.open {
+  align-items: start;
+}
+.fp-brow.open .fp-what b,
+.fp-brow.open .fp-what span {
+  white-space: normal;
+}
+.fp-brow.open .fp-act {
+  display: block;
+}
+.fp-more {
+  flex: none;
+  height: var(--sp-6);
+  display: flex;
+  align-items: center;
+  padding: 0 var(--sp-4);
+  border-top: 1px solid var(--line);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--fg-2);
+}
+.fp-owner {
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  padding: 0 var(--sp-2);
+  border-radius: var(--r);
+  color: var(--fg-2);
+  background: color-mix(in srgb, var(--fg-2) 14%, transparent);
+}
+.fp-owner.operator {
+  color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+}
+.fp-owner.ci {
+  color: var(--crit);
+  background: color-mix(in srgb, var(--crit) 14%, transparent);
+}
+.fp-brow.open .fp-owner {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.fp-wait {
+  font: 600 var(--fs) / var(--lh) var(--mono);
+  font-variant-numeric: tabular-nums;
+}
+.fp-empty {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding: var(--sp-4);
+}
+/* A line's age: a fixed right-hand column so the ages line up down the list. */
+.fp-age {
+  flex: none;
+  margin-left: auto;
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Standing orders: one 40 px strip under the status band; the full list opens over the page. */
+.fp-orders {
+  flex: none;
+  position: relative;
+  overflow: visible;
+}
+.fp-ostrip {
+  height: var(--fp-row);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  min-width: 0;
+}
+.fp-ohead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+  color: var(--fg);
+}
+.fp-ofirst {
+  flex: 1;
+  font-weight: 600;
+}
+.fp-meta {
+  flex: none;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  white-space: nowrap;
+}
+.fp-end {
+  flex: none;
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+/* Over the page, not in its flow: opening the list moves nothing. */
+.fp-orderlist {
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  max-height: calc(var(--fp-row) * 5);
+  overflow: auto;
+}
+.fp-orderlist li {
+  align-items: flex-start;
+}
+.fp-ocol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-items: flex-start;
+  overflow-wrap: anywhere;
+}
+.fp-ocol .fp-meta {
+  white-space: normal;
+}
+/* An order may be long: two lines show; Show all opens the rest. */
+.fp-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Standing orders sit in the title block: on a row of their own, or, on a wide short screen, in the
+   title's own row so they cost the blockers no height. */
+.fp-title > .fp-orders {
+  flex: 1 0 100%;
+}
+@media (min-width: 1500px) and (max-height: 800px) {
+  .fp-title {
+    flex-wrap: nowrap;
+  }
+  .fp-title > .fp-orders {
+    flex: 1 1 0;
+    min-width: 0;
+    order: 1;
+  }
+  .fp-title > .fp-records {
+    order: 2;
+  }
+  .fp-title > .fp-q {
+    flex: 0 8 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+}

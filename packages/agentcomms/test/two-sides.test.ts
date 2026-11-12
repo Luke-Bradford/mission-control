@@ -5,8 +5,11 @@ import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
+import { blockedHere, skipTestsIf } from "../../core/test/sandbox-gaps.ts";
 import type { InboxEntry } from "../src/inbox.ts";
 import { startNodeRelay } from "../src/relay-node.ts";
+
+skipTestsIf(await blockedHere("listen"));
 
 const exec = promisify(execFile);
 const shim = resolve("packages/agentcomms/bin/agentcomms");

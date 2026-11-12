@@ -7,7 +7,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { sendComms } from "../src/comms.ts";
+import { sendComms } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
@@ -395,6 +395,7 @@ describe("GET /api/tickets/:repoId/:number", () => {
           store,
           crew: () => ["guido-1", "flight-1"],
           knownSecrets: async () => [],
+          senderKind: "seat" as const,
           now: () => NOW,
           seatSender: true,
         },

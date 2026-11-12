@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { answerTarget, flightText } from "../src/comms/answer.ts";
+import { answerTarget, askedQuestion, flightText } from "../src/comms/answer.ts";
 import type { FlightSeat } from "../src/flight/flightTypes.ts";
 import { crewRow, item, SEAT_Q } from "./fixtures.ts";
 
@@ -44,4 +44,17 @@ describe("flightText", () => {
     );
     expect(flightText("ask:7", "", "Use port 5180.")).toBe("Re: ask:7\n\nUse port 5180.");
   });
+});
+
+describe("askedQuestion", () => {
+  it("reads the number from an ask: key", () => {
+    expect(askedQuestion("ask:7")).toBe(7);
+  });
+
+  it.each(["ask:", "ask:abc", "ask:0", "ask:7x", "note:7", "ask:99999999999999999999"])(
+    "gives null for %s",
+    (key) => {
+      expect(askedQuestion(key)).toBeNull();
+    },
+  );
 });

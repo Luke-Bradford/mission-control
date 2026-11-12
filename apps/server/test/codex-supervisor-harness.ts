@@ -1,13 +1,14 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { TestLock } from "../src/guard/lock.ts";
 import type { SupervisorDeps } from "../src/runtime/supervisor.ts";
 import { dir, make, recordFile } from "./supervisor-harness.ts";
 
 /** Direct supervisor deps only: configuration continues refusing Codex seats. */
 export function codexSupervisor(
   scenario: Record<string, unknown> = {},
-  over: { checks?: SupervisorDeps["checks"] } = {},
+  over: { checks?: SupervisorDeps["checks"]; lock?: TestLock } = {},
 ) {
   const command = join(dir, "codex");
   const fixture = fileURLToPath(new URL("./fixtures/fake-codex.mjs", import.meta.url));

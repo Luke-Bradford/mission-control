@@ -1,6 +1,7 @@
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, vi } from "vitest";
 import { hub } from "../src/data.ts";
+import { setDemo } from "../src/demo/mode.ts";
 import { resetOverlays } from "../src/shell/overlays.ts";
 import { resetSelection } from "../src/shell/selection.ts";
 import { resetSession } from "../src/shell/session.ts";
@@ -22,8 +23,8 @@ function memoryStorage(): Storage {
   };
 }
 
-// Node 25 has its own global localStorage which, without --localstorage-file, has no methods and
-// shadows jsdom's; each test gets a fresh working one instead.
+// Without --localstorage-file, Node 25's global localStorage has no methods and Node 26's is undefined.
+// Either way it shadows jsdom's, so each test gets a fresh working one instead.
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   vi.stubGlobal("sessionStorage", memoryStorage());
@@ -39,6 +40,7 @@ afterEach(() => {
   resetSelection();
   clearToast();
   resetTheme();
+  setDemo(false); // the mode is a module singleton too
   // viteConfig.test.ts runs in node, with no window
   if (typeof window !== "undefined") window.history.replaceState(null, "", "/");
 });

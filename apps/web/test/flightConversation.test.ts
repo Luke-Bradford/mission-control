@@ -7,6 +7,7 @@ import {
   kindLabel,
   overturnText,
   type PendingMsg,
+  withMessageStates,
   withPending,
 } from "../src/flight/conversation.ts";
 import { type FlightDecision, MC_LINE_PREFIX } from "../src/flight/flightTypes.ts";
@@ -28,6 +29,59 @@ const stream = (events: StreamEvent[]): AgentStream => ({
   truncated: false,
   lastOutputAt: null,
   reason: null,
+});
+
+describe("matching stream messages to Comms receipts", () => {
+  const rows = [
+    { kind: "you", id: "s1", at: 100, text: "Status?" },
+    { kind: "you", id: "s2", at: 200, text: "Status?" },
+  ] as const satisfies readonly DockRow[];
+  const messages = [
+    { id: "m1", at: 90, text: "Status?", deliveredAt: 100, operator: true, replyTo: null },
+    { id: "m2", at: 190, text: "Status?", deliveredAt: 200, operator: true, replyTo: null },
+    { id: "reply", at: 210, text: "Done", deliveredAt: null, operator: false, replyTo: "m2" },
+  ] as const;
+  it("uses each receipt once, so only the second repeated question is answered", () => {
+    expect(
+      withMessageStates(rows, messages, "UTC").map((r) => (r.kind === "you" ? r.line : null)),
+    ).toEqual(["Delivered 00:00", "Answered"]);
+  });
+  it("does not attach a newer stored repeat to an older stream row", () => {
+    const newer = { ...messages[1], at: 300, deliveredAt: null };
+    expect(
+      withMessageStates(rows.slice(0, 1), [messages[0], newer, messages[2]], "UTC")[0],
+    ).toMatchObject({ line: "Delivered 00:00" });
+  });
+  it("matches a truncated stream window to the latest eligible receipt", () => {
+    expect(withMessageStates([{ ...rows[1], text: "Stat…" }], messages, "UTC")[0]).toMatchObject({
+      line: "Answered",
+    });
+  });
+  it("does not use an undelivered repeat even when the stream timestamp is later", () => {
+    const stored = { ...messages[1], at: 95, deliveredAt: null };
+    expect(
+      withMessageStates(rows.slice(0, 1), [messages[0], stored, messages[2]], "UTC")[0],
+    ).toMatchObject({ line: "Delivered 00:00" });
+  });
+  it("uses a shared message id even when the stream timestamp is unknown", () => {
+    expect(
+      withMessageStates([{ ...rows[0], id: "m1", at: null }], messages, "UTC")[0],
+    ).toMatchObject({ line: "Delivered 00:00" });
+  });
+  it("keeps a pending send's own receipt and leaves an undated ambiguous row unknown", () => {
+    const pending: DockRow = {
+      kind: "you",
+      id: "pending",
+      at: 300,
+      text: "Status?",
+      pending: true,
+      line: "Stored",
+    };
+    expect(withMessageStates([{ ...rows[0], at: null }, pending], messages, "UTC")).toEqual([
+      { ...rows[0], at: null },
+      pending,
+    ]);
+  });
 });
 export const decision = (
   id: string,

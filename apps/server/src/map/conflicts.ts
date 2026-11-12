@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -100,6 +100,15 @@ export class MapConflicts {
       const seen = new Map<string, string[]>();
       // Checked only on a cache miss: a cached pair needs no object reads.
       const present = new Map<string, Promise<boolean>>();
+      let checkoutChecked = false;
+      const ensureCheckout = async () => {
+        if (!checkoutChecked) {
+          // A bad checkout is distinct from a valid checkout that has not fetched a PR head.
+          // Defer the validation so cached pairs still need no Git object reads.
+          await assertCheckout(worktree);
+          checkoutChecked = true;
+        }
+      };
       const holds = (sha: string) => {
         let known = present.get(sha);
         if (known === undefined) {
@@ -125,6 +134,7 @@ export class MapConflicts {
             }
           }
           if (files === undefined) {
+            await ensureCheckout();
             const held = this.failed.get(failedKey);
             if (held && held.until > now) {
               failedPairs.push([a.branch, b.branch]);
@@ -213,6 +223,28 @@ export class MapConflicts {
     }
     return held;
   }
+}
+
+/** Reject a directory that is not a usable Git worktree before checking individual object ids. */
+async function assertCheckout(worktree: string): Promise<void> {
+  const { stdout } = await execFileP(
+    "git",
+    [
+      "--no-optional-locks",
+      "-c",
+      "core.fsmonitor=false",
+      "-C",
+      worktree,
+      "rev-parse",
+      "--is-inside-work-tree",
+      "--show-toplevel",
+    ],
+    { env: isolatedEnv(), timeout: GIT_TIMEOUT_MS },
+  );
+  const [inside, root] = stdout.trim().split("\n");
+  if (inside !== "true" || !root) throw new Error("checkout is not a Git worktree");
+  const [actualRoot, actualWorktree] = await Promise.all([realpath(root), realpath(worktree)]);
+  if (actualRoot !== actualWorktree) throw new Error("checkout is not a Git worktree");
 }
 
 /** A git failure's first line, for the log; never sent to the page. */

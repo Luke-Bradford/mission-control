@@ -1,14 +1,14 @@
 import type { CrewVendor, StreamEvent } from "@mc/core";
 import { cleanText } from "./clean.ts";
+import { CODEX_MCP_ELICITATION } from "./runtime/codex-wire.ts";
+import { isObj, type Json, STREAM_EVENT_PREFIX, str, timeOf } from "./streamjson.ts";
 import {
   CODEX_APPROVAL_DECISION,
   codexPlan,
   codexTool,
   transcriptVendor,
-} from "./codex-transcript.ts";
-import { CODEX_MCP_ELICITATION } from "./runtime/codex-wire.ts";
-import { isObj, type Json, STREAM_EVENT_PREFIX, str, timeOf } from "./streamjson.ts";
-import { openTranscript } from "./transcript-file.ts";
+} from "./transcript/codex-transcript.ts";
+import { openTranscript } from "./transcript/file.ts";
 import { originalBytes } from "./util.ts";
 
 export const STREAM_CHUNK_BYTES = 256 * 1024;
@@ -253,7 +253,8 @@ export function readStreamPage(
   limit: number,
   vendor?: CrewVendor,
   before?: string,
-): { events: StreamEvent[]; truncated: boolean; more: boolean } {
+  scanBefore?: number,
+): { events: StreamEvent[]; truncated: boolean; more: boolean; scanBefore?: number } {
   const fd = openTranscript(path);
   try {
     const size = fd.size;
@@ -271,7 +272,9 @@ export function readStreamPage(
         }
       }
     }
-    let pos = size;
+    // Internal continuation across a scan window containing no recognised events. Unlike an
+    // event cursor, this boundary must not seek forward to the end of an oversized record.
+    let pos = scanBefore === undefined ? size : Math.max(0, Math.min(size, scanBefore));
     if (cut !== null) {
       // Only the line the event sits on and the ones before it: end the read at that line's end.
       pos = Number(cut[1]);
@@ -347,6 +350,7 @@ export function readStreamPage(
       events: events.slice(-limit),
       truncated: pos > 0 && count < want,
       more: events.length > limit || pos > 0 || (!firstTaken && carry.some((b) => b.length > 0)),
+      ...(events.length === 0 && pos > 0 ? { scanBefore: pos } : {}),
     };
   } finally {
     fd.close();

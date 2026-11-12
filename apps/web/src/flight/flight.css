@@ -436,6 +436,7 @@ button.flight-link:hover {
 }
 
 #wifP .wif-row {
+  height: auto;
   padding: var(--sp-3) var(--sp-3);
   border-bottom: 1px solid var(--line);
   border-radius: 0;
@@ -624,14 +625,14 @@ button.flight-link:hover {
 /* Needs you */
 .flight-needs {
   display: grid;
-  grid-template-rows: minmax(260px, 2fr) minmax(440px, auto) minmax(170px, 1fr) minmax(130px, 0.6fr);
+  grid-template-rows: auto minmax(440px, auto) minmax(170px, 1fr) minmax(130px, 0.6fr);
   gap: var(--sp-3);
   min-height: 0;
 }
 
 .flight-needs-groups {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--sp-3);
   min-height: 0;
 }
@@ -862,6 +863,26 @@ button.flight-link:hover {
   gap: var(--sp-3);
 }
 
+.flight-records-title {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.flight-records-title h1 {
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.flight-records-title p {
+  color: var(--fg-2);
+}
+.flight-records-title a {
+  flex: none;
+  min-width: var(--sp-5);
+  min-height: var(--sp-5);
+  line-height: var(--lh);
+}
 .flight-notes .flight-knowledge-scroll > p.note:first-child {
   max-width: none;
   margin: 0;
@@ -1187,12 +1208,9 @@ button.flight-link:hover {
 }
 
 @media (max-width: 1439px) {
-  /* Four groups side by side get too narrow here: two by two, each tall enough for its rows. */
+  /* Three groups side by side get too narrow here: two and one, each tall enough for its rows. */
   .flight-needs {
-    grid-template-rows: minmax(260px, 2fr) minmax(440px, auto) minmax(300px, 1.3fr) minmax(
-        130px,
-        0.6fr
-      );
+    grid-template-rows: auto minmax(440px, auto) minmax(300px, 1.3fr) minmax(130px, 0.6fr);
   }
   .flight-needs-groups {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1202,7 +1220,7 @@ button.flight-link:hover {
 
 @container flight (width < 900px) {
   .flight-needs {
-    grid-template-rows: minmax(240px, 1fr) auto auto auto;
+    grid-template-rows: auto auto auto auto;
   }
   .flight-needs-groups,
   .flight-knows-orders {

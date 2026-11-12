@@ -1,6 +1,7 @@
 import {
   type BoardItem,
   type CrewRow,
+  type FlightPrFlowRow,
   HUD_COLUMNS,
   type HudColumn,
   type PullRequestView,
@@ -9,9 +10,9 @@ import {
 import { useId, useMemo, useState } from "react";
 import type { NeedsYou } from "../attention.ts";
 import { agoDays, plural } from "../fmt.ts";
-import { reviewStateProps } from "../hud/ReviewState.tsx";
 import { Card, type CardProps } from "./Card.tsx";
 import {
+  type CardRework,
   cardAgent,
   cardColumn,
   cardNeeds,
@@ -22,13 +23,17 @@ import {
   cardYou,
   daysAgo,
   doneOutcome,
+  reworkLabel,
   sortCards,
   statusOutOfDateTitle,
   ticketRef,
 } from "./cards.ts";
 import { usePhone } from "./phone.ts";
+import { flowChip, flowKey } from "./prFlowChip.ts";
 
 const NO_PRS: PullRequestView[] = [];
+const NO_FLOW: ReadonlyMap<string, FlightPrFlowRow> = new Map();
+const NO_REWORK: ReadonlyMap<string, CardRework> = new Map();
 export interface KanbanColumnMetric {
   label: string;
   count: string;
@@ -48,6 +53,10 @@ interface CardCtx {
   now: number;
   tz: string | null;
   todayStart: number | null;
+  /** The server's rework facts per ticket ref. */
+  rework: ReadonlyMap<string, CardRework>;
+  /** The PR flow's rows per `repo#pr`: the stage and owner the chip names. */
+  flow: ReadonlyMap<string, FlightPrFlowRow>;
 }
 
 /**
@@ -64,7 +73,8 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
   const agent = cardAgent(item, ctx.crew);
   const pr = cardPr(item, prs);
   const needs = cardNeeds(item, ctx.needsYou, ctx.crew);
-  const check = pr?.check ? reviewStateProps(pr.check) : null;
+  const check = pr?.check ? flowChip(pr.check, ctx.flow.get(flowKey(pr.repoId, pr.number))) : null;
+  const facts = ctx.rework.get(ticketRef(item));
   return {
     item,
     showRepo: ctx.showRepo,
@@ -77,13 +87,21 @@ function cardProps(item: BoardItem, col: HudColumn, ctx: CardCtx): CardProps {
     checkTone: check?.tone ?? null,
     checkingSeat: pr?.check?.kind === "checking" ? pr.check.seat : undefined,
     checkingSince: pr?.check?.kind === "checking" ? pr.check.since : undefined,
-    checkReason: pr?.check?.kind === "held" ? pr.check.reason : undefined,
+    checkReason: check?.reason,
     mine: needs.length > 0,
     unacked: needs.some((a) => !a.acked),
     outcome: doneOutcome(item, prs),
     when,
     statusOutOfDate: statusOutOfDate(item) ? statusOutOfDateTitle(item) : null,
     you: cardYou(needs, ctx.now),
+    rework:
+      facts && col !== "Done"
+        ? reworkLabel(facts, {
+            ready: col === "Ready",
+            onTicket: agent !== null && agent.id === facts.seat,
+            pr: pr?.number ?? null,
+          })
+        : null,
   };
 }
 
@@ -100,6 +118,8 @@ export function Kanban({
   now,
   tz,
   todayStart,
+  rework = NO_REWORK,
+  flow = NO_FLOW,
   columns = HUD_COLUMNS,
   notIn,
   metrics = {},
@@ -114,6 +134,10 @@ export function Kanban({
   now: number;
   tz: string | null;
   todayStart: number | null;
+  /** The server's rework facts per ticket ref (the Overview pipeline's). */
+  rework?: ReadonlyMap<string, CardRework>;
+  /** The PR flow's rows per `repo#pr` (`flowByPr`). */
+  flow?: ReadonlyMap<string, FlightPrFlowRow>;
   /** The columns to draw, in order; default all eight. */
   columns?: readonly HudColumn[];
   /** Per column, the repo ids that lack it (Together layout): shown as `not in {ids}`. */
@@ -140,6 +164,8 @@ export function Kanban({
     now,
     tz,
     todayStart,
+    rework,
+    flow,
   };
   const phone = usePhone();
   const uid = useId();

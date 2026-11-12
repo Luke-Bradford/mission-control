@@ -1,6 +1,7 @@
 import type { NotificationEvent, NotificationPreferences } from "@mc/core";
-import { useEffect, useRef } from "react";
+import { createElement, useEffect, useRef } from "react";
 import { hub, RESOURCES, useResource, useResourceSettled } from "./data.ts";
+import { useDemo } from "./demo/mode.ts";
 import { hhmm } from "./fmt.ts";
 import { navigate } from "./router.ts";
 import { toast } from "./shell/Toast.tsx";
@@ -90,7 +91,12 @@ export function createDelivery(show = showNotification) {
 
 export const deliverNotification = createDelivery();
 
+/** Silent in Demo; going back to Live remounts it, so history is remembered afresh. */
 export function BrowserNotifications() {
+  return useDemo() ? null : createElement(LiveNotifications);
+}
+
+function LiveNotifications() {
   const prefs = useResource<NotificationPreferences>(RESOURCES.notificationPreferences);
   const events = useResource<NotificationEvent[]>(RESOURCES.notificationEvents);
   // A matching response keeps its data snapshot, but completion still wakes this coordination

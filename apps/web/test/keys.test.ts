@@ -39,10 +39,10 @@ afterEach(() => {
 describe("installKeys", () => {
   it.each([
     ["o", "/"],
+    ["n", "/needs-you"],
     ["f", "/flight"],
     ["b", "/board"],
     ["a", "/agent"],
-    ["m", "/map"],
     ["c", "/comms"],
     ["t", "/telemetry"],
     ["s", "/setup"],

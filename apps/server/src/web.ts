@@ -6,6 +6,7 @@
 import { readFile, realpath, stat } from "node:fs/promises";
 import { extname, resolve, sep } from "node:path";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { DESIGN_PREVIEW_PORT } from "./design-preview/port.ts";
 
 const TYPES: Readonly<Record<string, string>> = {
   ".html": "text/html; charset=utf-8",
@@ -35,6 +36,8 @@ export const WEB_CSP = [
   "base-uri 'none'",
   "form-action 'self'",
   "frame-ancestors 'none'",
+  // The Needs you preview overlay: the design preview server, loopback only. It keeps its own CSP.
+  `frame-src http://127.0.0.1:${DESIGN_PREVIEW_PORT}`,
 ].join("; ");
 
 /** Vite emits content-hashed file names under /assets/, so they can be cached for good. */
@@ -69,7 +72,7 @@ async function readInside(root: string, file: string): Promise<Buffer | null> {
   }
 }
 
-export function webHandler(webRoot: string) {
+export function webHandler(webRoot: string, csp: string = WEB_CSP) {
   const rootPromise = realpath(resolve(webRoot)).catch(() => resolve(webRoot));
 
   return async (req: FastifyRequest, reply: FastifyReply) => {
@@ -98,7 +101,7 @@ export function webHandler(webRoot: string) {
     }
     const type = TYPES[isFile ? ext.toLowerCase() : ".html"] ?? "application/octet-stream";
     reply.type(type);
-    if (type.startsWith("text/html")) reply.header("content-security-policy", WEB_CSP);
+    if (type.startsWith("text/html")) reply.header("content-security-policy", csp);
     reply.header(
       "cache-control",
       isFile && urlPath.startsWith(HASHED_PREFIX)

@@ -74,7 +74,7 @@ export async function collectFileSizes(
     throw Error("Size file scope limit");
   const shas = [...new Set(entries.map((entry) => entry.sha))];
   const data = shas.length
-    ? await (deps.blobs ?? readBlobs)([...base, "cat-file", "--batch"], shas.join("\n") + "\n")
+    ? await (deps.blobs ?? readBlobs)([...base, "cat-file", "--batch"], `${shas.join("\n")}\n`)
     : Buffer.alloc(0);
   if (data.length > SIZE_BLOB_BYTES_MAX) throw Error("Size blob output limit");
   const counts = new Map<string, number | null>();

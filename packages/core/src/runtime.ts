@@ -13,7 +13,13 @@ export {
 } from "./runtime-model.ts";
 
 import { GUARD_HOOK_EVENTS, type GuardHookEvent } from "./guard.ts";
-import { MC_MCP_SERVER, MC_TOOL_NAMES, MC_TOOLS, type McToolName } from "./mcp.ts";
+import {
+  CHECK_BASH_TIMEOUT_MS,
+  MC_MCP_SERVER,
+  MC_TOOL_NAMES,
+  MC_TOOLS,
+  type McToolName,
+} from "./mcp.ts";
 import { ROLES } from "./roles.ts";
 import { TOOL_OUTPUT_DIR } from "./tool-trim.ts";
 import type { AgentId } from "./types.ts";
@@ -90,6 +96,8 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.recall,
   MC_TOOL_NAMES.holdItem,
   MC_TOOL_NAMES.releaseHold,
+  MC_TOOL_NAMES.returnQuestion,
+  MC_TOOL_NAMES.withdrawQuestion,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
   MC_TOOL_NAMES.operator,
@@ -112,6 +120,7 @@ export const MC_TOOL_GRANTS: Readonly<
       "commit",
       "sync_main",
       MC_TOOL_NAMES.prBody,
+      MC_TOOL_NAMES.publishPreview,
       MC_TOOL_NAMES.askFlight,
       MC_TOOL_NAMES.callFlight,
       "report_evidence",
@@ -325,6 +334,7 @@ export const WRITER_TOOLS = [
   MC_TOOLS.commit,
   MC_TOOLS.syncMain,
   MC_TOOLS.prBody,
+  MC_TOOLS.publishPreview,
   MC_TOOLS.askFlight,
   MC_TOOLS.callFlight,
   MC_TOOLS.reportEvidence,
@@ -840,6 +850,12 @@ export function protectedFileRules(
 }
 
 /**
+ * Set to "1" in every crew seat's environment, Claude and Codex alike (#1411). Tests that need
+ * what a seat's sandbox denies use it to know they run in a seat; CI and the hub never set it.
+ */
+export const SEAT_SANDBOX_ENV = "MC_SEAT_SANDBOX";
+
+/**
  * Env every crew process gets:
  * - Bash returns to the worktree after each command, so a `cd` never moves the working directory
  *   the rules and `--restricted` resolve against (#41);
@@ -852,9 +868,13 @@ export function protectedFileRules(
  *   also forces the permission mode to `default`, so a seat's tools must be listed with
  *   `--allowedTools`; `bypassPermissions` has no effect;
  * - no self-update: the hub updates the CLI between runs (`updates.cli`), so a run's CLI never
- *   changes underneath it.
+ *   changes underneath it;
+ * - a higher Bash limit: the CLI cuts a call's `timeout` to 600 s unless this says otherwise, and a
+ *   long check needs more room (#1398). `seat-floors.test.ts` shows the real CLI reports and enforces it.
  */
 export const CREW_CLI_ENV = {
+  [SEAT_SANDBOX_ENV]: "1",
+  BASH_MAX_TIMEOUT_MS: String(CHECK_BASH_TIMEOUT_MS),
   CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR: "1",
   CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
   CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: "1",
@@ -1387,6 +1407,8 @@ export type SessionEvent =
       toolUseId: string;
       ok?: boolean;
       exitCode?: number | null;
+      /** The command pipes or chains past its first step, so its exit says little of a check (#1411). */
+      wrapped?: boolean;
       /** Exact completed Codex command facts, supplied only for FLIGHT audit. */
       command?: string;
       cwd?: string;

@@ -18,7 +18,7 @@ import {
   workSummary,
 } from "@mc/core";
 import { cleanText } from "./clean.ts";
-import { codexPlan, codexTool, transcriptVendor } from "./codex-transcript.ts";
+import { codexPlan, codexTool, transcriptVendor } from "./transcript/codex-transcript.ts";
 import { str } from "./util.ts";
 
 export interface TranscriptFacts {
@@ -51,6 +51,8 @@ export interface TranscriptFacts {
 // Token de-dup state (last-seen usage per message id). Kept out of the public facts shape so
 // facts stay plain/serialisable; it travels with the facts object across incremental folds.
 const seenUsage = new WeakMap<TranscriptFacts, Map<string, TokenUsage>>();
+/** The sum of the `result` events' `usage.output_tokens` so far; absent until one carries a number. */
+const resultOutput = new WeakMap<TranscriptFacts, number>();
 
 // Where the current branch came from. `vcs_state_changed` is preferred; `code_change_published`
 // is the fallback (studio fires never emit the former with a branch). Travels with the facts.
@@ -808,6 +810,7 @@ export function foldTranscript(
     ...((prev && branchSources.get(prev)) ?? { vcs: prev?.branch ?? null, published: null }),
   };
   let anon = seen.size;
+  let resultOut = prev ? resultOutput.get(prev) : undefined;
   const prevDigest = prev && digestStates.get(prev);
   const d = prevDigest ? copyDigestState(prevDigest) : emptyDigestState();
 
@@ -909,6 +912,9 @@ export function foldTranscript(
       });
     } else if (ev.type === "result") {
       facts.resultCount += 1;
+      // A streamed assistant event holds only part of its output; the CLI's own count is the result's.
+      const resultTokens = isObj(ev.usage) ? numOrNull(ev.usage.output_tokens) : null;
+      if (resultTokens !== null) resultOut = (resultOut ?? 0) + resultTokens;
       if (typeof ev.total_cost_usd === "number") {
         facts.costUsd = ev.total_cost_usd;
         const t = sumTokens(seen);
@@ -950,6 +956,10 @@ export function foldTranscript(
   facts.branch = src.vcs ?? src.published;
   branchSources.set(facts, src);
   facts.tokens = sumTokens(seen);
+  if (resultOut !== undefined) {
+    facts.tokens.output = resultOut;
+    resultOutput.set(facts, resultOut);
+  }
   seenUsage.set(facts, seen);
   const toolFrom = Math.max(fileMtime, d.lastEventAt ?? fileMtime) - TIMELINE_WINDOW_MS;
   d.toolStarts = new Map(

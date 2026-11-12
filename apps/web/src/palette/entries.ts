@@ -4,11 +4,11 @@ import {
   COMMS_CAPCOM,
   type CommsAgentResponse,
   type CrewRow,
-  HUD_PAGE_PATHS,
   type PullRequestView,
 } from "@mc/core";
 import { seatError } from "../agent/seat.ts";
 import { ApiError, apiPost } from "../api.ts";
+import { openNeed } from "../attention.ts";
 import { ticketForRef } from "../comms/model.ts";
 import { callSign, seatName } from "../crew.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
@@ -19,8 +19,8 @@ import {
   commsCrewPath,
   commsFlightPath,
   commsTicketPath,
-  itemPath,
   navigate,
+  PAGE_PATHS,
   type Page,
   ticketPath,
 } from "../router.ts";
@@ -47,10 +47,10 @@ export interface PaletteEntry {
 
 const PAGE_TITLES: Record<Page, string> = {
   overview: "Overview",
+  needs: "Needs you",
   flight: "FLIGHT",
   board: "Board",
   agent: "Agent",
-  map: "Map",
   comms: "Comms",
   telemetry: "Telemetry",
   audit: "Audit",
@@ -180,8 +180,8 @@ export function buildEntries(src: PaletteSources): PaletteEntry[] {
     id: `page:${page}`,
     group: "Page",
     title: PAGE_TITLES[page],
-    hint: HUD_PAGE_PATHS[page],
-    run: () => navigate(HUD_PAGE_PATHS[page]),
+    hint: PAGE_PATHS[page],
+    run: () => navigate(PAGE_PATHS[page]),
   }));
   for (const row of src.rows ?? []) {
     const name = callSign(row);
@@ -253,7 +253,7 @@ export function buildEntries(src: PaletteSources): PaletteEntry[] {
       title: th.text,
       hint: th.key,
       haystack: `${th.key} ${th.text}`,
-      run: () => navigate(itemPath(th.key)),
+      run: () => openNeed(th),
     });
   }
   return out;

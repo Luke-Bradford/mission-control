@@ -14,12 +14,13 @@ import { type Action, ActionDialog, EvidenceDialog, HistoryDialog } from "./dial
 import { date, label } from "./format.ts";
 import { Categories, Comparison, ReviewRounds } from "./ReviewQuality.tsx";
 import { TestHealth } from "./TestHealth.tsx";
+import { TokenAudit } from "./TokenAudit.tsx";
 import "./code-health.css";
 
 const Legacy = lazy(() =>
   import("../pages/LegacyAudit.tsx").then((m) => ({ default: m.LegacyAudit })),
 );
-const TABS = ["overview", "review", "risk", "test"] as const;
+const TABS = ["overview", "review", "risk", "test", "tokens"] as const;
 type Tab = (typeof TABS)[number];
 /** The shared operator question, with one bounded read for the selected repo/window/tab. */
 export function CodeHealth() {
@@ -31,7 +32,11 @@ export function CodeHealth() {
     );
   const [repo, setRepo] = useState(""),
     [window, setWindow] = useState<CodeHealthWindow>("30d"),
-    [tab, setTab] = useState<Tab>("overview");
+    [tab, setTab] = useState<Tab>(() =>
+      new URLSearchParams(globalThis.window.location.search).get("tab") === "risk"
+        ? "risk"
+        : "overview",
+    );
   const [last, setLast] = useState<{ path: string; view: CodeHealthView }>(),
     [expired, setExpired] = useState(false);
   const [evidence, setEvidence] = useState<{
@@ -60,7 +65,7 @@ export function CodeHealth() {
     }
   }, [config.data, repo]);
   const ref = useMemo(
-      () => (repo ? RESOURCES.codeHealth(repo, window, tab) : null),
+      () => (repo && tab !== "tokens" ? RESOURCES.codeHealth(repo, window, tab) : null),
       [repo, window, tab],
     ),
     res = useResource<CodeHealthView>(ref);
@@ -161,7 +166,7 @@ export function CodeHealth() {
           </h1>
           <p>Where should we invest in code health next?</p>
         </div>
-        <div className="ch-filters">
+        <div className="ch-filters" hidden={tab === "tokens"}>
           <label>
             Repo
             <select
@@ -192,7 +197,7 @@ export function CodeHealth() {
           </fieldset>
         </div>
       </div>
-      <div className="ch-coverage">
+      <div className="ch-coverage" hidden={tab === "tokens"}>
         <strong className={blocked ? "warn-t" : "ok-t"}>
           {disconnected
             ? reconnecting
@@ -265,11 +270,13 @@ export function CodeHealth() {
                 ? "Review quality"
                 : t === "risk"
                   ? "Code risk"
-                  : "Test health"}
+                  : t === "test"
+                    ? "Test health"
+                    : "Tokens"}
           </button>
         ))}
         <span className="ch-links">
-          <a href={repo ? `/map/${encodeURIComponent(repo)}` : "/map"}>Repo context in Map</a>
+          <a href="/audit?tab=risk">Code risk in Audit</a>
           <a href="/qa">PR readiness and tests in QA</a>
         </span>
       </div>
@@ -304,6 +311,7 @@ export function CodeHealth() {
         </p>
       )}
       <div id="ch-panel" role="tabpanel" aria-labelledby={`ch-tab-${tab}`} aria-busy={res.loading}>
+        {tab === "tokens" && <TokenAudit />}
         {view && tab === "test" && view.data.tab === "test" && (
           <TestHealth
             data={view.data}
@@ -317,13 +325,7 @@ export function CodeHealth() {
           />
         )}
         {view && tab === "risk" && view.data.tab === "risk" && (
-          <CodeRisk
-            data={view.data}
-            window={window}
-            coverage={view.coverage}
-            repo={repo}
-            onInspect={inspect}
-          />
+          <CodeRisk data={view.data} window={window} coverage={view.coverage} onInspect={inspect} />
         )}
         {view &&
           review &&

@@ -1,3 +1,4 @@
+import { DemoSwitch } from "./DemoSwitch.tsx";
 import { useBuildStatus } from "./overlays.ts";
 
 /** Build-status toggle and legend, then the key hints (catalogue §1.2; `s Setup` added, §7.6). */
@@ -5,6 +6,7 @@ export function Footer() {
   const [on, setOn] = useBuildStatus();
   return (
     <footer className="keys">
+      <DemoSwitch />
       <button
         type="button"
         className="sm"
@@ -22,8 +24,8 @@ export function Footer() {
         chip for detail
       </span>
       <span>
-        <kbd>g</kbd> then <kbd>o</kbd> <kbd>f</kbd> <kbd>b</kbd> <kbd>a</kbd> <kbd>m</kbd>{" "}
-        <kbd>c</kbd> <kbd>t</kbd> pages · <kbd>s</kbd> Setup
+        <kbd>g</kbd> then <kbd>o</kbd> <kbd>f</kbd> <kbd>b</kbd> <kbd>a</kbd> <kbd>c</kbd>{" "}
+        <kbd>t</kbd> pages · <kbd>s</kbd> Setup
       </span>
       <span>
         <kbd>f</kbd> FLIGHT

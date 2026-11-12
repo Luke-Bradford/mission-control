@@ -4,7 +4,7 @@ import "@fontsource/ibm-plex-sans/latin-400.css";
 import "@fontsource/ibm-plex-sans/latin-500.css";
 import "../src/hud.css";
 import { createRoot } from "react-dom/client";
-import { Flight } from "../src/pages/Flight.tsx";
+import { FlightTabs } from "../src/flight/FlightTabs.tsx";
 import { FLOW_NOW } from "./prFlowFixture.ts";
 
 // Only this fixture's browser clock is fixed, so time-based labels are reproducible.
@@ -15,7 +15,7 @@ createRoot(root).render(
   <div className="app">
     <div className="shell shell-full">
       <main>
-        <Flight />
+        <FlightTabs />
       </main>
     </div>
   </div>,

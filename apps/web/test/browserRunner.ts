@@ -23,13 +23,24 @@ export interface Box {
   height: number;
 }
 
+/** One request the page made to the harness origin, in the order it left the browser. */
+export interface LoggedRequest {
+  method: string;
+  /** Path and query, such as `/api/crew?shape=summary`. */
+  path: string;
+}
+
 export interface RenderedPage {
   errors(): readonly string[];
+  /** Every request the page has made to the harness origin so far, served or not. */
+  requests(): readonly LoggedRequest[];
   /** Resize the actual browser viewport, including its live media-query change events. */
   resize(width: number, height: number): Promise<void>;
   /** Reload the harness entry in the same browser session, preserving sessionStorage. */
   reload(): Promise<void>;
   press(key: string): Promise<void>;
+  /** Moves the real browser pointer in viewport CSS pixels. */
+  movePointer(x: number, y: number): Promise<void>;
   /** The first element matching `selector`; throws if there is none. */
   box(selector: string): Promise<Box>;
   /** Every element matching `selector`, in document order; throws if there is none. */
@@ -76,8 +87,10 @@ interface Route {
   fulfill(options: { status?: number; contentType?: string; body: string | Buffer }): Promise<void>;
 }
 interface Page {
+  mouse: { move(x: number, y: number): Promise<void> };
   keyboard: { press(key: string): Promise<void> };
   on(event: "pageerror", handler: (error: Error) => void): void;
+  on(event: "request", handler: (request: { url(): string; method(): string }) => void): void;
   setViewportSize(size: { width: number; height: number }): Promise<void>;
   route(url: RegExp, handler: (route: Route) => Promise<void>): Promise<void>;
   goto(url: string, options: { waitUntil: "load" }): Promise<unknown>;
@@ -125,14 +138,19 @@ function cachedHeadlessShells(): string[] {
       ? join(homedir(), "Library/Caches/ms-playwright")
       : join(homedir(), ".cache/ms-playwright");
   if (!existsSync(root)) return [];
-  return readdirSync(root)
-    .filter((name) => name.startsWith("chromium_headless_shell-"))
-    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
-    .flatMap((name) =>
-      readdirSync(join(root, name))
-        .filter((dir) => dir.startsWith("chrome-headless-shell"))
-        .map((dir) => join(root, name, dir, "chrome-headless-shell")),
-    );
+  try {
+    return readdirSync(root)
+      .filter((name) => name.startsWith("chromium_headless_shell-"))
+      .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+      .flatMap((name) =>
+        readdirSync(join(root, name))
+          .filter((dir) => dir.startsWith("chrome-headless-shell"))
+          .map((dir) => join(root, name, dir, "chrome-headless-shell")),
+      );
+  } catch {
+    // A sandbox that cannot read the cache has no cached shell; the other candidates still apply.
+    return [];
+  }
 }
 
 const BROWSER = [
@@ -147,7 +165,7 @@ const BROWSER = [
 
 /** Without a browser a local run skips; CI fails, so a layout check can never pass unrendered. */
 const MUST_RUN = Boolean(process.env.CI);
-const SKIP = !BROWSER && !MUST_RUN;
+const NO_BROWSER = !BROWSER && !MUST_RUN;
 
 /** `describe` for rendered tests: skipped locally when no browser is installed, never on CI. */
 export const describeRendered = (name: string, body: () => void) =>
@@ -163,6 +181,27 @@ async function launch(executablePath: string): Promise<Browser> {
   } catch {
     return chromium.launch({ executablePath, headless: true, args: SANDBOX_FALLBACK_ARGS });
   }
+}
+
+/**
+ * A browser that is installed but cannot start (a seat's sandbox forbids Chrome's profile and
+ * crash database) skips a local run like a missing one; on CI it still fails loudly.
+ */
+async function startable(): Promise<boolean> {
+  if (!BROWSER) return false;
+  try {
+    await (await launch(BROWSER)).close();
+    return true;
+  } catch {
+    return false;
+  }
+}
+const SKIP = NO_BROWSER || (!MUST_RUN && !(await startable()));
+if (SKIP && BROWSER) {
+  // Say so out loud: a green local run of a skipped layout check proves nothing about the layout.
+  console.warn(
+    `Rendered tests are SKIPPED: ${BROWSER} is installed but could not start here. CI still runs them.`,
+  );
 }
 
 /** Builds the harness pages once. */
@@ -217,6 +256,12 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       const page = await browser.newPage({ viewport: { width, height } });
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(error.stack ?? error.message));
+      const requests: LoggedRequest[] = [];
+      page.on("request", (request) => {
+        const url = new URL(request.url());
+        if (url.origin === ORIGIN)
+          requests.push({ method: request.method(), path: `${url.pathname}${url.search}` });
+      });
       await page.route(new RegExp(`^${ORIGIN}/`), async (route) => {
         const url = new URL(route.request().url());
         const key = `${url.pathname}${url.search}`;
@@ -317,7 +362,9 @@ export function browserSession(): { renderAt(options: RenderOptions): Promise<Re
       };
       return {
         press: (key) => page.keyboard.press(key),
+        movePointer: (x, y) => page.mouse.move(x, y),
         errors: () => errors.slice(),
+        requests: () => requests.slice(),
         resize: (width, height) => page.setViewportSize({ width, height }),
         reload: async () => {
           await page.goto(`${ORIGIN}/${entry}${search}`, { waitUntil: "load" });

@@ -12,6 +12,7 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";
+import { groupRecommendations } from "./groups.ts";
 import type { RecommendationRecord } from "./recommendations.ts";
 import { buildRiskTab } from "./risk-view.ts";
 import type { CodeHealthEvidenceKind } from "./source.ts";
@@ -330,11 +331,15 @@ export class CodeHealthReader {
     return this.store.codeHealthSnapshot(() => {
       const page = this.store.codeHealthRecommendationPage(repoId, offset),
         revision = this.store.codeHealthRevision(repoId);
+      const rows = page.recommendations.filter((row): row is RecommendationRecord => row !== null);
       return {
         ...page,
-        recommendations: page.recommendations
-          .filter((row): row is RecommendationRecord => row !== null)
-          .map((row) => this.recommendationEvidence(row, revision)),
+        recommendations: rows.map((row) => this.recommendationEvidence(row, revision)),
+        // Built from every undecided proposal, not this page, so one cause is one group; first page only.
+        groups:
+          offset === 0
+            ? groupRecommendations(this.store.codeHealthOpenRepeatedRounds(repoId, this.now()))
+            : [],
       };
     });
   }
