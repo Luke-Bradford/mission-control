@@ -1513,10 +1513,15 @@ describe("startReview", () => {
           at: 3,
         }),
       ).toBe(true);
-      await until(() => expect(userLines()).toHaveLength(1));
-      return { installs, brief: userLines()[0] as string, runId };
+      // FLIGHT is on the crew here and may get lines of its own: pick out the reviewer's brief
+      const briefLine = () => userLines().find((l) => l.includes("Reviewed, not installed"));
+      await until(() => expect(briefLine()).toBeDefined());
+      return { installs, brief: briefLine() as string, runId };
     }
-    const flightNotes = () => store.comms(0).filter((m) => m.to === "flight-1");
+    const flightNotes = () =>
+      store
+        .comms(0)
+        .filter((m) => m.to === "flight-1" && m.text.includes("reviewed without an install"));
 
     it("reviews a scripts-only change read-only (PR 1520) and reports it", async () => {
       const r = reviewOfPush({
