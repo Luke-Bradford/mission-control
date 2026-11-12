@@ -963,7 +963,7 @@ a.comms-ref {
 /* The column is shared: the nav shrinks (never below Team and three agents) and scrolls; the Tickets list takes the rest. */
 .comms-left > .comms-nav {
   flex: 0 1 auto;
-  min-height: 320px;
+  min-height: 300px;
   overflow-y: auto;
 }
 
@@ -973,7 +973,7 @@ a.comms-ref {
   flex: 1 1 0;
   flex-direction: column;
   gap: var(--sp-1);
-  min-height: 280px;
+  min-height: 220px;
   padding-bottom: var(--sp-2);
   overflow: hidden;
   background: var(--surface);

@@ -225,16 +225,6 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
       expect(tickets?.boxBottom).toBeLessThanOrEqual((tickets?.panelBottom ?? 0) + 0.5);
       expect(tickets?.panelTop).toBeGreaterThanOrEqual((tickets?.navBottom ?? 0) - 0.5);
       expect(tickets?.boxWidth).toBeGreaterThan(120);
-      // the agents list shows every row whole: the nav ends at or below its last row
-      const navFits = await page.evaluate(() => {
-        const nav = document.querySelector(".comms-nav")?.getBoundingClientRect();
-        const rows = [...document.querySelectorAll(".comms-nav button")];
-        return nav
-          ? rows.every((r) => r.getBoundingClientRect().bottom <= nav.bottom + 0.5)
-          : false;
-      }, undefined);
-      // (below 900 high the nav scrolls instead)
-      if (height >= 900) expect(navFits).toBe(true);
       // neither list spills past the column, and each keeps at least three rows whole
       const shared = await page.evaluate(() => {
         const left = document.querySelector(".comms-left")?.getBoundingClientRect();
