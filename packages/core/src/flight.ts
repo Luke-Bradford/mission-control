@@ -1374,10 +1374,7 @@ export const FLIGHT_HANDLING_MAX_MS = 24 * 60 * 60_000;
 export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
-export const FLIGHT_REWAKE_MS = 60 * 60_000;
-/** What a re-wake says when FLIGHT left reasons of the last wake without a decision. */
-export const FLIGHT_LEFT_HEAD = "You left these:";
-/** The one Needs-you note raised when a second wake leaves the same reasons unhandled. */
+/** The one Needs-you note raised when a wake's reasons are left without a decision (FLIGHT is not woken again for them). */
 export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
 /**
  * The least time between two wakes. FLIGHT's own turn ending checks at once, so a fact its turn
