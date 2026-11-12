@@ -458,8 +458,8 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 
 | Check | Fires when | Then |
 | --- | --- | --- |
-| Unchanged rerun | The same configured check runs again on the same commit with a clean tree (no file changed), by one run | The hook refuses the rerun and says why (Claude hook and Codex approval); each refusal is recorded. A call killed by the Bash timeout, or a failure with no exit code, is not a result and may run again |
-| Retry loop | A ticket has 2 failed attempts, or a run has 3 carry-on resumes and no report | Parks the ticket: no new start of it (the operator's and FLIGHT's start pass) |
+| Unchanged rerun | The same configured check runs again on the same commit with a clean tree (no file changed), by one run | The hook refuses the rerun and says why (Claude hook and Codex approval); each refusal is recorded. A rerun is refused once the newest result on that commit passed, or the last two both failed with an exit code, so one retry after a failure is allowed. A call killed by the Bash timeout, or a failure with no exit code, is not a result and may run again |
+| Retry loop | A ticket has 2 failed attempts (a run that ended failed, or parked as stuck, refused, conflict, no CI or gate), or a run has 3 carry-on resumes and no report | Parks the ticket: no new start of it (the operator's and FLIGHT's start pass) |
 | Review rounds | A change goes past 2 review rounds | Queued reviews of that change do not start |
 | Restart storm | One agent starts more than 6 times in an hour | That agent's new starts are refused (FLIGHT's seat included) until the hour's count falls back |
 | Cost without output | A ticket has cost over 3x the median cost of its size (recorded costs only, 3 merged tickets of the size at least) and has no merge | Alarm to FLIGHT with the runs listed |

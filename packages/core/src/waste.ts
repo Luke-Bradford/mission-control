@@ -3,6 +3,8 @@
  * ticket, run or seat, never the whole crew. Every threshold lives here, once.
  */
 
+import { STUCK_PARK } from "./loop.ts";
+
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
 
@@ -54,6 +56,18 @@ export const WASTE_THRESHOLDS = Object.freeze({
   /** An event alarm (a rerun refused) stays open this long, then closes. */
   eventOpenMs: DAY_MS,
 });
+
+/**
+ * Park kinds that count as a failed attempt for the retry loop: the run stopped because it could not
+ * get through. Operator holds (controller check, UAT, merge hold, away) and budget are not failures.
+ */
+export const WASTE_FAILED_PARK_KINDS: readonly string[] = [
+  STUCK_PARK,
+  "refused",
+  "conflict",
+  "no-ci",
+  "gate",
+];
 
 /** The two windows the Audit panel shows. */
 export const WASTE_WINDOWS = ["day", "week"] as const;
@@ -128,7 +142,7 @@ export const wasteResolveHoldMs = (check: WasteCheck): number | null =>
 
 /** The refusal a rerun gets. */
 export const unchangedRerunText = (command: string, sha: string): string =>
-  `Not run: ${command} already ran on commit ${sha.slice(0, 7)} and nothing has changed since (no commit, no edited file). Its result is recorded. Change something first, or read that result.`;
+  `Not run: ${command} already ran on commit ${sha.slice(0, 7)} and nothing has changed since (no commit, no edited file). It passed, or it has failed twice on this commit; the result is recorded. Change something first, or read that result.`;
 
 /** Every start refusal a waste alarm gives begins with this; the engine reads it as a hold, not a fault. */
 export const WASTE_HELD_PREFIX = "Not started: waste alarm.";

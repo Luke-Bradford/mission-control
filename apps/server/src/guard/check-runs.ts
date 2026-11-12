@@ -120,7 +120,7 @@ const DROPS_PER_RUN = 30;
 const DROPPED_RUNS = 200;
 
 export interface CheckRecorderDeps {
-  store: Pick<Store, "addCheckRun"> & Partial<Pick<Store, "latestCheckRun" | "addRerunRefusal">>;
+  store: Pick<Store, "addCheckRun"> & Partial<Pick<Store, "latestCheckRun" | "latestCheckResults" | "addRerunRefusal">>;
   /** The run's repo's configured checks; empty when it has none (throws when its rules cannot be read). */
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
@@ -196,6 +196,12 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
           // a run that passed, or failed with an exit code, is a result. One killed by the Bash
           // timeout, or that failed with no exit code (a missing install), is not: it may run again.
           if (last === null || (!last.ok && last.exitCode === null)) continue;
+          // one retry after a failure is allowed (a flaky test, a busy machine); a pass, or a
+          // second failure on the same commit, is final
+          if (!last.ok) {
+            const results = d.store.latestCheckResults?.(runId, check, at.head, 2) ?? [];
+            if (results.length < 2 || results.some((x) => x.ok)) continue;
+          }
           d.store.addRerunRefusal?.(runId, check, at.head, now());
           return unchangedRerunText(check, at.head);
         }

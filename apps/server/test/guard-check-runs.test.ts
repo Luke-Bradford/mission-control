@@ -523,6 +523,18 @@ describe("why the recorder dropped a check call", () => {
                   at: found.at,
                 };
           },
+          latestCheckResults: (runId, command, headSha, limit) =>
+            stored()
+              .filter(
+                (x) =>
+                  x.runId === runId &&
+                  x.command === command &&
+                  x.headSha === headSha &&
+                  (x.ok || (x.exitCode ?? null) !== null),
+              )
+              .slice(-limit)
+              .reverse()
+              .map((x) => ({ ok: x.ok, exitCode: x.exitCode ?? null })),
           addRerunRefusal: (_run, command) => void refused.push(command),
         },
         checks: async () => CHECKS,
@@ -540,11 +552,15 @@ describe("why the recorder dropped a check call", () => {
       expect(refused).toEqual([LINT]);
     });
 
-    it("is refused after a failure that has an exit code", async () => {
-      const { r } = withRerun();
+    it("allows one retry after a failure with an exit code, and refuses the second identical failure", async () => {
+      const { r, refused } = withRerun();
       await r.begin(KEY, LINT);
       await r.end(KEY, false, 1);
-      expect(await r.rerun?.("r1", LINT)).not.toBeNull();
+      expect(await r.rerun?.("r1", LINT)).toBeNull();
+      await r.begin(KEY, LINT);
+      await r.end(KEY, false, 1);
+      expect(await r.rerun?.("r1", LINT)).toMatch(/Not run/);
+      expect(refused).toEqual([LINT]);
     });
 
     it("is not refused after a call the Bash timeout killed: it may run again with a longer one", async () => {

@@ -38,13 +38,14 @@ export function wasteQueries(db: DatabaseSync) {
       );
     },
 
-    /** The same check run again on the same commit by one run (clean tree each time). */
+    /** The same check run again on the same commit by one run (clean tree each time): past one retry after a failure, or again after a pass. */
     repeatedChecks(since: number) {
       return all(
         `SELECT c.run_id AS runId, c.command AS command, c.head_sha AS sha, COUNT(*) AS n,
            MAX(c.at) AS lastAt, r.ticket AS ticket, r.repo_id AS repoId, r.agent_id AS agentId
          FROM check_runs c JOIN runs r ON r.id = c.run_id
-         WHERE c.at >= ? AND (c.ok = 1 OR c.exit_code IS NOT NULL) GROUP BY c.run_id, c.command, c.head_sha HAVING COUNT(*) > 1`,
+         WHERE c.at >= ? AND (c.ok = 1 OR c.exit_code IS NOT NULL) GROUP BY c.run_id, c.command, c.head_sha
+         HAVING COUNT(*) > 2 OR (COUNT(*) > 1 AND SUM(c.ok) > 1)`,
         since,
       ) as unknown as {
         runId: string;
@@ -135,12 +136,21 @@ export function wasteQueries(db: DatabaseSync) {
         const had = out.get(ticket);
         if (had === undefined || at < had) out.set(ticket, at);
       };
+      // one pass over the PRs, then one over the runs' distinct branches (no run-by-PR join)
+      const mergedAt = new Map<string, number>();
       for (const r of all(
-        `SELECT r.ticket AS ticket, MIN(h.merged_at) AS at FROM runs r JOIN pr_history h
-           ON h.repo_id = r.repo_id AND json_extract(h.record, '$.branch') = r.branch
-         WHERE r.ticket IS NOT NULL AND r.branch IS NOT NULL GROUP BY r.ticket`,
-      ))
-        note(r.ticket as string, r.at as number);
+        `SELECT repo_id, json_extract(record, '$.branch') AS branch, MIN(merged_at) AS at
+         FROM pr_history GROUP BY repo_id, branch`,
+      )) {
+        if (r.branch === null) continue;
+        mergedAt.set(`${r.repo_id as string}\u0000${r.branch as string}`, r.at as number);
+      }
+      for (const r of all(
+        "SELECT DISTINCT repo_id, branch, ticket FROM runs WHERE ticket IS NOT NULL AND branch IS NOT NULL",
+      )) {
+        const at = mergedAt.get(`${r.repo_id as string}\u0000${r.branch as string}`);
+        if (at !== undefined) note(r.ticket as string, at);
+      }
       for (const r of all(
         "SELECT repo_id, ticket, MIN(merged_at) AS at FROM pull_requests WHERE ticket IS NOT NULL AND merged_at IS NOT NULL GROUP BY repo_id, ticket",
       )) {
@@ -160,8 +170,9 @@ export function wasteQueries(db: DatabaseSync) {
     },
 
     /** Each merged ticket's size and the cost of its runs, for the median of a size. */
-    mergedTicketCosts(): { ticket: string; size: string; costUsd: number }[] {
-      const merged = this.mergedTickets();
+    mergedTicketCosts(
+      merged: ReadonlyMap<string, number> = this.mergedTickets(),
+    ): { ticket: string; size: string; costUsd: number }[] {
       const sizes = new Map(
         all("SELECT repo_id, number, size FROM flow_issues WHERE size IS NOT NULL").map((r) => [
           `${r.repo_id as string}#${r.number as number}`,

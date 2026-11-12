@@ -12,6 +12,7 @@ import {
   WASTE_CHECK_TITLES,
   WASTE_CHECKS,
   WASTE_SPLIT_TITLE,
+  WASTE_FAILED_PARK_KINDS,
   WASTE_THRESHOLDS,
   WASTE_WINDOW_MS,
   WASTE_WINDOWS,
@@ -112,12 +113,15 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     if (r.ticket === null) continue;
     byTicket.set(r.ticket, [...(byTicket.get(r.ticket) ?? []), r]);
   }
+  const failedAttempt = (r: Run): boolean =>
+    r.status === "failed" ||
+    (r.loop?.parked != null && WASTE_FAILED_PARK_KINDS.includes(r.loop.parked.kind));
   const developer = (r: Run): boolean =>
     r.reviewId === null && agents.get(r.agentId)?.loop === "build";
   const retry = new Map<string, { failed: Run[]; resumed: { runId: string; n: number }[] }>();
   for (const [ticket, list] of byTicket) {
     if (done(ticket)) continue;
-    const failed = list.filter((r) => developer(r) && r.status === "failed");
+    const failed = list.filter((r) => developer(r) && failedAttempt(r));
     if (failed.length >= t.retryFailedAttempts) retry.set(ticket, { failed, resumed: [] });
   }
   for (const r of q.unreportedResumes(now - SCAN_DAYS * 24 * HOUR_MS, t.retryResumes)) {
@@ -195,7 +199,7 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
 
   // Cost without output: a ticket past 3x the median cost of its size, with no merge.
   const sizeCosts = new Map<string, number[]>();
-  for (const m of q.mergedTicketCosts()) {
+  for (const m of q.mergedTicketCosts(merged)) {
     sizeCosts.set(m.size, [...(sizeCosts.get(m.size) ?? []), m.costUsd]);
   }
   for (const [ticket, list] of byTicket) {

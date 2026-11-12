@@ -7457,6 +7457,24 @@ export class Store {
         };
   }
 
+  /** The newest results (a pass, or a failure with an exit code) of `command` by this run on `headSha`. */
+  latestCheckResults(
+    runId: string,
+    command: string,
+    headSha: string,
+    limit: number,
+  ): { ok: boolean; exitCode: number | null }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT ok, exit_code FROM check_runs
+           WHERE run_id = ? AND command = ? AND head_sha = ? AND (ok = 1 OR exit_code IS NOT NULL)
+           ORDER BY at DESC, id DESC LIMIT ?`,
+        )
+        .all(runId, command, headSha, limit) as Row[]
+    ).map((r) => ({ ok: r.ok === 1, exitCode: (r.exit_code as number | null) ?? null }));
+  }
+
   /** The newest result this run recorded for `command`, regardless of commit. */
   newestCheckRun(
     runId: string,

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type BoardItem, type PullRequestView, type Run, WASTE_THRESHOLDS } from "@mc/core";
+import { type BoardItem, type PullRequestView, type Run, type RunLoop, WASTE_THRESHOLDS } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { limitRows } from "../src/api.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -147,13 +147,18 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
   const replay = () => {
     // nine test runs on one head, six failed; two failed attempts and three parks
     let last = "";
+    // the loop's parks end the run 'ok': the park, not the status, is the failed attempt
     for (let i = 0; i < 3; i++) {
       const r = run("guido-1", {
         ticket: TICKET,
         startedAt: NOW - 16 * HOUR + i * 5 * HOUR,
-        status: i < 2 ? "failed" : "ok",
+        status: "ok",
       });
       store.upsertRun(r);
+      store.setRunLoop(r.id, {
+        phase: "parked",
+        parked: { kind: "stuck", reason: "no progress", ended: true },
+      } as RunLoop);
       last = r.id;
     }
     for (let i = 0; i < 9; i++) checkOn(last, LINT, SHA, NOW - 3 * HOUR + i * MIN, i < 3);
@@ -163,10 +168,10 @@ describe("the #1596 replay (retry loop and unchanged rerun)", () => {
     replay();
     syncWasteAlarms(config, store, NOW);
     const by = Object.fromEntries(openWasteAlarms(store).map((a) => [a.check, a]));
-    expect(by["retry-loop"]).toMatchObject({ subject: TICKET, ticket: TICKET, level: 2 });
+    expect(by["retry-loop"]).toMatchObject({ subject: TICKET, ticket: TICKET, level: 3 });
     expect(by["unchanged-rerun"]).toMatchObject({ ticket: TICKET, level: 8 });
     expect(by["unchanged-rerun"]?.evidence).toContain(LINT);
-    expect(ticketParked(store, TICKET)).toMatch(/2 failed attempts/);
+    expect(ticketParked(store, TICKET)).toMatch(/3 failed attempts/);
     expect(ticketParked(store, "mc#1")).toBeNull();
   });
 
@@ -237,7 +242,7 @@ describe("unchanged rerun refusal", () => {
       now: () => NOW,
     });
     expect(await recorder.rerun?.(r.id, "pnpm -s lint")).toBeNull();
-    checkOn(r.id, "pnpm -s lint", "feedbeef00", NOW - MIN);
+    checkOn(r.id, "pnpm -s lint", "feedbeef00", NOW - MIN, true);
     expect(await recorder.rerun?.(r.id, "pnpm -s lint")).toMatch(
       /Not run: pnpm -s lint already ran on commit feedbee and nothing has changed/,
     );
@@ -577,5 +582,31 @@ describe("the waste_alarm FLIGHT signal", () => {
     const next = read(NOW + MIN);
     expect(next).toHaveLength(1);
     expect(next[0]?.told).toBe(true);
+  });
+});
+
+describe("the merged-ticket read at today's size", () => {
+  it("syncs 20,000 runs and 2,000 merged PRs well inside a tick", () => {
+    const db = (store as unknown as { db: { exec(sql: string): void } }).db;
+    db.exec("BEGIN");
+    for (let i = 0; i < 20_000; i++) {
+      store.upsertRun(
+        run("guido-1", {
+          ticket: `mc#${i % 2000}`,
+          branch: `feature/${i % 2000}`,
+          startedAt: NOW - 3 * 24 * HOUR - i,
+        }),
+      );
+    }
+    db.exec("COMMIT");
+    store.upsertPullRequests(
+      "mc",
+      Array.from({ length: 2000 }, (_, i) => mergedPr(i, `feature/${i}`, NOW - 2 * DAY)),
+      NOW,
+    );
+    const t0 = performance.now();
+    store.waste.mergedTickets();
+    syncWasteAlarms(config, store, NOW);
+    expect(performance.now() - t0).toBeLessThan(2000);
   });
 });
