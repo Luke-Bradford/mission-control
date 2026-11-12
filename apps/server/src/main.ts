@@ -73,6 +73,7 @@ import {
   DESIGN_PREVIEW_SWEEP_MS,
   DesignPreviews,
 } from "./design-preview/previews.ts";
+import { DISK_SWEEP_EVERY_MS, sweepDataFolder } from "./disk/sweep.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -1177,6 +1178,26 @@ export async function main(): Promise<void> {
     setInterval(everyTenMinutes, TIDY_EVERY_MS).unref();
     setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
     setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
+  }
+  // Local only: pictures, evidence and scratch of finished work are removed from the data folder.
+  if (!preview) {
+    const dataDir = dirname(dbPath);
+    const diskSweep = () => {
+      try {
+        sweepDataFolder({
+          dataDir,
+          now: Date.now,
+          openPrs: store.openPrKeys(),
+          citedAssets: store.qaAssetIdsOfOpenPrs(),
+          keptShots: store.reviewShotIdsOfOpenPrs(),
+          log,
+        });
+      } catch (e) {
+        log(`disk sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    };
+    setInterval(diskSweep, DISK_SWEEP_EVERY_MS).unref();
+    setTimeout(diskSweep, 2 * 60_000).unref();
   }
   // Local only (no GitHub write): merged PRs' reviews are recorded and due proposals re-measured.
   const audit = () => {

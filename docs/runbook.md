@@ -2995,3 +2995,14 @@ FLIGHT can withdraw its own brief from a protected item. This retains the underl
 source and protections; the original brief remains in history. Its unfinished-wake reminder stays
 in FLIGHT's wake and is omitted from operator attention. Answered and superseded note briefs
 are excluded from the current projection.
+
+## Disk housekeeping
+
+The hub removes its own finished work so its data folder stops growing (#1756). Once an hour (and two minutes after boot) on the live hub, `apps/server/src/disk/sweep.ts` runs one sweep and logs `disk sweep: removed N item(s), B bytes, from the data folder` when it removed anything.
+
+- **Pictures and evidence only while a PR is open.** A PR's `pr-evidence/<repo>/<pr>` folder, its QA report images (`qa-report-assets`) and its review screenshots (`review-screenshots`) are removed once the PR is no longer open and its files have sat untouched for an hour. The QA history keeps its text record; its picture links then stop resolving.
+- **Scratch is temporary.** Every folder under the data folder's `controller/` (except `controller/designs`) and under `pr-evidence-work/` that has been untouched for 3 days is removed.
+- **Only inside the data folder.** The sweep never follows a symlink and never removes a path that resolves outside the data folder. It does not touch observed loops or their worktrees.
+- **What the hub holds.** `GET /api/disk-use` returns bytes by kind: `worktrees` (the crew's worktree folder), `pictures`, `evidence`, `scratch`, `database`, and their `total`. It is measured at most once a minute.
+
+Not built yet: worktree removal for closed tickets and smaller set-aside worktrees, the disk budget cap, and the Mac panel's disk view.

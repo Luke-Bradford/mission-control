@@ -280,6 +280,7 @@ import {
 } from "./crew-pause.ts";
 import { readDependencyChains } from "./dependency-chains.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
+import { type DiskUse, diskUse } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -3010,6 +3011,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .type("text/markdown; charset=utf-8")
           .header("content-disposition", `attachment; filename="qa-${report.id}.md"`)
           .send(qaReportMarkdown(report));
+      });
+      // Reader: docs/runbook.md#disk-housekeeping (what the hub holds on disk, by kind; the Mac panel shows it)
+      let diskUseCache: { at: number; use: DiskUse } | undefined;
+      api.get("/disk-use", async () => {
+        // Walking worktrees is slow: one walk a minute serves every reader.
+        const at = Date.now();
+        if (diskUseCache === undefined || at - diskUseCache.at > 60_000) {
+          diskUseCache = {
+            at,
+            use: diskUse({ dataDir: dirname(store.path), worktrees: config.crew?.worktrees }),
+          };
+        }
+        return diskUseCache.use;
       });
       // Reader: docs/runbook.md#durable-qa-reports (retained before/after and review-browser PNGs)
       api.get<{ Params: { id: string } }>("/qa-report-assets/:id", async (req, reply) => {
