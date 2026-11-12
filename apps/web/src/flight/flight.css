@@ -1093,7 +1093,7 @@ button.flight-link:hover {
   display: grid;
   /* The first row is the tab's visible height (at least what Seats and Blocked chains need), so the
      queue and the triggers sit below the first screen and cannot take its space. */
-  grid-template-rows: minmax(640px, 100%) auto auto;
+  grid-template-rows: minmax(640px, 100%) minmax(180px, max-content) minmax(130px, max-content);
   gap: var(--sp-3);
   min-height: 0;
 }

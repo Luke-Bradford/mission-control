@@ -16,8 +16,6 @@ const SIZES = [
 const THEMES = ["light", "dark"] as const;
 const PANEL_MIN = 360;
 const SEATS_MIN = 260;
-/** The least height 11 seat rows need. */
-const SEATS_ROWS = 428;
 
 const node = (ref: string, over: Partial<ChainNode> = {}): ChainNode => ({
   ref,
@@ -113,7 +111,13 @@ describeRendered("Blocked chains in a browser", () => {
                 return { top: r.top - top, bottom: r.bottom - top, height: r.height };
               };
               const chainsScroll = document.querySelector<HTMLElement>("#chainsP .bc-scroll");
+              const seatsScroll = document.querySelector<HTMLElement>("#wifP .flight-panel-scroll");
+              const seatsRect = rect("wifP");
               return {
+                // What Seats needs to show all its rows: its box plus what its scroller cuts off.
+                seatsNeed: seatsScroll
+                  ? seatsRect.height + (seatsScroll.scrollHeight - seatsScroll.clientHeight)
+                  : seatsRect.height,
                 pageOverflow: root.scrollHeight - root.clientHeight,
                 sideways: root.scrollWidth - root.clientWidth,
                 screen: crew.clientHeight,
@@ -134,9 +138,9 @@ describeRendered("Blocked chains in a browser", () => {
             expect(m.chains.bottom, label).toBeLessThanOrEqual(
               Math.max(m.screen, SEATS_MIN + PANEL_MIN + gap) + 1,
             );
-            // Seats keeps its rows (11 rows are 428 px at the least) and gives way first.
+            // Seats keeps all its rows unless the screen is too short, and then gives way first.
             expect(m.seats.height, label).toBeGreaterThanOrEqual(
-              Math.min(SEATS_ROWS, m.screen - PANEL_MIN - gap) - 2,
+              Math.min(m.seatsNeed, m.screen - PANEL_MIN - gap) - 2,
             );
             expect(m.seats.height, label).toBeGreaterThanOrEqual(SEATS_MIN - 0.5);
             // The queue sits below that screen, whatever its length.
