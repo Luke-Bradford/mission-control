@@ -466,11 +466,17 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 | Coordination overhead | FLIGHT's recorded spend passes the developers' over a day (and is at least $10) | Alarm with the split; controller tokens are named, not priced |
 | Ticket churn | Tickets opened reach tickets closed in a day (5 opened at least), a ticket reads as a half, slice or follow-up, or a parked ticket starts again | Alarm to FLIGHT naming the tickets |
 | Runs per ticket | A ticket takes more than 3 developer runs without a merge | Alarm to FLIGHT with the runs and their blocking review findings |
+| Failed review rounds | An open PR has 2 reviews that reported blocking findings or a failed verdict | Alarm to FLIGHT; reviews go on. FLIGHT's state also lists the count on each PR (`prs[].reviewRounds`) |
+| Clearance waiting | A run has waited 2 hours on FLIGHT's clearance (a hard-rule PR, `awaitingFlight`) | Alarm to FLIGHT, once, with the hours waited. `GET /api/waste` lists it from 24 hours |
 
 - `GET /waste` also serves `flight`: 14 rolling 24-hour buckets (oldest first, the last ending now) of
   FLIGHT's wakes, its `wait` decisions, and its tokens against every run's new tokens (`tokenShare`, null
   with no tokens recorded), so the change to activity-only wakes can be read before and after. A bucket
   is counted by when the wake, decision or run started.
+- `GET /waste` also serves `counts`: the latest daily retrospective's tickets opened and closed, runs per
+  ticket (tickets with runs, mean, busiest), review rounds (reported, failed) and idle seat-hours, over the
+  retrospective's 24 hours; null before the first. `budget_unused` is a FLIGHT signal, not an alarm: a free
+  build seat idle 30 minutes while its account's 7-day use is under 50% raises one fact per idle spell.
 - One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
   ends: the ticket merges or closes, the count falls back, or the day passes.
 - FLIGHT is woken once per alarm, through the `waste_alarm` signal, except an unchanged-rerun alarm:
@@ -1442,6 +1448,7 @@ direction, irreversible actions and security exceptions go to the operator, park
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
 | `idle_no_work` | a build seat is idle 5 minutes and Ready holds nothing startable for its area and lane (for example only another lane's tickets); the evidence names the seat and its area, and FLIGHT promotes work for it. At most one per seat per hour |
+| `budget_unused` | a free build seat is idle 30 minutes while its account has used under 50% of its 7-day window; the evidence names the account and its weekly use. Once per idle spell |
 | `old_park` | a run has been parked for 15 minutes |
 | `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
