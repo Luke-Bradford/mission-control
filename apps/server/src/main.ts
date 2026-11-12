@@ -73,7 +73,7 @@ import {
   DESIGN_PREVIEW_SWEEP_MS,
   DesignPreviews,
 } from "./design-preview/previews.ts";
-import { DISK_SWEEP_EVERY_MS, sweepDataFolder } from "./disk/sweep.ts";
+import { DISK_SWEEP_EVERY_MS, diskBudgetBytes, sweepDataFolder } from "./disk/sweep.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -865,6 +865,7 @@ export async function main(): Promise<void> {
     inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
     log: (line) => log(line),
   });
+  const crewTidy = createCrewTidy({ config, store, pruneLocal: () => branchTidy.pruneLocal() });
   // set once the app exists: `mc operator` calls its routes in process
   let hubApp: ReturnType<typeof buildApp> | null = null;
 
@@ -877,7 +878,7 @@ export async function main(): Promise<void> {
             repoId === previewRepoId && designPreviews.list().some((v) => v.ticket === ticket),
         }),
     operator: operatorCall(() => hubApp, operatorToken),
-    tidy: createCrewTidy({ config, store, pruneLocal: () => branchTidy.pruneLocal() }),
+    tidy: crewTidy,
     hudShots,
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
@@ -1190,6 +1191,8 @@ export async function main(): Promise<void> {
           openPrs: store.openPrKeys(),
           citedAssets: store.qaAssetIdsOfOpenPrs(),
           keptShots: store.reviewShotIdsOfOpenPrs(),
+          budgetBytes: diskBudgetBytes(process.env),
+          worktrees: config.crew?.worktrees,
           log,
         });
       } catch (e) {
@@ -1198,6 +1201,24 @@ export async function main(): Promise<void> {
     };
     setInterval(diskSweep, DISK_SWEEP_EVERY_MS).unref();
     setTimeout(diskSweep, 2 * 60_000).unref();
+    // Crew worktrees: a finished PR's go, a set-aside run's lose node_modules. Where the engine runs.
+    if (engineOn) {
+      const worktreeTidy = () => {
+        crewTidy
+          .tidyFinished(Date.now())
+          .then((r) => {
+            if (r.removed.length + r.trimmed.length > 0)
+              log(
+                `worktree tidy: removed ${r.removed.length} worktree(s), trimmed ${r.trimmed.length} node_modules`,
+              );
+          })
+          .catch((e: unknown) => {
+            log(`worktree tidy failed: ${e instanceof Error ? e.message : String(e)}`);
+          });
+      };
+      setInterval(worktreeTidy, TIDY_EVERY_MS).unref();
+      setTimeout(worktreeTidy, TIDY_EVERY_MS).unref();
+    }
   }
   // Local only (no GitHub write): merged PRs' reviews are recorded and due proposals re-measured.
   const audit = () => {

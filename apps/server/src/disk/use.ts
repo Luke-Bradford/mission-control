@@ -1,6 +1,6 @@
 /** What the hub holds on disk, by kind (#1756): the figures the Mac panel and the disk flag show. */
 import { join } from "node:path";
-import { DATA_DIRS, measure } from "./sweep.ts";
+import { DATA_DIRS, measure } from "./measure.ts";
 
 export interface DiskUse {
   worktrees: number;

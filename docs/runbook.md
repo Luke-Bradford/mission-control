@@ -3005,4 +3005,8 @@ The hub removes its own finished work so its data folder stops growing (#1756). 
 - **Only inside the data folder.** The sweep never follows a symlink and never removes a path that resolves outside the data folder. It does not touch observed loops or their worktrees.
 - **What the hub holds.** `GET /api/disk-use` returns bytes by kind: `worktrees` (the crew's worktree folder), `pictures`, `evidence`, `scratch`, `database`, and their `total`. It is measured at most once a minute.
 
-Not built yet: worktree removal for closed tickets and smaller set-aside worktrees, the disk budget cap, and the Mac panel's disk view.
+- **One cap.** The hub's budget is 10 GB (`MC_DISK_BUDGET_GB` overrides it). When the data folder holds more, the same sweep removes scratch first, then the oldest evidence and pictures, until it fits, and logs `disk budget: ...` naming what the hub holds by kind. The crew's worktrees count in that list; the crew tidy, not the sweep, removes them.
+
+- **Crew worktrees.** Every 10 minutes (where the engine runs) the crew tidy looks at runs that ended in the last 30 days. If the branch's PR has merged or closed, the clean worktree is removed (the branch stays). If the work is still open (a set-aside run), only that worktree's `node_modules` is removed, so it stays small; the seat reinstalls when the run resumes. A dirty worktree, a live run's and one a seat still holds are left alone. The log line is `worktree tidy: removed N worktree(s), trimmed M node_modules`.
+
+Not built yet: a budget key in `config.yaml`, pictures attached to a Needs-you question (they are removed when that feature lands), and the Mac panel's disk view.
