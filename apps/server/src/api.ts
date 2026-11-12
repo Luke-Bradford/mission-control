@@ -29,6 +29,7 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_HIDE_NOTICES,
   COMMS_LABELS,
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
@@ -2133,35 +2134,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const commsPaging = (query: {
         limit?: unknown;
         before?: unknown;
-      }): { limit: number; before: string | undefined } | null => {
+        notices?: unknown;
+      }): { limit: number; before: string | undefined; hideNotices: boolean } | null => {
         const limit = parseLimit(query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
-        const { before } = query;
+        const { before, notices } = query;
         if (limit === null) return null;
+        if (notices !== undefined && notices !== COMMS_HIDE_NOTICES) return null;
         if (
           before !== undefined &&
           (typeof before !== "string" || !/^comms:[1-9]\d*$/.test(before))
         )
           return null;
-        return { limit, before };
+        return { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES };
       };
-      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id`;
+      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id; notices must be ${COMMS_HIDE_NOTICES}`;
       /** One page of a scope: the newest messages, the read cursor, unread over the whole scope. */
       const commsScopePage = (
         scope: CommsReadScope,
         cursorKey: string,
-        paging: { limit: number; before: string | undefined },
+        paging: { limit: number; before: string | undefined; hideNotices: boolean },
         countsOnly = false,
         recentSince?: number,
       ) => {
         const page = countsOnly
           ? { rows: [], hasMore: false }
-          : store.commsPage(scope, paging.limit, paging.before, recentSince);
+          : store.commsPage(scope, paging.limit, paging.before, recentSince, paging.hideNotices);
         const cursor = store.commsScopeCursor(cursorKey);
         return {
           messages: storedCommsMessages(page.rows),
           hasMore: page.hasMore,
           cursor,
-          unread: store.commsCounts(scope, cursor, recentSince).unread,
+          unread: store.commsCounts(scope, cursor, recentSince, paging.hideNotices).unread,
         };
       };
       const commsScope = (
@@ -2187,31 +2190,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown; history?: unknown } }>(
-        "/comms/crew",
-        (req, reply) => {
-          const paging = commsPaging(req.query);
-          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
-          if (req.query.history !== undefined && req.query.history !== "1")
-            return reply.code(400).send({ error: "history must be 1 when supplied" });
-          const history = req.query.history === "1";
-          const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
-          const page = commsScopePage({ crew: true }, "crew", paging, false, since);
-          const hidden =
-            !history &&
-            store.commsCounts({ crew: true }, null).count >
-              store.commsCounts({ crew: true }, null, since).count;
-          return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
-        },
-      );
+      api.get<{
+        Querystring: { limit?: unknown; before?: unknown; history?: unknown; notices?: unknown };
+      }>("/comms/crew", (req, reply) => {
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        if (req.query.history !== undefined && req.query.history !== "1")
+          return reply.code(400).send({ error: "history must be 1 when supplied" });
+        const history = req.query.history === "1";
+        const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
+        const page = commsScopePage({ crew: true }, "crew", paging, false, since);
+        const hidden =
+          !history &&
+          store.commsCounts({ crew: true }, null, undefined, paging.hideNotices).count >
+            store.commsCounts({ crew: true }, null, since, paging.hideNotices).count;
+        return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
+      });
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+      api.get<{ Querystring: { limit?: unknown; before?: unknown; notices?: unknown } }>(
         "/comms/flight",
         async (req, reply) => {
           const limit = parseLimit(req.query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
           const before = req.query.before;
+          const { notices } = req.query;
           if (
             limit === null ||
+            (notices !== undefined && notices !== COMMS_HIDE_NOTICES) ||
             (before !== undefined &&
               (typeof before !== "string" || before.length === 0 || before.length > 300))
           )
@@ -2234,15 +2238,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             runId,
           };
           try {
-            return {
-              ...(await flightConversation(
-                store,
-                flight,
-                found.session.seats.map((s) => s.id),
-                { limit, before },
-              )),
-              flight: flightStatus,
-            };
+            const page = await flightConversation(
+              store,
+              flight,
+              found.session.seats.map((s) => s.id),
+              { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES },
+            );
+            return { ...page, flight: flightStatus };
           } catch (error) {
             if (error instanceof FlightConversationCursorError)
               return reply.code(400).send({ error: error.message });
@@ -2253,7 +2255,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (agent Comms)
       api.get<{
         Params: { id: string };
-        Querystring: { limit?: unknown; before?: unknown; summary?: unknown };
+        Querystring: { limit?: unknown; before?: unknown; summary?: unknown; notices?: unknown };
       }>("/comms/agents/:id", (req, reply) => {
         const id = req.params.id;
         if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
@@ -2267,20 +2269,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const all = commsScopePage({ agent: id }, `agent-all:${id}`, paging, summary === "1");
         const inboxCursor = store.commsScopeCursor(`inbox:${id}`);
         const inbox =
-          summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
+          summary === "1"
+            ? none
+            : store.commsPage(
+                { inbox: id },
+                paging.limit,
+                paging.before,
+                undefined,
+                paging.hideNotices,
+              );
         // The conversation list: one line per contact, from counts, never their histories.
-        const contacts = commsContacts(id).map((contact) => {
-          const scope: CommsReadScope = { pair: [id, contact] };
-          const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
-          const last = store.commsPage(scope, 1).rows[0];
-          return {
-            id: contact,
-            lastMessage: last === undefined ? null : storedCommsMessage(last),
-            count: counts.count,
-            hasMessages: counts.count > 0,
-            unread: counts.unread,
-          };
-        });
+        const contacts = commsContacts(id)
+          .map((contact) => {
+            const scope: CommsReadScope = { pair: [id, contact] };
+            const counts = store.commsCounts(
+              scope,
+              store.commsScopeCursor(pairScope(id, contact)),
+              undefined,
+              paging.hideNotices,
+            );
+            const last = store.commsPage(scope, 1, undefined, undefined, paging.hideNotices)
+              .rows[0];
+            return {
+              id: contact,
+              lastMessage: last === undefined ? null : storedCommsMessage(last),
+              count: counts.count,
+              hasMessages: counts.count > 0,
+              unread: counts.unread,
+            };
+          })
+          // with notices hidden, a contact that only sent notices has nothing to show
+          .filter((contact) => !paging.hideNotices || contact.count > 0);
         return {
           ...all,
           inbox: storedCommsMessages(inbox.rows),
