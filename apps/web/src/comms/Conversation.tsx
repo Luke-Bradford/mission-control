@@ -746,7 +746,7 @@ function PinnedMessage({ message }: { message: FlightConversationMessage }) {
 }
 
 /** Empty with the switch on: the thread may hold notices, so never say it has nothing. */
-const HIDDEN_NOTICES_EMPTY = "No messages here besides hub notices, which are hidden.";
+const HIDDEN_NOTICES_EMPTY = "No messages here. Hub notices are hidden.";
 
 function ModernConversation({
   view,

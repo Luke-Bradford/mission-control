@@ -145,7 +145,7 @@ describe("Comms routes", () => {
         onOpenMessage={() => {}}
       />,
     );
-    await screen.findByText("No messages here besides hub notices, which are hidden.");
+    await screen.findByText("No messages here. Hub notices are hidden.");
     expect(screen.queryByText("No messages yet.")).toBeNull();
   });
   it("keeps the reader's place when the conversation rerenders", async () => {
