@@ -484,8 +484,16 @@ describe("Comms routes", () => {
       expect(document.querySelector(".comms-ref-plain")?.textContent).toBe("#5");
     });
 
-    it("opens the message's ticket page from a PR number", async () => {
-      await open({ ...base, ticket: "shop-app#5", ref: null, text: "see PR 12" });
+    it("keeps GitHub for PRs named in the text of a message with a ticket", async () => {
+      await open({ ...base, ticket: "shop-app#5", ref: null, text: "see PR 12 and PR 99" });
+      const first = await screen.findByRole("link", { name: "PR 12 on GitHub" });
+      expect(first.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/12");
+      const second = screen.getByRole("link", { name: "PR 99 on GitHub" });
+      expect(second.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/99");
+    });
+
+    it("opens the message's ticket page from the PR its ref names", async () => {
+      await open({ ...base, ticket: "shop-app#5", ref: "PR 12", text: "merged" });
       const link = await screen.findByRole("link", { name: "PR 12" });
       expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
       fireEvent.click(link);
@@ -547,7 +555,7 @@ describe("Comms routes", () => {
     });
   });
 
-  it("shows per-contact unread, retries a failed read, unpins, and does not send to a missing FLIGHT seat", async () => {
+  it("labels contact figures as messages, retries a failed read, unpins, and does not send to a missing FLIGHT seat", async () => {
     const pin = {
       id: "comms:pin",
       at: NOW,
@@ -592,7 +600,9 @@ describe("Comms routes", () => {
         row={seatRow({ id: "alpha" })}
       />,
     );
-    expect(await screen.findByText(/3 unread/)).toBeTruthy();
+    // beta is not the operator: its figure is a message count, never "unread"
+    expect(await screen.findByText(/beta · 1 message/i)).toBeTruthy();
+    expect(screen.queryByText(/unread/)).toBeNull();
     expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(reads).toBe(2));

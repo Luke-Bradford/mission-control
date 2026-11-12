@@ -141,9 +141,8 @@ export function TicketsList() {
                   <span className="comms-ticket-title" title={row.title}>
                     {row.title}
                   </span>
-                  <small>
-                    {row.status ? `${row.status} · ` : ""}
-                    <span>{plural(row.messages, "message")}</span>
+                  <small title={row.status ? `${row.status} · ${row.title}` : row.title}>
+                    {plural(row.messages, "message")}
                   </small>
                 </a>
                 <button

@@ -1027,34 +1027,30 @@ a.comms-ref {
 
 .comms-ticket-open {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 0 var(--sp-2);
-  align-items: baseline;
-  min-height: 28px;
+  align-items: center;
+  min-height: 32px;
   padding: 0 var(--sp-1);
   color: var(--fg);
   text-decoration: none;
 }
 
-/* Two lines at most; the whole title opens on focus or hover, so a keyboard reader gets it too. */
+/* One line per ticket so the list shows many at once; the full title is in title= and opens on focus or hover. */
 .comms-ticket-title {
-  display: -webkit-box;
   overflow: hidden;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .comms-ticket-open:focus-visible .comms-ticket-title,
 .comms-ticket-open:hover .comms-ticket-title {
-  display: block;
-  overflow: visible;
+  text-overflow: clip;
 }
 
 .comms-ticket-open small {
-  grid-column: 2;
   color: var(--muted);
+  white-space: nowrap;
 }
 
 .comms-ticket-filter {

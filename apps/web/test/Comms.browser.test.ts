@@ -140,10 +140,9 @@ const flightPage = {
 };
 // A busy Tickets list: 50 tickets with messages, some with long titles.
 const TALKED = Array.from({ length: 50 }, (_, i) => 3000 + i);
+// Every title is real-length, so the row-count checks test live-sized data, not "Ticket 3001".
 const ticketTitle = (n: number) =>
-  n % 5 === 0
-    ? `Ticket ${n}: a very long title that runs past the width of the left column and must wrap or clip`
-    : `Ticket ${n}`;
+  `Ticket ${n}: a long title like the board's real ones that runs well past the width of the left column and must clip to one line`;
 const flightApi = {
   ...api,
   "/api/repos": REPOS,
@@ -245,7 +244,18 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
         };
       }, undefined);
       expect(shared.ticketsInColumn).toBe(true);
-      expect(shared.ticketRows).toBeGreaterThanOrEqual(3);
+      // one line per ticket, so a tall window shows at least five whole rows of real-length titles
+      expect(shared.ticketRows).toBeGreaterThanOrEqual(height >= 1000 ? 5 : 3);
+      const tallest = await page.evaluate(
+        () =>
+          Math.max(
+            ...[...document.querySelectorAll(".comms-ticket-list li")].map(
+              (li) => li.getBoundingClientRect().height,
+            ),
+          ),
+        undefined,
+      );
+      expect(tallest).toBeLessThanOrEqual(40);
       expect(shared.agentRows).toBeGreaterThanOrEqual(3);
       // the busy list shows rows, each with its message count, and no row runs past the panel
       const listed = await page.evaluate(() => {

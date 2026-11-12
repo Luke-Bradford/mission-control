@@ -663,3 +663,45 @@ it("words a long wait by its largest unit, and names seats by call sign, in both
   const said = await screen.findByRole("region", { name: "Just said" });
   expect(said.textContent).toMatch(/RETRO-1 → GUIDO-1/);
 });
+
+it("keeps what the operator owes off Waiting on a reply and points to Needs you", async () => {
+  stubFetch({
+    "/api/comms/links": {
+      links: [
+        { from: "guido-1", to: "retro-1", count: 1 },
+        { from: "guido-1", to: "CAPCOM", count: 1 },
+      ],
+    },
+    "/api/comms/open": {
+      items: [
+        {
+          id: "a",
+          label: "question",
+          from: "guido-1",
+          to: "retro-1",
+          ticket: null,
+          waitedMs: 60_000,
+          question: "Which branch?",
+        },
+        {
+          id: "b",
+          label: "question",
+          from: "guido-1",
+          to: "CAPCOM",
+          ticket: null,
+          waitedMs: 120_000,
+          question: "Ship it?",
+        },
+      ],
+    },
+    "/api/comms/feed": { messages: [] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const waiting = await screen.findByRole("region", { name: "Waiting on a reply" });
+  expect(waiting.textContent).toContain("Which branch?");
+  expect(waiting.textContent).not.toContain("Ship it?");
+  const link = await screen.findByRole("link", { name: "1 waiting for you" });
+  expect(link.getAttribute("href")).toBe("/needs-you");
+});

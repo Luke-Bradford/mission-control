@@ -4,12 +4,12 @@ import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { percent, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
-import { type CommsView, navigate } from "../router.ts";
+import { type CommsView, NEEDS_YOU_PATH, navigate } from "../router.ts";
 import { type ChartMode, ChartModeSwitch, CommsRails } from "./CommsRails.tsx";
 import { chartHref, commsHrefFor, useChartFilter } from "./chartPaths.ts";
 import { useReducedMotion, waitWord } from "./chartTypes.ts";
 import { type ChartFilter, pairFilter } from "./commsFilter.ts";
-import { useChartData } from "./useChartData.ts";
+import { CAPCOM, useChartData } from "./useChartData.ts";
 
 /** The live crew's communication chart, with the traffic and message-length panels beneath it. */
 export function CommsGraph({
@@ -195,14 +195,33 @@ export function SignalLists({
   className?: string;
 }) {
   const nameOf = (id: string) => chart.seats.find((seat) => seat.id === id)?.name ?? id;
+  // What waits on the operator is answered on Needs you, not here: this list holds waits between
+  // agents, and one line says how many wait for the operator.
+  const forYou = chart.edges.reduce(
+    (n, edge) => (edge.a === CAPCOM || edge.b === CAPCOM ? n + (edge.waiting?.n ?? 0) : n),
+    0,
+  );
   return (
     <div className={`comms-signal-lists ${className}`.trim()}>
+      {forYou > 0 && (
+        <p className="comms-waiting-you">
+          <a
+            href={NEEDS_YOU_PATH}
+            onClick={(event) => {
+              event.preventDefault();
+              navigate(NEEDS_YOU_PATH);
+            }}
+          >
+            {forYou} waiting for you
+          </a>
+        </p>
+      )}
       <MessageList
         title="Waiting on a reply"
         empty="Nobody owes a reply."
         note={chart.waitingNote}
         rows={chart.edges
-          .filter((edge) => edge.waiting)
+          .filter((edge) => edge.waiting && edge.a !== CAPCOM && edge.b !== CAPCOM)
           .sort((a, b) => (b.waiting?.ms ?? 0) - (a.waiting?.ms ?? 0))
           .map((edge) => ({
             key: edge.key,

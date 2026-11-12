@@ -22,12 +22,13 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { useSeatName } from "../crew.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { messageStateLine, sendStateLine } from "../flight/conversation.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
-import { ago, dayMonth, hhmm } from "../fmt.ts";
+import { ago, dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket } from "../hud/RepoRef.tsx";
@@ -105,9 +106,12 @@ function RefChip({
   ticket,
   from,
   to,
+  about = false,
 }: {
   refText: string;
   ticket: string | null;
+  /** The message is structurally about this ref (its `ref` field), not a number in its text. */
+  about?: boolean;
   from: string;
   to: string;
 }) {
@@ -115,7 +119,8 @@ function RefChip({
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const repoOf = (id: string) => crew?.rows.find((r) => r.id === id)?.repoId;
   const repoId = refRepo(ticket, repoOf(from) ?? repoOf(to), config);
-  const target = repoId === null ? null : resolveRef(refText, repoId, config, ticket);
+  const target =
+    repoId === null ? null : resolveRef(refText, repoId, config, about ? ticket : null);
   const filter = () => navigate(commsTicketPath(refText, ticketForRef(refText, ticket)));
   return (
     <span className="comms-ref-pair">
@@ -172,7 +177,8 @@ function resolveRef(
   const issue = /^#(\d+)$/.exec(refText)?.[1];
   if (issue !== undefined) return { to: ticketPath(repoId, Number(issue)), github: null };
   const pr = /^PR (\d+)$/.exec(refText)?.[1];
-  // a PR the message is about belongs to the message's ticket: open that ticket's page
+  // a PR the message is about (its own ref) belongs to the message's ticket: open that ticket's
+  // page. A PR named in the text may belong to any ticket, so it keeps its GitHub link.
   const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
   if (pr !== undefined && parsed)
     return { to: ticketPath(parsed.repoId, parsed.number), github: null };
@@ -408,6 +414,7 @@ function MessagePane({
                     ticket={message.ticket}
                     from={message.from}
                     to={message.to}
+                    about
                   />
                 )}
                 {message.id.startsWith("comms:") && (
@@ -700,6 +707,7 @@ function StoredContacts({
   view: CommsView;
 }) {
   const active = view.kind === "contact" ? view.contactId : null;
+  const seatName = useSeatName();
   return (
     <aside className="comms-contacts" aria-label={`${agentId}'s contacts`}>
       <button
@@ -707,7 +715,7 @@ function StoredContacts({
         className={view.kind === "inbox" ? "on" : ""}
         onClick={() => navigate(commsInboxPath(agentId))}
       >
-        Inbox · what it reads <small>{data?.inboxUnread ?? 0} unread</small>
+        Inbox · what it reads
       </button>
       <button
         type="button"
@@ -723,9 +731,11 @@ function StoredContacts({
           key={contact.id}
           onClick={() => navigate(commsContactPath(agentId, contact.id))}
         >
-          {contact.id} · {contact.count}
+          {contact.id === COMMS_CAPCOM ? "You" : seatName(contact.id)} ·{" "}
+          {plural(contact.count, "message")}
           <small>
-            {contact.unread > 0 ? `${contact.unread} unread · ` : ""}
+            {/* only what is addressed to the operator is "unread"; other counts are messages */}
+            {contact.id === COMMS_CAPCOM && contact.unread > 0 ? `${contact.unread} unread · ` : ""}
             {contact.lastMessage?.text ?? "No messages yet."}
           </small>
         </button>
