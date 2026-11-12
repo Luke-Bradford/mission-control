@@ -111,7 +111,7 @@ export function Agent({ id }: { id: string | null }) {
         />
         {handoffRun && <HandoffPanel runId={handoffRun} />}
         {traceRun && id !== null ? (
-          <div className="control-main">
+          <div className="control-main trace">
             <RunTracePanel agentId={id} runId={traceRun} />
           </div>
         ) : row && detail.data ? (

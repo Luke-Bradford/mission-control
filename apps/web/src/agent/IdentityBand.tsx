@@ -8,8 +8,12 @@ import { Pill } from "../hud/Pill.tsx";
 import { followLink, setupPath } from "../router.ts";
 import { lastOutputText, silentFor, stoppedReason } from "./control.ts";
 import { SeatMore } from "./Header.tsx";
+import { Reason } from "./Reason.tsx";
 import { shortAge } from "./roster.ts";
 import { endConfirm, endSeat, interruptSeat, seatError } from "./seat.ts";
+
+/** The most of the state reason the band shows before "read more". */
+const REASON_MAX = 140;
 
 /** A sent action's life: asked, taken by the hub, or refused with the hub's reason. */
 type Outcome = { state: "sent" } | { state: "confirmed" } | { state: "failed"; reason: string };
@@ -135,6 +139,18 @@ export function IdentityBand({ view, connected }: { view: AgentDetailView; conne
           <Pill tone={status.tone} title={status.reason}>
             {status.label} · {shortAge(Math.max(0, now - row.stateSince))}
           </Pill>
+        )}
+        {view.awaiting.reason && (
+          <span className="idb-reason">
+            <Reason
+              line={firstLine(view.awaiting.reason).slice(0, REASON_MAX)}
+              full={
+                view.awaiting.reason === firstLine(view.awaiting.reason).slice(0, REASON_MAX)
+                  ? null
+                  : view.awaiting.reason
+              }
+            />
+          </span>
         )}
         {output && <span className="idb-last">{output}</span>}
         {subagents > 0 && (

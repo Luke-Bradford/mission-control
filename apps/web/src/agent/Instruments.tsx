@@ -93,7 +93,7 @@ function ContextRing({ row }: { row: CrewRow }) {
             ? `${kTokens(used)} used of ${kTokens(win)}`
             : "not measured"}
         </span>
-        <span className="inst-n">hands over at {CONTEXT_HANDOVER_PCT}%</span>
+        <span className="inst-n">hands over at {percent(CONTEXT_HANDOVER_PCT)}</span>
       </div>
     </div>
   );

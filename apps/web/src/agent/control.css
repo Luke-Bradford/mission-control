@@ -339,3 +339,9 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* A run trace is a long document: it takes the room beside the roster and scrolls itself. */
+.control-main.trace {
+  grid-column: 2 / -1;
+  overflow-y: auto;
+}

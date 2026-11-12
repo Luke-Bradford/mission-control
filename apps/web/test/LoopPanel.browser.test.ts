@@ -85,8 +85,8 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
         colorScheme: scheme,
         api,
       });
-      await page.box(".agent-v2-history summary");
-      await page.click(".agent-v2-history summary");
+      await page.box(".runs-history summary");
+      await page.click(".runs-history summary");
       await page.box("#loopP .vstep");
       const tall = await page.evaluate(() => {
         const lines = (el: Element) => {
@@ -94,11 +94,7 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
           const lh = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.3;
           return el.getBoundingClientRect().height / lh;
         };
-        return [
-          ...document.querySelectorAll(
-            "#loopP *, #ahead .agent-v2-state, #ahead .agent-v2-state *",
-          ),
-        ]
+        return [...document.querySelectorAll("#loopP *, #ahead .pill, #ahead .pill *")]
           .filter((el) => el.children.length === 0 && (el.textContent ?? "").trim() !== "")
           .filter((el) => lines(el) > 3.2)
           .map((el) => `${el.className}: ${(el.textContent ?? "").slice(0, 40)}`);
