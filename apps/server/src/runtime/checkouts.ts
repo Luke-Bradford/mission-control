@@ -196,15 +196,18 @@ export type CheckoutErrorCode =
 export class CheckoutError extends Error {
   readonly code: CheckoutErrorCode;
   readonly detail: string | null;
+  /** Every install input the branch changes, when the refusal is for changed inputs. */
+  readonly changed: readonly string[];
   constructor(
     code: CheckoutErrorCode,
     message: string,
-    options?: { cause?: unknown; detail?: string },
+    options?: { cause?: unknown; detail?: string; changed?: readonly string[] },
   ) {
     super(message, options);
     this.name = "CheckoutError";
     this.code = code;
     this.detail = options?.detail ?? null;
+    this.changed = options?.changed ?? [];
   }
 }
 
@@ -560,11 +563,12 @@ async function refuseInstallInputs(
       { cause: e },
     );
   }
-  const hit = changed.find((f) => inputs.has(f.split("/").pop() ?? ""));
-  if (hit !== undefined) {
+  const hits = changed.filter((f) => inputs.has(f.split("/").pop() ?? ""));
+  if (hits.length > 0) {
     throw new CheckoutError(
       "protected",
-      `${subject} changes ${hit}; Mission Control won't install from it`,
+      `${subject} changes ${hits.join(", ")}; Mission Control won't install from it`,
+      { changed: hits },
     );
   }
 }
@@ -1918,6 +1922,9 @@ export interface Scratch {
   installNote?: string;
 }
 
+/** The only changed install inputs a review reads without installing; any other one fails it. */
+const READ_ONLY_REVIEW_INPUTS: ReadonlySet<string> = new Set(["package.json", "pnpm-lock.yaml"]);
+
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
 /**
@@ -2004,14 +2011,14 @@ export async function prepareScratch(
         runInstall,
       );
     } catch (e) {
-      // Nothing from the PR branch is installed. A changed package.json or lockfile is reviewed
-      // read-only, and reported as "reviewed, not installed"; any other refusal still fails.
+      // Nothing from the PR branch is installed. A branch whose only changed install inputs are
+      // package.json and the lockfile is reviewed read-only, and reported as "reviewed, not
+      // installed"; any other changed input, or any other refusal, still fails.
       if (
         e instanceof CheckoutError &&
         e.code === "protected" &&
-        / changes (?:.+\/)?(?:package\.json|pnpm-lock\.yaml); Mission Control won't install from it$/.test(
-          e.message,
-        )
+        e.changed.length > 0 &&
+        e.changed.every((f) => READ_ONLY_REVIEW_INPUTS.has(basename(f)))
       ) {
         installNote = `Reviewed, not installed: ${e.message}`;
       } else {

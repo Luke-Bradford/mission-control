@@ -1956,6 +1956,33 @@ describe("review scratch checkouts", () => {
   });
 
   it.each([
+    ["package.json plus a root .npmrc", { "package.json": `${PKG}\n`, ".npmrc": "a=b\n" }],
+    ["package.json plus .pnpmfile.cjs", { "package.json": `${PKG}\n`, ".pnpmfile.cjs": "x\n" }],
+    [
+      "package.json plus pnpm-workspace.yaml",
+      { "package.json": `${PKG}\n`, "pnpm-workspace.yaml": "verifyDepsBeforeRun: install\n" },
+    ],
+    ["package.json plus a nested .npmrc", { "package.json": `${PKG}\n`, "sub/.npmrc": "a=b\n" }],
+  ])("a PR head that changes %s fails, whichever input sorts first", async (_n, files) => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const { head } = pr(files);
+    const install = vi.fn(async () => {});
+    const e = await fail(prepareScratch(scratchInput(head), install));
+    expect(e.code).toBe("protected");
+    expect(install).not.toHaveBeenCalled();
+    expect(existsSync(scratchPath())).toBe(false);
+  });
+
+  it.each([
+    [
+      "several package.json files and the lockfile",
+      {
+        "package.json": `${PKG}\n`,
+        "packages/x/package.json": `${PKG}\n`,
+        "pnpm-lock.yaml": `${EMPTY_LOCK}\n`,
+      },
+    ],
     ["package.json scripts (PR 1520)", { "package.json": `${PKG}\n` }],
     ["pnpm-lock.yaml", { "pnpm-lock.yaml": `${EMPTY_LOCK}\n` }],
     [

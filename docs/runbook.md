@@ -286,7 +286,11 @@ A PR that changes `package.json` or the lockfile is still reviewed. The hub neve
 branch's packages in a seat, so that review runs read-only against the base branch's installed
 packages: the brief records `Reviewed, not installed` with the reason and tells the reviewer to read
 the diff and run nothing that needs the PR's packages. FLIGHT is told at once, with the PR and the
-reason. The review ends as reported, not failed, so no failing `mc/review` status is posted.
+reason. The review ends as reported, not failed, so no failing `mc/review` status is posted: a clean
+one reads "QA review passed (reviewed, not installed)", and the QA report lists the reason under its
+limitations. The reviewer's brief tells it to run nothing, and its pnpm will not install before a
+script. This applies only when `package.json` and the lockfile are the only install inputs the PR
+changes; a PR that also changes `.npmrc`, `pnpm-workspace.yaml` or a pnpmfile still fails the review.
 
 These PRs do not enter the crew's merge or board-completion path. Their controller still applies CI,
 review, acceptance and repository merge rules. A failed review remains failed rather than repeatedly

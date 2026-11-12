@@ -1034,6 +1034,7 @@ export class Store {
     this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "done_when", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("reviews", "changed_since", "TEXT");
+    this.addColumn("reviews", "install_note", "TEXT");
     this.addColumn("review_findings", "late", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("review_findings", "category", "TEXT");
     this.addColumn("review_findings", "resolution", "TEXT");
@@ -5439,6 +5440,11 @@ export class Store {
     this.db
       .prepare("UPDATE reviews SET changed_since = ? WHERE id = ?")
       .run(JSON.stringify(files), reviewId);
+  }
+
+  /** Why this review ran without an install ("reviewed, not installed"), kept with the review. */
+  setReviewInstallNote(reviewId: number, note: string): void {
+    this.db.prepare("UPDATE reviews SET install_note = ? WHERE id = ?").run(note, reviewId);
   }
 
   findingsOf(reviewId: number): StoredFinding[] {

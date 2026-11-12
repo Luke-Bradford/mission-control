@@ -873,6 +873,40 @@ describe("visual report completeness", () => {
     if (!hash) throw new Error("Retained native fixture missing");
     expect(service().asset(hash)).toEqual(PNG);
   });
+  it("lists a review's 'reviewed, not installed' note among the QA report's limitations", async () => {
+    const id = store.requestReview({
+      authorRunId: "author",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - 100,
+    });
+    if (!id) throw new Error("Review fixture missing");
+    store.setReviewState(id, ["queued"], "running", { at: NOW - 50, runId: "retro:plain" });
+    store.setReviewInstallNote(id, "Reviewed, not installed: the PR changes package.json");
+    const row = store.review(id);
+    if (!row) throw new Error("Review fixture missing");
+    const report = await service().prepareNative(
+      row,
+      {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "Read the diff.",
+        findings: [],
+        limitations: ["No test ran."],
+        visualReason: "no UI change",
+      },
+      NOW,
+    );
+    expect(report.limitations).toEqual([
+      "Reviewed, not installed: the PR changes package.json",
+      "No test ran.",
+    ]);
+  });
+
   it("keeps explicit nonvisual browser and design exclusions complete", async () => {
     const saved = (
       await service().importController(

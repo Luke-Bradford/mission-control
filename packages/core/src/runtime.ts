@@ -893,6 +893,11 @@ export const CREW_PNPM_ENV = {
   npm_config_update_notifier: "false",
 } as const;
 
+/** A review with nothing installed: pnpm must not install before a script (the PR's setting wins otherwise). */
+export const CREW_PNPM_NO_INSTALL_ENV = {
+  npm_config_verify_deps_before_run: "false",
+} as const;
+
 /** pnpm's legacy project-local store directory, excluded from commits as a backstop. */
 export const PNPM_STORE_DIR_NAME = ".pnpm-store";
 /** The hub-owned pnpm store folder below `crew.worktrees`. */

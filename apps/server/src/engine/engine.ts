@@ -502,6 +502,7 @@ const reviewFact = (r: ReviewRow): ReviewFact => ({
   blocking: r.blocking,
   minor: r.minor,
   failure: r.failure,
+  ...(r.installNote === undefined ? {} : { installNote: r.installNote }),
 });
 
 /**

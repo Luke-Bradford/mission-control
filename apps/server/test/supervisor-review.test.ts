@@ -1548,6 +1548,7 @@ describe("startReview", () => {
       const [note] = flightNotes();
       expect(note?.text).toContain("PR #9 is reviewed without an install.");
       expect(note?.ticket).toBe("mc#42");
+      expect(store.review(r.reviewId)?.installNote).toContain("Reviewed, not installed");
       expect(store.review(r.reviewId)?.state).toBe("reported");
       expect(store.run(runId)?.status).not.toBe("failed");
     });
