@@ -844,6 +844,59 @@ describe("ciExcerpt", () => {
       return createPublisher(deps()).ciExcerpt("o/mc", SHA);
     };
 
+    describe("a vitest job log", () => {
+      const J = "server-process (2)";
+      const E = "\x1b[";
+      const LJ = (t: string) => `${J}\tRun tests\t2026-11-10T10:00:00.0000000Z ${t}`;
+      const passing = (n: number, tag: string) =>
+        Array.from({ length: n }, (_, i) =>
+          LJ(
+            `${E}32m ✓${E}39m |server-process| apps/server/test/${tag}${i}.test.ts > ok ${E}2m12ms${E}22m`,
+          ),
+        );
+
+      it("shows the failing test's name, assertion and source line from the Failed Tests block", async () => {
+        const out = await excerpt([
+          ...passing(300, "a"),
+          LJ(
+            `${E}31m⎯⎯⎯⎯⎯⎯⎯${E}39m${E}1m${E}41m Failed Tests 1 ${E}49m${E}22m${E}31m⎯⎯⎯⎯⎯⎯⎯${E}39m`,
+          ),
+          LJ(""),
+          LJ(
+            `${E}41m${E}1m FAIL ${E}22m${E}49m ${E}2m|server-process|${E}22m apps/server/test/supervisor-review.test.ts${E}2m > ${E}22mstartReview${E}2m > ${E}22ma PR that changes package.json`,
+          ),
+          LJ(
+            `${E}31m${E}1mAssertionError${E}22m: expected undefined to be 'mc#42' ${E}90m// Object.is equality${E}39m`,
+          ),
+          LJ(""),
+          LJ("- Expected:"),
+          LJ('"mc#42"'),
+          LJ("+ Received:"),
+          LJ("undefined"),
+          LJ(""),
+          LJ(` ${E}2m❯${E}22m apps/server/test/supervisor-review.test.ts:1550:30`),
+          LJ(` ${E}2m❯${E}22m node_modules/vitest/dist/runner.js:10:5`),
+          ...passing(100, "b"),
+          LJ(" Test Files  1 failed | 20 passed (21)"),
+        ]);
+        expect(out).toContain(
+          "FAIL  |server-process| apps/server/test/supervisor-review.test.ts > startReview > a PR that changes package.json",
+        );
+        expect(out).toContain("AssertionError: expected undefined to be 'mc#42'");
+        expect(out).toContain("❯ apps/server/test/supervisor-review.test.ts:1550:30");
+        expect(out).not.toContain("runner.js");
+        expect(out).not.toMatch(/\x1b|2026-11-10T/);
+        expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
+      });
+
+      it("is the log's last lines when the log has no failure summary", async () => {
+        const out = await excerpt([...passing(300, "a"), LJ(" Test Files  21 passed (21)")]);
+        expect(out).toContain("a299.test.ts > ok");
+        expect(out).toContain("Test Files  21 passed (21)");
+        expect(out).not.toContain("a0.test.ts");
+      });
+    });
+
     it("keeps an error line under each FAIL name, even when the words repeat", async () => {
       const out = await excerpt(
         [1, 2, 3].flatMap((i) => [
