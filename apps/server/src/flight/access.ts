@@ -18,7 +18,7 @@ import { z } from "zod";
 import { isKept, SAFE_BRANCH } from "../branch-tidy.ts";
 import type { McToolContext, McToolResult } from "../mcp/server.ts";
 import { readKnown } from "../mcp/tools.ts";
-import { crewDir } from "../store.ts";
+import { crewDir } from "../store/crew-paths.ts";
 import type { PowerHelpers } from "./powers.ts";
 import { cut } from "./tools.ts";
 

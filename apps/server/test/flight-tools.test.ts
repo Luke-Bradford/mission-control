@@ -144,7 +144,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { evaluateHolds, holds } from "../src/attention-holds.ts";
+import { evaluateHolds, holds } from "../src/attention/holds.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
@@ -158,7 +158,7 @@ import {
 import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
-import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
+import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
 import {
   flightBriefView,
   flightState,
@@ -170,13 +170,13 @@ import {
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import type { Move, MoveResult } from "../src/github-board.ts";
+import type { Move, MoveResult } from "../src/github/board.ts";
 import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run-handoffs.ts";
+import { recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -3688,6 +3688,52 @@ describe("flight_state", () => {
     expect(Object.keys(seen)).toEqual([`ask:${id}`]);
   });
 
+  describe("500 expired waits (#1632)", () => {
+    const waits = async (args: Record<string, unknown>) => {
+      for (let i = 0; i < 500; i++)
+        recordFlightWait(store, `mc#${1000 + i}`, {
+          on: "a long wait",
+          until: NOW - 3 * 24 * 60 * 60_000,
+          at: NOW - 4 * 24 * 60 * 60_000,
+        });
+      const read = JSON.parse((await call("flight_state", args)).text) as {
+        signals: { kind: string; evidence: string }[];
+      };
+      return read.signals.filter((s) => s.kind === "wait_over");
+    };
+
+    it("fold into one summary line with the count", async () => {
+      const over = await waits({});
+      expect(over).toHaveLength(1);
+      expect(over[0]?.evidence).toContain("500 expired waits");
+      expect(JSON.stringify(over).length).toBeLessThan(1000);
+    });
+
+    it("keep a wait that ended an hour ago listed on every read", async () => {
+      recordFlightWait(store, "mc#77", {
+        on: "PR 77 to merge",
+        until: NOW - 3_600_000,
+        at: NOW - 7_200_000,
+      });
+      const keys = async () =>
+        (
+          JSON.parse((await call("flight_state", {})).text) as {
+            signals: { kind: string; key: string }[];
+          }
+        ).signals
+          .filter((s) => s.kind === "wait_over")
+          .map((s) => s.key);
+      await keys();
+      const second = await keys();
+      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
+      expect(second).not.toContain("expired");
+    });
+
+    it("are all listed with full: true", async () => {
+      expect(await waits({ full: true })).toHaveLength(500);
+    });
+  });
+
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -4299,6 +4345,54 @@ describe("promote", () => {
       "Moved mc#7 to Refinement. Recorded in Decided without you.",
     );
     expect(moveCalls[0]?.column).toBe("Refinement");
+  });
+
+  it("flags a private prototype and refuses Ready until it is copied into docs/prototype", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\nPrototype: [working copy](https://private.example/prototype)` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it.each([
+    "https://private.example/docs/prototype/mockup.html",
+    "https://github.com/another/repo/blob/main/docs/prototype/mockup.html",
+  ])("refuses promotion when a private prototype mimics the repository path: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("refuses promotion for a private link listed under a Prototype heading", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\n\n## Prototype\n\nhttps://claude.ai/public/artifacts/abc` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("promotes a ticket that mentions the mockup beside an ordinary link in this repository", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, {
+        body: `${GOOD}\nJudge the page against the mockup and [the system](https://github.com/o/mc/blob/main/docs/design/system.md).`,
+      });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
+  });
+
+  it.each([
+    "https://github.com/o/mc/blob/main/docs/prototype/mockup.html",
+    "https://github.com/o/mc/blob/feature/prototype-polish/docs/prototype/mockup.html",
+    "https://raw.githubusercontent.com/o/mc/feature/prototype-polish/docs/prototype/mockup.html",
+  ])("allows promotion when the prototype URL names this repository: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
   });
 
   it("names only what is missing, and honours the rules' needs", async () => {
@@ -9979,10 +10073,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(await call("edit_issue", { issue: 7, body: kept })).toHaveProperty("isError", true);
       expect(ghCalls).toEqual([]);
     });
-    it("set_fields leaves Ready and Backlog to promote, and keeps one area label", async () => {
+    it("set_fields leaves Ready to promote, and keeps one area label", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog"])
-        expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
+      expect(await call("set_fields", { issue: 7, status: "Ready" })).toHaveProperty(
+        "isError",
+        true,
+      );
       liveLabels = ["lane:home", "area:server"];
       expect(
         await call("set_fields", { issue: 7, labels: ["lane:home", "area:server", "area:web"] }),
@@ -9991,6 +10087,24 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         "isError",
         true,
       );
+      expect(moveCalls).toEqual([]);
+      expect(ghCalls).toEqual([]);
+    });
+    it("set_fields takes a Blocked card back to Backlog, so promote can reach it", async () => {
+      readImpl = (n) => card(n, { labels: liveLabels, status: "Blocked" });
+      board(card(7, { status: "Blocked" }));
+      expect((await call("set_fields", { issue: 7, status: "Backlog" })).isError).toBeUndefined();
+      expect(moveCalls.at(-1)).toMatchObject({ issue: 7, column: "Backlog" });
+    });
+    it("set_fields moves no card to Backlog from outside Blocked", async () => {
+      for (const status of ["Ready", "In progress", "In review", "Done"]) {
+        readImpl = (n) => card(n, { labels: liveLabels, status });
+        // the store says Blocked: only the live card counts
+        board(card(7, { status: "Blocked" }));
+        const r = await call("set_fields", { issue: 7, status: "Backlog", size: "S" });
+        expect(r.isError).toBe(true);
+        expect(r.text).toContain("not in Blocked");
+      }
       expect(moveCalls).toEqual([]);
       expect(ghCalls).toEqual([]);
     });
@@ -10143,9 +10257,9 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         labels: ["lane:home", "legacy-odd", "area:server", "bug"],
       });
     });
-    it("set_fields moves a card only to Blocked", async () => {
+    it("set_fields moves a card only to Blocked or back to Backlog", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog", "Refinement", "In progress", "Done"])
+      for (const status of ["Ready", "Refinement", "In progress", "Done"])
         expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
       expect(moveCalls).toEqual([]);
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();

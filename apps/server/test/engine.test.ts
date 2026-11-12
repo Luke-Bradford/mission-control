@@ -143,9 +143,9 @@ import { seatMayTake } from "../src/engine/queue.ts";
 import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
-import { externalReviewKey } from "../src/external-reviews.ts";
-import type { Move } from "../src/github-board.ts";
+import type { Move } from "../src/github/board.ts";
 import { attentionItems } from "../src/hud.ts";
+import { externalReviewKey } from "../src/review/external.ts";
 import {
   type SeatBusy,
   type SeatFacts,
@@ -1317,10 +1317,54 @@ describe("CI and review", () => {
         text: expect.stringMatching(/^CI failed on aaaaaaa\./),
       },
     ]);
+    expect(store.commsPage({ agent: SEAT }, 10).rows[0]?.kind).toBe("notice");
+  });
+
+  it("stores a CI failure as a one-line hub notice with a link, and the seat's copy keeps the failing test", async () => {
+    await inCi();
+    await failCi();
+    const excerpt =
+      "CI:\n[web-core]\nFAIL  a.test.ts > it works\nAssertionError: expected 1 to be 2\n" +
+      "x".repeat(4000);
+    h.excerptTexts = [excerpt];
+    await h.engine.reconcileRun(RUN);
+    // the seat's own copy is whole: the failing test and its error
+    const seat = h.sent[0]?.text ?? "";
+    expect(seat).toContain("FAIL  a.test.ts > it works");
+    expect(seat).toContain("AssertionError: expected 1 to be 2");
+    // Comms holds one plain line with a link, as a hub notice
+    const row = store.commsPage({ agent: SEAT }, 10).rows[0];
+    expect(row).toMatchObject({ from: "MC", senderKind: "hub", kind: "notice" });
+    expect(row?.text).toBe(
+      `CI failed on ${SHA.slice(0, 7)} in job web-core. https://github.com/o/mc/commit/${SHA}/checks`,
+    );
+    expect(row?.text).not.toContain("\n");
+  });
+
+  it("a CI notice ignores bracketed log tags and keeps colons in job names", async () => {
+    await inCi();
+    await failCi();
+    h.excerptTexts = ["CI:\n[lint: web]\nFAIL test.ts\n[error]\nSome output\n[vite]\nMore output"];
+    await h.engine.reconcileRun(RUN);
+    expect(store.commsPage({ agent: SEAT }, 10).rows[0]?.text).toMatch(
+      /^CI failed on aaaaaaa in job lint: web\. https:/,
+    );
+  });
+
+  it("a CI notice names every failing job once", async () => {
+    await inCi();
+    await failCi();
+    h.excerptTexts = [
+      "CI:\n[web-core: console]\nboom\n\n[server]\nFAIL server.test.ts\n[web-core]\nFAIL repeated.test.ts",
+    ];
+    await h.engine.reconcileRun(RUN);
+    expect(store.commsPage({ agent: SEAT }, 10).rows[0]?.text).toMatch(
+      /^CI failed on aaaaaaa in jobs web-core, server\. https:/,
+    );
   });
 
   it.each([CI_EXCERPT_MAX, COMMS_TEXT_MAX + 1])(
-    "sends the seat a %i-character CI excerpt whole and shortens only the Comms copy",
+    "sends the seat a %i-character CI excerpt whole and keeps only a one-line notice in Comms",
     async (length) => {
       await inCi();
       await failCi();
@@ -1331,8 +1375,7 @@ describe("CI and review", () => {
       const text = h.sent[0]?.text ?? "";
       expect(text.endsWith(excerpt)).toBe(true);
       const comms = store.comms(0)[0]?.text ?? "";
-      expect(Array.from(comms)).toHaveLength(COMMS_MESSAGE_MAX);
-      expect(comms.endsWith("[CI output shortened; inspect the CI log.]")).toBe(true);
+      expect(comms).toBe(`CI failed on aaaaaaa. https://github.com/o/mc/commit/${SHA}/checks`);
       expect(loopOf()).toMatchObject({ phase: "working", parked: null, relayedSha: SHA });
       await h.engine.reconcileRun(RUN);
       expect(h.sent).toHaveLength(1);
@@ -7914,7 +7957,7 @@ describe("the engine runs reviews", () => {
 });
 
 it("1389 checks a bound choice again after waiting on the real engine run chain", async () => {
-  const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+  const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
   setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
   let sourceChanged = false;
   const result = withinBriefDispatch(
@@ -7929,7 +7972,7 @@ it("1389 checks a bound choice again after waiting on the real engine run chain"
   expect(loopTexts()).not.toContain("resumed by CAPCOM");
 });
 it("1389 rechecks a bound source after asynchronous beforeLift without weakening ordinary resume", async () => {
-  const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+  const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
   setLoop({ phase: "parked", parked: { kind: "ci", reason: "Fixture wait", ended: false } });
   let sourceChanged = false;
   const result = await withinBriefDispatch(
@@ -7953,7 +7996,7 @@ it("1389 rechecks a bound source after asynchronous beforeLift without weakening
 it.each(["controller", "uat"] as const)(
   "1389 preserves the %s hold if source changes after awaited send-back",
   async (kind) => {
-    const { withinBriefDispatch } = await import("../src/brief-dispatch-context.ts");
+    const { withinBriefDispatch } = await import("../src/brief/dispatch-context.ts");
     setLoop({
       phase: "parked",
       parked: {

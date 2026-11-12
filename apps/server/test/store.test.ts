@@ -31,12 +31,11 @@ import {
   NEW_LOOP,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pendingRunApproval } from "../src/attention-subjects.ts";
+import { pendingRunApproval } from "../src/attention/subjects.ts";
+import { crewPromptPath, crewTranscriptPath } from "../src/store/crew-paths.ts";
 import {
   ACK_ABSENT_MS,
   type AgentEvent,
-  crewPromptPath,
-  crewTranscriptPath,
   MACHINE_RETENTION_MS,
   MAX_OPEN_RUN_AGE_MS,
   Store,
@@ -3287,7 +3286,7 @@ describe("comms", () => {
     legacy.close();
     const migrated = new Store(legacyPath);
     try {
-      expect(migrated.commsMessage("comms:1")).toMatchObject({ text: "legacy", label: null });
+      expect(migrated.commsMessage("comms:1")).toMatchObject({ text: "legacy", label: "none" });
       expect(migrated.addComms({ ...row("new"), label: "question", ref: "#7" })).toMatchObject({
         label: "question",
         ref: "#7",
@@ -3786,6 +3785,33 @@ it("deduplicates a large history with an indexed first-commit lookup", () => {
   } finally {
     db.close();
   }
+});
+
+it("refreshes note details without losing an episode's age or dismissal", () => {
+  const note = {
+    key: "capacity-episode",
+    kind: "flag" as const,
+    runId: null,
+    seatId: null,
+    repoId: null,
+    text: "disk",
+    at: 10,
+  };
+  store.refreshNoteInEpisode(note);
+  store.dismissNote(note.key, 11);
+  store.refreshNoteInEpisode({ ...note, text: "memory", at: 20 });
+  expect(store.notes().find((n) => n.key === note.key)).toMatchObject({
+    text: "memory",
+    at: 10,
+    dismissedAt: 11,
+  });
+  store.clearNote(note.key, 30);
+  store.refreshNoteInEpisode({ ...note, text: "disk again", at: 40 });
+  expect(store.notes().find((n) => n.key === note.key)).toMatchObject({
+    text: "disk again",
+    at: 40,
+    dismissedAt: null,
+  });
 });
 
 it("retains each reopened attention episode and closes notes by run", () => {

@@ -2,9 +2,9 @@ import type { ConfigView, Crew, RepoView } from "@mc/core";
 import { useMemo, useState } from "react";
 import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
+import { plural } from "../fmt.ts";
 import { HistoryLens, ReviewLens } from "../lenses/lenses.tsx";
-import { mapRepoOptions } from "../map/repos.ts";
-import { useGraphSnapshot } from "../map/useGraphSnapshot.ts";
+import { useRepoGraph } from "../qa/useRepoGraph.ts";
 import { MAP_REPO_KEY, readKey } from "../storage.ts";
 import "./qa-hotspots.css";
 
@@ -15,7 +15,25 @@ export function QaHotspots() {
   const crew = useResource<Crew>(RESOURCES.crew);
   const mapped = useMemo(
     () =>
-      repos.data ? mapRepoOptions(repos.data, config.data, crew.data).filter((o) => o.mapped) : [],
+      repos.data
+        ? repos.data.flatMap((repo) => {
+            const sessions = config.data?.crew?.sessions.filter((s) => s.repoId === repo.id) ?? [];
+            const rows = crew.data?.rows.filter(
+              (row) => row.kind === "crew" && row.role !== "FLIGHT" && row.repoId === repo.id,
+            );
+            // Until crew data arrives, count the configured seats that run (not watchers or retiring).
+            const seats =
+              rows?.length ??
+              sessions.reduce(
+                (n, s) =>
+                  n + s.seats.filter((seat) => !seat.retiring && seat.loop !== "watch").length,
+                0,
+              );
+            return sessions.length > 0
+              ? [{ id: repo.id, label: `${repo.id} · ${plural(seats, "crew seat")}` }]
+              : [];
+          })
+        : [],
     [repos.data, config.data, crew.data],
   );
   const [picked, setPicked] = useState<string | null>(null);
@@ -71,7 +89,7 @@ function RepoHotspots({
   github: string | undefined;
   names: Record<string, string>;
 }) {
-  const map = useGraphSnapshot(repo);
+  const map = useRepoGraph(repo);
   const [focus, setFocus] = useState<string | null>(null);
   if (!map.data)
     return map.error ? (

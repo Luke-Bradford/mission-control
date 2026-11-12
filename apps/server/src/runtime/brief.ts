@@ -529,6 +529,31 @@ export const MC_RESTART_TEXT =
   "If an mc tool fails with ECONNREFUSED or ECONNRESET, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.";
 
 /**
+ * Drops the fenced yaml block that opens with `mc:` (the hub's own board configuration, which the
+ * hub reads from the repo and a seat never acts on); every other line of the file is kept. The
+ * block's `checks` commands are the one part a seat runs, so one line carries them in its place.
+ */
+export function withoutHubConfig(markdown: string): string {
+  return markdown.replace(
+    /^```ya?ml[ \t]*\r?\n(mc:[ \t]*\r?\n[\s\S]*?)^```[ \t]*(?:\r?\n|$)/gm,
+    (_block, body: string) => {
+      let checks: unknown;
+      try {
+        checks = (parseYaml(body) as { mc?: { checks?: unknown } } | null)?.mc?.checks;
+      } catch {
+        return "";
+      }
+      const commands = Array.isArray(checks)
+        ? checks.filter((c): c is string => typeof c === "string" && c.trim() !== "")
+        : [];
+      return commands.length === 0
+        ? ""
+        : `Checks (from the Mission Control block, left out here): ${commands.map((c) => `\`${c}\``).join(", ")}.\n`;
+    },
+  );
+}
+
+/**
  * The prompt file's text: the role brief, the restart line, the reference index, then the repo's
  * CLAUDE.md and AGENTS.md, each under its own heading (the repo's rules, not reference material).
  */
@@ -544,7 +569,8 @@ export function rolePrompt(
     [CLAUDE_MD_HEADING, claudeMd],
     [AGENTS_MD_HEADING, agentsMd],
   ] as const) {
-    if (body !== null && body.trim() !== "") out = `${out.trimEnd()}\n\n${heading}\n\n${body}`;
+    const text = body === null ? "" : heading === CLAUDE_MD_HEADING ? withoutHubConfig(body) : body;
+    if (text.trim() !== "") out = `${out.trimEnd()}\n\n${heading}\n\n${text}`;
   }
   if (seatInstructions !== "") out = `${out.trimEnd()}\n\n${seatInstructions}`;
   return out;

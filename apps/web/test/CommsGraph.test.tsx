@@ -52,7 +52,7 @@ function stubRisingLinks(count: () => number) {
 const seat = (name: RegExp) => screen.getByRole("button", { name });
 
 it.each([3, 6, 10])(
-  "puts FLIGHT, CAPCOM and #crew on the centre line and every seat on a rail for %i seats",
+  "keeps every session seat readable in the organic network for %i seats",
   async (seats) => {
     const live = Array.from({ length: seats }, (_, index) =>
       seatRow({
@@ -73,8 +73,8 @@ it.each([3, 6, 10])(
           document.querySelector(`.comms-node[data-id="${id}"]`)?.getAttribute("transform") ?? "",
         )?.[1],
       );
-    expect(x("flight-1")).toBe(x("CAPCOM"));
-    expect(x("flight-1")).toBe(x("crew"));
+    expect(x("flight-1")).not.toBe(x("CAPCOM"));
+    expect(x("flight-1")).not.toBe(x("crew"));
     expect(x("seat-1")).not.toBe(x("flight-1"));
     expect(screen.getByRole("button", { name: /^ebull-ta,/i })).toBeTruthy();
     expect([...document.querySelectorAll(".comms-node-name")].map((t) => t.textContent)).toContain(
@@ -97,7 +97,9 @@ it("draws a link per pair with both directions together, and its title row has A
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
   await screen.findByRole("button", { name: /^guido-1 ↔ retro-1, 5 messages/i });
   expect(document.querySelectorAll(".comms-edge")).toHaveLength(2);
-  expect(document.querySelector(".comms-traffic-stats strong")?.textContent).toBe("10");
+  expect(document.querySelector(".comms-graph-readout span:nth-child(3) b")?.textContent).toBe(
+    "10",
+  );
   expect(screen.getByRole("button", { name: "All" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByRole("button", { name: /^Open/i })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Tokens" })).toBeNull();
@@ -182,10 +184,36 @@ it("shows who is waiting by a dashed link and the wait in words, from the open i
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
   await waitFor(() => expect(document.querySelectorAll(".comms-edge.waiting")).toHaveLength(2));
   expect(document.querySelector(".comms-wait-mark")?.textContent).toContain("12m");
-  expect(seat(/^guido-1,/i).classList).toContain("waiting");
-  expect(seat(/^guido-1,/i).getAttribute("aria-label")).toMatch(/waiting on an answer/);
+  expect(seat(/^retro-1,/i).classList).toContain("waiting");
+  expect(seat(/^retro-1,/i).getAttribute("aria-label")).toMatch(/owes a reply/);
   fireEvent.click(screen.getByRole("button", { name: /^Open/i }));
   expect(document.querySelectorAll(".comms-edge")).toHaveLength(2);
+});
+
+it("holds the reply light at the recipient and states the waiting request in words", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 1 }] },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+    "/api/comms/open": {
+      items: [
+        {
+          id: "ask",
+          label: "question",
+          from: "guido-1",
+          to: "retro-1",
+          ticket: null,
+          waitedMs: 2 * 60_000,
+          question: "Which branch?",
+        },
+      ],
+    },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await screen.findByText(/waiting on a reply/i);
+  expect(seat(/^retro-1,/i).classList).toContain("waiting");
+  expect(seat(/^guido-1,/i).classList).not.toContain("waiting");
+  expect(screen.getByText(/guido-1 → retro-1/i).closest("button")?.textContent).toContain("2m");
 });
 
 it("reads an older hub's open items, which carry no text, without failing", async () => {
@@ -316,7 +344,7 @@ it("claims LIVE only while the links are loaded and their last read succeeded", 
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
   expect(document.querySelector(".comms-graph-readout .live")).toBeNull();
   await waitFor(() => expect(document.querySelector(".comms-graph-readout .live")).not.toBeNull());
-  await waitFor(() => expect(document.querySelector(".comms-chart-now.live")).not.toBeNull());
+  expect(document.querySelector(".comms-chart-now")).toBeNull();
   ok = false;
   act(() => hub.refetchTopic("agents"));
   await waitFor(() => expect(document.querySelector(".comms-graph-readout .live")).toBeNull());
@@ -369,8 +397,7 @@ it("hovers a seat or a link for its counts and newest message", async () => {
   expect(within(screen.getByRole("tooltip")).getByText(/Sent 3 · received 0/)).toBeTruthy();
 });
 
-it("includes the current hour and every qualifying chatter pair", async () => {
-  const currentHour = Math.floor(Date.now() / (60 * 60 * 1000)) * 60 * 60 * 1000;
+it("shows recent message text beside the live network", async () => {
   stubFetch({
     "/api/comms/links": {
       links: [
@@ -378,40 +405,26 @@ it("includes the current hour and every qualifying chatter pair", async () => {
         { from: "guido-1", to: "retro-1", count: 4 },
       ],
     },
-    "/api/comms/traffic": {
-      hours: [{ hour: currentHour, from: "guido-1", to: "retro-1", count: 4 }],
-    },
-    "/api/comms/chatter": {
-      pairs: [
-        { from: "flight-1", to: "CAPCOM", ticket: "mc#flight", rounds: 8 },
-        { from: "guido-1", to: "retro-1", ticket: "mc#agents", rounds: 7 },
-      ],
+    "/api/comms/feed": {
+      messages: [{ id: "m1", from: "guido-1", to: "retro-1", at: 1, text: "Review this" }],
     },
   });
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
-  await screen.findByText(/mc#agents/);
-  expect(screen.getByText(/mc#flight/)).toBeTruthy();
-  const hours = [...document.querySelectorAll(".comms-hour")];
-  expect(hours).toHaveLength(24);
-  // The newest hour is the last band, and the scale tops out at the peak.
-  expect(hours.at(-1)?.textContent).toMatch(/· 4 messages · 0 with capcom$/);
-  expect(hours.slice(0, -1).every((hour) => hour.textContent?.includes("· 0 messages"))).toBe(true);
-  expect(
-    [...document.querySelectorAll(".comms-chart-grid text")].map((tick) => tick.textContent),
-  ).toEqual(["4", "2", "0"]);
-  expect(document.querySelector(".comms-chart-trace")).not.toBeNull();
+  expect(await screen.findByText("Review this")).toBeTruthy();
+  expect(screen.queryByText(/chatter watch/i)).toBeNull();
+  expect(document.querySelector(".comms-chart-trace")).toBeNull();
 });
 
-it("says so when a scope has no traffic, rather than drawing an empty trace", async () => {
+it("keeps the network and words when the current scope has no traffic", async () => {
   stubFetch({
     "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 2 }] },
     "/api/comms/traffic": { hours: [] },
     "/api/comms/chatter": { pairs: [] },
   });
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "flight" }} />);
-  expect(await screen.findByText("No messages in FLIGHT ↔ CAPCOM in the last 24h.")).toBeTruthy();
+  expect(await screen.findByText("No direct messages yet.")).toBeTruthy();
   expect(document.querySelector(".comms-chart-trace")).toBeNull();
-  expect(document.querySelector(".comms-traffic-stats strong")?.textContent).toBe("0");
+  expect(screen.queryByText("Traffic")).toBeNull();
 });
 
 it("draws the #crew channel as a hub with its traffic", async () => {
@@ -425,8 +438,7 @@ it("draws the #crew channel as a hub with its traffic", async () => {
   expect(screen.getByRole("button", { name: /^#crew ↔ guido-1, 3 messages/i })).toBeTruthy();
 });
 
-it("resolves the configured FLIGHT seat and MC hub traffic in the open conversation", async () => {
-  const hour = Math.floor(Date.now() / (60 * 60 * 1000)) * 60 * 60 * 1000;
+it("does not turn hub notices into live messages", async () => {
   stubFetch({
     "/api/comms/links": {
       links: [
@@ -434,13 +446,9 @@ it("resolves the configured FLIGHT seat and MC hub traffic in the open conversat
         { from: "MC", to: "flight-1", count: 4 },
       ],
     },
-    "/api/comms/traffic": {
-      hours: [
-        { hour, from: "flight-1", to: "CAPCOM", count: 1 },
-        { hour, from: "MC", to: "flight-1", count: 4 },
-      ],
+    "/api/comms/feed": {
+      messages: [{ id: "notice", from: "MC", to: "flight-1", at: 1, text: "Hub notice" }],
     },
-    "/api/comms/chatter": { pairs: [] },
   });
   render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "flight" }} />);
   const traffic = await screen.findByLabelText("Comms activity");
@@ -449,13 +457,7 @@ it("resolves the configured FLIGHT seat and MC hub traffic in the open conversat
       within(traffic).getByRole("group", { name: /Comms chart, 3 seats, 5 messages in 24h/ }),
     ).toBeTruthy(),
   );
-  const stats = traffic.querySelectorAll(".comms-traffic-stats strong");
-  expect(stats[0]?.textContent).toBe("5");
-  expect(stats[2]?.textContent).toBe("5");
-  // MC's reports count as CAPCOM's, so all five land in the current hour, all with CAPCOM.
-  expect(traffic.querySelector(".comms-hour:last-of-type title")?.textContent).toMatch(
-    /· 5 messages · 5 with capcom$/,
-  );
+  expect(within(traffic).queryByText("Hub notice")).toBeNull();
 });
 
 it("labels traffic buckets by their start in the operator's timezone", async () => {
@@ -565,4 +567,99 @@ it("keeps a cached empty result but marks it stale when the refresh fails", asyn
   act(() => hub.refetchTopic("agents"));
   expect(await screen.findByText(/Stale · couldn't refresh/)).toBeTruthy();
   expect(screen.getByText(/No messages in the last 24h/)).toBeTruthy();
+});
+
+it("clears the owed ring, waiting mark, Open count and list row when the reply is recorded", async () => {
+  let open: unknown[] = [
+    {
+      id: "ask",
+      label: "question",
+      from: "guido-1",
+      to: "retro-1",
+      ticket: null,
+      waitedMs: 2 * 60_000,
+      question: "Which branch?",
+    },
+  ];
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 1 }] },
+    "/api/comms/open": () => ({ status: 200, body: { items: open } }),
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await screen.findByText(/guido-1 → retro-1/i);
+  expect(seat(/^retro-1,/i).classList).toContain("waiting");
+  expect(document.querySelector(".comms-wait-mark")).not.toBeNull();
+  expect(screen.getByRole("button", { name: /^open\b.*1/i })).toBeTruthy();
+  open = [];
+  act(() => hub.refetchTopic("agents"));
+  await waitFor(() => expect(screen.queryByText(/guido-1 → retro-1/i)).toBeNull());
+  expect(seat(/^retro-1,/i).classList).not.toContain("waiting");
+  expect(document.querySelector(".comms-wait-mark")).toBeNull();
+  expect(screen.getByText("Nobody owes a reply.")).toBeTruthy();
+  // The conversation itself stays.
+  expect(screen.getByRole("button", { name: /^guido-1 ↔ retro-1,/i })).toBeTruthy();
+});
+
+it("has no play control and no timeline", async () => {
+  stubFetch({ "/api/comms/links": { links: [] }, ...quiet });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  await screen.findByRole("button", { name: /^FLIGHT,/i });
+  expect(screen.queryByRole("button", { name: /^(play|pause|resume|replay)\b/i })).toBeNull();
+  expect(screen.queryByRole("slider")).toBeNull();
+  expect(document.querySelector("[class*=timeline], [class*=scrub]")).toBeNull();
+});
+
+it("says in words when who is waiting could not be read, instead of 'nobody owes a reply'", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 1 }] },
+    "/api/comms/open": () => ({ status: 500, body: { error: "down" } }),
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  expect(await screen.findByText(/couldn't read who is waiting/i)).toBeTruthy();
+  expect(screen.queryByText("Nobody owes a reply.")).toBeNull();
+});
+
+it("says the graph could not be loaded when its links fail, not that it is loading", async () => {
+  stubFetch({
+    "/api/comms/links": () => ({ status: 500, body: { error: "down" } }),
+    ...quiet,
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  expect(await screen.findByText(/couldn't load comms graph/i)).toBeTruthy();
+  expect(screen.queryByText(/loading comms graph/i)).toBeNull();
+});
+
+it("words a long wait by its largest unit, and names seats by call sign, in both lists", async () => {
+  stubFetch({
+    "/api/comms/links": { links: [{ from: "guido-1", to: "retro-1", count: 1 }] },
+    "/api/comms/open": {
+      items: [
+        {
+          id: "ask",
+          label: "question",
+          from: "guido-1",
+          to: "retro-1",
+          ticket: null,
+          waitedMs: 3 * 24 * 60 * 60_000,
+          question: "Which branch?",
+        },
+      ],
+    },
+    "/api/comms/feed": {
+      messages: [{ id: "m1", from: "retro-1", to: "guido-1", at: 1, text: "On main" }],
+    },
+    "/api/comms/traffic": { hours: [] },
+    "/api/comms/chatter": { pairs: [] },
+  });
+  render(<CommsGraph rows={rows} flightId="flight-1" view={{ kind: "crew" }} />);
+  const waiting = await screen.findByRole("region", { name: "Waiting on a reply" });
+  expect(waiting.textContent).toContain("3d");
+  expect(waiting.textContent).not.toMatch(/\d{4,}m/);
+  expect(waiting.textContent).toContain("GUIDO-1");
+  const said = await screen.findByRole("region", { name: "Just said" });
+  expect(said.textContent).toMatch(/RETRO-1 → GUIDO-1/);
 });

@@ -23,7 +23,7 @@ import {
   type ExecFn,
   NOT_A_CASK,
   realExec,
-} from "../src/cli-update.ts";
+} from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { type Collectors, createScheduler } from "../src/scheduler.ts";
 import { Store } from "../src/store.ts";
