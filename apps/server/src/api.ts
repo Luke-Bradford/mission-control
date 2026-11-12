@@ -1613,6 +1613,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
   let reconciled: { at: number; basis: string } | undefined;
+  // A skipped look is retried when the minute is up, so an item that came due on the clock alone
+  // does not wait for an unrelated event.
+  let repeatTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleNotifications = () => {
     if (notificationTimer !== undefined || reconcilingNotifications) return;
     notificationTimer = setTimeout(() => {
@@ -1637,6 +1640,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           reconcileNotifications();
           // after the reconcile: its own writes are not a change
           reconciled = { at, basis: basisNow() };
+        } else if (repeatTimer === undefined) {
+          repeatTimer = setTimeout(
+            () => {
+              repeatTimer = undefined;
+              scheduleNotifications();
+            },
+            Math.max(0, reconciled.at + NOTIFICATION_REPEAT_MS - at),
+          );
+          repeatTimer.unref();
         }
       } finally {
         reconcilingNotifications = false;
@@ -1686,6 +1698,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     unsubscribeNotifications();
     stopMapRing?.();
     clearTimeout(notificationTimer);
+    clearTimeout(repeatTimer);
     for (const end of [...streams]) end();
   });
 

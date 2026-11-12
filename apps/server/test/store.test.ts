@@ -696,6 +696,52 @@ describe("Store", () => {
     expect(store.board("r2")).toEqual([item(3, "r2")]);
   });
 
+  describe("boardView", () => {
+    const view = (n: number, title: string): BoardItem => ({
+      repoId: "r1",
+      issueNumber: n,
+      title,
+      status: "Todo",
+      state: "planned",
+      labels: [],
+      priority: null,
+      updatedAt: n,
+      url: "u",
+      stage: null,
+      owner: null,
+      parent: null,
+      subIssues: null,
+      blockedBy: [],
+      milestone: null,
+      size: null,
+      closed: false,
+      prioritySource: null,
+      createdAt: n,
+      itemId: null,
+      projectId: null,
+    });
+
+    it("serves the kept cards until the board is replaced, then the new ones", () => {
+      store.replaceBoard("r1", [view(1, "old")]);
+      const kept = store.boardView("r1");
+      expect(store.boardView("r1")).toBe(kept);
+      store.replaceBoard("r1", [view(1, "new")]);
+      expect(store.boardView("r1").map((c) => c.title)).toEqual(["new"]);
+    });
+
+    it("serves the new board after another connection replaces it", () => {
+      const other = new Store(join(dir, "mc.sqlite"));
+      try {
+        store.replaceBoard("r1", [view(1, "old")]);
+        expect(store.boardView("r1").map((c) => c.title)).toEqual(["old"]);
+        other.replaceBoard("r1", [view(1, "theirs"), view(2, "added")]);
+        expect(store.boardView("r1").map((c) => c.title)).toEqual(["theirs", "added"]);
+      } finally {
+        other.close();
+      }
+    });
+  });
+
   it("migrates an old board_items table, defaulting the new columns", () => {
     const old = join(dir, "old-board.sqlite");
     const db = new DatabaseSync(old);

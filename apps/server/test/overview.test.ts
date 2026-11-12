@@ -825,3 +825,12 @@ it("a review of an earlier epoch is not rework for a resumed run", () => {
   expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0]);
   expect(result.pipeline[3]?.cards[0]?.rework).toBeUndefined();
 });
+
+it("shows a replaced board's pipeline card on the next read", () => {
+  store.replaceBoard("repo", [card(1, "In review")]);
+  const before = summary().pipeline.flatMap((stage) => stage.cards.map((c) => c.title));
+  store.replaceBoard("repo", [card(1, "In review", { title: "Renamed" })]);
+  const after = summary().pipeline.flatMap((stage) => stage.cards.map((c) => c.title));
+  expect(after).not.toEqual(before);
+  expect(after).toContain("Renamed");
+});

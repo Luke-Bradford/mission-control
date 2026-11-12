@@ -10556,6 +10556,31 @@ describe("overview", () => {
     }
   });
 
+  it("retries a skipped notification look when the minute is up, with no new event", async () => {
+    await new Promise((r) => setTimeout(r, 1_100)); // the reconcile armed at ready
+    vi.useFakeTimers();
+    const reads = vi.spyOn(LocalNotifications.prototype, "reconcile");
+    try {
+      store.setSetting("notifications-test", "0");
+      bus.emit("attention");
+      await vi.advanceTimersByTimeAsync(1_000);
+      const first = reads.mock.calls.length;
+      expect(first).toBeGreaterThan(0);
+      clock += 30_000;
+      bus.emit("attention");
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(reads).toHaveBeenCalledTimes(first);
+      for (let s = 0; s < 120; s++) {
+        clock += 1_000;
+        await vi.advanceTimersByTimeAsync(1_000);
+      }
+      expect(reads.mock.calls.length).toBeGreaterThan(first);
+    } finally {
+      reads.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it("shares attention for two seconds and invalidates on non-machine topics", async () => {
     const reads = vi.spyOn(store, "acks");
     await get("/api/overview");
