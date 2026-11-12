@@ -158,6 +158,170 @@ describeRendered("FLIGHT page in a browser", () => {
     }
   }
 
+  for (const [width, height] of [
+    [1280, 800],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      it(
+        `shows the standing order, its end action and ages at ${width}x${height} in ${theme}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: flightPageApi("blocked"),
+          });
+          await page.box("#ordersP .fp-ofirst");
+          await page.box("#doing .fp-age");
+          expect(page.errors()).toEqual([]);
+          expect(await page.reachable("#ordersP .fp-end", "#ordersP")).toEqual([true]);
+          const r = await page.evaluate(() => {
+            const doc = document.documentElement;
+            const end = document
+              .querySelector<HTMLElement>("#ordersP .fp-end")
+              ?.getBoundingClientRect();
+            const panel = document.getElementById("ordersP");
+            return {
+              sideScroll: doc.scrollWidth - doc.clientWidth,
+              clipped: panel ? panel.scrollHeight > panel.clientHeight + 1 : true,
+              end: end ? { w: end.width, h: end.height } : null,
+              text: panel?.textContent ?? "",
+              decisions: document.querySelectorAll("#decisions li").length,
+            };
+          }, null);
+          const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(join(shots, `flight-orders-${width}x${height}-${theme}.png`));
+          }
+          expect(r.sideScroll).toBeLessThanOrEqual(0);
+          expect(r.clipped).toBe(false);
+          expect(r.end?.h).toBeGreaterThanOrEqual(24);
+          expect(r.text).toContain("Review only: no new builds");
+          expect(r.text).toContain("Ends: not set");
+          expect(r.decisions).toBeGreaterThanOrEqual(3);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  // Live-like load: long orders, five Doing now lines, four held items. The orders strip must be
+  // wholly on the first screen, with its setter, time and end inside it.
+  for (const [width, height] of [
+    [1280, 800],
+    [1600, 900],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      it(
+        `keeps the orders strip on the first screen with long orders at ${width}x${height} in ${theme}`,
+        async () => {
+          const long = (id: number) => ({
+            id,
+            at: NOW - 2 * 24 * 60 * 60_000,
+            revokedAt: null,
+            source: "saved",
+            seatId: null,
+            by: "operator",
+            kind: "text",
+            text: "y".repeat(300),
+          });
+          const held = [1, 2, 3, 4].map((n) =>
+            item({
+              key: `hold:${n}`,
+              text: `Wait for CI ${n}.`,
+              hold: {
+                reason: "CI is running",
+                condition: { kind: "manual" },
+                by: "flight-1",
+                at: NOW,
+              },
+            }),
+          );
+          const base = flightPageApi("busy");
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: {
+              ...base,
+              "/api/attention/held": held,
+              "/api/flight/orders?limit=1": {
+                active: [long(1), long(2)],
+                history: [],
+                nextCursor: null,
+              },
+            },
+          });
+          await page.box("#ordersP .fp-ofirst");
+          const r = await page.evaluate(() => {
+            const box = (el: Element | null) => el?.getBoundingClientRect() ?? null;
+            const strip = box(document.querySelector("#ordersP .fp-ostrip"));
+            const meta = box(document.querySelector("#ordersP .fp-meta"));
+            const end = box(document.querySelector("#ordersP .fp-end"));
+            const inside = (a: DOMRect | null, b: DOMRect | null) =>
+              a !== null &&
+              b !== null &&
+              a.top >= b.top - 1 &&
+              a.bottom <= b.bottom + 1 &&
+              a.right <= b.right + 1;
+            const edge = box(document.querySelector(".fp-brows"));
+            const rows = [...document.querySelectorAll("#blockers .fp-brow")].map((row) =>
+              row.getBoundingClientRect(),
+            );
+            const whole = rows.filter(
+              (b) => edge !== null && b.top >= edge.top - 1 && b.bottom <= edge.bottom + 1,
+            ).length;
+            const watch = box(document.getElementById("heldWatchP"));
+            const footCount = (panel: string) => {
+              const m = /^(\d+) more below/.exec(
+                document.querySelector(`${panel} .fp-more`)?.textContent ?? "",
+              );
+              return m ? Number(m[1]) : 0;
+            };
+            // Every Doing now line is clear of the Watch list, or counted in a visible foot.
+            const doingHidden = [...document.querySelectorAll("#doing li")].filter(
+              (li) => watch !== null && li.getBoundingClientRect().bottom > watch.top + 1,
+            ).length;
+            const panelBox = box(document.getElementById("heldWatchP"));
+            const watchHidden = [...document.querySelectorAll("#heldWatchP .drow")].filter(
+              (row) => {
+                const b = row.getBoundingClientRect();
+                return panelBox !== null && b.bottom > panelBox.bottom + 1;
+              },
+            ).length;
+            return {
+              whole,
+              doingLine: doingHidden <= footCount("#doingP"),
+              watchRows: watchHidden <= footCount("#heldWatchP"),
+              stripInViewport:
+                strip !== null && strip.top >= 0 && strip.bottom <= window.innerHeight,
+              metaInStrip: inside(meta, strip),
+              endInStrip: inside(end, strip),
+              height: strip?.height ?? 0,
+            };
+          }, null);
+          expect(r.whole, "blocker rows wholly in view").toBeGreaterThanOrEqual(2);
+          expect(r.doingLine, "no Doing now line sits under the Watch list uncounted").toBe(true);
+          expect(r.watchRows, "no Watch list row is cut without a count").toBe(true);
+          expect(r.stripInViewport).toBe(true);
+          expect(r.metaInStrip).toBe(true);
+          expect(r.endInStrip).toBe(true);
+          expect(r.height).toBeLessThanOrEqual(48);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
   for (const [width, height] of SIZES) {
     for (const state of STATES) {
       for (const theme of ["dark", "light"] as const) {
@@ -312,7 +476,7 @@ describeRendered("FLIGHT page in a browser", () => {
               total: rows.length,
               whole: whole.length,
               rowHeight: whole[0]?.getBoundingClientRect().height ?? 0,
-              more: document.querySelector(".fp-more")?.textContent ?? "",
+              more: document.querySelector("#blockers .fp-more")?.textContent ?? "",
               act: (() => {
                 const a = document.querySelector<HTMLElement>("#blockers .fp-brow .fp-act");
                 return {
@@ -437,7 +601,7 @@ describeRendered("FLIGHT page in a browser", () => {
               decTop: box("#decisionsP")?.top ?? 0,
               whole: whole.length,
               total: rows.length,
-              more: document.querySelector(".fp-more")?.textContent ?? "",
+              more: document.querySelector("#blockers .fp-more")?.textContent ?? "",
               columns: ["fp-what", "fp-act"].map(
                 (c) =>
                   first?.querySelector<HTMLElement>(`.${c}`)?.getBoundingClientRect().width ?? 0,
