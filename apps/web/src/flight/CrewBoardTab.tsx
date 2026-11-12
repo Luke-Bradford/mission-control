@@ -3,6 +3,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { SeatInstructionIndexPanel } from "../instructions/Instructions.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
+import { BlockedChains } from "./BlockedChains.tsx";
 import { WatchList } from "./Brief.tsx";
 import { Summary } from "./Summary.tsx";
 import { WorkInFlight } from "./WorkInFlight.tsx";
@@ -53,6 +54,7 @@ export function CrewBoardTab() {
           {context === "seats" ? <WorkInFlight /> : <SeatInstructionIndexPanel />}
         </div>
       </Panel>
+      <BlockedChains />
       <Panel
         id="ledgerP"
         title="FLIGHT's queue"
