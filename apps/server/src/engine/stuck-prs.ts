@@ -24,16 +24,16 @@ import {
   seatDef,
   WAITING_OPERATOR_LABEL,
 } from "@mc/core";
-import { holds } from "../attention/holds.ts";
+import { holds } from "../attention/holds-read.ts";
 import { activeAway } from "../away.ts";
 import { type CcConfig, type CrewSeatConfig, seatUnavailable } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
-import { originHeads } from "../mcp/tools.ts";
 import { prFlow } from "../pr/flow.ts";
 import { CREW_GIT_SLOW_MS, gitIdentity, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
+import { originHeads } from "../runtime/origin-heads.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { restartHold, ticketParked } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
