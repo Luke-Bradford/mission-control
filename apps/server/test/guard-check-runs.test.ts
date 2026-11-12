@@ -379,6 +379,29 @@ describe("the check recorder", () => {
     expect(r.drops("r1")).toMatchObject([{ reason: "turn-ended", command: LINT }]);
   });
 
+  it("does not reinstall a call whose run was dropped while its start was still reading the clone", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void rows.push(c) },
+      checks: async () => checks,
+      state: async () => {
+        await gate;
+        return state;
+      },
+      worktree: async () => WORKTREE,
+      now: () => 99,
+    });
+    expect(await r.admit?.(KEY, LINT)).toBeNull();
+    const starting = r.begin(KEY, LINT);
+    r.dropRun("r1"); // the turn was interrupted before the start finished
+    release();
+    await starting;
+    expect(await r.admit?.({ runId: "r1", toolUseId: "t2" }, TYPES)).toBeNull();
+  });
+
   it("keeps two runs' calls with the same tool id apart", async () => {
     const r = recorder();
     await r.begin({ runId: "r1", toolUseId: "t" }, LINT);

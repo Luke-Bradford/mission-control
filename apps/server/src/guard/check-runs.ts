@@ -161,6 +161,9 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   /** Calls that started on a clean tree and matched a check: what they matched, and the head. */
   const started = new Map<string, StartedCall>();
   const admitted = new Map<string, { key: CallKey; command: string }>();
+  /** Bumped when a run's turn is abandoned, so a start still reading the clone cannot install afterwards. */
+  const epochs = new Map<string, number>();
+  const epochOf = (runId: string): number => epochs.get(runId) ?? 0;
   const finishing = new Set<StartedCall>();
   /** Calls the recorder saw start and did not count, by run; in memory, so a restart forgets them. */
   const dropped = new Map<string, CheckDrop[]>();
@@ -219,11 +222,13 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       }
     },
     async admit(key, command) {
+      const epoch = epochOf(key.runId);
       try {
         const checks = await d.checks(key.runId);
         if (lockedCheck(command, checks) === null && !testCommand(command)) return null;
         const worktree =
           d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
+        if (epochOf(key.runId) !== epoch) return null;
         const checkout = worktree ?? key.runId;
         const active = admitted.get(checkout);
         if (active !== undefined && callId(active.key) !== callId(key)) return active.command;
@@ -242,6 +247,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       cancel(key);
     },
     async begin(key, command, aliases = [], options = {}) {
+      const epoch = epochOf(key.runId);
       try {
         const checks = await d.checks(key.runId);
         const own = d.worktree === undefined ? null : await d.worktree(key.runId).catch(() => null);
@@ -253,6 +259,11 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
           return;
         }
         const at = await d.state(key.runId);
+        // the turn was abandoned while the clone was read: nothing will run this call
+        if (epochOf(key.runId) !== epoch) {
+          cancel(key);
+          return;
+        }
         // Track execution even when its receipt cannot be trusted. A dirty start must not earn a
         // pass, but it still prevents another check or test racing in this checkout.
         const trackOnly = (head: string | null): void => {
@@ -371,6 +382,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       // Codex can hand a turn back while its command keeps running. Its later item completion is
       // still the only result that can cover the commit this call started on.
       if (options.keepWatching) return;
+      epochs.set(runId, epochOf(runId) + 1);
       const calls = [...new Set(started.values())].filter((call) => call.runId === runId);
       for (const [id, call] of started) if (call.runId === runId) started.delete(id);
       for (const call of calls)
