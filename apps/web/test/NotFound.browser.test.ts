@@ -23,9 +23,15 @@ describeRendered("Not-found page", () => {
           const layout = await page.evaluate(() => {
             const rect = (selector: string) =>
               (document.querySelector(selector) as HTMLElement).getBoundingClientRect();
+            const textLeft = (selector: string) => {
+              const range = document.createRange();
+              range.selectNodeContents(document.querySelector(selector) as HTMLElement);
+              return range.getBoundingClientRect().left;
+            };
             const panel = rect("#page-not-found");
             return {
-              inset: rect("#page-not-found > p").left - panel.left,
+              // where the text starts, not the box: padding does not move the paragraph's own edge
+              inset: textLeft("#page-not-found > p") - panel.left,
               slack: panel.bottom - rect(".not-found-links").bottom,
             };
           }, undefined);
