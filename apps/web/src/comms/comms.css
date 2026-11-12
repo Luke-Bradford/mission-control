@@ -989,12 +989,19 @@ a.comms-ref {
   flex: 1 1 0;
   flex-direction: column;
   gap: var(--sp-1);
-  min-height: 220px;
+  min-height: 240px;
   padding-bottom: var(--sp-2);
   overflow: hidden;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--r);
+}
+
+/* A short window drops the caption so three whole rows still fit; the count keeps its screen-reader label. */
+@media (max-height: 899px) {
+  .comms-ticket-cols {
+    display: none;
+  }
 }
 
 /* From 900 px high the list gets room for five one-line rows plus its head, search and footer; the nav shrinks to pay for it. */
