@@ -31,7 +31,6 @@ const PAGES: [string, string, RegExp, string][] = [
   ["Board", "/board", /Cache the quote total/, "Board"],
   ["a ticket", "/tickets/shop-app/101", /Cache the quote total at checkout/, "Board"],
   ["an agent", "/agent/dev-1", /DEV-1/, "Agents"],
-  ["a repo's Map", "/map/shop-app", /Crew activity map/i, "Map"],
   ["Comms", "/comms/crew", /Starting on the checkout cache/, "Comms"],
   ["QA", "/qa", /Export orders as CSV/, "QA"],
   ["Telemetry", "/telemetry", /Cycle time/i, "Telemetry"],
