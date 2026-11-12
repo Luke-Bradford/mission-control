@@ -469,7 +469,8 @@ threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
 
 - `GET /waste` also serves `flight`: 14 rolling 24-hour buckets (oldest first, the last ending now) of
   FLIGHT's wakes, its `wait` decisions, and its tokens against every run's new tokens (`tokenShare`, null
-  with no tokens recorded), so the change to activity-only wakes can be read before and after.
+  with no tokens recorded), so the change to activity-only wakes can be read before and after. A bucket
+  is counted by when the wake, decision or run started.
 - One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
   ends: the ticket merges or closes, the count falls back, or the day passes.
 - FLIGHT is woken once per alarm, through the `waste_alarm` signal, except an unchanged-rerun alarm:
