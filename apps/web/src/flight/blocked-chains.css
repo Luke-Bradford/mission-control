@@ -39,7 +39,7 @@
 }
 
 .bc-stat b {
-  font: 600 16px / 20px var(--display);
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--display);
   font-variant-numeric: tabular-nums;
 }
 
@@ -169,7 +169,7 @@
 }
 
 .bc-root .bc-ref {
-  font-size: 13px;
+  font-size: var(--fs);
 }
 
 .bc-title {
