@@ -1,5 +1,6 @@
 import type { AttentionItem, Crew } from "@mc/core";
 import { SafeLink } from "../components/SafeLink.tsx";
+import { callSign as callSignOf } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { agentPath, followLink } from "../router.ts";
 import { briefLinks } from "./pictures.ts";
@@ -28,9 +29,8 @@ export function pinnedLinks(item: AttentionItem): { label: string; url: string }
  */
 export function LinksSection({ item }: { item: AttentionItem }) {
   // the seat's page is a link here, by its call sign, never by its id
-  const callSign = useResource<Crew>(RESOURCES.crew).data?.rows.find(
-    (r) => r.id === item.agentId,
-  )?.displayCallSign;
+  const row = useResource<Crew>(RESOURCES.crew).data?.rows.find((r) => r.id === item.agentId);
+  const callSign = row ? callSignOf(row) : undefined;
   const seen = new Set<string>();
   const links = [...pinnedLinks(item), ...briefLinks(item)].filter((l) => {
     if (seen.has(l.url)) return false;
