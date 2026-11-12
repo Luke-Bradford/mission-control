@@ -44,8 +44,21 @@ with the real store; collectors are stubbed.
 FLIGHT's copied-data profile of 4cb561a showed 3.10% busy (against 2.84% before), with the open
 runs keeping ticks from being quiet; the last two rows are the answer to that.
 
-Payload bytes of `/api/overview` and the SSE stream are unchanged (no field was added or
-removed; the overview differs only in the time-dependent figures).
+### Bytes (measured, 12 Nov)
+
+Same synthetic fixture (1,500 cards, 6,000 moves, 3,000 runs with digests, 7 days of samples, a ta
+loop), at `origin/main` before this branch and at this head, same seed and clock:
+
+| Measure | Before | After |
+| --- | --- | --- |
+| `/api/overview` body | 3,577 bytes (sha256 prefix `0676ec6867ff`) | 3,577 bytes (`0676ec6867ff`) |
+| SSE events over 5 idle minutes, one stream, collectors stubbed, not counting `machine` | 12 events, 1,770 bytes with `machine` pings (30 at most, 10 s apart) | 12 events, 1,770 bytes |
+| Same, by topic | `limits` 6, `attention` 6 (+ `machine` 31 emits) | `limits` 6, `attention` 6 (+ `machine` 31 emits) |
+| Test run time for the same 5 minutes plus seeding | 6.2 s | 3.8 s |
+
+Equal bytes and an identical body hash are the result: the work moved, not the payload. The SSE
+window is small because the scheduler's collectors were stubbed; it shows the gate sends no
+event it did not before, not what a live hub sends.
 
 The fixture now also carries two such dead loop runs; the tick-pair figures above (2.2 ms with no
 browser, 3.1 ms with one) include them.
