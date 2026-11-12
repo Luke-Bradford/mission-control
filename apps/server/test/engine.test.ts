@@ -2349,6 +2349,24 @@ describe("taking by rule", () => {
     expect(h.taken).toEqual([SEAT]);
   });
 
+  it("offers a freed seat a stuck PR before it takes its next queued ticket", async () => {
+    const order: string[] = [];
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async (seatId) => void order.push(`stuck ${seatId}`),
+      takeNext: async (seatId) => void order.push(`take ${seatId}`),
+    });
+    h.engine.start();
+    order.length = 0;
+    report();
+    await h.engine.reconcileRun(RUN);
+    setPr({ ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    setPr({ state: "merged", ci: "passing", mergedAt: clock });
+    await h.engine.reconcileRun(RUN);
+    expect(order.slice(0, 2)).toEqual([`stuck ${SEAT}`, `take ${SEAT}`]);
+  });
+
   it("hands out stuck PRs on the tick, before the queues are refilled and any ticket is taken", async () => {
     seatIdle(null);
     const order: string[] = [];

@@ -86,15 +86,38 @@ export const stuckPrRepo = (config: CcConfig, repoId: RepoId): boolean =>
     (s) => s.repoId === repoId && s.seats.some((x) => seatDef(x).loop === "build"),
   );
 
-/** The FLIGHT wait on any name this PR or its ticket goes by, if one is still running. */
-function flightWaitsOn(store: Store, targets: string[], now: number): boolean {
+/**
+ * The issue or PR number a `wait_on` target names, in any spelling FLIGHT uses (`mc#7`, `7`, `#7`,
+ * `PR 7`, `pull 7`, `ticket 7`, `issue 7`); null for another repo's ref or a target with no number.
+ * Signals read their wait targets with it too, so there is one list of spellings.
+ */
+export function waitTargetNumber(repo: string, target: string): number | null {
+  const t = target.trim();
+  const ref = /^([\w.-]+)#(\d+)$/.exec(t);
+  if (ref !== null) return ref[1] === repo ? Number(ref[2]) : null;
+  const n = /^(?:(?:PR|pull|ticket|issue)\s*)?#?(\d+)$/i.exec(t)?.[1];
+  return n === undefined ? null : Number(n);
+}
+
+/** Whether a FLIGHT wait still running is on this PR or its ticket, by any name it goes by. */
+function flightWaitsOn(
+  store: Store,
+  repo: string,
+  prNumber: number,
+  issue: number,
+  now: number,
+): boolean {
   let waits: Record<string, { until?: number }> = {};
   try {
     waits = JSON.parse(store.getSetting(FLIGHT_WAITS_SETTING) || "{}");
   } catch {
     return false;
   }
-  return targets.some((t) => (waits[t]?.until ?? 0) > now);
+  return Object.entries(waits).some(([target, w]) => {
+    if ((w.until ?? 0) <= now) return false;
+    const n = waitTargetNumber(repo, target);
+    return n === prNumber || n === issue;
+  });
 }
 
 /**
@@ -152,20 +175,7 @@ export function stuckPrs(i: {
       continue;
     if (ticketHolds.has(pr.ticket)) continue;
     if (attentionHolds.some(([key]) => key.startsWith(`pr:${repoId}#${pr.number}:`))) continue;
-    if (
-      flightWaitsOn(
-        store,
-        [
-          pr.ticket,
-          `${repoId}#${pr.number}`,
-          `PR ${pr.number}`,
-          `PR #${pr.number}`,
-          `#${pr.number}`,
-        ],
-        now,
-      )
-    )
-      continue;
+    if (flightWaitsOn(store, repoId, pr.number, issue, now)) continue;
     const card = board.find((c) => c.issueNumber === issue);
     if (card === undefined || card.closed || card.labels.includes(WAITING_OPERATOR_LABEL)) continue;
     if (ticketParked(store, pr.ticket) !== null) continue;
@@ -347,7 +357,7 @@ function freeSeats(
  * 30 minutes is merged by the hub when its conflict is clean, else started on a free seat in its
  * area. A PR no seat is free for waits for the next tick.
  */
-export async function takeStuckPrs(deps: StuckDeps): Promise<void> {
+export async function takeStuckPrs(deps: StuckDeps, onlySeat?: string): Promise<void> {
   const { config, store, now } = deps;
   if (!deps.enabled || deps.login === null) return;
   // a conflict the hub settles costs no seat; only the starts wait on the machine and the operator
@@ -384,13 +394,19 @@ export async function takeStuckPrs(deps: StuckDeps): Promise<void> {
           continue;
         }
       }
-      if (!(await startOnStuckPr(deps, rules, pr))) retries.set(key, now() + STUCK_PR_RETRY_MS);
+      if (!(await startOnStuckPr(deps, rules, pr, onlySeat)))
+        retries.set(key, now() + STUCK_PR_RETRY_MS);
     }
   }
 }
 
 /** Starts a free seat on the stuck PR's ticket; false when none was started. */
-async function startOnStuckPr(deps: StuckDeps, rules: RepoRules, pr: StuckPr): Promise<boolean> {
+async function startOnStuckPr(
+  deps: StuckDeps,
+  rules: RepoRules,
+  pr: StuckPr,
+  onlySeat?: string,
+): Promise<boolean> {
   const { config, store } = deps;
   const capacity = storedMachineCapacity(
     store,
@@ -405,6 +421,7 @@ async function startOnStuckPr(deps: StuckDeps, rules: RepoRules, pr: StuckPr): P
   const board = store.board(pr.repoId);
   const waitsOf = waitReader(store, pr.repoId);
   for (const seat of freeSeats(deps, pr.repoId, rules, card)) {
+    if (onlySeat !== undefined && seat.id !== onlySeat) continue;
     const refusal = eligibleToStart({
       repoId: pr.repoId,
       issue: pr.issue,

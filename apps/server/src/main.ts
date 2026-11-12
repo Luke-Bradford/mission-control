@@ -800,18 +800,21 @@ export async function main(): Promise<void> {
         now: Date.now,
         onNotes: () => bus.emit("attention"),
       }),
-    takeStuckPrs: () =>
-      takeStuckPrs({
-        config,
-        store,
-        supervisor,
-        login: hubLogin,
-        rules: engineRules,
-        inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
-        enabled: engineOn,
-        now: Date.now,
-        log: (line) => log(`engine: ${line}`),
-      }),
+    takeStuckPrs: (onlySeat) =>
+      takeStuckPrs(
+        {
+          config,
+          store,
+          supervisor,
+          login: hubLogin,
+          rules: engineRules,
+          inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+          enabled: engineOn,
+          now: Date.now,
+          log: (line) => log(`engine: ${line}`),
+        },
+        onlySeat,
+      ),
     takeNext: (seatId) =>
       takeNext(
         {

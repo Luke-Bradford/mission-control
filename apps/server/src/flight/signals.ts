@@ -41,7 +41,7 @@ import {
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
-import { dueStuckPrs, prFitsSeat, type StuckPr } from "../engine/stuck-prs.ts";
+import { dueStuckPrs, prFitsSeat, type StuckPr, waitTargetNumber } from "../engine/stuck-prs.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import { ownsCard } from "../ownership.ts";
 import { openWasteAlarms } from "../spend/waste.ts";
@@ -980,8 +980,8 @@ function waitSubjectDone(store: Store, repo: string, target: string): boolean {
   if (waitResolved(store, repo, target)) return true;
   const run = store.run(target);
   if (run !== null && run !== undefined) return run.endedAt !== null;
-  const n = /^(?:(?:PR|pull|ticket|issue)\s*)?#?(\d+)$/i.exec(target.trim())?.[1];
-  if (n === undefined) return false;
+  const n = waitTargetNumber(repo, target);
+  if (n === null) return false;
   return waitResolved(store, repo, `${repo}#${n}`);
 }
 
