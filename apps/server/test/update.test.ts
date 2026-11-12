@@ -24,6 +24,7 @@ import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { CREW_LOCK_FILE, createSupervisor, type SeatBusy } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
+import { canRunPnpmInstall, skipWhenRefused } from "./sandbox-capability.ts";
 import {
   type AutoUpdateDeps,
   autoUpdatePath,
@@ -679,65 +680,68 @@ describe("update", () => {
     expect(readFileSync(web("dist", "index.html"), "utf8")).toBe("old");
   });
 
-  it("installs a package added by a lockfile update through node_modules' store", async () => {
-    const store = join(dir, "operator-store");
-    const pnpmEnv = {
-      ...process.env,
-      CI: "false",
-      NPM_CONFIG_WORKSPACE_DIR: dev,
-      pnpm_config_store_dir: store,
-    };
-    const packageJson = (dependencies: Record<string, string>) =>
-      `${JSON.stringify({ name: "hub", version: "1.0.0", private: true, dependencies })}\n`;
+  it.skipIf(skipWhenRefused(canRunPnpmInstall()))(
+    "installs a package added by a lockfile update through node_modules' store",
+    async () => {
+      const store = join(dir, "operator-store");
+      const pnpmEnv = {
+        ...process.env,
+        CI: "false",
+        NPM_CONFIG_WORKSPACE_DIR: dev,
+        pnpm_config_store_dir: store,
+      };
+      const packageJson = (dependencies: Record<string, string>) =>
+        `${JSON.stringify({ name: "hub", version: "1.0.0", private: true, dependencies })}\n`;
 
-    mkdirSync(join(dev, "vendor", "base-package"), { recursive: true });
-    writeFileSync(
-      join(dev, "vendor", "base-package", "package.json"),
-      JSON.stringify({ name: "base-package", version: "1.0.0" }),
-    );
-    writeFileSync(
-      join(dev, "package.json"),
-      packageJson({ "base-package": "file:vendor/base-package" }),
-    );
-    execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
-    git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/base-package/package.json");
-    git(dev, "commit", "-qm", "initial pnpm workspace");
-    git(dev, "push", "-q", "origin", "main");
-    git(hub, "pull", "--ff-only", "origin", "main");
-    execFileSync("pnpm", ["install", "--frozen-lockfile"], {
-      cwd: hub,
-      env: { ...pnpmEnv, NPM_CONFIG_WORKSPACE_DIR: hub },
-    });
+      mkdirSync(join(dev, "vendor", "base-package"), { recursive: true });
+      writeFileSync(
+        join(dev, "vendor", "base-package", "package.json"),
+        JSON.stringify({ name: "base-package", version: "1.0.0" }),
+      );
+      writeFileSync(
+        join(dev, "package.json"),
+        packageJson({ "base-package": "file:vendor/base-package" }),
+      );
+      execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
+      git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/base-package/package.json");
+      git(dev, "commit", "-qm", "initial pnpm workspace");
+      git(dev, "push", "-q", "origin", "main");
+      git(hub, "pull", "--ff-only", "origin", "main");
+      execFileSync("pnpm", ["install", "--frozen-lockfile"], {
+        cwd: hub,
+        env: { ...pnpmEnv, NPM_CONFIG_WORKSPACE_DIR: hub },
+      });
 
-    mkdirSync(join(dev, "vendor", "added-package"), { recursive: true });
-    writeFileSync(
-      join(dev, "vendor", "added-package", "package.json"),
-      JSON.stringify({ name: "added-package", version: "1.0.0" }),
-    );
-    writeFileSync(
-      join(dev, "package.json"),
-      packageJson({
-        "base-package": "file:vendor/base-package",
-        "added-package": "file:vendor/added-package",
-      }),
-    );
-    execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
-    git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/added-package/package.json");
-    git(dev, "commit", "-qm", "add package");
-    git(dev, "push", "-q", "origin", "main");
+      mkdirSync(join(dev, "vendor", "added-package"), { recursive: true });
+      writeFileSync(
+        join(dev, "vendor", "added-package", "package.json"),
+        JSON.stringify({ name: "added-package", version: "1.0.0" }),
+      );
+      writeFileSync(
+        join(dev, "package.json"),
+        packageJson({
+          "base-package": "file:vendor/base-package",
+          "added-package": "file:vendor/added-package",
+        }),
+      );
+      execFileSync("pnpm", ["install", "--lockfile-only"], { cwd: dev, env: pnpmEnv });
+      git(dev, "add", "package.json", "pnpm-lock.yaml", "vendor/added-package/package.json");
+      git(dev, "commit", "-qm", "add package");
+      git(dev, "push", "-q", "origin", "main");
 
-    const fake = fakeExec();
-    const exec: Exec = (file, args, options) =>
-      file === "pnpm" && args[0] === "install"
-        ? execFileP(file, [...args], { cwd: options.cwd, env: options.env, encoding: "utf8" })
-        : fake.exec(file, args, options);
-    const { u } = updater({ exec });
-    await expect(u.update()).resolves.toEqual({ restarting: true });
+      const fake = fakeExec();
+      const exec: Exec = (file, args, options) =>
+        file === "pnpm" && args[0] === "install"
+          ? execFileP(file, [...args], { cwd: options.cwd, env: options.env, encoding: "utf8" })
+          : fake.exec(file, args, options);
+      const { u } = updater({ exec });
+      await expect(u.update()).resolves.toEqual({ restarting: true });
 
-    expect(
-      readFileSync(join(hub, "node_modules", "added-package", "package.json"), "utf8"),
-    ).toContain('"added-package"');
-  });
+      expect(
+        readFileSync(join(hub, "node_modules", "added-package", "package.json"), "utf8"),
+      ).toContain('"added-package"');
+    },
+  );
 
   it("leaves node_modules alone when pnpm says it needs a non-interactive purge", async () => {
     upstreamCommit("pnpm-lock.yaml");

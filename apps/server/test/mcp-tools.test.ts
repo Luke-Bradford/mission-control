@@ -133,6 +133,7 @@ import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { runSeatGrants } from "../src/runtime/grants.ts";
 import { Store } from "../src/store.ts";
+import { canApplySeatbelt, skipWhenRefused } from "./sandbox-capability.ts";
 
 const NOW = Date.parse("2026-10-20T12:00:00Z");
 const BRANCH = "feature/42-fix-the-stop-race";
@@ -5999,7 +6000,7 @@ describe("restore_file", () => {
     expect(restoreSandbox).not.toHaveBeenCalled();
   });
 
-  it.skipIf(process.platform !== "darwin")(
+  it.skipIf(process.platform !== "darwin" || skipWhenRefused(canApplySeatbelt()))(
     "Seatbelt tool restore and delete use the default sandbox runner",
     async () => {
       const ts = make({ config: cfg });

@@ -38,6 +38,7 @@ import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { CODEX_PROJECT_DIR, codexSeatConfig } from "../src/runtime/codex-floor.ts";
 import { crewTempRoot } from "../src/runtime/supervisor.ts";
 import { type FakeAnthropic, startFakeAnthropic } from "./fake-anthropic.ts";
+import { canListenOnLoopback, skipWhenRefused } from "./sandbox-capability.ts";
 
 const SANDBOX_EXEC = "/usr/bin/sandbox-exec";
 
@@ -480,22 +481,25 @@ function runToEnd(
 }
 
 describe("the loopback probe itself", () => {
-  it("reaches the hub when run outside any sandbox", async () => {
-    const hub = await listenOnLoopback();
-    let output = "";
-    try {
-      output = await runToEnd(
-        "/bin/sh",
-        ["-c", loopbackProbe(hub.port)],
-        { env: process.env },
-        20_000,
-      );
-    } finally {
-      await hub.close();
-    }
-    expect(output, "the probe's output").toMatch(/^ran\n[1-5]\d\drc=0$/m);
-    expect(hub.hits(), "requests that reached the hub").toBe(1);
-  });
+  it.skipIf(skipWhenRefused(canListenOnLoopback()))(
+    "reaches the hub when run outside any sandbox",
+    async () => {
+      const hub = await listenOnLoopback();
+      let output = "";
+      try {
+        output = await runToEnd(
+          "/bin/sh",
+          ["-c", loopbackProbe(hub.port)],
+          { env: process.env },
+          20_000,
+        );
+      } finally {
+        await hub.close();
+      }
+      expect(output, "the probe's output").toMatch(/^ran\n[1-5]\d\drc=0$/m);
+      expect(hub.hits(), "requests that reached the hub").toBe(1);
+    },
+  );
 });
 
 // The Codex seat's live sandbox state has network off too: the hub refuses a thread whose

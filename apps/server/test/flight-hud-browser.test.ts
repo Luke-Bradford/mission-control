@@ -18,6 +18,7 @@ import {
 } from "../src/flight/hud-render.ts";
 import { createFlightTools, type FlightToolsDeps } from "../src/flight/tools.ts";
 import { Store } from "../src/store.ts";
+import { canListenOnLoopback, skipWhenRefused } from "./sandbox-capability.ts";
 import { WEB_CSP } from "../src/web.ts";
 
 /** A Chrome or Chromium to render with: the override, else the usual macOS and Linux installs. */
@@ -168,161 +169,170 @@ if (CHROME === undefined && process.env.CI)
     });
   });
 
-describe.skipIf(CHROME === undefined)("HUD screenshots in a real browser", () => {
-  beforeAll(startServers);
-  afterAll(stopServers);
+describe.skipIf(CHROME === undefined || skipWhenRefused(canListenOnLoopback()))(
+  "HUD screenshots in a real browser",
+  () => {
+    beforeAll(startServers);
+    afterAll(stopServers);
 
-  it("waits for the lazy page and its data before capturing", async () => {
-    const png = await render("/map");
-    expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
-    // the beacon is sent only after the placeholder was replaced; the capture came after it
-    expect(ready).toEqual(["?page=map"]);
-  }, 90_000);
+    it("waits for the lazy page and its data before capturing", async () => {
+      const png = await render("/map");
+      expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
+      // the beacon is sent only after the placeholder was replaced; the capture came after it
+      expect(ready).toEqual(["?page=map"]);
+    }, 90_000);
 
-  it("refuses a redirect off the hub and never reaches the other server", async () => {
-    await expect(render("/board")).rejects.toThrow();
-    expect(other.requests).toEqual([]);
-  }, 90_000);
+    it("refuses a redirect off the hub and never reaches the other server", async () => {
+      await expect(render("/board")).rejects.toThrow();
+      expect(other.requests).toEqual([]);
+    }, 90_000);
 
-  it("closes popups and never reaches the other server from them", async () => {
-    const before = other.requests.length;
-    const png = await render("/flight");
-    expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
-    expect(other.requests).toHaveLength(before);
-  }, 90_000);
+    it("closes popups and never reaches the other server from them", async () => {
+      const before = other.requests.length;
+      const png = await render("/flight");
+      expect(png.subarray(0, 4)).toEqual(PNG_MAGIC);
+      expect(other.requests).toHaveLength(before);
+    }, 90_000);
 
-  it("blocks service workers", async () => {
-    await render("/comms");
-    expect(hub.requests.filter((u) => u === "/sw.js")).toEqual([]);
-  }, 90_000);
+    it("blocks service workers", async () => {
+      await render("/comms");
+      expect(hub.requests.filter((u) => u === "/sw.js")).toEqual([]);
+    }, 90_000);
 
-  it("blocks WebSockets, to the hub and anywhere else", async () => {
-    await render("/telemetry");
-    expect(hub.upgrades).toEqual([]);
-    expect(other.upgrades).toEqual([]);
-  }, 90_000);
+    it("blocks WebSockets, to the hub and anywhere else", async () => {
+      await render("/telemetry");
+      expect(hub.upgrades).toEqual([]);
+      expect(other.upgrades).toEqual([]);
+    }, 90_000);
 
-  it("denies encoded spellings of the bootstrap and the stream, and every write", async () => {
-    await render("/overview");
-    const seen = hub.requests.map((u) => decodeURIComponent(u).toLowerCase());
-    expect(seen).not.toContain("/api/operator/bootstrap");
-    expect(seen).not.toContain("/api/stream");
-    expect(seen).not.toContain("/api/x");
-  }, 90_000);
+    it("denies encoded spellings of the bootstrap and the stream, and every write", async () => {
+      await render("/overview");
+      const seen = hub.requests.map((u) => decodeURIComponent(u).toLowerCase());
+      expect(seen).not.toContain("/api/operator/bootstrap");
+      expect(seen).not.toContain("/api/stream");
+      expect(seen).not.toContain("/api/x");
+    }, 90_000);
 
-  it("rejects encoded and dot-segment spellings of non-HUD paths before launching", () => {
-    const guard = hudRenderRequest(hub.origin);
-    for (const page of ["/%61pi/health", "/map/%2e%2e/api/health", "//example.test/map", "/mcp"])
-      expect(() => guard.page(page)).toThrow("HUD page required");
-  });
+    it("rejects encoded and dot-segment spellings of non-HUD paths before launching", () => {
+      const guard = hudRenderRequest(hub.origin);
+      for (const page of ["/%61pi/health", "/map/%2e%2e/api/health", "//example.test/map", "/mcp"])
+        expect(() => guard.page(page)).toThrow("HUD page required");
+    });
 
-  it("leaves no Chrome behind after a deadline in the owned helper", async () => {
-    const baseline = chromeCount();
-    const guard = hudRenderRequest(hub.origin);
-    await expect(
-      renderHudInHelper(guard.page("/setup"), guard, {
-        executablePath: CHROME as string,
-        deadlineMs: 3_000,
-      }),
-    ).rejects.toThrow("timed out");
-    await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
-  }, 150_000);
+    it("leaves no Chrome behind after a deadline in the owned helper", async () => {
+      const baseline = chromeCount();
+      const guard = hudRenderRequest(hub.origin);
+      await expect(
+        renderHudInHelper(guard.page("/setup"), guard, {
+          executablePath: CHROME as string,
+          deadlineMs: 3_000,
+        }),
+      ).rejects.toThrow("timed out");
+      await expect.poll(chromeCount, { timeout: 10_000 }).toBeLessThanOrEqual(baseline);
+    }, 150_000);
 
-  it("releases a queued screenshot_hud render after the render before it failed", async () => {
-    const NOW = Date.now();
-    const store = new Store(":memory:");
-    store.upsertRun({
-      id: "r-flight",
-      agentId: "flight-1",
-      repoId: "mc",
-      seq: 1,
-      startedAt: NOW,
-      endedAt: null,
-      status: "running",
-      sessionId: "cli",
-      model: "opus",
-      branch: null,
-      ticket: null,
-      costUsd: null,
-      tokens: null,
-      transcriptPath: "/x",
-      prs: [],
-      summary: null,
-    } satisfies Run);
-    store.setSeatSession({
-      seatId: "flight-1",
-      runId: "r-flight",
-      cliSessionId: "cli",
-      state: "idle",
-      reason: null,
-      worktree: null,
-      updatedAt: NOW,
-    } satisfies SeatSessionRow);
-    const config: CcConfig = {
-      operator: { id: "op", timezone: "UTC" },
-      accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
-      repos: [
-        {
-          id: "mc",
-          github: "o/mc",
-          project: 1,
-          statusMap: {},
-          autonomy: "draft",
-          flightPowers: "superuser",
-        },
-      ],
-      loops: [],
-      poll: { usageMinutes: 30, githubSeconds: 60 },
-      crew: {
-        worktrees: "/tmp/none",
-        maxSeats: 8,
-        sessions: [
+    it("releases a queued screenshot_hud render after the render before it failed", async () => {
+      const NOW = Date.now();
+      const store = new Store(":memory:");
+      store.upsertRun({
+        id: "r-flight",
+        agentId: "flight-1",
+        repoId: "mc",
+        seq: 1,
+        startedAt: NOW,
+        endedAt: null,
+        status: "running",
+        sessionId: "cli",
+        model: "opus",
+        branch: null,
+        ticket: null,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "/x",
+        prs: [],
+        summary: null,
+      } satisfies Run);
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "r-flight",
+        cliSessionId: "cli",
+        state: "idle",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      } satisfies SeatSessionRow);
+      const config: CcConfig = {
+        operator: { id: "op", timezone: "UTC" },
+        accounts: [{ id: "claude-main", vendor: "claude", alertAt: 80, stopAt: 95 }],
+        repos: [
           {
-            id: "s1",
-            repoId: "mc",
-            checkout: "/tmp/none/clone",
-            seats: [
-              { id: "flight-1", role: "FLIGHT", accountId: "claude-main", model: "opus", area: [] },
-            ],
+            id: "mc",
+            github: "o/mc",
+            project: 1,
+            statusMap: {},
+            autonomy: "draft",
+            flightPowers: "superuser",
           },
         ],
-      },
-    };
-    const events: string[] = [];
-    // only screenshot_hud is called; the other deps are never reached
-    const tools = createFlightTools({
-      config,
-      store,
-      bus: new ChangeBus(),
-      hubOrigin: hub.origin,
-      // the production renderer: a real helper process and Chrome per call
-      screenshotHud: async (url: string, guard: HudRenderGuard) => {
-        const page = new URL(url).pathname;
-        events.push(`launch ${page}`);
-        try {
-          return await renderHudInHelper(url, guard, {
-            executablePath: CHROME as string,
-            deadlineMs: COLD_START_DEADLINE_MS,
-          });
-        } catch (e) {
-          events.push(`failed ${page}`);
-          throw e;
-        }
-      },
-    } as unknown as FlightToolsDeps);
-    const shot = tools.find((t) => t.name === "screenshot_hud");
-    if (!shot) throw new Error("no screenshot_hud tool");
-    const ctx = { seatId: "flight-1", runId: "r-flight" };
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+        crew: {
+          worktrees: "/tmp/none",
+          maxSeats: 8,
+          sessions: [
+            {
+              id: "s1",
+              repoId: "mc",
+              checkout: "/tmp/none/clone",
+              seats: [
+                {
+                  id: "flight-1",
+                  role: "FLIGHT",
+                  accountId: "claude-main",
+                  model: "opus",
+                  area: [],
+                },
+              ],
+            },
+          ],
+        },
+      };
+      const events: string[] = [];
+      // only screenshot_hud is called; the other deps are never reached
+      const tools = createFlightTools({
+        config,
+        store,
+        bus: new ChangeBus(),
+        hubOrigin: hub.origin,
+        // the production renderer: a real helper process and Chrome per call
+        screenshotHud: async (url: string, guard: HudRenderGuard) => {
+          const page = new URL(url).pathname;
+          events.push(`launch ${page}`);
+          try {
+            return await renderHudInHelper(url, guard, {
+              executablePath: CHROME as string,
+              deadlineMs: COLD_START_DEADLINE_MS,
+            });
+          } catch (e) {
+            events.push(`failed ${page}`);
+            throw e;
+          }
+        },
+      } as unknown as FlightToolsDeps);
+      const shot = tools.find((t) => t.name === "screenshot_hud");
+      if (!shot) throw new Error("no screenshot_hud tool");
+      const ctx = { seatId: "flight-1", runId: "r-flight" };
 
-    // /board redirects off the hub and fails; /overview is a good page queued behind it
-    const first = shot.call(ctx, { page: "/board" });
-    const second = shot.call(ctx, { page: "/overview" });
-    const [a, b] = await Promise.all([first, second]);
+      // /board redirects off the hub and fails; /overview is a good page queued behind it
+      const first = shot.call(ctx, { page: "/board" });
+      const second = shot.call(ctx, { page: "/overview" });
+      const [a, b] = await Promise.all([first, second]);
 
-    expect(a.isError).toBe(true);
-    expect(b.isError).toBeUndefined();
-    expect(b.image?.mimeType).toBe("image/png");
-    // the second helper only launched once the first render had failed and left the queue
-    expect(events).toEqual(["launch /board", "failed /board", "launch /overview"]);
-  }, 150_000);
-});
+      expect(a.isError).toBe(true);
+      expect(b.isError).toBeUndefined();
+      expect(b.image?.mimeType).toBe("image/png");
+      // the second helper only launched once the first render had failed and left the queue
+      expect(events).toEqual(["launch /board", "failed /board", "launch /overview"]);
+    }, 150_000);
+  },
+);

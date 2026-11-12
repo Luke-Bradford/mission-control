@@ -17,6 +17,7 @@ import {
 } from "../src/engine/publish.ts";
 import type { McToolsDeps } from "../src/mcp/tools.ts";
 import { Store } from "../src/store.ts";
+import { canRunPnpmInstall, skipWhenRefused } from "./sandbox-capability.ts";
 
 const BRANCH = "feature/7-fix-the-thing";
 const START = Date.parse("2026-10-21T10:00:00Z");
@@ -176,39 +177,43 @@ describe("updateBranch (real git)", () => {
     expect(store.runCommits(working.id)).toEqual([]);
   });
 
-  it.each(["installed", "unsafe", "failed"])(
+  const dependencyChange = async (outcome: "installed" | "unsafe" | "failed") => {
+    setup((root) => {
+      write(root, "package.json", '{"name":"sync-test","private":true}\n');
+      write(
+        root,
+        "pnpm-lock.yaml",
+        outcome === "failed" ? "garbage: [\n" : "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+      );
+    });
+    if (outcome === "unsafe") {
+      write(worktree, "nested/.npmrc", "unsafe=true\n");
+      git(worktree, "add", "-A");
+      git(worktree, "commit", "-qm", "branch install input");
+    }
+    store.upsertRun(run());
+    const r = await publisher().updateBranch(run(), mainSha, worktree);
+    expect(r).toMatchObject({ ok: true, kind: "merged" });
+    if (!r.ok || r.kind !== "merged") throw new Error("expected merge");
+    expect(store.runCommits(run().id)).toContain(r.sha);
+    if (outcome === "installed") {
+      expect(r.installNote).toBeUndefined();
+      expect(existsSync(join(worktree, "node_modules"))).toBe(true);
+    } else {
+      expect(r.installNote).toContain("dependencies changed; install refused:");
+      expect(r.installNote).toContain(
+        outcome === "unsafe" ? "nested/.npmrc" : "pnpm install failed",
+      );
+    }
+  };
+
+  it.skipIf(skipWhenRefused(canRunPnpmInstall()))(
+    "handles dependency changes after a recorded merge: installed",
+    () => dependencyChange("installed"),
+  );
+  it.each(["unsafe", "failed"] as const)(
     "handles dependency changes after a recorded merge: %s",
-    async (outcome) => {
-      setup((root) => {
-        write(root, "package.json", '{"name":"sync-test","private":true}\n');
-        write(
-          root,
-          "pnpm-lock.yaml",
-          outcome === "failed"
-            ? "garbage: [\n"
-            : "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
-        );
-      });
-      if (outcome === "unsafe") {
-        write(worktree, "nested/.npmrc", "unsafe=true\n");
-        git(worktree, "add", "-A");
-        git(worktree, "commit", "-qm", "branch install input");
-      }
-      store.upsertRun(run());
-      const r = await publisher().updateBranch(run(), mainSha, worktree);
-      expect(r).toMatchObject({ ok: true, kind: "merged" });
-      if (!r.ok || r.kind !== "merged") throw new Error("expected merge");
-      expect(store.runCommits(run().id)).toContain(r.sha);
-      if (outcome === "installed") {
-        expect(r.installNote).toBeUndefined();
-        expect(existsSync(join(worktree, "node_modules"))).toBe(true);
-      } else {
-        expect(r.installNote).toContain("dependencies changed; install refused:");
-        expect(r.installNote).toContain(
-          outcome === "unsafe" ? "nested/.npmrc" : "pnpm install failed",
-        );
-      }
-    },
+    dependencyChange,
   );
 
   it("a clean merge makes an engine commit with both parents, and records it", async () => {
