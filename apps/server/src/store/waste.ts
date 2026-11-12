@@ -171,8 +171,9 @@ export function wasteQueries(db: DatabaseSync) {
 
     /** Each merged ticket's size and the cost of its runs, for the median of a size. */
     mergedTicketCosts(
-      merged: ReadonlyMap<string, number> = this.mergedTickets(),
+      mergedIn?: ReadonlyMap<string, number>,
     ): { ticket: string; size: string; costUsd: number }[] {
+      const merged = mergedIn ?? this.mergedTickets();
       const sizes = new Map(
         all("SELECT repo_id, number, size FROM flow_issues WHERE size IS NOT NULL").map((r) => [
           `${r.repo_id as string}#${r.number as number}`,
