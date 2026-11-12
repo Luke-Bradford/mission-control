@@ -1102,6 +1102,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "wait_over",
   "seat_call",
   "question_changed",
+  "waste_alarm",
 ] as const;
 export interface FlightSignal {
   checks?: string[];

@@ -163,6 +163,7 @@ import {
   type UpdateLog,
   type UsageSample,
   type VersionInfo,
+  type WasteReport,
   watchStartRefusedText,
 } from "@mc/core";
 import Fastify, {
@@ -420,7 +421,8 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import { weeklyProjection } from "./spend/budget-brake.ts";
+import { weeklyProjection } from "./spend/projection.ts";
+import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
@@ -2791,6 +2793,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+          // the same check on the same commit with nothing changed is not run again (waste alarm);
+          // a suite the guard already sends to the lock is a check too
+          if (
+            (verdict.kind === "allow" || verdict.kind === "lock") &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const rerun = await checks?.rerun?.(who.runId, command);
+            if (rerun) return answer(rerun);
+          }
           if (
             verdict.kind === "allow" &&
             body.data.tool_name === "Bash" &&
@@ -4202,6 +4214,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return shape === "summary" ? tokenAuditSummary(view) : view;
         },
       );
+      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
+      api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
         const footprint =
@@ -4685,7 +4699,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (b.issue !== undefined) {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
-          started = await sup.startWatch(id);
+          started = await sup.startWatch(id, { operator: true });
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
           // FLIGHT calling this route is not the operator: the slow pace still holds its starts

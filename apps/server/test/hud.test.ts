@@ -6,7 +6,6 @@ import { DatabaseSync } from "node:sqlite";
 import {
   ATTENTION_LABEL,
   type BoardItem,
-  BUDGET_BRAKE_KEY,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
@@ -4019,7 +4018,6 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     flight();
     expect(HUB_STOP_KEYS).toEqual([
       `note:${MACHINE_CAPACITY_KEY}`,
-      `note:${BUDGET_BRAKE_KEY}`,
       `note:${CLI_NOTE_KEY}`,
       `note:${CLI_AUTO_NOTE_PREFIX}`,
       `note:${INSTRUCTION_FOCUS_NOTE_PREFIX}`,
