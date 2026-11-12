@@ -5070,6 +5070,40 @@ export class Store {
     return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
   }
 
+  /** Every packet saved for one item, newest first; the per-question image cap sums over them. */
+  attentionMaterialsAllForItem(itemKey: string): AttentionMaterials[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') DESC, id DESC",
+        )
+        .all(itemKey) as { packet: string }[]
+    ).map((row) => JSON.parse(row.packet) as AttentionMaterials);
+  }
+
+  /** Packets whose images are still held, for the retention sweep. */
+  attentionMaterialsHeld(): AttentionMaterials[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT packet FROM attention_materials WHERE json_extract(packet, '$.imagesRemovedAt') IS NULL",
+        )
+        .all() as { packet: string }[]
+    ).map((row) => JSON.parse(row.packet) as AttentionMaterials);
+  }
+
+  /** Records only the retention markers (`closedAt`, `imagesRemovedAt`) of a saved packet. */
+  markAttentionMaterials(
+    id: string,
+    marks: { closedAt?: number | null; imagesRemovedAt?: number | null },
+  ): void {
+    const packet = this.attentionMaterials(id);
+    if (!packet) return;
+    this.db
+      .prepare("UPDATE attention_materials SET packet = ? WHERE id = ?")
+      .run(JSON.stringify({ ...packet, ...marks }), id);
+  }
+
   qaReports(repoId: string, pr: number, headSha?: string): QaReport[] {
     const rows = this.db
       .prepare(`SELECT report FROM qa_reports WHERE repo_id = ? AND pr_number = ?
