@@ -27,6 +27,7 @@ export function Comms({ item, view }: { item: string | null; view: CommsView }) 
   const items = useResource<AttentionItem[]>(RESOURCES.attention).data;
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const [jump, setJump] = useState<string | null>(null);
+  const [hideNotices, setHideNotices] = useState(false);
   const handled = useRef<string | null>(null);
   useEffect(() => {
     if (item === null) {
@@ -55,11 +56,26 @@ export function Comms({ item, view }: { item: string | null; view: CommsView }) 
       <h1 className="sr-only">Comms</h1>
       <div className="comms-grid">
         <div className="comms-left">
+          <label className="comms-notice-switch">
+            <input
+              type="checkbox"
+              checked={hideNotices}
+              onChange={(event) => setHideNotices(event.target.checked)}
+            />
+            Hide hub notices
+          </label>
           <Decisions items={items} rows={rows} />
-          <CommsNav rows={rows} flightId={flightId} view={view} onNavigate={navigate} />
+          <CommsNav
+            rows={rows}
+            flightId={flightId}
+            view={view}
+            onNavigate={navigate}
+            hideNotices={hideNotices}
+          />
         </div>
         <CommsConversation
           view={view}
+          hideNotices={hideNotices}
           row={selectedRow}
           jumpId={jump}
           onJumped={() => setJump(null)}
