@@ -52,8 +52,10 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
+  COMMS_NOTICE,
   COMMS_OPEN_PREFIX,
   COMMS_TEXT_MAX,
+  type CommsKind,
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
@@ -366,6 +368,15 @@ function cutCommsText(text: string): string {
 const DIGEST_BATCH = 500;
 const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
+
+const toTokenCall = (r: Row): TokenCall => ({
+  at: (r.at as number | null) ?? null,
+  context: r.context as number,
+  cacheRead: r.cache_read as number,
+  cacheWrite: r.cache_write as number,
+  output: r.output as number,
+  added: JSON.parse(r.added as string) as TokenSourceAdd[],
+});
 
 export class Store {
   private readonly db: DatabaseSync;
@@ -808,6 +819,10 @@ export class Store {
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
     this.addColumn("review_moves", "budget_brake_override", "INTEGER NOT NULL DEFAULT 0");
+    // Token audit call times (#1646): audits stored before this have none until re-read.
+    this.addColumn("run_token_calls", "at", "INTEGER");
+    this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
+    this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
@@ -1089,6 +1104,17 @@ export class Store {
     this.addColumn("question_choices", "chosen_by", "TEXT");
     // Who sent it, set by the hub; NULL on rows stored before this column.
     this.addColumn("comms", "sender_kind", "TEXT");
+    // `notice` on a line the hub wrote; NULL on any other message.
+    this.addColumn("comms", "kind", "TEXT");
+    // An up-to-date reader must not take a write lock merely to open the store.
+    if (
+      this.db
+        .prepare("SELECT 1 FROM comms WHERE sender_kind = ? AND kind IS NULL LIMIT 1")
+        .get("hub")
+    )
+      this.db
+        .prepare("UPDATE comms SET kind = ? WHERE sender_kind = ? AND kind IS NULL")
+        .run(COMMS_NOTICE, "hub");
     this.migrateCommsLabels();
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
@@ -1416,7 +1442,7 @@ export class Store {
         .prepare(
           `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
              cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             by_source, by_command, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .run(
           runId,
@@ -1434,8 +1460,8 @@ export class Store {
           JSON.stringify(audit.byCommand),
         );
       const insert = this.db.prepare(
-        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const [i, c] of calls.entries()) {
         insert.run(
@@ -1446,6 +1472,7 @@ export class Store {
           c.cacheWrite,
           c.output,
           JSON.stringify(c.added),
+          c.at ?? null,
         );
       }
     });
@@ -1457,13 +1484,83 @@ export class Store {
       this.db
         .prepare("SELECT * FROM run_token_calls WHERE run_id = ? ORDER BY idx")
         .all(runId) as Row[]
-    ).map((r) => ({
-      context: r.context as number,
-      cacheRead: r.cache_read as number,
-      cacheWrite: r.cache_write as number,
-      output: r.output as number,
-      added: JSON.parse(r.added as string) as TokenSourceAdd[],
-    }));
+    ).map(toTokenCall);
+  }
+
+  /** Audited runs with calls whose call times were never looked for, oldest first (the back-fill). */
+  runsToRetimeTokens(limit: number): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT r.* FROM run_token_audit a JOIN runs r ON r.id = a.run_id
+           WHERE a.timestamps_checked = 0 AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC LIMIT ?`,
+        )
+        .all(limit) as Row[]
+    ).map(toRun);
+  }
+
+  /** Records that a run's transcript could not give call times, so it is not tried again. */
+  markTokenTimesChecked(runId: string): void {
+    this.db
+      .prepare("UPDATE run_token_audit SET timestamps_checked = 1 WHERE run_id = ?")
+      .run(runId);
+  }
+
+  /**
+   * Every stored call of each run that made a call in `(from, to]`, in order, so a window can read
+   * the calls before it (the context a call grew from) and after it (what re-read an addition).
+   */
+  tokenCallsOfRunsActiveIn(from: number, to: number): { run: Run; calls: TokenCall[] }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.*, c.context AS c_context, c.cache_read AS c_cache_read, c.cache_write AS c_cache_write,
+           c.output AS c_output, c.added AS c_added, c.at AS c_at
+         FROM run_token_calls c JOIN runs r ON r.id = c.run_id
+         WHERE c.run_id IN (SELECT run_id FROM run_token_calls WHERE at > ? AND at <= ?)
+         ORDER BY r.started_at DESC, r.seq DESC, c.run_id, c.idx`,
+      )
+      .all(from, to) as Row[];
+    const out: { run: Run; calls: TokenCall[] }[] = [];
+    for (const r of rows) {
+      let last = out.at(-1);
+      if (last === undefined || last.run.id !== (r.id as string)) {
+        last = { run: toRun(r), calls: [] };
+        out.push(last);
+      }
+      last.calls.push({
+        at: (r.c_at as number | null) ?? null,
+        context: r.c_context as number,
+        cacheRead: r.c_cache_read as number,
+        cacheWrite: r.c_cache_write as number,
+        output: r.c_output as number,
+        added: JSON.parse(r.c_added as string) as TokenSourceAdd[],
+      });
+    }
+    return out;
+  }
+
+  /**
+   * For each run overlapping `[from, to]`: whether its token audit is stored, whether it has calls,
+   * and whether any call has no time. What an event window can and cannot say.
+   */
+  tokenAuditStates(
+    from: number,
+    to: number,
+  ): { runId: string; stored: boolean; calls: number; untimed: boolean }[] {
+    const ids = this.overlappingRuns("id", from, to + 1).map((r) => r.id as string);
+    const state = this.db.prepare(
+      `SELECT a.calls AS calls, (SELECT COUNT(*) FROM run_token_calls c WHERE c.run_id = ? AND c.at IS NULL) AS untimed
+       FROM run_token_audit a WHERE a.run_id = ?`,
+    );
+    return ids.map((runId) => {
+      const row = state.get(runId, runId) as { calls: number; untimed: number } | undefined;
+      return {
+        runId,
+        stored: row !== undefined,
+        calls: row?.calls ?? 0,
+        untimed: (row?.untimed ?? 0) > 0,
+      };
+    });
   }
 
   /** Ended runs started since `since` with no token audit yet, newest first. */
@@ -5776,7 +5873,7 @@ export class Store {
       throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, item_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, kind, item_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -5791,6 +5888,7 @@ export class Store {
         row.fromRunId ?? null,
         row.pr ?? null,
         row.senderKind ?? null,
+        row.kind ?? (row.senderKind === "hub" ? COMMS_NOTICE : null),
         row.itemKey ?? null,
       );
     const id = Number(inserted.lastInsertRowid);
@@ -5824,6 +5922,7 @@ export class Store {
       mentions,
       deliveredAt: (r.delivered_at as number | null | undefined) ?? null,
       senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
+      kind: (r.kind as CommsKind | null) ?? null,
       ...(typeof r.item_key === "string" ? { itemKey: r.item_key } : {}),
     };
   }
@@ -6207,14 +6306,31 @@ export class Store {
   private flightConversationScope(
     flightId: string,
     seats: readonly string[],
+    hideNotices = false,
   ): { sql: string; args: SQLInputValue[] } {
     const targets = [...new Set([flightId, ...seats])];
+    // The hub's notices to FLIGHT belong to its conversation; its internal context rows do not.
     return {
       sql: `(((c.from_id = ? AND c.to_id = ?) OR (c.from_id = ? AND c.to_id = ?))
-      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")})))
-      AND c.sender_kind IS NOT 'hub'
-      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`,
-      args: [COMMS_CAPCOM, flightId, flightId, COMMS_CAPCOM, COMMS_CAPCOM, ...targets],
+      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")}))
+      OR (c.from_id = ? AND c.to_id = ? AND c.kind = ?))
+      AND (c.sender_kind IS NOT 'hub' OR c.kind = ?)
+      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'${
+        hideNotices ? " AND c.kind IS NOT ?" : ""
+      }`,
+      args: [
+        COMMS_CAPCOM,
+        flightId,
+        flightId,
+        COMMS_CAPCOM,
+        COMMS_CAPCOM,
+        ...targets,
+        COMMS_MC,
+        flightId,
+        COMMS_NOTICE,
+        COMMS_NOTICE,
+        ...(hideNotices ? [COMMS_NOTICE] : []),
+      ],
     };
   }
 
@@ -6225,8 +6341,9 @@ export class Store {
     limit: number,
     before?: { at: number; id: number },
     exactId?: string,
+    hideNotices = false,
   ): (CommsRow & { choice?: { label: string } })[] {
-    const scope = this.flightConversationScope(flightId, seats);
+    const scope = this.flightConversationScope(flightId, seats, hideNotices);
     const id = exactId === undefined ? null : commsMessageNumber(exactId);
     if (exactId !== undefined && id === null) return [];
     const rows = this.db
@@ -6276,8 +6393,8 @@ export class Store {
     const row = this.db
       .prepare(`SELECT COUNT(*) AS n FROM comms c
       LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
-      WHERE ${scope.sql} AND ${after}`)
-      .get(...scope.args, ...args) as Row;
+      WHERE ${scope.sql} AND c.kind IS NOT ? AND ${after}`)
+      .get(...scope.args, COMMS_NOTICE, ...args) as Row;
     return row.n as number;
   }
 
@@ -6329,8 +6446,9 @@ export class Store {
     limit: number,
     before?: string,
     recentSince?: number,
+    hideNotices = false,
   ): { rows: CommsRow[]; hasMore: boolean } {
-    const { where, args } = this.commsRecentScopeWhere(scope, recentSince);
+    const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
     const beforeId = before === undefined ? null : commsMessageNumber(before);
     const rows = (
       this.db
@@ -6349,18 +6467,24 @@ export class Store {
     scope: CommsReadScope,
     cursor: string | null,
     recentSince?: number,
+    hideNotices = false,
   ): { count: number; unread: number } {
-    const { where, args } = this.commsRecentScopeWhere(scope, recentSince);
+    const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
     const offset = cursor === null ? 0 : (commsMessageNumber(cursor) ?? 0);
+    // a notice is never unread, shown or not
     const r = this.db
       .prepare(
-        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ?), 0) AS unread FROM comms WHERE ${where}`,
+        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ? AND kind IS NOT ?), 0) AS unread
+         FROM comms WHERE ${where}`,
       )
-      .get(offset, ...args) as { count: number; unread: number };
+      .get(offset, COMMS_NOTICE, ...args) as { count: number; unread: number };
     return { count: r.count, unread: r.unread };
   }
-  private commsRecentScopeWhere(scope: CommsReadScope, since?: number) {
-    const base = this.commsScopeWhere(scope);
+  private commsRecentScopeWhere(scope: CommsReadScope, since?: number, hideNotices = false) {
+    const scoped = this.commsScopeWhere(scope);
+    const base = hideNotices
+      ? { where: `(${scoped.where}) AND kind IS NOT ?`, args: [...scoped.args, COMMS_NOTICE] }
+      : scoped;
     if (since === undefined) return base;
     return {
       where: `(${base.where}) AND at >= ? AND (

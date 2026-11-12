@@ -26,6 +26,128 @@ afterEach(() => {
 });
 
 describe("Comms routes", () => {
+  it("hides hub notices through one switch while preserving crew messages and the draft", async () => {
+    const message = {
+      id: "comms:1",
+      at: NOW,
+      from: "alpha",
+      to: "crew",
+      text: "A real crew message",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const notice = {
+      ...message,
+      id: "comms:2",
+      from: "MC",
+      text: "CI failed. Read the check.",
+      kind: "notice",
+    };
+    const fetch = stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [message, notice] },
+      "/api/comms/crew?notices=hide": { messages: [message] },
+      "/api/comms/flight": { messages: [] },
+      "/api/comms/flight?notices=hide": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    await screen.findByText(notice.text);
+    const input = screen.getByLabelText(
+      "Post to #crew as CAPCOM · @name pings one agent",
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Keep my draft" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/crew?notices=hide", expect.anything()),
+    );
+    await waitFor(() => expect(screen.queryByText(notice.text)).toBeNull());
+    expect(screen.getByText(message.text)).toBeTruthy();
+    expect(input.value).toBe("Keep my draft");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await screen.findByText(notice.text);
+  });
+  it("keeps the loaded messages and counts on screen while the notices switch loads", async () => {
+    const base = {
+      at: NOW,
+      from: "flight",
+      to: COMMS_CAPCOM,
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const ordinary = { ...base, id: "comms:10", text: "An ordinary FLIGHT reply" };
+    const notice = { ...base, id: "comms:11", from: "MC", text: "CI failed.", kind: "notice" };
+    const routes = {
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [] },
+      "/api/comms/flight": { messages: [ordinary, notice] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+    };
+    const inner = stubFetch(routes);
+    const fetch = vi.fn((input: string, init?: RequestInit) =>
+      input.includes("notices=hide") ? new Promise<Response>(() => {}) : inner(input, init),
+    );
+    vi.stubGlobal("fetch", fetch);
+    render(<Comms item={null} view={{ kind: "flight" }} />);
+    await screen.findByText(ordinary.text);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/flight?notices=hide", expect.anything()),
+    );
+    expect(screen.getByText(ordinary.text)).toBeTruthy();
+    expect(screen.queryByText(notice.text)).toBeNull();
+    expect(screen.queryByText("No messages yet.")).toBeNull();
+    expect(screen.getByRole("navigation", { name: "Comms" }).textContent).not.toMatch(
+      /\b0 messages/,
+    );
+  });
+  it("says hub notices are hidden, not that the conversation is empty", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/agents/alpha?notices=hide": { messages: [], contacts: [], unread: 0 },
+      "/api/comms/agents/alpha?summary=1&notices=hide": { messages: [], contacts: [], unread: 0 },
+      "/api/comms/agents/alpha/contacts/MC?notices=hide": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+    });
+    render(
+      <CommsConversation
+        view={{ kind: "contact", agentId: "alpha", contactId: "MC" }}
+        hideNotices
+        row={seatRow({ id: "alpha" })}
+        jumpId={null}
+        onJumped={() => {}}
+        onOpenMessage={() => {}}
+      />,
+    );
+    await screen.findByText("No messages here. Hub notices are hidden.");
+    expect(screen.queryByText("No messages yet.")).toBeNull();
+  });
   it("keeps the reader's place when the conversation rerenders", async () => {
     const message = {
       id: "comms:older",

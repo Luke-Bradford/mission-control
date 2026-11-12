@@ -29,6 +29,7 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_HIDE_NOTICES,
   COMMS_LABELS,
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
@@ -151,6 +152,8 @@ import {
   type TicketView,
   TOKEN_AUDIT_DAYS_DEFAULT,
   TOKEN_AUDIT_DAYS_MAX,
+  TOKEN_AUDIT_HOURS_MAX,
+  type TokenAuditView,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -434,7 +437,7 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
-import { tokenAuditView } from "./token-audit/view.ts";
+import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
@@ -2142,35 +2145,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const commsPaging = (query: {
         limit?: unknown;
         before?: unknown;
-      }): { limit: number; before: string | undefined } | null => {
+        notices?: unknown;
+      }): { limit: number; before: string | undefined; hideNotices: boolean } | null => {
         const limit = parseLimit(query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
-        const { before } = query;
+        const { before, notices } = query;
         if (limit === null) return null;
+        if (notices !== undefined && notices !== COMMS_HIDE_NOTICES) return null;
         if (
           before !== undefined &&
           (typeof before !== "string" || !/^comms:[1-9]\d*$/.test(before))
         )
           return null;
-        return { limit, before };
+        return { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES };
       };
-      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id`;
+      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id; notices must be ${COMMS_HIDE_NOTICES}`;
       /** One page of a scope: the newest messages, the read cursor, unread over the whole scope. */
       const commsScopePage = (
         scope: CommsReadScope,
         cursorKey: string,
-        paging: { limit: number; before: string | undefined },
+        paging: { limit: number; before: string | undefined; hideNotices: boolean },
         countsOnly = false,
         recentSince?: number,
       ) => {
         const page = countsOnly
           ? { rows: [], hasMore: false }
-          : store.commsPage(scope, paging.limit, paging.before, recentSince);
+          : store.commsPage(scope, paging.limit, paging.before, recentSince, paging.hideNotices);
         const cursor = store.commsScopeCursor(cursorKey);
         return {
           messages: storedCommsMessages(page.rows),
           hasMore: page.hasMore,
           cursor,
-          unread: store.commsCounts(scope, cursor, recentSince).unread,
+          unread: store.commsCounts(scope, cursor, recentSince, paging.hideNotices).unread,
         };
       };
       const commsScope = (
@@ -2196,31 +2201,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown; history?: unknown } }>(
-        "/comms/crew",
-        (req, reply) => {
-          const paging = commsPaging(req.query);
-          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
-          if (req.query.history !== undefined && req.query.history !== "1")
-            return reply.code(400).send({ error: "history must be 1 when supplied" });
-          const history = req.query.history === "1";
-          const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
-          const page = commsScopePage({ crew: true }, "crew", paging, false, since);
-          const hidden =
-            !history &&
-            store.commsCounts({ crew: true }, null).count >
-              store.commsCounts({ crew: true }, null, since).count;
-          return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
-        },
-      );
+      api.get<{
+        Querystring: { limit?: unknown; before?: unknown; history?: unknown; notices?: unknown };
+      }>("/comms/crew", (req, reply) => {
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        if (req.query.history !== undefined && req.query.history !== "1")
+          return reply.code(400).send({ error: "history must be 1 when supplied" });
+        const history = req.query.history === "1";
+        const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
+        const page = commsScopePage({ crew: true }, "crew", paging, false, since);
+        const hidden =
+          !history &&
+          store.commsCounts({ crew: true }, null, undefined, paging.hideNotices).count >
+            store.commsCounts({ crew: true }, null, since, paging.hideNotices).count;
+        return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
+      });
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+      api.get<{ Querystring: { limit?: unknown; before?: unknown; notices?: unknown } }>(
         "/comms/flight",
         async (req, reply) => {
           const limit = parseLimit(req.query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
           const before = req.query.before;
+          const { notices } = req.query;
           if (
             limit === null ||
+            (notices !== undefined && notices !== COMMS_HIDE_NOTICES) ||
             (before !== undefined &&
               (typeof before !== "string" || before.length === 0 || before.length > 300))
           )
@@ -2243,15 +2249,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             runId,
           };
           try {
-            return {
-              ...(await flightConversation(
-                store,
-                flight,
-                found.session.seats.map((s) => s.id),
-                { limit, before },
-              )),
-              flight: flightStatus,
-            };
+            const page = await flightConversation(
+              store,
+              flight,
+              found.session.seats.map((s) => s.id),
+              { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES },
+            );
+            return { ...page, flight: flightStatus };
           } catch (error) {
             if (error instanceof FlightConversationCursorError)
               return reply.code(400).send({ error: error.message });
@@ -2262,7 +2266,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (agent Comms)
       api.get<{
         Params: { id: string };
-        Querystring: { limit?: unknown; before?: unknown; summary?: unknown };
+        Querystring: { limit?: unknown; before?: unknown; summary?: unknown; notices?: unknown };
       }>("/comms/agents/:id", (req, reply) => {
         const id = req.params.id;
         if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
@@ -2276,20 +2280,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const all = commsScopePage({ agent: id }, `agent-all:${id}`, paging, summary === "1");
         const inboxCursor = store.commsScopeCursor(`inbox:${id}`);
         const inbox =
-          summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
+          summary === "1"
+            ? none
+            : store.commsPage(
+                { inbox: id },
+                paging.limit,
+                paging.before,
+                undefined,
+                paging.hideNotices,
+              );
         // The conversation list: one line per contact, from counts, never their histories.
-        const contacts = commsContacts(id).map((contact) => {
-          const scope: CommsReadScope = { pair: [id, contact] };
-          const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
-          const last = store.commsPage(scope, 1).rows[0];
-          return {
-            id: contact,
-            lastMessage: last === undefined ? null : storedCommsMessage(last),
-            count: counts.count,
-            hasMessages: counts.count > 0,
-            unread: counts.unread,
-          };
-        });
+        const contacts = commsContacts(id)
+          .map((contact) => {
+            const scope: CommsReadScope = { pair: [id, contact] };
+            const counts = store.commsCounts(
+              scope,
+              store.commsScopeCursor(pairScope(id, contact)),
+              undefined,
+              paging.hideNotices,
+            );
+            const last = store.commsPage(scope, 1, undefined, undefined, paging.hideNotices)
+              .rows[0];
+            return {
+              id: contact,
+              lastMessage: last === undefined ? null : storedCommsMessage(last),
+              count: counts.count,
+              hasMessages: counts.count > 0,
+              unread: counts.unread,
+            };
+          })
+          // with notices hidden, a contact that only sent notices has nothing to show
+          .filter((contact) => !paging.hideNotices || contact.count > 0);
         return {
           ...all,
           inbox: storedCommsMessages(inbox.rows),
@@ -4128,16 +4149,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
       });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
-      api.get<{ Querystring: { days?: string } }>("/audit/tokens", async (req, reply) => {
-        const raw = req.query.days ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
-        const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
-        if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
-          return reply
-            .code(400)
-            .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
-        }
-        return tokenAuditView(store, config, now(), days);
-      });
+      api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(
+        "/audit/tokens",
+        async (req, reply) => {
+          const { days: rawDays, hours: rawHours, shape } = req.query;
+          if (rawDays !== undefined && rawHours !== undefined) {
+            return reply.code(400).send({ error: "send days or hours, not both" });
+          }
+          if (shape !== undefined && shape !== "summary") {
+            return reply.code(400).send({ error: "shape must be summary" });
+          }
+          let view: TokenAuditView;
+          if (rawHours !== undefined) {
+            const hours = /^\d{1,2}$/.test(rawHours) ? Number(rawHours) : 0;
+            if (hours < 1 || hours > TOKEN_AUDIT_HOURS_MAX) {
+              return reply.code(400).send({
+                error: `hours must be a whole number from 1 to ${TOKEN_AUDIT_HOURS_MAX}`,
+              });
+            }
+            view = tokenAuditWindowView(store, config, now(), hours);
+          } else {
+            const raw = rawDays ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
+            const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
+            if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
+              return reply
+                .code(400)
+                .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
+            }
+            view = tokenAuditView(store, config, now(), days);
+          }
+          return shape === "summary" ? tokenAuditSummary(view) : view;
+        },
+      );
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
         const footprint =
