@@ -14,8 +14,8 @@ import {
   startOfLocalDay,
 } from "@mc/core";
 import { reworkReview } from "./rework.ts";
-import { parseTicket } from "./runview.ts";
-import { runSpend } from "./spend.ts";
+import { parseTicket } from "./run/view.ts";
+import { runSpend } from "./spend/spend.ts";
 import type { Store } from "./store.ts";
 import { endOf } from "./views.ts";
 
@@ -269,7 +269,11 @@ export function pipelineStages(
       live.set(run.ticket, run);
   }
   const checks = (pr: PullRequestView | undefined): PipelineCard["ci"] =>
-    pr?.checks?.length ? pr.checks.map((c) => CI[c.state]) : pr?.ci ? [CI[pr.ci]] : [];
+    pr?.checks?.length
+      ? pr.checks.filter((c) => !c.skipped).map((c) => CI[c.state])
+      : pr?.ci
+        ? [CI[pr.ci]]
+        : [];
   const agentStates = store.latestAgentStates();
   for (const repoId of pipelineRepos) {
     const readyMoves = store.overviewReadyMoves(repoId);

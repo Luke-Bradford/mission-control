@@ -1,4 +1,10 @@
-import { type AttentionItem, type AttentionOwner, type FlightView, isOperatorItem } from "@mc/core";
+import {
+  type AttentionItem,
+  type AttentionOwner,
+  type FlightBlocked,
+  type FlightView,
+  isOperatorItem,
+} from "@mc/core";
 import { needText } from "../../comms/needText.ts";
 import type { FlightRun } from "../Situation.tsx";
 
@@ -65,6 +71,24 @@ export function waitOwner(
   return { owner: own ? wait.slice(repo.length) : wait, tone: "plain" };
 }
 
+/** The work a ticket waits on at the root of its chain, or its first wait's ticket with no chain. */
+function rootOf(b: FlightBlocked): string {
+  if (b.chain.length > 1) return b.chain[b.chain.length - 1] as string;
+  return (b.waitsOn[0] ?? b.ref).split(" (")[0] as string;
+}
+
+/** Tickets that wait on the same root work are one blocker, not one per link of the chain. */
+function blockedGroups(
+  blocked: readonly FlightBlocked[],
+): { root: string; members: FlightBlocked[] }[] {
+  const groups = new Map<string, FlightBlocked[]>();
+  for (const b of blocked) {
+    const root = rootOf(b);
+    groups.set(root, [...(groups.get(root) ?? []), b]);
+  }
+  return [...groups].map(([root, members]) => ({ root, members }));
+}
+
 /**
  * The blockers, longest wait first: asks that others own (the operator's above all), tickets
  * waiting on unmerged work, and FLIGHT itself when stopped or held (aged from its last wake; with
@@ -106,19 +130,26 @@ export function buildBlockers(
       doing: itemDoing(item),
     });
   }
-  for (const b of flight?.blocked ?? []) {
-    const { owner, tone } = waitOwner(b.waitsOn[0], b.ref);
+  for (const group of blockedGroups(flight?.blocked ?? [])) {
+    // The member nearest the root: its wait is the thing that, once it clears, frees the chain.
+    const near = group.members.reduce((a, b) => (b.chain.length < a.chain.length ? b : a));
+    const first = near.waitsOn[0];
+    const { owner, tone } = waitOwner(first, near.ref);
+    const freed = near.waitsOn.length > 0 ? `Frees when ${near.waitsOn.join(" and ")} clears.` : "";
+    const one = group.members.length === 1;
     rows.push({
-      key: `ticket:${b.ref}`,
-      ...(owner !== b.waitsOn[0] && /^[^\s(]+$/.test(b.waitsOn[0] ?? "")
-        ? { ownerTitle: b.waitsOn[0] }
-        : {}),
-      what: `${b.ref} ${b.title}`,
-      detail: `Waits on ${b.waitsOn.join(", ")}`,
+      key: one ? `ticket:${near.ref}` : `chain:${group.root}`,
+      ...(owner !== first && /^[^\s(]+$/.test(first ?? "") ? { ownerTitle: first } : {}),
+      what: one
+        ? `${near.ref} ${near.title}`
+        : `${group.members.length} tickets wait on ${group.root}`,
+      detail: one ? freed : [freed, group.members.map((m) => m.ref).join(", ")].join(" "),
       owner,
       tone,
-      waitedMs: b.waitedMin * MIN_MS,
-      doing: b.waitsOn[0] ? `Watching. It moves once ${b.waitsOn[0]} clears.` : "Watching.",
+      waitedMs: Math.max(...group.members.map((m) => m.waitedMin)) * MIN_MS,
+      doing: first
+        ? `Nothing to do for ${one ? "it" : "them"} until ${first} clears; ${one ? "it moves" : "they move"} on their own.`
+        : "Watching.",
     });
   }
   return rows.sort(

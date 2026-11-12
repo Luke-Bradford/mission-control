@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { claudeVersion, parseCliVersion, probeClaudeVersion } from "../src/cli-version.ts";
+import { claudeVersion, parseCliVersion, probeClaudeVersion } from "../src/cli/version.ts";
 
 let dir: string;
 let savedPath: string | undefined;

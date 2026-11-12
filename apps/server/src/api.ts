@@ -9,6 +9,7 @@ import {
   type AccountModelsView,
   type AgentStream,
   API_PREFIX,
+  type AttentionCompactItem,
   type AttentionItem,
   type AuditRunKind,
   AWAY_SETTING,
@@ -28,6 +29,7 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_HIDE_NOTICES,
   COMMS_LABELS,
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
@@ -53,6 +55,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  compactAttentionItem,
   compareDependencyChains,
   crewProfileOf,
   crewSummary,
@@ -86,6 +89,7 @@ import {
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
   isOperatorItem,
+  itemOwner,
   type LimitRow,
   LOCK_WAIT_MS,
   LOOPBACK_HOST,
@@ -148,6 +152,8 @@ import {
   type TicketView,
   TOKEN_AUDIT_DAYS_DEFAULT,
   TOKEN_AUDIT_DAYS_MAX,
+  TOKEN_AUDIT_HOURS_MAX,
+  type TokenAuditView,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -167,16 +173,20 @@ import Fastify, {
   LogController,
 } from "fastify";
 import { z } from "zod";
-import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
+import {
+  type AccountModels,
+  discoverAccountModels,
+  readAccountStatus,
+} from "./accounts/accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
-import { AsideAnswerChanged, AsideAnswerUnconfirmed, answerAsideQuestion } from "./aside-answer.ts";
+import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
   holdItem,
   nothingForOperator,
   releaseHold,
-} from "./attention-holds.ts";
+} from "./attention/holds.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -184,14 +194,12 @@ import {
   awayDigest,
   readAwaySettings,
 } from "./away.ts";
-import { registerBriefChoiceRoutes } from "./brief-api.ts";
-import { checkBriefDispatch } from "./brief-dispatch.ts";
-import { boundBriefGuard } from "./brief-dispatch-context.ts";
-import { weeklyProjection } from "./budget-brake.ts";
+import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import { checkBriefDispatch } from "./brief/dispatch.ts";
+import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
-import { clearAttentionItem } from "./clear-attention.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -224,9 +232,9 @@ import {
   sendComms,
   threadMessages,
   validateCommsText,
-} from "./comms.ts";
-import { replyRoute } from "./comms-reply.ts";
-import { commsTicketCounts } from "./comms-ticket-counts.ts";
+} from "./comms/index.ts";
+import { replyRoute } from "./comms/reply.ts";
+import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -270,7 +278,7 @@ import {
   writeCrewPause,
 } from "./crew-pause.ts";
 import { readDependencyChains } from "./dependency-chains.ts";
-import type { DesignPreviews } from "./design-previews.ts";
+import type { DesignPreviews } from "./design-preview/previews.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -283,7 +291,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -303,6 +310,7 @@ import {
   flightLive,
   flightScheduleView,
   flightSeat,
+  flightSeatView,
   flightView,
   prFlow,
 } from "./flight/state.ts";
@@ -312,7 +320,7 @@ import {
   flightConversation,
   readFlightConversation,
 } from "./flight-conversation.ts";
-import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github/setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
@@ -329,13 +337,10 @@ import {
   pinned,
   seatQuestionTriage,
 } from "./hud.ts";
+import { registerInstructionRoutes } from "./instructions/api.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
-import { loopTries } from "./loophistory.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "./machine-capacity.ts";
+import { loopTries } from "./loop/history.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
@@ -364,11 +369,15 @@ import {
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
+import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
-import { prAcceptanceFor, prUat } from "./pr-uat.ts";
-import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
+import {
+  PREVIEW_ACTIVITY_HEADER,
+  PreviewHubError,
+  type PreviewManager,
+} from "./preview/previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
-import { qaHistoryPage, qaNativeHistory } from "./qa-history.ts";
+import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
   QA_REPORT_BODY_LIMIT,
@@ -376,7 +385,7 @@ import {
   QaReportError,
   type QaReportService,
   qaReportMarkdown,
-} from "./qa-reports.ts";
+} from "./qa/reports.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
@@ -384,8 +393,22 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { reviewCheckFor } from "./review-check.ts";
-import { publicHandoff } from "./run-handoffs.ts";
+import { reviewCheckFor } from "./review/check.ts";
+import { branchOwned, readExternalSubject } from "./review/external.ts";
+import {
+  AsideAnswerChanged,
+  AsideAnswerUnconfirmed,
+  answerAsideQuestion,
+} from "./run/aside-answer.ts";
+import { publicHandoff } from "./run/handoffs.ts";
+import {
+  type BoardTitleCache,
+  type PrCache,
+  runPrs,
+  runTicket,
+  runUsage,
+  runView,
+} from "./run/view.ts";
 import {
   adminDirOf,
   CheckoutError,
@@ -397,23 +420,9 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import {
-  type BoardTitleCache,
-  type PrCache,
-  runPrs,
-  runTicket,
-  runUsage,
-  runView,
-} from "./runview.ts";
-import { registerInstructionRoutes } from "./standing-instructions-api.ts";
-import {
-  type CommsReadScope,
-  commsMessageNumber,
-  commsPosition,
-  crewDir,
-  crewPrBodyPath,
-  type Store,
-} from "./store.ts";
+import { weeklyProjection } from "./spend/budget-brake.ts";
+import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
+import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import {
@@ -423,9 +432,9 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
-import { tokenAuditView } from "./token-audit-view.ts";
-import { transcriptFilePath } from "./transcript-file.ts";
-import { transcriptFootprint } from "./transcript-lifecycle.ts";
+import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
+import { transcriptFilePath } from "./transcript/file.ts";
+import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -775,6 +784,15 @@ const QA_DAYS_ERROR = `days must be an integer 1..${QA_RETENTION_DAYS}`;
 /** `GET /api/agents/:id/files/diff?path=`: one path, as the file list gives it. */
 const DiffPath = z.string().min(1).max(4096);
 
+/** `GET /api/attention` options: one owner's items, and the compact shape. */
+const AttentionListQuery = z.strictObject({
+  owner: z.string().min(1).max(100).optional(),
+  compact: z
+    .enum(["1", "true", "0", "false"])
+    .transform((v) => v === "1" || v === "true")
+    .optional(),
+});
+
 /** `GET /api/attention/answered`: the questions closed without an answer, over the last week. */
 const ANSWERED_WINDOW_MS = 7 * 24 * 60 * 60_000;
 const ANSWERED_LIMIT = 50;
@@ -853,7 +871,13 @@ function prSummary(pr: PullRequestView, check: ReviewCheckState | null): PullReq
     : {
         ...rest,
         check,
-        checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
+        checks: checks.map(({ name, kind, state, attempt, skipped }) => ({
+          name,
+          kind,
+          state,
+          attempt,
+          ...(skipped === undefined ? {} : { skipped }),
+        })),
       };
 }
 
@@ -1696,15 +1720,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           const agent = agentById(req.params.id);
           if (!agent) return reply.code(404).send({ error: "unknown agent" });
+          const withFlightUnread = async (stream: AgentStream): Promise<AgentStream> => {
+            if (agent.kind !== "crew" || agent.seat.role !== "FLIGHT") return stream;
+            const session = config.crew?.sessions.find(
+              (candidate) => candidate.id === agent.sessionId,
+            );
+            if (session === undefined) return stream;
+            const conversation = await flightConversation(
+              store,
+              agent.id,
+              session.seats.map((seat) => seat.id),
+              { limit: 1 },
+            );
+            return { ...stream, unread: conversation.unread };
+          };
           const run = store.seatRun(agent.id);
           if (!run) {
-            return {
+            return withFlightUnread({
               runId: null,
               events: [],
               truncated: false,
               lastOutputAt: null,
               reason: NO_RUNS_YET,
-            };
+            });
           }
           const lastEventAt = store.digest(run.id)?.lastEventAt ?? null;
           const missing = (): AgentStream => ({
@@ -1716,9 +1754,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             reason: TRANSCRIPT_NOT_FOUND,
           });
           const path = run.transcriptPath;
-          if (path === "") return missing();
+          if (path === "") return withFlightUnread(missing());
           const st = await stat(transcriptFilePath(path)).catch(() => null);
-          if (!st?.isFile()) return missing();
+          if (!st?.isFile()) return withFlightUnread(missing());
           const { size, mtimeMs } = st;
           let entry = streamCache.get(agent.id);
           if (
@@ -1736,12 +1774,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   ? readTranscript(path, limit, run.vendor)
                   : readTranscript(path, limit, run.vendor, before);
             } catch {
-              return missing();
+              return withFlightUnread(missing());
             }
             entry = { path, size, mtimeMs, limit, before, result };
             streamCache.set(agent.id, entry);
           }
-          return {
+          return withFlightUnread({
             runId: run.id,
             tasks: store.digest(run.id)?.tasks ?? [],
             events: entry.result.events,
@@ -1749,7 +1787,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             hasMore: entry.result.more ?? false,
             lastOutputAt: lastOutputAt(lastEventAt, Math.floor(mtimeMs)),
             reason: null,
-          };
+          });
         },
       );
 
@@ -2094,35 +2132,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const commsPaging = (query: {
         limit?: unknown;
         before?: unknown;
-      }): { limit: number; before: string | undefined } | null => {
+        notices?: unknown;
+      }): { limit: number; before: string | undefined; hideNotices: boolean } | null => {
         const limit = parseLimit(query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
-        const { before } = query;
+        const { before, notices } = query;
         if (limit === null) return null;
+        if (notices !== undefined && notices !== COMMS_HIDE_NOTICES) return null;
         if (
           before !== undefined &&
           (typeof before !== "string" || !/^comms:[1-9]\d*$/.test(before))
         )
           return null;
-        return { limit, before };
+        return { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES };
       };
-      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id`;
+      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id; notices must be ${COMMS_HIDE_NOTICES}`;
       /** One page of a scope: the newest messages, the read cursor, unread over the whole scope. */
       const commsScopePage = (
         scope: CommsReadScope,
         cursorKey: string,
-        paging: { limit: number; before: string | undefined },
+        paging: { limit: number; before: string | undefined; hideNotices: boolean },
         countsOnly = false,
         recentSince?: number,
       ) => {
         const page = countsOnly
           ? { rows: [], hasMore: false }
-          : store.commsPage(scope, paging.limit, paging.before, recentSince);
+          : store.commsPage(scope, paging.limit, paging.before, recentSince, paging.hideNotices);
         const cursor = store.commsScopeCursor(cursorKey);
         return {
           messages: storedCommsMessages(page.rows),
           hasMore: page.hasMore,
           cursor,
-          unread: store.commsCounts(scope, cursor, recentSince).unread,
+          unread: store.commsCounts(scope, cursor, recentSince, paging.hideNotices).unread,
         };
       };
       const commsScope = (
@@ -2148,31 +2188,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown; history?: unknown } }>(
-        "/comms/crew",
-        (req, reply) => {
-          const paging = commsPaging(req.query);
-          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
-          if (req.query.history !== undefined && req.query.history !== "1")
-            return reply.code(400).send({ error: "history must be 1 when supplied" });
-          const history = req.query.history === "1";
-          const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
-          const page = commsScopePage({ crew: true }, "crew", paging, false, since);
-          const hidden =
-            !history &&
-            store.commsCounts({ crew: true }, null).count >
-              store.commsCounts({ crew: true }, null, since).count;
-          return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
-        },
-      );
+      api.get<{
+        Querystring: { limit?: unknown; before?: unknown; history?: unknown; notices?: unknown };
+      }>("/comms/crew", (req, reply) => {
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        if (req.query.history !== undefined && req.query.history !== "1")
+          return reply.code(400).send({ error: "history must be 1 when supplied" });
+        const history = req.query.history === "1";
+        const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
+        const page = commsScopePage({ crew: true }, "crew", paging, false, since);
+        const hidden =
+          !history &&
+          store.commsCounts({ crew: true }, null, undefined, paging.hideNotices).count >
+            store.commsCounts({ crew: true }, null, since, paging.hideNotices).count;
+        return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
+      });
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+      api.get<{ Querystring: { limit?: unknown; before?: unknown; notices?: unknown } }>(
         "/comms/flight",
         async (req, reply) => {
           const limit = parseLimit(req.query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
           const before = req.query.before;
+          const { notices } = req.query;
           if (
             limit === null ||
+            (notices !== undefined && notices !== COMMS_HIDE_NOTICES) ||
             (before !== undefined &&
               (typeof before !== "string" || before.length === 0 || before.length > 300))
           )
@@ -2195,15 +2236,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             runId,
           };
           try {
-            return {
-              ...(await flightConversation(
-                store,
-                flight,
-                found.session.seats.map((s) => s.id),
-                { limit, before },
-              )),
-              flight: flightStatus,
-            };
+            const page = await flightConversation(
+              store,
+              flight,
+              found.session.seats.map((s) => s.id),
+              { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES },
+            );
+            return { ...page, flight: flightStatus };
           } catch (error) {
             if (error instanceof FlightConversationCursorError)
               return reply.code(400).send({ error: error.message });
@@ -2214,7 +2253,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (agent Comms)
       api.get<{
         Params: { id: string };
-        Querystring: { limit?: unknown; before?: unknown; summary?: unknown };
+        Querystring: { limit?: unknown; before?: unknown; summary?: unknown; notices?: unknown };
       }>("/comms/agents/:id", (req, reply) => {
         const id = req.params.id;
         if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
@@ -2228,20 +2267,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const all = commsScopePage({ agent: id }, `agent-all:${id}`, paging, summary === "1");
         const inboxCursor = store.commsScopeCursor(`inbox:${id}`);
         const inbox =
-          summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
+          summary === "1"
+            ? none
+            : store.commsPage(
+                { inbox: id },
+                paging.limit,
+                paging.before,
+                undefined,
+                paging.hideNotices,
+              );
         // The conversation list: one line per contact, from counts, never their histories.
-        const contacts = commsContacts(id).map((contact) => {
-          const scope: CommsReadScope = { pair: [id, contact] };
-          const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
-          const last = store.commsPage(scope, 1).rows[0];
-          return {
-            id: contact,
-            lastMessage: last === undefined ? null : storedCommsMessage(last),
-            count: counts.count,
-            hasMessages: counts.count > 0,
-            unread: counts.unread,
-          };
-        });
+        const contacts = commsContacts(id)
+          .map((contact) => {
+            const scope: CommsReadScope = { pair: [id, contact] };
+            const counts = store.commsCounts(
+              scope,
+              store.commsScopeCursor(pairScope(id, contact)),
+              undefined,
+              paging.hideNotices,
+            );
+            const last = store.commsPage(scope, 1, undefined, undefined, paging.hideNotices)
+              .rows[0];
+            return {
+              id: contact,
+              lastMessage: last === undefined ? null : storedCommsMessage(last),
+              count: counts.count,
+              hasMessages: counts.count > 0,
+              unread: counts.unread,
+            };
+          })
+          // with notices hidden, a contact that only sent notices has nothing to show
+          .filter((contact) => !paging.hideNotices || contact.count > 0);
         return {
           ...all,
           inbox: storedCommsMessages(inbox.rows),
@@ -4080,16 +4136,38 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
       });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
-      api.get<{ Querystring: { days?: string } }>("/audit/tokens", async (req, reply) => {
-        const raw = req.query.days ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
-        const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
-        if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
-          return reply
-            .code(400)
-            .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
-        }
-        return tokenAuditView(store, config, now(), days);
-      });
+      api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(
+        "/audit/tokens",
+        async (req, reply) => {
+          const { days: rawDays, hours: rawHours, shape } = req.query;
+          if (rawDays !== undefined && rawHours !== undefined) {
+            return reply.code(400).send({ error: "send days or hours, not both" });
+          }
+          if (shape !== undefined && shape !== "summary") {
+            return reply.code(400).send({ error: "shape must be summary" });
+          }
+          let view: TokenAuditView;
+          if (rawHours !== undefined) {
+            const hours = /^\d{1,2}$/.test(rawHours) ? Number(rawHours) : 0;
+            if (hours < 1 || hours > TOKEN_AUDIT_HOURS_MAX) {
+              return reply.code(400).send({
+                error: `hours must be a whole number from 1 to ${TOKEN_AUDIT_HOURS_MAX}`,
+              });
+            }
+            view = tokenAuditWindowView(store, config, now(), hours);
+          } else {
+            const raw = rawDays ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
+            const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
+            if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
+              return reply
+                .code(400)
+                .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
+            }
+            view = tokenAuditView(store, config, now(), days);
+          }
+          return shape === "summary" ? tokenAuditSummary(view) : view;
+        },
+      );
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
         const footprint =
@@ -4104,13 +4182,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const counts = sessions.map((s) => s.seats.length);
         const latest = machine();
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          latest === null
-            ? store.machineSamples(machineCapacitySince(now(), capacityConfig))
-            : [...store.machineSamples(machineCapacitySince(now(), capacityConfig)), latest],
-          now(),
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, now(), capacityConfig, latest);
         return {
           latest,
           warning: capacity.reason,
@@ -4569,11 +4641,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         const at = now();
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         if (capacity.blocked && b.force !== true)
           throw new SupervisorError(409, `Machine capacity held: ${capacity.reason}`);
         const loop = crewSeatDef(config, id).loop;
@@ -4788,11 +4856,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         },
       );
-      // Reader: apps/web/src/shell/Dock.tsx#Dock
+      // Reader: apps/web/src/data.ts#RESOURCES (the dependent web child switches seat-only readers)
       // `live` is judged from FLIGHT's session, not only its run row (#798)
-      api.get("/flight", async () =>
-        flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
-      );
+      api.get<{ Querystring: { shape?: unknown } }>("/flight", async (req, reply) => {
+        const { shape } = req.query;
+        if (shape !== undefined && shape !== "seat")
+          return reply.code(400).send({ error: "shape must be seat" });
+        const at = Date.now();
+        const alive = (id: string) => supervisor?.sessionAlive?.(id) ?? null;
+        return shape === "seat"
+          ? { seat: flightSeatView(config, store, alive) }
+          : flightView(config, store, at, alive);
+      });
       // Reader: apps/web/src/flight/PrFlowPanel.tsx (protected PR-flow panel)
       api.get("/prs/flow", async (req, reply) => {
         if (
@@ -6199,17 +6274,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             }
           : item;
       };
+      // `?owner=operator` keeps one owner's items; `?compact=1` returns each as AttentionCompactItem (#1632)
       api.get(
         "/attention",
-        async (): Promise<AttentionItem[]> =>
-          sharedAttention().map((item) =>
-            // the operator's items carry their ticket and PR with titles (#1543)
-            pinnedFor(
-              item.kind === "tag" && item.text.length > 170
-                ? { ...item, text: `${item.text.slice(0, 169)}…` }
-                : item,
-            ),
-          ),
+        async (req, reply): Promise<AttentionItem[] | AttentionCompactItem[]> => {
+          const query = AttentionListQuery.safeParse(req.query);
+          if (!query.success) return reply.code(400).send({ error: "Bad owner or compact." });
+          const { owner, compact } = query.data;
+          return sharedAttention()
+            .filter((item) => owner === undefined || itemOwner(item) === owner)
+            .map((item) =>
+              // the operator's items carry their ticket and PR with titles (#1543)
+              pinnedFor(
+                item.kind === "tag" && item.text.length > 170
+                  ? { ...item, text: `${item.text.slice(0, 169)}…` }
+                  : item,
+              ),
+            )
+            .map((item) => (compact === true ? compactAttentionItem(item) : item));
+        },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
       registerBriefChoiceRoutes(api, app, deps, flightActor);
@@ -6364,7 +6447,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return thread ?? reply.code(404).send({ error: "Unknown discussion." });
           }
           const item = currentDiscussionItem(key);
-          if (!item?.version) return reply.code(404).send({ error: "No current item." });
+          if (!item?.version) {
+            const thread = store.discussionForItem(key);
+            return thread ?? reply.code(404).send({ error: "No current item." });
+          }
           return openDiscussion({ ...item, version: item.version });
         },
       );

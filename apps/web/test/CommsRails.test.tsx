@@ -173,9 +173,9 @@ it("shows a waiting link by dashes and its wait in words, not by colour alone", 
   expect(waiting?.querySelector(".comms-wait-mark")?.textContent).toContain("12m");
   expect(waiting?.getAttribute("aria-label")).toMatch(/waiting 12m/i);
   expect(document.querySelectorAll(".comms-edge.waiting")).toHaveLength(1);
-  // The asker's seat carries a dashed ring as well.
+  // The recipient carries the reply ring.
   expect(
-    document.querySelector(".comms-node[data-id='dev-1']")?.classList.contains("waiting"),
+    document.querySelector(".comms-node[data-id='dev-2']")?.classList.contains("waiting"),
   ).toBe(true);
 });
 
@@ -203,6 +203,12 @@ it("sends a dot along the link for each new message, and none under reduced moti
   expect(document.querySelector(".comms-particle")).toBeNull();
   // The link still lights, so the message is not missed.
   expect(document.querySelector(".comms-edge.live")).not.toBeNull();
+});
+
+it("keeps each node at its layout position, with nothing animating the whole graph", () => {
+  view(3);
+  expect(document.querySelector("animateTransform")).toBeNull();
+  expect(document.querySelector(".comms-node")?.getAttribute("transform")).toMatch(/^translate\(/);
 });
 
 it("does not replay messages that were already there when the chart opened", () => {
@@ -283,4 +289,123 @@ it("keeps many waits from stacking: no two marks overlap, and the rest are count
   });
   const more = document.querySelector(".comms-wait-more");
   expect(boxes.length + Number(/\+(\d+)/.exec(more?.textContent ?? "")?.[1] ?? 0)).toBe(9);
+});
+
+it("flashes only the recipient, once the light has travelled, then clears it", () => {
+  vi.useFakeTimers();
+  const v = view(3);
+  v.rerender(
+    <CommsRails
+      {...v.props}
+      flows={{ generation: 1, list: [{ from: "dev-1", to: "dev-2", n: 1 }] }}
+    />,
+  );
+  const node = (id: string) => document.querySelector(`.comms-node[data-id="${id}"]`);
+  expect(node("dev-2")?.classList.contains("arrival")).toBe(false);
+  act(() => vi.advanceTimersByTime(1_200));
+  expect(node("dev-2")?.classList.contains("arrival")).toBe(true);
+  expect(node("dev-1")?.classList.contains("arrival")).toBe(false);
+  act(() => vi.advanceTimersByTime(600));
+  expect(node("dev-2")?.classList.contains("arrival")).toBe(false);
+});
+
+it("gives every message in a burst its own light, in the sender's colour, none dropped", () => {
+  const v = view(3);
+  const seats = v.props.seats.map((s) =>
+    s.id === "dev-1" ? { ...s, color: "red" } : s.id === "dev-2" ? { ...s, color: "blue" } : s,
+  );
+  v.rerender(
+    <CommsRails
+      {...v.props}
+      seats={seats}
+      flows={{
+        generation: 1,
+        list: [
+          { from: "dev-1", to: "dev-2", n: 30 },
+          { from: "dev-2", to: "flight-1", n: 25 },
+        ],
+      }}
+    />,
+  );
+  const dots = [...document.querySelectorAll(".comms-particle")];
+  expect(dots).toHaveLength(55);
+  expect(new Set(dots.map((d) => d.getAttribute("fill"))).size).toBe(2);
+});
+
+it("stops its timers when it is unmounted", () => {
+  vi.useFakeTimers();
+  const v = view(3);
+  v.rerender(
+    <CommsRails
+      {...v.props}
+      flows={{ generation: 1, list: [{ from: "dev-1", to: "dev-2", n: 3 }] }}
+    />,
+  );
+  v.unmount();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("has no play control and no timeline", () => {
+  view(3);
+  expect(screen.queryByRole("button", { name: /^(play|pause|resume|replay)\b/i })).toBeNull();
+  expect(screen.queryByRole("slider")).toBeNull();
+  expect(document.querySelector("[class*=timeline], [class*=scrub]")).toBeNull();
+});
+
+it("starts each light on the overlay's current clock, not at zero, so a late message still moves", () => {
+  const proto = SVGSVGElement.prototype as unknown as { getCurrentTime?: () => number };
+  proto.getCurrentTime = () => 42;
+  try {
+    const v = view(3);
+    v.rerender(
+      <CommsRails
+        {...v.props}
+        flows={{ generation: 1, list: [{ from: "dev-1", to: "dev-2", n: 2 }] }}
+      />,
+    );
+    const begins = [...document.querySelectorAll(".comms-particle animateMotion")].map((a) =>
+      a.getAttribute("begin"),
+    );
+    expect(begins).toEqual(["42s", "42.2s"]);
+  } finally {
+    proto.getCurrentTime = undefined;
+  }
+});
+
+it("keeps every name clear of every other name, hub pill and wait mark", () => {
+  const { seats } = crew(9);
+  const waiting = {
+    n: 1,
+    ms: 5 * 60_000,
+    asker: "dev-1",
+    owed: "dev-2",
+    question: null,
+  };
+  view(9, {
+    edges: [edge("dev-1", "dev-2", { waiting }), edge("dev-3", "flight-1")],
+  });
+  expect(document.querySelectorAll(".comms-node-name")).toHaveLength(seats.length);
+  const pos = (id: string) =>
+    /translate\(([\d.]+) ([\d.]+)\)/.exec(
+      document.querySelector(`.comms-node[data-id="${id}"]`)?.getAttribute("transform") ?? "",
+    );
+  const pts = seats
+    .filter((s) => !s.hub)
+    .map((s) => ({ x: Number(pos(s.id)?.[1]), y: Number(pos(s.id)?.[2]) }));
+  for (const [i, a] of pts.entries())
+    for (const b of pts.slice(i + 1))
+      expect(Math.abs(a.x - b.x) >= 60 || Math.abs(a.y - b.y) >= 20).toBe(true);
+});
+
+it("keeps every light invisible outside its own interval, so none waits at the corner", () => {
+  const v = view(3);
+  v.rerender(
+    <CommsRails
+      {...v.props}
+      flows={{ generation: 1, list: [{ from: "dev-1", to: "dev-2", n: 3 }] }}
+    />,
+  );
+  const dots = [...document.querySelectorAll(".comms-particle")];
+  expect(dots).toHaveLength(3);
+  for (const dot of dots) expect(dot.getAttribute("opacity")).toBe("0");
 });

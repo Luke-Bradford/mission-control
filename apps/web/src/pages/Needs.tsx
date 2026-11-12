@@ -1,11 +1,22 @@
 import type { AttentionItem, Crew, QuestionClosure } from "@mc/core";
+import { useState } from "react";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { isNotTriaging, NotTriagingRow } from "../flight/NotTriaging.tsx";
 import { needsGroups } from "../flight/needsGroups.ts";
 import { Pending } from "../flight/Pending.tsx";
 import { HoldItem } from "../needs/HoldItem.tsx";
+import { AlertsChip, NeedsControls } from "../needs/NeedsControls.tsx";
 import { NeedsList } from "../needs/NeedsList.tsx";
-import { QuestionBand } from "../needs/QuestionBand.tsx";
+import {
+  distinct,
+  filterNeeds,
+  isAlert,
+  type NeedsFilters,
+  type NeedsOrder,
+  NO_FILTERS,
+  orderNeeds,
+} from "../needs/needsView.ts";
+import { askerOf, QuestionBand } from "../needs/QuestionBand.tsx";
 import { handledLine, type NotificationsView } from "../notifications.ts";
 import { followLink, NEEDS_YOU_PATH, needsYouPath } from "../router.ts";
 import { ItemDetail, useItemDetail } from "../shell/ItemDetail.tsx";
@@ -15,6 +26,7 @@ import "../needs/needs.css";
 
 export const NOBODY_WAITING = "Nobody is waiting on you.";
 export const ITEM_CLOSED = "This item is no longer open.";
+export const NO_MATCH = "No open questions match these filters.";
 export const DISCONNECTED = "Disconnected. Showing the last list received.";
 
 /** The open item: the band over the page-layout detail. */
@@ -51,8 +63,21 @@ export function Needs({ item }: { item: string | null }) {
   const { inRepo } = useSessionScope();
   const connection = useStore(streamStatus);
   const { asks, defaulted } = needsGroups(attention);
-  const list = [...asks, ...defaulted];
-  const first = list[0]?.key ?? null;
+  const crew = useResource<Crew>(RESOURCES.crew).data?.rows;
+  const [filters, setFilters] = useState<NeedsFilters>(NO_FILTERS);
+  const [order, setOrder] = useState<NeedsOrder>("default");
+  const asker = (i: AttentionItem) =>
+    askerOf(i, crew?.find((r) => r.id === i.agentId)?.displayCallSign);
+  // alerts are the hub's, not questions: they get their own chip and group
+  const alerts = [...asks, ...defaulted].filter(isAlert);
+  const questions = [...asks, ...defaulted].filter((i) => !isAlert(i));
+  const shown = (xs: readonly AttentionItem[]) =>
+    orderNeeds(filterNeeds(xs, filters, asker), order);
+  const shownAsks = shown(asks.filter((i) => !isAlert(i)));
+  const shownDefaulted = shown(defaulted.filter((i) => !isAlert(i)));
+  const noMatch = questions.length > 0 && shownAsks.length === 0 && shownDefaulted.length === 0;
+  const list = [...alerts, ...questions];
+  const first = [...alerts, ...shownAsks, ...shownDefaulted][0]?.key ?? null;
   const open = item === null ? first : item;
   const current = attention === undefined ? undefined : list.find((i) => i.key === open);
   // the first item opens without changing the URL; a named key that has gone does not jump
@@ -78,8 +103,35 @@ export function Needs({ item }: { item: string | null }) {
       ) : (
         <div className="needs-grid">
           <NeedsList
-            asks={asks}
-            defaulted={defaulted}
+            asks={shownAsks}
+            defaulted={shownDefaulted}
+            alerts={alerts}
+            controls={
+              <>
+                <div className="needs-head">
+                  <span className="needs-count" data-testid="question-count">
+                    {`${questions.length} open ${questions.length === 1 ? "question" : "questions"}`}
+                  </span>
+                  <AlertsChip alerts={alerts} />
+                </div>
+                <NeedsControls
+                  filters={filters}
+                  onFilters={setFilters}
+                  order={order}
+                  onOrder={setOrder}
+                  repos={distinct(questions.map((i) => i.repoId))}
+                  askers={distinct(questions.map(asker))}
+                />
+                {noMatch && (
+                  <p className="s note needs-nomatch" role="status">
+                    {NO_MATCH}{" "}
+                    <button type="button" className="btn" onClick={() => setFilters(NO_FILTERS)}>
+                      Clear filters
+                    </button>
+                  </p>
+                )}
+              </>
+            }
             answered={answered.data}
             answeredError={answered.error}
             selected={current?.key ?? null}
@@ -109,7 +161,9 @@ export function Needs({ item }: { item: string | null }) {
                 </p>
               ) : current ? (
                 <Open key={current.key} item={current} items={attention} />
-              ) : null}
+              ) : (
+                <p className="pb note">{NO_MATCH}</p>
+              )}
             </div>
           </div>
         </div>

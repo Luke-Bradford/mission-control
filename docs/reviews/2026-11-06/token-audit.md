@@ -178,7 +178,7 @@ output 10%, file reads 4%. Inside shell output:
 | Reviewer's report | 811,000 characters a day written, 10,000 a call | The operator decides what the QA page needs |
 | Developer's report | 39% of the Done-when text repeats the report before | Send only what changed |
 | Hub notices in Comms | A third of all Comms text | One line (rule 8 of the Comms design, PR 1500) |
-| A seat's inbox | The hub attaches the newest 40 inbox messages, read or not, to the run's start and to each line it delivers between turns, up to 8,000 characters. Found by reading `apps/server/src/comms.ts:123`; not measured | Send each message once |
+| A seat's inbox | The hub attaches the newest 40 inbox messages, read or not, to the run's start and to each line it delivers between turns, up to 8,000 characters. Found by reading `apps/server/src/comms/index.ts:123`; not measured | Send each message once |
 
 ## Can the waste go without losing what agents need?
 

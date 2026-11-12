@@ -85,6 +85,40 @@ const pr = (ticket: number, extra: Partial<PullRequestView> = {}): PullRequestVi
   mergeable: null,
   ...extra,
 });
+
+it("omits a refused review from the completed card's CI count", () => {
+  store.replaceBoard("repo", [card(1520, "Done", { closed: true })]);
+  store.replacePullRequests(
+    "repo",
+    [
+      pr(1520, {
+        state: "merged",
+        mergedAt: NOW - MIN,
+        checks: [
+          {
+            name: "check",
+            kind: "check",
+            state: "passing",
+            conclusion: "SUCCESS",
+            attempt: 1,
+            url: null,
+          },
+          {
+            name: "mc/review",
+            kind: "status",
+            state: "failing",
+            skipped: true,
+            conclusion: "FAILURE",
+            attempt: null,
+            url: null,
+          },
+        ],
+      }),
+    ],
+    NOW,
+  );
+  expect(summary().pipeline[5]?.cards[0]?.ci).toEqual(["pass"]);
+});
 const digest = (minuteTokens: RunDigest["minuteTokens"]): RunDigest => ({
   toolCalls: 0,
   turns: 0,

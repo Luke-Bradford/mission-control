@@ -64,7 +64,7 @@ describe("Demo renders every page busy", () => {
     },
   );
 
-  it("fills the Overview's crew table and the Map's tree", async () => {
+  it("fills the Overview's crew table", async () => {
     window.history.replaceState(null, "", "/");
     const view = render(<App />);
     await waitFor(() =>
@@ -73,11 +73,6 @@ describe("Demo renders every page busy", () => {
       ).toBeGreaterThanOrEqual(10),
     );
     view.unmount();
-    window.history.replaceState(null, "", "/map/shop-app");
-    render(<App />);
-    await waitFor(() =>
-      expect(document.querySelectorAll(".map-treemap-tile").length).toBeGreaterThanOrEqual(30),
-    );
   });
 
   it("refuses a write from the Away modal and says it is a demo", async () => {

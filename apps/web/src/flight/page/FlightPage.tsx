@@ -10,7 +10,10 @@ import { flightRun } from "../Situation.tsx";
 import { BlockersList } from "./BlockersPanel.tsx";
 import { buildBlockers } from "./blockers.ts";
 import { DoingNowList, doingLines } from "./DoingNow.tsx";
+import { changedSomething } from "./decisionEffect.ts";
 import { DecisionRows, newestFirst } from "./RecentDecisions.tsx";
+import { ScrollList } from "./ScrollList.tsx";
+import { StandingOrders } from "./StandingOrders.tsx";
 import { StatusBand } from "./StatusBand.tsx";
 import "./page.css";
 
@@ -32,7 +35,7 @@ export function FlightPage() {
   const view = flight.data;
   const run = flightRun(view, pause);
   const blockers = buildBlockers(attention.data, view, run, now);
-  const decisions = newestFirst(view?.decisions ?? []);
+  const decisions = newestFirst((view?.decisions ?? []).filter(changedSomething));
   const board = PAGE_PATHS.board;
   return (
     <section id="page-flight" className="fp">
@@ -45,6 +48,14 @@ export function FlightPage() {
           </a>
           .
         </span>
+        <a
+          className="fp-records"
+          href={`${PAGE_PATHS.flight}#handlingP`}
+          onClick={(e) => followLink(e, `${PAGE_PATHS.flight}#handlingP`)}
+        >
+          Records
+        </a>
+        <StandingOrders />
       </div>
       <StatusBand run={run} view={view} now={now} />
       <div className="fp-mid">
@@ -79,7 +90,7 @@ export function FlightPage() {
             <Pending what="blockers" error={attention.error} resource={RESOURCES.attention} />
           )}
         </section>
-        <section className="fp-panel fp-watch" id="watchP" aria-labelledby="watchH">
+        <section className="fp-panel fp-watch" id="heldWatchP" aria-labelledby="watchH">
           <h2 className="fp-head" id="watchH">
             Watch list
             <span className="fp-sub">
@@ -93,7 +104,9 @@ export function FlightPage() {
           ) : held.data.length === 0 ? (
             <p className="fp-note">Nothing is held.</p>
           ) : (
-            <WatchListItems items={held.data} />
+            <ScrollList row=".drow">
+              <WatchListItems items={held.data} />
+            </ScrollList>
           )}
         </section>
       </div>

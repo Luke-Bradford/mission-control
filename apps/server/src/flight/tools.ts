@@ -318,7 +318,7 @@ import {
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -328,21 +328,20 @@ import {
   protectedDecisionItem,
   questionAskAt,
   releaseHold,
-} from "../attention-holds.ts";
+} from "../attention/holds.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
   bindCompleteBrief,
   bindPreparedBrief,
   completeBriefError,
-} from "../brief-prepare.ts";
-import { BriefActionInput, BriefDecisionInput } from "../brief-schema.ts";
-import { budgetBrake } from "../budget-brake.ts";
+} from "../brief/prepare.ts";
+import { BriefActionInput, BriefDecisionInput } from "../brief/schema.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
+import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms/index.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
@@ -351,7 +350,7 @@ import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import { seatFocus } from "../focus.ts";
-import type { Move, MoveResult } from "../github-board.ts";
+import type { Move, MoveResult } from "../github/board.ts";
 import {
   attentionItems,
   CREW_ERROR_KEY,
@@ -363,12 +362,9 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud.ts";
-import { announceInstruction } from "../instruction-notices.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "../machine-capacity.ts";
+import { announceInstruction } from "../instructions/notices.ts";
+import { InstructionInput } from "../instructions/standing.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
@@ -385,13 +381,15 @@ import {
 } from "../mcp/tools.ts";
 import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
+import { prototypeLinkProblem } from "../prototype-links.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
-import { handoffTarget } from "../run-handoffs.ts";
+import { handoffTarget } from "../run/handoffs.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { InstructionInput } from "../standing-instructions.ts";
-import { crewDir, type Store } from "../store.ts";
+import { budgetBrake } from "../spend/budget-brake.ts";
+import { crewDir } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
@@ -406,6 +404,7 @@ import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown, recordFlightWait, waitTargetOf } from "./signals.ts";
 import {
+  compactSignals,
   crewSeatIds,
   flightArrivalSource,
   flightSeat,
@@ -541,7 +540,7 @@ const WaitOnArgs = z.strictObject({
   until: z.iso.datetime({ offset: true }),
   basis: basisArg,
 });
-const FlightStateArgs = z.strictObject({});
+const FlightStateArgs = z.strictObject({ full: z.boolean().optional() });
 const ScreenshotHudArgs = z.strictObject({ page: z.string().min(1).max(200) });
 const ReadTicketArgs = z.strictObject({
   issue: issueNumber,
@@ -1594,11 +1593,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const ref = `${repo.id}#${issue}`;
     const at = now();
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    const capacity = machineCapacity(
-      store.machineSamples(machineCapacitySince(at, capacityConfig)),
-      at,
-      capacityConfig,
-    );
+    const capacity = storedMachineCapacity(store, at, capacityConfig);
     if (capacity.blocked) return fail(`the machine has insufficient headroom: ${capacity.reason}`);
     const loopKind = seatDef(cfg).loop;
     if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
@@ -2212,7 +2207,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (to === "Ready") {
       let body: string;
       try {
-        body = (await deps.fetchTicket(repo, issue))?.body ?? "";
+        const ticket = await deps.fetchTicket(repo, issue);
+        body = ticket?.body ?? "";
+        const prototypeProblem =
+          ticket?.prototypeProblem ?? prototypeLinkProblem(body, repo.github);
+        if (prototypeProblem !== null) return fail(`Not moved: ${ref} ${prototypeProblem}`);
       } catch {
         return fail(PROMOTE_NO_GITHUB);
       }
@@ -2816,6 +2815,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, FlightStateArgs, args);
     if (!c.ok) return c.result;
+    const full = c.args.full === true;
     const repo = repoOf();
     if (repo)
       await refreshAuthors(store, deps.gh, crewDir(deps.dbPath), repo.id, repo.github, now());
@@ -2838,6 +2838,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return {
       text: JSON.stringify({
         ...shown,
+        signals: full ? shown.signals : compactSignals(shown.signals, now()),
         items: state.items.map((item) => {
           const thread = parsePersonKey(item.key);
           const n = thread ? store.notification(thread.id) : null;
@@ -3824,11 +3825,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return { text };
         }
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         if (capacity.blocked)
           return fail(`the machine has insufficient headroom: ${capacity.reason}`);
         if (row.state === "stopped")
@@ -4588,7 +4585,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       name: MC_TOOL_NAMES.flightState,
       description:
         "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and the runaway breaker; and your brief.",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      inputSchema: {
+        type: "object",
+        properties: {
+          full: {
+            type: "boolean",
+            description:
+              "List every signal, including the expired waits that are otherwise folded into one line with a count.",
+          },
+        },
+        additionalProperties: false,
+      },
       modes: [],
       grantable: ["read-only"],
       call: readState,

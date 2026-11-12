@@ -103,7 +103,7 @@ this list. It stops at the first step that fits:
    question (rule 4). The test: someone new to the project could answer it from that page alone.
 
 **Protected items always reach the operator.** These are the items the hub already protects
-(`protectedDecisionItem`, `apps/server/src/attention-holds.ts:197`): approvals, the safety stop,
+(`protectedDecisionItem`, `apps/server/src/attention/holds.ts:186`): approvals, the safety stop,
 merging a change to the files that steer the crew, an Update only a person can run, an account at
 its limit. FLIGHT adds a brief. It cannot hold back, return or withdraw the protected source.
 The 8 November amendment lets it withdraw its own brief only; the source and its stop remain.
@@ -424,7 +424,7 @@ The controller read the live hub at commit `47c1f5bd`.
 | Needs you is mostly not questions | 10 items, 1 real decision. The rest: 3 old items from stopped loops, 3 "PR · You: review" rows, 2 notices that FLIGHT was late, 1 reminder for the controller |
 | The one real question did not stand alone | Its headline held four raw `127.0.0.1` addresses. Its options assumed the reader knew two ticket numbers |
 | Picking an option names no option | `apps/web/src/shell/ItemDetail.tsx:192`. To a seat it sends chat text. To FLIGHT it posts in the item's discussion |
-| An answer to a seat is stored, not delivered | `apps/server/src/comms.ts:118`. The seat reads it at its next turn. The route can deliver to the asking run, but the page never names the question |
+| An answer to a seat is stored, not delivered | `apps/server/src/comms/index.ts:118`. The seat reads it at its next turn. The route can deliver to the asking run, but the page never names the question |
 | A seat's question is not on its ticket | The text is in `seat_questions`, which has no ticket. Comms holds a pointer line only |
 | A question can show only pictures the hub already holds | `apps/web/src/needs/pictures.ts`. A new mockup image has nowhere to be stored |
 | At least three ways to type to FLIGHT | The fly-out posts a seat message. Comms posts a stored message. A Needs-you item posts to its own discussion |
@@ -504,7 +504,7 @@ Every message records a sender kind: `operator`, `controller`, `flight`, `seat` 
 - FLIGHT's actions through its operator tool are recorded as FLIGHT's.
 - The hub's own messages get kind `hub`. Today some are sent as `MC` and some as `CAPCOM`. Examples, where the hub is the sender:
   `apps/server/src/crew-apply.ts:421`, `apps/server/src/engine/engine.ts:1226`,
-  `apps/server/src/decision-defaults.ts:38` and `apps/server/src/instruction-notices.ts:44`. Every
+  `apps/server/src/decision-defaults.ts:38` and `apps/server/src/instructions/notices.ts:44`. Every
   such place changes.
 - Messages stored before this change keep their old sender.
 - Rooms will add a sixth kind, for an agent on another hub.
@@ -712,7 +712,7 @@ people, and are not sent to agents.
 
 - **The hub sends each message to a seat once.** Today it attaches the newest 40 inbox messages,
   read or not, to a run's start. It attaches them again to each line it delivers between turns,
-  up to 8,000 characters (`apps/server/src/comms.ts:123`).
+  up to 8,000 characters (`apps/server/src/comms/index.ts:123`).
 - **A run starts with its ticket's decisions.** Every run on a ticket gets the ticket's answered
   questions in its start brief. Each is one line with the choice, ten at most **(controller's
   call)**. A decision is then not asked twice. A run that takes over unfinished work also gets the
@@ -928,7 +928,7 @@ Each of these is a change, stated so nobody finds it by surprise.
 | #1453: Enter rule on the Needs you boxes | Unchanged until the fly-out mockup settles one rule |
 | The roadmap, decision 1: one Needs-you set, counted the same everywhere | The count narrows to open questions, and the page shows only those. Held items and timed defaults leave the page; alerts have their chip |
 | Timed defaults (#741, `apps/server/src/decision-defaults.ts`) | Retired for questions to the operator. FLIGHT decides or asks |
-| Hold on a Needs-you item (#638: `apps/web/src/needs/HoldItem.tsx`, `holdItem` in `apps/server/src/attention-holds.ts`) | Becomes **Not now** and **Drop** for the operator. FLIGHT's own holds (its hold tool, and holds set through `brief_item`) move to its watch list |
+| Hold on a Needs-you item (#638: `apps/web/src/needs/HoldItem.tsx`, `holdItem` in `apps/server/src/attention/holds.ts`) | Becomes **Not now** and **Drop** for the operator. FLIGHT's own holds (its hold tool, and holds set through `brief_item`) move to its watch list |
 | The roadmap, plan item 7: notices only for briefed asks and "FLIGHT is down" | Two more alerts send a notice: an Update the operator must run, and an account at its limit |
 | The role files: use `comms_read` for missed crew context | Read by ticket |
 

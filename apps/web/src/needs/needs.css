@@ -409,3 +409,66 @@
 .needs-answered .note {
   margin: var(--sp-1) 0 0;
 }
+
+.needs-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.needs-count {
+  font-weight: 600;
+}
+
+.needs-alerts-chip {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: var(--sp-1) var(--sp-2);
+  line-height: var(--lh-s);
+  border: 1px solid var(--warn, var(--line));
+  border-radius: 999px;
+  color: var(--fg);
+  text-decoration: none;
+  font-size: var(--fs-s);
+}
+
+.needs-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line);
+}
+
+.needs-control {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  flex: 1 1 120px;
+}
+
+.needs-control-text {
+  flex-basis: 100%;
+}
+
+.needs-control select,
+.needs-control input {
+  min-width: 0;
+  max-width: 100%;
+}
+
+fieldset.needs-controls {
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.needs-nomatch {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
+}

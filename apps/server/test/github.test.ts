@@ -186,7 +186,7 @@ describe("fetchTicket repos", () => {
       title: "t",
       url: "u",
       state: "OPEN",
-      body: "",
+      body: "Prototype: [working copy](https://private.example/prototype)",
       subIssues: {
         nodes: [
           { number: 6, title: "same", state: "OPEN", repository: at("octo-org", "shop-app") },
@@ -225,6 +225,7 @@ describe("fetchTicket repos", () => {
       [30, "site-builder"],
       [31, null],
     ]);
+    expect(t?.prototypeProblem).toBe("links a prototype outside docs/prototype/.");
   });
 
   it("asks GitHub for each item's repository", async () => {
@@ -1699,6 +1700,41 @@ describe("collectGithub pull requests", () => {
       expect(prs()[0]?.ci, state).toBe("passing");
     }
   });
+
+  it("reports the hub's refused review on PR 1520 as skipped, not a failed check", async () => {
+    const { gql, calls } = stub({
+      prPages: [
+        prPage([
+          pull(1520, {
+            commits: heads("FAILURE", checkRun("check", "SUCCESS"), {
+              ...statusContext("mc/review", "FAILURE"),
+              description: "QA review did not complete",
+            }),
+          }),
+        ]),
+      ],
+    });
+    await collectGithub(repo, store, gql, NOW);
+    expect(calls.find(({ q }) => q.includes("pullRequests"))?.q).toMatch(
+      /on StatusContext\s*\{[^}]*\bdescription\b/,
+    );
+    expect(prs()[0]?.checks).toContainEqual(
+      expect.objectContaining({ name: "mc/review", skipped: true, conclusion: "FAILURE" }),
+    );
+  });
+
+  it.each(["QA review found blocking issues", undefined])(
+    "keeps a failed review failing without a skipped marker (%s)",
+    (description) => {
+      const [check] = parseChecks({
+        contexts: {
+          nodes: [{ ...statusContext("mc/review", "FAILURE"), description }],
+        },
+      });
+      expect(check?.state).toBe("failing");
+      expect(check?.skipped).not.toBe(true);
+    },
+  );
 
   it("with required_checks, an unreported required check is pending", async () => {
     const { gql } = stub({ prPages: [prPage([pull(1)])] });

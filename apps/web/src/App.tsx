@@ -9,13 +9,13 @@ import {
   useRef,
   useState,
 } from "react";
+import { chooseSeat } from "./agent/chooseSeat.ts";
+import { stepRoster } from "./agent/roster.ts";
 import { useNeedsCount } from "./attention.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
 import type { FlightView } from "./flight/flightTypes.ts";
-
 import {
-  agentPath,
   FULL_WIDTH_PAGES,
   followLink,
   isPopout,
@@ -49,7 +49,7 @@ import {
 } from "./shell/overlays.ts";
 import { PopoutContext } from "./shell/popout.ts";
 import { getSelectedAgent, nextAgent, setSelectedAgent } from "./shell/selection.ts";
-import { getSession, useSessionScope } from "./shell/session.ts";
+import { getSession, inCrewSession, useSessionScope } from "./shell/session.ts";
 import { Toast, toast } from "./shell/Toast.tsx";
 
 const Agent = lazy(() => import("./pages/Agent.tsx").then((m) => ({ default: m.Agent })));
@@ -60,7 +60,6 @@ const Comms = lazy(() => import("./pages/Comms.tsx").then((m) => ({ default: m.C
 const CommsChartPage = lazy(() =>
   import("./pages/CommsChartPage.tsx").then((m) => ({ default: m.CommsChartPage })),
 );
-const MapPage = lazy(() => import("./pages/MapPage.tsx").then((m) => ({ default: m.MapPage })));
 const Needs = lazy(() => import("./pages/Needs.tsx").then((m) => ({ default: m.Needs })));
 const Flight = lazy(() => import("./pages/Flight.tsx").then((m) => ({ default: m.Flight })));
 const Overview = lazy(() => import("./pages/Overview.tsx").then((m) => ({ default: m.Overview })));
@@ -82,7 +81,7 @@ const TITLE = "Mission Control";
 /** The document title in Demo; the same mark as the chip, in the tab. */
 const DEMO_TITLE = `DEMO · ${TITLE}`;
 
-/** The app, remounted on a switch between Live and Demo: page state and the Map start afresh. */
+/** The app, remounted on a switch between Live and Demo so page state starts afresh. */
 export function App(
   props: { onRender?: () => void; onPageRender?: ProfilerOnRenderCallback } = {},
 ) {
@@ -365,9 +364,6 @@ function PageView({ route: r }: { route: Route }) {
     case "agent":
       page = <Agent id={r.id} />;
       break;
-    case "map":
-      page = <MapPage repoId={r.repoId} />;
-      break;
     case "comms":
       page = <Comms item={r.item} view={r.view} />;
       break;
@@ -406,19 +402,28 @@ function useShellKeys(current: Route, popout: boolean) {
   useEffect(() => {
     const select = (dir: 1 | -1) => {
       const { current: on, rows: r, items: i } = latest.current;
-      const id = nextAgent(
-        r ?? [],
-        i ?? [],
-        getSession(),
-        getSelectedAgent(),
-        dir,
-        latest.current.repo,
-        latest.current.flightId,
-        Date.now(),
-      );
+      // The Agents page steps in the roster's own order, so j and k move down the list on screen.
+      const id =
+        on.page === "agent"
+          ? stepRoster(
+              (r ?? []).filter((row) => inCrewSession(getSession(), row, latest.current.repo)),
+              getSelectedAgent(),
+              dir,
+            )
+          : nextAgent(
+              r ?? [],
+              i ?? [],
+              getSession(),
+              getSelectedAgent(),
+              dir,
+              latest.current.repo,
+              latest.current.flightId,
+              Date.now(),
+            );
       if (id === null) return;
-      setSelectedAgent(id);
-      if (on.page === "agent") navigate(agentPath(id)); // the URL follows the selection
+      if (on.page === "agent")
+        chooseSeat(id, getSelectedAgent()); // the URL follows the selection
+      else setSelectedAgent(id);
     };
     return installKeys({
       // a page key leaves you where you are on that page (g b on a ticket keeps the ticket); a

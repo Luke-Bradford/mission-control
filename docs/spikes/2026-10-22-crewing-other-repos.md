@@ -87,12 +87,12 @@ the commit tool's `add -A` leaves out only `.pnpm-store` (`apps/server/src/mcp/t
 
 How it works today: three reads go through `user(login:)`: the board collector
 (`apps/server/src/collectors/github.ts` 62), Setup's board check, which also creates fields
-(`apps/server/src/github-setup.ts` 62, 78), and the repo profile, whose error already says
+(`apps/server/src/github/setup.ts` 62, 78), and the repo profile, whose error already says
 "organisation projects are not supported yet" (`apps/server/src/repo-profile.ts` 66, 104). The
 HUD's board link builds `/users/<owner>/projects/<n>` (`apps/web/src/board/lanes.ts` 34, and Setup's
 link at `apps/web/src/setup/Repos.tsx` 66). The Project's owner is the repo's owner. Card moves find
 the card through `repository.issue.projectItems`, but first read the Status field through Setup's
-`user(login:)` query (`apps/server/src/github-board.ts` 99), so they fail for an organisation too.
+`user(login:)` query (`apps/server/src/github/board.ts` 99), so they fail for an organisation too.
 
 Live check: `repositoryOwner(login:)` reports `__typename` `User` for this repo's owner and
 `Organization` for an organisation the account belongs to; both answer through the
