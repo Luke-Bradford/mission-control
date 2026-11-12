@@ -209,8 +209,25 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
    - the ticket or PR it is about: the item's own, or one FLIGHT names with `ticket`;
    - the time it was raised.
 
-Rule 4's further parts (title, priority, picture for a looks question) join this check when #1510
-lands. The check is one function, so each later rule is one more line in it.
+Rule 4's further parts landed with #1510, in `briefPartFaults` beside this check, run by
+`brief_item` when it writes: one decision (a single `?`), a title (one line, at most 90 characters,
+no web address, no bare `#n` or `PR n`), a priority (the main ticket's board value, else the one
+FLIGHT states with `priority`), a main ticket or `noTicket` with the repo and a reason, and for a
+question marked `looks`, a picture written in its text (a hub image route) or a branch preview of
+its ticket. Each refusal names the part. The hub also writes each `#n` and `PR n` in the
+recommendation and options with its title beside it. The check is one function, so each later rule
+is one more line in it.
+
+Two more refusals from the 12 November addition to #1510:
+
+- `brief_item` for the operator is refused, naming the tool, when FLIGHT holds one that settles the
+  item (`flightToolFor`): `sync_main`, `rerun_ci`, `dismiss_item`, `merge_pr`, `settle_park`,
+  `close_ticket`. A chatter note is always FLIGHT's: `noteOwner` gives chatter notes and hard-rule
+  flags to FLIGHT whenever a FLIGHT seat exists.
+- A seat's question that reaches the operator shows FLIGHT as its asker, never the seat.
+
+The image store this ticket first listed moved to #1705, which holds a question's pictures in one
+place.
 
 ### What happens to an item that fails
 

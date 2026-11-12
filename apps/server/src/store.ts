@@ -42,6 +42,7 @@ import {
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
+  CHATTER_NOTE_PREFIX,
   type CiRunView,
   CODE_HEALTH_FLIGHT_REVIEW_DAYS,
   CODE_HEALTH_FLIGHT_TIER_RULES,
@@ -5828,7 +5829,7 @@ export class Store {
     );
     if (!crossed) return;
     this.raiseNote({
-      key: `chatter:${row.ticket}:${pair[0]}:${pair[1]}`,
+      key: `${CHATTER_NOTE_PREFIX}${row.ticket}:${pair[0]}:${pair[1]}`,
       kind: "blocked",
       runId: null,
       seatId: null,

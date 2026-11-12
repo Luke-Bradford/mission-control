@@ -44,6 +44,7 @@ import {
   flightNotTriagingText,
   hardRulesBySettingKey,
   hudState,
+  isChatterNoteKey,
   isCleanupNoteKey,
   isFlakeNoteKey,
   isForTheController,
@@ -1724,7 +1725,18 @@ function buildAttentionItems(
     acks,
   );
   // last, after a released hold has handed an item back to the operator
-  const checked = partition.items.map(entryCheck);
+  // A seat's question reaches the operator only as FLIGHT's own question about a product choice, so
+  // the page never shows the seat as the asker (#1510).
+  const asFlights = (item: AttentionItem): AttentionItem =>
+    flightId !== null &&
+    item.owner === OWNER_OPERATOR &&
+    item.kind === "question" &&
+    item.key.startsWith("ask:") &&
+    item.brief?.for === "operator" &&
+    item.agentId !== flightId
+      ? { ...item, agentId: flightId }
+      : item;
+  const checked = partition.items.map(entryCheck).map(asFlights);
   const shown =
     triage === null
       ? checked
@@ -1834,12 +1846,15 @@ function endedParkGone(
 }
 
 /**
- * Who an engine note waits on: housekeeping is the controller's; a hard-rule flag is the
- * operator's, unless the repo's rules say the controller merges hard-rule PRs.
+ * Who an engine note waits on: housekeeping is the controller's. A chatter note and a hard-rule
+ * flag are FLIGHT's (#1510): hub-internal, they reach the operator only through FLIGHT's brief. The
+ * rest stay the operator's raw, and go through FLIGHT's triage like any raw item. With no FLIGHT
+ * seat nobody else can act on a note, so it is the operator's.
  */
 function noteOwner(
   store: Store,
   n: Pick<AttentionNote, "key" | "repoId" | "runId">,
+  flightSeated: boolean,
 ): AttentionOwner {
   if (
     n.repoId !== null &&
@@ -1858,6 +1873,7 @@ function noteOwner(
   ) {
     return OWNER_CONTROLLER;
   }
+  if (flightSeated && (isChatterNoteKey(n.key) || isHardRulesFlagKey(n.key))) return OWNER_FLIGHT;
   return OWNER_OPERATOR;
 }
 
@@ -1870,6 +1886,7 @@ function crewItems(
   now: number,
 ): OwnedItem[] {
   const sessions = config.crew?.sessions ?? [];
+  const flightSeated = flightSeat(config) !== null;
   const repoOfSeat = (seatId: string) =>
     sessions.find((s) => s.seats.some((x) => x.id === seatId))?.repoId ?? null;
   const item = (
@@ -1947,7 +1964,7 @@ function crewItems(
     const run = n.runId === null ? null : store.run(n.runId);
     if (
       n.kind === "blocked" &&
-      noteOwner(store, n) !== OWNER_CONTROLLER &&
+      noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
       run !== null &&
       endedParkGone(config, store, run, boardOf)
     )
@@ -1957,7 +1974,7 @@ function crewItems(
         ? undefined
         : (store.pullRequest(run.repoId, run.loop.prNumber) ?? undefined);
     const noteItem: OwnedItem = {
-      owner: noteOwner(store, n),
+      owner: noteOwner(store, n, flightSeated),
       key: `${NOTE_KEY}${n.key}`,
       kind: n.kind,
       agentId: n.seatId,
