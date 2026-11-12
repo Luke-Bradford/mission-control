@@ -4,6 +4,7 @@ import { callSign } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { percent, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
+import { useMetrics } from "../metrics.ts";
 import { type CommsView, NEEDS_YOU_PATH, navigate } from "../router.ts";
 import { type ChartMode, ChartModeSwitch, CommsRails } from "./CommsRails.tsx";
 import { chartHref, commsHrefFor, useChartFilter } from "./chartPaths.ts";
@@ -196,11 +197,8 @@ export function SignalLists({
 }) {
   const nameOf = (id: string) => chart.seats.find((seat) => seat.id === id)?.name ?? id;
   // What waits on the operator is answered on Needs you, not here: this list holds waits between
-  // agents, and one line says how many wait for the operator.
-  const forYou = chart.edges.reduce(
-    (n, edge) => (edge.a === CAPCOM || edge.b === CAPCOM ? n + (edge.waiting?.n ?? 0) : n),
-    0,
-  );
+  // agents, and one line says how many wait for the operator, from the figure the header shows.
+  const forYou = Number(useMetrics().readings.needsYou?.value ?? 0);
   return (
     <div className={`comms-signal-lists ${className}`.trim()}>
       {forYou > 0 && (

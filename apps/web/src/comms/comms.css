@@ -1000,7 +1000,7 @@ a.comms-ref {
 /* From 900 px high the list gets room for five one-line rows plus its head, search and footer; the nav shrinks to pay for it. */
 @media (min-height: 900px) {
   .comms-tickets {
-    min-height: 300px;
+    min-height: 320px;
   }
 }
 
@@ -1043,7 +1043,7 @@ a.comms-ref {
   text-decoration: none;
 }
 
-/* One line per ticket so the list shows many at once; the full title is in title= and opens on focus or hover. */
+/* One line per ticket so the list shows many at once; on hover or focus the whole title wraps open in place. */
 .comms-ticket-title {
   overflow: hidden;
   white-space: nowrap;
@@ -1052,14 +1052,28 @@ a.comms-ref {
 
 .comms-ticket-open:focus-visible .comms-ticket-title,
 .comms-ticket-open:hover .comms-ticket-title {
-  text-overflow: clip;
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 .comms-ticket-open small {
+  min-width: 2ch;
   color: var(--muted);
+  text-align: right;
   white-space: nowrap;
 }
 
+.comms-ticket-cols {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
 .comms-ticket-filter {
+  min-width: 24px;
   min-height: 24px;
+  padding: 0 var(--sp-1);
 }

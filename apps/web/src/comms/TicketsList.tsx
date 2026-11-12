@@ -126,38 +126,45 @@ export function TicketsList() {
             : `No ticket matches “${query.trim()}”.`}
         </p>
       ) : (
-        <ul className="comms-ticket-list">
-          {found.slice(0, SHOWN).map((row) => {
-            const href = ticketPath(row.repoId, row.issueNumber);
-            return (
-              <li key={row.ref}>
-                <a
-                  className="comms-ticket-open"
-                  href={href}
-                  aria-label={`Open ${row.ref}: ${row.title}`}
-                  onClick={(e) => followLink(e, href)}
-                >
-                  <b className="mono">{`#${row.issueNumber}`}</b>
-                  <span className="comms-ticket-title" title={row.title}>
-                    {row.title}
-                  </span>
-                  <small title={row.status ? `${row.status} · ${row.title}` : row.title}>
-                    {plural(row.messages, "message")}
-                  </small>
-                </a>
-                <button
-                  type="button"
-                  className="comms-ticket-filter"
-                  aria-label={`Show only messages about ${row.ref}`}
-                  title="Show only the messages about this ticket"
-                  onClick={() => navigate(commsTicketPath(`#${row.issueNumber}`, row.ref))}
-                >
-                  Chat
-                </button>
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          <p className="comms-ticket-cols" aria-hidden="true">
+            <span>Ticket</span>
+            <span>Messages</span>
+          </p>
+          <ul className="comms-ticket-list">
+            {found.slice(0, SHOWN).map((row) => {
+              const href = ticketPath(row.repoId, row.issueNumber);
+              return (
+                <li key={row.ref}>
+                  <a
+                    className="comms-ticket-open"
+                    href={href}
+                    aria-label={`Open ${row.ref}: ${row.title}`}
+                    onClick={(e) => followLink(e, href)}
+                  >
+                    <b className="mono">{`#${row.issueNumber}`}</b>
+                    <span className="comms-ticket-title" title={row.title}>
+                      {row.title}
+                    </span>
+                    <small title={row.status ? `${row.status} · ${row.title}` : row.title}>
+                      <span aria-hidden="true">{row.messages}</span>
+                      <span className="sr-only">{plural(row.messages, "message")}</span>
+                    </small>
+                  </a>
+                  <button
+                    type="button"
+                    className="comms-ticket-filter"
+                    aria-label={`Show only messages about ${row.ref}`}
+                    title="Show only the messages about this ticket"
+                    onClick={() => navigate(commsTicketPath(`#${row.issueNumber}`, row.ref))}
+                  >
+                    <span aria-hidden="true">⌕</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
       {showList && found.length > SHOWN && (
         <p className="note">{`Showing ${SHOWN} of ${found.length}. Type more to narrow it.`}</p>

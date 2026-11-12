@@ -256,6 +256,20 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
         undefined,
       );
       expect(tallest).toBeLessThanOrEqual(40);
+      // a title is wide enough to say which ticket it is, and on focus the whole of it shows
+      const titles = await page.evaluate(async () => {
+        const first = document.querySelector<HTMLElement>(".comms-ticket-open");
+        const title = first?.querySelector<HTMLElement>(".comms-ticket-title");
+        const width = title?.getBoundingClientRect().width ?? 0;
+        first?.focus();
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+        return {
+          width,
+          clipped: title ? title.scrollWidth > title.clientWidth : true,
+        };
+      }, undefined);
+      if (width >= 1280) expect(titles.width).toBeGreaterThanOrEqual(160);
+      expect(titles.clipped).toBe(false);
       expect(shared.agentRows).toBeGreaterThanOrEqual(3);
       // the busy list shows rows, each with its message count, and no row runs past the panel
       const listed = await page.evaluate(() => {
