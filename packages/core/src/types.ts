@@ -1332,6 +1332,11 @@ export interface AttentionItem {
   key: string;
   kind: AttentionKind;
   agentId: AgentId | null;
+  /**
+   * Who the operator's page names as the asker (#1510): FLIGHT's seat id on a seat's question
+   * FLIGHT briefed for the operator, where `agentId` still names the seat. Absent: use `agentId`.
+   */
+  asker?: AgentId;
   repoId: RepoId | null;
   text: string;
   /** The live tool of a stall, so the client renders `{m:ss} in {tool}` without parsing text. */

@@ -224,7 +224,8 @@ Two more refusals from the 12 November addition to #1510:
   item (`flightToolFor`): `sync_main`, `rerun_ci`, `dismiss_item`, `merge_pr`, `settle_park`,
   `close_ticket`. A chatter note is always FLIGHT's: `noteOwner` gives chatter notes and hard-rule
   flags to FLIGHT whenever a FLIGHT seat exists.
-- A seat's question that reaches the operator shows FLIGHT as its asker, never the seat.
+- A seat's question that reaches the operator carries `asker` (FLIGHT's seat id) beside `agentId`
+  (the seat); the page names `asker` first, so it never shows the seat as the asker.
 
 The image store this ticket first listed moved to #1705, which holds a question's pictures in one
 place.

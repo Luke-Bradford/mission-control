@@ -2292,9 +2292,10 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     });
     expect(keys(NOW)).toEqual([`ask:${id}`]);
     // the page never shows the seat as the asker: FLIGHT asks it (#1510)
-    expect(attentionItems(c, store, NOW).find((i) => i.key === `ask:${id}`)?.agentId).toBe(
-      "FLIGHT-1",
-    );
+    expect(attentionItems(c, store, NOW).find((i) => i.key === `ask:${id}`)).toMatchObject({
+      asker: "FLIGHT-1",
+      agentId: "GUIDO-1",
+    });
     // FLIGHT stopped: a new question stays FLIGHT's, marked down, and the stopped item counts it
     const held = asked("GUIDO-1", "c1");
     flightRow({ runId: null, state: "stopped" });

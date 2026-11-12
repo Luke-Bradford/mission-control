@@ -1726,7 +1726,8 @@ function buildAttentionItems(
   );
   // last, after a released hold has handed an item back to the operator
   // A seat's question reaches the operator only as FLIGHT's own question about a product choice, so
-  // the page never shows the seat as the asker (#1510).
+  // the page never shows the seat as the asker (#1510). `agentId` stays the seat: the question's
+  // answer and its Not now and Drop checks still read it.
   const asFlights = (item: AttentionItem): AttentionItem =>
     flightId !== null &&
     item.owner === OWNER_OPERATOR &&
@@ -1734,7 +1735,7 @@ function buildAttentionItems(
     item.key.startsWith("ask:") &&
     item.brief?.for === "operator" &&
     item.agentId !== flightId
-      ? { ...item, agentId: flightId }
+      ? { ...item, asker: flightId }
       : item;
   const checked = partition.items.map(entryCheck).map(asFlights);
   const shown =
