@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { BoardItem, Run, WasteCounts } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
+import { prepareRetrospective } from "../src/flight/retrospective.ts";
 import { wasteCounts, wasteReport } from "../src/spend/waste.ts";
 import { Store } from "../src/store.ts";
 
@@ -167,6 +168,36 @@ describe("the retrospective's waste counts", () => {
     expect(c.reviewRounds).toEqual({ reported: 2, failed: 1 });
     // idle from the window's start to 10h ago (14h, the state before its first event), then 6h to 2h ago (4h)
     expect(c.idleSeatHours).toBeCloseTo(18, 5);
+  });
+
+  it("counts a seat idle through the whole window with no state change", () => {
+    store.addAgentEvent({
+      agentId: "guido-1",
+      at: SINCE - 24 * HOUR,
+      from: "running",
+      to: "idle",
+      text: "",
+    });
+    expect(wasteCounts(config, store, "mc", "2026-11-12", SINCE, NOW).idleSeatHours).toBeCloseTo(
+      24,
+      5,
+    );
+  });
+
+  it("is stored by the daily retrospective and served on the waste route", async () => {
+    store.replaceBoard("mc", [card(1, NOW - HOUR)]);
+    store.addAgentEvent({
+      agentId: "guido-1",
+      at: SINCE - 24 * HOUR,
+      from: "running",
+      to: "idle",
+      text: "",
+    });
+    await prepareRetrospective(config, store, NOW);
+    const stored = (store.retrospectives("mc")[0] as { counts?: WasteCounts }).counts;
+    expect(stored).toMatchObject({ day: "2026-11-12", ticketsOpened: 1 });
+    expect(stored?.idleSeatHours).toBeCloseTo(24, 5);
+    expect(wasteReport(config, store, NOW + HOUR).counts).toEqual(stored);
   });
 
   it("serves the latest stored counts on the waste route, null before the first", () => {

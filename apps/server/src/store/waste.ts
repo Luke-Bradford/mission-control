@@ -140,6 +140,18 @@ export function wasteQueries(db: DatabaseSync) {
       ) as unknown as { repoId: string; pr: number; rounds: number; runId: string }[];
     },
 
+    /** Each agent's state when `since` began: its latest recorded change before it. */
+    agentStatesBefore(since: number): Map<string, string> {
+      return new Map(
+        all(
+          `SELECT agent_id, to_state FROM agent_events e
+           WHERE at < ? AND at = (SELECT MAX(at) FROM agent_events WHERE agent_id = e.agent_id AND at < ?)`,
+          since,
+          since,
+        ).map((r) => [r.agent_id as string, r.to_state as string]),
+      );
+    },
+
     /** Open runs waiting on FLIGHT's clearance, and since when (the latest wait recorded for the run). */
     clearanceWaits() {
       return all(

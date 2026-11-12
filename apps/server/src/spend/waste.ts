@@ -573,6 +573,12 @@ export function wasteCounts(
     const open = spans.get(id);
     if (open?.state === "idle") idleMs += Math.max(0, until - open.at);
   };
+  // each seat starts the window in the state it was last left in, so a quiet seat still counts
+  const before = q.agentStatesBefore(since);
+  for (const id of seats) {
+    const state = before.get(id) ?? store.seatSession(id)?.state;
+    if (state !== undefined) spans.set(id, { state, at: since });
+  }
   for (const e of store.agentEvents(since)) {
     if (!seats.has(e.agentId) || e.at > now) continue;
     if (!spans.has(e.agentId)) spans.set(e.agentId, { state: e.from, at: since });
