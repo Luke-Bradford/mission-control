@@ -425,6 +425,28 @@ describe("the check recorder", () => {
     expect(rows).toEqual([]);
   });
 
+  it("bounds a call at once when its completion came with no exit code", async () => {
+    let t = 99;
+    const freed: unknown[] = [];
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void rows.push(c) },
+      checks: async () => checks,
+      state: async () => state,
+      worktree: async () => WORKTREE,
+      now: () => t,
+      release: (k) => void freed.push(k),
+    });
+    const item = { runId: "r1", toolUseId: "item-1" };
+    await r.begin(KEY, LINT, [item]);
+    r.keep?.(KEY); // no turn end, no later event: the call is waited for only until its timeout
+    const other = { runId: "r1", toolUseId: "t2" };
+    expect(await r.admit?.(other, TYPES)).toBe(LINT);
+    r.cancel?.(other);
+    t += CHECK_BASH_TIMEOUT_MS + 1;
+    expect(await r.admit?.(other, TYPES)).toBeNull();
+    expect(freed).toEqual([KEY, item]);
+  });
+
   it("forgets a call whose approval was cancelled after it was noted", async () => {
     const r = recorder();
     await r.begin(KEY, LINT, [{ runId: "r1", toolUseId: "item-1" }]);

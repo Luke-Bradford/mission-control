@@ -121,6 +121,8 @@ export interface CheckRecorder {
   cancel?(key: CallKey): void;
   /** Drops an approved call that will not run after all (its approval was cancelled), with its admission. */
   abandon?(key: CallKey): void;
+  /** No further event can end this call (its completion came without an exit code): bound its wait now. */
+  keep?(key: CallKey): void;
   /** A turn ended. Only a normal Codex hand-back can keep waiting for an item completion, until its deadline. */
   dropRun(runId: string, options?: { keepWatching?: boolean }): void;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
@@ -212,6 +214,16 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       for (const id of ids) d.release?.(callKey(id));
     }
   };
+  /** From now the call is waited for only until its own timeout, capped; the sweep frees it then. */
+  const keepCalls = (calls: Iterable<StartedCall>): void => {
+    let soonest = Number.POSITIVE_INFINITY;
+    for (const call of calls) {
+      call.keptUntil ??=
+        call.startedAt + Math.min(call.timeoutMs || CHECK_BASH_TIMEOUT_MS, CHECK_BASH_TIMEOUT_MS);
+      soonest = Math.min(soonest, call.keptUntil);
+    }
+    if (Number.isFinite(soonest)) setTimeout(sweep, Math.max(0, soonest - now()) + 1).unref();
+  };
   const cancel = (key: CallKey): void => {
     for (const [checkout, admission] of admitted) {
       if (callId(admission.key) === callId(key)) admitted.delete(checkout);
@@ -268,6 +280,10 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
     },
     cancel(key) {
       cancel(key);
+    },
+    keep(key) {
+      const call = started.get(callId(key));
+      if (call !== undefined) keepCalls([call]);
     },
     abandon(key) {
       cancel(key);
@@ -412,15 +428,7 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       // still the only result that can cover the commit this call started on.
       if (options.keepWatching) {
         // the command may outlive its turn, but not its own timeout: then nothing will report it
-        let soonest = Number.POSITIVE_INFINITY;
-        for (const call of new Set(started.values())) {
-          if (call.runId !== runId) continue;
-          call.keptUntil ??=
-            call.startedAt +
-            Math.min(call.timeoutMs || CHECK_BASH_TIMEOUT_MS, CHECK_BASH_TIMEOUT_MS);
-          soonest = Math.min(soonest, call.keptUntil);
-        }
-        if (Number.isFinite(soonest)) setTimeout(sweep, Math.max(0, soonest - now()) + 1).unref();
+        keepCalls([...new Set(started.values())].filter((call) => call.runId === runId));
         return;
       }
       epochs.set(runId, epochOf(runId) + 1);

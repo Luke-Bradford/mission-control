@@ -1313,6 +1313,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             // a wrapped call that succeeded says nothing of the check: done, never pass (#1411)
             e.ok === undefined ? undefined : !e.ok ? true : e.wrapped ? undefined : false,
           );
+        // a Codex completion with no exit code is the last word on this call: bound its wait
+        if (l.run.vendor === "codex" && e.ok === undefined)
+          deps.checks?.keep?.({ runId: l.run.id, toolUseId: e.toolUseId });
         // a Codex command says how it exited; a Claude call's end comes by its Post hook instead
         if (e.ok !== undefined) {
           void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok, e.exitCode);

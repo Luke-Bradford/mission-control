@@ -1,6 +1,7 @@
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
+import { CHECK_BASH_TIMEOUT_MS } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { type CheckRecorder, createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -74,12 +75,15 @@ describe("a Codex command handed back before it exits", () => {
   it("keeps its lock and its record, and counts no result for it", async () => {
     const command = "pnpm -s lint";
     const rows: unknown[] = [];
+    let clock = Date.now();
+    const lock = new TestLock({ holds: store });
     const checks = createCheckRecorder({
       store: { addCheckRun: (row) => void rows.push(row) },
       checks: async () => [command],
       state: async () => ({ head: "a".repeat(40), clean: true }),
+      now: () => clock,
+      release: (key) => lock.release(key),
     });
-    const lock = new TestLock({ holds: store });
     const { sup } = codexSupervisor({ command, holdTurn: true }, { checks, lock });
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
@@ -88,6 +92,10 @@ describe("a Codex command handed back before it exits", () => {
     expect(lock.state().holder?.runId).toBe(runId);
     expect(await checks.running?.(runId, command)).toBe(command);
     expect(rows).toEqual([]);
+    // nothing can report its exit: past its own timeout the hub stops holding the lock for it
+    clock += CHECK_BASH_TIMEOUT_MS + 1;
+    expect(await checks.running?.(runId, command)).toBeNull();
+    expect(lock.state().holder).toBeNull();
     await sup.endRunByEngine(runId);
   });
 });
