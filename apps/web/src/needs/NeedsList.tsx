@@ -1,6 +1,7 @@
 import { ATTENTION_LABEL, type AttentionItem, type Crew, type QuestionClosure } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
+import { callSign as callSignOf } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { Pending } from "../flight/Pending.tsx";
 import { raisedAt, rel } from "../fmt.ts";
@@ -23,9 +24,8 @@ function RowAge({ at }: { at: number }) {
 function Row({ item, current }: { item: AttentionItem; current: boolean }) {
   const to = needsYouPath(item.key);
   // the band's name for the asker, so the list and the open item agree
-  const callSign = useResource<Crew>(RESOURCES.crew).data?.rows.find(
-    (r) => r.id === askerIdOf(item),
-  )?.displayCallSign;
+  const row = useResource<Crew>(RESOURCES.crew).data?.rows.find((r) => r.id === askerIdOf(item));
+  const callSign = row ? callSignOf(row) : undefined;
   return (
     <a
       className={current ? "needs-row on" : "needs-row"}

@@ -1,6 +1,7 @@
 import { ATTENTION_LABEL, type AttentionItem, type CrewRow, needsYouAlert } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
+import { callSign as callSignOf } from "../crew.ts";
 import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 
@@ -78,7 +79,7 @@ export function QuestionBand({
     <section className="needs-band" aria-label="The question">
       <div className="needs-band-meta">
         <Pill tone={item.kind === "decision" ? "warn" : "plain"}>{ATTENTION_LABEL[item.kind]}</Pill>
-        <span className="needs-band-who">{`Asked by ${askerOf(item, row?.displayCallSign)}`}</span>
+        <span className="needs-band-who">{`Asked by ${askerOf(item, row ? callSignOf(row) : undefined)}`}</span>
         <Raised at={item.at} />
         {actions}
       </div>

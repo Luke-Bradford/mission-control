@@ -1,5 +1,6 @@
 import type { AttentionItem, Crew, QuestionClosure } from "@mc/core";
 import { useState } from "react";
+import { callSign as callSignOf } from "../crew.ts";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { isNotTriaging, NotTriagingRow } from "../flight/NotTriaging.tsx";
 import { needsGroups } from "../flight/needsGroups.ts";
@@ -66,8 +67,10 @@ export function Needs({ item }: { item: string | null }) {
   const crew = useResource<Crew>(RESOURCES.crew).data?.rows;
   const [filters, setFilters] = useState<NeedsFilters>(NO_FILTERS);
   const [order, setOrder] = useState<NeedsOrder>("default");
-  const asker = (i: AttentionItem) =>
-    askerOf(i, crew?.find((r) => r.id === askerIdOf(i))?.displayCallSign);
+  const asker = (i: AttentionItem) => {
+    const row = crew?.find((r) => r.id === askerIdOf(i));
+    return askerOf(i, row ? callSignOf(row) : undefined);
+  };
   // alerts are the hub's, not questions: they get their own chip and group
   const alerts = [...asks, ...defaulted].filter(isAlert);
   const questions = [...asks, ...defaulted].filter((i) => !isAlert(i));
