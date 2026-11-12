@@ -532,7 +532,7 @@ describe("the read route's report", () => {
       costUsd: 10,
     });
     expect(week?.merged).toBe(0);
-    expect(report.checks.map((c) => c.check)).toHaveLength(8);
+    expect(report.checks.map((c) => c.check)).toHaveLength(10);
   });
 
   it("divides by the changes merged in the window", () => {

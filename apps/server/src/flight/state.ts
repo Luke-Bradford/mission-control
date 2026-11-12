@@ -1133,6 +1133,12 @@ export function flightState(i: {
     );
   const stale = store.stalePullRequests(session.repoId);
   const shown = shownPrs(store);
+  const failedRounds = new Map(
+    store.waste
+      .failedReviewRounds()
+      .filter((r) => r.repoId === session.repoId)
+      .map((r) => [r.pr, r.rounds]),
+  );
   const prs = store
     .pullRequests(session.repoId)
     .filter(
@@ -1171,6 +1177,7 @@ export function flightState(i: {
             ? null
             : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
         failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
+        reviewRounds: failedRounds.get(p.number) ?? 0,
       };
     });
 
