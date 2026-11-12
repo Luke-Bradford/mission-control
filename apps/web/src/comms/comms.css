@@ -22,6 +22,22 @@
   overflow: hidden;
 }
 
+.comms-notice-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 32px;
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.comms-notice-switch input {
+  min-width: 24px;
+  min-height: 24px;
+}
+
 .comms-grid {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) minmax(300px, 380px);

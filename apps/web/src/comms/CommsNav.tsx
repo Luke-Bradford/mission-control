@@ -16,6 +16,7 @@ import {
   commsCrewPath,
   commsFlightPath,
 } from "../router.ts";
+import { useNoticeResource } from "./model.ts";
 
 /** The short area label belongs in the compact nav; path globs belong in seat detail. */
 export function commsAgentRole(row: CrewRow): string {
@@ -27,12 +28,14 @@ export function AgentNavRow({
   row,
   view,
   onNavigate,
+  hideNotices = false,
 }: {
   row: CrewRow;
   view: CommsView;
+  hideNotices?: boolean;
   onNavigate: (path: string) => void;
 }) {
-  const data = useResource<CommsAgentResponse>(RESOURCES.commsNav(row.id)).data;
+  const data = useNoticeResource<CommsAgentResponse>(RESOURCES.commsNav(row.id), hideNotices).data;
   // The nav row reads counts, not messages: what its contact conversations hold (the crew
   // channel is not among them).
   const total = (data?.contacts ?? []).reduce((n, c) => n + c.count, 0);
@@ -112,13 +115,15 @@ export function CommsNav({
   flightId,
   view,
   onNavigate,
+  hideNotices = false,
 }: {
   rows: CrewRow[];
   flightId: string | undefined;
   view: CommsView;
   onNavigate: (path: string) => void;
+  hideNotices?: boolean;
 }) {
-  const flight = useResource<CommsMessagesResponse>(RESOURCES.commsFlight).data;
+  const flight = useNoticeResource<CommsMessagesResponse>(RESOURCES.commsFlight, hideNotices).data;
   // Observed loops appear in `/api/crew` too, but are not stored-Comms agents.  In particular,
   // `/api/comms/agents/:id` correctly rejects them, so never mount an AgentNavRow for one.
   const seats = rows.filter((row) => row.kind === "crew" && row.id !== flightId);
@@ -168,7 +173,13 @@ export function CommsNav({
         <span>{plural(seats.length, "agent")}</span>
       </div>
       {seats.map((row) => (
-        <AgentNavRow key={row.id} row={row} view={view} onNavigate={onNavigate} />
+        <AgentNavRow
+          key={row.id}
+          row={row}
+          hideNotices={hideNotices}
+          view={view}
+          onNavigate={onNavigate}
+        />
       ))}
     </nav>
   );
