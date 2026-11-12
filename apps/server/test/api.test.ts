@@ -7287,7 +7287,8 @@ describe("crew routes", () => {
       const r = await postBody("/api/seats/flight-1/start", {});
       expect(r.statusCode).toBe(200);
       expect(r.json()).toEqual({ runId: "r-3" });
-      expect(supervisorCalls).toEqual([["startWatch", "flight-1"]]);
+      // the operator's dock start passes the restart-storm hold
+      expect(supervisorCalls).toEqual([["startWatch", "flight-1", { operator: true }]]);
     });
 
     it("refuses an issue with 400", async () => {
