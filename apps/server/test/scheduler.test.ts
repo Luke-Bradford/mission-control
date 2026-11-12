@@ -1626,6 +1626,45 @@ describe("scheduler", () => {
       expect(store.machineSamples(0).map((m) => m.at)).toEqual([minute + 1000, minute + 61_000]);
     });
 
+    it("names what the hub holds on disk when the disk is what is tight", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      const gb = 1024 ** 3;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => minute + 1000,
+        hubDiskUse: () => ({
+          worktrees: 12.1 * gb,
+          pictures: 0.8 * gb,
+          evidence: 1.2 * gb,
+          scratch: 4 * gb,
+          database: 0.4 * gb,
+          total: 18.5 * gb,
+        }),
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: 10 * gb,
+              diskTotalBytes: 100 * gb,
+              memTotalBytes: 24 * gb,
+              swapUsedBytes: gb,
+              swapTotalBytes: 20 * gb,
+              memoryPressureFreePct: 20,
+              load1: 1,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "machine-capacity")?.text).toContain(
+        "The hub holds: worktrees 12.1 GB, scratch 4.0 GB, evidence 1.2 GB, pictures 0.8 GB, database 0.4 GB.",
+      );
+    });
+
     it("raises one machine-capacity item and closes it after five minutes of headroom", async () => {
       const minute = Math.floor(NOW / 60_000) * 60_000;
       let t = minute + 1000;

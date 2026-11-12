@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { diskUse } from "../src/disk/use.ts";
+import { cachedDiskUse, diskUse } from "../src/disk/use.ts";
 
 const dirs: string[] = [];
 const tmp = (): string => {
@@ -18,7 +18,7 @@ const put = (path: string, bytes: number): void => {
   writeFileSync(path, "x".repeat(bytes));
 };
 
-it("sizes what the hub holds by kind", () => {
+it("sizes what the hub holds by kind", async () => {
   const data = tmp();
   const wt = tmp();
   put(join(data, "qa-report-assets", "a.png"), 10);
@@ -30,7 +30,7 @@ it("sizes what the hub holds by kind", () => {
   put(join(data, "mc.sqlite"), 7000);
   put(join(data, "mc.sqlite-wal"), 300);
   put(join(wt, "seat-1", "file"), 40000);
-  expect(diskUse({ dataDir: data, worktrees: wt })).toEqual({
+  expect(await diskUse({ dataDir: data, worktrees: wt })).toEqual({
     worktrees: 40000,
     pictures: 35,
     evidence: 100,
@@ -40,6 +40,30 @@ it("sizes what the hub holds by kind", () => {
   });
 });
 
-it("reports zero for a folder that does not exist", () => {
-  expect(diskUse({ dataDir: join(tmp(), "none"), worktrees: undefined }).total).toBe(0);
+it("reports zero for a folder that does not exist", async () => {
+  expect((await diskUse({ dataDir: join(tmp(), "none"), worktrees: undefined })).total).toBe(0);
+});
+
+it("measures once for every reader inside the cache window, and shares a walk in flight", async () => {
+  let at = 0;
+  let walks = 0;
+  const use = { worktrees: 1, pictures: 0, evidence: 0, scratch: 0, database: 0, total: 1 };
+  const reader = cachedDiskUse(
+    { dataDir: "x", worktrees: undefined },
+    () => at,
+    async () => {
+      walks += 1;
+      return use;
+    },
+  );
+  expect(reader.last()).toBeNull();
+  await Promise.all([reader.read(), reader.read()]);
+  expect(walks).toBe(1);
+  at = 30_000;
+  await reader.read();
+  expect(walks).toBe(1);
+  at = 61_000;
+  await reader.read();
+  expect(walks).toBe(2);
+  expect(reader.last()).toEqual(use);
 });

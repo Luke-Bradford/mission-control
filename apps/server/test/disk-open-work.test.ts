@@ -1,3 +1,4 @@
+import type { QaReport } from "@mc/core";
 import { expect, it } from "vitest";
 import { prView } from "../../web/test/fixtures.ts";
 import { Store } from "../src/store.ts";
@@ -31,4 +32,28 @@ it("names the open PRs, and the QA images and review shots that open PRs still n
   store.addReviewShot(review(5), { shotId: "s5", label: "x", width: 1, theme: "dark" }, NOW);
   store.addReviewShot(review(6), { shotId: "s6", label: "x", width: 1, theme: "dark" }, NOW);
   expect([...store.reviewShotIdsOfOpenPrs()]).toEqual(["s5"]);
+});
+
+it("keeps only the QA images that a report of an open PR cites", () => {
+  const store = new Store(":memory:");
+  store.upsertPullRequests(
+    "mc",
+    [
+      prView({ repoId: "mc", number: 5, state: "open" }),
+      prView({ repoId: "mc", number: 6, state: "merged" }),
+    ],
+    NOW,
+  );
+  const report = (id: string, pr: number, image: string): QaReport =>
+    ({
+      id,
+      repoId: "mc",
+      prNumber: pr,
+      headSha: "a".repeat(40),
+      registeredAt: NOW,
+      before: { url: `/api/qa-report-assets/${image}`, sha256: image },
+    }) as unknown as QaReport;
+  store.putQaReport(report("r5", 5, "a".repeat(64)));
+  store.putQaReport(report("r6", 6, "b".repeat(64)));
+  expect([...store.qaAssetIdsOfOpenPrs()]).toEqual(["a".repeat(64)]);
 });

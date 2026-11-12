@@ -41,6 +41,8 @@ export interface CrewTidyDeps {
   store: Store;
   /** `BranchTidy.pruneLocal`: the dropped branches, as `repo:branch`. */
   pruneLocal: () => Promise<string[]>;
+  /** The supervisor's clone lock (`inClone`): a checkout being prepared holds it. Default: no lock. */
+  inClone?: <T>(checkout: string, fn: () => Promise<T>) => Promise<T>;
   git?: typeof crewGit;
   remove?: typeof removeCheckout;
 }
@@ -51,6 +53,17 @@ const no = (text: string): TidyResult => ({ ok: false, text });
 export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
   const git = deps.git ?? crewGit;
   const remove = deps.remove ?? removeCheckout;
+
+  const inClone: NonNullable<CrewTidyDeps["inClone"]> = deps.inClone ?? ((_c, fn) => fn());
+  const sessionOf = (run: Run): SessionRef | undefined => {
+    const sessions = (deps.config.crew?.sessions ?? []).filter((s) => s.repoId === run.repoId);
+    return sessions.find((s) => s.seats.some((x) => x.id === run.agentId)) ?? sessions[0];
+  };
+  /** The run's ticket (`repo#number`) is Done on the board: its work is finished, PR or not. */
+  const ticketDone = (run: Run): boolean => {
+    const m = /^(.+)#([1-9][0-9]*)$/.exec(run.ticket ?? "");
+    return m !== null && deps.store.boardItem(m[1], Number(m[2]))?.state === "done";
+  };
 
   /** The worktree an ended run's branch is checked out in, or why there is none to touch. */
   async function locate(run: Run): Promise<{ session: SessionRef; path: string } | string> {
@@ -82,6 +95,7 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
         .some((x) => deps.store.seatSession(x.id)?.worktree === path)
     )
       return "A seat still holds that worktree.";
+    if (deps.store.checkoutPending(path)) return "A checkout is being prepared there.";
     return { session, path };
   }
 
@@ -123,25 +137,31 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
         const key = `${run.repoId}:${run.branch}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        const pr = deps.store.pullRequestOfBranch(run.repoId, run.branch as string);
-        if (pr !== null && pr.state !== "open") {
-          if ((await this.removeWorktree(run.id)).ok) out.removed.push(run.id);
-          continue;
-        }
-        const live = deps.store
-          .runsActiveSince(Number.MAX_SAFE_INTEGER)
-          .some((r) => r.endedAt === null && r.repoId === run.repoId && r.branch === run.branch);
-        if (live) continue;
-        try {
-          const found = await locate(run);
-          if (typeof found === "string") continue;
-          const modules = join(found.path, "node_modules");
-          if (!(await stat(modules).catch(() => null))?.isDirectory()) continue;
-          await rm(modules, { recursive: true, force: true });
-          out.trimmed.push(run.id);
-        } catch {
-          // left as it is; the next cycle looks again
-        }
+        const checkout = sessionOf(run)?.checkout;
+        if (checkout === undefined) continue;
+        // Under the clone lock, as a resuming run's checkout is: the live-run check and the removal
+        // must not fall between its install and the run row that makes it live.
+        await inClone(checkout, async () => {
+          const live = deps.store
+            .runsActiveSince(Number.MAX_SAFE_INTEGER)
+            .some((r) => r.endedAt === null && r.repoId === run.repoId && r.branch === run.branch);
+          if (live) return;
+          const pr = deps.store.pullRequestOfBranch(run.repoId, run.branch as string);
+          if ((pr !== null && pr.state !== "open") || ticketDone(run)) {
+            if ((await this.removeWorktree(run.id)).ok) out.removed.push(run.id);
+            return;
+          }
+          try {
+            const found = await locate(run);
+            if (typeof found === "string") return;
+            const modules = join(found.path, "node_modules");
+            if (!(await stat(modules).catch(() => null))?.isDirectory()) return;
+            await rm(modules, { recursive: true, force: true });
+            out.trimmed.push(run.id);
+          } catch {
+            // left as it is; the next cycle looks again
+          }
+        });
       }
       return out;
     },

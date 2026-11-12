@@ -74,6 +74,7 @@ import {
   DesignPreviews,
 } from "./design-preview/previews.ts";
 import { DISK_SWEEP_EVERY_MS, diskBudgetBytes, sweepDataFolder } from "./disk/sweep.ts";
+import { cachedDiskUse } from "./disk/use.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -325,8 +326,17 @@ export async function main(): Promise<void> {
   // set by the CLI update check while the CLI fails its smoke test: no run starts or resumes
   const cliHold = new CliHold();
   let browserStreamCount = 0;
+  // One measurement of the hub's disk use (a walk of many gigabytes) serves the panel, the sweep and the disk flag.
+  const hubDiskUse = cachedDiskUse({
+    dataDir: dirname(dbPath),
+    worktrees: config.crew?.worktrees,
+  });
   const scheduler = createScheduler({
     config,
+    hubDiskUse: () => {
+      void hubDiskUse.read().catch(() => {});
+      return hubDiskUse.last();
+    },
     teamsEnabled: !isPreview(port, process.env),
     boardWrites: !preview,
     store,
@@ -865,7 +875,12 @@ export async function main(): Promise<void> {
     inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
     log: (line) => log(line),
   });
-  const crewTidy = createCrewTidy({ config, store, pruneLocal: () => branchTidy.pruneLocal() });
+  const crewTidy = createCrewTidy({
+    config,
+    store,
+    pruneLocal: () => branchTidy.pruneLocal(),
+    inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+  });
   // set once the app exists: `mc operator` calls its routes in process
   let hubApp: ReturnType<typeof buildApp> | null = null;
 
@@ -1014,6 +1029,7 @@ export async function main(): Promise<void> {
     });
   });
   const app = buildApp({
+    diskUse: hubDiskUse,
     qaReports,
     previews,
     previewRepoId,
@@ -1183,21 +1199,26 @@ export async function main(): Promise<void> {
   // Local only: pictures, evidence and scratch of finished work are removed from the data folder.
   if (!preview) {
     const dataDir = dirname(dbPath);
+    let sweeping = false;
     const diskSweep = () => {
-      try {
-        sweepDataFolder({
-          dataDir,
-          now: Date.now,
-          openPrs: store.openPrKeys(),
-          citedAssets: store.qaAssetIdsOfOpenPrs(),
-          keptShots: store.reviewShotIdsOfOpenPrs(),
-          budgetBytes: diskBudgetBytes(process.env),
-          worktrees: config.crew?.worktrees,
-          log,
+      if (sweeping) return;
+      sweeping = true;
+      sweepDataFolder({
+        dataDir,
+        now: Date.now,
+        openPrs: store.openPrKeys(),
+        citedAssets: store.qaAssetIdsOfOpenPrs(),
+        keptShots: store.reviewShotIdsOfOpenPrs(),
+        budgetBytes: diskBudgetBytes(process.env),
+        holdings: () => hubDiskUse.read(),
+        log,
+      })
+        .catch((e: unknown) => {
+          log(`disk sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+        })
+        .finally(() => {
+          sweeping = false;
         });
-      } catch (e) {
-        log(`disk sweep failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
     };
     setInterval(diskSweep, DISK_SWEEP_EVERY_MS).unref();
     setTimeout(diskSweep, 2 * 60_000).unref();

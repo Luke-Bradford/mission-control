@@ -62,10 +62,10 @@ const open = {
 };
 
 describe("sweepDataFolder", () => {
-  it("removes finished work's pictures and old scratch, keeps open work and designs", () => {
+  it("removes finished work's pictures and old scratch, keeps open work and designs", async () => {
     const data = fixture();
     const lines: string[] = [];
-    const r = sweepDataFolder({
+    const r = await sweepDataFolder({
       dataDir: data,
       now: () => NOW,
       ...open,
@@ -86,14 +86,14 @@ describe("sweepDataFolder", () => {
     expect(lines.join("\n")).toMatch(/removed 5 .*1800 bytes/);
   });
 
-  it("leaves a PR's files for a grace period after it finishes", () => {
+  it("leaves a PR's files for a grace period after it finishes", async () => {
     const data = tmp();
     file(join(data, "pr-evidence", "mc", "7", "c".repeat(40), "m.png"), 60_000);
-    sweepDataFolder({ dataDir: data, now: () => NOW, ...open, log: () => {} });
+    await sweepDataFolder({ dataDir: data, now: () => NOW, ...open, log: () => {} });
     expect(existsSync(join(data, "pr-evidence", "mc", "7"))).toBe(true);
   });
 
-  it("never removes a path outside the data folder, even through a symlink", () => {
+  it("never removes a path outside the data folder, even through a symlink", async () => {
     const data = fixture();
     const outside = tmp();
     file(join(outside, "precious.txt"), 30 * DAY);
@@ -101,7 +101,7 @@ describe("sweepDataFolder", () => {
     symlinkSync(outside, join(data, "pr-evidence", "mc", "9"));
     const old = (NOW - 30 * DAY) / 1000;
     utimesSync(join(data, "controller", "link-out"), old, old);
-    sweepDataFolder({ dataDir: data, now: () => NOW, ...open, log: () => {} });
+    await sweepDataFolder({ dataDir: data, now: () => NOW, ...open, log: () => {} });
     expect(existsSync(join(outside, "precious.txt"))).toBe(true);
     expect(SCRATCH_MAX_AGE_MS).toBe(3 * DAY);
   });
