@@ -51,6 +51,7 @@ import { PopoutContext } from "./shell/popout.ts";
 import { getSelectedAgent, nextAgent, setSelectedAgent } from "./shell/selection.ts";
 import { getSession, inCrewSession, useSessionScope } from "./shell/session.ts";
 import { Toast, toast } from "./shell/Toast.tsx";
+import "./not-found.css";
 
 const Agent = lazy(() => import("./pages/Agent.tsx").then((m) => ({ default: m.Agent })));
 const BoardPage = lazy(() =>
@@ -258,7 +259,6 @@ const PAGE_TITLES: Record<Route["page"], string> = {
   board: "Board",
   ticket: "Board",
   agent: "Agents",
-  map: "Map",
   comms: "Comms",
   commsChart: "Comms",
   telemetry: "Telemetry",

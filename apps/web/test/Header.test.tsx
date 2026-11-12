@@ -66,7 +66,7 @@ afterEach(() => {
 });
 
 describe("Header chat button", () => {
-  it("keeps mention badges in Comms so Overview remains unobscured", async () => {
+  it("badges only the unread messages to the operator, not the Needs-you items", async () => {
     const mention = (id: string, seen: boolean) => ({
       seen,
       message: { id, from: "inco-1", to: "CAPCOM", text: "hello", at: NOW },
@@ -80,8 +80,8 @@ describe("Header chat button", () => {
       mentions: [mention("1", false), mention("2", false), mention("3", true)],
     });
     render(<Header page="board" />);
-    const btn = await screen.findByRole("button", { name: "FLIGHT chat" });
-    expect(btn.querySelector(".dock-unread")).toBeNull();
+    const btn = await screen.findByRole("button", { name: "FLIGHT chat, 2 unread to you" });
+    expect(btn.querySelector(".dock-unread")?.textContent).toBe("2");
     expect(screen.getByRole("link", { name: "Needs you: 3 waiting" })).toBeTruthy();
   });
 

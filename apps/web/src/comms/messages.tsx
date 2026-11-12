@@ -60,39 +60,37 @@ export function commsKeys(list: CommsEvent[]): string[] {
 export function MentionText({ text, onRef }: { text: string; onRef?: (ref: string) => void }) {
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const login = config?.githubLogin;
-  const parts = text.split(COMMS_TOKEN);
-  return (
-    <>
-      {parts.map((part, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
-        <Fragment key={i}>
-          {QA_REPORT_REF.test(part) ? (
-            <a
-              href={part}
-              style={{ display: "inline-block", minHeight: 24 }}
-              onClick={(event) => followLink(event, part)}
-            >
-              Open saved QA report
-            </a>
-          ) : COMMS_REF.test(part) && onRef ? (
-            <button
-              type="button"
-              className="comms-ref"
-              aria-label={`Every message about ${part}`}
-              onClick={() => onRef(part)}
-            >
-              {part}
-            </button>
-          ) : part.toLowerCase() === CAPCOM_TAG.toLowerCase() ||
-            (login && part.toLowerCase() === `@${login.toLowerCase()}`) ? (
-            <span className="mention">{part}</span>
-          ) : (
-            <MarkdownInline text={part} />
-          )}
-        </Fragment>
-      ))}
-    </>
-  );
+  const tokens = (run: string) =>
+    run.split(COMMS_TOKEN).map((part, i) => (
+      // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
+      <Fragment key={i}>
+        {QA_REPORT_REF.test(part) ? (
+          <a
+            href={part}
+            style={{ display: "inline-block", minHeight: 24 }}
+            onClick={(event) => followLink(event, part)}
+          >
+            Open saved QA report
+          </a>
+        ) : COMMS_REF.test(part) && onRef ? (
+          <button
+            type="button"
+            className="comms-ref"
+            aria-label={`Every message about ${part}`}
+            onClick={() => onRef(part)}
+          >
+            {part}
+          </button>
+        ) : part.toLowerCase() === CAPCOM_TAG.toLowerCase() ||
+          (login && part.toLowerCase() === `@${login.toLowerCase()}`) ? (
+          <span className="mention">{part}</span>
+        ) : (
+          part
+        )}
+      </Fragment>
+    ));
+  // The whole message is parsed once; tokens are picked out of each text run, so bold can hold one.
+  return <MarkdownInline text={text} renderText={tokens} />;
 }
 
 /** One end of a message: a configured agent's tag, the operator, the engine, or any other id muted. */

@@ -204,9 +204,15 @@ function limit(nodes: MdNode[], max: number): MdNode[] {
 /** True under `OpenLinks`: links and bare http(s) URLs become safe, openable links. */
 const OpenLinksContext = createContext(false);
 
+/** How a caller turns each plain-text run into elements (references, mentions); text by default. */
+type TextRenderer = (text: string) => ReactNode;
+const TextRendererContext = createContext<TextRenderer | null>(null);
+
 /** Text, with bare http(s) URLs made links under `OpenLinks`. */
 function MdText({ text }: { text: string }) {
   const open = useContext(OpenLinksContext);
+  const custom = useContext(TextRendererContext);
+  if (custom) return <>{custom(text)}</>;
   if (!open || !text.includes("http")) return <>{text}</>;
   const parts = text.split(BARE_URL);
   return (
@@ -268,9 +274,23 @@ const inline = (text: string): ReactNode[] => render(parse(text));
  * elements, nothing block-level. With `max` the text is cut after parsing, so a cut never leaves
  * half a marker.
  */
-export function MarkdownInline({ text, max }: { text: string; max?: number }) {
+export function MarkdownInline({
+  text,
+  max,
+  renderText,
+}: {
+  text: string;
+  max?: number;
+  /** Turns each plain-text run into elements, so a token inside bold stays inside the bold. */
+  renderText?: TextRenderer;
+}) {
   const nodes = parse(text);
-  return <>{render(max === undefined ? nodes : limit(nodes, max))}</>;
+  const out = <>{render(max === undefined ? nodes : limit(nodes, max))}</>;
+  return renderText ? (
+    <TextRendererContext.Provider value={renderText}>{out}</TextRendererContext.Provider>
+  ) : (
+    out
+  );
 }
 
 interface Item {
