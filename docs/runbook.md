@@ -1444,7 +1444,7 @@ red CI, that `prFlow` shows owned by nobody, with no unended run on the ticket. 
 stuck state on a head (the `stuck-prs` setting), and the PR is stuck once it has stood 30 minutes since that, or since
 the last run on it ended, whichever is later. Never taken: a ticket labelled `waiting:operator`, a ticket with an open
 retry-loop waste alarm, a ticket or PR with a running `wait_on`, a ticket held behind a PR, a PR whose author run holds a
-merge hold (operator or FLIGHT), a PR the operator holds in Needs you, a stacked PR, a closed card.
+merge hold (operator or FLIGHT), a PR the operator holds in Needs you, a PR that has failed two reviews or whose run FLIGHT ended (the two-attempt rule: that call stays FLIGHT's, whether or not a wait has expired), a stacked PR, a closed card.
 A conflicting PR is first tried without a model: the hub merges main into the branch with `git merge-tree` in the
 session's clone, commits `Merge main into <branch>` as Mission Control, and pushes it plain (never forced), the same
 push `mc push` makes; a clean merge ends there. A real conflict, and a red PR, are started on a free build seat of the

@@ -490,6 +490,83 @@ describe("tickets and PRs that are never taken", () => {
   });
 });
 
+describe("the two-attempt rule (a call that stays FLIGHT's)", () => {
+  const failReview = (round: number, sha: string) => {
+    const id = store.requestReview({
+      authorRunId: `${GUIDO}:7`,
+      repoId: REPO,
+      seatId: "retro",
+      prNumber: 7,
+      sha,
+      epoch: 0,
+      attempt: 1,
+      round,
+      at: T0,
+    });
+    if (id === null) throw new Error("no review");
+    store.setReviewState(id, ["queued"], "running", { at: T0, runId: `rr${round}` });
+    store.recordFindings(id, `rr${round}`, {
+      verdict: { spec: "pass", quality: "fail" },
+      summary: "s",
+      findings: [
+        { severity: "Important", file: "a.ts", line: 1, summary: "s", scenario: "w", fix: "f" },
+      ],
+      at: T0,
+    });
+  };
+  const expired = [
+    [
+      "after its wait has expired",
+      () =>
+        store.setSetting(
+          FLIGHT_WAITS_SETTING,
+          JSON.stringify({ [`${REPO}#7`]: { until: T0 - 1, at: T0 - 60 * MIN, reason: "r" } }),
+        ),
+    ],
+    ["with no wait at all", () => {}],
+  ] as const;
+
+  it.each(expired)("a PR that failed two reviews is not offered %s", async (_n, wait) => {
+    stuckSetup(7);
+    failReview(1, "sha-a");
+    failReview(2, "sha-b");
+    wait();
+    stuckFor30();
+    await takeStuckPrs(deps(realConflict()));
+    expect(started).toEqual([]);
+    expect(list()).toEqual([]);
+    const state = flightState({ config, store, busy: [], now, areas: RULES.areas });
+    expect(state.signals.map((s) => s.kind)).not.toContain("stuck_pr");
+  });
+
+  it("a PR that failed one review is still offered", async () => {
+    stuckSetup(7);
+    failReview(1, "sha-a");
+    stuckFor30();
+    await takeStuckPrs(deps(realConflict()));
+    expect(started).toHaveLength(1);
+  });
+
+  it("a ticket whose run FLIGHT ended is not offered, even after its wait expires", async () => {
+    stuckSetup(7);
+    store.addFlightDecision({
+      at: T0 - 60 * MIN,
+      kind: "end",
+      seatId: "flight-1",
+      targetRunId: `${GUIDO}:7`,
+      ref: `${REPO}#7`,
+      questionId: null,
+      about: `${REPO}#7`,
+      decision: "Ended the run",
+      basis: "two attempts",
+    });
+    stuckFor30();
+    await takeStuckPrs(deps(realConflict()));
+    expect(started).toEqual([]);
+    expect(list()).toEqual([]);
+  });
+});
+
 describe("FLIGHT hears only when no seat can take it", () => {
   const signals = (areas = RULES.areas) =>
     flightState({ config, store, busy: [], now, areas }).signals.filter(

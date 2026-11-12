@@ -43,6 +43,8 @@ import { RepoRulesError } from "./rules.ts";
 
 /** The setting that keeps when each stuck state was first seen, so the 30 minutes survive a restart. */
 export const STUCK_PRS_SETTING = "stuck-prs";
+/** The operator's two-attempt rule: a PR that has failed this many reviews is not taken again by the hub. */
+export const STUCK_PR_MAX_FAILED_REVIEWS = 2;
 /** After a start the supervisor refused, a PR is not offered again for this long. */
 export const STUCK_PR_RETRY_MS = 10 * 60_000;
 
@@ -130,6 +132,24 @@ export function stuckPrs(i: {
     // a merge hold from the operator or FLIGHT outlives the run that made it
     const latest = [...runs].sort((a, b) => b.startedAt - a.startedAt)[0];
     if (latest?.loop?.mergeHold) continue;
+    // two failed reviews, or a run FLIGHT ended: the call is FLIGHT's, however long its wait ran
+    if (
+      store
+        .reviewsOfPr(repoId, pr.number)
+        .filter((r) => r.state === "reported" && (r.blocking ?? 0) > 0).length >=
+      STUCK_PR_MAX_FAILED_REVIEWS
+    )
+      continue;
+    if (
+      store
+        .flightDecisionsOnTicket(
+          pr.ticket,
+          runs.map((r) => r.id),
+          50,
+        )
+        .some((d) => d.kind === "end")
+    )
+      continue;
     if (ticketHolds.has(pr.ticket)) continue;
     if (attentionHolds.some(([key]) => key.startsWith(`pr:${repoId}#${pr.number}:`))) continue;
     if (
