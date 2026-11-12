@@ -839,193 +839,6 @@ async function refuseChangedInputs(
 }
 
 /**
- * Review-only exception for changes that cannot add executable package code. A manifest may only
- * change scripts, or versions of DefinitelyTyped packages. A matching lockfile may only change
- * DefinitelyTyped package records which do not declare a build. Every other install input keeps
- * the normal byte-for-byte origin check.
- */
-function rightDependencyValue(
-  before: Record<string, unknown>,
-  after: Record<string, unknown>,
-  name: string,
-): unknown {
-  for (const field of [
-    "dependencies",
-    "devDependencies",
-    "optionalDependencies",
-    "peerDependencies",
-  ]) {
-    const left = before[field] as Record<string, unknown> | undefined;
-    const right = after[field] as Record<string, unknown> | undefined;
-    if (left?.[name] !== right?.[name]) return right?.[name];
-  }
-  return undefined;
-}
-
-/** Only approved type dependencies may differ in pnpm's importer resolution records. */
-function safeTypeImporters(
-  before: unknown,
-  after: unknown,
-  typeSpecs: ReadonlyMap<string, unknown>,
-): boolean {
-  if (before === null || after === null || typeof before !== "object" || typeof after !== "object")
-    return JSON.stringify(before) === JSON.stringify(after);
-  for (const root of new Set([...Object.keys(before), ...Object.keys(after)])) {
-    const left = (before as Record<string, unknown>)[root];
-    const right = (after as Record<string, unknown>)[root];
-    if (left === null || right === null || typeof left !== "object" || typeof right !== "object") {
-      if (JSON.stringify(left) !== JSON.stringify(right)) return false;
-      continue;
-    }
-    for (const field of new Set([...Object.keys(left), ...Object.keys(right)])) {
-      const leftField = (left as Record<string, unknown>)[field];
-      const rightField = (right as Record<string, unknown>)[field];
-      if (
-        leftField === null ||
-        rightField === null ||
-        typeof leftField !== "object" ||
-        typeof rightField !== "object"
-      ) {
-        if (JSON.stringify(leftField) !== JSON.stringify(rightField)) return false;
-        continue;
-      }
-      const l = { ...(leftField as Record<string, unknown>) };
-      const r = { ...(rightField as Record<string, unknown>) };
-      for (const [name, specifier] of typeSpecs) {
-        const value = r[name];
-        if (
-          value !== undefined &&
-          typeof value === "object" &&
-          value !== null &&
-          (value as Record<string, unknown>).specifier !== specifier
-        )
-          return false;
-        delete l[name];
-        delete r[name];
-      }
-      if (JSON.stringify(l) !== JSON.stringify(r)) return false;
-    }
-  }
-  return true;
-}
-
-async function safeReviewPnpmChanges(
-  s: InstallVerification,
-  read: ReadObject,
-  base: string,
-): Promise<boolean> {
-  let changed: string[];
-  try {
-    changed = (
-      await s.inClone(["diff", "--name-only", "--no-renames", "-z", `${base}...${s.rev}`, "--"])
-    )
-      .split("\0")
-      .filter(Boolean);
-  } catch {
-    return false;
-  }
-  if (
-    changed.length === 0 ||
-    changed.some((file) => basename(file) !== "package.json" && file !== PNPM_TOOL.lockfile)
-  )
-    return false;
-
-  let typesOnly = false;
-  let scriptsChanged = false;
-  const typeSpecs = new Map<string, unknown>();
-  for (const file of changed.filter((file) => basename(file) === "package.json")) {
-    const entry = await baseEntry(read, base, file);
-    if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return false;
-    try {
-      const before = JSON.parse((await read("blob", entry.id, file)).toString("utf8")) as Record<
-        string,
-        unknown
-      >;
-      const after = JSON.parse(await readFile(join(s.path, file), "utf8")) as Record<
-        string,
-        unknown
-      >;
-      const beforeRest = { ...before };
-      const afterRest = { ...after };
-      delete beforeRest.scripts;
-      delete afterRest.scripts;
-      if (JSON.stringify(before.scripts) !== JSON.stringify(after.scripts)) scriptsChanged = true;
-      for (const field of [
-        "dependencies",
-        "devDependencies",
-        "optionalDependencies",
-        "peerDependencies",
-      ]) {
-        delete beforeRest[field];
-        delete afterRest[field];
-      }
-      if (JSON.stringify(beforeRest) !== JSON.stringify(afterRest)) return false;
-      const names = new Set<string>();
-      for (const field of [
-        "dependencies",
-        "devDependencies",
-        "optionalDependencies",
-        "peerDependencies",
-      ]) {
-        const left = before[field] as Record<string, unknown> | undefined;
-        const right = after[field] as Record<string, unknown> | undefined;
-        if (JSON.stringify(left) === JSON.stringify(right)) continue;
-        for (const name of new Set([...Object.keys(left ?? {}), ...Object.keys(right ?? {})])) {
-          if (left?.[name] !== right?.[name]) names.add(name);
-        }
-      }
-      if (names.size > 0) {
-        if ([...names].some((name) => !name.startsWith("@types/"))) return false;
-        for (const name of names) typeSpecs.set(name, rightDependencyValue(before, after, name));
-        typesOnly = true;
-      }
-    } catch {
-      return false;
-    }
-  }
-  if (!changed.includes(PNPM_TOOL.lockfile)) return scriptsChanged || typesOnly;
-  if (!typesOnly) return false;
-  try {
-    const entry = await baseEntry(read, base, PNPM_TOOL.lockfile);
-    if (entry === null || (entry.mode !== "100644" && entry.mode !== "100755")) return false;
-    const before = parseYaml(
-      (await read("blob", entry.id, PNPM_TOOL.lockfile)).toString("utf8"),
-    ) as {
-      importers?: unknown;
-      packages?: Record<string, { requiresBuild?: unknown }>;
-    };
-    const after = parseYaml(
-      await readFile(join(s.path, PNPM_TOOL.lockfile), "utf8"),
-    ) as typeof before;
-    // `snapshots`, catalogues, patches and settings also affect what pnpm resolves. They do not
-    // carry enough provenance to establish an install-safe dependency closure, so any change is
-    // reviewed without installing rather than being treated as a types-only bump.
-    const beforeResolution = { ...before };
-    const afterResolution = { ...after };
-    delete beforeResolution.packages;
-    delete afterResolution.packages;
-    delete beforeResolution.importers;
-    delete afterResolution.importers;
-    if (JSON.stringify(beforeResolution) !== JSON.stringify(afterResolution)) return false;
-    if (!safeTypeImporters(before.importers, after.importers, typeSpecs)) return false;
-    const keys = new Set([
-      ...Object.keys(before.packages ?? {}),
-      ...Object.keys(after.packages ?? {}),
-    ]);
-    return [...keys].every((key) => {
-      const left = before.packages?.[key];
-      const right = after.packages?.[key];
-      if (JSON.stringify(left) === JSON.stringify(right)) return true;
-      return (
-        key.startsWith("@types/") && left?.requiresBuild !== true && right?.requiresBuild !== true
-      );
-    });
-  } catch {
-    return false;
-  }
-}
-
-/**
  * pnpm's environment for an install in `worktree`: the server's, without git's or a parent pnpm
  * run's settings and without CI markers, plus `CI=false` (ci-info then reports not-CI whatever
  * else is set; under CI pnpm purges a mismatched node_modules without asking), a server-controlled
@@ -1219,15 +1032,12 @@ async function verifyInstall(
 ): Promise<string[]> {
   await refuseUnsafeTree(s.inClone, s.rev, s.subject, tool.installDir);
   const base = s.compare ? await branchBase(s.inClone, s.base, s.rev, s.subject) : s.base;
+  if (s.compare) await refuseInstallInputs(s.inClone, base, s.rev, s.subject, tool.inputs);
   const format = (await s.inClone(["rev-parse", "--show-object-format"])).trim();
   if (format !== "sha1") throw refuse(s.subject, `is in a ${format} repository`);
   const read = verifiedObjects((args, maxBuffer) =>
     crewGitBytes(s.checkout, args, s.common, { gitDir: s.common, maxBuffer }),
   );
-  const safeReviewChange =
-    s.compare && tool === PNPM_TOOL && (await safeReviewPnpmChanges(s, read, base));
-  if (s.compare && !safeReviewChange)
-    await refuseInstallInputs(s.inClone, base, s.rev, s.subject, tool.inputs);
   const found: string[] = [];
   const allowedInstallDirs = new Set<string>();
   const unsafe = await inspectDisk(
@@ -1241,7 +1051,7 @@ async function verifyInstall(
     read,
   );
   if (unsafe !== null) throw refuse(s.subject, unsafe);
-  if (!safeReviewChange) await refuseChangedInputs(s.path, tool, found, read, base, s.subject);
+  await refuseChangedInputs(s.path, tool, found, read, base, s.subject);
   for (const file of tool.required) {
     if (!found.includes(file)) throw refuse(s.subject, `has no ${file}`);
   }
@@ -2104,7 +1914,7 @@ export interface Scratch {
   /** origin's default tip */
   baseSha: string;
   mergeBase: string;
-  /** Present when this review reads the PR without installing its changed dependencies. */
+  /** Present when this review reads the PR without installing: its package.json or lockfile changed. */
   installNote?: string;
 }
 
@@ -2194,6 +2004,8 @@ export async function prepareScratch(
         runInstall,
       );
     } catch (e) {
+      // Nothing from the PR branch is installed. A changed package.json or lockfile is reviewed
+      // read-only, and reported as "reviewed, not installed"; any other refusal still fails.
       if (
         e instanceof CheckoutError &&
         e.code === "protected" &&

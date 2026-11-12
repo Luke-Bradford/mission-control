@@ -1516,36 +1516,17 @@ describe("startReview", () => {
     }
     const flightNotes = () => store.comms(0).filter((m) => m.to === "flight-1");
 
-    it("installs and reports a PR that edits only scripts (PR 1520)", async () => {
+    it("reviews a scripts-only change read-only (PR 1520) and reports it", async () => {
       const r = reviewOfPush({
         base: { "package.json": pkg({ scripts: { check: "old" } }), "pnpm-lock.yaml": LOCK },
         files: { "package.json": pkg({ scripts: { check: "new" } }) },
       });
-      const { installs, brief } = await reviewAndReport(r);
-      expect(installs).toContain("pnpm");
-      expect(brief).not.toContain("not installed");
-      expect(flightNotes()).toEqual([]);
+      const { installs, brief, runId } = await reviewAndReport(r);
+      expect(installs).toEqual([]);
+      expect(brief).toContain("Reviewed, not installed");
+      expect(flightNotes()).toHaveLength(1);
       expect(store.review(r.reviewId)?.state).toBe("reported");
-    });
-
-    it("installs and reports a PR that bumps only a types package (PR 1640)", async () => {
-      const importers = (v: string) =>
-        `lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    devDependencies:\n      '@types/node':\n        specifier: ${v}\n        version: ${v}\n\npackages:\n\n  '@types/node@${v}':\n    resolution: {integrity: sha512-${v}}\n`;
-      const r = reviewOfPush({
-        base: {
-          "package.json": pkg({ devDependencies: { "@types/node": "20.0.0" } }),
-          "pnpm-lock.yaml": importers("20.0.0"),
-        },
-        files: {
-          "package.json": pkg({ devDependencies: { "@types/node": "20.1.0" } }),
-          "pnpm-lock.yaml": importers("20.1.0"),
-        },
-      });
-      const { installs, brief } = await reviewAndReport(r);
-      expect(installs).toContain("pnpm");
-      expect(brief).not.toContain("not installed");
-      expect(flightNotes()).toEqual([]);
-      expect(store.review(r.reviewId)?.state).toBe("reported");
+      expect(store.run(runId)?.status).not.toBe("failed");
     });
 
     it("reviews an added dependency read-only, says so, tells FLIGHT, and still reports", async () => {

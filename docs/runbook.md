@@ -282,13 +282,11 @@ same way, and the head is not reviewed a second time. When the hub holds a repor
 not post (a draft PR, a branch still owned, a PR it was never asked to review), it logs one line
 saying why, once per review.
 
-Review setup installs with lifecycle scripts disabled. A scripts-only `package.json` change is safe
-to install. A types-only bump is also safe when every changed manifest dependency and lockfile
-package record is under `@types/` and neither old nor new record declares `requiresBuild`. All other
-manifest or lockfile changes start a read-only review without installing the PR's packages. The
-review brief records `Reviewed, not installed` and tells the reviewer not to run commands that need
-those packages. FLIGHT receives the same reason when the review starts; this is a review limitation,
-not a failed review.
+A PR that changes `package.json` or the lockfile is still reviewed. The hub never installs a PR
+branch's packages in a seat, so that review runs read-only against the base branch's installed
+packages: the brief records `Reviewed, not installed` with the reason and tells the reviewer to read
+the diff and run nothing that needs the PR's packages. FLIGHT is told at once, with the PR and the
+reason. The review ends as reported, not failed, so no failing `mc/review` status is posted.
 
 These PRs do not enter the crew's merge or board-completion path. Their controller still applies CI,
 review, acceptance and repository merge rules. A failed review remains failed rather than repeatedly

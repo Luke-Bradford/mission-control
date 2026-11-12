@@ -1945,104 +1945,35 @@ describe("review scratch checkouts", () => {
     expect(worktreeDiskKb() - before).toBeLessThan(20 * 1024);
   });
 
-  it("installs a scripts-only package manifest change for a review", async () => {
+  it("a PR head that changes a protected install input other than the manifest is refused and removed", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
     git(seed, "push", "-q", "origin", "main");
-    const { head } = pr({
-      "package.json": `${JSON.stringify({
-        name: "x",
-        version: "1.0.0",
-        private: true,
-        scripts: { check: "echo checked" },
-      })}\n`,
-    });
-    const run = vi.fn(payloadInstall);
-
-    await expect(prepareScratch(scratchInput(head), run)).resolves.toMatchObject({
-      path: scratchPath(),
-    });
-    expect(run).toHaveBeenCalledOnce();
-    expect(run.mock.calls[0]?.[1]).toEqual(INSTALL_ARGS);
+    const { head } = pr({ ".npmrc": "ignore-scripts=false\n" });
+    const e = await fail(prepareScratch(scratchInput(head)));
+    expect(e.code).toBe("protected");
+    expect(existsSync(scratchPath())).toBe(false);
+    expect(worktrees()).toHaveLength(1);
   });
 
-  it("installs a types-only manifest and lockfile bump for a review", async () => {
-    const oldLock = `lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    devDependencies:\n      '@types/example':\n        specifier: 1.0.0\n        version: 1.0.0\n\npackages:\n\n  '@types/example@1.0.0':\n    resolution: {integrity: sha512-old}\n`;
-    const newLock = `lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    devDependencies:\n      '@types/example':\n        specifier: 2.0.0\n        version: 2.0.0\n\npackages:\n\n  '@types/example@2.0.0':\n    resolution: {integrity: sha512-new}\n`;
-    commit(seed, {
-      "package.json": `${JSON.stringify({
-        name: "x",
-        version: "1.0.0",
-        private: true,
-        devDependencies: { "@types/example": "1.0.0" },
-      })}\n`,
-      "pnpm-lock.yaml": oldLock,
-    });
-    git(seed, "push", "-q", "origin", "main");
-    const { head } = pr({
-      "package.json": `${JSON.stringify({
-        name: "x",
-        version: "1.0.0",
-        private: true,
-        devDependencies: { "@types/example": "2.0.0" },
-      })}\n`,
-      "pnpm-lock.yaml": newLock,
-    });
-    const run = vi.fn(payloadInstall);
-
-    await expect(prepareScratch(scratchInput(head), run)).resolves.toMatchObject({
-      path: scratchPath(),
-    });
-    expect(run).toHaveBeenCalledOnce();
-  });
-
-  it("does not install a types bump whose lockfile changes snapshots", async () => {
-    const oldLock = `${EMPTY_LOCK}\npackages:\n\n  '@types/example@1.0.0':\n    resolution: {integrity: sha512-old}\n`;
-    const newLock = `${EMPTY_LOCK}\npackages:\n\n  '@types/example@2.0.0':\n    resolution: {integrity: sha512-new}\n\nsnapshots:\n\n  '@types/example@2.0.0':\n    dependencies:\n      native-package: 1.0.0\n`;
-    commit(seed, {
-      "package.json": `${JSON.stringify({
-        name: "x",
-        version: "1.0.0",
-        private: true,
-        devDependencies: { "@types/example": "1.0.0" },
-      })}\n`,
-      "pnpm-lock.yaml": oldLock,
-    });
-    git(seed, "push", "-q", "origin", "main");
-    const { head } = pr({
-      "package.json": `${JSON.stringify({
-        name: "x",
-        version: "1.0.0",
-        private: true,
-        devDependencies: { "@types/example": "2.0.0" },
-      })}\n`,
-      "pnpm-lock.yaml": newLock,
-    });
-    const run = vi.fn(payloadInstall);
-
-    await expect(prepareScratch(scratchInput(head), run)).resolves.toMatchObject({
-      installNote: expect.stringContaining("Reviewed, not installed"),
-    });
-    expect(run).not.toHaveBeenCalled();
-  });
-
-  it("reviews a PR dependency change without installing it", async () => {
+  it.each([
+    ["package.json scripts (PR 1520)", { "package.json": `${PKG}\n` }],
+    ["pnpm-lock.yaml", { "pnpm-lock.yaml": `${EMPTY_LOCK}\n` }],
+    [
+      "package.json plus pnpm-lock.yaml (PR 1640)",
+      { "package.json": `${PKG}\n`, "pnpm-lock.yaml": `${EMPTY_LOCK}\n` },
+    ],
+  ])("a PR head that changes %s is reviewed read-only, with nothing installed", async (_n, files) => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
     git(seed, "push", "-q", "origin", "main");
-    const { head } = pr({
-      "package.json": `${JSON.stringify({
-        name: "x",
-        version: "1.0.0",
-        private: true,
-        dependencies: { "untrusted-package": "1.0.0" },
-      })}\n`,
-    });
-    const run = vi.fn(payloadInstall);
-
-    await expect(prepareScratch(scratchInput(head), run)).resolves.toMatchObject({
-      installNote: `Reviewed, not installed: the PR head ${head.slice(0, 7)} changes package.json; Mission Control won't install from it`,
-    });
-    expect(run).not.toHaveBeenCalled();
+    const { head } = pr(files);
+    const install = vi.fn(async () => {});
+    const s = await prepareScratch(scratchInput(head), install);
+    expect(install).not.toHaveBeenCalled();
+    expect(s.installNote).toMatch(
+      new RegExp(`^Reviewed, not installed: the PR head ${head.slice(0, 7)} changes .*; Mission Control won't install from it$`),
+    );
     expect(existsSync(scratchPath())).toBe(true);
+    expect(existsSync(join(scratchPath(), "node_modules"))).toBe(false);
   });
 
   describe("writeReviewInputs", () => {
