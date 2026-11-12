@@ -7,7 +7,7 @@ import {
   type Crew,
 } from "@mc/core";
 import { Fragment } from "react";
-import { MarkdownInline } from "../components/Markdown.tsx";
+import { MarkdownInline, type TextRenderer } from "../components/Markdown.tsx";
 import { seatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -58,9 +58,18 @@ export function commsKeys(list: CommsEvent[]): string[] {
 
 /** Plain text with each mention picked out. */
 export function MentionText({ text, onRef }: { text: string; onRef?: (ref: string) => void }) {
+  return <MarkdownInline text={text} renderText={useTokenRenderer(onRef)} />;
+}
+
+/**
+ * Turns a run of plain text into elements: saved QA reports, `#n` and `PR n` references (buttons
+ * when `onRef` is given) and mentions. Hand it to a Markdown component so the whole message is
+ * parsed once and a token can sit inside bold or a list item.
+ */
+export function useTokenRenderer(onRef?: (ref: string) => void): TextRenderer {
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const login = config?.githubLogin;
-  const tokens = (run: string) =>
+  return (run: string) =>
     run.split(COMMS_TOKEN).map((part, i) => (
       // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
       <Fragment key={i}>
@@ -89,8 +98,6 @@ export function MentionText({ text, onRef }: { text: string; onRef?: (ref: strin
         )}
       </Fragment>
     ));
-  // The whole message is parsed once; tokens are picked out of each text run, so bold can hold one.
-  return <MarkdownInline text={text} renderText={tokens} />;
 }
 
 /** One end of a message: a configured agent's tag, the operator, the engine, or any other id muted. */

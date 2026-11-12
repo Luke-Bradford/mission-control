@@ -109,4 +109,48 @@ describeRendered("Setup tabs, rendered", () => {
       BROWSER_TEST_TIMEOUT_MS * 4,
     );
   }
+
+  it(
+    "keeps the display buttons at their text width with build status on, clear of the legend, at 1280x800",
+    async () => {
+      for (const colorScheme of ["light", "dark"] as const) {
+        const page = await renderAt({
+          page: "test/setupBrowser.html",
+          width: 1280,
+          height: 800,
+          search: "?tab=sources",
+          colorScheme,
+          api,
+        });
+        await page.box(".display-controls");
+        await page.evaluate(() => {
+          const on = [...document.querySelectorAll<HTMLButtonElement>(".display-controls button")];
+          on.find((b) => b.textContent === "Show build status")?.click();
+        }, null);
+        await page.box(".bslegend");
+        const state = await page.evaluate(() => {
+          const legend = document.querySelector(".bslegend") as HTMLElement;
+          const l = legend.getBoundingClientRect();
+          return [...document.querySelectorAll<HTMLElement>(".display-controls button")].map(
+            (b) => {
+              const r = b.getBoundingClientRect();
+              return {
+                label: b.textContent,
+                fits: b.scrollWidth <= b.clientWidth,
+                clear:
+                  r.bottom <= l.top || r.top >= l.bottom || r.right <= l.left || r.left >= l.right,
+              };
+            },
+          );
+        }, null);
+        expect(state.length).toBeGreaterThanOrEqual(2);
+        for (const b of state) {
+          expect(b.fits, `${b.label} ${colorScheme}`).toBe(true);
+          expect(b.clear, `${b.label} ${colorScheme}`).toBe(true);
+        }
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

@@ -1,3 +1,12 @@
+/* The not-found page sizes to its content; its text and links share the panel's padding. */
+#page-not-found {
+  align-self: start;
+  height: auto;
+}
+#page-not-found > p {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-3) 0;
+}
 /* The not-found page's links: separate, at least 24×24 px, with a visible keyboard focus. */
 .not-found-links {
   display: flex;

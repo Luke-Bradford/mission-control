@@ -20,6 +20,18 @@ describeRendered("Not-found page", () => {
         });
         try {
           await page.boxes("#page-not-found");
+          const layout = await page.evaluate(() => {
+            const rect = (selector: string) =>
+              (document.querySelector(selector) as HTMLElement).getBoundingClientRect();
+            const panel = rect("#page-not-found");
+            return {
+              inset: rect("#page-not-found > p").left - panel.left,
+              slack: panel.bottom - rect(".not-found-links").bottom,
+            };
+          }, undefined);
+          expect(layout.inset).toBeGreaterThanOrEqual(12);
+          // the panel ends right after its links, with no more than padding below them
+          expect(layout.slack).toBeLessThanOrEqual(24);
           const links = await page.boxes(".not-found-links a");
           expect(links.length).toBeGreaterThanOrEqual(3);
           for (const box of links) {

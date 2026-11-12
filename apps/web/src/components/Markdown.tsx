@@ -205,7 +205,7 @@ function limit(nodes: MdNode[], max: number): MdNode[] {
 const OpenLinksContext = createContext(false);
 
 /** How a caller turns each plain-text run into elements (references, mentions); text by default. */
-type TextRenderer = (text: string) => ReactNode;
+export type TextRenderer = (text: string) => ReactNode;
 const TextRendererContext = createContext<TextRenderer | null>(null);
 
 /** Text, with bare http(s) URLs made links under `OpenLinks`. */
@@ -444,6 +444,11 @@ function blocks(text: string): ReactNode[] {
  * code, fenced blocks, headings as bold lines, links as their text with the URL in `title`.
  * React elements only: raw HTML in the text shows as literal text.
  */
-export function Markdown({ text }: { text: string }) {
-  return <div className="md">{blocks(text)}</div>;
+export function Markdown({ text, renderText }: { text: string; renderText?: TextRenderer }) {
+  const out = <div className="md">{blocks(text)}</div>;
+  return renderText ? (
+    <TextRendererContext.Provider value={renderText}>{out}</TextRendererContext.Provider>
+  ) : (
+    out
+  );
 }
