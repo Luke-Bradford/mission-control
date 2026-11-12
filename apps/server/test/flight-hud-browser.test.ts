@@ -18,8 +18,8 @@ import {
 } from "../src/flight/hud-render.ts";
 import { createFlightTools, type FlightToolsDeps } from "../src/flight/tools.ts";
 import { Store } from "../src/store.ts";
-import { canListenOnLoopback, skipWhenRefused } from "./sandbox-capability.ts";
 import { WEB_CSP } from "../src/web.ts";
+import { canListenOnLoopback, skipWhenRefused } from "./sandbox-capability.ts";
 
 /** A Chrome or Chromium to render with: the override, else the usual macOS and Linux installs. */
 const CHROME = [

@@ -24,7 +24,6 @@ import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { CREW_LOCK_FILE, createSupervisor, type SeatBusy } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
-import { canRunPnpmInstall, skipWhenRefused } from "./sandbox-capability.ts";
 import {
   type AutoUpdateDeps,
   autoUpdatePath,
@@ -57,6 +56,7 @@ import {
   VERSION_CHECK_FLOOR_MS,
   VERSION_CHECK_MS,
 } from "../src/update.ts";
+import { canRunPnpmInstall, skipWhenRefused } from "./sandbox-capability.ts";
 
 const execFileP = promisify(execFile);
 
