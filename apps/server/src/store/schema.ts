@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS board_moves (
   board_column TEXT NOT NULL, state TEXT NOT NULL, detail TEXT, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS board_moves_at ON board_moves(at);
+CREATE INDEX IF NOT EXISTS board_moves_card ON board_moves(repo_id, issue, state, at);
 -- What a run's seat reported (append-only); the loop's reconciler reads the latest.
 CREATE TABLE IF NOT EXISTS run_evidence (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, note TEXT NOT NULL, at INTEGER NOT NULL,
