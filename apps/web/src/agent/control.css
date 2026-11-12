@@ -1,29 +1,28 @@
 /* biome-ignore-all lint/style/noDescendingSpecificity: the page-scoped overrides follow the shared panel rules */
 /* The Agents control room: roster | chosen seat | right column, on one fixed screen
    (docs/prototype/agents-page-revised.html). Only the roster, the activity list and the tab body scroll. */
+/* Rows: the disconnected banner, the removed-seat banner, then the shell, which takes exactly the
+   rest of the page: the grid bounds it, so nothing below can push the message box off screen. */
 #page-agent.control-room {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   height: 100%;
   min-height: 0;
   overflow: hidden;
 }
 .control-banner {
-  flex: none;
+  margin-bottom: var(--sp-3);
   padding: var(--sp-2) var(--sp-4);
   border: 1px solid var(--line-2);
   border-radius: var(--r);
 }
 .control-shell {
-  flex: 1;
+  grid-row: 3;
+  height: auto;
+  overflow: hidden;
   grid-template-columns: 348px minmax(0, 1fr) 320px;
   min-height: 0;
-}
-@container (max-width: 1000px) {
-  .control-shell {
-    grid-template-columns: 348px minmax(0, 1fr);
-  }
 }
 .control-main {
   display: flex;
@@ -290,6 +289,7 @@
 
 /* Right column */
 .side {
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
@@ -344,4 +344,25 @@
 .control-main.trace {
   grid-column: 2 / -1;
   overflow-y: auto;
+}
+
+/* Narrow: everything stacks and the shell scrolls inside its own frame (the fixed screen is for 1280 px and up). */
+@container (max-width: 1000px) {
+  .control-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    overflow-y: auto;
+  }
+  .control-main,
+  .control-main.trace {
+    overflow: visible;
+  }
+  #page-agent.control-room #streamP {
+    flex: none;
+    min-height: 320px;
+  }
+  .control-main.trace {
+    grid-column: auto;
+  }
 }

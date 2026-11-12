@@ -60,6 +60,7 @@ describeRendered("Agents control room in a browser", () => {
             return {
               pageScrollsY: doc.scrollHeight > innerHeight + 1,
               pageScrollsX: doc.scrollWidth > innerWidth + 1,
+              composerBox: composer ? [composer.top, composer.bottom, innerHeight] : null,
               composerInView: !!composer && composer.bottom <= innerHeight && composer.top >= 0,
               listScrolls: (() => {
                 const s = document.querySelector<HTMLElement>("#stream");
@@ -74,7 +75,10 @@ describeRendered("Agents control room in a browser", () => {
           const where = `${width}x${height}, ${theme}`;
           expect(r.pageScrollsY, `${where}: the page does not scroll`).toBe(false);
           expect(r.pageScrollsX, `${where}: nor sideways`).toBe(false);
-          expect(r.composerInView, `${where}: the message box is on screen`).toBe(true);
+          expect(
+            r.composerInView,
+            `${where}: the message box is on screen (top, bottom, window: ${JSON.stringify(r.composerBox)})`,
+          ).toBe(true);
           expect(r.listScrolls, `${where}: the activity list is what scrolls`).toBe(true);
           expect(r.nameCut, `${where}: names and states are never cut`).toEqual([]);
           const shots = process.env.MC_AGENT_CONTROL_SHOTS;

@@ -256,7 +256,7 @@ describeRendered("Agents roster in a browser", () => {
       const r = await page.evaluate(
         () => ({
           roster: document.querySelector("#roster")?.getBoundingClientRect().height ?? 0,
-          mainTop: document.querySelector(".agent-v2-main")?.getBoundingClientRect().top ?? 0,
+          mainTop: document.querySelector(".control-main")?.getBoundingClientRect().top ?? 0,
           inner: innerHeight,
         }),
         null,
