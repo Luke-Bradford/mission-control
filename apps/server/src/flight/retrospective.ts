@@ -14,6 +14,7 @@ import type { CcConfig } from "../config.ts";
 import { CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit, crewGitBytes } from "../runtime/git.ts";
 import { originHeads } from "../runtime/origin-heads.ts";
+import { wasteCounts } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { flightMetrics } from "./ledger.ts";
 import { flightSignalHistory } from "./signals.ts";
@@ -313,6 +314,7 @@ export async function prepareRetrospective(
       .slice(0, FLIGHT_COSTLY_RUNS_MAX)
       .map((r) => ({ runId: r.id, seat: r.agentId, ticket: r.ticket, costUsd: r.costUsd })),
     productPass: { pages: hudProductPages(config), instruction: PRODUCT_PASS_INSTRUCTION },
+    counts: wasteCounts(config, store, repoId, day, metrics.since, now),
   };
   store.setSetting(
     setting(repoId),

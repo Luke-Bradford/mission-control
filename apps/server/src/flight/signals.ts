@@ -3,6 +3,7 @@ import {
   BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
   COMMS_CONTROLLER,
+  FLIGHT_BUDGET_UNUSED_PCT,
   FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_COST_DAYS,
@@ -10,6 +11,7 @@ import {
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
   FLIGHT_IDLE_NO_WORK_MS,
+  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_ITEM_RELAPSE_MS,
   FLIGHT_ITEM_STALE_MS,
   FLIGHT_LOOPS_SETTING,
@@ -544,6 +546,27 @@ export function flightSignals(i: {
             ? `eligibleToStart queued ${work.repoId}#${work.issue}`
             : `open PR #${stuckWork?.number} (${stuckWork?.ticket}) has no run and is ${stuckWork?.kind === "conflict" ? "in conflict with main" : "red"}`
         }`,
+      );
+    }
+    // a free build seat idle for half an hour while its account has most of its week left
+    const account = session.seats.find((x) => x.id === seat.id)?.accountId;
+    const weekly = account === undefined ? null : store.latestUsage(account, "7d");
+    if (
+      seat.loop === "build" &&
+      seat.free &&
+      row?.state === "idle" &&
+      !seat.atStop &&
+      since !== undefined &&
+      now - since >= FLIGHT_IDLE_SEAT_WAKE_MS &&
+      weekly !== null &&
+      weekly.resetAt > now &&
+      weekly.pct < FLIGHT_BUDGET_UNUSED_PCT
+    ) {
+      raise(
+        "budget_unused",
+        `${seat.id}:${since}`,
+        since,
+        `${seat.id} idle since ${new Date(since).toISOString()} while ${account} has used ${Math.round(weekly.pct)}% of its week (resets ${new Date(weekly.resetAt).toISOString()}); the budget is going unused`,
       );
     }
     if (

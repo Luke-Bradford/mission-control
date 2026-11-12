@@ -18,6 +18,7 @@ import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime-model.ts";
 import type { LoopPhase } from "./types.ts";
+import type { WasteCounts } from "./waste.ts";
 
 // The FLIGHT seat: the head agent that runs the crew. It is the one `watch` seat, started with no
 // ticket, and it keeps a log of what it decided (`flight_decisions`).
@@ -509,6 +510,8 @@ export interface FlightRetrospective {
   costlyRuns: { runId: string; seat: string; ticket: string | null; costUsd: number | null }[];
   /** Daily visual-quality work for FLIGHT, delivered with the retrospective wake. */
   productPass: { pages: string[]; instruction: string };
+  /** Tickets opened and closed, runs per ticket, review rounds and idle seat-hours. */
+  counts?: WasteCounts;
 }
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
@@ -1109,7 +1112,10 @@ export const FLIGHT_SIGNAL_KINDS = [
   "question_changed",
   "waste_alarm",
   "stuck_pr",
+  "budget_unused",
 ] as const;
+/** A seat idle while its account is under this share of its week raises `budget_unused`. */
+export const FLIGHT_BUDGET_UNUSED_PCT = 50;
 export interface FlightSignal {
   checks?: string[];
   told?: boolean;
@@ -1199,6 +1205,8 @@ export interface FlightState {
     review: FlightPrReview | null;
     /** The names of the checks failing on the stored head. */
     failingChecks: string[];
+    /** Reviews of the PR that reported blocking findings or a failed verdict. */
+    reviewRounds?: number;
   }[];
   /** Items waiting for triage, oldest first, including those held from the operator. */
   items: {

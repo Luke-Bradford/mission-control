@@ -491,6 +491,7 @@ describe("FLIGHT's PR list", () => {
         stale: false,
         review: null,
         failingChecks: [],
+        reviewRounds: 0,
       },
     ]);
     store.markPullRequestsStale("mc");

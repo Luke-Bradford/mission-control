@@ -4148,6 +4148,7 @@ describe("flight_state", () => {
           stale: false,
           review: null,
           failingChecks: [],
+          reviewRounds: 0,
         },
       ],
       prFlow: expect.objectContaining({
