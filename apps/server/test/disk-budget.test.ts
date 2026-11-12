@@ -85,3 +85,23 @@ it("never removes open work or scratch that may be in use, even far over the bud
   expect(existsSync(join(data, "pr-evidence", "mc", "5"))).toBe(true);
   expect(lines.join("\n")).toMatch(/only open or in-use work is left/);
 });
+
+it("does not count this sweep's removals twice against the budget", async () => {
+  const data = folder();
+  file(join(data, "controller", "stale", "f"), 4 * DAY, 400); // removed by the 3-day rule
+  file(join(data, "controller", "idle", "f"), 2 * DAY, 400);
+  file(join(data, "pr-evidence", "mc", "5", "a".repeat(40), "m.png"), 2 * DAY, 400);
+  file(join(data, "mc.sqlite"), 0, 100);
+  // a live measure, as the hub's, taken whenever it is asked: before or after the removals
+  const r = await sweepDataFolder({
+    dataDir: data,
+    now: () => NOW,
+    ...open,
+    budgetBytes: 700,
+    holdings: () => diskUse({ dataDir: data, worktrees: undefined }),
+    log: () => {},
+  });
+  // 1300 held: 400 goes as stale, 900 is still over 700, so the idle scratch goes too
+  expect(existsSync(join(data, "controller", "idle"))).toBe(false);
+  expect(r.bytes).toBe(800);
+});

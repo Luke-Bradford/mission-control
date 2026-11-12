@@ -734,6 +734,8 @@ export interface Supervisor {
    * does not block what follows. The mc tools' git writes go through here.
    */
   inClone<T>(checkout: string, fn: () => Promise<T>): Promise<T>;
+  /** Whether a run is starting in the worktree: from its install until the seat's session points at it. */
+  isStartingWorktree(path: string): boolean;
 }
 
 /** One seat `busy()` names. */
@@ -947,6 +949,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
+  const startingWorktrees = new Set<string>();
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
   const checkRuns = new Map<string, { stderr: string | null }>();
   const handoffJobs = new Map<string, Promise<void>>();
@@ -3410,6 +3414,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, ticketInReviewText(ref));
     }
     starting.add(seatId);
+    let startedWorktree: string | null = null;
     let handoff: RunHandoff | null = null;
     const handoffClaim = randomUUID();
     try {
@@ -3591,6 +3596,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                   clearPending: (path) => store.clearCheckoutPending(path),
                 },
               });
+        // still under the clone lock: the tidy never sees the gap before the run row exists
+        if (!planner && !readOnly) {
+          startedWorktree = c.path;
+          startingWorktrees.add(c.path);
+        }
         return {
           checkout: c,
           repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
@@ -3891,6 +3901,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } finally {
       if (handoff && !readOnly && !planner) store.releaseHandoff(handoff.runId, handoffClaim);
       starting.delete(seatId);
+      if (startedWorktree !== null) startingWorktrees.delete(startedWorktree);
     }
   }
 
@@ -5366,6 +5377,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     },
 
     inClone,
+
+    isStartingWorktree: (path) => startingWorktrees.has(path),
   };
 }
 

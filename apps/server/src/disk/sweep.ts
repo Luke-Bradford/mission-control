@@ -60,6 +60,9 @@ export async function sweepDataFolder(i: SweepInput): Promise<SweepResult> {
   }
   const now = i.now();
   const result: SweepResult = { files: 0, bytes: 0 };
+  // Measured before any removal, so the removals below are subtracted from it exactly once.
+  const held =
+    i.budgetBytes !== undefined && i.holdings !== undefined ? await i.holdings() : null;
 
   /** Removes `path` when it is a real entry inside the data folder and `due` says so. */
   const remove = async (path: string, due: (newest: number) => boolean): Promise<void> => {
@@ -111,10 +114,9 @@ export async function sweepDataFolder(i: SweepInput): Promise<SweepResult> {
     for (const name of await scratchOf(dir)) await remove(join(root, dir, name), stale);
   }
 
-  if (i.budgetBytes !== undefined && i.holdings !== undefined) {
+  if (i.budgetBytes !== undefined && held !== null) {
     // Open work (evidence, pictures an open PR cites) is never a candidate, and neither is scratch a
     // run may still be using. What is left to remove is idle scratch, oldest first.
-    const held = await i.holdings();
     const budget = i.budgetBytes;
     let over = held.total - held.worktrees - result.bytes - budget;
     if (over > 0) {

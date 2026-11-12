@@ -880,6 +880,7 @@ export async function main(): Promise<void> {
     store,
     pruneLocal: () => branchTidy.pruneLocal(),
     inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+    isStarting: (path) => supervisor.isStartingWorktree(path),
   });
   // set once the app exists: `mc operator` calls its routes in process
   let hubApp: ReturnType<typeof buildApp> | null = null;

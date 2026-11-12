@@ -164,3 +164,53 @@ it("waits for the clone lock, then skips a branch a run went live on meanwhile",
   expect(await cycle).toEqual({ removed: [], trimmed: [] });
   expect(existsSync(join(wt, "node_modules"))).toBe(true);
 });
+
+it("removes the worktree of an ended run whose ticket is closed on GitHub, card not in Done", async () => {
+  const wt = worktree("guido-1-8", "mc/8");
+  store.upsertRun({ ...run("r8", "mc/8"), ticket: "mc#8" });
+  store.replaceBoard("mc", [
+    boardItem({ repoId: "mc", issueNumber: 8, state: "in progress", closed: true }),
+  ]);
+  expect((await tidyOf().tidyFinished(NOW)).removed).toEqual(["r8"]);
+  expect(existsSync(wt)).toBe(false);
+});
+
+it("keeps node_modules of a run that is resuming, in the supervisor's real order", async () => {
+  const wt = worktree("guido-1-9", "mc/9");
+  store.upsertRun(run("r9", "mc/9"));
+  const startingNow = new Set<string>();
+  // a one-slot lock, as the supervisor's inClone is
+  let tail: Promise<unknown> = Promise.resolve();
+  const inClone = <T>(_c: string, fn: () => Promise<T>): Promise<T> => {
+    const next = tail.then(fn, fn);
+    tail = next.catch(() => {});
+    return next;
+  };
+  const tidy = tidyOf({ inClone, isStarting: (p) => startingNow.has(p) });
+  let lockFree: () => void = () => {};
+  const free = new Promise<void>((r) => {
+    lockFree = r;
+  });
+  let rowWritten: () => void = () => {};
+  const rowGate = new Promise<void>((r) => {
+    rowWritten = r;
+  });
+  const resume = async () => {
+    await inClone("c", async () => {
+      await new Promise((r) => setTimeout(r, 10)); // the install
+      startingNow.add(wt);
+    });
+    lockFree();
+    // the lock is free; the run row is written only after the tidy has looked
+    await rowGate;
+    await new Promise((r) => setTimeout(r, 30));
+    store.upsertRun({ ...run("r9b", "mc/9"), endedAt: null, status: "running" });
+    startingNow.delete(wt);
+  };
+  const resuming = resume();
+  await free; // the tidy meets the gap
+  expect(await tidy.tidyFinished(NOW)).toEqual({ removed: [], trimmed: [] });
+  rowWritten();
+  await resuming;
+  expect(existsSync(join(wt, "node_modules"))).toBe(true);
+});

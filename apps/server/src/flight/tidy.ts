@@ -43,6 +43,8 @@ export interface CrewTidyDeps {
   pruneLocal: () => Promise<string[]>;
   /** The supervisor's clone lock (`inClone`): a checkout being prepared holds it. Default: no lock. */
   inClone?: <T>(checkout: string, fn: () => Promise<T>) => Promise<T>;
+  /** The supervisor's starting set: a worktree a run is starting in, from install until its seat points at it. */
+  isStarting?: (path: string) => boolean;
   git?: typeof crewGit;
   remove?: typeof removeCheckout;
 }
@@ -62,7 +64,9 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
   /** The run's ticket (`repo#number`) is Done on the board: its work is finished, PR or not. */
   const ticketDone = (run: Run): boolean => {
     const m = /^(.+)#([1-9][0-9]*)$/.exec(run.ticket ?? "");
-    return m !== null && deps.store.boardItem(m[1], Number(m[2]))?.state === "done";
+    if (m === null) return false;
+    const item = deps.store.boardItem(m[1], Number(m[2]));
+    return item !== null && (item.state === "done" || item.closed);
   };
 
   /** The worktree an ended run's branch is checked out in, or why there is none to touch. */
@@ -96,6 +100,7 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
     )
       return "A seat still holds that worktree.";
     if (deps.store.checkoutPending(path)) return "A checkout is being prepared there.";
+    if (deps.isStarting?.(path) === true) return "A run is starting in that worktree.";
     return { session, path };
   }
 
