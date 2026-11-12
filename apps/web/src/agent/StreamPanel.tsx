@@ -11,18 +11,27 @@ import {
   type StreamEvent,
   type StreamKind,
 } from "@mc/core";
-import { type FormEvent, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  type FormEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useSecond } from "../clock.ts";
 import { agentComms, commsKeys, commsLine, MentionText } from "../comms/messages.tsx";
 import type { ComposerPrefill } from "../comms/model.ts";
 import { useTestLock } from "../components/LockLines.tsx";
 import { Markdown } from "../components/Markdown.tsx";
-import { callSign, seatTurn, useSeatName } from "../crew.ts";
+import { callSign, hasActiveRun, seatTurn, useSeatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { dur, hhmm, mss } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { toast } from "../shell/Toast.tsx";
+import { agentDraftKey, readKey, writeKey } from "../storage.ts";
 import { reviewPark, reviewParkSha } from "./reviewPark.tsx";
 import { messageRun, messageSeat, seatError } from "./seat.ts";
 import { type Relativise, relativiser, toolResult, toolTarget } from "./toolTarget.ts";
@@ -256,11 +265,21 @@ export function SeatComposer({
 }: {
   row: CrewRow;
   placeholder?: string;
-  onSent?: () => void;
+  onSent?: (text: string) => void;
   prefill?: ComposerPrefill;
   onPrefillConsumed?: (token: number) => void;
 }) {
-  const [text, setText] = useState("");
+  // A typed message is kept per seat in this browser: it survives a refresh, a reconnect and a
+  // change of seat.
+  const draftKey = agentDraftKey(row.id);
+  const [text, setTextState] = useState(() => readKey(draftKey) ?? "");
+  const setText = useCallback(
+    (value: string) => {
+      setTextState(value);
+      writeKey(draftKey, value);
+    },
+    [draftKey],
+  );
   const input = useRef<HTMLInputElement>(null);
   const used = useRef<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -285,9 +304,10 @@ export function SeatComposer({
     setText(prefill.text);
     input.current?.focus();
     onPrefillConsumed?.(prefill.token);
-  }, [onPrefillConsumed, prefill]);
+  }, [onPrefillConsumed, prefill, setText]);
 
   const send = async (interrupt: boolean) => {
+    const sentText = text;
     if (text.trim() === "") {
       toast("Type a message first.");
       return;
@@ -299,7 +319,7 @@ export function SeatComposer({
       else await messageSeat(row, text, interrupt);
       setText("");
       toast(`Delivered to ${call}.`);
-      onSent?.();
+      onSent?.(sentText);
     } catch (e) {
       setError(seatError(e));
     } finally {
@@ -397,24 +417,53 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   const events = all.filter((e) => shows === null || shows.includes(e.kind));
   const count = events.length;
 
-  // Follow the newest event only when the list's content changed and the reader was already at
-  // the bottom: a refetch (a fresh object every few seconds) or a reader scrolled up stays put.
-  const atBottom = useRef(true);
+  // Following is on by default and turns off when the reader scrolls up. While it is off, new rows
+  // are counted ("n new") and never move the list; the count button returns to the newest row.
+  const [following, setFollowing] = useState(true);
+  const followingRef = useRef(true);
+  const seen = useRef(0);
   const signature = `${stream.data?.runId ?? ""}:${filter}:${count}:${events.at(-1)?.at ?? ""}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `signature` is the trigger
   useLayoutEffect(() => {
     const el = box.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (followingRef.current) {
+      el.scrollTop = el.scrollHeight;
+      seen.current = count;
+    }
   }, [signature]);
   const onScroll = () => {
     const el = box.current;
-    if (el) atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    if (!el) return;
+    const at = el.scrollHeight - el.scrollTop - el.clientHeight <= NEAR_BOTTOM_PX;
+    if (at) seen.current = count;
+    if (at !== followingRef.current) {
+      followingRef.current = at;
+      setFollowing(at);
+    }
   };
+  const newRows = following ? 0 : Math.max(0, count - seen.current);
+  const toNewest = () => {
+    const el = box.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    seen.current = count;
+    followingRef.current = true;
+    setFollowing(true);
+  };
+
+  // Messages sent from the box show at once as "sent", then "read" once the seat has written
+  // anything after them. They leave the list when the stream carries the message itself.
+  const [sentList, setSentList] = useState<{ text: string; at: number }[]>([]);
+  const carried = (text: string) =>
+    all.some((e) => (e.kind === "op" || e.kind === "a2a") && e.text.includes(text.trim()));
+  const pending = sentList.filter((m) => !carried(m.text));
 
   let empty: string | null = null;
   if (stream.error && !stream.data) empty = `Could not load the activity: ${stream.error.message}`;
   else if (!stream.data) empty = "Loading…";
   else if (filter === "guard" && count === 0) empty = NO_GUARD_HITS;
+  else if (all.length === 0 && row.kind === "crew" && !hasActiveRun(row))
+    empty = "No run in progress. Recent runs lists the earlier ones.";
   else if (all.length === 0) empty = stream.data.reason ?? "No activity yet.";
   else if (count === 0) empty = "Nothing of this kind in this run.";
 
@@ -429,9 +478,8 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
     >
       <LiveCall row={row} tz={tz} />
       <div className="scroll" id="stream" ref={box} onScroll={onScroll}>
-        {empty !== null ? (
-          <p className="pb s muted">{empty}</p>
-        ) : (
+        {empty !== null && <p className="pb s muted">{empty}</p>}
+        {empty === null &&
           events.map((ev) => (
             <EventRow
               key={ev.kind === "a2a" || ev.kind === "guard" ? ev.key : `${runId}:${ev.id}`}
@@ -439,10 +487,34 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
               tz={tz}
               rel={rel}
             />
-          ))
+          ))}
+        {pending.map((m) => (
+          <div className="ev you sent" key={`sent:${m.at}`}>
+            <span className="at num">{tz ? hhmm(m.at, tz) : DASH}</span>
+            <span className="who">
+              <span className="event-kind">you</span>
+            </span>
+            <div className="txt">
+              {m.text}{" "}
+              <span className="xs muted" title="Read once the seat has written anything after it">
+                {(row.lastOutputAt ?? 0) > m.at ? "read" : "sent"}
+              </span>
+            </div>
+          </div>
+        ))}
+        {empty === null && newRows > 0 && (
+          <button type="button" className="new-rows" onClick={toNewest}>
+            {newRows} new
+          </button>
         )}
       </div>
-      <SeatComposer row={row} />
+      <SeatComposer
+        row={row}
+        onSent={(text) => {
+          setSentList((l) => [...l, { text, at: Date.now() }]);
+          toNewest();
+        }}
+      />
     </Panel>
   );
 }
