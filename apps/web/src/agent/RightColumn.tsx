@@ -11,6 +11,7 @@ import { planProgress, runOutcome } from "./control.ts";
 import { HandoffPanel } from "./HandoffPanel.tsx";
 import { usePlan } from "./plan.ts";
 import { RunsPanel } from "./RunsPanel.tsx";
+import { Queue } from "./SideTabs.tsx";
 
 const RECENT_RUNS = 5;
 
@@ -180,6 +181,12 @@ function SetupTab({ row }: { row: CrewRow }) {
           Edit in Setup
         </a>
       </dd>
+      {row.kind === "crew" && row.mode === "writer" && (
+        <dd className="setup-queue">
+          <h4>Queue and focus</h4>
+          <Queue key={`queue:${row.id}`} row={row} />
+        </dd>
+      )}
       {row.kind === "crew" && (
         <dd className="setup-instructions">
           <SeatInstructionsDisclosure key={`instructions:${row.id}`} seatId={row.id} />

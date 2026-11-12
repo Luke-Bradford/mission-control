@@ -90,7 +90,7 @@ function Plan({
 }
 
 /** A writer seat's queue: the ticket it holds, then the tickets it takes next, in order. */
-function Queue({ row }: { row: CrewRow }) {
+export function Queue({ row }: { row: CrewRow }) {
   const focusRef = RESOURCES.focus(row.id);
   const focus = useResource<FocusInstructionView>(
     row.kind === "crew" && row.mode === "writer" ? focusRef : null,
