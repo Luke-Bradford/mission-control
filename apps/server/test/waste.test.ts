@@ -1,7 +1,13 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type BoardItem, type PullRequestView, type Run, type RunLoop, WASTE_THRESHOLDS } from "@mc/core";
+import {
+  type BoardItem,
+  type PullRequestView,
+  type Run,
+  type RunLoop,
+  WASTE_THRESHOLDS,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { limitRows } from "../src/api.ts";
 import type { CcConfig } from "../src/config.ts";

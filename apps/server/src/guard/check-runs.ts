@@ -120,7 +120,8 @@ const DROPS_PER_RUN = 30;
 const DROPPED_RUNS = 200;
 
 export interface CheckRecorderDeps {
-  store: Pick<Store, "addCheckRun"> & Partial<Pick<Store, "latestCheckRun" | "latestCheckResults" | "addRerunRefusal">>;
+  store: Pick<Store, "addCheckRun"> &
+    Partial<Pick<Store, "latestCheckRun" | "latestCheckResults" | "addRerunRefusal">>;
   /** The run's repo's configured checks; empty when it has none (throws when its rules cannot be read). */
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
