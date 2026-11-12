@@ -93,10 +93,10 @@ export const stuckPrRepo = (config: CcConfig, repoId: RepoId): boolean =>
  */
 export function waitTargetNumber(repo: string, target: string): number | null {
   const t = target.trim();
-  const ref = /^([\w.-]+)#(\d+)$/.exec(t);
-  if (ref !== null) return ref[1] === repo ? Number(ref[2]) : null;
   const n = /^(?:(?:PR|pull|ticket|issue)\s*)?#?(\d+)$/i.exec(t)?.[1];
-  return n === undefined ? null : Number(n);
+  if (n !== undefined) return Number(n);
+  const ref = /^([\w.-]+)#(\d+)$/.exec(t);
+  return ref !== null && ref[1] === repo ? Number(ref[2]) : null;
 }
 
 /** Whether a FLIGHT wait still running is on this PR or its ticket, by any name it goes by. */

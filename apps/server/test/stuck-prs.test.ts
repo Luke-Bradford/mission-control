@@ -31,6 +31,7 @@ import {
   stuckPrs,
   takeStuckPrs,
   trackStuckPrs,
+  waitTargetNumber,
 } from "../src/engine/stuck-prs.ts";
 import { flightState } from "../src/flight/state.ts";
 import { prFlow } from "../src/pr/flow.ts";
@@ -491,21 +492,40 @@ describe("tickets and PRs that are never taken", () => {
 });
 
 describe("a FLIGHT wait in any spelling of its target", () => {
-  it.each(["7", "#7", "ticket 7", "issue 7", "20", "pr 20", "pull 20", "PR #20", "mc#20", "mc#7"])(
-    "holds PR 20 on ticket 7 when the wait is on %s",
-    async (target) => {
-      stuckSetup(7, { number: 20, branch: "feature/7-x", ticket: `${REPO}#7` });
-      store.setSetting(
-        FLIGHT_WAITS_SETTING,
-        JSON.stringify({ [target]: { until: T0 + 24 * 60 * MIN, at: T0, reason: "r" } }),
-      );
-      trackStuckPrs(store, config, now);
-      now += FLIGHT_STUCK_PR_MS;
-      await takeStuckPrs(deps(realConflict()));
-      expect(started).toEqual([]);
-      expect(list()).toEqual([]);
-    },
-  );
+  it("reads a target to its number", () => {
+    expect(waitTargetNumber("mc", "PR#20")).toBe(20);
+    expect(waitTargetNumber("mc", "mc#7")).toBe(7);
+    expect(waitTargetNumber("mc", "other#7")).toBeNull();
+    expect(waitTargetNumber("mc", "note:blocked:x")).toBeNull();
+  });
+
+  it.each([
+    "7",
+    "#7",
+    "ticket 7",
+    "issue 7",
+    "20",
+    "pr 20",
+    "pull 20",
+    "PR #20",
+    "PR#20",
+    "pull#20",
+    "ticket#7",
+    "issue#7",
+    "mc#20",
+    "mc#7",
+  ])("holds PR 20 on ticket 7 when the wait is on %s", async (target) => {
+    stuckSetup(7, { number: 20, branch: "feature/7-x", ticket: `${REPO}#7` });
+    store.setSetting(
+      FLIGHT_WAITS_SETTING,
+      JSON.stringify({ [target]: { until: T0 + 24 * 60 * MIN, at: T0, reason: "r" } }),
+    );
+    trackStuckPrs(store, config, now);
+    now += FLIGHT_STUCK_PR_MS;
+    await takeStuckPrs(deps(realConflict()));
+    expect(started).toEqual([]);
+    expect(list()).toEqual([]);
+  });
 
   it("does not hold on another repo's ref or an unrelated number", async () => {
     stuckSetup(7, { number: 20, branch: "feature/7-x", ticket: `${REPO}#7` });
@@ -519,6 +539,34 @@ describe("a FLIGHT wait in any spelling of its target", () => {
     trackStuckPrs(store, config, now);
     now += FLIGHT_STUCK_PR_MS;
     expect(list()).toHaveLength(1);
+  });
+});
+
+describe("a freed seat is offered the stuck PR, and no other seat", () => {
+  const second = () =>
+    config.crew?.sessions[0]?.seats.push({
+      id: "guido-2",
+      role: "GUIDO",
+      accountId: "claude-main",
+      model: "opus",
+      area: ["apps/server/**"],
+    });
+
+  it("starts only the seat it was called for", async () => {
+    second();
+    stuckSetup(7);
+    stuckFor30();
+    await takeStuckPrs(deps(realConflict()), "guido-2");
+    expect(started.map((s) => [s.seatId, s.issue])).toEqual([["guido-2", 7]]);
+  });
+
+  it("starts nothing for a seat of another area, and sets no retry", async () => {
+    stuckSetup(7);
+    stuckFor30();
+    await takeStuckPrs(deps(realConflict()), INCO);
+    expect(started).toEqual([]);
+    await takeStuckPrs(deps(realConflict()));
+    expect(started.map((s) => s.seatId)).toEqual([GUIDO]);
   });
 });
 
