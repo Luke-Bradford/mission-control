@@ -1,5 +1,4 @@
 import { type CpuInfo, homedir } from "node:os";
-import type { DiskUse } from "./disk/use.ts";
 import { join } from "node:path";
 import {
   type AccountId,
@@ -106,6 +105,7 @@ import {
 import type { CcConfig } from "./config.ts";
 import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
 import { applyDecisionDefaults } from "./decision-defaults.ts";
+import type { DiskUse } from "./disk/use.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
