@@ -13,6 +13,7 @@ import {
   AgentStory,
 } from "../agent/Overview.tsx";
 import { Picker } from "../agent/Picker.tsx";
+import { Roster } from "../agent/Roster.tsx";
 import { RunsPanel } from "../agent/RunsPanel.tsx";
 import { RunTracePanel } from "../agent/RunTrace.tsx";
 import { SideTabs } from "../agent/SideTabs.tsx";
@@ -93,81 +94,93 @@ export function Agent({ id }: { id: string | null }) {
   return (
     <section id="page-agent" className="agent-v2">
       <h1 className="sr-only">Agents</h1>
-      {handoffRun && <HandoffPanel runId={handoffRun} />}
-      {traceRun && id !== null ? (
-        <RunTracePanel agentId={id} runId={traceRun} />
-      ) : (
-        <>
-          <Picker rows={inView} items={items} current={shownId} />
-          {row ? (
+      <div className="agent-v2-shell">
+        <Roster
+          rows={crew.data ? inView : null}
+          current={shownId}
+          error={!!crew.error && !crew.data}
+        />
+        <div className="agent-v2-main">
+          {handoffRun && <HandoffPanel runId={handoffRun} />}
+          {traceRun && id !== null ? (
+            <RunTracePanel agentId={id} runId={traceRun} />
+          ) : (
             <>
-              {detail.error && (
-                <div className="pb s crit-t" role="status">
-                  Showing the last saved agent view. Could not refresh: {detail.error.message}{" "}
-                  <button
-                    type="button"
-                    className="sm"
-                    onClick={() => shownId && hub.refetch(RESOURCES.agentDetail(shownId).path)}
-                  >
-                    Retry agent
-                  </button>
-                </div>
-              )}
-              <AgentIdentity view={detail.data as AgentDetailView} />
-              {row && (
-                <div className="agent-v2-columns">
-                  <div className="agent-v2-left">
-                    <AgentStory view={detail.data as AgentDetailView} />
-                    <AgentNextMove view={detail.data as AgentDetailView} />
-                    <AgentDeliverables view={detail.data as AgentDetailView} />
-                    <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
-                  </div>
-                  <div className="agent-v2-right">
-                    <AgentAvailability view={detail.data as AgentDetailView} />
-                    <AgentStats view={detail.data as AgentDetailView} />
-                    <AgentLoop view={detail.data as AgentDetailView} />
-                    {!handoffRun && row.kind === "crew" && row.run && (
-                      <HandoffPanel runId={row.run.id} />
-                    )}
-                    <AgentRelated view={detail.data as AgentDetailView} />
-                    <AgentContext view={detail.data as AgentDetailView} />
-                    {row.kind === "crew" && (
-                      <SeatInstructionsDisclosure key={`instructions:${row.id}`} seatId={row.id} />
-                    )}
-                    <SideTabs key={`t:${row.id}`} row={row} />
-                  </div>
-                </div>
-              )}
-              {row.run && (
-                <details
-                  className="panel agent-v2-history"
-                  onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+              <Picker rows={inView} items={items} current={shownId} />
+              {row ? (
+                <>
+                  {detail.error && (
+                    <div className="pb s crit-t" role="status">
+                      Showing the last saved agent view. Could not refresh: {detail.error.message}{" "}
+                      <button
+                        type="button"
+                        className="sm"
+                        onClick={() => shownId && hub.refetch(RESOURCES.agentDetail(shownId).path)}
+                      >
+                        Retry agent
+                      </button>
+                    </div>
+                  )}
+                  <AgentIdentity view={detail.data as AgentDetailView} />
+                  {row && (
+                    <div className="agent-v2-columns">
+                      <div className="agent-v2-left">
+                        <AgentStory view={detail.data as AgentDetailView} />
+                        <AgentNextMove view={detail.data as AgentDetailView} />
+                        <AgentDeliverables view={detail.data as AgentDetailView} />
+                        <StreamPanel key={`s:${row.id}`} row={row} tz={tz} />
+                      </div>
+                      <div className="agent-v2-right">
+                        <AgentAvailability view={detail.data as AgentDetailView} />
+                        <AgentStats view={detail.data as AgentDetailView} />
+                        <AgentLoop view={detail.data as AgentDetailView} />
+                        {!handoffRun && row.kind === "crew" && row.run && (
+                          <HandoffPanel runId={row.run.id} />
+                        )}
+                        <AgentRelated view={detail.data as AgentDetailView} />
+                        <AgentContext view={detail.data as AgentDetailView} />
+                        {row.kind === "crew" && (
+                          <SeatInstructionsDisclosure
+                            key={`instructions:${row.id}`}
+                            seatId={row.id}
+                          />
+                        )}
+                        <SideTabs key={`t:${row.id}`} row={row} />
+                      </div>
+                    </div>
+                  )}
+                  {row.run && (
+                    <details
+                      className="panel agent-v2-history"
+                      onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+                    >
+                      <summary>Attempts and previous runs</summary>
+                      {historyOpen && <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />}
+                    </details>
+                  )}
+                </>
+              ) : (
+                <p
+                  className={
+                    (crew.error && !crew.data) || (detail.error && !row) ? "pb crit-t" : "pb muted"
+                  }
                 >
-                  <summary>Attempts and previous runs</summary>
-                  {historyOpen && <RunsPanel key={`r:${row.id}`} row={row} tz={tz} />}
-                </details>
+                  {missing}
+                  {detail.error && shownId && (
+                    <button
+                      type="button"
+                      className="sm"
+                      onClick={() => hub.refetch(RESOURCES.agentDetail(shownId).path)}
+                    >
+                      Retry agent
+                    </button>
+                  )}
+                </p>
               )}
             </>
-          ) : (
-            <p
-              className={
-                (crew.error && !crew.data) || (detail.error && !row) ? "pb crit-t" : "pb muted"
-              }
-            >
-              {missing}
-              {detail.error && shownId && (
-                <button
-                  type="button"
-                  className="sm"
-                  onClick={() => hub.refetch(RESOURCES.agentDetail(shownId).path)}
-                >
-                  Retry agent
-                </button>
-              )}
-            </p>
           )}
-        </>
-      )}
+        </div>
+      </div>
     </section>
   );
 }
