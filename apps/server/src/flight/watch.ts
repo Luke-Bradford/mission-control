@@ -46,6 +46,7 @@ import {
   memoryTopicKey,
   type SeatSessionRow,
   type TestLockState,
+  WASTE_HELD_PREFIX,
   wakeKey,
   wakeLine,
 } from "@mc/core";
@@ -55,6 +56,7 @@ import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { wakePieces } from "../prompt-cost.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
+import { restartHold } from "../spend/waste.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
@@ -545,6 +547,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         bus.emit("attention");
         return;
       }
+      // a restart-storm alarm holds FLIGHT's starts: it waits, it is not a failed start, no note
+      const storm = restartHold(store, id);
+      if (storm !== null) {
+        lastReason = storm;
+        return;
+      }
       if (starts.length >= FLIGHT_STARTS_MAX && !rotating) {
         clearDown(t);
         store.raiseNote({
@@ -629,9 +637,16 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         );
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
+        const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+        if (said.startsWith(WASTE_HELD_PREFIX)) {
+          // a hold that landed between the check and the start: not a failure, not counted
+          starts = starts.filter((x) => x !== t);
+          rotations = rotations.filter((x) => x !== t);
+          lastReason = said;
+          return;
+        }
         if (operatorWaiting)
           raiseDown(id, found.session.repoId, "it could not start. Your message is saved", t);
-        const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         const failure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
         lastReason = processGone
           ? "its process is gone and it would not restart; the server log has the error"

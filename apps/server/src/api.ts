@@ -4646,7 +4646,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (b.issue !== undefined) {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
-          started = await sup.startWatch(id);
+          started = await sup.startWatch(id, { operator: true });
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
           // FLIGHT calling this route is not the operator: the slow pace still holds its starts

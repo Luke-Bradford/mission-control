@@ -673,7 +673,12 @@ export interface Supervisor {
    */
   startWatch(
     seatId: string,
-    opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
+    opts?: {
+      first?: string;
+      firstPieces?: readonly PromptPiece[];
+      /** The operator's explicit start (the dock): a restart-storm hold does not stop it. */
+      operator?: boolean;
+    },
   ): Promise<{ runId: string }>;
   /**
    * The live check of a CLI update (`cli-auto.ts`): starts one build seat of `vendor` that holds no
@@ -3891,7 +3896,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startWatch(
     seatId: string,
-    opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
+    opts?: { first?: string; firstPieces?: readonly PromptPiece[]; operator?: boolean },
   ): Promise<{ runId: string }> {
     const { runId } = await startDetached(seatId, opts ?? {});
     return { runId };
@@ -3910,13 +3915,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       first?: string;
       firstPieces?: readonly PromptPiece[];
       check?: (checkout: string) => string;
+      operator?: boolean;
       /** Set once the check has got as far as invoking the new CLI (before that, a failure is not its). */
       stage?: { cli: boolean };
     },
   ): Promise<{ runId: string; worktree: string }> {
     const info = need(seatId);
     // a seat in a restart storm is not started again (a CLI update's live check is not a restart)
-    if (opts.check === undefined) {
+    if (opts.check === undefined && opts.operator !== true) {
       const storm = restartHold(store, seatId);
       if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
     }

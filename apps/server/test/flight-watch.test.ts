@@ -2179,6 +2179,32 @@ describe("the FLIGHT watcher", () => {
     }
   });
 
+  it("holds FLIGHT's starts while a restart-storm alarm stands: no start, no failed-start note, one start after it closes", async () => {
+    const id = store.waste.insertAlarm(
+      {
+        check: "restart-storm",
+        subject: "flight-1",
+        repoId: "mc",
+        ticket: null,
+        seatId: "flight-1",
+        runId: null,
+        level: 8,
+        evidence: "FLIGHT-1 started 8 times in the last hour.",
+      },
+      nowMs,
+    );
+    for (let i = 0; i < 5; i++) {
+      nowMs += 60_000;
+      await watch.check();
+    }
+    expect(startCalls).toEqual([]);
+    expect(notesOpen()).toEqual([]);
+    store.waste.closeAlarm(id, nowMs);
+    nowMs += 60_000;
+    await watch.check();
+    expect(startCalls.map((c) => c.seatId)).toEqual(["flight-1"]);
+  });
+
   it("keeps starting FLIGHT while its account's weekly pace passes 100%", async () => {
     for (const [at, pct] of [
       [T0 - 6 * 60 * MIN, 40],

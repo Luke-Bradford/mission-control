@@ -254,6 +254,13 @@ describe("startRun eligibility", () => {
       expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
     });
 
+    it("lets the operator's dock start the watch seat during its own storm", async () => {
+      alarm("restart-storm", "flight-1");
+      const { sup } = make({ rules: withRules(), extraSeat: flightSeat });
+      sup.start();
+      expect((await sup.startWatch("flight-1", { operator: true })).runId).toBeTruthy();
+    });
+
     it("refuses a start of a parked ticket and starts another ticket", async () => {
       alarm("retry-loop", "mc#42", "mc#42");
       const claim = vi.fn(async () => {});
