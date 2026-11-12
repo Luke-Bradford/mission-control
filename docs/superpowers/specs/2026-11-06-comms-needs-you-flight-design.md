@@ -228,7 +228,7 @@ Two more refusals from the 12 November addition to #1510:
   (the seat); the page names `asker` first, so it never shows the seat as the asker.
 
 The image store this ticket first listed moved to #1705, which holds a question's pictures in one
-place.
+place. The web's asker line must read `asker` before `agentId`; that change is the page's.
 
 ### What happens to an item that fails
 
