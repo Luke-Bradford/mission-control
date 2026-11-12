@@ -1547,7 +1547,7 @@ describe("startReview", () => {
       expect(brief).toContain("Do not run commands that need packages from this PR");
       const [note] = flightNotes();
       expect(note?.text).toContain("PR #9 is reviewed without an install.");
-      expect(note?.ref).toBe("mc#42");
+      expect(note?.ticket).toBe("mc#42");
       expect(store.review(r.reviewId)?.state).toBe("reported");
       expect(store.run(runId)?.status).not.toBe("failed");
     });
