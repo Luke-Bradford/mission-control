@@ -266,6 +266,8 @@ let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let aliveNow: string[];
+/** Tickets of repo mc with a published branch preview. */
+let previewTickets: number[];
 let engineOn: boolean;
 let lifts: boolean;
 let refuseWith: OperatorRefusal | null = null;
@@ -427,7 +429,9 @@ beforeEach(() => {
     pruneBranches: async () => ({ ok: true, text: "Pruned." }),
   };
   stateSeen.mockClear();
+  previewTickets = [];
   tools = createFlightTools({
+    hasPreview: (repoId, ticket) => repoId === "mc" && previewTickets.includes(ticket),
     hubOrigin: "http://127.0.0.1:7420",
     hudShots: {
       save: (png) => shotsSaveImpl(png),
@@ -5446,6 +5450,8 @@ describe("brief_item", () => {
       | undefined;
     return {
       key: KEY,
+      title: "A parked seat waits for you",
+      priority: "P1",
       context: "The seat is parked since 11:00 and waits for you.",
       ask: "Should I un-park it?",
       recommendation: "Un-park it.",
@@ -5523,6 +5529,129 @@ describe("brief_item", () => {
     expect((await call("brief_item", payload)).isError).toBe(true);
     expect(store.briefs().size).toBe(0);
     expect(seen).toEqual([]);
+  });
+  describe("rule 4's added parts (#1510)", () => {
+    const refused = async (over: Record<string, unknown>, part: RegExp) => {
+      const result = await call("brief_item", B(over));
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(part);
+      expect(store.briefs().size).toBe(0);
+    };
+    it("refuses a question missing a part, naming it", async () => {
+      await refused({ title: undefined }, /no title/);
+      await refused({ priority: undefined }, /no priority/);
+      await refused({ ask: "Un-park it? Or close the ticket?" }, /one decision/);
+    });
+    it("refuses a title over 90 characters, with a web address or a bare ticket number", async () => {
+      await refused({ title: "x".repeat(91) }, /over 90/);
+      await refused({ title: "See https://example.com" }, /web address/);
+      await refused({ title: "Un-park mc#7 now" }, /ticket number/);
+      await refused({ title: "Un-park #7 now" }, /ticket number/);
+    });
+    it("takes the priority from the main ticket's card over the one stated", async () => {
+      board(card(7, { priority: "P0" }));
+      expect(await call("brief_item", B({ priority: undefined }))).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(KEY)?.priority).toBe("P0");
+    });
+    it("takes a question with no ticket when the repo and a reason are given", async () => {
+      store.upsertRun(run("r-none", "guido-1"));
+      raise("blocked:r2:0", { runId: "r-none" });
+      const key = "note:blocked:r2:0";
+      await refused({ key }, /no ticket/);
+      const ok = await call(
+        "brief_item",
+        B({ key, noTicket: { repo: "mc", reason: "It is about the hub itself." } }),
+      );
+      expect(ok).toEqual({ text: BRIEFED_TEXT });
+    });
+    it("refuses a looks question with no picture and no preview; passes with either", async () => {
+      await refused({ looks: true }, /about how something looks/);
+      previewTickets = [7];
+      const withPreview = await call("brief_item", B({ looks: true }));
+      expect(withPreview).toEqual({ text: BRIEFED_TEXT });
+      previewTickets = [];
+      const picture = `/api/hud-screenshots/${"a".repeat(32)}`;
+      expect(
+        await call(
+          "brief_item",
+          B({
+            looks: true,
+            assessment: `The seat is parked and this is how the page looks: ![page](${picture}).`,
+          }),
+        ),
+      ).toEqual({ text: BRIEFED_TEXT });
+    });
+    it("brings each ticket and PR number back with its title", async () => {
+      board(card(7, { title: "Away mode rules" }));
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 12,
+            title: "Fix away mode",
+            url: "u",
+            branch: "feature/7-away",
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: "pending",
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      await call("brief_item", B({ recommendation: "Do as #7 says; the fix is PR 12." }));
+      expect(store.briefs().get(KEY)?.recommendation).toBe(
+        "Do as #7 (Away mode rules) says; the fix is PR 12 (Fix away mode).",
+      );
+    });
+    it("refuses to ask the operator what a FLIGHT tool settles, naming the tool", async () => {
+      store.raiseNote({
+        key: "chatter:mc#7:a:b",
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: "mc",
+        text: "a and b exceeded 3 rounds on mc#7.",
+        at: NOW,
+      });
+      await refused({ key: "note:chatter:mc#7:a:b" }, /dismiss_item/);
+    });
+    it("lets a money decision through whatever the seat's words say", async () => {
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "r-guido",
+        text: "Should I merge the PR that raises the plan price to 12 pounds, or wait for you?",
+        at: NOW,
+      });
+      const fields = B({ key: `ask:${id}`, ask: "Raise the plan price to 12 pounds now?" });
+      expect(
+        await call("brief_item", {
+          ...fields,
+          decision: {
+            ...(fields.decision as Record<string, unknown>),
+            whyOperator: { kind: "money", explanation: "It changes what customers pay." },
+          },
+        }),
+      ).toEqual({ text: BRIEFED_TEXT });
+    });
+    it("refuses a seat's question that FLIGHT's sync_main settles", async () => {
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "r-guido",
+        text: "May I merge main into the branch?",
+        at: NOW,
+      });
+      await refused({ key: `ask:${id}`, ask: "Merge main into the branch?" }, /sync_main/);
+    });
   });
   it("1389 rolls back a question pass and audit if atomic brief persistence refuses its source", async () => {
     live("guido-1", "r-guido");
@@ -9596,6 +9725,8 @@ describe("brief_item with a hold (#760)", () => {
   const HOLD_RUN = "r-hold";
   const brief = (over: Record<string, unknown> = {}) => ({
     key,
+    title: "Whether to leave the parked work waiting",
+    priority: "P1",
     assessment: "Nothing to do yet.",
     ask: "Leave it parked?",
     recommendation: "Leave it until the condition is met.",

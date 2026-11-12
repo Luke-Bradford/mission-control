@@ -1,5 +1,9 @@
+import { PRIORITIES } from "./board.ts";
+import { isChatterNoteKey } from "./comms.ts";
 import { FLIGHT_NOT_TRIAGING_KEY } from "./flight.ts";
 import { GUARD_ACK_PREFIX } from "./guard.ts";
+import { isHardRulesFlagKey } from "./loop.ts";
+import { MC_TOOL_NAMES } from "./mcp.ts";
 import type { AttentionItem } from "./types.ts";
 
 /**
@@ -39,7 +43,7 @@ export const BRIEF_ENTRY_REFUSED =
 
 /** Text that means an agent pasted machine output instead of writing for a person. */
 const RAW_TEXT: readonly [RegExp, string][] = [
-  [/https?:\/\//i, "a web address (put links in the ticket or PR, not the question)"],
+  [/https?:\/\//i, "a web address (put links in links, not the question)"],
   [/\b[\w-]+:[\w./#-]+:\d{10,}\b/, "a raw signal id such as kind:key:1793825335003"],
   [/\b\d{12,}\b/, "a raw timestamp"],
 ];
@@ -135,8 +139,100 @@ export function needsYouEntryFaults(
     faults.push("an option has no label or no answer");
   if (brief.recommendation.trim() === "")
     faults.push("no recommendation: say which option FLIGHT would pick, and why");
-  if (item.ticket === null && item.url === null && !brief.ticket)
+  if (item.ticket === null && item.url === null && !brief.ticket && !brief.noTicket)
     faults.push("no ticket or PR: name it with ticket in brief_item");
   if (item.at <= 0) faults.push("no time raised");
   return faults;
+}
+
+export const BRIEF_TITLE_MAX = 90;
+
+/** What `briefPartFaults` reads: the parts rule 4 adds, as the hub resolved them. */
+export interface BriefParts {
+  title?: string | undefined;
+  ask: string;
+  /** The main ticket's board priority, else the one FLIGHT stated; null when neither exists. */
+  priority: string | null;
+  /** The item or `ticket` names a main ticket or PR. */
+  hasTicket: boolean;
+  noTicket?: { repo: string; reason: string } | undefined;
+  looks: boolean;
+  /** Every text of the question, where a picture may be written. */
+  texts: readonly string[];
+  /** A branch preview is published for the question's ticket. */
+  hasPreview: boolean;
+}
+
+/** A picture written in a question's text: markdown image from a hub route. */
+const HUB_PICTURE = /!\[[^\]\n]*\]\(\/api\/[^)\s]+\)/;
+
+/**
+ * Rule 4's added parts of a question (#1510), each named so FLIGHT fixes the brief in one try.
+ * Empty when they all hold. The older parts are `needsYouEntryFaults`.
+ */
+export function briefPartFaults(p: BriefParts): string[] {
+  const faults: string[] = [];
+  if ((p.ask.match(/\?/g)?.length ?? 0) > 1)
+    faults.push(
+      "the question asks more than once: one decision per question, so two are two questions",
+    );
+  const title = p.title?.trim() ?? "";
+  if (title === "")
+    faults.push(`no title: give title, one line of at most ${BRIEF_TITLE_MAX} characters`);
+  else {
+    if (/[\r\n]/.test(title)) faults.push("the title is not one line");
+    if (title.length > BRIEF_TITLE_MAX)
+      faults.push(`the title is over ${BRIEF_TITLE_MAX} characters`);
+    if (/https?:\/\//i.test(title)) faults.push("the title has a web address (links go in links)");
+    if (/#\d+|\bPR\s*\d+/i.test(title))
+      faults.push("the title has a bare ticket number: say it in words");
+  }
+  if (p.priority === null || !(PRIORITIES as readonly string[]).includes(p.priority))
+    faults.push(
+      `no priority: the ticket has none, so state priority as one of ${PRIORITIES.join(", ")}`,
+    );
+  if (!p.hasTicket && (p.noTicket === undefined || p.noTicket.reason.trim() === ""))
+    faults.push(
+      "no ticket: name the main one with ticket, or give noTicket with the repo and a reason",
+    );
+  if (p.looks && !p.hasPreview && !p.texts.some((t) => HUB_PICTURE.test(t)))
+    faults.push(
+      "the question is about how something looks but has no picture in its text and no branch preview for its ticket",
+    );
+  return faults;
+}
+
+/**
+ * Each `#n` and `PR n` in `text` followed by its title, so a number never stands alone. A number
+ * with a title, a repo before it, a link label or no known title stays as it is.
+ */
+export function withTicketTitles(
+  text: string,
+  titleOf: (n: number, kind: "ticket" | "pr") => string | null,
+): string {
+  return text.replace(
+    /(?<![\w/-])(?:(#)|(PR\s*#?))(\d{1,10})(?![\d\]]|\s*\()/gi,
+    (whole, hash: string | undefined, _pr: string | undefined, digits: string) => {
+      const title = titleOf(Number(digits), hash ? "ticket" : "pr");
+      return title === null ? whole : `${whole} (${title})`;
+    },
+  );
+}
+
+/** The FLIGHT tool that settles an item without the operator, when its words say so; else null. */
+export function flightToolFor(item: Pick<AttentionItem, "key" | "kind" | "text">): string | null {
+  const key = item.key.replace(/^note:/, "");
+  if (isChatterNoteKey(key)) return MC_TOOL_NAMES.dismissItem;
+  if (isHardRulesFlagKey(key)) return MC_TOOL_NAMES.mergePr;
+  const text = item.text;
+  if (/\b(?:merge|pull|bring)\s+(?:origin\/)?main\b|\bsync[_ ]?main\b/i.test(text))
+    return MC_TOOL_NAMES.syncMain;
+  if (/\bre-?run\b[^.?!]{0,30}\b(?:CI|checks?|tests?|jobs?)\b/i.test(text))
+    return MC_TOOL_NAMES.rerunCi;
+  if (/\bclear\b[^.?!]{0,30}\b(?:flag|note|chatter)\b/i.test(text))
+    return MC_TOOL_NAMES.dismissItem;
+  if (/\bmerge\b[^.?!]{0,20}\b(?:PR|pull request)\b/i.test(text)) return MC_TOOL_NAMES.mergePr;
+  if (/\bclose\b[^.?!]{0,20}\b(?:ticket|issue)\b/i.test(text)) return MC_TOOL_NAMES.closeTicket;
+  if (/\b(?:settle|resume|unpark)\b[^.?!]{0,20}\bpark/i.test(text)) return MC_TOOL_NAMES.settlePark;
+  return null;
 }
