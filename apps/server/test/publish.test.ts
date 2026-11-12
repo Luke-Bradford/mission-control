@@ -885,7 +885,8 @@ describe("ciExcerpt", () => {
         expect(out).toContain("AssertionError: expected undefined to be 'mc#42'");
         expect(out).toContain("❯ apps/server/test/supervisor-review.test.ts:1550:30");
         expect(out).not.toContain("runner.js");
-        expect(out).not.toMatch(/\x1b|2026-11-10T/);
+        expect(out).not.toContain("\x1b");
+        expect(out).not.toContain("2026-11-10T");
         expect(Buffer.byteLength(out)).toBeLessThanOrEqual(CI_EXCERPT_MAX);
       });
 
