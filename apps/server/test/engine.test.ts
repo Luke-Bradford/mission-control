@@ -2349,6 +2349,36 @@ describe("taking by rule", () => {
     expect(h.taken).toEqual([SEAT]);
   });
 
+  it("hands out stuck PRs on the tick, before the queues are refilled and any ticket is taken", async () => {
+    seatIdle(null);
+    const order: string[] = [];
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async () => void order.push("stuck"),
+      refillQueues: async () => void order.push("refill"),
+      takeNext: async (seatId) => void order.push(`take ${seatId}`),
+    });
+    h.engine.start();
+    order.length = 0;
+    await h.engine.tick();
+    expect(order).toEqual(["stuck", "refill", `take ${SEAT}`]);
+  });
+
+  it("logs a failing stuck-PR step and still deals the tickets", async () => {
+    seatIdle(null);
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async () => {
+        throw new Error("no git");
+      },
+    });
+    h.engine.start();
+    h.taken.length = 0;
+    await h.engine.tick();
+    expect(h.logs.some((l) => l.includes("stuck PRs: no git"))).toBe(true);
+    expect(h.taken).toEqual([SEAT]);
+  });
+
   it("asks a seat with no seat row, and one whose run has ended", async () => {
     config.crew?.sessions[0]?.seats.push({
       id: "guido-2",

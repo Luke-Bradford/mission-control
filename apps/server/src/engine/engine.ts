@@ -265,6 +265,11 @@ export interface EngineDeps {
   refillQueues: () => Promise<void>;
   /** Starts the seat's next queued ticket; it does nothing for a seat that may not take one. */
   takeNext: (seatId: string) => Promise<void>;
+  /**
+   * Settles or hands out the stuck PRs (conflicting or red, with no run on them); each tick, before
+   * any Ready ticket is taken. Absent: nothing is looked at.
+   */
+  takeStuckPrs?: () => Promise<void>;
   /** false: crew is off, or this is a preview, or loop writes are disabled. */
   enabled: boolean;
   /** Whether this process may act on crew right now (it holds the crew lock); default true. */
@@ -2321,6 +2326,12 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** Refills the queues, then each writer seat that is idle with no run takes its next ticket. */
   async function takeForSeats(): Promise<void> {
+    // a stuck PR goes to a free seat before any Ready ticket
+    try {
+      await deps.takeStuckPrs?.();
+    } catch (e) {
+      log(`stuck PRs: ${e instanceof Error ? e.message : String(e)}`);
+    }
     try {
       await deps.refillQueues();
     } catch (e) {

@@ -41,6 +41,7 @@ import {
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
+import { dueStuckPrs, prFitsSeat, type StuckPr } from "../engine/stuck-prs.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import { ownsCard } from "../ownership.ts";
 import { openWasteAlarms } from "../spend/waste.ts";
@@ -318,6 +319,10 @@ export function flightSignals(i: {
   session: CrewSessionConfig;
   seats: FlightState["seats"];
   aside?: FlightState["aside"];
+  /** The repo's area labels and their globs; absent: any seat may take any stuck PR. */
+  areas?: Record<string, string[]>;
+  /** The open crew PRs that conflict or are red with no run on them, whatever the wait. */
+  stuckPrs?: StuckPr[];
   /** Items awaiting FLIGHT's triage, with when each arrived. */
   triageItems?: { key: string; kind: string; at: number; text: string }[];
   /** Open PRs whose run reported them ready to merge, with when it did. */
@@ -501,6 +506,9 @@ export function flightSignals(i: {
       inLane(b.labels, config.crew?.lane, config.crew?.laneDefault ?? false) &&
       !b.blockedBy.some((d) => !d.closed),
   );
+  // a stuck PR the hub would hand a free seat counts as queued work for that seat
+  const areaRules = i.areas === undefined ? null : { areas: i.areas };
+  const stuck = dueStuckPrs(i.stuckPrs ?? [], now);
   for (const seat of seats) {
     const row = store.seatSession(seat.id);
     const since = row ? Math.max(row.updatedAt, row.lastTurnEndedAt ?? row.updatedAt) : undefined;
@@ -515,19 +523,27 @@ export function flightSignals(i: {
             (b) => b.issueNumber === q.issue && !b.closed && !b.blockedBy.some((d) => !d.closed),
           ),
       );
+    const stuckWork =
+      seat.loop === "build"
+        ? stuck.find((p) => prFitsSeat(areaRules, seat.area, board, p))
+        : undefined;
     if (
       seat.free &&
       row?.state === "idle" &&
       !seat.atStop &&
       since !== undefined &&
       now - since >= FLIGHT_IDLE_MS &&
-      work
+      (work || stuckWork)
     ) {
       raise(
         "idle_seat",
         `${seat.id}:${since}`,
         since,
-        `${seat.id} idle since ${new Date(since).toISOString()}; eligibleToStart queued ${work.repoId}#${work.issue}`,
+        `${seat.id} idle since ${new Date(since).toISOString()}; ${
+          work
+            ? `eligibleToStart queued ${work.repoId}#${work.issue}`
+            : `open PR #${stuckWork?.number} (${stuckWork?.ticket}) has no run and is ${stuckWork?.kind === "conflict" ? "in conflict with main" : "red"}`
+        }`,
       );
     }
     if (
@@ -538,6 +554,7 @@ export function flightSignals(i: {
       since !== undefined &&
       now - since >= FLIGHT_IDLE_NO_WORK_MS &&
       !work &&
+      !stuckWork &&
       (dealt || !readyInLane)
     ) {
       const id = `idle_no_work:${seat.id}:${since}`;
@@ -558,6 +575,24 @@ export function flightSignals(i: {
           `${seat.id} (area ${seat.area.join(", ") || "any"}) idle since ${new Date(since).toISOString()}; no ticket in Ready is startable for its area and lane, so promote work for it`,
         );
     }
+  }
+  // a stuck PR no seat of its area can take is FLIGHT's to place; one a seat can take is the hub's
+  for (const p of stuck) {
+    const takers = seats.filter(
+      (s) =>
+        s.loop === "build" &&
+        s.pause === null &&
+        s.stop === null &&
+        !s.atStop &&
+        prFitsSeat(areaRules, s.area, board, p),
+    );
+    if (takers.length > 0) continue;
+    raise(
+      "stuck_pr",
+      `${p.ticket}:${p.number}:${p.headSha}:${p.kind}`,
+      p.since,
+      `PR #${p.number} (${p.ticket}) has been ${p.kind === "conflict" ? "in conflict with main" : `red${p.failing.length > 0 ? ` (${p.failing.join(", ")})` : ""}`} with no run since ${new Date(p.since).toISOString()}, and no seat can take it`,
+    );
   }
   // a chain of waiting tickets that has stood still wakes FLIGHT once; a chain that moved or
   // ended before FLIGHT heard of it is dropped, not told

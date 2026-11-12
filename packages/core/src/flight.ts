@@ -1061,6 +1061,11 @@ export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
+/**
+ * An open crew PR that conflicts with main or has red CI, with no run on it, is stuck after this
+ * long: the hub offers it to a free seat, and wakes FLIGHT only when no seat can take it.
+ */
+export const FLIGHT_STUCK_PR_MS = 30 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
 export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 /** An item not seen stale for this long, and then stale again, is told as a new reason. */
@@ -1103,6 +1108,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "seat_call",
   "question_changed",
   "waste_alarm",
+  "stuck_pr",
 ] as const;
 export interface FlightSignal {
   checks?: string[];

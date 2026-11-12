@@ -102,6 +102,7 @@ import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { stuckPrs } from "../engine/stuck-prs.ts";
 import {
   attentionItems,
   crew,
@@ -1421,6 +1422,8 @@ export function flightState(i: {
       session,
       seats,
       aside,
+      ...(i.areas === undefined ? {} : { areas: i.areas }),
+      stuckPrs: stuckPrs({ store, config, repoId: session.repoId, flow, now }),
       triageItems: triageAll.map((x) => ({ key: x.key, kind: x.kind, at: x.at, text: x.text })),
       readyPrs: prs.flatMap((p) => {
         const at = store
