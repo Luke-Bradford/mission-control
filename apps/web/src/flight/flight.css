@@ -1091,19 +1091,11 @@ button.flight-link:hover {
 /* Crew & board */
 .flight-crew {
   display: grid;
-  /* Seats takes its rows' height; Blocked chains keeps at least 360 px and takes the rest;
-     the queue and the triggers stay below, reached by scrolling the tab. */
-  grid-template-rows: minmax(160px, max-content) minmax(360px, 1fr) minmax(180px, auto) minmax(
-      130px,
-      auto
-    );
+  /* Seats and Blocked chains share the height, each scrolling inside itself; Blocked chains keeps
+     at least 360 px. The queue and the triggers stay below, reached by scrolling the tab. */
+  grid-template-rows: minmax(260px, 1fr) minmax(360px, 1fr) minmax(180px, auto) minmax(130px, auto);
   gap: var(--sp-3);
   min-height: 0;
-}
-
-/* Seats sizes to its rows, so its track can be as tall as they are; a shorter track scrolls it. */
-.flight-crew #wifP .flight-panel-scroll {
-  flex: 0 1 auto;
 }
 
 .flight-tiles {
