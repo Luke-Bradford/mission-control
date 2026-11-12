@@ -3299,6 +3299,7 @@ import(${JSON.stringify(fixture)});
     const { sup, lock } = codex({
       command: "pnpm -s test",
       params: { approvalId: "test-key" },
+      exitCode: 0,
       holdItem: true,
       holdTurn: true,
     });
