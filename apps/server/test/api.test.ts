@@ -263,6 +263,7 @@ const stubSupervisor = (): Supervisor => {
     seatBusy: () => false,
     status: () => supervisorStatus,
     inClone: (_checkout, fn) => fn(),
+    isStartingWorktree: () => false,
   };
 };
 let streamReads: ReturnType<typeof vi.fn<typeof readStreamPage>>;
