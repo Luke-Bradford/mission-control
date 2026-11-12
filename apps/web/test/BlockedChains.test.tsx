@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { hub, streamStatus } from "../src/data.ts";
 import { BlockedChains } from "../src/flight/BlockedChains.tsx";
-import { chainStats, flattenChain, waitText } from "../src/flight/chains.ts";
+import { chainStats, flattenChain, ownerText, waitText } from "../src/flight/chains.ts";
 import { stubFetch } from "./fetchStub.ts";
 
 const H = 3_600_000;
@@ -22,7 +22,7 @@ const chain = (root: string, over: Partial<DependencyChain> = {}): DependencyCha
   root: node(root, { edge: null }),
   state: "moving",
   reason: "In review",
-  owner: "RETRO",
+  owner: "retro-1",
   seatId: null,
   longestWaitMs: null,
   frees: [],
@@ -33,7 +33,7 @@ const chain = (root: string, over: Partial<DependencyChain> = {}): DependencyCha
 const stuck = chain("PR 1033", {
   state: "stuck",
   reason: "No owner for the next step",
-  owner: "—",
+  owner: "nobody",
   longestWaitMs: 2 * D + 3 * H,
   frees: ["mc#5", "mc#6"],
   root: node("PR 1033", {
@@ -49,7 +49,7 @@ const moving = chain("mc#20", {
   longestWaitMs: 4 * H + 30 * 60_000,
   root: node("mc#20", { edge: null, children: [node("mc#21", { waitedMs: 4 * H })] }),
 });
-const withYou = chain("PR 40", { state: "with-you", owner: "You", reason: "Waiting for you" });
+const withYou = chain("PR 40", { state: "with-you", owner: "operator", reason: "Waiting for you" });
 
 beforeEach(() => {
   hub.clear();
@@ -129,7 +129,7 @@ it("shows the six columns word for word, the four stats and the rows in the serv
 it("links tickets, PRs and the owning seat; an untracked repo stays text", async () => {
   serve([
     stuck,
-    chain("mc#20", { seatId: "retro-1", owner: "RETRO", root: node("mc#20", { edge: null }) }),
+    chain("mc#20", { seatId: "retro-1", owner: "retro-1", root: node("mc#20", { edge: null }) }),
     chain("legacy#7", { repoId: "legacy", root: node("legacy#7", { edge: null }) }),
   ]);
   render(<BlockedChains />);
@@ -138,7 +138,7 @@ it("links tickets, PRs and the owning seat; an untracked repo stays text", async
     "/qa?repo=mc&pr=1033",
   );
   expect(screen.getByRole("link", { name: "mc#5" }).getAttribute("href")).toBe("/tickets/mc/5");
-  expect(screen.getByRole("link", { name: "RETRO" }).getAttribute("href")).toBe("/agent/retro-1");
+  expect(screen.getByRole("link", { name: "retro-1" }).getAttribute("href")).toBe("/agent/retro-1");
   expect(screen.queryByRole("link", { name: "legacy#7" })).toBeNull();
   expect(screen.getByText("legacy#7")).toBeTruthy();
 });
@@ -206,4 +206,47 @@ it("says the hub is not connected and when the list is from", async () => {
   expect(
     await screen.findByText(/Not connected to the hub\. This list is from \d\d:\d\d\./),
   ).toBeTruthy();
+});
+
+it("says the next owner in the reader's words, from the server's own strings", async () => {
+  const owned = (root: string, owner: string, seatId: string | null = null) =>
+    chain(root, { owner, seatId, root: node(root, { edge: null }) });
+  expect(ownerText("operator")).toBe("You");
+  expect(ownerText("nobody")).toBe("—");
+  expect(ownerText("controller")).toBe("Controller");
+  expect(ownerText("retro-1")).toBe("retro-1");
+  serve([
+    owned("mc#1", "operator"),
+    owned("mc#2", "nobody"),
+    owned("mc#3", "controller"),
+    owned("mc#4", "retro-1", "retro-1"),
+  ]);
+  render(<BlockedChains />);
+  await screen.findByRole("table", { name: "Blocked chains" });
+  const cell = (ref: string) =>
+    document.querySelector(`tr.bc-root[data-ref="${ref}"] td:nth-child(4)`) as HTMLElement;
+  expect(["mc#1", "mc#2", "mc#3", "mc#4"].map((r) => cell(r).textContent)).toEqual([
+    "You",
+    "—",
+    "Controller",
+    "retro-1",
+  ]);
+  expect(cell("mc#1").querySelector("a")).toBeNull();
+  expect(cell("mc#4").querySelector("a")?.getAttribute("href")).toBe("/agent/retro-1");
+});
+
+it("sorts longest wait first, unknown last, and ties Stuck first, then by ref", async () => {
+  const waited = (root: string, ms: number | null, state: DependencyChain["state"]) =>
+    chain(root, { state, longestWaitMs: ms });
+  serve([
+    waited("mc#7", null, "moving"),
+    waited("mc#9", 4 * H, "moving"),
+    waited("mc#50", 4 * H, "stuck"),
+    waited("mc#8", 2 * D, "moving"),
+    waited("mc#10", 4 * H, "moving"),
+  ]);
+  render(<BlockedChains />);
+  await screen.findByRole("table", { name: "Blocked chains" });
+  const refs = [...document.querySelectorAll("tr.bc-root")].map((r) => r.getAttribute("data-ref"));
+  expect(refs).toEqual(["mc#8", "mc#50", "mc#10", "mc#9", "mc#7"]);
 });

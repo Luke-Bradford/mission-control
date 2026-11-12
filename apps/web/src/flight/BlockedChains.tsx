@@ -18,6 +18,7 @@ import {
   flattenChain,
   MAX_SHOWN,
   NO_START,
+  ownerText,
   SHOWN_WHEN_CAPPED,
   STATE_MARK,
   STATE_WORD,
@@ -71,15 +72,16 @@ function Wait({ ms }: { ms: number | null }) {
 }
 
 function Owner({ chain }: { chain: DependencyChain }) {
-  if (chain.seatId && chain.owner !== "You" && chain.owner !== "—") {
+  const text = ownerText(chain.owner);
+  if (chain.seatId) {
     const href = agentPath(chain.seatId);
     return (
       <a href={href} onClick={(e) => followLink(e, href)}>
-        {chain.owner}
+        {text}
       </a>
     );
   }
-  return <>{chain.owner}</>;
+  return text;
 }
 
 function RootRow({

@@ -3,6 +3,7 @@ import type { ChainNode, DependencyChain } from "@mc/core";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
 import { CONFIG, HOUR, METRICS_VIEW, NOW, REPOS, seatRow } from "./fixtures.ts";
+import { flightSummary, ledgerEntry, summaryItem } from "./flightSummaryFixture.ts";
 
 const { renderAt } = browserSession();
 
@@ -14,6 +15,9 @@ const SIZES = [
 ] as const;
 const THEMES = ["light", "dark"] as const;
 const PANEL_MIN = 360;
+const SEATS_MIN = 260;
+/** The least height 11 seat rows need. */
+const SEATS_ROWS = 428;
 
 const node = (ref: string, over: Partial<ChainNode> = {}): ChainNode => ({
   ref,
@@ -35,14 +39,31 @@ const chains: DependencyChain[] = Array.from({ length: 12 }, (_, i) => ({
   }),
   state: i % 4 === 0 ? "stuck" : i % 4 === 1 ? "with-you" : "moving",
   reason: "No owner for the next step",
-  owner: i % 4 === 1 ? "You" : "RETRO",
+  owner: i % 4 === 1 ? "operator" : "retro-1",
   seatId: i % 4 === 1 ? null : "retro-1",
   longestWaitMs: (40 - i) * HOUR,
   frees: ["shop-app#1"],
   stillWaiting: [],
 }));
 
+/** A long queue, so its content cannot take the first screen's height. */
+const queue = Array.from({ length: 30 }, (_, i) =>
+  ledgerEntry({ key: `work:${i}`, title: `Queued work ${i}`, next: `Next step ${i}` }),
+);
+
 const api = {
+  "/api/flight/summary": flightSummary({ next: queue.map(summaryItem) }),
+  "/api/flight/ledger?status=open": {
+    session: "s1",
+    entries: queue,
+    more: false,
+    nextOffset: null,
+  },
+  "/api/flight/brief": { session: "s1", sections: [] },
+  "/api/flight/schedule": { session: "s1", entries: [] },
+  "/api/flight/incoming": { entries: [] },
+  "/api/drafts": [],
+  "/api/drafts/history": [],
   "/api/operator/bootstrap": { token: "fixture-token" },
   "/api/dependencies": chains,
   "/api/prs/flow": { generatedAt: NOW, repos: [] },
@@ -85,25 +106,42 @@ describeRendered("Blocked chains in a browser", () => {
             await page.boxes("#chainsP .bc-row");
             const m = await page.evaluate(() => {
               const root = document.scrollingElement ?? document.documentElement;
-              const panel = document.getElementById("chainsP") as HTMLElement;
-              const scroll = panel.querySelector<HTMLElement>(".bc-scroll") as HTMLElement;
-              const seats = document.getElementById("wifP") as HTMLElement;
+              const crew = document.getElementById("flight-crew") as HTMLElement;
+              const top = crew.getBoundingClientRect().top;
+              const rect = (id: string) => {
+                const r = (document.getElementById(id) as HTMLElement).getBoundingClientRect();
+                return { top: r.top - top, bottom: r.bottom - top, height: r.height };
+              };
+              const chainsScroll = document.querySelector<HTMLElement>("#chainsP .bc-scroll");
               return {
                 pageOverflow: root.scrollHeight - root.clientHeight,
                 sideways: root.scrollWidth - root.clientWidth,
-                panelHeight: panel.getBoundingClientRect().height,
-                panelClipped: panel.scrollHeight - panel.clientHeight,
-                listScrolls: scroll.scrollHeight - scroll.clientHeight,
-                seatsHeight: seats.getBoundingClientRect().height,
-                headers: [...panel.querySelectorAll("th")].map((th) => th.textContent),
+                screen: crew.clientHeight,
+                seats: rect("wifP"),
+                chains: rect("chainsP"),
+                queue: rect("ledgerP"),
+                listScrolls: chainsScroll
+                  ? chainsScroll.scrollHeight - chainsScroll.clientHeight
+                  : 0,
+                headers: [...document.querySelectorAll("#chainsP th")].map((th) => th.textContent),
               };
             }, undefined);
+            const gap = 12;
             expect(m.pageOverflow, label).toBeLessThanOrEqual(0);
             expect(m.sideways, label).toBeLessThanOrEqual(0);
-            expect(m.panelHeight, label).toBeGreaterThanOrEqual(PANEL_MIN - 0.5);
-            expect(m.panelClipped, label).toBeLessThanOrEqual(1);
+            // Blocked chains keeps its floor and lies inside the tab's first screen.
+            expect(m.chains.height, label).toBeGreaterThanOrEqual(PANEL_MIN - 0.5);
+            expect(m.chains.bottom, label).toBeLessThanOrEqual(
+              Math.max(m.screen, SEATS_MIN + PANEL_MIN + gap) + 1,
+            );
+            // Seats keeps its rows (11 rows are 428 px at the least) and gives way first.
+            expect(m.seats.height, label).toBeGreaterThanOrEqual(
+              Math.min(SEATS_ROWS, m.screen - PANEL_MIN - gap) - 2,
+            );
+            expect(m.seats.height, label).toBeGreaterThanOrEqual(SEATS_MIN - 0.5);
+            // The queue sits below that screen, whatever its length.
+            expect(m.queue.top, label).toBeGreaterThanOrEqual(m.chains.bottom - 1);
             expect(m.listScrolls, label).toBeGreaterThan(0);
-            expect(m.seatsHeight, label).toBeGreaterThan(0);
             expect(m.headers, label).toEqual([
               "Work",
               "State",

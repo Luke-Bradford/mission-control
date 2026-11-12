@@ -1091,11 +1091,31 @@ button.flight-link:hover {
 /* Crew & board */
 .flight-crew {
   display: grid;
-  /* Seats and Blocked chains share the height, each scrolling inside itself; Blocked chains keeps
-     at least 360 px. The queue and the triggers stay below, reached by scrolling the tab. */
-  grid-template-rows: minmax(260px, 1fr) minmax(360px, 1fr) minmax(180px, auto) minmax(130px, auto);
+  /* The first row is the tab's visible height (at least what Seats and Blocked chains need), so the
+     queue and the triggers sit below the first screen and cannot take its space. */
+  grid-template-rows: minmax(640px, 100%) auto auto;
   gap: var(--sp-3);
   min-height: 0;
+}
+
+/* Seats takes the height of its rows and gives way first; Blocked chains keeps at least 360 px and
+   takes the rest. Each scrolls inside itself. */
+.flight-crew-first {
+  display: grid;
+  grid-template-rows: minmax(260px, max-content) minmax(360px, 1fr);
+  gap: var(--sp-3);
+  min-height: 0;
+}
+
+.flight-crew-first #wifP .flight-panel-scroll {
+  flex: 0 1 auto;
+}
+
+/* The queue and the triggers take their content's height up to a cap, then scroll. */
+.flight-crew > #ledgerP .flight-panel-scroll,
+.flight-crew > #watchP .flight-panel-scroll {
+  flex: none;
+  max-height: 320px;
 }
 
 .flight-tiles {
@@ -1289,6 +1309,16 @@ button.flight-link:hover {
   /* The page scrolls down; a table wider than its panel still scrolls sideways inside it. */
   .bc-panel {
     min-height: 0;
+  }
+  .flight-crew-first {
+    display: flex;
+    flex-direction: column;
+  }
+  .flight-crew-first #wifP .flight-panel-scroll,
+  .flight-crew > #ledgerP .flight-panel-scroll,
+  .flight-crew > #watchP .flight-panel-scroll {
+    flex: none;
+    max-height: none;
   }
   .bc-scroll,
   .flight-panel-scroll {

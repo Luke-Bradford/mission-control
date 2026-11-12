@@ -94,3 +94,11 @@ export function chainStats(chains: readonly DependencyChain[]): ChainStats {
     longestMs,
   };
 }
+
+/** The server names the next owner `operator`, `controller`, `nobody` or a seat; the page says it plainly. */
+export function ownerText(owner: string): string {
+  if (owner === "operator") return "You";
+  if (owner === "controller") return "Controller";
+  if (owner === "nobody") return "—";
+  return owner;
+}
