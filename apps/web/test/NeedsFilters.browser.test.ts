@@ -107,6 +107,8 @@ describeRendered("Needs you filters, orders and alerts", () => {
         expect(
           await page.evaluate(() => document.querySelector(".needs-count")?.textContent, undefined),
         ).toBe("14 open questions");
+        const chip = await page.box("[data-testid=alerts-chip]");
+        expect(chip.height, "the Alerts chip is a 24px target").toBeGreaterThanOrEqual(24);
         await page.click("[data-testid=alerts-chip]");
         expect(
           await page.evaluate(() => decodeURIComponent(location.pathname), undefined),

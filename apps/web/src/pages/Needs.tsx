@@ -26,6 +26,7 @@ import "../needs/needs.css";
 
 export const NOBODY_WAITING = "Nobody is waiting on you.";
 export const ITEM_CLOSED = "This item is no longer open.";
+export const NO_MATCH = "No open questions match these filters.";
 export const DISCONNECTED = "Disconnected. Showing the last list received.";
 
 /** The open item: the band over the page-layout detail. */
@@ -74,6 +75,7 @@ export function Needs({ item }: { item: string | null }) {
     orderNeeds(filterNeeds(xs, filters, asker), order);
   const shownAsks = shown(asks.filter((i) => !isAlert(i)));
   const shownDefaulted = shown(defaulted.filter((i) => !isAlert(i)));
+  const noMatch = questions.length > 0 && shownAsks.length === 0 && shownDefaulted.length === 0;
   const list = [...alerts, ...questions];
   const first = [...alerts, ...shownAsks, ...shownDefaulted][0]?.key ?? null;
   const open = item === null ? first : item;
@@ -120,6 +122,14 @@ export function Needs({ item }: { item: string | null }) {
                   repos={distinct(questions.map((i) => i.repoId))}
                   askers={distinct(questions.map(asker))}
                 />
+                {noMatch && (
+                  <p className="s note needs-nomatch" role="status">
+                    {NO_MATCH}{" "}
+                    <button type="button" className="btn" onClick={() => setFilters(NO_FILTERS)}>
+                      Clear filters
+                    </button>
+                  </p>
+                )}
               </>
             }
             answered={answered.data}
@@ -151,7 +161,9 @@ export function Needs({ item }: { item: string | null }) {
                 </p>
               ) : current ? (
                 <Open key={current.key} item={current} items={attention} />
-              ) : null}
+              ) : (
+                <p className="pb note">{NO_MATCH}</p>
+              )}
             </div>
           </div>
         </div>

@@ -424,7 +424,11 @@
 
 .needs-alerts-chip {
   margin-left: auto;
-  padding: 0 var(--sp-2);
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: var(--sp-1) var(--sp-2);
+  line-height: var(--lh-s);
   border: 1px solid var(--warn, var(--line));
   border-radius: 999px;
   color: var(--fg);
@@ -462,4 +466,9 @@ fieldset.needs-controls {
   border: 0;
   border-bottom: 1px solid var(--line);
   min-width: 0;
+}
+
+.needs-nomatch {
+  margin: 0;
+  padding: var(--sp-2) var(--sp-3);
 }

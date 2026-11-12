@@ -92,3 +92,13 @@ it("filters by text and repo, and orders newest first", async () => {
   fireEvent.change(screen.getByLabelText("Order"), { target: { value: "newest" } });
   expect(rowTexts()[0]).toContain("Colour two");
 });
+
+it("says so when the filters match nothing, and clears them", async () => {
+  mount([ask("q1"), ask("q2")]);
+  await screen.findByTestId("question-count");
+  fireEvent.change(screen.getByLabelText("Search"), { target: { value: "zzz" } });
+  expect(screen.getAllByText("No open questions match these filters.").length).toBeGreaterThan(0);
+  expect(rowTexts()).toHaveLength(0);
+  fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
+  expect(rowTexts()).toHaveLength(2);
+});
