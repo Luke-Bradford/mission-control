@@ -61,8 +61,7 @@ export async function sweepDataFolder(i: SweepInput): Promise<SweepResult> {
   const now = i.now();
   const result: SweepResult = { files: 0, bytes: 0 };
   // Measured before any removal, so the removals below are subtracted from it exactly once.
-  const held =
-    i.budgetBytes !== undefined && i.holdings !== undefined ? await i.holdings() : null;
+  const held = i.budgetBytes !== undefined && i.holdings !== undefined ? await i.holdings() : null;
 
   /** Removes `path` when it is a real entry inside the data folder and `due` says so. */
   const remove = async (path: string, due: (newest: number) => boolean): Promise<void> => {
