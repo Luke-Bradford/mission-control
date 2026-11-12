@@ -22,7 +22,6 @@ import {
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
-  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
@@ -414,7 +413,8 @@ export function nextWakeAt(
 ): number | null {
   const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
-  if (s.wake?.idle) times.push(idleWakeAt(s.wake.idle));
+  const idleAt = s.wake?.idle ? idleWakeAt(s.wake.idle) : null;
+  if (idleAt !== null) times.push(idleAt);
   if (batchAt !== undefined) times.push(batchAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }
@@ -877,16 +877,12 @@ export function idleSeatLine(idle: FlightIdleSeats, seats: FlightIdleSeats["seat
   return `flight watch: seat idle: ${named} with ${idle.open.length} open ticket${idle.open.length === 1 ? "" : "s"}${triage}; why: ${why}`;
 }
 
-/** When FLIGHT is next woken about idle seats: the soonest period boundary of any seat. */
-export function idleWakeAt(idle: FlightIdleSeats): number {
-  return Math.min(
-    ...idle.seats.map((x) => {
-      const period = idlePeriod(x.ms);
-      return (
-        x.since + FLIGHT_IDLE_MS + (period === null ? 0 : (period + 1) * FLIGHT_IDLE_SEAT_WAKE_MS)
-      );
-    }),
-  );
+/** When FLIGHT is next woken about idle seats: the moment the soonest seat's spell reaches FLIGHT_IDLE_MS; null when none is still short of it. */
+export function idleWakeAt(idle: FlightIdleSeats): number | null {
+  const coming = idle.seats
+    .filter((x) => idlePeriod(x.ms) === null)
+    .map((x) => x.since + FLIGHT_IDLE_MS);
+  return coming.length === 0 ? null : Math.min(...coming);
 }
 
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
@@ -1724,7 +1720,7 @@ export function wakeFacts(
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: startable.sort(),
-    // seats idle with tickets open: a new fact each 30 minutes, until one starts or FLIGHT logs a wait
+    // seats idle with tickets open: one fact per idle spell, until one starts or FLIGHT logs a wait
     idle: idleFacts(s.wake?.idle),
     // a park the engine clears alone is digest-only; old_park says when it has stood too long
     parked: [
@@ -1761,9 +1757,9 @@ export function wakeFacts(
   });
 }
 
-/** The idle-seat facts: each long-idle seat with the period of its own spell, so a new period is a new fact. */
+/** The idle-seat facts: each long-idle seat with the start of its spell, so a spell is one fact however long it lasts. */
 const idleFacts = (idle: FlightIdleSeats | undefined): string[] =>
-  idleLong(idle).map((x) => `${x.id}:${idlePeriod(x.ms)}`);
+  idleLong(idle).map((x) => `${x.id}:${x.since}`);
 
 /** An item as a wake fact: a PR's by its text, so a new state of it is a new fact. */
 export const itemFactId = (x: { kind: string; key: string; text: string }): string =>

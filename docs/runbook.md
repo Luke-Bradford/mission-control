@@ -1431,9 +1431,8 @@ by reason and by hour over the last day.
 build seat, open tickets near its area (all open tickets, not only the 30 the digest lists; Backlog, Refinement or Ready; an area label that is the seat's,
 or none or several, which need triage), and no `wait_on` on the seat or the ticket. A ticket with no
 board status counts as work to triage, and the wake says how many. Each seat is timed on its own. Once a seat has stood 10 minutes the
-`idle` wake fact names it, and it changes every 30 minutes (`FLIGHT_IDLE_SEAT_WAKE_MS`), so FLIGHT
-is woken then and every 30 minutes after, until a seat starts, no ticket is open, or FLIGHT logs a wait
-with `wait_on`. An empty Ready with a free seat is a reason to promote, not to wait. The hub records when each seat's
+`idle` wake fact names it, one value for the whole idle spell, so FLIGHT is woken once, at 10 minutes, and not again for
+that spell (it is woken again when the seat starts and goes idle again). An empty Ready with a free seat is a reason to promote, not to wait. The hub records when each seat's
 spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
 line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`.
 The wake text tells FLIGHT to go round a wait on a person, take other work or decide; only money,
