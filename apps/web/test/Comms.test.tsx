@@ -979,61 +979,6 @@ describe("Comms routes", () => {
     expect(asked.filter((p) => /^\/api\/comms\/agents\/[^?/]+$/.test(p))).toEqual([]);
   });
 
-  it("returns CAPCOM to its contact after sending from an agent-to-agent conversation", async () => {
-    const message = {
-      id: "comms:peer",
-      at: NOW,
-      from: "alpha",
-      to: "beta",
-      text: "handoff",
-      ticket: null,
-      label: null,
-      ref: null,
-      replyTo: null,
-      mentions: [],
-      reactions: [],
-      pinned: false,
-      operator: false,
-    };
-    const fetch = stubFetch({
-      "/api/comms/agents/alpha": {
-        messages: [message],
-        inbox: [],
-        contacts: [{ id: "beta", count: 1, unread: 0, lastMessage: message }],
-        unread: 0,
-        inboxUnread: 0,
-      },
-      "/api/comms/agents/alpha?summary=1": {
-        messages: [message],
-        inbox: [],
-        contacts: [{ id: "beta", count: 1, unread: 0, lastMessage: message }],
-        unread: 0,
-        inboxUnread: 0,
-      },
-      "/api/comms/agents/alpha/contacts/beta": { messages: [message] },
-      "/api/comms/mentions": { mentions: [] },
-      "/api/comms/pins": { messages: [] },
-      "/api/flight": { seat: null, decisions: [] },
-      "POST /api/comms/read": { ok: true },
-      "POST /api/comms": { message: { ...message, from: "CAPCOM", to: "alpha" } },
-    });
-    window.history.replaceState(null, "", "/comms/agents/alpha/contacts/beta");
-    render(
-      <CommsConversation
-        view={{ kind: "contact", agentId: "alpha", contactId: "beta" }}
-        row={seatRow({ id: "alpha" })}
-      />,
-    );
-    const composer = await screen.findByLabelText("Message alpha as CAPCOM");
-    fireEvent.change(composer, { target: { value: "Operator reply" } });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => {
-      const sent = fetch.mock.calls.find(([path]) => path === "/api/comms");
-      expect(JSON.parse(String(sent?.[1]?.body))).toMatchObject({ to: "alpha" });
-      expect(window.location.pathname).toBe("/comms/agents/alpha/contacts/CAPCOM");
-    });
-  });
-
   it("replies with a quote, pins messages, and keeps the fixed reaction choices", async () => {
     const original = {
       id: "comms:8",

@@ -533,10 +533,10 @@ describe("cards", () => {
     expect(open1.getAttribute("href")).toBe("/tickets/shop-app/1");
     fireEvent.click(open1);
     expect(window.location.pathname).toBe("/tickets/shop-app/1");
-    // a worked card opens its agent
+    // a worked card still opens its ticket: the seat on it may not be working it
     const worked = card(container, "shop-app#3349") as HTMLElement;
     expect(within(worked).getByRole("link", { name: "Ticket 3349" }).getAttribute("href")).toBe(
-      "/agent/shop-app-ta",
+      "/tickets/shop-app/3349",
     );
   });
 
@@ -834,9 +834,9 @@ describe("cards", () => {
     expect(chip.className).toBe("pill warn kyou");
     expect(c.className).toContain("pulse-warn");
     fireEvent.click(chip);
-    expect(new URLSearchParams(window.location.search).get("item")).toBe(key);
-    // the chip opens the brief, not the ticket beside the board
-    expect(window.location.pathname).toBe("/");
+    // the chip opens its Needs you page, with the context, not the side pane or the ticket
+    expect(window.location.pathname).toBe(`/needs-you/${encodeURIComponent(key)}`);
+    expect(new URLSearchParams(window.location.search).get("item")).toBeNull();
   });
 
   it("a PR waiting by the PR rule alone, with no Needs-you item, shows no chip", async () => {
@@ -1045,7 +1045,7 @@ describe("cards", () => {
 describe("agent overlay and click", () => {
   const working = () => [todo(3349, { status: "In progress", state: "in progress" })];
 
-  it("a worked card shows the agent tag, its state pill and run number; click goes to the agent", async () => {
+  it("a worked card shows the agent tag, its state pill and run number; click goes to the ticket", async () => {
     stub({ shopApp: working(), crew: [crewRow()] });
     await open();
     const c = (await screen.findByText("Ticket 3349")).closest(".kcard") as HTMLElement;
@@ -1055,7 +1055,7 @@ describe("agent overlay and click", () => {
     expect(c.className).toContain("pulse-ok");
     expect(c.title).toBe("Being worked on or looked at now");
     fireEvent.click(c);
-    expect(window.location.pathname).toBe("/agent/shop-app-ta");
+    expect(window.location.pathname).toBe("/tickets/shop-app/3349");
   });
 
   it("a worked card shows its template, step and try", async () => {

@@ -522,11 +522,11 @@
   border: 0;
 }
 
-.comms-bubble.capcom {
+.comms-bubble.right {
   align-self: flex-end;
 }
 
-.comms-bubble.capcom .comms-message-meta {
+.comms-bubble.right .comms-message-meta {
   justify-content: flex-end;
 }
 
@@ -561,7 +561,7 @@
     box-shadow 150ms ease;
 }
 
-.comms-bubble.capcom .comms-bubble-body {
+.comms-bubble.right .comms-bubble-body {
   color: var(--fg);
   background: color-mix(in srgb, var(--accent) 7%, var(--surface));
 }
@@ -590,7 +590,7 @@
   transition: opacity 150ms ease;
 }
 
-.comms-bubble.capcom .comms-actions {
+.comms-bubble.right .comms-actions {
   right: 10px;
   left: auto;
 }
