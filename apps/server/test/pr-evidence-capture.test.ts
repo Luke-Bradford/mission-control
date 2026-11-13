@@ -149,6 +149,10 @@ describe("Demo renders of the head", () => {
     await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
     t.store.save({ ...(t.store.manifest("mc", 7, HEAD) as EvidenceManifest), demos: [] }, []);
     expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toContain("Demo");
+    asked.length = 0;
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(asked).toHaveLength(2);
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).demos).toHaveLength(2);
   });
 });
 
