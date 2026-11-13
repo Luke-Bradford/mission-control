@@ -327,6 +327,56 @@ describe("Plan and mockups in the question", () => {
   });
 });
 
+describe("review fixes", () => {
+  it("makes a link in the plan a real link", async () => {
+    routes([ask()], {
+      [TICKET]: history(
+        ticketBody("See [the spec](https://github.com/octo-org/shop-app/blob/main/docs/spec.md)"),
+      ),
+    });
+    render(<Needs item="q1" />);
+    const region = await screen.findByRole("region", { name: "Plan of shop-app#4001" });
+    expect(within(region).getByRole("link", { name: "the spec" }).getAttribute("href")).toBe(
+      "https://github.com/octo-org/shop-app/blob/main/docs/spec.md",
+    );
+  });
+
+  it("offers Retry when the materials read fails, and asks again", async () => {
+    const fn = routes([ask()], {
+      [TICKET]: history(ticketBody("1. x")),
+      [matPath("q1")]: () => ({ status: 500, body: { error: "boom" } }),
+    });
+    render(<Needs item="q1" />);
+    const retry = await screen.findByRole("button", { name: "Retry loading the materials" });
+    const before = fn.mock.calls.filter(([p]) => p === matPath("q1")).length;
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(fn.mock.calls.filter(([p]) => p === matPath("q1")).length).toBeGreaterThan(before),
+    );
+  });
+
+  it("keeps focus inside the viewer and keeps the arrow keys working at the last picture", async () => {
+    routes([ask()], {
+      [TICKET]: history(ticketBody("1. x")),
+      [matPath("q1")]: { packets: [packet()] },
+    });
+    render(<Needs item="q1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Open Before full size" }));
+    const dialog = await screen.findByRole("dialog", { name: "Picture: Before" });
+    const close = within(dialog).getByRole("button", { name: "Close" });
+    close.focus();
+    fireEvent.keyDown(close, { key: "Tab" });
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    const next = within(dialog).getByRole("button", { name: "Next" });
+    next.focus();
+    fireEvent.click(next);
+    const last = await screen.findByRole("dialog", { name: "Picture: After" });
+    expect(last.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
+    expect(await screen.findByRole("dialog", { name: "Picture: Before" })).toBeTruthy();
+  });
+});
+
 describe("Preview of a PR-labelled item", () => {
   const view = (over = {}) => ({
     ticket: 1513,

@@ -10,11 +10,11 @@ import type {
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ApiError } from "../api.ts";
 import { useTz } from "../clock.ts";
-import { Markdown } from "../components/Markdown.tsx";
+import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { raisedAt, shortSha } from "../fmt.ts";
 import { followLink, ticketPath } from "../router.ts";
-import { useOverlay, useReturnFocus } from "../shell/overlays.ts";
+import { trapTab, useOverlay, useReturnFocus } from "../shell/overlays.ts";
 import {
   chooserImages,
   defaultImageIndex,
@@ -132,7 +132,9 @@ function ViewerBody(p: {
       role="dialog"
       aria-modal="true"
       aria-label={`Picture: ${p.current.label}`}
+      tabIndex={-1}
       onKeyDown={(e) => {
+        trapTab(e);
         if (e.key === "ArrowRight") {
           e.preventDefault();
           step(1);
@@ -149,7 +151,12 @@ function ViewerBody(p: {
             <span className="note" aria-live="polite">
               {p.index + 1} of {p.group.length}
             </span>
-            <button type="button" className="sm" disabled={p.index === 0} onClick={() => step(-1)}>
+            <button
+              type="button"
+              className="sm"
+              aria-disabled={p.index === 0}
+              onClick={() => step(-1)}
+            >
               Previous
             </button>
             <button
@@ -274,7 +281,11 @@ function Section({
   return (
     <section className="mat-section" data-depth={depth}>
       <Heading className="mat-heading">{section.heading}</Heading>
-      {section.text.trim() !== "" && <Markdown text={section.text} />}
+      {section.text.trim() !== "" && (
+        <OpenLinks>
+          <Markdown text={section.text} />
+        </OpenLinks>
+      )}
       {images.length > 0 && (
         <div
           className={section.comparison ? "mat-compare" : "mat-images"}
@@ -397,30 +408,32 @@ function Packet({
       ) : (
         <>
           <PlanScroll label={`${packet.label} plan`}>
-            <Markdown
-              text={packet.markdown}
-              renderLink={(url, label, image) => {
-                if (inPlan(url)) {
-                  const id = retainedImageId(url) as string;
-                  const found = packetImage(packet, id);
-                  const at = group.findIndex((g) => g.url === url);
-                  if (!found || at < 0) return <span>{label} (picture unavailable)</span>;
-                  return (
-                    <button type="button" className="linklike" onClick={() => open(group, at)}>
-                      {image ? "Picture: " : ""}
-                      {label}
-                    </button>
-                  );
-                }
-                if (isRelativeReference(url))
-                  return (
-                    <span title={url}>
-                      {label} <span className="note">(not attached to this question)</span>
-                    </span>
-                  );
-                return undefined;
-              }}
-            />
+            <OpenLinks>
+              <Markdown
+                text={packet.markdown}
+                renderLink={(url, label, image) => {
+                  if (inPlan(url)) {
+                    const id = retainedImageId(url) as string;
+                    const found = packetImage(packet, id);
+                    const at = group.findIndex((g) => g.url === url);
+                    if (!found || at < 0) return <span>{label} (picture unavailable)</span>;
+                    return (
+                      <button type="button" className="linklike" onClick={() => open(group, at)}>
+                        {image ? "Picture: " : ""}
+                        {label}
+                      </button>
+                    );
+                  }
+                  if (isRelativeReference(url))
+                    return (
+                      <span title={url}>
+                        {label} <span className="note">(not attached to this question)</span>
+                      </span>
+                    );
+                  return undefined;
+                }}
+              />
+            </OpenLinks>
           </PlanScroll>
           <Chooser images={planImages} open={open} />
         </>
@@ -525,7 +538,9 @@ function MainPlan({ item }: { item: AttentionItem }) {
         </p>
       ) : (
         <PlanScroll label={`Plan of ${name}`}>
-          <Markdown text={plan} />
+          <OpenLinks>
+            <Markdown text={plan} />
+          </OpenLinks>
         </PlanScroll>
       )}
       {t.bodyTruncated && (
@@ -590,7 +605,14 @@ export function PlanAndMockups({
       )}
       {error && (
         <p className="note" role="status">
-          Could not load the attached materials: {error.message}
+          Could not load the attached materials: {error.message}{" "}
+          <button
+            type="button"
+            className="sm"
+            onClick={() => hub.refetch(RESOURCES.attentionMaterials(item.key).path)}
+          >
+            Retry loading the materials
+          </button>
         </p>
       )}
       {packets.map((p) => (
