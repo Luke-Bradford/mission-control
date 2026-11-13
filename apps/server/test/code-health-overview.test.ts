@@ -136,10 +136,10 @@ describe("Audit first-screen summary", () => {
       cost,
     );
   }
-  function proposal(id: string, state: string, extra: Partial<Proposal> = {}) {
+  function proposal(id: string, state: string, extra: Partial<Proposal> = {}, repoId = "sample") {
     const value: Proposal = {
       id,
-      repoId: "sample",
+      repoId,
       rule: "repeated-rounds",
       ruleVersion: 1,
       evidenceFingerprint: `fp-${id}`,
@@ -175,6 +175,14 @@ describe("Audit first-screen summary", () => {
     merged(1, NOW - DAY, a);
     merged(2, NOW - DAY, b, "other");
     proposal("p1", "proposed");
+    // Data in the other repo that would show up if any filter leaked.
+    finding(b, "src/a.ts", "leaky");
+    touch(2, "src/a.ts", "other");
+    for (const n of [1, 2, 3]) proposal(`od${n}`, "dismissed", {}, "other");
+    proposal("oacc", "accepted", {}, "other");
+    db.prepare("UPDATE code_health_recommendations SET remeasure=? WHERE id='oacc'").run(
+      JSON.stringify({ at: NOW, baseline: 3, current: 1, change: "improved", note: "n" }),
+    );
     const response = await get("/api/code-health/overview?repo=sample");
     expect(response.statusCode).toBe(200);
     expect(response.headers["cache-control"]).toBe("no-store");
@@ -194,9 +202,17 @@ describe("Audit first-screen summary", () => {
     expect(view.build.merged.value).toBe(1);
     expect((await overview("repo=other")).build.merged.value).toBe(1);
     // The hub derives its own proposals when it rebuilds; the fixture's hand-made one is not kept active.
+    expect(view.rows.length).toBeGreaterThan(0);
     expect(view.rows.every((row) => row.repoId === "sample" && row.evidence.length === 0)).toBe(
       true,
     );
+    expect(view.landing.files.map((row) => row.path)).not.toContain("src/a.ts");
+    expect(view.past.funnel.find((row) => row.kind === "dismissed")).toBeUndefined();
+    expect(view.past.items.map((row) => row.id)).not.toContain("oacc");
+    expect(view.past.measured.improved).toBe(0);
+    const other = await overview("repo=other");
+    expect(other.past.funnel).toContainEqual({ kind: "dismissed", count: 3 });
+    expect(other.past.measured.improved).toBe(1);
     expect(view.outside.state).toBe("not-collected");
     expect(view.wasteAlarms.state).toBe("not-available");
     // The existing routes keep their shapes.
@@ -253,6 +269,14 @@ describe("Audit first-screen summary", () => {
     expect(gone).toMatchObject({ findings: 1, touches: 0 });
     expect(gone?.ratio.value).toBeNull();
     expect(gone?.ratio.state).toBe("unknown");
+  });
+
+  it("leaves an open PR's findings out of findings per touch", async () => {
+    merged(1, NOW - DAY, review(1, 1));
+    touch(1, "src/a.ts");
+    const open = review(2, 1);
+    for (const summary of ["x", "y", "z"]) finding(open, "src/a.ts", summary);
+    expect((await overview()).landing.files.map((row) => row.path)).not.toContain("src/a.ts");
   });
 
   it("counts the funnel by scoped SQL beyond the 200-row history cap", async () => {

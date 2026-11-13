@@ -172,7 +172,7 @@ export interface LandingRow {
 }
 
 /**
- * Per file: distinct finding lineages (one per PR, file, category, summary and fix, so a finding
+ * Per file, for PRs merged in the window: distinct finding lineages (one per PR, file, category, summary and fix, so a finding
  * repeated across rounds counts once) and the merged PRs that changed that exact path in the window.
  */
 export function landingAggregate(
@@ -188,7 +188,8 @@ export function landingAggregate(
          SELECT file, COUNT(*) AS findings, MAX(ended_at) AS newest FROM (
            SELECT v.pr_number, f.file, f.category, f.summary, f.fix, MAX(v.ended_at) AS ended_at
            FROM review_findings f JOIN reviews v ON v.id = f.review_id
-           WHERE v.repo_id = ? AND v.state = 'reported' AND v.ended_at >= ? AND v.ended_at < ?
+           JOIN code_health_merged_reviews m ON m.repo_id = v.repo_id AND m.pr_number = v.pr_number
+           WHERE v.repo_id = ? AND v.state = 'reported' AND m.merged_at >= ? AND m.merged_at < ?
            GROUP BY v.pr_number, f.file, f.category, f.summary, f.fix
          ) GROUP BY file
        )

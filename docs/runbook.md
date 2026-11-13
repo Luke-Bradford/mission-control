@@ -76,7 +76,8 @@ findings per touch, and the proposal funnel and outcomes. Each figure carries un
 (the equal window before), source, coverage and last update. Definitions: merged-per-day uses the stored
 merge time and keeps "no hub review record" apart from rounds 1, 2 and 3 or more; rework is the share of
 reviewed PRs reaching round 2, with the reviewed count as denominator; findings per touch counts a finding
-once per PR, file, category, summary and fix, over merged PRs that changed that exact path, and zero
+once per PR, file, category, summary and fix, only for PRs merged in the window (an open PR's
+findings are left out), over those merged PRs that changed that exact path, and zero
 touches is null (undefined), not 0; the funnel counts every stored proposal in SQL, not the newest 200;
 after-date results come only from stored remeasure records; a PR with a run whose cost is not recorded
 (for example Codex) is left out of the median cost and counted as unpriced, never as free. Outside sources
