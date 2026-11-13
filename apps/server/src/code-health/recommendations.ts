@@ -2,8 +2,10 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   CODE_HEALTH_FLIGHT_TIER_RULES,
   CODE_HEALTH_RULES,
+  type CodeHealthFinding,
   type CodeHealthRecommendation,
   type CodeHealthRecommendationState,
+  type CodeHealthReviewRound,
 } from "@mc/core";
 import { z } from "zod";
 import type { Store } from "../store.ts";
@@ -70,6 +72,23 @@ function normaliseProposal(
     },
     decision: legacy.decision ?? defaultDecision(value.rule),
   } as Proposal;
+}
+/**
+ * Open (blocking) findings of one cause still unresolved at the PR's current head, or null when
+ * a changed head has no matching review: that is unknown, never zero. A logged Minor is not
+ * blocking and never counts.
+ */
+export function blockingAtExactHead(
+  findings: CodeHealthFinding[],
+  reviews: CodeHealthReviewRound[],
+): number | null {
+  for (const pr of new Set(findings.map((f) => f.pr))) {
+    const head = findings.find((f) => f.pr === pr)?.currentHeadSha;
+    if (!head || !reviews.some((r) => r.pr === pr && r.headSha === head)) return null;
+  }
+  return findings.filter(
+    (f) => f.state === "open" && f.resolution === null && f.currentHeadSha === f.headSha,
+  ).length;
 }
 export interface RecommendationRecord extends CodeHealthRecommendation {
   scope: RecommendationScope | null;
@@ -459,18 +478,8 @@ export function recommendationProposals(
         ...new Set(rows.map((row) => row.file).filter((file): file is string => !!file)),
       ].sort();
       const causeId = `finding-lineage:${hash([category, summary, fix])}`;
-      const exactHead = [...new Set(rows.map((row) => row.pr))].every((pr) => {
-        const currentHead = rows.find((row) => row.pr === pr)?.currentHeadSha;
-        return (
-          currentHead !== null &&
-          currentHead !== undefined &&
-          source.reviews.some((review) => review.pr === pr && review.headSha === currentHead)
-        );
-      });
-      const unresolved = rows.filter(
-        (row) => row.resolution === null && row.currentHeadSha === row.headSha,
-      );
-      const current = exactHead ? unresolved.length : null;
+      const current = blockingAtExactHead(rows, source.reviews);
+      const exactHead = current !== null;
       add(
         "recurring-correction",
         key,

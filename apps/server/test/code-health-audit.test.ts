@@ -161,7 +161,7 @@ describe("code-health audit", () => {
         JSON.stringify({ kind: "accepted", owner: "o", reviewAt, linkedWork: null }),
         JSON.stringify({
           observation: "o",
-          scope: null,
+          scope: row.scope,
           fingerprint: "f",
           target: row.target,
           acceptedAt: NOW - 10 * DAY,
@@ -218,6 +218,109 @@ describe("code-health audit", () => {
       finding(20, 1, "spec");
       audit(NOW + DAY);
       expect(store.codeHealthRecommendation("sample", due.id)?.remeasure?.current).toBe(1);
+    });
+    function reviewAt(id: number, number: number, sha: string, endedAt: number) {
+      db.prepare(
+        `INSERT INTO reviews(id,author_run_id,repo_id,seat_id,pr_number,sha,epoch,attempt,round,state,created_at,ended_at)VALUES(?,?,'sample','reviewer',?,?,0,1,1,'reported',?,?)`,
+      ).run(id, `run-${id}`, number, sha, endedAt, endedAt);
+    }
+    function lineageFinding(
+      reviewId: number,
+      pos: number,
+      file: string,
+      opts: { summary?: string; state?: string; resolution?: string | null } = {},
+    ) {
+      db.prepare(
+        `INSERT INTO review_findings(review_id,author_run_id,pos,severity,file,line,summary,scenario,fix,category,state,resolution)VALUES(?,?,?,'Important',?,1,?,'s','Guard the null case','correctness',?,?)`,
+      ).run(
+        reviewId,
+        `run-${reviewId}`,
+        pos,
+        file,
+        opts.summary ?? "Null input crashes the parser",
+        opts.state ?? "open",
+        opts.resolution ?? null,
+      );
+    }
+    function head(number: number, headSha: string) {
+      store.upsertPullRequests(
+        "sample",
+        [pr(number, `feature/${number}`, { state: "open", mergedAt: null, headSha })],
+        NOW,
+      );
+    }
+    /** Two PRs repeat one recorded cause across three files; one finding is fixed, one is a logged Minor. */
+    function lineageRow(reviewDate: number) {
+      reviewAt(1, 10, SHA, NOW - 2 * DAY);
+      reviewAt(2, 11, SHA, NOW - 2 * DAY);
+      lineageFinding(1, 0, "src/a.ts");
+      lineageFinding(1, 1, "src/b.ts", { resolution: "fixed" });
+      lineageFinding(1, 2, "src/c.ts");
+      lineageFinding(2, 0, "src/a.ts");
+      lineageFinding(2, 1, "src/b.ts", { state: "logged" });
+      lineageFinding(2, 2, "src/c.ts");
+      lineageFinding(2, 3, "src/a.ts", { summary: "A different problem entirely" });
+      head(10, SHA);
+      head(11, SHA);
+      store.refreshCodeHealthRecommendations("sample", NOW);
+      const row = store
+        .codeHealthRecommendations("sample")
+        .find((r) => r.rule === "recurring-correction" && r.title?.includes("Guard the null case"));
+      if (!row) throw Error("Missing lineage row");
+      accept(row as unknown as Proposal, reviewDate);
+      return row;
+    }
+    it("counts only open, unresolved, exact-head findings of the recorded lineage, once, across a fresh reader", () => {
+      const row = lineageRow(NOW + DAY);
+      expect(row.measure?.current).toBe(4);
+      audit(NOW);
+      expect(store.codeHealthRecommendation("sample", row.id)?.remeasure).toBeNull();
+      audit(NOW + DAY);
+      const measured = store.codeHealthRecommendation("sample", row.id)?.remeasure;
+      expect(measured).toMatchObject({ baseline: 4, current: 4, change: "unchanged" });
+      const restarted = new CodeHealthReader(store, config, () => NOW + DAY);
+      expect(restarted.recommendation("sample", row.id).remeasure).toEqual(measured);
+      lineageFinding(1, 9, "src/d.ts");
+      audit(NOW + 2 * DAY);
+      expect(store.codeHealthRecommendation("sample", row.id)?.remeasure).toEqual(measured);
+    });
+    it("retries while a reworked head has no review, then measures it", () => {
+      const row = lineageRow(NOW + DAY);
+      head(10, "b".repeat(40));
+      audit(NOW + DAY);
+      audit(NOW + DAY + 3_600_000);
+      expect(store.codeHealthRecommendation("sample", row.id)?.remeasure).toBeNull();
+      reviewAt(3, 10, "b".repeat(40), NOW + DAY + 7_200_000);
+      audit(NOW + DAY + 10_800_000);
+      expect(store.codeHealthRecommendation("sample", row.id)?.remeasure).toMatchObject({
+        baseline: 4,
+        current: 2,
+        change: "improved",
+      });
+    });
+    it("records an unreviewed head as unmeasured after 7 days", () => {
+      const row = lineageRow(NOW + DAY);
+      head(10, "b".repeat(40));
+      audit(NOW + 9 * DAY);
+      expect(store.codeHealthRecommendation("sample", row.id)?.remeasure?.change).toBe(
+        "unmeasured",
+      );
+    });
+    it("keeps measuring a legacy accepted row by its own category and file metric", () => {
+      const due = proposal("recurring-correction", "legacy", {
+        scope,
+        target: { metric: "m", direction: "decrease", baseline: 3 },
+      });
+      accept(due, NOW - 1000);
+      review(60, 60);
+      for (let pos = 0; pos < 3; pos++) finding(60, pos, "spec");
+      db.prepare("UPDATE review_findings SET resolution='fixed' WHERE review_id=60").run();
+      audit();
+      expect(store.codeHealthRecommendation("sample", due.id)?.remeasure).toMatchObject({
+        baseline: 3,
+        current: 3,
+        change: "unchanged",
+      });
     });
     const big = () =>
       proposal("repeatedly-changed-large-file", "big", {

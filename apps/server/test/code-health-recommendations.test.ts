@@ -441,35 +441,27 @@ describe("durable code-health decisions", () => {
         ?.measure?.current,
     ).toBe(2);
   });
-  it("keeps eight distinct real-shaped causes with measured targets in a busy fixture", () => {
-    for (let cause = 1; cause <= 8; cause++) {
-      const first = cause * 10,
-        second = first + 1,
-        category = `boundary-${cause}`;
-      review(first, first);
-      review(second, second);
-      finding(first, 0, `src/feature-${cause}.ts`, category);
-      finding(first, 1, `src/feature-${cause}.ts`, category);
-      finding(second, 0, `src/feature-${cause}.spec.ts`, category);
-      finding(second, 1, `src/feature-${cause}.spec.ts`, category);
-      currentHead(first, "a".repeat(40));
-      currentHead(second, "a".repeat(40));
+  it("counts only open findings against the zero target; logged Minors do not block", () => {
+    review(1, 10);
+    review(2, 11);
+    for (let pos = 0; pos < 2; pos++) {
+      finding(1, pos, "src/a.ts", "spec");
+      finding(2, pos, "src/b.ts", "spec");
     }
-
+    db.prepare("UPDATE review_findings SET state='logged'").run();
+    currentHead(10, "a".repeat(40));
+    currentHead(11, "a".repeat(40));
     store.refreshCodeHealthRecommendations("sample", NOW);
-
-    const causes = store
-      .codeHealthRecommendations("sample")
-      .filter((row) => row.rule === "recurring-correction");
-    expect(new Set(causes.map((row) => row.causeId)).size).toBe(8);
-    expect(
-      causes.filter(
-        (row) => typeof row.measure?.current === "number" && typeof row.target.value === "number",
-      ),
-    ).toHaveLength(8);
-    expect(causes.every((row) => row.title && row.decision && row.state.kind === "proposed")).toBe(
-      true,
-    );
+    const logged = () =>
+      present(
+        store
+          .codeHealthRecommendations("sample")
+          .find((row) => row.rule === "recurring-correction"),
+      );
+    expect(logged().measure?.current).toBe(0);
+    db.prepare("UPDATE review_findings SET state='open' WHERE pos=0").run();
+    store.refreshCodeHealthRecommendations("sample", NOW + 1);
+    expect(logged().measure?.current).toBe(2);
   });
   it("refresh deduplicates and retains accepted owner and immutable baseline after evidence changes", () => {
     review(1, 10, 3);
