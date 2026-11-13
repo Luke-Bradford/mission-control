@@ -1,7 +1,8 @@
 import { act, waitFor } from "@testing-library/react";
 import { expect, vi } from "vitest";
 
-type Handler = (init: RequestInit | undefined) => { status: number; body: unknown };
+type Answer = { status: number; body: unknown };
+type Handler = (init: RequestInit | undefined) => Answer | Promise<Answer>;
 
 /** Stub fetch by "METHOD path" (or path for GET); unknown requests are a 404. */
 export function stubFetch(routes: Record<string, Handler | unknown>) {
@@ -10,7 +11,7 @@ export function stubFetch(routes: Record<string, Handler | unknown>) {
     const r = routes[`${method} ${input}`] ?? (method === "GET" ? routes[input] : undefined);
     const out =
       typeof r === "function"
-        ? (r as Handler)(init)
+        ? await (r as Handler)(init)
         : r === undefined
           ? { status: 404, body: { error: "not found" } }
           : { status: 200, body: r };

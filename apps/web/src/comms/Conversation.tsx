@@ -875,9 +875,10 @@ function ModernConversation({
   const [reply, setReply] = useState<FlightConversationMessage | null>(null);
   const [sent, setSent] = useState(0);
   const replyInView = reply && messages.some((message) => message.id === reply.id) ? reply : null;
-  // Read when the cursor moves, never a reason to move it.
-  const mentionsNow = useRef<CommsMention[]>([]);
-  mentionsNow.current = useMentions();
+  const mentions = useMentions();
+  // The read key the hub has accepted; its mentions are marked once both it and the list are here.
+  const [readKey, setReadKey] = useState<string | null>(null);
+  const markingMentions = useRef(new Set<string>());
   const read = useRef(new Set<string>());
   const pendingRead = useRef(new Set<string>());
   const [readError, setReadError] = useState<string | null>(null);
@@ -898,16 +899,7 @@ function ModernConversation({
         read.current.add(key);
         setReadError(null);
         hub.refetchTopic("agents");
-        // Opening a conversation reads the messages to the operator in it, so the bell, header and
-        // nav counts drop with the read cursor instead of keeping a second tally.
-        const shown = new Set(messages.map((m) => m.id));
-        const unseen = mentionsNow.current.filter((m) => !m.seen && shown.has(m.message.id));
-        if (unseen.length > 0) {
-          const ids = unseen.map((m) => m.message.id);
-          void apiPost("/api/comms/mentions/seen", { ids })
-            .then(() => recordMentionsSeen(ids))
-            .catch(() => {});
-        }
+        setReadKey(key);
       })
       .catch((error: unknown) => {
         // Only an answer from the server is a failure to report. A request that got none (a
@@ -917,6 +909,27 @@ function ModernConversation({
       })
       .finally(() => pendingRead.current.delete(key));
   }, [scope, messages, readRetry]);
+  // Opening a conversation reads the messages to the operator in it, so the bell, header and nav
+  // counts drop with the read cursor instead of keeping a second tally. It waits on the mention
+  // list as well as the cursor: whichever answers last, the mark follows.
+  useEffect(() => {
+    const latest = messages.at(-1);
+    if (!scope || !latest || readKey !== `${scope}:${latest.id}`) return;
+    const shown = new Set(messages.map((m) => m.id));
+    const ids = mentions
+      .filter(
+        (m) => !m.seen && shown.has(m.message.id) && !markingMentions.current.has(m.message.id),
+      )
+      .map((m) => m.message.id);
+    if (ids.length === 0) return;
+    for (const id of ids) markingMentions.current.add(id);
+    void apiPost("/api/comms/mentions/seen", { ids })
+      .then(() => recordMentionsSeen(ids))
+      .catch(() => {})
+      .finally(() => {
+        for (const id of ids) markingMentions.current.delete(id);
+      });
+  }, [readKey, mentions, messages, scope]);
   const to =
     view.kind === "crew" || view.kind === "ticket"
       ? COMMS_CREW

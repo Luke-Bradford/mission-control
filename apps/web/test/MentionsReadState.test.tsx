@@ -135,4 +135,53 @@ describe("one read state for mentions", () => {
     expect(screen.getByRole("button", { name: "Mentions, 0 new" })).toBeTruthy();
     expect(within(nav).queryByTitle("1 unread message to you")).toBeNull();
   });
+
+  it("marks the mentions read even when the mention list answers after the read cursor", async () => {
+    const toYou = {
+      ...message("comms:5"),
+      from: "flight",
+      to: "CAPCOM",
+      text: "A question for you",
+      mentions: [],
+    };
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/flight": { messages: [toYou], unread: 1 },
+      "/api/comms/mentions": async () => {
+        await gate;
+        return { status: 200, body: { mentions: [{ message: toYou, seen: false }] } };
+      },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms/mentions/seen": { ok: true },
+    });
+    render(
+      <>
+        <CommsNav rows={[]} flightId="flight" view={{ kind: "flight" }} onNavigate={() => {}} />
+        <CommsConversation view={{ kind: "flight" }} row={null} />
+      </>,
+    );
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/comms/read",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    release();
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/comms/mentions/seen",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    const nav = screen.getByRole("navigation", { name: "Comms" });
+    await waitFor(() => expect(within(nav).queryByTitle("1 unread message to you")).toBeNull());
+  });
 });
