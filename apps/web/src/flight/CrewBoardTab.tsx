@@ -3,6 +3,7 @@ import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import { SeatInstructionIndexPanel } from "../instructions/Instructions.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
+import { BlockedChains } from "./BlockedChains.tsx";
 import { WatchList } from "./Brief.tsx";
 import { Summary } from "./Summary.tsx";
 import { WorkInFlight } from "./WorkInFlight.tsx";
@@ -26,33 +27,37 @@ export function CrewBoardTab() {
   const [context, setContext] = useState<"seats" | "instructions">("seats");
   return (
     <>
-      <Panel
-        id="wifP"
-        title={context === "seats" ? "Seats" : "Seat instructions"}
-        sub={
-          context === "seats"
-            ? "LIVE · ticket, stage, what stops each seat and FLIGHT's next action"
-            : "saved guidance, effective focus and retained history"
-        }
-        actions={
-          <>
-            <Seg
-              label="Crew context"
-              options={[
-                { value: "seats", label: "Seats" },
-                { value: "instructions", label: "Instructions" },
-              ]}
-              value={context}
-              onChange={setContext}
-            />
-            {context === "seats" && <CrewStats />}
-          </>
-        }
-      >
-        <div className="flight-panel-scroll">
-          {context === "seats" ? <WorkInFlight /> : <SeatInstructionIndexPanel />}
-        </div>
-      </Panel>
+      {/* The first screen: Seats and Blocked chains share the tab's visible height. */}
+      <div className="flight-crew-first">
+        <Panel
+          id="wifP"
+          title={context === "seats" ? "Seats" : "Seat instructions"}
+          sub={
+            context === "seats"
+              ? "LIVE · ticket, stage, what stops each seat and FLIGHT's next action"
+              : "saved guidance, effective focus and retained history"
+          }
+          actions={
+            <>
+              <Seg
+                label="Crew context"
+                options={[
+                  { value: "seats", label: "Seats" },
+                  { value: "instructions", label: "Instructions" },
+                ]}
+                value={context}
+                onChange={setContext}
+              />
+              {context === "seats" && <CrewStats />}
+            </>
+          }
+        >
+          <div className="flight-panel-scroll">
+            {context === "seats" ? <WorkInFlight /> : <SeatInstructionIndexPanel />}
+          </div>
+        </Panel>
+        <BlockedChains />
+      </div>
       <Panel
         id="ledgerP"
         title="FLIGHT's queue"

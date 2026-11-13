@@ -286,6 +286,7 @@ import {
   type Stray,
   THREAD_COMMS_LIMIT,
 } from "./store/types.ts";
+import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
 
 export * from "./store/types.ts";
 
@@ -822,7 +823,12 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
-    this.addColumn("review_moves", "budget_brake_override", "INTEGER NOT NULL DEFAULT 0");
+    // the forecast brake's Needs-you note is gone with the brake
+    if (
+      this.db.prepare("SELECT 1 FROM attention_notes WHERE key = 'budget-brake'").get() !==
+      undefined
+    )
+      this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
     // Token audit call times (#1646): audits stored before this have none until re-read.
     this.addColumn("run_token_calls", "at", "INTEGER");
     this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
@@ -1264,6 +1270,21 @@ export class Store {
       at: r.at as number,
       data: JSON.parse(r.data as string) as Record<string, unknown>,
     }));
+  }
+
+  /** The waste checks' queries and the alarms table (spend/waste.ts). */
+  get waste(): ReturnType<typeof wasteQueries> {
+    return wasteQueries(this.db);
+  }
+
+  /** A check call the hook refused as an unchanged rerun (same run, command and commit). */
+  addRerunRefusal(runId: string, command: string, sha: string, at: number): void {
+    this.appendAttempt(runId, RERUN_REFUSED_ATTEMPT, at, { command, sha, at });
+  }
+
+  /** A run resumed with the hub's "carry on" line (kind `resume`), counted by the retry-loop check. */
+  addResumeAttempt(runId: string, at: number): void {
+    this.appendAttempt(runId, RESUME_ATTEMPT, at, { at });
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
@@ -5052,7 +5073,7 @@ export class Store {
   }
 
   /** Moves a queued review to another review seat; true only when it was still queued. */
-  moveQueuedReview(id: number, seatId: string, at: number, budgetBrakeOverride = false): boolean {
+  moveQueuedReview(id: number, seatId: string, at: number): boolean {
     let moved = false;
     this.transaction(() => {
       moved =
@@ -5061,10 +5082,8 @@ export class Store {
           .run(seatId, id).changes === 1;
       if (moved)
         this.db
-          .prepare(
-            "INSERT OR REPLACE INTO review_moves (review_id, seat_id, at, budget_brake_override) VALUES (?, ?, ?, ?)",
-          )
-          .run(id, seatId, at, Number(budgetBrakeOverride));
+          .prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)")
+          .run(id, seatId, at);
     });
     return moved;
   }
@@ -5072,14 +5091,6 @@ export class Store {
   /** Whether FLIGHT assigned the queued review to its current seat. */
   reviewMoved(id: number): boolean {
     return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
-  }
-
-  /** Whether FLIGHT explicitly passed the target account's budget brake for this review. */
-  reviewBudgetBrakeOverride(id: number): boolean {
-    const row = this.db
-      .prepare("SELECT budget_brake_override FROM review_moves WHERE review_id = ?")
-      .get(id) as { budget_brake_override?: number } | undefined;
-    return row?.budget_brake_override === 1;
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */
@@ -7555,6 +7566,24 @@ export class Store {
         };
   }
 
+  /** The newest results (a pass, or a failure with an exit code) of `command` by this run on `headSha`. */
+  latestCheckResults(
+    runId: string,
+    command: string,
+    headSha: string,
+    limit: number,
+  ): { ok: boolean; exitCode: number | null }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT ok, exit_code FROM check_runs
+           WHERE run_id = ? AND command = ? AND head_sha = ? AND (ok = 1 OR exit_code IS NOT NULL)
+           ORDER BY at DESC, id DESC LIMIT ?`,
+        )
+        .all(runId, command, headSha, limit) as Row[]
+    ).map((r) => ({ ok: r.ok === 1, exitCode: (r.exit_code as number | null) ?? null }));
+  }
+
   /** The newest result this run recorded for `command`, regardless of commit. */
   newestCheckRun(
     runId: string,
@@ -8684,6 +8713,15 @@ export class Store {
       .prepare("SELECT * FROM flight_decisions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?")
       .all(since, limit) as Row[];
     return rows.map(toFlightDecision);
+  }
+
+  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
+  flightWaitTimes(since: number): number[] {
+    return (
+      this.db
+        .prepare("SELECT at FROM flight_decisions WHERE kind = 'wait' AND at >= ? ORDER BY at")
+        .all(since) as { at: number }[]
+    ).map((r) => r.at);
   }
 
   /** The decisions of one kind about one ticket, newest first. */

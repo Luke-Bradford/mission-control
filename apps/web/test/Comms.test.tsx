@@ -449,6 +449,29 @@ describe("Comms routes", () => {
       expect(window.location.pathname).toBe("/comms/tickets/%23707");
     });
 
+    it("keeps a reference inside bold as a chip, with no literal markers, and still filters", async () => {
+      await open({ ...base, ref: null, text: "**Split: #1667 covered, PR 12 open** done" });
+      await screen.findByRole("link", { name: "#1667" });
+      const body = document.querySelector(".comms-bubble-body") as HTMLElement;
+      expect(body.textContent).not.toContain("**");
+      const strong = body.querySelector("strong") as HTMLElement;
+      expect(within(strong).getByRole("link", { name: "#1667" })).toBeTruthy();
+      expect(strong.textContent).toContain("PR 12");
+      fireEvent.click(within(strong).getByRole("button", { name: "Filter chat to #1667" }));
+      expect(window.location.pathname).toBe("/comms/tickets/%231667");
+    });
+
+    it("shows a list as list items with a chip inside, not raw dashes", async () => {
+      await open({ ...base, ref: null, text: "Plan:\n- first #12\n- second **bold**" });
+      await screen.findByRole("link", { name: "#12" });
+      const body = document.querySelector(".comms-bubble-body") as HTMLElement;
+      const items = [...body.querySelectorAll("li")];
+      expect(items).toHaveLength(2);
+      expect(items.some((li) => /^\s*-/.test(li.textContent ?? ""))).toBe(false);
+      expect(within(items[0] as HTMLElement).getByRole("link", { name: "#12" })).toBeTruthy();
+      expect(items[1]?.querySelector("strong")?.textContent).toBe("bold");
+    });
+
     it("opens another ticket of the message's repo, not only its own", async () => {
       await open({ ...base, ref: null, text: "see #708" });
       const link = await screen.findByRole("link", { name: "#708" });

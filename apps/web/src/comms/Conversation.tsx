@@ -18,10 +18,11 @@ import {
   type FlightConversationPage,
   type FlightView,
 } from "@mc/core";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { messageStateLine, sendStateLine } from "../flight/conversation.ts";
@@ -43,7 +44,7 @@ import {
   ticketPath,
 } from "../router.ts";
 import { toast } from "../shell/Toast.tsx";
-import { CommsEnd, MentionText } from "./messages.tsx";
+import { CommsEnd, useTokenRenderer } from "./messages.tsx";
 import { type CommsView, noticeResource, ticketForRef, useNoticeResource } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
 
@@ -186,22 +187,22 @@ function MessageRefs({
   from: string;
   to: string;
 }) {
-  const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
-  const occurrences = new Map<string, number>();
-  return (
-    <>
-      {parts.map((part) => {
-        const n = occurrences.get(part) ?? 0;
-        occurrences.set(part, n + 1);
-        const key = `${part}:${n}`;
-        return /^(?:PR \d+|#\d+)$/.test(part) ? (
-          <RefChip key={key} refText={part} ticket={ticket} from={from} to={to} />
-        ) : (
-          <MentionText key={key} text={part} />
-        );
-      })}
-    </>
-  );
+  const tokens = useTokenRenderer();
+  // The whole message is parsed once as Markdown; each text run then has its references made chips.
+  const renderText = (run: string) => {
+    const occurrences = new Map<string, number>();
+    return run.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g).map((part) => {
+      const n = occurrences.get(part) ?? 0;
+      occurrences.set(part, n + 1);
+      const key = `${part}:${n}`;
+      return /^(?:PR \d+|#\d+)$/.test(part) ? (
+        <RefChip key={key} refText={part} ticket={ticket} from={from} to={to} />
+      ) : (
+        <Fragment key={key}>{tokens(part)}</Fragment>
+      );
+    });
+  };
+  return <Markdown text={text} renderText={renderText} />;
 }
 
 function Breadcrumb({ view }: { view: CommsView }) {
@@ -664,7 +665,9 @@ function MentionsBell({
                   {mention.message.to === COMMS_CREW ? "#crew" : "direct"} ·{" "}
                   {time(mention.message.at)}
                 </span>
-                <em>{mention.message.text}</em>
+                <em>
+                  <MarkdownInline text={mention.message.text} />
+                </em>
               </button>
             );
           })}

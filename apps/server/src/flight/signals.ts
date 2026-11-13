@@ -3,6 +3,7 @@ import {
   BLOCKING_SEVERITIES,
   COMMS_CAPCOM,
   COMMS_CONTROLLER,
+  FLIGHT_BUDGET_UNUSED_PCT,
   FLIGHT_CHAIN_STALL_MS,
   FLIGHT_CONTROLLER_WAIT_MS,
   FLIGHT_COST_DAYS,
@@ -10,6 +11,7 @@ import {
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
   FLIGHT_IDLE_NO_WORK_MS,
+  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_ITEM_RELAPSE_MS,
   FLIGHT_ITEM_STALE_MS,
   FLIGHT_LOOPS_SETTING,
@@ -37,11 +39,13 @@ import {
   STUCK_PARK,
   seatDef,
   WAITING_OPERATOR_LABEL,
+  WASTE_CHECK_TITLES,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
 import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
 import { ownsCard } from "../ownership.ts";
+import { openWasteAlarms } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 
 interface RecordState {
@@ -528,6 +532,27 @@ export function flightSignals(i: {
         `${seat.id} idle since ${new Date(since).toISOString()}; eligibleToStart queued ${work.repoId}#${work.issue}`,
       );
     }
+    // a free build seat idle for half an hour while its account has most of its week left
+    const account = session.seats.find((x) => x.id === seat.id)?.accountId;
+    const weekly = account === undefined ? null : store.latestUsage(account, "7d");
+    if (
+      seat.loop === "build" &&
+      seat.free &&
+      row?.state === "idle" &&
+      !seat.atStop &&
+      since !== undefined &&
+      now - since >= FLIGHT_IDLE_SEAT_WAKE_MS &&
+      weekly !== null &&
+      weekly.resetAt > now &&
+      weekly.pct < FLIGHT_BUDGET_UNUSED_PCT
+    ) {
+      raise(
+        "budget_unused",
+        `${seat.id}:${since}`,
+        since,
+        `${seat.id} idle since ${new Date(since).toISOString()} while ${account} has used ${Math.round(weekly.pct)}% of its week (resets ${new Date(weekly.resetAt).toISOString()}); the budget is going unused`,
+      );
+    }
     if (
       seat.loop === "build" &&
       seat.free &&
@@ -816,6 +841,18 @@ export function flightSignals(i: {
       if (closure?.by === "hub")
         raise("question_changed", `${id}:closed`, now, `${closure.key}: ${closure.reason}`);
     }
+  }
+  // a waste alarm wakes FLIGHT once: the signal keeps its told mark for as long as the alarm stands
+  for (const alarm of openWasteAlarms(store)) {
+    if (alarm.repoId !== repo) continue;
+    // a refused rerun is already fixed by the hook: Audit records it, FLIGHT is not woken
+    if (alarm.check === "unchanged-rerun") continue;
+    raise(
+      "waste_alarm",
+      String(alarm.id),
+      alarm.openedAt,
+      `${WASTE_CHECK_TITLES[alarm.check]}: ${alarm.evidence}`,
+    );
   }
   const loops = heartbeats(store).loops;
   for (const [source, loop] of Object.entries(loops)) {

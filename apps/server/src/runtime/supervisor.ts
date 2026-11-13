@@ -41,7 +41,6 @@ import { basename, dirname, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
   BLOCKING_SEVERITIES,
-  budgetBrakeText,
   CANNOT_START,
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
@@ -127,6 +126,8 @@ import {
   ticketInReviewText,
   ticketPathGrants,
   trimHookCommand,
+  wasteParkText,
+  wasteStormText,
   watchCheckoutName,
   watchStartRefusedText,
   wrapExternalText,
@@ -188,7 +189,7 @@ import {
   recordRunHandoff,
 } from "../run/handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
-import { budgetBrake } from "../spend/budget-brake.ts";
+import { restartHold, ticketParked } from "../spend/waste.ts";
 import {
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
@@ -672,7 +673,12 @@ export interface Supervisor {
    */
   startWatch(
     seatId: string,
-    opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
+    opts?: {
+      first?: string;
+      firstPieces?: readonly PromptPiece[];
+      /** The operator's explicit start (the dock): a restart-storm hold does not stop it. */
+      operator?: boolean;
+    },
   ): Promise<{ runId: string }>;
   /**
    * The live check of a CLI update (`cli-auto.ts`): starts one build seat of `vendor` that holds no
@@ -2174,6 +2180,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       resumedAt: resume && !transferState(run.id)?.pending ? Date.now() : null,
       spawnedAt: resume ? Date.now() : null,
     });
+    // a carry-on resume is recorded: three without a report is a retry loop (waste alarm)
+    if (l.resumedAt !== null) store.addResumeAttempt(run.id, l.resumedAt);
     // the resume window runs from the CLI's start, not from the keeper's: its own boot is not the CLI's
     if (resume) {
       void session.ready.then(() => {
@@ -3478,13 +3486,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       ) {
         throw new SupervisorError(422, AWAY_QUOTA_REFUSED);
       }
-      // The budget brake stops a new run; an operator's explicit start and a reader pass.
-      const brake = budgetBrake(config, store, info.seat.accountId, now());
-      if (brake !== null && !readOnly && !opts?.operator) {
-        throw new SupervisorError(
-          422,
-          budgetBrakeText(call(info), brake, config.operator.timezone),
-        );
+      // A waste alarm stops a loop: a seat in a restart storm, or a parked ticket. The operator's
+      // explicit start and FLIGHT's pass; a reader never competes for the ticket.
+      if (!readOnly && !opts?.operator) {
+        const storm = restartHold(store, info.seat.id);
+        if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
+        if (opts?.flight !== true) {
+          const parked = ticketParked(store, ref);
+          if (parked !== null) throw new SupervisorError(422, wasteParkText(ref, parked));
+        }
       }
       // A detached reader does not compete for the ticket or its assignee.
       const refusal = eligibleToStart({
@@ -3886,7 +3896,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startWatch(
     seatId: string,
-    opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
+    opts?: { first?: string; firstPieces?: readonly PromptPiece[]; operator?: boolean },
   ): Promise<{ runId: string }> {
     const { runId } = await startDetached(seatId, opts ?? {});
     return { runId };
@@ -3905,11 +3915,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       first?: string;
       firstPieces?: readonly PromptPiece[];
       check?: (checkout: string) => string;
+      operator?: boolean;
       /** Set once the check has got as far as invoking the new CLI (before that, a failure is not its). */
       stage?: { cli: boolean };
     },
   ): Promise<{ runId: string; worktree: string }> {
     const info = need(seatId);
+    // a seat in a restart storm is not started again (a CLI update's live check is not a restart)
+    if (opts.check === undefined && opts.operator !== true) {
+      const storm = restartHold(store, seatId);
+      if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
+    }
     const def = seatDef(info.seat);
     const check = opts.check;
     const unavailable = seatUnavailable(info.seat);
@@ -4247,6 +4263,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
     const info = need(seatId);
+    const storm = restartHold(store, seatId);
+    if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
     const def = seatDef(info.seat);
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);

@@ -39,6 +39,7 @@ import {
   seatCallSign,
   seatDef,
   type TicketView,
+  WASTE_HELD_PREFIX,
 } from "@mc/core";
 import { activeAway } from "../away.ts";
 import type { CardNow } from "../collectors/github.ts";
@@ -59,7 +60,7 @@ import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { budgetBrake } from "../spend/budget-brake.ts";
+import { restartHold, ticketParked } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { wakeDueAsideRun } from "./aside.ts";
 import { RepoRulesError } from "./rules.ts";
@@ -167,15 +168,19 @@ export const maxOpenRunsOf = (config: CcConfig): number =>
 
 /** The cards in the Ready column (a closed card is Done, never Ready), in the order picked. */
 function readyCards(store: Store, repoId: RepoId): BoardItem[] {
-  return store
-    .board(repoId)
-    .filter((c) => hudColumnOf(c) === "Ready")
-    .sort(
-      (a, b) =>
-        priorityRank(a.priority) - priorityRank(b.priority) ||
-        a.createdAt - b.createdAt ||
-        a.issueNumber - b.issueNumber,
-    );
+  return (
+    store
+      .board(repoId)
+      .filter((c) => hudColumnOf(c) === "Ready")
+      // a ticket a waste alarm parked is not dealt: FLIGHT takes the next
+      .filter((c) => ticketParked(store, refOf(repoId, c.issueNumber)) === null)
+      .sort(
+        (a, b) =>
+          priorityRank(a.priority) - priorityRank(b.priority) ||
+          a.createdAt - b.createdAt ||
+          a.issueNumber - b.issueNumber,
+      )
+  );
 }
 
 /**
@@ -514,6 +519,15 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
     store.dropQueued(seatId, repoId, issue);
     return;
   }
+  // a waste alarm holds this ticket or this seat: no note, nothing to fix on the card
+  if (ticketParked(store, ref) !== null) {
+    store.dropQueued(seatId, repoId, issue);
+    return;
+  }
+  if (restartHold(store, seatId) !== null) {
+    store.untake(seatId, repoId, issue);
+    return;
+  }
   const away = activeAway(store, deps.now(), config.operator.timezone);
   if (away) {
     const rules = await deps.rules(repoId);
@@ -618,7 +632,8 @@ export async function takeNext(deps: TakeDeps, seatId: string): Promise<void> {
       e instanceof SupervisorError &&
       (e.message === AWAY_START_REFUSED ||
         e.message === AWAY_QUOTA_REFUSED ||
-        e.message.startsWith(PACE_HELD_PREFIX))
+        e.message.startsWith(PACE_HELD_PREFIX) ||
+        e.message.startsWith(WASTE_HELD_PREFIX))
     ) {
       store.untake(seatId, repoId, issue);
       return;
@@ -727,8 +742,9 @@ export function awayQuotaReserve(
 }
 
 /**
- * Whether the account may not take on new work: at its usage stop, or its weekly projection has
- * the budget brake on. Only new deals and starts ask this; runs in progress and resumes do not.
+ * Whether the account may not take on new work: it is at its usage stop. Pace alone never holds
+ * work (the weekly projection is information only). Only new deals and starts ask this; runs in
+ * progress and resumes do not.
  */
 export function accountHoldsNewWork(
   config: CcConfig,
@@ -736,10 +752,7 @@ export function accountHoldsNewWork(
   accountId: string,
   at: number,
 ): boolean {
-  return (
-    accountAtStop(config, store, accountId, at) ||
-    budgetBrake(config, store, accountId, at) !== null
-  );
+  return accountAtStop(config, store, accountId, at);
 }
 
 const atQuotaStop = (deps: TakeDeps, accountId: string): boolean =>
