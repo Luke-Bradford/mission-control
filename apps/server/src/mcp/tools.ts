@@ -2552,6 +2552,8 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
           store,
           config,
           item: () => ({ repoId }),
+          // this lookup says "open" for every key, so it must never sweep
+          sweepOnUse: false,
           ...(deps.attentionMaterialsDir === undefined
             ? {}
             : { assetsDir: deps.attentionMaterialsDir }),

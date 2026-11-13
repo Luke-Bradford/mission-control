@@ -100,3 +100,8 @@ export interface AttentionStoryRegistration {
   sections: AttentionStoryInputSection[];
   optionImages?: { optionId: string; imagePaths: string[] }[];
 }
+
+/** `GET /api/attention/:key/materials`: every packet kept for the item, oldest first. */
+export interface AttentionMaterialsResponse {
+  packets: AttentionMaterials[];
+}

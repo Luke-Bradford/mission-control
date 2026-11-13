@@ -3002,8 +3002,9 @@ data. Registration reads committed Git blobs only: it never reads a checkout fil
 symlink, or downloads a link. The hub saves the complete Markdown and each linked PNG, JPEG or WebP
 (at most 2 MB each, 64 per packet; a larger file is refused by its committed size, before it is read) under a private, content-addressed asset id. Relative image
 links, including links in tables, resolve from the plan's directory at that commit. The returned
-Markdown rewrites those to `/api/attention-material-assets/:id`. Every other image embed (external,
-SVG, a reference-style `![x][r]`, a non-raster file) becomes a plain link or text, and raw HTML is
+Markdown rewrites those to `/api/attention-material-assets/:id`. Every other `![` (external,
+SVG, a non-raster file, a reference or shortcut form, spaces or brackets that break the usual
+syntax) loses its `!` and is a plain link or text, and raw HTML is
 made inert (`<` becomes `&lt;`), so nothing is fetched or run when it is shown.
 
 **Story.** FLIGHT attaches one with `attach_materials { key, sourceCommit, label, sections,
@@ -3020,11 +3021,12 @@ picture. The read returns `story` in order, with each image named by `imageId` i
 **Limits and retention.** A question may hold 24 MB of images in all its packets together; a
 registration past that is refused with a plain message. A repeat registration of the same input is
 the same packet and adds nothing. The hub deletes a question's images 30 days after it first sees the
-question closed (checked on each read, each registration and every hour; a preview hub
-skips the hourly pass); the packet then reads
+question closed (checked by the API on each read and registration, and every hour; a preview hub
+skips the hourly pass; a seat's `ask_flight` attaches pictures without checking, because it cannot tell which questions are closed); the packet then reads
 `imagesRemovedAt` and its image links answer 404, while the text stays.
 
-**Reading.** `GET /api/attention/:key/materials` returns the latest packet for the item and works after the
+**Reading.** `GET /api/attention/:key/materials` returns `{ packets }`, every packet kept for the item, oldest first (a plan, then a story
+attached later, each whole; `AttentionMaterialsResponse` in mc/core), answers 404 when there are none, and works after the
 question is rebriefed, held or closed. A held question still counts as open here: a hold never
 starts the retention window. `historical` is true, with `historicalReason` (`rebriefed`,
 `source changed`, `question closed` or `repository changed`), when the live item no longer matches

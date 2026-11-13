@@ -134,6 +134,9 @@ const REG = (commit: string) => ({
   sourcePath: "docs/p/README.md",
   label: "Layout",
 });
+/** The newest packet the service reads for an item. */
+const one = (service: ReturnType<typeof createAttentionMaterials>, key: string) =>
+  service.read(key).at(-1) ?? null;
 const AUTH = { "x-mc-operator": "secret" };
 const app = (
   store: Store,
@@ -176,7 +179,7 @@ describe("a retained plan", () => {
       headers: AUTH,
     });
     expect(got.statusCode).toBe(200);
-    const packet = got.json();
+    const packet = got.json().packets[0];
     const linked = packet.images.map((i: { url: string }) => i.url);
     expect(packet.markdown).toBe(
       PLAN.replace("before.png", linked[0]).replace("nested/after.png", linked[1]),
@@ -242,10 +245,10 @@ describe("a retained plan", () => {
     const h = harness(PACKET);
     const { service } = h.make();
     await service.register("k1", REG(h.commit));
-    expect(service.read("k2")).toBeNull();
+    expect(service.read("k2")).toEqual([]);
     const other = await service.register("k2", { ...REG(h.commit), label: "Other" });
-    expect(service.read("k1")?.label).toBe("Layout");
-    expect(service.read("k2")?.id).toBe(other.id);
+    expect(one(service, "k1")?.label).toBe("Layout");
+    expect(one(service, "k2")?.id).toBe(other.id);
   });
 
   it("changes no brief, hold or decision when it registers or reads", async () => {
@@ -275,7 +278,7 @@ describe("a retained plan", () => {
     const h = harness(PACKET);
     const { service } = h.make();
     await service.register("k1", REG(h.commit));
-    const read = () => service.read("k1");
+    const read = () => one(service, "k1");
     expect(read()).toMatchObject({ historical: false, historicalReason: null });
     h.state.item = { ...OPEN, brief: { ...OPEN?.brief, binding: { sourceRevision: "rev-2" } } };
     expect(read()).toMatchObject({ historical: true, historicalReason: "source changed" });
@@ -374,9 +377,9 @@ describe("a held question", () => {
     expect(
       (await server.inject({ method: "GET", url: "/api/attention/held" })).json(),
     ).toHaveLength(1);
-    expect((await get()).json()).toMatchObject({ historical: false, closedAt: null });
+    expect((await get()).json().packets[0]).toMatchObject({ historical: false, closedAt: null });
     at += (ATTENTION_MATERIAL_RETENTION_DAYS + 1) * DAY;
-    const later = (await get()).json();
+    const later = (await get()).json().packets[0];
     expect(later).toMatchObject({ historical: false, closedAt: null, imagesRemovedAt: null });
     expect(readdirSync(join(h.dir, "attention-material-assets"))).toHaveLength(2);
     expect((await post()).statusCode).toBe(201);
@@ -551,7 +554,7 @@ describe("a story in pictures", () => {
     const h = harness(files);
     const { service } = h.make();
     const saved = await service.attachStory("k1", story(h.commit));
-    const read = service.read("k1");
+    const read = one(service, "k1");
     expect(read?.id).toBe(saved.id);
     expect(read?.sourcePath).toBeNull();
     const top = first(read?.story);
@@ -671,12 +674,12 @@ describe("retention", () => {
     expect(service.asset(id)).not.toBeNull();
     h.state.item = null;
     h.state.at = 5000;
-    expect(service.read("k1")).toMatchObject({ closedAt: 5000, imagesRemovedAt: null });
+    expect(one(service, "k1")).toMatchObject({ closedAt: 5000, imagesRemovedAt: null });
     h.state.at = 5000 + (ATTENTION_MATERIAL_RETENTION_DAYS - 1) * DAY;
     service.sweep();
     expect(service.asset(id)).not.toBeNull();
     h.state.at = 5000 + ATTENTION_MATERIAL_RETENTION_DAYS * DAY;
-    const read = service.read("k1");
+    const read = one(service, "k1");
     expect(read?.imagesRemovedAt).toBe(h.state.at);
     expect(read?.markdown).toContain("/api/attention-material-assets/");
     expect(service.asset(id)).toBeNull();
@@ -705,8 +708,8 @@ describe("retention", () => {
     h.state.at = 10 + ATTENTION_MATERIAL_RETENTION_DAYS * DAY;
     both.sweep();
     expect(readdirSync(h.assets)).toHaveLength(2);
-    expect(both.read("k1")?.imagesRemovedAt).toBe(h.state.at);
-    expect(both.read("k2")?.imagesRemovedAt).toBeNull();
+    expect(one(both, "k1")?.imagesRemovedAt).toBe(h.state.at);
+    expect(one(both, "k2")?.imagesRemovedAt).toBeNull();
   });
 });
 
@@ -777,4 +780,178 @@ it("imports the full retained layout packet from a self-contained Git fixture", 
     const original = expected.referencedImages.find((ref) => image.path.endsWith(`/${ref.path}`));
     expect(image.sha256).toBe(original?.sha256);
   }
+});
+
+describe("embeds that slip past a pattern", () => {
+  it("makes every image form but a retained one a plain link", async () => {
+    const h = harness({
+      "docs/p/README.md": [
+        "![space]( https://evil.example/space.png )",
+        "![nested [b] alt](https://evil.example/nested.png)",
+        "![shortcut]",
+        "![ok](shot.png)",
+        "[shortcut]: https://evil.example/shortcut.png",
+      ].join("\n"),
+      "docs/p/shot.png": png("shot"),
+    });
+    const { service } = h.make();
+    const p = await service.register("k1", REG(h.commit));
+    expect(p.markdown.match(/!\[[^\]]*\]\((?!\/api\/attention-material-assets\/)/g)).toBeNull();
+    expect(p.markdown).not.toMatch(/!\[shortcut\](?!\()/);
+    expect(p.markdown).not.toContain("![space]");
+    expect(p.markdown).not.toContain("![nested");
+    expect(p.markdown).toContain("[space]( https://evil.example/space.png )");
+    expect(p.markdown).toMatch(/!\[ok\]\(\/api\/attention-material-assets\/[a-f0-9]{64}\)/);
+    expect(p.images).toHaveLength(1);
+  });
+});
+
+describe("one item, several packets", () => {
+  it("reads a plan and a story attached after it, oldest first, the plan whole", async () => {
+    const h = harness({
+      ...PACKET,
+      "docs/s/a.png": png("optionA"),
+      "docs/s/b.png": png("optionB"),
+    });
+    const { service } = h.make();
+    const plan = await service.register("k1", REG(h.commit));
+    h.state.at += 1000;
+    await service.attachStory("k1", {
+      repoId: "sample",
+      sourceCommit: h.commit,
+      label: "Pictures",
+      sections: [
+        {
+          heading: "Which?",
+          images: [
+            { path: "docs/s/a.png", caption: "A" },
+            { path: "docs/s/b.png", caption: "B" },
+          ],
+          comparison: "options",
+        },
+      ],
+    });
+    const read = service.read("k1");
+    expect(read.map((p) => p.label)).toEqual(["Layout", "Pictures"]);
+    expect(read[0]?.markdown).toBe(plan.markdown);
+    expect(read[0]?.markdown.length).toBeGreaterThan(0);
+    expect(read[1]?.story).not.toBeNull();
+    // two packets stored in the same millisecond still read in the order they were saved
+    h.state.at += 0;
+    await service.register("k1", { ...REG(h.commit), label: "Second plan" });
+    await service.register("k1", { ...REG(h.commit), label: "Third plan" });
+    expect(
+      service
+        .read("k1")
+        .slice(2)
+        .map((p) => p.label),
+    ).toEqual(["Second plan", "Third plan"]);
+  });
+
+  it("answers the route with every packet", async () => {
+    const h = harness(PACKET);
+    const { store, service } = h.make();
+    const server = app(store, service);
+    await service.register("k1", REG(h.commit));
+    await service.register("k1", { ...REG(h.commit), label: "Again" });
+    const got = await server.inject({
+      method: "GET",
+      url: "/api/attention/k1/materials",
+      headers: AUTH,
+    });
+    expect(got.json().packets.map((p: { label: string }) => p.label)).toEqual(["Layout", "Again"]);
+    await server.close();
+  });
+});
+
+describe("a service that cannot tell open from closed", () => {
+  it("never restarts the retention clock of a closed question", async () => {
+    const h = harness(PACKET);
+    const { store, service } = h.make();
+    const saved = await service.register("k1", REG(h.commit));
+    const [kept, gone] = [saved.images[0]?.id ?? "", saved.images[1]?.id ?? ""];
+    h.state.item = null;
+    h.state.at = 1000;
+    service.sweep();
+    expect(one(service, "k1")?.closedAt).toBe(1000);
+    // ask_flight's service answers "open" for every key, and must not sweep
+    const asking = createAttentionMaterials({
+      store,
+      config: CONFIG,
+      item: () => ({ repoId: "sample" }),
+      sweepOnUse: false,
+      checkout: () => h.checkout,
+      assetsDir: h.assets,
+      now: () => h.state.at,
+    });
+    h.state.at = 1000 + (ATTENTION_MATERIAL_RETENTION_DAYS - 1) * DAY;
+    await asking.attachStory("ask:9", {
+      repoId: "sample",
+      sourceCommit: h.commit,
+      label: "Seat pictures",
+      sections: [{ heading: "Now", images: [{ path: "docs/p/before.png", caption: "Today" }] }],
+    });
+    asking.read("ask:9");
+    expect(store.attentionMaterialsAllForItem("k1")[0]?.closedAt).toBe(1000);
+    h.state.at = 1000 + ATTENTION_MATERIAL_RETENTION_DAYS * DAY;
+    service.sweep();
+    expect(store.attentionMaterialsAllForItem("k1")[0]?.imagesRemovedAt).toBe(h.state.at);
+    // the seat's own packet still holds before.png, so only the other file goes
+    expect(existsSync(join(h.assets, kept))).toBe(true);
+    expect(existsSync(join(h.assets, gone))).toBe(false);
+  });
+});
+
+const REAL_COMMIT = "33230f9ef1371e9e7d99ebcf3adbf92cfdecfdc2";
+const REAL_PATH = "docs/reviews/2026-11-10/comms-1513-proposal/README.md";
+const REPO_ROOT = join(dirname(new URL(import.meta.url).pathname), "../../..");
+const realCommitHere = (() => {
+  try {
+    execFileSync("git", ["-C", REPO_ROOT, "cat-file", "-e", `${REAL_COMMIT}^{commit}`], {
+      stdio: "ignore",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+describe("the real layout packet", () => {
+  // a shallow clone may not hold the commit; then there is nothing to import
+  it.skipIf(!realCommitHere)(
+    "imports the real README at commit 33230f9 with its linked PNGs",
+    async () => {
+      const dir = mkdtempSync(join(tmpdir(), "materials-real-commit-"));
+      dirs.push(dir);
+      const store = new Store(join(dir, "mc.sqlite"));
+      stores.push(store);
+      const service = createAttentionMaterials({
+        store,
+        config: CONFIG,
+        item: () => OPEN,
+        checkout: () => REPO_ROOT,
+        assetsDir: join(dir, "assets"),
+        now: () => 1000,
+      });
+      const p = await service.register("k1", {
+        repoId: "sample",
+        sourceCommit: REAL_COMMIT,
+        sourcePath: REAL_PATH,
+        label: "Comms layout proposal",
+      });
+      expect(p.images).toHaveLength(17);
+      expect(p.markdown).not.toContain("comms-before-1600x1000-dark.png");
+      for (const image of p.images) {
+        const real = execFileSync("git", [
+          "-C",
+          REPO_ROOT,
+          "cat-file",
+          "blob",
+          `${REAL_COMMIT}:${image.path}`,
+        ]);
+        expect(service.asset(image.id)?.bytes).toEqual(real);
+        expect(p.markdown).toContain(image.url);
+      }
+    },
+  );
 });

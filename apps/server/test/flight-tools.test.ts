@@ -11832,7 +11832,7 @@ describe("attach_materials", () => {
       headers,
     });
     expect(res.statusCode).toBe(200);
-    const packet = res.json();
+    const packet = res.json().packets[0];
     expect(packet.sourcePath).toBeNull();
     expect(packet.story[0].heading).toBe("This page");
     expect(packet.story[0].children[0]).toMatchObject({

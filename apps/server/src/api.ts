@@ -11,6 +11,7 @@ import {
   API_PREFIX,
   type AttentionCompactItem,
   type AttentionItem,
+  type AttentionMaterialsResponse,
   type AuditRunKind,
   AWAY_SETTING,
   type AwaySettings,
@@ -6440,8 +6441,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
         )
           return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
-        const packet = attentionMaterials.read(req.params.key);
-        return packet ?? reply.code(404).send({ error: "No retained materials for this item." });
+        const packets = attentionMaterials.read(req.params.key);
+        if (packets.length === 0)
+          return reply.code(404).send({ error: "No retained materials for this item." });
+        const body: AttentionMaterialsResponse = { packets };
+        return body;
       });
       // Reader: apps/web/src/pages/Needs.tsx (authenticated raster image in a retained packet; planned #1705)
       api.get<{ Params: { id: string } }>("/attention-material-assets/:id", async (req, reply) => {

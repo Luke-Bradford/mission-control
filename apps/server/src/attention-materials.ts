@@ -31,8 +31,9 @@ const DOC_MARKDOWN = /^docs\/(?:[^/]+\/)*[^/]+\.md$/i;
 const RELATIVE_PATH = /^(?!\/)(?!.*(?:^|\/)\.\.?\/)(?!.*%)(?:[^/]+\/)*[^/]+$/;
 /** `![alt](dest "title")`, `[text](dest)`; the destination may be `<...>` wrapped. */
 const MARKDOWN_LINK = /(!?)\[([^\]]*)\]\((?:<([^>]*)>|([^)\s]+))(?:\s+[^)]*)?\)/g;
-/** Reference-style image use: `![alt][ref]`. */
-const REFERENCE_IMAGE = /!(\[[^\]]*\]\[[^\]]*\])/g;
+/** Marks the image embeds the rewrite itself emits; every other `![` is then made a link. */
+const EMBED_MARK = "\u0000";
+const IMAGE_OPEN = /!\[/g;
 /** The start of raw HTML (`<img`, `</x`, `<!--`) is made inert text, never an element. */
 const RAW_HTML = /<(?=[a-zA-Z/!?])/g;
 const RASTER_EXT = /\.(?:png|jpe?g|webp)$/i;
@@ -53,7 +54,6 @@ export class AttentionMaterialsError extends Error {
 type SavedStore = Pick<
   Store,
   | "attentionMaterials"
-  | "attentionMaterialsForItem"
   | "attentionMaterialsAllForItem"
   | "attentionMaterialsHeld"
   | "markAttentionMaterials"
@@ -72,9 +72,13 @@ type GitBlob = (checkout: string, commit: string, path: string, limit?: number) 
 export interface AttentionMaterialsService {
   register(itemKey: string, input: AttentionMaterialRegistration): Promise<AttentionMaterials>;
   attachStory(itemKey: string, input: AttentionStoryRegistration): Promise<AttentionMaterials>;
-  read(itemKey: string): AttentionMaterials | null;
+  /** Every packet kept for the item, oldest first; empty when there are none. */
+  read(itemKey: string): AttentionMaterials[];
   asset(id: string): { bytes: Buffer; mediaType: AttentionMaterialImage["mediaType"] } | null;
-  /** Marks closed questions, and deletes the images of those closed past the retention window. */
+  /**
+   * Marks closed questions, and deletes the images of those closed past the retention window.
+   * Only a service whose `item` lookup knows every open item may sweep.
+   */
   sweep(): void;
 }
 
@@ -180,12 +184,18 @@ export function createAttentionMaterials(i: {
   store: SavedStore;
   config: CcConfig;
   item: (key: string) => Item;
+  /**
+   * Sweep on each read and registration. Off for a service whose `item` lookup cannot tell an
+   * open question from a closed one (a seat's ask_flight): it would reopen every closed packet.
+   */
+  sweepOnUse?: boolean;
   checkout?: (repoId: string) => string | undefined;
   git?: GitBlob;
   assetsDir?: string;
   now?: () => number;
 }): AttentionMaterialsService {
   const now = i.now ?? Date.now;
+  const sweepOnUse = i.sweepOnUse ?? true;
   const checkout =
     i.checkout ?? ((repoId) => i.config.crew?.sessions.find((s) => s.repoId === repoId)?.checkout);
   const read = i.git ?? committedBlob;
@@ -385,9 +395,15 @@ export function createAttentionMaterials(i: {
           "Plan image path must stay within the packet directory.",
         );
       const image = await images.load(path, label);
-      output += embed ? `![${text}](${image.url})` : `[${text}](${image.url})`;
+      output += `${embed ? EMBED_MARK : ""}[${text}](${image.url})`;
     }
-    return (output + source.slice(offset)).replace(REFERENCE_IMAGE, "$1").replace(RAW_HTML, "&lt;");
+    // Any `![` the patterns above did not turn into a retained image (a space inside the
+    // parentheses, brackets in the alt text, a `![x]` shortcut or `![x][r]` reference) loses its
+    // `!` and is a plain link; only the embeds emitted above get theirs back.
+    return (output + source.slice(offset))
+      .replace(IMAGE_OPEN, "[")
+      .replaceAll(EMBED_MARK, "!")
+      .replace(RAW_HTML, "&lt;");
   };
 
   const storyPaths = (input: AttentionStoryRegistration): string[] => {
@@ -442,7 +458,7 @@ export function createAttentionMaterials(i: {
           "The source path must be a Markdown file under docs/.",
         );
       const item = precheck(itemKey, input.repoId, input.sourceCommit);
-      sweep();
+      if (sweepOnUse) sweep();
       const id = packetId(itemKey, [
         input.repoId,
         input.sourceCommit,
@@ -485,7 +501,7 @@ export function createAttentionMaterials(i: {
       input: AttentionStoryRegistration,
     ): Promise<AttentionMaterials> {
       const item = precheck(itemKey, input.repoId, input.sourceCommit);
-      sweep();
+      if (sweepOnUse) sweep();
       const paths = storyPaths(input);
       const optionIds = new Set((item.brief?.options ?? []).flatMap((o) => (o.id ? [o.id] : [])));
       for (const option of input.optionImages ?? []) {
@@ -571,10 +587,9 @@ export function createAttentionMaterials(i: {
       i.store.putAttentionMaterials(packet);
       return packet;
     },
-    read(itemKey: string): AttentionMaterials | null {
-      sweep();
-      const packet = i.store.attentionMaterialsForItem(itemKey);
-      return packet ? view(packet) : null;
+    read(itemKey: string): AttentionMaterials[] {
+      if (sweepOnUse) sweep();
+      return i.store.attentionMaterialsAllForItem(itemKey).map(view);
     },
     asset(id: string): { bytes: Buffer; mediaType: AttentionMaterialImage["mediaType"] } | null {
       if (!/^[a-f0-9]{64}$/.test(id)) return null;

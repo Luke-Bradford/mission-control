@@ -1217,10 +1217,31 @@ describe("ask_flight", () => {
         },
       ],
     });
+    // a closed question's packet: the seat's ask must not restart its retention clock
+    store.putAttentionMaterials({
+      id: "closed-one",
+      itemKey: "note:gone",
+      repoId: "mc",
+      sourceCommit: commit,
+      sourcePath: null,
+      label: "Old",
+      registeredAt: 1,
+      briefId: null,
+      sourceRevision: null,
+      markdown: "",
+      images: [],
+      story: null,
+      optionImages: [],
+      historical: false,
+      historicalReason: null,
+      closedAt: 500,
+      imagesRemovedAt: null,
+    });
     const asked = await ask({ question: "Which header?", materials: materials("docs/s/now.png") });
+    expect(store.attentionMaterials("closed-one")?.closedAt).toBe(500);
     expect(asked).toEqual({ text: ASKED_FLIGHT });
     const [question] = store.openQuestions();
-    const packet = store.attentionMaterialsForItem(`ask:${question?.id}`);
+    const packet = store.attentionMaterialsAllForItem(`ask:${question?.id}`).at(-1);
     expect(packet).toMatchObject({
       repoId: "mc",
       sourceCommit: commit,

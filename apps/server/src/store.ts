@@ -5141,21 +5141,12 @@ export class Store {
     return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
   }
 
-  attentionMaterialsForItem(itemKey: string): AttentionMaterials | null {
-    const row = this.db
-      .prepare(
-        "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') DESC, id DESC LIMIT 1",
-      )
-      .get(itemKey) as { packet: string } | undefined;
-    return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
-  }
-
-  /** Every packet saved for one item, newest first; the per-question image cap sums over them. */
+  /** Every packet saved for one item, oldest first; the per-question image cap sums over them. */
   attentionMaterialsAllForItem(itemKey: string): AttentionMaterials[] {
     return (
       this.db
         .prepare(
-          "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') DESC, id DESC",
+          "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') ASC, rowid ASC",
         )
         .all(itemKey) as { packet: string }[]
     ).map((row) => JSON.parse(row.packet) as AttentionMaterials);
