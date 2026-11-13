@@ -161,6 +161,46 @@ export function recommendationRows(db: Db, repo: string, openAt?: number): Recom
       .all(repo, ...(openAt === undefined ? [] : [openAt])) as Record<string, unknown>[]
   ).map(decode);
 }
+/** Decided proposals (accepted or assessed), newest first, for the first screen's history. */
+export function decidedRecommendationRows(
+  db: Db,
+  repo: string,
+  limit: number,
+): RecommendationRecord[] {
+  return (
+    db
+      .prepare(
+        `SELECT * FROM code_health_recommendations WHERE repo_id=?
+         AND json_extract(state,'$.kind') IN ('accepted','paid-off','no-effect')
+         ORDER BY updated_at DESC,id LIMIT ?`,
+      )
+      .all(repo, limit) as Record<string, unknown>[]
+  ).map(decode);
+}
+/** Counts by state over every stored row; an open proposal that no longer applies is not counted. */
+export function recommendationFunnel(db: Db, repo: string): { kind: string; count: number }[] {
+  return (
+    db
+      .prepare(
+        `SELECT json_extract(state,'$.kind') AS kind, COUNT(*) AS count FROM code_health_recommendations
+         WHERE repo_id=? AND (active=1 OR json_extract(state,'$.kind') != 'proposed')
+         GROUP BY kind ORDER BY kind`,
+      )
+      .all(repo) as { kind: string; count: number }[]
+  ).map((row) => ({ kind: String(row.kind), count: Number(row.count) }));
+}
+/** Counts of stored re-measure results by change, over every accepted row. */
+export function remeasureCounts(db: Db, repo: string): Record<Remeasure["change"], number> {
+  const counts = { improved: 0, unchanged: 0, worse: 0, unmeasured: 0 };
+  for (const row of db
+    .prepare(
+      `SELECT json_extract(remeasure,'$.change') AS change, COUNT(*) AS count FROM code_health_recommendations
+       WHERE repo_id=? AND remeasure IS NOT NULL GROUP BY change`,
+    )
+    .all(repo) as { change: keyof typeof counts; count: number }[])
+    if (row.change in counts) counts[row.change] = Number(row.count);
+  return counts;
+}
 export function recommendationRow(db: Db, repo: string, id: string): RecommendationRecord | null {
   const row = db
     .prepare("SELECT * FROM code_health_recommendations WHERE repo_id=? AND id=?")

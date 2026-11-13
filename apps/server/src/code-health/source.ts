@@ -30,6 +30,7 @@ export function installCodeHealthRevisions(db: Db): void {
   )`);
   const tables = [
     ["code_health_recommendations", "direct"],
+    ["code_health_merged_reviews", "direct"],
     ["code_health_test_reports", "direct"],
     ["code_health_test_attempts", "direct"],
     ["code_health_test_qa", "direct"],
