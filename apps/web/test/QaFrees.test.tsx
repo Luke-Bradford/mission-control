@@ -37,9 +37,9 @@ it("says what waits on other work when nothing is freed outright", () => {
   expect(screen.getByText("1 more also wait on other work")).toBeTruthy();
 });
 
-it("says no recorded work waits when there is no chain", () => {
-  render(<FreesLine chain={undefined} repoId="a" />);
-  expect(screen.getByText("No recorded work waits on this PR.")).toBeTruthy();
+it("shows nothing when there is no chain", () => {
+  const { container } = render(<FreesLine chain={undefined} repoId="a" />);
+  expect(container.textContent).toBe("");
 });
 
 it("finds a PR's chain by its number or its ticket, in its own repo", () => {

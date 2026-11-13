@@ -224,7 +224,8 @@ export function wasteScan(config: CcConfig, store: Store, now: number): WasteFin
     const hours = Math.floor((now - w.since) / HOUR_MS);
     out.push({
       check: "clearance-waiting",
-      subject: w.runId,
+      // per head: resolving one head's alarm must not hold back the next head's
+      subject: `${w.runId}@${w.head}`,
       repoId: w.repoId,
       ticket: w.ticket,
       seatId: w.agentId,

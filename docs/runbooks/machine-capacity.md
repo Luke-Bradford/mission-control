@@ -25,6 +25,14 @@ Configure the limits below `crew.machine_capacity` in `config.yaml` (all values 
 - `swap_used_pct: 60` is measured against physical RAM, never the macOS swap-file size. It
   blocks with `memory_free_pct: 10` when both floors are crossed; swap alone blocks above 90% of
   RAM. `load_per_core: 1.5` sets the other floor.
+- Two fixed stops (#1812), for the fault where the file-change service (`fseventsd`) swells and
+  pushes memory into swap: swap used over 85% of the swap file when that swap is also over 50%
+  of RAM (a small swap file that is nearly full is normal and does not block), and `fseventsd`
+  holding over 2 GB. The second reads its memory with compressed pages counted (`top`, run with
+  `pgrep` beside `ps` when the spawns above run), because `ps` RSS leaves compressed pages out.
+  The Needs-you item then says to run `sudo killall fseventsd` (about 15 seconds, no Mac
+  restart). At start the hub also writes `.metadata_never_index` into the crew worktrees folder
+  and the evidence folders so Spotlight stays out of them.
 - `load_window_min: 5` requires sustained load; `clear_after_min: 5` avoids start/stop churn.
 
 The dashboard API's `/api/machine` response includes the latest disk and swap readings and a

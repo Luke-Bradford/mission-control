@@ -253,6 +253,10 @@ export const notInSessionText = (seat: string): string =>
 export const BRIEF_OPTIONS_MIN = 2;
 export const BRIEF_OPTIONS_MAX = 4;
 export const BRIEF_LABEL_MAX = 80;
+/** What attach_materials does, for FLIGHT's tool list. */
+export const ATTACH_MATERIALS_DESCRIPTION =
+  "Attach a story told in pictures to a question's Needs-you item (an ask:<id> item for a seat's question), from images committed to its repository: sections in order, each with a heading, a short text and images that each carry a caption; a section may hold child sections (up to four deep); a section marked comparison (before-after or options) shows its two or more images side by side. optionImages names the images that show a brief option, by the option's id, so a choice can be made by picking a picture. Give the full 40-character sourceCommit the images are committed at; paths are repo-relative PNG, JPEG or WebP files of at most 2 MB. The hub keeps its own copy, up to 24 MB per question. Attaching changes no option, approval or hold.";
+
 /** The longest text `brief_item` takes; stored whole; labels are limited separately to BRIEF_LABEL_MAX. */
 export const BRIEF_INPUT_MAX = 8000;
 export const BRIEF_KEY_MAX = 500;

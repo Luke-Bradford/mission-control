@@ -69,6 +69,23 @@ Re-measuring never ends the work; `assess` stays a manual, evidence-backed decis
 The recommendation history reply also carries `groups`: one-per-PR proposals (repeated review rounds)
 with the same rule and cause (the PR's most common finding category) read as one group listing each PR.
 
+**Audit first-screen summary.** `GET /api/code-health/overview?repo=&window=` (operator token) returns the
+whole first screen in one reply: verdict, ranked proposals (without evidence references; the evidence
+drawer stays on `/api/code-health`), figures, outside sources, waste alarms, merged-per-day and rework,
+findings per touch, and the proposal funnel and outcomes. Each figure carries unit, window, comparison
+(the equal window before), source, coverage and last update. Definitions: merged-per-day uses the stored
+merge time and keeps "no hub review record" apart from rounds 1, 2 and 3 or more; rework is the share of
+reviewed PRs reaching round 2, with the reviewed count as denominator; findings per touch counts a finding
+once per PR, file, category, summary and fix, only for PRs merged in the window (an open PR's
+findings are left out), over those merged PRs that changed that exact path, and zero
+touches is null (undefined), not 0; the funnel counts every stored proposal in SQL, not the newest 200;
+after-date results come only from stored remeasure records; a PR with a run whose cost is not recorded
+(for example Codex) is left out of the median cost and counted as unpriced, never as free. Outside sources
+read "not collected" and waste alarms "not available" until those parts exist. The summary is stored in
+`code_health_overview`, one row per repo and window, and served while the code-health source revision is
+unchanged and the row is under 10 minutes old; a new hub process serves the stored row without rebuilding.
+The hub emits the `health` topic only when a rebuild changes the content shown (`summaryRevision`).
+
 Granted read-only FLIGHT/FAO sessions can call `mc code_health` with tab, optional window,
 issued evidence/cursor, or a recommendation ID. The authenticated session repo bounds every
 read. Tool responses use the same reader and credential cleaning as HTTP. Stored evidence and
@@ -271,7 +288,7 @@ review data includes its PR, head and waiting reason even when the reviewer cann
 The hub posts `mc/review` and a report comment containing the SHA, findings and recorded checks and
 tests. It links the available before/after screenshot manifest for that head, or states that no pairs
 were captured. Web changes require the configured screenshot gate before queueing. Evidence uses
-isolated previews and copied data; it never reconstructs a historical approval. Which pages a web change is photographed on comes from the static imports of the PR head's
+isolated previews and copied data; it never reconstructs a historical approval. Each affected page is also rendered on the head alone in the web app's Demo mode at 1920×940 and 2560×1145 (the Demo scene at its busiest), stored beside the live pairs and linked in the PR body; a Demo render that fails keeps the PR in draft like a live one. Which pages a web change is photographed on comes from the static imports of the PR head's
 `apps/web/src`: each file in `pages/` is a page (a lazy `import()` of it is the boundary), what
 `main.tsx` and `App.tsx` reach counts for every page, and CSS belongs to the file that imports it.
 A file listed with no photographed pages needs no pairs (for example, one reached only by the unphotographed Ticket page). A file the graph does not list, or a graph that cannot be read, falls back to the folder rule. Graph reads use a temporary archive of the fetched head, share one read per head, retry after failure and are cancelled on shutdown. A reviewer run is
@@ -2773,6 +2790,10 @@ If that requested start fails, one outage alert says the message is saved; provi
 stay out of that alert. Waiting crew questions stay with FLIGHT rather than becoming extra
 operator questions.
 
+## A ticket whose seat hits its account's stop
+
+A seat is never the one that waits. Each engine cycle (`engine/account-release.ts`), a build seat that sits idle at its account's usage stop with an unfinished run has that run ended; its branch, PR and handoff notes stay. The ticket records a wait (`ticket_waits`: the reason and what frees it, shown on `GET /api/boards/:repoId` as `waiting`, with no owner). In the same cycle a free seat in the ticket's area on an account that is under its stop resumes the ticket on the same branch and PR, and the wait is cleared. With no such seat the ticket keeps its wait and is offered again each cycle, so it clears as soon as any account in the area can work (including the original one when its window resets). A seat in the middle of a turn finishes it first.
+
 ## FLIGHT's fresh session
 
 FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (150K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
@@ -3015,6 +3036,47 @@ keep their permission checks.
   them keep 365.
 
 
+### Retained Needs-you materials
+
+A Needs-you item can keep two kinds of display material, each tied to a named commit of a
+configured repository: a **plan** (a Markdown file with its images) and a **story** (sections of
+text and captioned pictures). Neither changes a brief, option, approval, hold or decision receipt.
+
+**Plan.** `POST /api/attention/:key/materials` registers one. The body names `repoId`, a full
+40-character `sourceCommit`, a Markdown `sourcePath` below `docs/`, and a human `label`. The item must
+belong to that repository. Preview hubs refuse registration (409) because they do not write loop
+data. Registration reads committed Git blobs only: it never reads a checkout file, follows a
+symlink, or downloads a link. The hub saves the complete Markdown and each linked PNG, JPEG or WebP
+(at most 2 MB each, 64 per packet; a larger file is refused by its committed size, before it is read) under a private, content-addressed asset id. Relative image
+links, including links in tables, resolve from the plan's directory at that commit. The returned
+Markdown rewrites those to `/api/attention-material-assets/:id`. Every other `![` (external,
+SVG, a non-raster file, a reference or shortcut form, spaces or brackets that break the usual
+syntax) loses its `!` and is a plain link or text, and raw HTML is
+made inert (`<` becomes `&lt;`), so nothing is fetched or run when it is shown.
+
+**Story.** FLIGHT attaches one with `attach_materials { key, sourceCommit, label, sections,
+optionImages? }` (a seat's question is the item `ask:<id>`). A seat's `ask_flight` carries no
+materials; only FLIGHT attaches them. Each section has a `heading`, a short
+`text`, `images` (repo-relative PNG, JPEG or WebP paths, each with a `caption`), optional child
+`sections` (up to four deep, 40 sections in all) and an optional `comparison` (`before-after` or
+`options`; needs two or more images) so the page shows its images side by side. `optionImages` lists,
+by a brief option's `id`, the images that show that option, so a choice can be made by picking a
+picture. The read returns `story` in order, with each image named by `imageId` in `images[]`.
+
+**Limits.** A question may hold 24 MB of images in all its packets together; a
+registration past that is refused with a plain message. A repeat registration of the same input is
+the same packet and adds nothing. The hub keeps what it stored and deletes nothing here; clearing
+old images from disk is the housekeeping job's.
+
+**Reading.** `GET /api/attention/:key/materials` returns `{ packets }`, every packet kept for the item, oldest first (a plan, then a story
+attached later, each whole; `AttentionMaterialsResponse` in mc/core), answers 404 when there are none, and works after the
+question is rebriefed, held or closed. `historical` is true, with `historicalReason` (`rebriefed`,
+`source changed`, `question closed` or `repository changed`), when the live item no longer matches
+the packet's brief id, source revision or repository, or its brief is stale.
+`GET /api/attention-material-assets/:id` returns the retained raster bytes. All three routes need
+the normal operator token. These materials are provenance for display, not a current approval or
+source binding.
+
 ### Clearing a Needs-you item
 
 `POST /api/attention/:key/clear` with an empty body returns `{ cleared: key }`. The operator or
@@ -3032,3 +3094,18 @@ FLIGHT can withdraw its own brief from a protected item. This retains the underl
 source and protections; the original brief remains in history. Its unfinished-wake reminder stays
 in FLIGHT's wake and is omitted from operator attention. Answered and superseded note briefs
 are excluded from the current projection.
+
+## Disk housekeeping
+
+The hub removes its own finished work so its data folder stops growing (#1756). Once an hour (and two minutes after boot) on the live hub, `apps/server/src/disk/sweep.ts` runs one sweep and logs `disk sweep: removed N item(s), B bytes, from the data folder` when it removed anything.
+
+- **Pictures and evidence only while a PR is open.** A PR's `pr-evidence/<repo>/<pr>` folder, its QA report images (`qa-report-assets`) its review screenshots (`review-screenshots`) and the pictures attached to a Needs-you question (`attention-material-assets`, until the question is answered or closed) are removed once the PR is no longer open and its files have sat untouched for an hour. The QA history keeps its text record; its picture links then stop resolving.
+- **Scratch is temporary.** Every folder (plain files, such as the controller monitor's state, are left) under the data folder's `controller/` (except `controller/designs`) and under `pr-evidence-work/` that has been untouched for 3 days is removed.
+- **Only inside the data folder.** The sweep never follows a symlink and never removes a path that resolves outside the data folder. It does not touch observed loops or their worktrees.
+- **What the hub holds.** `GET /api/disk-use` returns bytes by kind: `worktrees` (the crew's worktree folder), `pictures`, `evidence`, `scratch`, `database`, and their `total`. It is measured at most once a minute.
+
+- **One cap.** The hub's budget is 10 GB (`MC_DISK_BUDGET_GB` overrides it), counted over the data folder (worktrees are the tidy's). Over it, the same sweep removes idle scratch (untouched for a day) oldest first, and logs `disk budget: ...` naming what the hub holds by kind. It never removes an open PR's evidence, a QA image or review shot an open PR cites, or scratch touched in the last day (a running preview or capture); when only that is left it logs `only open or in-use work is left` and stops. The disk flag ("Machine headroom is tight") adds `The hub holds: worktrees ..., scratch ..., evidence ..., pictures ..., database ...` when the disk is what is tight.
+- **No stalls.** The sweep, the sizes and the deletes use async file calls, and one measurement (cached for a minute) serves `/api/disk-use`, the sweep and the flag.
+- **Crew worktrees.** Every 10 minutes (where the engine runs) the crew tidy looks at runs from the last 30 days. For an ended run, if the branch's PR has merged or closed, or its ticket is Done or closed on GitHub (PR or not), the clean worktree is removed (the branch stays). A run set aside at review (not ended, no seat running it) keeps its worktree but loses `node_modules`, so it stays small; waking it reinstalls them under the clone lock before the CLI launches. The checks and the removal run under the clone lock, and a worktree a run is starting in (the supervisor marks it from the checkout, or a wake's reinstall, until the seat's session points at it) is never touched. A dirty worktree, a live run's, one a seat still holds and one with a checkout being prepared are left alone. The log line is `worktree tidy: removed N worktree(s), trimmed M node_modules`.
+
+Not built yet: a budget key in `config.yaml`, and the Mac panel's disk view (it reads `/api/disk-use`).

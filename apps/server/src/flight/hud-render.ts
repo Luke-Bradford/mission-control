@@ -3,6 +3,8 @@ import { type ChildProcess, fork } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+  DEMO_MARKER_LABEL,
+  DEMO_SESSION_KEY,
   HUD_PAGE_PATHS,
   HUD_RENDERER_HEADER,
   OPERATOR_BOOTSTRAP_PATH,
@@ -27,6 +29,7 @@ const HUD_STREAM_PATH = "/api/stream";
 // The labels are the page's own (mc/core): a rename there reaches this capture and its tests.
 const HUD_QA_VIEW = `[aria-label="${QA_VIEW_LABEL}"]`;
 const HUD_QA_DISCLOSURE = `button:text-is("${QA_DISCLOSURE_LABEL}")`;
+const HUD_DEMO_MARKER = `[aria-label="${DEMO_MARKER_LABEL}"]`;
 const HUD_READY = "html[data-hud-ready='1']";
 /**
  * The requested page itself has rendered: the app shell's lazy-route Suspense fallback
@@ -122,6 +125,8 @@ interface HudBrowserContext {
     }) => Promise<void>,
   ): Promise<void>;
   newPage(): Promise<HudPage>;
+  /** Runs `script` (source text) in every page before its own scripts. */
+  addInitScript(script: string): Promise<void>;
   on(event: "page", handler: (page: HudPage) => void): unknown;
   close(): Promise<void>;
 }
@@ -151,6 +156,12 @@ export interface HudPlaywright {
   };
 }
 
+export interface HudViewport {
+  width: number;
+  height: number;
+}
+export const HUD_VIEWPORT: HudViewport = { width: 1600, height: 1000 };
+
 export interface HudRenderOptions {
   executablePath?: string;
   fileExists?: (path: string) => boolean;
@@ -161,6 +172,10 @@ export interface HudRenderOptions {
   quietMs?: number;
   /** Emulated colour scheme; absent: the browser's default. */
   colorScheme?: HudColorScheme;
+  /** The window size; default HUD_VIEWPORT. */
+  viewport?: HudViewport;
+  /** Turn the web app's Demo mode on before the page loads, and wait for its marker. */
+  demo?: boolean;
 }
 
 const loadPlaywright = async (): Promise<HudPlaywright> =>
@@ -314,9 +329,15 @@ export async function renderHudWithPlaywright(
       serviceWorkers: "block",
       // the hub refuses the operator bootstrap to any request carrying this header
       extraHTTPHeaders: { [HUD_RENDERER_HEADER]: "1" },
-      viewport: { width: 1600, height: 1000 },
+      viewport: options.viewport ?? HUD_VIEWPORT,
       ...(options.colorScheme === undefined ? {} : { colorScheme: options.colorScheme }),
     });
+    ensureActive();
+    // Demo is the tab's own session choice (DEMO_KEY in apps/web storage); set before the app boots.
+    if (options.demo)
+      await context.addInitScript(
+        `sessionStorage.setItem(${JSON.stringify(DEMO_SESSION_KEY)}, "true")`,
+      );
     ensureActive();
     await context.route("**/*", async (route) => {
       const request = route.request();
@@ -364,6 +385,8 @@ export async function renderHudWithPlaywright(
     // The shell is ready; now the requested (lazy) page and its data: wait for the placeholder to
     // go, the requests to settle, and the placeholder to still be gone once they have.
     await wait(PAGE_MAIN, "attached");
+    // The simulator fills the page from its seed once Demo is on; the marker says it is running.
+    if (options.demo) await wait(HUD_DEMO_MARKER, "attached");
     await wait(PAGE_LOADING, "detached");
     // Evidence captures visit each Audit tab on both old and new commits. Only these fixed
     // local view selectors may be clicked; requests still cross the GET-only boundary.
@@ -445,6 +468,8 @@ export interface HudHelperJob {
   executablePath?: string;
   deadlineMs: number;
   colorScheme?: HudColorScheme;
+  viewport?: HudViewport;
+  demo?: boolean;
 }
 
 export interface HudHelperOptions {
@@ -454,6 +479,8 @@ export interface HudHelperOptions {
   executablePath?: string;
   deadlineMs?: number;
   colorScheme?: HudColorScheme;
+  viewport?: HudViewport;
+  demo?: boolean;
   /** Extra time past the render deadline for the helper's own cleanup before it is killed. */
   graceMs?: number;
   /** How long the helper gets to close Chrome after SIGTERM before the group is killed. */
@@ -561,6 +588,8 @@ export function renderHudInHelper(
       deadlineMs,
       ...(options.executablePath === undefined ? {} : { executablePath: options.executablePath }),
       ...(options.colorScheme === undefined ? {} : { colorScheme: options.colorScheme }),
+      ...(options.viewport === undefined ? {} : { viewport: options.viewport }),
+      ...(options.demo === undefined ? {} : { demo: options.demo }),
     };
     child.send(job);
   });

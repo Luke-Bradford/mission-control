@@ -40,6 +40,12 @@ import { dayMonth, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { LinksSection } from "../needs/LinksSection.tsx";
+import {
+  OptionPictures,
+  PlanAndMockups,
+  useAttentionMaterials,
+  useImageViewer,
+} from "../needs/Materials.tsx";
 import { Pictures } from "../needs/Pictures.tsx";
 import { PreviewOpener } from "../needs/PreviewFrame.tsx";
 import {
@@ -352,8 +358,10 @@ export function ItemDetail({
     act,
     setJustHandled,
   } = detail;
-  if (key === null) return null;
   const page = layout === "page";
+  const materials = useAttentionMaterials(page && item && !holding ? item : null);
+  const viewer = useImageViewer();
+  if (key === null) return null;
   const p = page ? "needs" : "ds";
   const flightSeat = flight === undefined ? undefined : flight.seat;
   const previewBlock = item && !holding ? <PreviewOpener item={item} /> : null;
@@ -463,6 +471,13 @@ export function ItemDetail({
                 variant={item.kind === "approval" ? "row" : "panel"}
                 rowLabel={item.kind === "approval" ? "Your call:" : undefined}
                 primaryFirst={item.kind === "approval"}
+                pictures={
+                  materials.packets.length > 0
+                    ? (o) => (
+                        <OptionPictures option={o} packets={materials.packets} open={viewer.open} />
+                      )
+                    : undefined
+                }
                 onPick={pick}
               />
               {!queueApproval && target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
@@ -584,6 +599,8 @@ export function ItemDetail({
             {replyBlock}
           </div>
           {previewBlock}
+          <PlanAndMockups item={item} open={viewer.open} {...materials} />
+          {viewer.element}
           <Pictures item={item} />
           {item.brief ? (
             <details className="needs-more">

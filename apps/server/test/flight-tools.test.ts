@@ -145,6 +145,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { evaluateHolds, holds } from "../src/attention/holds.ts";
+import { AttentionMaterialsError } from "../src/attention-materials.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
@@ -168,7 +169,7 @@ import {
   wakeReasons,
 } from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
-import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
+import { createFlightTools, cut, type FlightToolsDeps, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github/board.ts";
 import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
@@ -244,6 +245,7 @@ let lockNow: TestLockState;
 let cfg: CcConfig;
 const stateSeen = vi.fn();
 let tools: McTool[];
+let flightDeps: () => FlightToolsDeps;
 let startCalls: unknown[][];
 let endCalls: string[];
 let interruptCalls: string[];
@@ -274,6 +276,7 @@ let refuseWith: OperatorRefusal | null = null;
 let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
+let materialsImpl: (key: string, story: { repoId: string; label: string }) => Promise<unknown>;
 let endImpl: (seatId: string) => Promise<void>;
 let asideEnds: string[];
 let rulingImpl: () => Promise<AcceptRulingResult>;
@@ -387,6 +390,11 @@ beforeEach(() => {
   reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
   startImpl = async () => ({ runId: "", branch: "" });
   messageImpl = async () => {};
+  materialsImpl = async (_key, story) => ({
+    label: story.label,
+    images: [{}, {}],
+    sourceCommit: "a".repeat(40),
+  });
   // what the supervisor's endRun leaves behind: the run ended, the seat stopped
   endImpl = async (seatId) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
@@ -430,7 +438,8 @@ beforeEach(() => {
   };
   stateSeen.mockClear();
   previewTickets = [];
-  tools = createFlightTools({
+  flightDeps = (): FlightToolsDeps => ({
+    attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },
     hasPreview: (repoId, ticket) => repoId === "mc" && previewTickets.includes(ticket),
     hubOrigin: "http://127.0.0.1:7420",
     hudShots: {
@@ -568,6 +577,7 @@ beforeEach(() => {
     },
     now: () => nowMs,
   });
+  tools = createFlightTools(flightDeps());
   const t = tools.find((candidate) => candidate.name === "log_decision");
   if (t === undefined) throw new Error("no tool");
   tool = t;
@@ -1435,6 +1445,7 @@ describe("tool list", () => {
       "answer_question",
       "return_question",
       "withdraw_question",
+      "attach_materials",
       "start_seat",
       "reassign_ticket",
       "message_seat",
@@ -11672,5 +11683,189 @@ describe("start_seat and the open-ticket list leave a waiting:operator card alon
     expect(
       flightState({ config: cfg, store, busy: [], now: NOW }).tickets.map((t) => t.ref),
     ).not.toContain("mc#7");
+  });
+});
+
+describe("attach_materials", () => {
+  const story = (over: Record<string, unknown> = {}) => ({
+    sourceCommit: "a".repeat(40),
+    label: "Comms layout",
+    sections: [
+      {
+        heading: "This page",
+        images: [
+          { path: "docs/a.png", caption: "Before" },
+          { path: "docs/b.png", caption: "After" },
+        ],
+        comparison: "before-after",
+        children: [{ heading: "Also here", text: "It shrinks." }],
+      },
+    ],
+    optionImages: [{ optionId: "a", imagePaths: ["docs/a.png"] }],
+    ...over,
+  });
+  const ask = () => {
+    live("guido-1", "r-guido");
+    return store.addQuestion({ agentId: "guido-1", runId: "r-guido", text: "Which?", at: NOW });
+  };
+
+  it("attaches a nested story with a comparison and picture options to a question in one call", async () => {
+    const id = ask();
+    const seenCalls: [string, unknown][] = [];
+    materialsImpl = async (key, s) => {
+      seenCalls.push([key, s]);
+      return { label: s.label, images: [{}, {}], sourceCommit: "a".repeat(40) };
+    };
+    const result = await call("attach_materials", { key: `ask:${id}`, ...story() });
+    expect(result.isError).not.toBe(true);
+    expect(result.text).toContain("2 images");
+    expect(seenCalls).toHaveLength(1);
+    expect(seenCalls[0]?.[0]).toBe(`ask:${id}`);
+    expect(seenCalls[0]?.[1]).toMatchObject({
+      label: "Comms layout",
+      sections: [{ comparison: "before-after", children: [{ heading: "Also here" }] }],
+      optionImages: [{ optionId: "a" }],
+    });
+  });
+
+  it("refuses a question that is not open, and says why a story was not kept", async () => {
+    expect(await call("attach_materials", { key: "ask:999", ...story() })).toEqual(
+      refused("Not attached: that question is no longer open."),
+    );
+    const id = ask();
+    materialsImpl = async () => {
+      throw new AttentionMaterialsError(400, "Images must be bounded PNG, JPEG or WebP files.");
+    };
+    expect(await call("attach_materials", { key: `ask:${id}`, ...story() })).toEqual(
+      refused("Not attached: Images must be bounded PNG, JPEG or WebP files."),
+    );
+  });
+
+  it("keeps the story the real tool attaches, and the read route returns it in order with its bytes", async () => {
+    // real Git, the hub's own service (no stub), the real API over the same store
+    const repoDir = join(dir, "story-repo");
+    mkdirSync(join(repoDir, "docs/s"), { recursive: true });
+    const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const files: Record<string, Buffer> = {};
+    for (const n of ["page", "before", "after", "a", "b"])
+      files[`docs/s/${n}.png`] = Buffer.concat([sig, Buffer.from(`image-${n}`)]);
+    for (const [path, bytes] of Object.entries(files)) writeFileSync(join(repoDir, path), bytes);
+    const git = (...a: string[]) =>
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=T",
+          "-c",
+          "user.email=t@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          "-C",
+          repoDir,
+          ...a,
+        ],
+        { encoding: "utf8" },
+      ).trim();
+    git("init", "--quiet");
+    git("add", "-A");
+    git("commit", "-qm", "images");
+    const commit = git("rev-parse", "HEAD");
+    need(cfg.crew?.sessions[0]).checkout = repoDir;
+    const id = ask();
+    const key = `ask:${id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: NOW,
+      ask: "Which layout?",
+      context: "Two layouts.",
+      recommendation: "A.",
+      basis: "Both checked.",
+      options: [
+        { id: "a", label: "A", answer: "A." },
+        { id: "b", label: "B", answer: "B." },
+      ],
+    });
+    const deps = flightDeps();
+    delete deps.attentionMaterials;
+    const real = createFlightTools(deps).find((t) => t.name === "attach_materials");
+    const result = await need(real).call(
+      ctx(),
+      story({
+        key,
+        sourceCommit: commit,
+        sections: [
+          {
+            heading: "This page",
+            images: [{ path: "docs/s/page.png", caption: "Today" }],
+            children: [
+              {
+                heading: "This part changes",
+                images: [
+                  { path: "docs/s/before.png", caption: "Before" },
+                  { path: "docs/s/after.png", caption: "After" },
+                ],
+                comparison: "before-after",
+                children: [{ heading: "Also here", text: "It shrinks." }],
+              },
+            ],
+          },
+        ],
+        optionImages: [
+          { optionId: "a", imagePaths: ["docs/s/a.png"] },
+          { optionId: "b", imagePaths: ["docs/s/b.png"] },
+        ],
+      }),
+    );
+    expect(result.isError).not.toBe(true);
+    const app = buildApp({
+      store,
+      bus: new ChangeBus(),
+      config: cfg,
+      operatorToken: "secret",
+      now: () => nowMs,
+    });
+    const headers = { "x-mc-operator": "secret" };
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/attention/${key}/materials`,
+      headers,
+    });
+    expect(res.statusCode).toBe(200);
+    const packet = res.json().packets[0];
+    expect(packet.sourcePath).toBeNull();
+    expect(packet.story[0].heading).toBe("This page");
+    expect(packet.story[0].children[0]).toMatchObject({
+      heading: "This part changes",
+      comparison: "before-after",
+    });
+    expect(packet.story[0].children[0].children[0].heading).toBe("Also here");
+    const byId = new Map(packet.images.map((i: { id: string; path: string }) => [i.id, i]));
+    expect(
+      packet.optionImages.map((o: { optionId: string; imageIds: string[] }) => [
+        o.optionId,
+        (byId.get(o.imageIds[0] ?? "") as { path: string }).path,
+      ]),
+    ).toEqual([
+      ["a", "docs/s/a.png"],
+      ["b", "docs/s/b.png"],
+    ]);
+    for (const image of packet.images) {
+      const bytes = await app.inject({ method: "GET", url: image.url, headers });
+      expect(bytes.statusCode).toBe(200);
+      expect(bytes.rawPayload).toEqual(files[image.path]);
+    }
+    await app.close();
+  });
+
+  it("refuses a story with no sections or an unknown field", async () => {
+    const id = ask();
+    expect(
+      (await call("attach_materials", { key: `ask:${id}`, ...story({ sections: [] }) })).isError,
+    ).toBe(true);
+    expect(
+      (await call("attach_materials", { key: `ask:${id}`, ...story({ extra: 1 }) })).isError,
+    ).toBe(true);
   });
 });

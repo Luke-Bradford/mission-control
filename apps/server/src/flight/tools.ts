@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import {
   ANSWER_OWN_QUESTION,
   AREA_LABEL_PREFIX,
+  ATTACH_MATERIALS_DESCRIPTION,
   type AttentionBrief,
   type AttentionItem,
   AWAY_BUG_VERIFIED,
@@ -331,6 +332,12 @@ import {
   questionAskAt,
   releaseHold,
 } from "../attention/holds.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "../attention-materials.ts";
+import { MaterialsOptionImages, MaterialsStoryShape } from "../attention-materials-schema.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
@@ -423,6 +430,8 @@ import { cardProblem as cardProblemOf, closeBlocker } from "./ticket-close.ts";
 import type { CrewTidy } from "./tidy.ts";
 
 export interface FlightToolsDeps {
+  /** Keeps the pictures of an attached story; absent: the hub's own, over its stored copies. */
+  attentionMaterials?: Pick<AttentionMaterialsService, "attachStory">;
   /** Read-only HUD renderer. It must apply hudRenderRequest to every browser request. */
   screenshotHud?: (url: string, guard: ReturnType<typeof hudRenderRequest>) => Promise<Buffer>;
   hubOrigin?: string;
@@ -809,6 +818,11 @@ const WithdrawQuestionArgs = z.strictObject({
   key: z.string().min(1).max(BRIEF_KEY_MAX),
   reason: text(QUESTION_REASON_MAX),
   basis: basisArg,
+});
+const AttachMaterialsArgs = z.strictObject({
+  key: z.string().min(1).max(BRIEF_KEY_MAX),
+  ...MaterialsStoryShape,
+  optionImages: MaterialsOptionImages.optional(),
 });
 const PassArgs = z.looseObject({
   question_id: z.number().int().min(1),
@@ -1404,6 +1418,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   /** The attention item with this key, held or not; undefined when it has left Needs you. */
+  const materials =
+    deps.attentionMaterials ??
+    createAttentionMaterials({ store, config, item: (key) => itemByKey(key) ?? null });
   const itemByKey = (key: string): AttentionItem | undefined => {
     const lock = deps.lockState?.() ?? NO_LOCK;
     const rows = crew(config, store, now(), lock, NO_CLI_VERSION).rows;
@@ -1519,6 +1536,30 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     bus.emit("flight");
     return { text: returnedText(call) };
+  }
+
+  /** Retains a nested picture story, from committed images, with a question's Needs-you item. */
+  async function attachMaterials(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, AttachMaterialsArgs, args);
+    if (!c.ok) return c.result;
+    const { key, ...story } = c.args;
+    const item = itemByKey(key);
+    if (item === undefined || item.repoId === null)
+      return fail("Not attached: that question is no longer open.");
+    try {
+      const packet = await materials.attachStory(key, { ...story, repoId: item.repoId });
+      bus.emit("attention");
+      const pictures = packet.images.length;
+      return {
+        text: `Attached "${packet.label}" to ${key}: ${pictures} image${pictures === 1 ? "" : "s"}, kept from commit ${packet.sourceCommit.slice(0, 7)}. The operator reads it with the question.`,
+      };
+    } catch (error) {
+      return fail(
+        error instanceof AttentionMaterialsError
+          ? `Not attached: ${error.message}`
+          : "Not attached: the materials could not be retained.",
+      );
+    }
   }
 
   /** Takes a question FLIGHT wrote for the operator off Needs you, with a one-line reason. */
@@ -4635,6 +4676,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       call: withdrawQuestion,
     },
     {
+      name: MC_TOOL_NAMES.attachMaterials,
+      description: ATTACH_MATERIALS_DESCRIPTION,
+      inputSchema: z.toJSONSchema(AttachMaterialsArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: attachMaterials,
+    },
+    {
       name: MC_TOOL_NAMES.startSeat,
       description: START_SEAT_DESCRIPTION,
       inputSchema: objectSchema(
@@ -5046,6 +5095,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.releaseHold,
     MC_TOOL_NAMES.returnQuestion,
     MC_TOOL_NAMES.withdrawQuestion,
+    MC_TOOL_NAMES.attachMaterials,
   ]);
   return flightTools.map((tool) => ({
     ...tool,

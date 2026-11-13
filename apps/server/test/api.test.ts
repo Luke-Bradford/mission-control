@@ -262,6 +262,7 @@ const stubSupervisor = (): Supervisor => {
     seatBusy: () => false,
     status: () => supervisorStatus,
     inClone: (_checkout, fn) => fn(),
+    isStartingWorktree: () => false,
   };
 };
 let streamReads: ReturnType<typeof vi.fn<typeof readStreamPage>>;
@@ -1567,11 +1568,13 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa-reports/:id"],
   ["GET", "/api/qa-reports/:id/markdown"],
   ["GET", "/api/qa-report-assets/:id"],
+  ["GET", "/api/attention-material-assets/:id"],
   ["GET", "/api/code-health/recommendations?repo=shop-app"],
   ["POST", "/api/code-health/recommendations/:id?repo=shop-app"],
   ["POST", "/api/code-health/test-reports", {}],
   ["POST", "/api/code-health/test-qa", {}],
   ["GET", "/api/code-health?repo=shop-app"],
+  ["GET", "/api/code-health/overview?repo=shop-app"],
   ["GET", "/api/code-health/evidence/:id?repo=shop-app"],
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
@@ -1601,6 +1604,17 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/comms:1/reply-route"],
   ["GET", "/api/comms/comms:1/state"],
   ["POST", "/api/attention/unknown/choose", { optionId: "yes", briefAt: 1 }],
+  [
+    "POST",
+    "/api/attention/unknown/materials",
+    {
+      repoId: "shop-app",
+      sourceCommit: "a".repeat(40),
+      sourcePath: "docs/plan.md",
+      label: "Plan",
+    },
+  ],
+  ["GET", "/api/attention/unknown/materials"],
   ["POST", "/api/attention/unknown/clear", {}],
   ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
@@ -1614,6 +1628,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/repos"],
   ["GET", "/api/previews"],
   ["GET", "/api/design-previews"],
+  ["GET", "/api/disk-use"],
   ["POST", "/api/design-previews/41/open", {}],
   ["POST", "/api/previews", { pr: 41 }],
   ["DELETE", "/api/previews/41", {}],
@@ -2709,6 +2724,8 @@ describe("local access", () => {
         continue;
       }
       if (
+        url === "/api/attention-material-assets/:id" ||
+        url === "/api/attention/unknown/materials" ||
         url === "/api/attention/unknown" ||
         url === "/api/attention/unknown/clear" ||
         /^\/api\/attention\/unknown\/choo?[si]/.test(url)
@@ -2732,8 +2749,11 @@ describe("local access", () => {
         expect(r.json()).toEqual({ error: "map checkout unavailable" });
         continue;
       }
-      if (url.startsWith("/api/code-health/recommendations")) {
-        // This local-access fixture has no operator token; recommendation history and decisions always require it.
+      if (
+        url.startsWith("/api/code-health/recommendations") ||
+        url.startsWith("/api/code-health/overview")
+      ) {
+        // This local-access fixture has no operator token; these reads and decisions always require it.
         expect(r.statusCode).toBe(401);
         continue;
       }
@@ -2998,6 +3018,7 @@ describe("local access", () => {
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
+            .replace(/\/attention\/[^/]+\/materials$/, "/attention/:key/materials")
             .replace(/\/attention\/[^/]+\/(choose|choice)$/, "/attention/:key/$1")
             .replace(
               /\/attention\/[^/]+\/replies\/[^/]+\/post$/,
@@ -4592,6 +4613,26 @@ describe("boards, escalations, health", () => {
     expect(r.json()).toEqual([item]);
     expect((await get("/api/boards/site-builder")).json()).toEqual([]);
     expect((await get("/api/boards/nope")).statusCode).toBe(404);
+  });
+
+  it("shows a waiting ticket without an owner", async () => {
+    store.replaceBoard("shop-app", [{ ...item, assignees: ["hub"], owner: "Agent" }]);
+    store.setTicketWait({
+      repoId: "shop-app",
+      issue: 7,
+      reason: "CI is running",
+      freesWhen: "CI finishes",
+      at: NOW,
+    });
+
+    expect((await get("/api/boards/shop-app")).json()).toEqual([
+      {
+        ...item,
+        assignees: [],
+        owner: null,
+        waiting: { reason: "CI is running", freesWhen: "CI finishes", at: NOW },
+      },
+    ]);
   });
 
   it("says in words why the map snapshot is unavailable, without git's command text", async () => {

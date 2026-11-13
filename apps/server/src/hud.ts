@@ -1830,8 +1830,19 @@ function endedParkGone(
 ): boolean {
   const loop = run.loop;
   if (loop?.phase !== "parked" || loop.parked?.kind !== "ended") return false;
+  return runSubjectGone(config, store, run, boardOf);
+}
+
+/** Whether a run's PR is merged or closed, or its ticket is closed, off its board or unconfigured. */
+export function runSubjectGone(
+  config: CcConfig,
+  store: Store,
+  run: Run,
+  boardOf: (repoId: string) => BoardItem[],
+): boolean {
+  const loop = run.loop;
   const pr =
-    loop.prNumber !== null
+    loop?.prNumber !== undefined && loop.prNumber !== null
       ? store.pullRequest(run.repoId, loop.prNumber)
       : run.branch === null
         ? null
@@ -1844,6 +1855,24 @@ function endedParkGone(
   if (board.length === 0) return false;
   const item = board.find((b) => b.issueNumber === t.number);
   return item === undefined || item.closed;
+}
+
+/** How long an ended run's question, note, hold or park lingers when its ticket never closes. */
+export const LEFTOVER_MAX_AGE_MS = 7 * 24 * 3_600_000;
+
+/**
+ * Whether an ended run's work is over, so what it left behind (a question, a note, a hold, a park)
+ * is a leftover: its ticket is closed or gone, or it ended more than 7 days ago.
+ */
+export function endedWorkOver(
+  config: CcConfig,
+  store: Store,
+  run: Run,
+  boardOf: (repoId: string) => BoardItem[],
+  now: number,
+): boolean {
+  if (run.endedAt === null) return false;
+  return now - run.endedAt >= LEFTOVER_MAX_AGE_MS || runSubjectGone(config, store, run, boardOf);
 }
 
 /**
@@ -1943,6 +1972,8 @@ function crewItems(
   }
 
   for (const q of store.openQuestions()) {
+    const asker = store.run(q.runId);
+    if (asker !== null && endedWorkOver(config, store, asker, boardOf, now)) continue;
     out.push({
       ...item({
         key: `ask:${q.id}`,
@@ -1963,6 +1994,14 @@ function crewItems(
     if (n.dismissedAt !== null) continue;
     if (isHardRulesFlagKey(n.key) || isFlakeNoteKey(n.key)) continue;
     const run = n.runId === null ? null : store.run(n.runId);
+    // the unfiled-minor-findings flag is raised after the merge and waits for a fix: it outlives its run
+    if (
+      !n.key.endsWith(":file-minor") &&
+      noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
+      run !== null &&
+      endedWorkOver(config, store, run, boardOf, now)
+    )
+      continue;
     if (
       n.kind === "blocked" &&
       noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
+  AttentionMaterials,
   BriefChoiceReceipt,
   ChoiceTargetKind,
   ItemChatMessage,
@@ -55,6 +56,7 @@ import {
   COMMS_NOTICE,
   COMMS_OPEN_PREFIX,
   COMMS_TEXT_MAX,
+  type CodeHealthWindow,
   type CommsKind,
   type CommsLabel,
   type CommsReaction,
@@ -154,6 +156,7 @@ import {
   type TestLockRun,
   TICKET_SIZES,
   TITLE_MARKERS,
+  type TicketWait,
   type TokenUsage,
   testsTouched,
   tokenBaselines,
@@ -177,16 +180,29 @@ import {
   recordMergedReviews,
 } from "./code-health/merged-reviews.ts";
 import {
+  costAggregate,
+  installOverview,
+  landingAggregate,
+  mergedAggregate,
+  mergedObserved,
+  readOverviewRow,
+  type StoredOverview,
+  writeOverviewRow,
+} from "./code-health/overview-store.ts";
+import {
+  decidedRecommendationRows,
   installRecommendations,
   linkRecommendation,
   type Mutation,
   mutateRecommendation,
   openRepeatedRoundsRows,
   RecommendationMutation,
+  recommendationFunnel,
   recommendationProposals,
   recommendationRow,
   recommendationRows,
   recommendationRowsForFiles,
+  remeasureCounts,
   upsertRecommendation,
 } from "./code-health/recommendations.ts";
 import { remeasureDue } from "./code-health/remeasure.ts";
@@ -242,6 +258,7 @@ import {
   toRun,
   toSample,
 } from "./store/rows.ts";
+import { SCHEMA } from "./store/schema.ts";
 import {
   ACK_ABSENT_MS,
   ACTIVE_SEAT_STATES,
@@ -294,8 +311,6 @@ export * from "./store/types.ts";
 const COMMS_QUESTION_THREAD_SQL =
   "COALESCE(label, '') = 'question' OR COALESCE(reply_to, -1) IN (SELECT q.id FROM comms q WHERE q.label = 'question')";
 const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
-
-import { SCHEMA } from "./store/schema.ts";
 
 type Row = Record<string, SQLInputValue>;
 
@@ -432,6 +447,7 @@ export class Store {
     installMergedReviews(this.db);
     installTestReports(this.db);
     installTestQa(this.db);
+    installOverview(this.db);
     installCodeHealthRevisions(this.db);
   }
 
@@ -491,8 +507,7 @@ export class Store {
   refreshCodeHealthRecommendations(repoId: string, at: number, checkout?: string) {
     this.transaction(() => {
       const proposals = recommendationProposals(this, repoId, at, checkout);
-      for (const proposal of proposals) upsertRecommendation(this.db, proposal, at);
-      const ids = proposals.map((row) => row.id);
+      const ids = proposals.map((proposal) => upsertRecommendation(this.db, proposal, at));
       this.db
         .prepare(
           `UPDATE code_health_recommendations SET active=0,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND active=1 AND id NOT IN (${ids.map(() => "?").join(",")})`,
@@ -666,6 +681,33 @@ export class Store {
   }
   recordCodeHealthMembership(input: Parameters<typeof recordRiskMembership>[1]) {
     recordRiskMembership(this.db, input);
+  }
+  codeHealthOverviewRow(repoId: string, window: CodeHealthWindow) {
+    return readOverviewRow(this.db, repoId, window);
+  }
+  saveCodeHealthOverview(repoId: string, window: CodeHealthWindow, row: StoredOverview) {
+    writeOverviewRow(this.db, repoId, window, row);
+  }
+  codeHealthMergedAggregate(repoId: string, from: number, until: number) {
+    return mergedAggregate(this.db, repoId, from, until);
+  }
+  codeHealthMergedObserved(repoId: string) {
+    return mergedObserved(this.db, repoId);
+  }
+  codeHealthCostAggregate(repoId: string, from: number, until: number) {
+    return costAggregate(this.db, repoId, from, until);
+  }
+  codeHealthLandingAggregate(repoId: string, from: number, until: number, limit: number) {
+    return landingAggregate(this.db, repoId, from, until, limit);
+  }
+  codeHealthDecidedRecommendations(repoId: string, limit: number) {
+    return decidedRecommendationRows(this.db, repoId, limit);
+  }
+  codeHealthFunnel(repoId: string) {
+    return recommendationFunnel(this.db, repoId);
+  }
+  codeHealthRemeasureCounts(repoId: string) {
+    return remeasureCounts(this.db, repoId);
   }
   codeHealthRevision(repoId: string): string {
     return codeHealthSourceRevision(this.db, repoId);
@@ -2060,6 +2102,18 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Ended runs still carrying a merge hold or a parked state, oldest first. */
+  endedRunsWithHoldOrPark(): Run[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM runs WHERE ended_at IS NOT NULL AND loop IS NOT NULL
+           AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.parked') IS NOT NULL)
+         ORDER BY started_at, seq`,
+      )
+      .all() as Row[];
+    return rows.map(toRun);
+  }
+
   /** Live acceptance metadata never needs to decode ended loop history. */
   activeLoopRuns(repoId: RepoId): Run[] {
     const rows = this.statement(
@@ -3073,6 +3127,53 @@ export class Store {
       .prepare("SELECT * FROM board_items WHERE repo_id = ? AND issue_number = ?")
       .get(repoId, issueNumber) as Row | undefined;
     return row === undefined ? null : toBoardItem(row);
+  }
+
+  /** The hub-owned wait for a ticket. GitHub's board state remains the source for every other field. */
+  ticketWait(repoId: RepoId, issue: number): TicketWait | null {
+    const row = this.db
+      .prepare("SELECT reason, frees_when, at FROM ticket_waits WHERE repo_id = ? AND issue = ?")
+      .get(repoId, issue) as Row | undefined;
+    return row === undefined
+      ? null
+      : { reason: row.reason as string, freesWhen: row.frees_when as string, at: row.at as number };
+  }
+
+  /** Every ticket of the repo that is waiting, oldest first. */
+  ticketWaits(repoId: RepoId): ({ issue: number } & TicketWait)[] {
+    const rows = this.db
+      .prepare(
+        "SELECT issue, reason, frees_when, at FROM ticket_waits WHERE repo_id = ? ORDER BY at, issue",
+      )
+      .all(repoId) as Row[];
+    return rows.map((row) => ({
+      issue: row.issue as number,
+      reason: row.reason as string,
+      freesWhen: row.frees_when as string,
+      at: row.at as number,
+    }));
+  }
+
+  /** Records that a ticket, rather than its former seat, waits for a known condition. */
+  setTicketWait({ repoId, issue, ...wait }: { repoId: RepoId; issue: number } & TicketWait): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO ticket_waits (repo_id, issue, reason, frees_when, at) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(repo_id, issue) DO UPDATE SET reason = excluded.reason,
+             frees_when = excluded.frees_when, at = excluded.at`,
+        )
+        .run(repoId, issue, wait.reason, wait.freesWhen, wait.at);
+    });
+  }
+
+  /** Clears a condition the hub has observed to be resolved. */
+  clearTicketWait(repoId: RepoId, issue: number): void {
+    this.transaction(() => {
+      this.db
+        .prepare("DELETE FROM ticket_waits WHERE repo_id = ? AND issue = ?")
+        .run(repoId, issue);
+    });
   }
 
   /**
@@ -5124,6 +5225,35 @@ export class Store {
     }
   }
 
+  /** Immutable display material for a Needs-you item; packets never alter its brief or choice. */
+  putAttentionMaterials(packet: AttentionMaterials): boolean {
+    return (
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO attention_materials (id, item_key, packet) VALUES (?, ?, ?)",
+        )
+        .run(packet.id, packet.itemKey, JSON.stringify(packet)).changes > 0
+    );
+  }
+
+  attentionMaterials(id: string): AttentionMaterials | null {
+    const row = this.db.prepare("SELECT packet FROM attention_materials WHERE id = ?").get(id) as
+      | { packet: string }
+      | undefined;
+    return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
+  }
+
+  /** Every packet saved for one item, oldest first; the per-question image cap sums over them. */
+  attentionMaterialsAllForItem(itemKey: string): AttentionMaterials[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') ASC, rowid ASC",
+        )
+        .all(itemKey) as { packet: string }[]
+    ).map((row) => JSON.parse(row.packet) as AttentionMaterials);
+  }
+
   qaReports(repoId: string, pr: number, headSha?: string): QaReport[] {
     const rows = this.db
       .prepare(`SELECT report FROM qa_reports WHERE repo_id = ? AND pr_number = ?
@@ -5256,6 +5386,60 @@ export class Store {
         .prepare(`SELECT 1 FROM qa_reports WHERE repo_id IN (${repoIds.map(() => "?").join(",")})
       AND instr(report, ?) > 0 LIMIT 1`)
         .get(...repoIds, `/api/qa-report-assets/${id}`) !== undefined
+    );
+  }
+
+  /** Open PRs as `repoId#number`: the work whose evidence and pictures the disk sweep keeps. */
+  openPrKeys(): Set<string> {
+    return new Set(
+      (
+        this.db
+          .prepare("SELECT repo_id, number FROM pull_requests WHERE state = 'open'")
+          .all() as Row[]
+      ).map((r) => `${r.repo_id as string}#${r.number as number}`),
+    );
+  }
+
+  /** The QA image ids (sha256) that a report of an open PR cites. */
+  qaAssetIdsOfOpenPrs(): Set<string> {
+    const ids = new Set<string>();
+    const rows = this.db
+      .prepare(
+        `SELECT q.report FROM qa_reports q JOIN pull_requests p
+           ON p.repo_id = q.repo_id AND p.number = q.pr_number AND p.state = 'open'`,
+      )
+      .all() as Row[];
+    for (const r of rows)
+      for (const m of (r.report as string).matchAll(/\/api\/qa-report-assets\/([0-9a-f]{64})/g))
+        ids.add(m[1]);
+    return ids;
+  }
+
+  /** The picture ids that packets of the given still-waiting questions cite. */
+  attentionMaterialAssetIds(openItemKeys: ReadonlySet<string>): Set<string> {
+    const ids = new Set<string>();
+    const rows = this.db.prepare("SELECT item_key, packet FROM attention_materials").all() as Row[];
+    for (const r of rows) {
+      if (!openItemKeys.has(r.item_key as string)) continue;
+      for (const m of (r.packet as string).matchAll(
+        /\/api\/attention-material-assets\/([0-9a-f]{64})/g,
+      ))
+        ids.add(m[1]);
+    }
+    return ids;
+  }
+
+  /** The review screenshot ids of reviews of open PRs. */
+  reviewShotIdsOfOpenPrs(): Set<string> {
+    return new Set(
+      (
+        this.db
+          .prepare(
+            `SELECT s.shot_id FROM review_shots s JOIN reviews v ON v.id = s.review_id
+               JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'`,
+          )
+          .all() as Row[]
+      ).map((r) => r.shot_id as string),
     );
   }
 
