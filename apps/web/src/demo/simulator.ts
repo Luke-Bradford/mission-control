@@ -7,12 +7,15 @@ import type {
   ActivityRow,
   AgentDetailView,
   AgentStream,
+  AttentionItem,
   CommsMessage,
   CrewRow,
   LimitRow,
   OverviewSummary,
+  QuestionClosure,
   Topic,
 } from "@mc/core";
+import { DEMO_PLAIN_KEY, demoArriving } from "../../test/demoNeeds.ts";
 import {
   boardItems,
   commsMessage,
@@ -322,9 +325,37 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
   );
 }
 
+/** The beat a new question reaches Needs you, and the beat the operator answers another. */
+const QUESTION_ARRIVES = 12;
+const QUESTION_ANSWERED = 30;
+
+function needsYou(s: DemoState, at: number, index: number): boolean {
+  const list = s.api["/api/attention"] as AttentionItem[];
+  if (index === QUESTION_ARRIVES) list.push(demoArriving(at));
+  else if (index === QUESTION_ANSWERED) {
+    const at2 = list.findIndex((q) => q.key === DEMO_PLAIN_KEY);
+    const [done] = at2 < 0 ? [] : list.splice(at2, 1);
+    if (!done) return false;
+    (s.api["/api/attention/answered"] as QuestionClosure[]).unshift({
+      key: done.key,
+      askAt: done.at,
+      kind: "cleared",
+      reason: "Answered: use ISO dates.",
+      by: done.agentId ?? "hub",
+      question: done.text,
+      ticket: done.ticket,
+      operator: true,
+      at,
+    });
+  } else return false;
+  summaryOf(s).kpis.needsYou.count = list.length;
+  return true;
+}
+
 function makeBeat(index: number): DemoBeat {
   const move = index % 5 === 4 ? TICKET_MOVES[Math.floor(index / 5) % TICKET_MOVES.length] : null;
   const topics: Topic[] = ["agents"];
+  if (index === QUESTION_ARRIVES || index === QUESTION_ANSWERED) topics.push("attention");
   if (move) topics.push("boards");
   else if (index % 4 === 0) topics.push("limits");
   else if (index % 3 === 0) topics.push("machine");
@@ -336,6 +367,7 @@ function makeBeat(index: number): DemoBeat {
       burn(s);
       if (index % 2 === 0) say(s, at, 0);
       if (index % 7 === 3) say(s, at, 1);
+      needsYou(s, at, index);
       if (move) moveTicket(s, at, move);
       return;
     },

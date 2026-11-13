@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { setDemo } from "../src/demo/mode.ts";
 import { demoMisses } from "../src/demo/source.ts";
-import { SETUP_TABS } from "../src/router.ts";
+import { PAGE_PATHS, type Route, route, SETUP_TABS, tabOf } from "../src/router.ts";
 
 /**
  * Every page, then every tab, segmented choice and select on it, one at a time: Demo must answer
@@ -22,23 +22,41 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-const ROUTES = [
-  "/",
-  "/flight",
-  "/board",
-  "/board/shop-app",
-  "/tickets/shop-app/102",
-  "/agent/dev-1",
-  "/agent/flight-1",
-  "/comms",
-  "/comms/crew",
-  "/comms/agents/dev-1",
-  "/qa",
-  "/qa?view=history",
-  "/telemetry",
-  "/audit",
-  ...SETUP_TABS.map((tab) => `/setup/${tab}`),
-];
+/**
+ * The paths each router page is visited by. Typed on `Route["page"]`, so a page added to the
+ * router without an entry here does not compile; an empty list fails the first test below.
+ */
+const PAGE_ROUTES: Record<Route["page"], readonly string[]> = {
+  overview: ["/"],
+  needs: ["/needs-you", "/needs-you/demo-design-signoff", "/needs-you/demo-picture-options"],
+  flight: ["/flight"],
+  board: ["/board", "/board/shop-app"],
+  ticket: ["/tickets/shop-app/102"],
+  agent: ["/agent", "/agent/dev-1", "/agent/flight-1"],
+  comms: ["/comms", "/comms/crew", "/comms/agents/dev-1"],
+  commsChart: ["/comms/chart"],
+  qa: ["/qa", "/qa?view=history"],
+  telemetry: ["/telemetry"],
+  audit: ["/audit"],
+  setup: SETUP_TABS.map((tab) => `/setup/${tab}`),
+};
+const ROUTES = Object.values(PAGE_ROUTES).flat();
+
+it("covers every page of the router, each path resolving to the page it is listed under", () => {
+  for (const [page, paths] of Object.entries(PAGE_ROUTES)) {
+    expect(paths.length, `${page} has no crawl route`).toBeGreaterThan(0);
+    for (const path of paths) expect(route(path)?.page, path).toBe(page);
+  }
+  // Every header page, by the page its own path shows.
+  for (const path of Object.values(PAGE_PATHS)) {
+    const r = route(path);
+    expect(r, path).not.toBeNull();
+    expect(ROUTES.some((p) => route(p) && tabOf(route(p) as Route) === tabOf(r as Route))).toBe(
+      true,
+    );
+  }
+});
+
 const CHOICE =
   "main [role=tab], main [role=tablist] button, main .seg button, main .tabs button, main nav button";
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 350))));

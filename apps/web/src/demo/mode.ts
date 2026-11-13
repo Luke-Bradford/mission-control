@@ -54,11 +54,19 @@ const unavailable = (): Response =>
     headers: { "content-type": "application/json" },
   });
 
+/** Image routes the hub serves; Demo answers each with the one demo picture. */
+const DEMO_PICTURE_ROUTES: readonly string[] = [
+  "/api/qa/review-shots/",
+  "/api/qa-report-assets/",
+  "/api/attention-material-assets/",
+  "/api/hud-screenshots/",
+];
+
 /** Answer a Demo request: writes are refused here, reads come from the lazily loaded source. */
 export async function demoSend(path: string, init: RequestInit): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   if (method !== "GET") return demoRefusal();
-  if (path.startsWith("/api/qa/review-shots/") || path.startsWith("/api/qa-report-assets/")) {
+  if (DEMO_PICTURE_ROUTES.some((prefix) => path.startsWith(prefix))) {
     const bytes = Uint8Array.from(atob(DEMO_PNG_BASE64), (c) => c.charCodeAt(0));
     return new Response(bytes, { status: 200, headers: { "content-type": "image/png" } });
   }
