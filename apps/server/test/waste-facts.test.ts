@@ -209,4 +209,31 @@ describe("clearance waiting", () => {
     const signals = flightSignals({ config, store, session, seats: [], now: NOW + HOUR }).signals;
     expect(signals.filter((s) => s.kind === "waste_alarm")).toHaveLength(1);
   });
+
+  it("wakes FLIGHT once for each head: a new head restarts the two hours", () => {
+    const clearance = (at: number) =>
+      flightSignals({ config, store, session, seats: [], now: at }).signals.filter(
+        (s) => s.kind === "waste_alarm" && s.evidence.includes("clearance"),
+      );
+    hold(NOW - 3 * HOUR);
+    syncWasteAlarms(config, store, NOW);
+    expect(clearance(NOW)).toHaveLength(1);
+    // a new head: the wait starts over, so the old head's alarm closes and nothing is raised
+    store.setRunLoop(
+      "r1",
+      { phase: "review", awaitingFlight: "sha2", prNumber: 7 } as unknown as RunLoop,
+      NOW + MIN,
+    );
+    syncWasteAlarms(config, store, NOW + HOUR);
+    expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toEqual([]);
+    // two hours on the new head: one fact again, then quiet
+    syncWasteAlarms(config, store, NOW + 2 * HOUR + 2 * MIN);
+    expect(
+      openWasteAlarms(store).filter((a) => a.check === "clearance-waiting"),
+    ).toHaveLength(1);
+    syncWasteAlarms(config, store, NOW + 4 * HOUR);
+    expect(
+      openWasteAlarms(store).filter((a) => a.check === "clearance-waiting"),
+    ).toHaveLength(1);
+  });
 });
