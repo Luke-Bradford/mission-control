@@ -210,7 +210,7 @@ describe("Demo findings from round 3", () => {
     expect(document.body.textContent).not.toContain("No messages in FLIGHT");
     expect(panel.textContent).toMatch(/\d+\s*msg/);
     const counts = [...document.querySelectorAll(".comms-nav-counts small")].map((e) =>
-      Number(e.textContent),
+      Number.parseInt(e.textContent ?? "", 10),
     );
     expect(counts.some((n) => n > 0)).toBe(true);
   });
