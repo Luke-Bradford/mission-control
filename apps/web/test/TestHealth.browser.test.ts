@@ -120,9 +120,9 @@ describeRendered("Test health measured layout", () => {
               api,
             });
             try {
-              await page.boxes(".ch-recommendation");
+              await page.boxes(".ao-views");
               if (rail === "expanded") await page.click("#dock .dockrail button");
-              await page.click("#ch-tab-test");
+              await page.click('.ao-views button:has-text("Test health")');
               await page.boxes(".ch-test");
               const metrics = await page.evaluate(
                 () => ({

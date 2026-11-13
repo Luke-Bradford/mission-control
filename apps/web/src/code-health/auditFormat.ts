@@ -4,6 +4,7 @@ import type {
   CodeHealthRecommendation,
   CodeHealthRecommendationState,
 } from "@mc/core";
+import { percent } from "../fmt.ts";
 import { label } from "./format.ts";
 
 const number = (value: number) =>
@@ -24,7 +25,7 @@ export function shortDate(at: number, now = Date.now()): string {
 /** A value with its unit; null is unknown and shows `—`, never zero. */
 export function measureValue(value: number | null | undefined, unit: string): string {
   if (value === null || value === undefined) return "—";
-  if (unit.startsWith("%")) return `${number(value)}%`;
+  if (unit.startsWith("%")) return percent(value, 1);
   if (unit.startsWith("USD")) return `$${value.toFixed(2)}`;
   return unit ? `${number(value)} ${unit}` : number(value);
 }

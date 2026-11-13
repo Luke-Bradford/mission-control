@@ -66,7 +66,7 @@
 .ao-verdict {
   flex: 1;
   min-width: 0;
-  font-size: 14px;
+  font-size: var(--fs-panel);
   line-height: var(--lh);
   color: var(--fg-2);
 }
@@ -503,7 +503,7 @@
 }
 .ao .fun b {
   display: block;
-  font: 600 16px / var(--lh) var(--mono);
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--mono);
   color: var(--fg);
 }
 .ao .fun span {
