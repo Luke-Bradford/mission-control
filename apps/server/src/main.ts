@@ -485,6 +485,10 @@ export async function main(): Promise<void> {
             const guard = hudRenderRequest(origin);
             return renderHudInHelper(guard.page(path), guard, { colorScheme, signal });
           },
+          renderDemo: (origin, path, viewport, signal) => {
+            const guard = hudRenderRequest(origin);
+            return renderHudInHelper(guard.page(path), guard, { demo: true, viewport, signal });
+          },
           log: (line) => log(line),
         })
       : undefined;
