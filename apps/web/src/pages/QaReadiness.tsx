@@ -107,8 +107,7 @@ function CurrentQaReadiness() {
   const params = new URLSearchParams(search);
   const selected =
     prs.find((p) => p.repoId === params.get("repo") && String(p.number) === params.get("pr")) ??
-    waiting[0] ??
-    review[0];
+    waiting[0];
   const reportId = params.get("report");
   const requestedPr = params.get("pr");
   const requestedRepo = params.get("repo");
@@ -223,8 +222,7 @@ function CurrentQaReadiness() {
             />
           ) : (
             <div className="uat-empty panel">
-              <h2>Pick a pull request</h2>
-              <p>Its evidence will appear here.</p>
+              <p>Nothing needs you right now.</p>
             </div>
           )}
         </div>
@@ -339,6 +337,7 @@ function Detail({
     (detail.data !== undefined && !detailMatches) || (full.data !== undefined && !fullMatches);
   const disabled =
     !enabled || detail.error !== null || full.error !== null || !detailMatches || !fullMatches;
+  const awaiting = Boolean(pr.uat) && data?.uat.waiting !== false;
   const pairs = evidence.data?.sha === pr.headSha ? evidence.data : undefined;
   return (
     <div className="uat-detail">
@@ -372,7 +371,9 @@ function Detail({
           ) : chains ? (
             <FreesLine chain={chainFor(chains, pr)} repoId={pr.repoId} />
           ) : (
-            <p className="uat-frees">Could not read what this PR frees.</p>
+            <p className="uat-frees crit-t" role="alert">
+              Could not read what this PR frees.
+            </p>
           )}
           {detail.loading && !data && <p role="status">Loading this PR’s evidence…</p>}
           {moved && (
@@ -402,7 +403,7 @@ function Detail({
           </ExternalLink>
         </div>
       </Panel>
-      <CurrentQaReport repo={pr.repoId} pr={pr.number} head={pr.headSha}>
+      <CurrentQaReport repo={pr.repoId} pr={pr.number} head={pr.headSha} awaiting={awaiting}>
         <Pairs
           pr={pr}
           manifest={pairs}
@@ -556,25 +557,27 @@ function Decide({
       <div className="uat-detail-head">
         {children}
         <div className="uat-actions-area">
-          <fieldset className="uat-actions" aria-label="Decide">
-            <button
-              type="button"
-              className="uat-accept"
-              disabled={disabled || !waiting || busy || done}
-              onClick={() => void decide("accept")}
-            >
-              Accept
-            </button>
-            <button
-              type="button"
-              className="uat-send"
-              disabled={disabled || !waiting || busy || done}
-              aria-expanded={open}
-              onClick={() => setOpen(!open)}
-            >
-              Send back…
-            </button>
-          </fieldset>
+          {waiting !== false && (
+            <fieldset className="uat-actions" aria-label="Decide">
+              <button
+                type="button"
+                className="uat-accept"
+                disabled={disabled || !waiting || busy || done}
+                onClick={() => void decide("accept")}
+              >
+                Accept
+              </button>
+              <button
+                type="button"
+                className="uat-send"
+                disabled={disabled || !waiting || busy || done}
+                aria-expanded={open}
+                onClick={() => setOpen(!open)}
+              >
+                Send back…
+              </button>
+            </fieldset>
+          )}
           {waiting === false && !done && (
             <p className="uat-meta">This PR is not waiting for acceptance.</p>
           )}
