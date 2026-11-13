@@ -96,6 +96,7 @@ import {
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
+import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./leftovers.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
@@ -1219,6 +1220,17 @@ export async function main(): Promise<void> {
   };
   setInterval(audit, CODE_HEALTH_AUDIT_EVERY_MS).unref();
   setTimeout(audit, 60_000).unref();
+  // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
+  const leftovers = () => {
+    try {
+      for (const text of clearLeftovers({ store, config, now: Date.now() }))
+        log(`leftovers: ${text}`);
+    } catch (e) {
+      log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  setInterval(leftovers, LEFTOVERS_EVERY_MS).unref();
+  setTimeout(leftovers, 5_000).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({
