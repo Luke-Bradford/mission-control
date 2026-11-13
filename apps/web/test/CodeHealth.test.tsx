@@ -145,6 +145,21 @@ afterEach(() => {
 async function ready() {
   await screen.findByText(proposal.proposal);
 }
+it("opens on Code risk when it arrives at /audit?tab=risk", async () => {
+  const fixture = codeRiskFixture(NOW);
+  const fetch = setup(fixture.api);
+  window.history.replaceState(null, "", "/audit?tab=risk");
+  try {
+    render(<CodeHealth />);
+    await screen.findByRole("region", { name: "File risk measurements" });
+    expect(screen.getByRole("tab", { name: "Code risk" }).getAttribute("aria-selected")).toBe(
+      "true",
+    );
+    expect(fetch.mock.calls.some(([url]) => String(url).includes("tab=risk"))).toBe(true);
+  } finally {
+    window.history.replaceState(null, "", "/");
+  }
+});
 it("fetches only the selected tab and uses keyboard tab navigation", async () => {
   const fetch = setup();
   render(<CodeHealth />);

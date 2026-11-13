@@ -11,7 +11,6 @@ import {
   isPopout,
   itemPath,
   legacyRedirect,
-  mapPath,
   needsYouPath,
   PAGE_PATHS,
   route,
@@ -37,10 +36,6 @@ describe("route()", () => {
     ["/agent", { page: "agent", id: null }],
     ["/agent/shop-app-ta", { page: "agent", id: "shop-app-ta" }],
     ["/agent/a%20b/", { page: "agent", id: "a b" }],
-    ["/map", { page: "map", repoId: null }],
-    ["/map/", { page: "map", repoId: null }],
-    ["/map/mission-control", { page: "map", repoId: "mission-control" }],
-    ["/map/a%20b/", { page: "map", repoId: "a b" }],
     ["/comms", { page: "comms", item: null, view: { kind: "flight" } }],
     ["/comms/crew", { page: "comms", item: null, view: { kind: "crew" } }],
     ["/comms/agents/a%20b", { page: "comms", item: null, view: { kind: "agent", agentId: "a b" } }],
@@ -71,8 +66,8 @@ describe("route()", () => {
   it.each([
     "/agent/%E0%A4%A",
     "/comms/%zz",
-    "/map/%zz",
-    "/map/repo/extra",
+    "/map",
+    "/map/mission-control",
     "/board/%",
     "/board/shop-app/0",
     "/board/shop-app/007",
@@ -173,15 +168,12 @@ describe("path helpers", () => {
       view: { kind: "ticket", ref: "#703", ticket: "shop-app#703" },
     });
     expect(route(agentPath("x/y"))).toEqual({ page: "agent", id: "x/y" });
-    expect(mapPath("a/b c")).toBe("/map/a%2Fb%20c");
-    expect(route(mapPath("a/b c"))).toEqual({ page: "map", repoId: "a/b c" });
     expect(PAGE_PATHS).toEqual({
       overview: "/",
       needs: "/needs-you",
       flight: "/flight",
       board: "/board",
       agent: "/agent",
-      map: "/map",
       comms: "/comms",
       qa: "/qa",
       telemetry: "/telemetry",

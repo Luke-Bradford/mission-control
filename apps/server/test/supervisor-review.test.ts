@@ -37,17 +37,17 @@ import {
   ticketInReviewText,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
-import { CliHold } from "../src/cli-update.ts";
+import { CliHold } from "../src/cli/update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
-import { externalReviewKey } from "../src/external-reviews.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
-import { createReviewPreviews } from "../src/review-preview.ts";
+import { createReviewPreviews } from "../src/preview/review.ts";
+import { externalReviewKey } from "../src/review/external.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
-import { crewTokenPath } from "../src/store.ts";
+import { crewTokenPath } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -1054,6 +1054,60 @@ describe("startReview", () => {
     expect(brief).toContain("mc preview_browser");
     await sup.endRun("retro");
     await until(() => expect(closed).toContain(runId));
+  });
+
+  it("a review brief lists the files that import what the PR changed", async () => {
+    const r = reviewOfPush();
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "t",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: r.sha,
+          mergeable: null,
+          author: null,
+          assignees: [],
+          files: [{ path: "a.txt", changeType: "modified" }],
+        },
+      ],
+      1,
+    );
+    const { sup } = make({
+      scratchRetro: true,
+      importGraph: async () => [{ from: "uses-a.ts", to: "a.txt" }],
+    });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("- Files changed (1): a.txt.");
+    expect(brief).toContain("- Files that import them (1): uses-a.ts.");
+  });
+
+  it("a review still starts, with no import lines, when the import graph cannot be read", async () => {
+    const r = reviewOfPush();
+    const { sup } = make({
+      scratchRetro: true,
+      importGraph: async () => {
+        throw new Error("no graph");
+      },
+    });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).not.toContain("Files changed");
   });
 
   it("a review still starts when its preview build never finishes", async () => {

@@ -461,13 +461,15 @@ export interface PrCheck {
   name: string; // a check run's name, or a status's context
   kind: "check" | "status";
   state: "passing" | "failing" | "pending";
+  /** The hub declined this status rather than a check run failing. */
+  skipped?: boolean;
   conclusion: string; // a check run's conclusion (its status until done); a status's state
   attempt: number | null; // the Actions run attempt; null for a status or a non-Actions run
   url: string | null;
 }
 
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
-export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt">;
+export type PrCheckSummary = Pick<PrCheck, "name" | "kind" | "state" | "attempt" | "skipped">;
 
 /**
  * What every PR row from `/api/repos/:repoId/prs` (and `/prs/:number`) says about previews.
@@ -792,6 +794,8 @@ export interface AgentStream {
   lastOutputAt: number | null;
   /** Why there are no events (`no runs yet`, `transcript not found`), else null. */
   reason: string | null;
+  /** FLIGHT only: messages the operator has not read in either Comms or the fly-out. */
+  unread?: number;
 }
 
 /**
@@ -1296,6 +1300,18 @@ export interface AttentionBrief {
    * crew error, a stray, FLIGHT's own question.
    */
   ticket?: string;
+  /** One line, at most 90 characters: what the operator reads in the list (#1510). */
+  title?: string;
+  /** P0, P1 or P2: the main ticket's, else the one FLIGHT stated. */
+  priority?: string;
+  /** Other tickets (`repo#n`) the question touches. */
+  related?: string[];
+  /** For a question with no ticket: the repo it is about and why there is none. */
+  noTicket?: { repo: string; reason: string };
+  /** Links, so the question and title carry no raw address. */
+  links?: { label: string; url: string }[];
+  /** The question is about how something looks: it needs a picture or a branch preview. */
+  looks?: boolean;
   original?: string;
   assessment?: string;
   did?: { action: string; refs: string[] }[];
@@ -1325,6 +1341,11 @@ export interface AttentionItem {
   key: string;
   kind: AttentionKind;
   agentId: AgentId | null;
+  /**
+   * Who the operator's page names as the asker (#1510): FLIGHT's seat id on a seat's question
+   * FLIGHT briefed for the operator, where `agentId` still names the seat. Absent: use `agentId`.
+   */
+  asker?: AgentId;
   repoId: RepoId | null;
   text: string;
   /** The live tool of a stall, so the client renders `{m:ss} in {tool}` without parsing text. */

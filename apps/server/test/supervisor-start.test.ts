@@ -112,7 +112,7 @@ import {
   crewPromptPath,
   crewSkillsDir,
   crewTokenPath,
-} from "../src/store.ts";
+} from "../src/store/crew-paths.ts";
 import { crewRefusal } from "../src/update.ts";
 import { writeCodexHostileFiles } from "./fixtures/codex-hostile.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -213,40 +213,88 @@ describe("startRun eligibility", () => {
     await refused(422, AWAY_QUOTA_REFUSED);
   });
 
-  describe("the budget brake", () => {
-    const brake = () => {
-      const at = Date.now();
-      for (const [t, pct] of [
-        [at - 6 * 3_600_000, 40],
-        [at, 60],
-      ] as const)
-        store.addUsage({
-          accountId: "claude-main",
-          window: "7d",
-          at: t,
-          resetAt: at + 86_400_000,
-          pct,
-          source: "test",
-        });
+  describe("a waste alarm holds the hub's own starts", () => {
+    const alarm = (check: "restart-storm" | "retry-loop", subject: string, ticket?: string) =>
+      store.waste.insertAlarm(
+        {
+          check,
+          subject,
+          repoId: "mc",
+          ticket: ticket ?? null,
+          seatId: check === "restart-storm" ? subject : null,
+          runId: null,
+          level: 9,
+          evidence: "evidence line.",
+        },
+        Date.now(),
+      );
+    const flightSeat = {
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
     };
-    it("refuses a new start while the weekly projection passes 100%", async () => {
-      brake();
+
+    it("refuses startRun and startWatch of a seat in a restart storm, and lets the operator start", async () => {
+      alarm("restart-storm", "guido-1");
+      alarm("restart-storm", "flight-1");
+      const { sup } = make({
+        rules: withRules(),
+        fetchTicket: ticketWith({}),
+        extraSeat: flightSeat,
+      });
+      sup.start();
+      const e = await refusal(sup.startRun("guido-1", 42));
+      expect(e.status).toBe(422);
+      expect(e.message).toMatch(/^Not started: waste alarm\. GUIDO-1 is in a restart storm/);
+      const w = await refusal(sup.startWatch("flight-1"));
+      expect(w.status).toBe(422);
+      expect(w.message).toMatch(/FLIGHT-1 is in a restart storm/);
+      expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
+    });
+
+    it("lets the operator's dock start the watch seat during its own storm", async () => {
+      alarm("restart-storm", "flight-1");
+      const { sup } = make({ rules: withRules(), extraSeat: flightSeat });
+      sup.start();
+      expect((await sup.startWatch("flight-1", { operator: true })).runId).toBeTruthy();
+    });
+
+    it("refuses a start of a parked ticket and starts another ticket", async () => {
+      alarm("retry-loop", "mc#42", "mc#42");
       const claim = vi.fn(async () => {});
       const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}), claim });
       sup.start();
       const e = await refusal(sup.startRun("guido-1", 42));
       expect(e.status).toBe(422);
-      expect(e.message).toMatch(
-        /^Not started: the budget brake is on\. GUIDO-1's account claude-main/,
-      );
+      expect(e.message).toMatch(/^Not started: waste alarm\. mc#42 is parked/);
       expect(claim).not.toHaveBeenCalled();
-      expect(store.seatSession("guido-1")).toBeNull();
     });
-    it("lets the operator's explicit start through", async () => {
-      brake();
+  });
+
+  describe("a weekly pace past 100%", () => {
+    it("never refuses a start: the account's stop_at alone limits it (32% use, 195% projection)", async () => {
+      const at = Date.now();
+      store.addUsage({
+        accountId: "claude-main",
+        window: "7d",
+        at: at - 3 * 3_600_000,
+        pct: 10,
+        resetAt: at + 86_400_000,
+        source: "test",
+      });
+      store.addUsage({
+        accountId: "claude-main",
+        window: "7d",
+        at,
+        pct: 32,
+        resetAt: at + 86_400_000,
+        source: "test",
+      });
       const { sup } = make({ rules: withRules(), fetchTicket: ticketWith({}) });
       sup.start();
-      expect((await sup.startRun("guido-1", 42, { operator: true })).runId).toBeTruthy();
+      expect((await sup.startRun("guido-1", 42)).runId).toBeTruthy();
     });
   });
 
@@ -1121,6 +1169,31 @@ describe("startRun", () => {
     const text = readFileSync(promptPath, "utf8");
     expect(text.startsWith(readFileSync(join(HUB_ROLES, "GUIDO.md"), "utf8").trimEnd())).toBe(true);
     expect(text).toContain(`${CLAUDE_MD_HEADING}\n\nRepo rule: keep tests green.\n`);
+  });
+
+  it("measures the rules section on the CLAUDE.md text the prompt carries, without the mc block", async () => {
+    writeFileSync(
+      join(clone, "CLAUDE.md"),
+      "Repo rule.\n\n```yaml\nmc:\n  pick_from: [Ready]\n```\n",
+    );
+    git(clone, "add", "CLAUDE.md");
+    git(clone, "commit", "-qm", "Add mc block");
+    git(join(dir, "origin.git"), "fetch", clone, "main:main");
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const prompt = readFileSync(crewPromptPath(dbPath, runId), "utf8");
+    expect(prompt).not.toContain("pick_from");
+    expect(prompt).toContain(`${CLAUDE_MD_HEADING}\n\nRepo rule.\n`);
+    const rules = store.promptWakes(runId)[0]?.sections.find((x) => x.section === "rules");
+    const references = prompt.slice(
+      prompt.indexOf("# Repository reference material"),
+      prompt.indexOf(`\n\n${CLAUDE_MD_HEADING}`),
+    );
+    expect(rules?.bytes).toBe(
+      textBytes(references) + textBytes(`\n\n${CLAUDE_MD_HEADING}\n\nRepo rule.\n\n`),
+    );
   });
 
   it("indexes repo references and leaves them readable without loading repo hooks", async () => {

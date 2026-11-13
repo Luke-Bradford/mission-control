@@ -74,7 +74,6 @@ const PAGES: PageCase[] = [
   { name: "Board", at: "/board", minText: 700 },
   { name: "a ticket", at: "/tickets/shop-app/101", minText: 150 },
   { name: "an agent", at: "/agent/dev-1", minText: 500 },
-  { name: "a repo's Map", at: "/map/shop-app", minText: 500, populated: [".map-treemap-tile", 30] },
   { name: "Comms", at: "/comms/crew", minText: 2000 },
   { name: "QA", at: "/qa", minText: 500 },
   { name: "Telemetry", at: "/telemetry", minText: 3000 },
@@ -127,25 +126,21 @@ describeRendered("Demo, rendered", () => {
   );
 
   it.each([
-    ["Overview", "/", "#agentsList", "text"],
-    ["Board", "/board", "main", "text"],
-    ["Comms", "/comms/crew", "main", "text"],
-    ["Map", "/map/shop-app", "main", "html"],
+    ["Overview", "/", "#agentsList"],
+    ["Board", "/board", "main"],
+    ["Comms", "/comms/crew", "main"],
   ] as const)(
     "%s moves on its own at a quick beat",
-    async (_name, at, selector, kind) => {
+    async (_name, at, selector) => {
       const page = await open(at);
       await page.box(".demo-marker");
       await eventually(page, async () => (await text(page, selector)).length > 100, "content");
       await page.evaluate(() => window.__demoSetBeatMs(100), undefined);
       const read = () =>
-        page.evaluate(
-          ([css, how]) => {
-            const el = document.querySelector(css);
-            return (how === "html" ? el?.innerHTML : el?.textContent) ?? "";
-          },
-          [selector, kind] as const,
-        );
+        page.evaluate((css) => {
+          const el = document.querySelector(css);
+          return el?.textContent ?? "";
+        }, selector);
       const before = await read();
       await eventually(page, async () => (await read()) !== before, `${at} to change`, 40_000);
       await page.close();
@@ -221,6 +216,9 @@ describeRendered("Demo, rendered", () => {
       await page.evaluate(() => {
         window.__noReload = true;
       }, undefined);
+      // Display controls belong in Setup, rather than competing with operational-page shortcuts.
+      await page.click("button[aria-label=Setup]");
+      await page.box(".demo-switch");
       const clickedAt = page.requests().length;
 
       await page.click(".demo-switch");
@@ -239,6 +237,7 @@ describeRendered("Demo, rendered", () => {
         async () => (await count(page, ".demo-marker")) === 0,
         "the marker to go",
       );
+      await page.click('a[href="/"]');
       await eventually(page, () => bodyHas(page, SENTINEL), "the Live sentinel back");
       const back = page
         .requests()
@@ -273,6 +272,8 @@ describeRendered("Demo, rendered", () => {
         async () => (await count(page, "#agentsList .trow:not(.head)")) >= 10,
         "the Demo crew",
       );
+      await page.click("button[aria-label=Setup]");
+      await page.box(".demo-switch");
       expect(apiRequests(page)).toEqual([]);
       await page.click(".demo-switch");
       await eventually(
@@ -280,6 +281,7 @@ describeRendered("Demo, rendered", () => {
         async () => (await count(page, ".demo-marker")) === 0,
         "the marker to go",
       );
+      await page.click('a[href="/"]');
       await page.evaluate(() => new Promise((r) => setTimeout(r, 800)), undefined);
       expect(await count(page, "[role=alert]")).toBe(0);
       expect(page.errors()).toEqual([]);

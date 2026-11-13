@@ -6,7 +6,6 @@ import { DatabaseSync } from "node:sqlite";
 import {
   ATTENTION_LABEL,
   type BoardItem,
-  BUDGET_BRAKE_KEY,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
@@ -35,8 +34,8 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLI_AUTO_NOTE_PREFIX } from "../src/cli-auto.ts";
-import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli-update.ts";
+import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
+import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {
@@ -51,7 +50,7 @@ import {
   NO_LOCK,
   pinned,
 } from "../src/hud.ts";
-import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instruction-notices.ts";
+import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
@@ -2291,6 +2290,11 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       for: "operator",
     });
     expect(keys(NOW)).toEqual([`ask:${id}`]);
+    // the page never shows the seat as the asker: FLIGHT asks it (#1510)
+    expect(attentionItems(c, store, NOW).find((i) => i.key === `ask:${id}`)).toMatchObject({
+      asker: "FLIGHT-1",
+      agentId: "GUIDO-1",
+    });
     // FLIGHT stopped: a new question stays FLIGHT's, marked down, and the stopped item counts it
     const held = asked("GUIDO-1", "c1");
     flightRow({ runId: null, state: "stopped" });
@@ -3515,6 +3519,36 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(all(late).find((item) => item.key === key)).toBeUndefined();
   });
 
+  it("names FLIGHT as the asker of a seat's Comms blocker briefed for the operator (#1510)", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "shop-app#706",
+      text: "May I merge main into the branch?",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    store.addBrief({
+      key,
+      context: "A seat needs a product call from you.",
+      ask: "One lane per customer?",
+      recommendation: "Yes.",
+      options: TWO_OPTIONS,
+      basis: "product direction",
+      at: current,
+      for: "operator",
+    });
+    expect(all(current).find((item) => item.key === key)).toMatchObject({
+      owner: "operator",
+      asker: "flight-1",
+      agentId: "guido-1",
+    });
+  });
+
   it("does not raise a Comms item that predates the rollout cutoff", () => {
     flight();
     const message = store.addComms({
@@ -3984,7 +4018,6 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     flight();
     expect(HUB_STOP_KEYS).toEqual([
       `note:${MACHINE_CAPACITY_KEY}`,
-      `note:${BUDGET_BRAKE_KEY}`,
       `note:${CLI_NOTE_KEY}`,
       `note:${CLI_AUTO_NOTE_PREFIX}`,
       `note:${INSTRUCTION_FOCUS_NOTE_PREFIX}`,

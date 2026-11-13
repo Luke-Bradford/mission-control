@@ -17,10 +17,10 @@ function dataUrl(blob: Blob): Promise<string> {
   });
 }
 
-type Source = { state: "loading" } | { state: "ready"; src: string } | { state: "failed" };
+export type Source = { state: "loading" } | { state: "ready"; src: string } | { state: "failed" };
 
 /** What to put in `src`: a hub route as it is, an operator route fetched with the token. */
-function useSource(route: PictureRoute, attempt: number): Source {
+export function useSource(route: PictureRoute, attempt: number): Source {
   const [source, setSource] = useState<Source>(
     route.auth === "hub" ? { state: "ready", src: route.path } : { state: "loading" },
   );

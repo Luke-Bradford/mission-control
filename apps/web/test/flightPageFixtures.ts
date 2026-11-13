@@ -92,7 +92,24 @@ export function flightPageApi(state: PageState, over: Record<string, unknown> = 
     "/api/metrics": METRICS_VIEW,
     "/api/settings/crew-pause": null,
     "/api/flight": view,
+    "/api/flight/orders?limit=1": {
+      active: [
+        {
+          id: 7,
+          at: NOW - 5 * HOUR,
+          revokedAt: null,
+          source: "saved",
+          seatId: null,
+          by: "operator",
+          kind: "text",
+          text: "Review only: no new builds until the queue is clear.",
+        },
+      ],
+      history: [],
+      nextCursor: null,
+    },
     "/api/attention": attention,
+    "/api/attention/held": [],
     "/api/flight/summary": flightSummary({
       session: "s1",
       headline: "The crew is shipping; one review needs attention.",

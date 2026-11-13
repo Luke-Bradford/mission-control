@@ -22,6 +22,22 @@
   overflow: hidden;
 }
 
+.comms-notice-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 32px;
+  padding: var(--sp-1) var(--sp-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.comms-notice-switch input {
+  min-width: 24px;
+  min-height: 24px;
+}
+
 .comms-grid {
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr) minmax(300px, 380px);
@@ -41,18 +57,6 @@
 .comms-left,
 .comms-right {
   overflow-y: auto;
-}
-
-.comms-decisions {
-  display: flex;
-  flex: 0 0 auto;
-  flex-direction: column;
-  max-height: 46%;
-  min-height: 0;
-  overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
 }
 
 .comms-section-head {
@@ -95,11 +99,6 @@
 
 .comms-section-head .comms-needs-link:hover {
   text-decoration: underline;
-}
-
-.comms-decision-list {
-  min-height: 0;
-  overflow: auto;
 }
 
 .comms-nav,
@@ -951,5 +950,158 @@ a.comms-ref {
 @media (min-width: 1600px) {
   .comms-grid {
     grid-template-columns: 280px minmax(0, 1fr) 420px;
+  }
+}
+
+/* Who sent a message: a tag, so a person and a machine never read alike. */
+.comms-sender-tag {
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s, 3px);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.comms-sender-tag[data-kind="operator"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.comms-sender-tag[data-kind="controller"],
+.comms-sender-tag[data-kind="hub"] {
+  color: var(--muted);
+}
+
+/* The column is shared: the nav shrinks (never below Team and three agents) and scrolls; the Tickets list takes the rest. */
+.comms-left > .comms-nav {
+  flex: 0 1 auto;
+  min-height: 300px;
+  overflow-y: auto;
+}
+
+/* Tickets list: a search over one row per ticket; the number opens it, "Chat" filters the chat. */
+.comms-tickets {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-height: 220px;
+  padding-bottom: var(--sp-2);
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+/* A short window drops the caption so three whole rows still fit; the count keeps its screen-reader label. */
+@media (max-height: 899px) {
+  .comms-ticket-cols {
+    display: none;
+  }
+}
+
+/* From 900 px high the list gets room for five one-line rows plus its head, search and footer; the nav shrinks to pay for it. */
+@media (min-height: 900px) {
+  .comms-tickets {
+    min-height: 320px;
+  }
+}
+
+.comms-tickets > :not(.comms-section-head, .comms-ticket-list) {
+  margin: 0 var(--sp-2);
+}
+
+.comms-ticket-search {
+  align-self: stretch;
+  box-sizing: border-box;
+  width: auto;
+  min-height: 28px;
+}
+
+.comms-ticket-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.comms-ticket-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--sp-1);
+  align-items: center;
+}
+
+.comms-ticket-open {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0 var(--sp-2);
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--sp-1);
+  color: var(--fg);
+  text-decoration: none;
+}
+
+/* One line per ticket so the list shows many at once; on hover or focus the whole title wraps open in place. */
+.comms-ticket-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.comms-ticket-open:focus-visible .comms-ticket-title,
+.comms-ticket-open:hover .comms-ticket-title {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.comms-ticket-open small {
+  min-width: 2ch;
+  color: var(--muted);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.comms-ticket-cols {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 var(--sp-2);
+  color: var(--muted);
+  font-size: var(--fs-s);
+}
+
+.comms-ticket-filter {
+  min-width: 24px;
+  min-height: 24px;
+  padding: 0 var(--sp-1);
+}
+
+/* A short window also tightens the panel's own chrome, so the list keeps room without taking it from the agents. */
+@media (max-height: 899px) {
+  .comms-tickets {
+    gap: 0;
+    padding-bottom: var(--sp-1);
+  }
+
+  .comms-tickets .comms-section-head {
+    padding-block: var(--sp-1);
+  }
+
+  .comms-tickets .comms-ticket-search {
+    min-height: 24px;
+    margin-bottom: var(--sp-1);
+  }
+
+  .comms-tickets .comms-ticket-open {
+    min-height: 28px;
   }
 }

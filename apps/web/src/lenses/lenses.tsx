@@ -5,9 +5,9 @@ import {
   type MapSeat,
   type MapSnapshot,
 } from "@mc/core";
+import { seatColorVar } from "../crew.ts";
 import { percent, plural } from "../fmt.ts";
 import { githubItemHref } from "../links.ts";
-import { seatToken } from "../map/cards.ts";
 import "./lenses.css";
 
 /** The ownership areas' colours, in rules order: the mockup's three first, then other distinct tokens. */
@@ -602,7 +602,9 @@ function SeatTag({
     <span className="map-lens-note">
       <i
         className="map-lens-seat-dot"
-        style={{ background: `var(${seatToken(seat, indices[seat] ?? 0)})` }}
+        style={{
+          background: `var(${seat === "FLIGHT" ? "--seat-flight" : seatColorVar(indices[seat] ?? 0)})`,
+        }}
         aria-hidden="true"
       />
       {names[seat] ?? seat}

@@ -28,11 +28,10 @@ import {
   type UsageSample,
   usageCollector,
 } from "@mc/core";
-import { codexProfile } from "./account-bindings.ts";
-import { evaluateHolds } from "./attention-holds.ts";
+import { codexProfile } from "./accounts/bindings.ts";
+import { evaluateHolds, holds } from "./attention/holds.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
-import type { BriefChoiceDeps } from "./brief-choices.ts";
-import { syncBudgetBrake } from "./budget-brake.ts";
+import type { BriefChoiceDeps } from "./brief/choices.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
   AUTO_CLI_TOOLS,
@@ -46,7 +45,7 @@ import {
   realCliOps,
   type SeatCheck,
   settlePending,
-} from "./cli-auto.ts";
+} from "./cli/auto.ts";
 import {
   CLI_COLLECTOR,
   CLI_NOTE_KEY,
@@ -60,7 +59,7 @@ import {
   cliFailedText,
   NOT_A_CASK,
   realExec,
-} from "./cli-update.ts";
+} from "./cli/update.ts";
 import { collectorName, DIGEST_RETENTION_MS, FOLD_WINDOW_MS } from "./collectors/common.ts";
 import { collectFlow } from "./collectors/flow.ts";
 import {
@@ -109,7 +108,7 @@ import { applyDecisionDefaults } from "./decision-defaults.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
 import { flightSeat } from "./flight/state.ts";
-import { followPrs } from "./github-board.ts";
+import { followPrs } from "./github/board.ts";
 import {
   attentionItems,
   crew,
@@ -121,19 +120,23 @@ import {
 import {
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
-  machineCapacity,
-  machineCapacitySince,
+  storedMachineCapacity,
 } from "./machine-capacity.ts";
 import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
+import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";
-import { auditEndedRuns } from "./token-audit.ts";
+import {
+  auditEndedRuns,
+  TOKEN_AUDIT_FIRST_DELAY_MS,
+  TOKEN_AUDIT_INTERVAL_MS,
+} from "./token-audit/audit.ts";
 import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,
   TRANSCRIPT_PASS_INTERVAL_MS,
-} from "./transcript-lifecycle.ts";
+} from "./transcript/lifecycle.ts";
 import { VERSION_CHECK_MS } from "./update.ts";
 
 export type Job =
@@ -145,6 +148,7 @@ export type Job =
   | "usage"
   | "maintenance"
   | "transcripts"
+  | "tokenAudit"
   | "machine"
   | "prs"
   | "flow"
@@ -165,6 +169,7 @@ export const JOBS: readonly Job[] = [
   "usage",
   "maintenance",
   "transcripts",
+  "tokenAudit",
   "machine",
   "prs",
   "flow",
@@ -198,6 +203,17 @@ export const FLOW_FIRST_DELAY_MS = 7 * 60_000;
  * fire together every 15 s and would otherwise each make every page refetch (#26 A1).
  */
 export const EMIT_COALESCE_MS = 1000;
+/** A quiet loop tick repeats the ack and hold sweep at least this often. */
+export const SWEEP_REPEAT_MS = 60_000;
+/**
+ * A seat running, stalled or waiting turns with the clock, by the minute (stall and wait
+ * thresholds): with its inputs unchanged, a loop tick reads the crew for it at most this often.
+ */
+export const TIMED_COAST_MS = 60_000;
+/** A loop run left open longer than this is a dead row; it no longer keeps loop ticks reading the crew. */
+export const ACTIVE_RUN_WINDOW_MS = 24 * 60 * 60_000;
+/** The topic gate rebuilds a page's content at least this often, whatever the store did. */
+export const GATE_CLOCK_MS = 60_000;
 export { DIGEST_RETENTION_MS };
 /** Recorded HUD state changes are kept this long. */
 export const AGENT_EVENT_RETENTION_MS = 30 * 24 * 60 * 60_000;
@@ -497,16 +513,27 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   let emitTimer: NodeJS.Timeout | null = null;
 
   /** What each gated topic's page shows, hashed on each flush to tell a changed topic from a re-poll. */
-  const gate = new TopicGate({
-    agents: () => crew(config, store, now(), deps.lockState?.() ?? NO_LOCK).rows,
-    health: () => healthContent(store.status()),
-    // keys and owners only: an item's relative text changes every minute and is no news
-    attention: () =>
-      attentionItems(config, store, now(), deps.lockState?.() ?? NO_LOCK).map((i) => [
-        i.key,
-        i.owner,
-      ]),
-  });
+  // The clock moves rows only by the minute (stall and wait thresholds), so a minute with no store
+  // write and the same lock has the content it had at the last check.
+  const clockBasis = (): string =>
+    JSON.stringify([
+      store.readVersion(),
+      Math.floor(now() / GATE_CLOCK_MS),
+      deps.lockState?.() ?? NO_LOCK,
+    ]);
+  const gate = new TopicGate(
+    {
+      agents: () => crew(config, store, now(), deps.lockState?.() ?? NO_LOCK).rows,
+      health: () => healthContent(store.status()),
+      // keys and owners only: an item's relative text changes every minute and is no news
+      attention: () =>
+        attentionItems(config, store, now(), deps.lockState?.() ?? NO_LOCK).map((i) => [
+          i.key,
+          i.owner,
+        ]),
+    },
+    { agents: clockBasis, attention: clockBasis },
+  );
 
   /** Sends each queued topic once, and each gated topic that changed. Attention items are built from agents and escalations. */
   const flushEmits = () => {
@@ -595,9 +622,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   let triageTimer: NodeJS.Timeout | null = null;
   let triageAt = 0;
+  /** What the last triage look read: the same store and lock a minute on need not be read again. */
+  let triaged: { at: number; basis: string } | null = null;
   const scheduleTriage = () => {
     const at = now();
     if (triageTimer !== null && triageAt <= at) return;
+    // A look at an unchanged store finds the due times it found: each already has its timer, and
+    // the clock-only items turn over by the minute.
+    const basisNow = () => JSON.stringify([store.readVersion(), deps.lockState?.() ?? NO_LOCK]);
+    if (
+      triaged !== null &&
+      triaged.basis === basisNow() &&
+      at >= triaged.at &&
+      at - triaged.at < SWEEP_REPEAT_MS
+    )
+      return;
     if (triageTimer !== null) clearTimeout(triageTimer);
     triageTimer = null;
     const due = attentionItems(config, store, at, deps.lockState?.() ?? NO_LOCK).flatMap((item) =>
@@ -606,10 +645,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     // a FLIGHT that is not running shows as not triaging once its restart grace has passed
     const shows = flightNotTriagingDueAt(config, store, at);
     if (shows !== null && shows > at) due.push(shows);
+    // after the look: a view it built may have written, and that is not a change
+    triaged = { at, basis: basisNow() };
     if (due.length === 0) return;
     triageAt = Math.min(...due);
     triageTimer = setTimeout(() => {
       triageTimer = null;
+      triaged = null;
       // never read a view built earlier in this second: the timer's reason is that time has passed
       forgetViews(store);
       void applyDefaults();
@@ -622,8 +664,21 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
   const noViewClients = (): boolean => deps.hasViewClients?.() === false;
 
   /** Drops acks whose item has been gone for ACK_ABSENT_MS (after each loop tick / GitHub poll). */
-  const sweepAcks = (rows?: CrewRow[]) => {
+  const sweepAcks = (rows?: CrewRow[], skippable = false) => {
     const at = now();
+    // A quiet tick finds what the last sweep found while nothing was written, no date hold has
+    // come due and under SWEEP_REPEAT_MS has passed: the clock-only rules re-run each minute, and
+    // the triage timer applies defaults when one falls due.
+    if (
+      skippable &&
+      lastSweep !== null &&
+      lastSweep.version === store.readVersion() &&
+      lastSweep.viewed === !noViewClients() &&
+      at >= lastSweep.at &&
+      at - lastSweep.at < SWEEP_REPEAT_MS &&
+      at < nextDateHold()
+    )
+      return;
     const lock = deps.lockState?.() ?? NO_LOCK;
     // Rows are read only if a hold needs them, and then without event timelines (the sweep keeps
     // none).
@@ -667,9 +722,18 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       emit("attention");
     void applyDefaults();
     // The ack sweep is housekeeping: a hub with no browser leaves it to the next poll with one.
-    if (noViewClients()) return;
-    store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
+    if (!noViewClients())
+      store.sweepAcks(new Set(attentionItems(config, store, at, lock, rows).map((i) => i.key)), at);
+    lastSweep = { at, version: store.readVersion(), viewed: !noViewClients() };
   };
+  let lastSweep: { at: number; version: string; viewed: boolean } | null = null;
+  const nextDateHold = (): number =>
+    Math.min(
+      Infinity,
+      ...Object.values(holds(store)).flatMap((h) =>
+        h.releasedAt === undefined && h.condition.kind === "date" ? [h.condition.at] : [],
+      ),
+    );
 
   /**
    * Records each agent's change of HUD state when either side is notable (running <-> idle is
@@ -703,21 +767,37 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
 
   /** After a loop tick: one crew read serves the state-change record and the ack sweep. */
   let lastInputs: string | null = null;
+  /** When a tick last read the crew; seats in a clock-driven state coast on that for TIMED_COAST_MS. */
+  let timedReadAt = 0;
   /** States that turn with the clock; the others turn only with the inputs `stateInputs` reads. */
   const TIMED_STATES: readonly HudState[] = ["running", "stalled", "waiting"];
   const afterLoopTick = () => {
-    const inputs = noViewClients() ? stateInputs(config, store) : null;
+    // a caller that cannot say who watches (a unit test) reads eagerly
+    const inputs = deps.hasViewClients !== undefined ? stateInputs(config, store) : null;
     // an agent no longer configured keeps its last event, and no row of it changes
-    const configured = new Set(configuredAgents(config).map((a) => a.id));
-    const quiet =
-      inputs !== null &&
-      inputs === lastInputs &&
-      !store.hasActiveRun() &&
-      ![...lastStates].some(([id, s]) => configured.has(id) && TIMED_STATES.includes(s));
+    const agents = configuredAgents(config);
+    const configured = new Set(agents.map((a) => a.id));
+    // A crew seat's state turns with its session row (in the inputs) or the clock (timed states),
+    // open run or not; a loop's turns with its run's output, which the inputs do not read.
+    const loopIds = agents.filter((a) => a.kind === "loop").map((a) => a.id);
+    // why this tick cannot skip the crew read, for the debug line
+    const timed = [...lastStates].find(([id, s]) => configured.has(id) && TIMED_STATES.includes(s));
+    const reason =
+      inputs === null
+        ? "caller cannot say who watches"
+        : inputs !== lastInputs
+          ? "state inputs changed"
+          : store.hasActiveRunOf(loopIds, now() - ACTIVE_RUN_WINDOW_MS)
+            ? "a loop run is open"
+            : timed !== undefined && !(now() >= timedReadAt && now() - timedReadAt < TIMED_COAST_MS)
+              ? `${timed[0]} is ${timed[1]}, read over ${TIMED_COAST_MS} ms ago`
+              : null;
     // nothing can change state: no crew read
-    if (quiet) return sweepAcks();
+    if (reason === null) return sweepAcks(undefined, true);
+    deps.debug?.(`loop tick reads the crew: ${reason}`);
     lastInputs = inputs;
     const at = now();
+    timedReadAt = at;
     // with no browser the rows are the summary: state changes need no event timelines
     const lock = deps.lockState?.() ?? NO_LOCK;
     const rows = (
@@ -726,7 +806,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         : crew(config, store, at, lock)
     ).rows;
     recordStateChanges(rows, at);
-    sweepAcks(rows);
+    sweepAcks(rows, true);
   };
 
   /** Crew rows change between loop ticks: record them on the `agents` event, at most once a second. */
@@ -910,6 +990,16 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       recordStatus("sessions", true, null);
     });
 
+  /** Reads ended runs' transcripts for the token audit; a failure is logged, never thrown. */
+  const runTokenAudit = async () => {
+    try {
+      const a = await (c.tokenAudit ?? auditEndedRuns)({ store, config, now: now() });
+      if (a.audited || a.controllerSessions)
+        deps.log?.(`token audit: ${a.audited} runs, ${a.controllerSessions} controller sessions`);
+    } catch (e) {
+      deps.log?.(`token audit failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
   const jobs: Record<Job, () => Promise<void>> = {
     ta: async () => {
       for (const loop of config.loops.filter((l) => l.kind === "ta-loop")) {
@@ -1158,7 +1248,6 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       for (const acct of config.accounts) {
         await guarded(usageCollector(acct.id), () => usageFor(acct));
       }
-      if (syncBudgetBrake(config, store, now())) emit("attention");
       emit("limits", "health");
     },
     maintenance: async () => {
@@ -1256,14 +1345,9 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
           `backfill: ${r.folded} runs in ${Math.round(performance.now() - t0)} ms, ${r.left} left`,
         );
       }),
+    tokenAudit: runTokenAudit,
     transcripts: async () => {
-      try {
-        const a = await (c.tokenAudit ?? auditEndedRuns)({ store, config, now: now() });
-        if (a.audited || a.controllerSessions)
-          deps.log?.(`token audit: ${a.audited} runs, ${a.controllerSessions} controller sessions`);
-      } catch (e) {
-        deps.log?.(`token audit failed: ${e instanceof Error ? e.message : String(e)}`);
-      }
+      await runTokenAudit();
       const r = await (c.transcripts ?? maintainTranscripts)({
         store,
         now: now(),
@@ -1303,11 +1387,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         store.addMachineSample(r.sample);
         machineMinute = minute;
         const capacityConfig = deps.config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         machineBlocked = capacity.blocked;
         if (capacity.blocked) {
           const gb = (bytes: number | null | undefined): string =>
@@ -1326,7 +1406,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
                 )
                 .join("; ")
             : "unavailable";
-          store.refreshNote({
+          store.refreshNoteInEpisode({
             key: MACHINE_CAPACITY_KEY,
             kind: "flag",
             runId: null,
@@ -1338,8 +1418,13 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
         } else {
           store.clearNote(MACHINE_CAPACITY_KEY, at);
         }
-        // The week's reset lifts the brake without a new reading
-        syncBudgetBrake(deps.config, store, at);
+        // Waste alarms are read once a minute: a restart storm shows within minutes. They never
+        // raise a Needs-you item; FLIGHT is woken once per alarm.
+        try {
+          syncWasteAlarms(deps.config, store, at);
+        } catch (e) {
+          deps.log?.(`waste alarms: ${e instanceof Error ? e.message : String(e)}`);
+        }
         emit("attention");
       }
     },
@@ -1389,6 +1474,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     usage: config.poll.usageMinutes * 60_000,
     maintenance: MAINTENANCE_INTERVAL_MS,
     transcripts: TRANSCRIPT_PASS_INTERVAL_MS,
+    tokenAudit: TOKEN_AUDIT_INTERVAL_MS,
     machine: MACHINE_INTERVAL_MS,
     prs: PR_SWEEP_MS,
     flow: FLOW_INTERVAL_MS,
@@ -1405,6 +1491,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
     flow: FLOW_FIRST_DELAY_MS,
     backfill: BACKFILL_FIRST_DELAY_MS,
     transcripts: TRANSCRIPT_PASS_FIRST_DELAY_MS,
+    tokenAudit: TOKEN_AUDIT_FIRST_DELAY_MS,
   };
 
   const refreshBoards = () => {
@@ -1463,6 +1550,8 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
       store.setSetting(FLIGHT_LOOPS_SETTING, "{}");
       unsubscribeCrew = bus.subscribe((t) => {
         if (t === "agents") recordCrewSoon();
+        // config and FLIGHT's liveness are not in the store version
+        if (t === "config" || t === "flight") triaged = null;
         if (["agents", "escalations", "attention", "flight", "boards", "config"].includes(t))
           scheduleTriage();
       });

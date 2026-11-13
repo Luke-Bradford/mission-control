@@ -2,7 +2,7 @@ import { COMMS_CAPCOM } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
-import { Decisions } from "../src/comms/Decisions.tsx";
+import { callSign } from "../src/crew.ts";
 import { hub } from "../src/data.ts";
 import { FLIGHT_NO_SEAT } from "../src/flight/flightTypes.ts";
 import { Comms } from "../src/pages/Comms.tsx";
@@ -13,6 +13,26 @@ const ROWS = [
   crewRow(),
   crewRow({ id: "studio", repoId: "site-builder", index: 1, hudState: "idle", run: null }),
 ];
+
+/** An unseen message from `from` to the operator: what every unread-to-you badge counts. */
+const toOperator = (id: string, from: string) => ({
+  message: {
+    id,
+    at: NOW,
+    from,
+    to: "CAPCOM",
+    text: `reply ${id}`,
+    ticket: null,
+    label: null,
+    ref: null,
+    replyTo: null,
+    mentions: [],
+    reactions: [],
+    pinned: false,
+    operator: false,
+  },
+  seen: false,
+});
 
 beforeEach(() => {
   hub.clear();
@@ -26,6 +46,128 @@ afterEach(() => {
 });
 
 describe("Comms routes", () => {
+  it("hides hub notices through one switch while preserving crew messages and the draft", async () => {
+    const message = {
+      id: "comms:1",
+      at: NOW,
+      from: "alpha",
+      to: "crew",
+      text: "A real crew message",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const notice = {
+      ...message,
+      id: "comms:2",
+      from: "MC",
+      text: "CI failed. Read the check.",
+      kind: "notice",
+    };
+    const fetch = stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [message, notice] },
+      "/api/comms/crew?notices=hide": { messages: [message] },
+      "/api/comms/flight": { messages: [] },
+      "/api/comms/flight?notices=hide": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+    });
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    await screen.findByText(notice.text);
+    const input = screen.getByLabelText(
+      "Post to #crew as CAPCOM · @name pings one agent",
+    ) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "Keep my draft" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/crew?notices=hide", expect.anything()),
+    );
+    await waitFor(() => expect(screen.queryByText(notice.text)).toBeNull());
+    expect(screen.getByText(message.text)).toBeTruthy();
+    expect(input.value).toBe("Keep my draft");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await screen.findByText(notice.text);
+  });
+  it("keeps the loaded messages and counts on screen while the notices switch loads", async () => {
+    const base = {
+      at: NOW,
+      from: "flight",
+      to: COMMS_CAPCOM,
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+    };
+    const ordinary = { ...base, id: "comms:10", text: "An ordinary FLIGHT reply" };
+    const notice = { ...base, id: "comms:11", from: "MC", text: "CI failed.", kind: "notice" };
+    const routes = {
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/crew": { messages: [] },
+      "/api/comms/flight": { messages: [ordinary, notice] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+    };
+    const inner = stubFetch(routes);
+    const fetch = vi.fn((input: string, init?: RequestInit) =>
+      input.includes("notices=hide") ? new Promise<Response>(() => {}) : inner(input, init),
+    );
+    vi.stubGlobal("fetch", fetch);
+    render(<Comms item={null} view={{ kind: "flight" }} />);
+    await screen.findByText(ordinary.text);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Hide hub notices" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith("/api/comms/flight?notices=hide", expect.anything()),
+    );
+    expect(screen.getByText(ordinary.text)).toBeTruthy();
+    expect(screen.queryByText(notice.text)).toBeNull();
+    expect(screen.queryByText("No messages yet.")).toBeNull();
+    expect(screen.getByRole("navigation", { name: "Comms" }).textContent).not.toMatch(
+      /\b0 messages/,
+    );
+  });
+  it("says hub notices are hidden, not that the conversation is empty", async () => {
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: ROWS },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      "/api/comms/agents/alpha?notices=hide": { messages: [], contacts: [], unread: 0 },
+      "/api/comms/agents/alpha?summary=1&notices=hide": { messages: [], contacts: [], unread: 0 },
+      "/api/comms/agents/alpha/contacts/MC?notices=hide": { messages: [] },
+      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/pins": { messages: [] },
+    });
+    render(
+      <CommsConversation
+        view={{ kind: "contact", agentId: "alpha", contactId: "MC" }}
+        hideNotices
+        row={seatRow({ id: "alpha" })}
+        jumpId={null}
+        onJumped={() => {}}
+        onOpenMessage={() => {}}
+      />,
+    );
+    await screen.findByText("No messages here. Hub notices are hidden.");
+    expect(screen.queryByText("No messages yet.")).toBeNull();
+  });
   it("keeps the reader's place when the conversation rerenders", async () => {
     const message = {
       id: "comms:older",
@@ -327,6 +469,29 @@ describe("Comms routes", () => {
       expect(window.location.pathname).toBe("/comms/tickets/%23707");
     });
 
+    it("keeps a reference inside bold as a chip, with no literal markers, and still filters", async () => {
+      await open({ ...base, ref: null, text: "**Split: #1667 covered, PR 12 open** done" });
+      await screen.findByRole("link", { name: "#1667" });
+      const body = document.querySelector(".comms-bubble-body") as HTMLElement;
+      expect(body.textContent).not.toContain("**");
+      const strong = body.querySelector("strong") as HTMLElement;
+      expect(within(strong).getByRole("link", { name: "#1667" })).toBeTruthy();
+      expect(strong.textContent).toContain("PR 12");
+      fireEvent.click(within(strong).getByRole("button", { name: "Filter chat to #1667" }));
+      expect(window.location.pathname).toBe("/comms/tickets/%231667");
+    });
+
+    it("shows a list as list items with a chip inside, not raw dashes", async () => {
+      await open({ ...base, ref: null, text: "Plan:\n- first #12\n- second **bold**" });
+      await screen.findByRole("link", { name: "#12" });
+      const body = document.querySelector(".comms-bubble-body") as HTMLElement;
+      const items = [...body.querySelectorAll("li")];
+      expect(items).toHaveLength(2);
+      expect(items.some((li) => /^\s*-/.test(li.textContent ?? ""))).toBe(false);
+      expect(within(items[0] as HTMLElement).getByRole("link", { name: "#12" })).toBeTruthy();
+      expect(items[1]?.querySelector("strong")?.textContent).toBe("bold");
+    });
+
     it("opens another ticket of the message's repo, not only its own", async () => {
       await open({ ...base, ref: null, text: "see #708" });
       const link = await screen.findByRole("link", { name: "#708" });
@@ -362,8 +527,24 @@ describe("Comms routes", () => {
       expect(document.querySelector(".comms-ref-plain")?.textContent).toBe("#5");
     });
 
+    it("keeps GitHub for PRs named in the text of a message with a ticket", async () => {
+      await open({ ...base, ticket: "shop-app#5", ref: null, text: "see PR 12 and PR 99" });
+      const first = await screen.findByRole("link", { name: "PR 12 on GitHub" });
+      expect(first.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/12");
+      const second = screen.getByRole("link", { name: "PR 99 on GitHub" });
+      expect(second.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/99");
+    });
+
+    it("opens the message's ticket page from the PR its ref names", async () => {
+      await open({ ...base, ticket: "shop-app#5", ref: "PR 12", text: "merged" });
+      const link = await screen.findByRole("link", { name: "PR 12" });
+      expect(link.getAttribute("href")).toBe("/tickets/shop-app/5");
+      fireEvent.click(link);
+      expect(window.location.pathname).toBe("/tickets/shop-app/5");
+    });
+
     it("opens a PR on GitHub from the message's repo, with a separate filter", async () => {
-      await open({ ...base, ref: null, text: "see PR 12" });
+      await open({ ...base, from: "sender", ticket: null, ref: null, text: "see PR 12" });
       const link = await screen.findByRole("link", { name: "PR 12 on GitHub" });
       expect(link.getAttribute("href")).toBe("https://github.com/octo-org/shop-app/pull/12");
       expect(link.getAttribute("target")).toBe("_blank");
@@ -371,7 +552,7 @@ describe("Comms routes", () => {
     });
 
     it("keeps a PR with no GitHub repo configured as the filter alone", async () => {
-      await open({ ...base, ref: null, text: "see PR 12" }, []);
+      await open({ ...base, ticket: null, ref: null, text: "see PR 12" }, []);
       await screen.findByRole("button", { name: "Filter chat to PR 12" });
       expect(screen.queryByRole("link", { name: /PR 12/ })).toBeNull();
     });
@@ -417,7 +598,7 @@ describe("Comms routes", () => {
     });
   });
 
-  it("shows per-contact unread, retries a failed read, unpins, and does not send to a missing FLIGHT seat", async () => {
+  it("labels contact figures as messages, retries a failed read, unpins, and does not send to a missing FLIGHT seat", async () => {
     const pin = {
       id: "comms:pin",
       at: NOW,
@@ -462,7 +643,9 @@ describe("Comms routes", () => {
         row={seatRow({ id: "alpha" })}
       />,
     );
-    expect(await screen.findByText(/3 unread/)).toBeTruthy();
+    // beta is not the operator: its figure is a message count, never "unread"
+    expect(await screen.findByText(/beta · 1 message/i)).toBeTruthy();
+    expect(screen.queryByText(/unread/)).toBeNull();
     expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(reads).toBe(2));
@@ -498,7 +681,11 @@ describe("Comms routes", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/crew": { messages: [message], unread: 3 },
-      "/api/comms/mentions": { mentions: [{ message, seen: false }] },
+      "/api/comms/crew?history=1": { messages: [message], unread: 3 },
+      // not among the messages shown: opening the channel reads the ones it shows
+      "/api/comms/mentions": {
+        mentions: [{ message: { ...message, id: "comms:10" }, seen: false }],
+      },
       "/api/comms/pins": { messages: [message] },
       "POST /api/comms/read": { ok: true },
       "POST /api/comms/mentions/seen": { ok: true },
@@ -508,12 +695,9 @@ describe("Comms routes", () => {
     expect(await screen.findByText("question")).toBeTruthy();
     expect(screen.getByText("Pinned")).toBeTruthy();
     const nav = screen.getByRole("navigation", { name: "Comms" });
-    expect(
-      within(nav).getByTitle("3 unread messages").querySelector("[aria-hidden]")?.textContent,
-    ).toBe("3");
-    expect(
-      within(nav).getByTitle("1 new mention").querySelector("[aria-hidden]")?.textContent,
-    ).toBe("@1");
+    // #crew is not addressed to the operator, so it makes no unread mark, and nor does a mention
+    expect(within(nav).queryByTitle("3 unread messages")).toBeNull();
+    expect(within(nav).queryByTitle("1 new mention")).toBeNull();
     const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
     expect(bell.closest(".act")).toBeTruthy();
     fireEvent.click(bell);
@@ -558,7 +742,7 @@ describe("Comms routes", () => {
     };
     let attempts = 0;
     stubFetch({
-      "/api/comms/crew": { messages: [message] },
+      "/api/comms/crew": { messages: [] },
       "/api/comms/mentions": { mentions: [{ message, seen: false }] },
       "/api/comms/pins": { messages: [] },
       "/api/flight": { seat: null, decisions: [] },
@@ -596,7 +780,9 @@ describe("Comms routes", () => {
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/crew": { messages: [], unread: 0 },
       "/api/comms/flight": { messages: [], unread: 0 },
-      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/mentions": {
+        mentions: [toOperator("comms:71", "alpha"), toOperator("comms:72", "alpha")],
+      },
       "/api/comms/pins": { messages: [] },
       "/api/comms/agents/alpha": {
         messages: [],
@@ -617,8 +803,8 @@ describe("Comms routes", () => {
     });
     render(<Comms item={null} view={{ kind: "crew" }} />);
     const nav = await screen.findByRole("navigation", { name: "Comms" });
-    const badge = await within(nav).findByTitle("2 unread replies to you");
-    expect(badge.querySelector("[aria-hidden]")?.textContent).toBe("↩2");
+    const badge = await within(nav).findByTitle("2 unread messages to you");
+    expect(badge.querySelector("[aria-hidden]")?.textContent).toBe("2");
   });
 
   const stored = (id: string, text: string, at: number) => ({
@@ -731,7 +917,9 @@ describe("Comms routes", () => {
     });
     render(<Comms item={null} view={{ kind: "crew" }} />);
     const nav = await screen.findByRole("navigation", { name: "Comms" });
-    expect((await within(nav).findByTitle("7 messages with its contacts")).textContent).toBe("7");
+    expect((await within(nav).findByTitle(/^7 messages with its contacts\./)).textContent).toBe(
+      "7 msgs",
+    );
   });
 
   it("shows no all-messages total for a long history, which the first page cannot give", async () => {
@@ -1003,7 +1191,7 @@ describe("Comms routes", () => {
       <Comms item={null} view={{ kind: "contact", agentId: "shop-app-ta", contactId: "studio" }} />,
     );
     const nav = await screen.findByRole("navigation", { name: "Comms" });
-    expect(within(nav).getByText("FLIGHT ↔ CAPCOM")).toBeTruthy();
+    expect(within(nav).getByText("FLIGHT and you")).toBeTruthy();
     // The Comms graph names the #crew hub too; the nav entry is the one asserted here.
     expect(within(nav).getByText("#crew")).toBeTruthy();
     expect((await screen.findAllByText("handoff")).length).toBe(2);
@@ -1063,7 +1251,7 @@ describe("Comms routes", () => {
     const nav = screen.getByRole("navigation", { name: "Comms" });
     const guido = within(nav).getByText("guido-cx").closest("button");
     const retro = within(nav).getByText("retro-cx").closest("button");
-    expect(guido && within(guido).getByTitle("1 new mention")).toBeTruthy();
+    expect(guido && within(guido).queryByTitle("1 new mention")).toBeNull();
     expect(retro && within(retro).queryByTitle("1 new mention")).toBeNull();
     expect(screen.queryByText("packages/core/**")).toBeNull();
     expect(screen.queryByText("apps/review/**")).toBeNull();
@@ -1116,34 +1304,122 @@ describe("Comms routes", () => {
   });
 });
 
-describe("Decisions", () => {
-  it("lists a briefed question with a default and counts down to that default", () => {
-    const defaultDueAt = NOW + 90_000;
-    render(
-      <Decisions
-        items={[
-          item({
-            key: "ask:default",
-            kind: "question",
-            text: "Which cache should we use?",
-            brief: brief(),
-            defaultDueAt,
-            triageDueAt: NOW + 10 * MIN,
-          }),
-          item({
-            key: "decision:triage",
-            text: "Current decision deadline",
-            triageDueAt: NOW + MIN,
-          }),
-        ]}
-        rows={ROWS}
-      />,
-    );
+describe("the record, not a place to answer", () => {
+  const SEAT = crewRow({ id: "alpha", kind: "crew", role: "Developer" });
+  const routes = (agent: Record<string, unknown> = {}, mentions: unknown[] = []) => ({
+    "/api/config": CONFIG,
+    "/api/attention": [
+      item({ key: "ask:1", kind: "question", text: "Which cache should we use?", brief: brief() }),
+    ],
+    "/api/crew?shape=summary": { rows: [SEAT], firstRunToday: null },
+    "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+    "/api/comms/crew": { messages: [] },
+    "/api/comms/flight": { messages: [], unread: 0 },
+    "/api/comms/mentions": { mentions },
+    "/api/comms/pins": { messages: [] },
+    [`/api/comms/agents/${SEAT.id}`]: { messages: [], inbox: [], contacts: [], ...agent },
+    [`/api/comms/agents/${SEAT.id}?summary=1`]: { messages: [], inbox: [], contacts: [], ...agent },
+    "/api/comms/agents/studio": { messages: [], inbox: [], contacts: [] },
+    "/api/repos": [],
+  });
 
-    const decisions = screen.getByRole("region", { name: "Decisions" });
-    expect(within(decisions).getByText("Which cache should we use?")).toBeTruthy();
-    expect(within(decisions).getByText("default in 1:30")).toBeTruthy();
-    expect(within(decisions).getByText("default in 1:00")).toBeTruthy();
+  it("has no Decisions panel, and shows no question to answer", async () => {
+    stubFetch(routes());
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    await screen.findByRole("button", { name: /FLIGHT and you/ });
+    expect(screen.queryByRole("region", { name: "Decisions" })).toBeNull();
+    expect(screen.queryByText("Which cache should we use?")).toBeNull();
+    expect(screen.getByRole("region", { name: "Tickets" })).toBeTruthy();
+  });
+
+  it("marks unread only for what is addressed to the operator", async () => {
+    stubFetch(
+      routes(
+        {
+          unread: 7,
+          directUnread: 99,
+          contacts: [{ id: "studio", lastMessage: null, count: 3, unread: 3 }],
+        },
+        [toOperator("comms:81", "alpha"), toOperator("comms:82", "alpha")],
+      ),
+    );
+    render(<Comms item={null} view={{ kind: "crew" }} />);
+    const nav = await screen.findByRole("navigation", { name: "Comms" });
+    const row = (await within(nav).findByText(callSign(SEAT))).closest("button");
+    await waitFor(() =>
+      expect(within(row as HTMLElement).getByText("2 unread messages to you")).toBeTruthy(),
+    );
+    // the 7 unread messages of other conversations make no mark, and the figure is a message count
+    expect(within(row as HTMLElement).queryByText(/7 unread/)).toBeNull();
+    expect(within(row as HTMLElement).getByTitle(/3 messages with its contacts/)).toBeTruthy();
+  });
+});
+
+describe("FLIGHT and the controller, and the hub's conversation", () => {
+  const FLIGHT = crewRow({ id: "flight-1", kind: "crew", role: "FLIGHT" });
+  const base = (contacts: unknown[]) => ({
+    "/api/config": CONFIG,
+    "/api/attention": [],
+    "/api/crew?shape=summary": { rows: [FLIGHT], firstRunToday: null },
+    "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
+    "/api/comms/crew": { messages: [] },
+    "/api/comms/flight": { messages: [], unread: 0 },
+    "/api/comms/mentions": { mentions: [] },
+    "/api/comms/pins": { messages: [] },
+    "/api/comms/agents/flight-1?summary=1": { messages: [], inbox: [], contacts },
+    "/api/comms/agents/flight-1": { messages: [], inbox: [], contacts },
+    "/api/repos": [],
+    "/api/comms/ticket-counts": { tickets: [], unassignedCount: 0 },
+  });
+  const contact = (id: string, hasMessages: boolean) => ({
+    id,
+    hasMessages,
+    count: hasMessages ? 264 : 0,
+    unread: 0,
+    lastMessage: null,
+  });
+
+  it("shows FLIGHT and the controller, linked to that conversation, when there are controller messages", async () => {
+    stubFetch(base([contact("CONTROLLER", true)]));
+    render(<Comms item={null} view={{ kind: "flight" }} />);
+    const entry = await screen.findByRole("button", { name: /FLIGHT and the controller/ });
+    fireEvent.click(entry);
+    expect(window.location.pathname).toBe("/comms/agents/flight-1/contacts/CONTROLLER");
+  });
+
+  it("leaves the entry out when there are no controller messages", async () => {
+    stubFetch(base([contact("CONTROLLER", false)]));
+    render(<Comms item={null} view={{ kind: "flight" }} />);
+    await screen.findByRole("button", { name: /FLIGHT and you/ });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: /FLIGHT and the controller/ })).toBeNull(),
+    );
+  });
+
+  it("opens the hub's conversation with its stored messages", async () => {
+    const note = {
+      id: "comms:5",
+      at: NOW - MIN,
+      from: "MC",
+      to: "flight-1",
+      text: "CI failed on 341f108 in job web-core.",
+      ticket: null,
+      label: null,
+      ref: null,
+      replyTo: null,
+      mentions: [],
+      reactions: [],
+      pinned: false,
+      operator: false,
+      senderKind: "hub",
+    };
+    stubFetch({
+      ...base([contact("MC", true)]),
+      "/api/comms/agents/flight-1/contacts/MC": { messages: [note] },
+    });
+    render(<Comms item={null} view={{ kind: "contact", agentId: "flight-1", contactId: "MC" }} />);
+    expect(await screen.findByText("CI failed on 341f108 in job web-core.")).toBeTruthy();
+    expect(screen.getByTestId("sender-tag").textContent).toBe("HUB");
   });
 });
 

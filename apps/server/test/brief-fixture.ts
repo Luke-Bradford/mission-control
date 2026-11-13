@@ -4,7 +4,7 @@ import {
   currentBriefFlight,
   ORDINARY_GUIDANCE,
   prepareOrdinaryGuidance,
-} from "../src/brief-prepare.ts";
+} from "../src/brief/prepare.ts";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems } from "../src/hud.ts";
 import type { Store } from "../src/store.ts";
@@ -53,6 +53,8 @@ export function operatorDecisionFields(
   why: BriefOperatorReason = "product-direction",
 ) {
   return {
+    title: "A fixture needs the operator's decision",
+    priority: "P1" as const,
     did: [],
     checked: [],
     recommendedOptionId: "apply",

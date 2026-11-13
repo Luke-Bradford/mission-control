@@ -1,53 +1,65 @@
-import type { AttentionHoldCondition } from "@mc/core";
+import type { AttentionItem, NeedsYouOffer } from "@mc/core";
 import { useState } from "react";
-import { apiPost } from "../api.ts";
-import { HoldForm } from "../comms/HoldForm.tsx";
+import { ApiError, apiPost } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { writeFailure } from "../demo/mode.ts";
 
-/**
- * Put the open item on hold with a reason and a release condition (the Hold action Comms' decision
- * rows had before the item moved to this page). The server decides who may hold what.
- */
-export function HoldItem({ itemKey }: { itemKey: string }) {
-  const [holding, setHolding] = useState(false);
-  const [busy, setBusy] = useState(false);
+const ACTION_LABEL: Record<NeedsYouOffer, string> = {
+  "not-now": "Not now",
+  drop: "Drop",
+};
+
+type AttentionAction = NeedsYouOffer | "clear";
+
+const actionPath = (offer: NeedsYouOffer, key: string): string =>
+  offer === "not-now" ? ACTIONS.notNow(key) : ACTIONS.drop(key);
+
+const pathFor = (action: AttentionAction, key: string): string =>
+  action === "clear" ? ACTIONS.clear(key) : actionPath(action, key);
+
+const labelFor = (action: AttentionAction): string =>
+  action === "clear" ? "Clear" : ACTION_LABEL[action];
+
+/** Set aside or close only the actions the server has offered for this open question. */
+export function HoldItem({ item }: { item: AttentionItem }) {
+  const [busy, setBusy] = useState<AttentionAction | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const hold = async (reason: string, condition: AttentionHoldCondition) => {
-    setBusy(true);
+  const offers = item.offers ?? [];
+  const actions: readonly AttentionAction[] = [...offers, "clear"];
+  const act = async (action: AttentionAction) => {
+    setBusy(action);
     setError(null);
     try {
-      await apiPost(ACTIONS.hold(itemKey), { reason, condition });
-      setHolding(false);
+      await apiPost(pathFor(action, item.key), {});
       hub.refetch(RESOURCES.attention.path);
-      hub.refetch(RESOURCES.heldAttention.path);
+      hub.refetch(RESOURCES.answeredAttention.path);
     } catch (e) {
-      setError(writeFailure(e, "Could not hold this item."));
+      setError(
+        e instanceof ApiError && [404, 409, 422, 502].includes(e.status)
+          ? e.message
+          : writeFailure(e, `Could not ${labelFor(action).toLowerCase()} this item.`),
+      );
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
   return (
-    <div className="needs-hold">
-      <button
-        type="button"
-        className="sm"
-        disabled={busy || holding}
-        onClick={() => setHolding(true)}
-      >
-        Hold
-      </button>
+    <div className="needs-actions">
+      {actions.map((action) => (
+        <button
+          type="button"
+          className="sm"
+          disabled={busy !== null}
+          key={action}
+          onClick={() => void act(action)}
+        >
+          {labelFor(action)}
+        </button>
+      ))}
       {error && (
         <p className="note err" role="alert">
           {error}
         </p>
-      )}
-      {holding && (
-        <HoldForm
-          busy={busy}
-          onCancel={() => setHolding(false)}
-          onHold={(r, c) => void hold(r, c)}
-        />
       )}
     </div>
   );

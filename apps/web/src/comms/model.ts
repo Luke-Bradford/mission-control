@@ -1,5 +1,33 @@
 import { COMMS_TICKET, type CommsThreadMessage } from "@mc/core";
+import { useRef } from "react";
+import { type Resource, type ResourceRef, useResource } from "../data.ts";
 import type { CommsView } from "../router.ts";
+
+/** Keep the notice filter on both the newest page and its older-page requests. */
+export function noticeResource(ref: ResourceRef, hidden: boolean): ResourceRef {
+  return hidden
+    ? { ...ref, path: `${ref.path}${ref.path.includes("?") ? "&" : "?"}notices=hide` }
+    : ref;
+}
+
+/**
+ * A Comms resource under the notices switch. Flipping the switch changes the path, which starts
+ * with no data; until the new page arrives, keep the last page of the same conversation so the
+ * view does not flash "No messages yet." or "0 messages". Callers filter notices themselves.
+ */
+export function useNoticeResource<T>(base: ResourceRef | null, hidden: boolean): Resource<T> {
+  const current = useResource<T>(base ? noticeResource(base, hidden) : null);
+  const last = useRef<{ base: string; data: T } | null>(null);
+  if (!base) {
+    last.current = null;
+    return current;
+  }
+  if (current.data !== undefined) {
+    last.current = { base: base.path, data: current.data };
+    return current;
+  }
+  return last.current?.base === base.path ? { ...current, data: last.current.data } : current;
+}
 
 export type { CommsView } from "../router.ts";
 export type ComposerPrefill = { token: number; text: string };

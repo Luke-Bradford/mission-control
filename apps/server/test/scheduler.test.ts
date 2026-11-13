@@ -17,7 +17,7 @@ import {
   type UsageSample,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { holdItem, holds } from "../src/attention-holds.ts";
+import { holdItem, holds } from "../src/attention/holds.ts";
 import { ChangeBus, type Topic } from "../src/bus.ts";
 import { collectorName, FOLD_WINDOW_MS } from "../src/collectors/common.ts";
 import { MISSING_SCOPE_PREFIX } from "../src/collectors/github.ts";
@@ -32,7 +32,9 @@ import {
 import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
 import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
+import { flightState, markItemsShown } from "../src/flight/state.ts";
 import * as hud from "../src/hud.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
   BACKFILL_BUDGET_MS,
@@ -54,7 +56,9 @@ import {
   refreshOnSeatFree,
   waitedPrNumbers,
 } from "../src/scheduler.ts";
+import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
+import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
 import * as views from "../src/views.ts";
 
@@ -244,6 +248,26 @@ describe("scheduler", () => {
     await s.tick("transcripts");
     expect(order).toEqual(["tokenAudit", "transcripts"]);
     expect(log).toHaveBeenCalledWith("token audit failed: disk gone");
+  });
+
+  it("reads ended runs for the token audit every ten minutes, apart from the six-hourly transcripts pass", async () => {
+    vi.useFakeTimers();
+    const tokenAudit = vi.fn(async () => ({ audited: 0, empty: 0, controllerSessions: 0 }));
+    const transcripts = vi.fn(async () => ({ gzipped: 0, deleted: 0, skippedLive: 0, failed: [] }));
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => NOW,
+      collectors: stubs({ transcripts, tokenAudit }),
+    });
+    s.start();
+    await vi.advanceTimersByTimeAsync(TOKEN_AUDIT_FIRST_DELAY_MS);
+    expect(tokenAudit).toHaveBeenCalledTimes(1);
+    expect(transcripts).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(TOKEN_AUDIT_INTERVAL_MS);
+    expect(tokenAudit.mock.calls.length).toBeGreaterThanOrEqual(2);
+    s.stop();
   });
 
   it("starts transcript maintenance after one minute, then every six hours", async () => {
@@ -909,10 +933,12 @@ describe("scheduler", () => {
           await s.stop();
         });
 
-        it("records state changes from the summary crew while no browser is connected and a run is open", async () => {
+        // A loop's state turns with its run's output, which the state inputs do not read; a crew
+        // seat's turns with its session row, which they do (see the next test).
+        it("records state changes from the summary crew while no browser is connected and a loop's run is open", async () => {
           store.upsertRun({
             id: "open",
-            agentId: "seat-guido",
+            agentId: "shop-app-ta",
             repoId: "shop-app",
             seq: 1,
             startedAt: NOW,
@@ -949,6 +975,81 @@ describe("scheduler", () => {
           const calls = vi.mocked(hud.crew).mock.calls.slice(before);
           expect(calls.length).toBeGreaterThan(0);
           expect(calls.every((call) => call[5] === true)).toBe(true);
+        });
+
+        it("counts a loop's run left open for over a day as dead: its ticks go quiet", async () => {
+          store.upsertRun({
+            id: "dead",
+            agentId: "shop-app-ta",
+            repoId: "shop-app",
+            seq: 1,
+            startedAt: NOW - 30 * 86_400_000,
+            endedAt: null,
+            status: "running",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: null,
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/dead.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          const before = vi.mocked(hud.crew).mock.calls.length;
+          at = NOW + 15_000;
+          await s.tick("ta");
+          expect(vi.mocked(hud.crew).mock.calls.length).toBe(before);
+          expect(store.run("dead")?.endedAt).toBeNull();
+        });
+
+        it("reads no crew on quiet ticks while a crew seat's run is open and the seat is unchanged", async () => {
+          store.upsertRun({
+            id: "open-seat",
+            agentId: "seat-guido",
+            repoId: "shop-app",
+            seq: 1,
+            startedAt: NOW,
+            endedAt: null,
+            status: "running",
+            sessionId: null,
+            model: null,
+            branch: null,
+            ticket: "shop-app#1",
+            costUsd: null,
+            tokens: null,
+            transcriptPath: "/x/y.log",
+            prs: [],
+            summary: null,
+            reviewId: null,
+          });
+          const s = createScheduler({
+            config,
+            store,
+            bus,
+            now: () => at,
+            collectors: stubs(),
+            hasViewClients: () => false,
+          });
+          await s.tick("ta");
+          await s.tick("ta");
+          const before = vi.mocked(hud.crew).mock.calls.length;
+          at = NOW + 15_000;
+          await s.tick("ta");
+          at = NOW + 30_000;
+          await s.tick("ta");
+          expect(vi.mocked(hud.crew).mock.calls.length).toBe(before);
         });
 
         it("records a loop's error while no browser is connected and no run is open", async () => {
@@ -1563,20 +1664,123 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
-    it("raises one budget-brake alert on the minute tick and lifts it when the week resets", async () => {
-      const minute = Math.floor(NOW / 60_000) * 60_000;
-      const resetAt = minute + 24 * 3600e3;
-      for (const [at, pct] of [
-        [minute - 6 * 3600e3, 40],
-        [minute, 60],
-      ] as const)
-        store.addUsage({ accountId: "claude-main", window: "7d", at, resetAt, pct, source: "t" });
-      let t = minute + 1000;
+    it("keeps one disk-capacity item and FLIGHT wake while headroom flaps around the percentage floor", async () => {
+      let t = Math.floor(NOW / 60_000) * 60_000;
+      const diskFreeGb = [4.5, 5.3, 4.6];
+      let reading = 0;
+      config.crew = {
+        worktrees: join(dir, "worktrees"),
+        maxSeats: 1,
+        sessions: [
+          {
+            id: "flight-session",
+            repoId: "shop-app",
+            checkout: join(dir, "checkout"),
+            seats: [
+              {
+                id: "flight-1",
+                role: "FLIGHT",
+                accountId: "claude-main",
+                model: "opus",
+                area: [],
+              },
+            ],
+          },
+        ],
+        machineCapacity: {
+          diskFreeGb: 1,
+          diskFreePct: 5,
+          swapUsedPct: 60,
+          memoryFreePct: 10,
+          loadPerCore: 1.5,
+          loadWindowMin: 5,
+          clearAfterMin: 5,
+        },
+      };
       const s = createScheduler({
         config,
         store,
         bus,
         now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: (diskFreeGb[reading] ?? 0) * 1024 ** 3,
+              diskTotalBytes: 100 * 1024 ** 3,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      const state = () => flightState({ config, store, busy: [], now: t });
+
+      await s.tick("machine");
+      const first = store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY);
+      if (first === undefined) throw new Error("machine-capacity note was not raised");
+      const firstWake = state();
+      expect(firstWake.wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
+      markItemsShown(store, firstWake);
+
+      for (reading = 1; reading < diskFreeGb.length; reading++) {
+        t += 60_000;
+        await s.tick("machine");
+      }
+
+      const notes = store.notes().filter((n) => n.key === MACHINE_CAPACITY_KEY);
+      expect(notes).toEqual([expect.objectContaining({ at: first.at })]);
+      expect(notes[0]?.text).toContain("disk free is 4.6%");
+      expect(state().wake?.fresh).toEqual([]);
+
+      diskFreeGb.push(6.1);
+      reading = diskFreeGb.length - 1;
+      t += 60_000;
+      await s.tick("machine");
+      for (let minute = 1; minute < 10; minute++) {
+        t += 60_000;
+        await s.tick("machine");
+        expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeDefined();
+      }
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)).toBeUndefined();
+
+      // A new episode is a fresh item, so it wakes FLIGHT again.
+      diskFreeGb.push(4.5);
+      reading = diskFreeGb.length - 1;
+      t += 60_000;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === MACHINE_CAPACITY_KEY)?.at).toBe(t);
+      expect(state().wake?.fresh).toEqual([`note:${MACHINE_CAPACITY_KEY}`]);
+    });
+
+    it("the minute tick opens a restart-storm alarm for an agent with 7 starts in the hour", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      for (let i = 0; i < 7; i++)
+        store.upsertRun({
+          id: `storm-${i}`,
+          agentId: "guido-1",
+          repoId: "mc",
+          seq: i + 1,
+          startedAt: minute - i * 60_000,
+          endedAt: minute - i * 60_000 + 1000,
+          status: "ok",
+          sessionId: "cli",
+          model: "m",
+          branch: null,
+          ticket: null,
+          costUsd: null,
+          tokens: null,
+          transcriptPath: "/x",
+          prs: [],
+          summary: null,
+        });
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => minute + 1000,
         collectors: stubs({
           machine: vi.fn(async (_p, _prev, at) => ({
             sample: machineSample({ at }),
@@ -1586,13 +1790,35 @@ describe("scheduler", () => {
         }),
       });
       await s.tick("machine");
-      expect(store.notes().filter((n) => n.key === "budget-brake")).toHaveLength(1);
-      t += 60_000;
+      expect(openWasteAlarms(store).map((a) => [a.check, a.subject])).toEqual([
+        ["restart-storm", "guido-1"],
+      ]);
+      expect(store.notes()).toEqual([]);
+    });
+
+    it("the minute tick raises no Needs-you note for a weekly pace past 100%", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      const resetAt = minute + 24 * 3600e3;
+      for (const [at, pct] of [
+        [minute - 6 * 3600e3, 40],
+        [minute, 60],
+      ] as const)
+        store.addUsage({ accountId: "claude-main", window: "7d", at, resetAt, pct, source: "t" });
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => minute + 1000,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({ at }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
       await s.tick("machine");
-      expect(store.notes().filter((n) => n.key === "budget-brake")).toHaveLength(1);
-      t = resetAt + 60_000;
-      await s.tick("machine");
-      expect(store.notes().find((n) => n.key === "budget-brake")).toBeUndefined();
+      expect(store.notes()).toEqual([]);
     });
 
     it.each([
@@ -1641,7 +1867,7 @@ describe("scheduler", () => {
       expect(notes[0]?.text).toContain(reason);
     });
 
-    it("refreshes one capacity item when the active threshold and consumers change", async () => {
+    it("updates the capacity item without renewing its age when the active threshold changes", async () => {
       let t = NOW;
       let disk = true;
       const s = createScheduler({
@@ -3150,4 +3376,115 @@ it("emits attention at the earliest triage deadline and cancels the timer on sto
   topics.length = 0;
   await vi.advanceTimersByTimeAsync(1000);
   expect(topics).toEqual([]);
+});
+
+describe("quiet loop ticks", () => {
+  const quiet = (hasViewClients: () => boolean) =>
+    createScheduler({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      collectors: stubs(),
+      hasViewClients,
+    });
+  let clock = NOW;
+  beforeEach(() => {
+    clock = NOW;
+  });
+
+  it.each([false, true])(
+    "repeats no ack or hold sweep within a minute while nothing was written (browser: %s)",
+    async (viewed) => {
+      const crew = vi.spyOn(hud, "crew");
+      const attention = vi.spyOn(hud, "attentionItems");
+      const s = quiet(() => viewed);
+      for (const job of ["ta", "studio", "ta", "studio"] as const) await s.tick(job);
+      const reads = crew.mock.calls.length + attention.mock.calls.length;
+      clock = NOW + 15_000;
+      await s.tick("studio");
+      clock = NOW + 30_000;
+      await s.tick("ta");
+      expect(crew.mock.calls.length + attention.mock.calls.length).toBe(reads);
+      clock = NOW + 61_000;
+      await s.tick("ta");
+      expect(crew.mock.calls.length + attention.mock.calls.length).toBeGreaterThan(reads);
+    },
+  );
+
+  it("reads the crew for a running agent at most once a minute while its inputs are unchanged", async () => {
+    const row = { id: "shop-app-ta", kind: "loop", loopKind: "ta-loop", hudState: "running" };
+    const reads = vi
+      .spyOn(hud, "crew")
+      .mockReturnValue({ rows: [row] as unknown as CrewRow[], firstRunToday: null });
+    const debug: string[] = [];
+    const s = createScheduler({
+      config,
+      store,
+      bus,
+      now: () => clock,
+      collectors: stubs(),
+      hasViewClients: () => false,
+      debug: (line) => debug.push(line),
+    });
+    for (const job of ["ta", "studio", "ta", "studio"] as const) await s.tick(job);
+    const settled = reads.mock.calls.length;
+    for (const offset of [15_000, 30_000, 45_000]) {
+      clock = NOW + offset;
+      await s.tick("ta");
+    }
+    expect(reads.mock.calls.length).toBe(settled);
+    clock = NOW + 61_000;
+    await s.tick("ta");
+    expect(reads.mock.calls.length).toBeGreaterThan(settled);
+    expect(debug.some((line) => line.includes("shop-app-ta is running"))).toBe(true);
+  });
+
+  it("sweeps again at once after a write, and when a date hold comes due", async () => {
+    const attention = vi.spyOn(hud, "attentionItems");
+    const s = quiet(() => false);
+    await s.tick("ta");
+    await s.tick("ta");
+    const quietReads = attention.mock.calls.length;
+    holdItem(store, "ask:soon", "Waiting", { kind: "date", at: NOW + 20_000 }, "operator", NOW);
+    clock = NOW + 15_000;
+    await s.tick("ta");
+    expect(holds(store)["ask:soon"]?.releasedAt).toBeUndefined();
+    clock = NOW + 20_000;
+    await s.tick("ta");
+    expect(holds(store)["ask:soon"]?.releasedAt).toBe(NOW + 20_000);
+    expect(attention.mock.calls.length).toBeGreaterThanOrEqual(quietReads);
+  });
+});
+
+describe("triage look", () => {
+  it("reads attention again only when the store, config or FLIGHT changed, or a minute passed", async () => {
+    vi.useFakeTimers();
+    let clock = NOW;
+    const attention = vi.spyOn(hud, "attentionItems");
+    const s = createScheduler({ config, store, bus, now: () => clock, collectors: stubs() });
+    try {
+      s.start();
+      await vi.advanceTimersByTimeAsync(3_000);
+      bus.emit("attention"); // one look at the settled store
+      const settled = attention.mock.calls.length;
+      clock += 5_000;
+      bus.emit("attention");
+      bus.emit("boards");
+      expect(attention.mock.calls.length).toBe(settled);
+      store.setSetting("triage-test", "x");
+      bus.emit("attention");
+      const written = attention.mock.calls.length;
+      expect(written).toBeGreaterThan(settled);
+      bus.emit("config");
+      expect(attention.mock.calls.length).toBeGreaterThan(written);
+      const configured = attention.mock.calls.length;
+      clock += 61_000;
+      bus.emit("attention");
+      expect(attention.mock.calls.length).toBeGreaterThan(configured);
+    } finally {
+      await s.stop();
+      vi.useRealTimers();
+    }
+  });
 });

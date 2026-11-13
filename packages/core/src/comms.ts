@@ -1,5 +1,7 @@
 /** Shared stored-Comms contract.  Keep the wire values here: seats and the hub use the same set. */
-export const COMMS_LABELS = ["question", "handoff", "blocker"] as const;
+export const COMMS_LABELS = ["question", "handoff", "blocker", "none"] as const;
+/** The required classification a seat or FLIGHT chooses for a Comms message. */
+export const COMMS_SEAT_LABELS = ["question", "blocker", "none"] as const;
 export const COMMS_REACTIONS = ["seen", "on_it", "done", "cant"] as const;
 export const COMMS_CREW = "crew";
 export const COMMS_RATE_LIMIT_COUNT = 30;
@@ -15,6 +17,9 @@ export const COMMS_OPEN_PREFIX = "comms-open:";
 export const COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT = Date.parse("2026-10-29T07:26:35Z");
 /** One ticket conversation is chatter once both participants have exceeded this many rounds. */
 export const COMMS_CHATTER_ROUNDS = 6;
+/** Key prefix of the note the hub raises for a chatter pair (apps/server/src/store.ts). */
+export const CHATTER_NOTE_PREFIX = "chatter:";
+export const isChatterNoteKey = (key: string): boolean => key.startsWith(CHATTER_NOTE_PREFIX);
 /** The rolling conversation window used to spot a pair stuck in a ticket discussion. */
 export const COMMS_CHATTER_WINDOW_MS = 2 * 60 * 60_000;
 /** The only ticket references accepted at Comms boundaries. */
@@ -62,6 +67,11 @@ export interface CommsReaction {
 /** Who a stored message came from, set by the hub from how the request was made, never from the text. */
 export const COMMS_SENDER_KINDS = ["operator", "controller", "flight", "seat", "hub"] as const;
 export type CommsSenderKind = (typeof COMMS_SENDER_KINDS)[number];
+/** What a stored message is, beyond who sent it. A notice is a line the hub wrote about itself. */
+export const COMMS_NOTICE = "notice";
+export type CommsKind = typeof COMMS_NOTICE;
+/** `?notices=hide` on a Comms read leaves the notices out; any other value is refused. */
+export const COMMS_HIDE_NOTICES = "hide";
 /** Recorded ticket-reference totals, preserved across message retention rather than feed-limited. */
 export interface CommsTicketCounts {
   tickets: { ticket: string; count: number }[];
@@ -84,6 +94,8 @@ export interface CommsMessage {
   operator: boolean;
   /** Null on a message stored before senders were recorded. */
   senderKind?: CommsSenderKind | null;
+  /** `notice` on a line the hub wrote; null on any other message. A notice is never unread. */
+  kind?: CommsKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt?: number | null;
   state?: "stored" | "delivered" | "answered";
@@ -94,11 +106,20 @@ export interface CommsMessage {
 /** A transcript can lack a timestamp; keep that fact instead of inventing its clock time. */
 export type FlightConversationMessage = Omit<CommsMessage, "at"> & { at: number | null };
 
+/** FLIGHT's current run, when the server includes its status with the conversation. */
+export interface FlightConversationStatus {
+  live: boolean;
+  since: number | null;
+  runId: string | null;
+}
+
 export interface FlightConversationPage {
   messages: FlightConversationMessage[];
   hasMore: boolean;
   cursor: string | null;
   unread: number;
+  /** Absent from older servers that do not yet return FLIGHT's run status. */
+  flight?: FlightConversationStatus;
 }
 
 /** Where a message stands: kept by the hub, or taken by its recipient. */

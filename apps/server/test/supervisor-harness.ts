@@ -21,11 +21,11 @@ import {
 } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
-import type { CliHold } from "../src/cli-update.ts";
+import type { CliHold } from "../src/cli/update.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
-import type { ReviewPreviews } from "../src/review-preview.ts";
+import type { ReviewPreviews } from "../src/preview/review.ts";
 import { endKeeper } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
@@ -321,6 +321,7 @@ function make(
     lock?: TestLock;
     hubRoot?: string;
     reviewPreviews?: ReviewPreviews;
+    importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
     prEvidence?: import("../src/pr-evidence/store.ts").PrEvidenceStore;
     prEvidenceRepo?: string;
     rolesDir?: string;
@@ -413,6 +414,7 @@ function make(
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
     ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
+    ...(over.importGraph === undefined ? {} : { importGraph: over.importGraph }),
     ...(over.prEvidence === undefined ? {} : { prEvidence: over.prEvidence }),
     ...(over.prEvidenceRepo === undefined ? {} : { prEvidenceRepo: over.prEvidenceRepo }),
     hubPort: HUB_PORT,

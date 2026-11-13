@@ -41,7 +41,6 @@ import { basename, dirname, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
   BLOCKING_SEVERITIES,
-  budgetBrakeText,
   CANNOT_START,
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
@@ -127,18 +126,19 @@ import {
   ticketInReviewText,
   ticketPathGrants,
   trimHookCommand,
+  wasteParkText,
+  wasteStormText,
   watchCheckoutName,
   watchStartRefusedText,
   wrapExternalText,
 } from "@mc/core";
-import { accountBindingProblem, codexProfile } from "../account-bindings.ts";
+import { accountBindingProblem, codexProfile } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
-import { boundBriefGuard, boundBriefIdentity } from "../brief-dispatch-context.ts";
-import { budgetBrake } from "../budget-brake.ts";
+import { boundBriefGuard, boundBriefIdentity } from "../brief/dispatch-context.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
-import type { CliHold } from "../cli-update.ts";
-import { probeClaudeVersion } from "../cli-version.ts";
+import type { CliHold } from "../cli/update.ts";
+import { probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
 import {
   applySeatAccount,
@@ -156,21 +156,21 @@ import { waitReader } from "../dependencies.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
-import { type ExternalReviewSubject, isExternalReview } from "../external-reviews.ts";
 import { flightFloor, flightShellContext } from "../flight/floor.ts";
 import { noteFlightWrite } from "../flight/runaway.ts";
 import type { CheckRecorder } from "../guard/check-runs.ts";
 import { HOOK_ENTRY } from "../guard/hook.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { TRIM_ENTRY } from "../guard/trim.ts";
+import { mapTree } from "../map/snapshot.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
-import { openOlderFindings } from "../older-findings.ts";
 import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
+import type { ReviewPreviews } from "../preview/review.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import {
   mergeSections,
@@ -179,7 +179,9 @@ import {
   textBytes,
   ticketPiece,
 } from "../prompt-cost.ts";
-import type { ReviewPreviews } from "../review-preview.ts";
+import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
+import { openOlderFindings } from "../review/older-findings.ts";
+import { reviewReach } from "../review/reach.ts";
 import {
   enrichHandoff,
   handoffForBrief,
@@ -187,10 +189,10 @@ import {
   inheritedHandoffLoop,
   publicHandoff,
   recordRunHandoff,
-} from "../run-handoffs.ts";
+} from "../run/handoffs.ts";
 import { SHUTDOWN_TIMEOUT_MS } from "../shutdown.ts";
+import { restartHold, ticketParked } from "../spend/waste.ts";
 import {
-  ACTIVE_SEAT_STATES,
   CREW_CODEX_DIR,
   CREW_KEEPER_DIR,
   CREW_PR_BODY_FILE,
@@ -203,9 +205,8 @@ import {
   crewSkillsDir,
   crewTokenPath,
   crewTranscriptPath,
-  type KeeperCursor,
-  type Store,
-} from "../store.ts";
+} from "../store/crew-paths.ts";
+import { ACTIVE_SEAT_STATES, type KeeperCursor, type Store } from "../store.ts";
 import {
   AGENTS_MD_HEADING,
   BRIEF_DECISIONS_MAX,
@@ -218,6 +219,7 @@ import {
   ticketBrief,
   transferBrief,
   watchBrief,
+  withoutHubConfig,
 } from "./brief.ts";
 import {
   cloneGitDir,
@@ -523,6 +525,8 @@ export interface SupervisorDeps {
   inbox?: (seatId: string, runId: string) => InboxContext;
   /** Opens a preview of a web PR's head for its review run and closes it when the run ends. */
   reviewPreviews?: ReviewPreviews;
+  /** The default branch's import edges for a clone; tests replace it, the hub reads the map tree. */
+  importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
 }
 
 export interface InboxContext {
@@ -673,7 +677,12 @@ export interface Supervisor {
    */
   startWatch(
     seatId: string,
-    opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
+    opts?: {
+      first?: string;
+      firstPieces?: readonly PromptPiece[];
+      /** The operator's explicit start (the dock): a restart-storm hold does not stop it. */
+      operator?: boolean;
+    },
   ): Promise<{ runId: string }>;
   /**
    * The live check of a CLI update (`cli-auto.ts`): starts one build seat of `vendor` that holds no
@@ -1464,6 +1473,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     }
   }
 
+  /** The map tree's import edges at the default branch, cached per commit in the store. */
+  const defaultImportGraph = async (checkout: string) =>
+    (
+      await mapTree(checkout, "origin/HEAD", [], [], Date.now(), {
+        get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
+        put: (kind, scope, key, value, exclusive) =>
+          store.mapCachePut(kind, scope, key, value, exclusive),
+      })
+    ).imports;
+
   function inClone<T>(checkout: string, fn: () => Promise<T>): Promise<T> {
     const prev = cloneQueues.get(checkout) ?? Promise.resolve();
     const p = prev.then(fn, fn);
@@ -1897,7 +1916,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           section: "rules",
           bytes:
             textBytes(references) +
-            block(CLAUDE_MD_HEADING, repoDocs?.claudeMd) +
+            // the text rolePrompt carries, not the raw file
+            block(
+              CLAUDE_MD_HEADING,
+              repoDocs?.claudeMd == null ? null : withoutHubConfig(repoDocs.claudeMd),
+            ) +
             block(AGENTS_MD_HEADING, repoDocs?.agentsMd),
         },
       ];
@@ -2171,6 +2194,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       resumedAt: resume && !transferState(run.id)?.pending ? Date.now() : null,
       spawnedAt: resume ? Date.now() : null,
     });
+    // a carry-on resume is recorded: three without a report is a retry loop (waste alarm)
+    if (l.resumedAt !== null) store.addResumeAttempt(run.id, l.resumedAt);
     // the resume window runs from the CLI's start, not from the keeper's: its own boot is not the CLI's
     if (resume) {
       void session.ready.then(() => {
@@ -3475,13 +3500,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       ) {
         throw new SupervisorError(422, AWAY_QUOTA_REFUSED);
       }
-      // The budget brake stops a new run; an operator's explicit start and a reader pass.
-      const brake = budgetBrake(config, store, info.seat.accountId, now());
-      if (brake !== null && !readOnly && !opts?.operator) {
-        throw new SupervisorError(
-          422,
-          budgetBrakeText(call(info), brake, config.operator.timezone),
-        );
+      // A waste alarm stops a loop: a seat in a restart storm, or a parked ticket. The operator's
+      // explicit start and FLIGHT's pass; a reader never competes for the ticket.
+      if (!readOnly && !opts?.operator) {
+        const storm = restartHold(store, info.seat.id);
+        if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
+        if (opts?.flight !== true) {
+          const parked = ticketParked(store, ref);
+          if (parked !== null) throw new SupervisorError(422, wasteParkText(ref, parked));
+        }
       }
       // A detached reader does not compete for the ticket or its assignee.
       const refusal = eligibleToStart({
@@ -3883,7 +3910,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startWatch(
     seatId: string,
-    opts?: { first?: string; firstPieces?: readonly PromptPiece[] },
+    opts?: { first?: string; firstPieces?: readonly PromptPiece[]; operator?: boolean },
   ): Promise<{ runId: string }> {
     const { runId } = await startDetached(seatId, opts ?? {});
     return { runId };
@@ -3902,11 +3929,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       first?: string;
       firstPieces?: readonly PromptPiece[];
       check?: (checkout: string) => string;
+      operator?: boolean;
       /** Set once the check has got as far as invoking the new CLI (before that, a failure is not its). */
       stage?: { cli: boolean };
     },
   ): Promise<{ runId: string; worktree: string }> {
     const info = need(seatId);
+    // a seat in a restart storm is not started again (a CLI update's live check is not a restart)
+    if (opts.check === undefined && opts.operator !== true) {
+      const storm = restartHold(store, seatId);
+      if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
+    }
     const def = seatDef(info.seat);
     const check = opts.check;
     const unavailable = seatUnavailable(info.seat);
@@ -4244,6 +4277,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   async function startReview(seatId: string, reviewId: number): Promise<{ runId: string }> {
     const info = need(seatId);
+    const storm = restartHold(store, seatId);
+    if (storm !== null) throw new SupervisorError(422, wasteStormText(call(info), storm));
     const def = seatDef(info.seat);
     const unavailable = seatUnavailable(info.seat);
     if (unavailable) throw new SupervisorError(409, unavailable);
@@ -4447,6 +4482,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // An ended run's PR: its earlier heads' reviews belong to the crew run, so the findings still
       // open there are not in `prev`.
       const olderFindings = external ? openOlderFindings(store, review, prev?.id ?? null) : [];
+      // The files that import the change: a missing graph leaves the line out, never the review.
+      const changedPaths = store.prFilePaths(info.repo.id, review.prNumber);
+      const reach = await (deps.importGraph ?? defaultImportGraph)(info.session.checkout).then(
+        (edges) => reviewReach(edges, changedPaths),
+        () => null,
+      );
       let brief = reviewBrief({
         call: call(info),
         repo: info.repo.github,
@@ -4470,6 +4511,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           : [],
         prevReply,
         ...(olderFindings.length > 0 ? { olderFindings } : {}),
+        ...(reach === null ? {} : { reach }),
         diffCut: inputs.diffCut,
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],

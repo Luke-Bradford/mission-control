@@ -11,7 +11,8 @@ import {
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import type { GhRunner } from "../mcp/gh.ts";
-import { crewDir, type Store } from "../store.ts";
+import { crewDir } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 
 const asRecord = (v: unknown): Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};

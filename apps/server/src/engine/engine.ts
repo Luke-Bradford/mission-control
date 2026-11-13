@@ -1,4 +1,4 @@
-import { checkBriefDispatch, withoutBriefDispatch } from "../brief-dispatch-context.ts";
+import { checkBriefDispatch, withoutBriefDispatch } from "../brief/dispatch-context.ts";
 /**
  * The engine drives each looped run from report to merged. It holds no state a restart would
  * lose for reconciliation: every pass rebuilds a snapshot from stored facts, asks `reconcile`
@@ -37,7 +37,6 @@ import {
   CI_RERUN_FAILED_EVENT_PREFIX,
   CI_RERUN_FAILED_TEXT,
   COMMS_MC,
-  COMMS_MESSAGE_MAX,
   CONTROLLER_CHECK_PARK,
   CONTROLLER_CHECK_USE_ROUTE,
   cardMark,
@@ -152,23 +151,19 @@ import {
   wokenEventText,
   writerSyncConflictText,
 } from "@mc/core";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
-import { budgetBrake } from "../budget-brake.ts";
 import type { ChangeBus } from "../bus.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
-import { type ExternalReviews, isExternalReview } from "../external-reviews.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
-import type { Move, MoveResult } from "../github-board.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "../machine-capacity.ts";
+import type { Move, MoveResult } from "../github/board.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
+import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
+import { restartHold, reviewsHeld } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
@@ -197,13 +192,34 @@ import { overrunText, tickLogOf } from "./ticks.ts";
 /** Why the PR step found no PR when the branch tip is not the pushed commit. */
 export const TIP_MOVED = "the branch's tip is not the pushed commit, or could not be read";
 
-/** The Comms copy of the seat's CI message: the intro, then the excerpt from its start, cut to a Comms message. */
-export function ciSeatText(intro: string, excerpt: string): string {
-  const shortened = "\n[CI output shortened; inspect the CI log.]";
-  const room = COMMS_MESSAGE_MAX - Array.from(intro + shortened).length;
-  return Array.from(intro + excerpt).length <= COMMS_MESSAGE_MAX
-    ? intro + excerpt
-    : `${intro}${Array.from(excerpt).slice(0, Math.max(0, room)).join("")}${shortened}`;
+/** The jobs an excerpt names, in order, once each: its `[job]` and `[job: tier]` headings. */
+export function ciExcerptJobs(excerpt: string): string[] {
+  const jobs: string[] = [];
+  const lines = excerpt.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const match = lines[i]?.match(/^\[([^\]\n]+?)\]$/);
+    if (!match?.[1]) continue;
+    const heading = match[1];
+    const tier = /: (?:console|last lines)$/.test(heading);
+    // Plain bracketed log tags are not job headings. ciLogBody labels a failure block or tier.
+    if (!tier && !/^\s*(?:FAIL\b|×|❯)/.test(lines[i + 1] ?? "")) continue;
+    const job = heading.replace(/: (?:console|last lines)$/, "").trim();
+    if (job !== "" && !/ more failing lines in /.test(job) && !jobs.includes(job)) jobs.push(job);
+  }
+  return jobs;
+}
+
+/**
+ * The Comms copy of the seat's CI message, a notice: one plain line, "CI failed on 341f108 in job
+ * web-core.", then the link to the commit's checks. The seat gets the whole excerpt instead.
+ */
+export function ciNoticeText(sha: string, excerpt: string, repo: string, again: boolean): string {
+  const jobs = ciExcerptJobs(excerpt);
+  const where =
+    jobs.length === 0 ? "" : ` in ${jobs.length === 1 ? "job" : "jobs"} ${jobs.join(", ")}`;
+  const what = again ? "CI failed again on" : "CI failed on";
+  const link = repo === "" ? "" : ` https://github.com/${repo}/commit/${sha}/checks`;
+  return `${what} ${sha.slice(0, 7)}${where}.${link}`;
 }
 
 /** What `ciExcerpt` says when it has no excerpt to give: not kept, but asked for again. */
@@ -249,6 +265,11 @@ export interface EngineDeps {
   refillQueues: () => Promise<void>;
   /** Starts the seat's next queued ticket; it does nothing for a seat that may not take one. */
   takeNext: (seatId: string) => Promise<void>;
+  /**
+   * Settles or hands out the stuck PRs (conflicting or red, with no run on them); each tick, before
+   * any Ready ticket is taken. Absent: nothing is looked at.
+   */
+  takeStuckPrs?: (onlySeat?: string) => Promise<void>;
   /** false: crew is off, or this is a preview, or loop writes are disabled. */
   enabled: boolean;
   /** Whether this process may act on crew right now (it holds the crew lock); default true. */
@@ -1480,10 +1501,11 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!NOT_EXCERPTS.includes(excerpt)) excerpts.set(a.key, excerpt);
         const head = a.again === true ? CI_RERUN_FAILED_TEXT : CI_FAILED_TEXT;
         const intro = fillLoopText(head, { sha7: a.sha.slice(0, 7) });
-        // the seat gets the whole excerpt (already cut to CI_EXCERPT_MAX bytes); only the Comms
-        // copy is held to a Comms message
+        // the seat gets the whole excerpt (already cut to CI_EXCERPT_MAX bytes); Comms keeps
+        // only a one-line notice of it
         const sent = await send(run.id, a.key, intro + excerpt);
-        if (sent === "sent") handOff(COMMS_MC, ciSeatText(intro, excerpt));
+        if (sent === "sent")
+          handOff(COMMS_MC, ciNoticeText(a.sha, excerpt, repo?.github ?? "", a.again === true));
         if (sent === "sent" || sent === "dup") {
           cur.relayedSha = a.sha;
           excerpts.delete(a.key);
@@ -1546,7 +1568,7 @@ export function createEngine(deps: EngineDeps): Engine {
         // not while the seat holds another run (a merged PR found after the run was stopped)
         const holds = supervisor.seat(run.agentId)?.runId ?? null;
         if (!pausedSeat(store, run.agentId, null) && (holds === null || holds === run.id))
-          await deps.takeNext(run.agentId);
+          await takeAfterFree(run.agentId);
         return;
       }
       case "event":
@@ -1645,7 +1667,7 @@ export function createEngine(deps: EngineDeps): Engine {
           !pausedSeat(store, run.agentId, null) &&
           wakeDueAsideRun(store, run.agentId) === undefined
         ) {
-          deps.takeNext(run.agentId).catch((e: unknown) => {
+          takeAfterFree(run.agentId).catch((e: unknown) => {
             log(
               `${run.agentId}: take after set-aside failed: ${e instanceof Error ? e.message : String(e)}`,
             );
@@ -2302,8 +2324,24 @@ export function createEngine(deps: EngineDeps): Engine {
     });
   }
 
+  /** A freed seat is offered a stuck PR in its area before it takes the next queued ticket. */
+  async function takeAfterFree(seatId: string): Promise<void> {
+    try {
+      await deps.takeStuckPrs?.(seatId);
+    } catch (e) {
+      log(`stuck PRs: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    await deps.takeNext(seatId);
+  }
+
   /** Refills the queues, then each writer seat that is idle with no run takes its next ticket. */
   async function takeForSeats(): Promise<void> {
+    // a stuck PR goes to a free seat before any Ready ticket
+    try {
+      await deps.takeStuckPrs?.();
+    } catch (e) {
+      log(`stuck PRs: ${e instanceof Error ? e.message : String(e)}`);
+    }
     try {
       await deps.refillQueues();
     } catch (e) {
@@ -2629,14 +2667,7 @@ export function createEngine(deps: EngineDeps): Engine {
     }
     // 4. each free scratch seat starts its oldest wanted review. Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    if (
-      machineCapacity(
-        store.machineSamples(machineCapacitySince(now(), capacityConfig)),
-        now(),
-        capacityConfig,
-      ).blocked
-    )
-      return;
+    if (storedMachineCapacity(store, now(), capacityConfig).blocked) return;
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
       .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");
@@ -2648,9 +2679,11 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
       const at = now();
       if (accountAtStop(config, store, seat.accountId, at)) continue;
-      const braked = budgetBrake(config, store, seat.accountId, at) !== null;
+      // a reviewer in a restart storm keeps its queued reviews; they wait, they do not fail
+      if (restartHold(store, seat.id) !== null) continue;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
-        if (braked && !store.reviewBudgetBrakeOverride(row.id)) continue;
+        // a change past its review rounds waits for FLIGHT's decision (waste alarm)
+        if (reviewsHeld(store, row.authorRunId)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;

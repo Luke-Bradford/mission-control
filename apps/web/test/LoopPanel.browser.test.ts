@@ -85,8 +85,8 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
         colorScheme: scheme,
         api,
       });
-      await page.box(".agent-v2-history summary");
-      await page.click(".agent-v2-history summary");
+      await page.box(".runs-history summary");
+      await page.click(".runs-history summary");
       await page.box("#loopP .vstep");
       const tall = await page.evaluate(() => {
         const lines = (el: Element) => {
@@ -94,11 +94,7 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
           const lh = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.3;
           return el.getBoundingClientRect().height / lh;
         };
-        return [
-          ...document.querySelectorAll(
-            "#loopP *, #ahead .agent-v2-state, #ahead .agent-v2-state *",
-          ),
-        ]
+        return [...document.querySelectorAll("#loopP *, #ahead .pill, #ahead .pill *")]
           .filter((el) => el.children.length === 0 && (el.textContent ?? "").trim() !== "")
           .filter((el) => lines(el) > 3.2)
           .map((el) => `${el.className}: ${(el.textContent ?? "").slice(0, 40)}`);
@@ -111,7 +107,25 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
       expect(header).toContain("Parked");
       expect(header).toContain("RETRO-CX reviewed c74cdfc");
       expect(header).not.toContain("the grid clips");
-      expect(await page.reachable("#loopP .vstep")).not.toContain(false);
+      const measured = await page.evaluate(() => {
+        const box = (selector: string) => {
+          const r = document.querySelector(selector)?.getBoundingClientRect();
+          return r ? [Math.round(r.top), Math.round(r.bottom)] : null;
+        };
+        return JSON.stringify({
+          window: innerHeight,
+          shell: box(".control-shell"),
+          side: box(".side"),
+          tabs: box(".side-tabs"),
+          body: box(".side-body"),
+          loop: box("#loopP"),
+          steps: [...document.querySelectorAll("#loopP .vstep")].map((el) => {
+            const r = el.getBoundingClientRect();
+            return [Math.round(r.top), Math.round(r.bottom)];
+          }),
+        });
+      }, null);
+      expect(await page.reachable("#loopP .vstep"), measured).not.toContain(false);
       if (process.env.MC_SHOT_DIR) {
         await page.screenshot(`${process.env.MC_SHOT_DIR}/loop-${width}-${scheme}.png`);
       }

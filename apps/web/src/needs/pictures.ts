@@ -20,6 +20,7 @@ const ROUTES: readonly { re: RegExp; auth: PictureRoute["auth"] }[] = [
   { re: /^\/api\/hud-screenshots\/[0-9a-f]{32}$/, auth: "operator" },
   { re: /^\/api\/qa\/review-shots\/[0-9a-f]{32}$/, auth: "operator" },
   { re: /^\/api\/qa-report-assets\/[0-9a-f]{64}$/, auth: "operator" },
+  { re: /^\/api\/attention-material-assets\/[0-9a-f]{64}$/, auth: "operator" },
 ];
 
 /** The route a picture URL names, or null when it is not one the hub serves (it is a link then). */
@@ -87,6 +88,7 @@ export function briefLinks(item: AttentionItem): { label: string; url: string }[
     const rest = text.replace(IMAGE, " ").replace(LINK, " ");
     for (const m of rest.matchAll(BARE)) add(m[0], m[0]);
   }
+  for (const l of item.brief?.links ?? []) add(l.label.trim() || l.url, l.url);
   for (const ref of item.brief?.person?.related ?? []) if (ref.url) add(ref.label, ref.url);
   return out;
 }

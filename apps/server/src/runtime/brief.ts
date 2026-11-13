@@ -31,6 +31,7 @@ import {
 } from "@mc/core";
 import { parse as parseYaml } from "yaml";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
+import type { ReviewReach } from "../review/reach.ts";
 import { readBaseFile } from "./checkouts.ts";
 import { crewGitBytes, overflowed } from "./git.ts";
 import type { RepoSkills } from "./skills.ts";
@@ -288,6 +289,8 @@ export interface ReviewBriefInput {
   second?: { reason: string; findings: readonly StoredFinding[] };
   /** True for a web PR: its preview is starting in the background. */
   preview?: boolean;
+  /** The PR's changed files and the default branch's files that import them; absent when unknown. */
+  reach?: ReviewReach;
   /** An ended run's PR: blocking findings still open from the PR's earlier reviews. */
   olderFindings?: readonly { reviewId: number; sha: string; finding: StoredFinding }[];
 }
@@ -320,6 +323,20 @@ function evidenceLine(p: EvidencePair, dir: string): string {
   const count = p.regions.length === 1 ? "1 region" : `${p.regions.length} regions`;
   const files = EVIDENCE_KINDS.map((k) => `${dir}/${evidenceImageName(p.page, p.scheme, k)}`);
   return `- ${p.page}, ${p.scheme}: ${p.changedPixels === 0 ? "no change" : `${p.changedPercent}% changed, ${count} (${where}${more})`} — ${files.join(", ")}`;
+}
+
+const listWith = (shown: readonly string[], more: number): string =>
+  `${shown.join(", ")}${more > 0 ? ` and ${more} more` : ""}`;
+
+/** The brief's lines on what the change touches and what imports it. */
+function reachLines(reach: ReviewReach | undefined): string[] {
+  if (reach === undefined) return [];
+  return [
+    `- Files changed (${reach.changed.length + reach.changedMore}): ${listWith(reach.changed, reach.changedMore)}.`,
+    reach.importers.length + reach.importersMore === 0
+      ? "- No file in the default branch imports them."
+      : `- Files that import them (${reach.importers.length + reach.importersMore}): ${listWith(reach.importers, reach.importersMore)}. Check these still work with the change.`,
+  ];
 }
 
 /** RETRO's first message: the PR, what it has to read, how to review, the ticket and the notes. */
@@ -359,6 +376,7 @@ export function reviewBrief(i: ReviewBriefInput): string {
           `- This PR touches hard-rule files, which the operator merges by hand: ${i.touches.join(", ")}.`,
         ]
       : []),
+    ...reachLines(i.reach),
     `- Below: the ticket and the author's report notes${i.prevFindings.length > 0 ? ", and the findings and reply from the last review" : ""}.`,
     "",
     "How to review:",
@@ -529,6 +547,31 @@ export const MC_RESTART_TEXT =
   "If an mc tool fails with ECONNREFUSED or ECONNRESET, Mission Control is restarting: wait about 10 seconds, then call the same tool again with the same arguments. It does not mean the call was refused.";
 
 /**
+ * Drops the fenced yaml block that opens with `mc:` (the hub's own board configuration, which the
+ * hub reads from the repo and a seat never acts on); every other line of the file is kept. The
+ * block's `checks` commands are the one part a seat runs, so one line carries them in its place.
+ */
+export function withoutHubConfig(markdown: string): string {
+  return markdown.replace(
+    /^```ya?ml[ \t]*\r?\n(mc:[ \t]*\r?\n[\s\S]*?)^```[ \t]*(?:\r?\n|$)/gm,
+    (_block, body: string) => {
+      let checks: unknown;
+      try {
+        checks = (parseYaml(body) as { mc?: { checks?: unknown } } | null)?.mc?.checks;
+      } catch {
+        return "";
+      }
+      const commands = Array.isArray(checks)
+        ? checks.filter((c): c is string => typeof c === "string" && c.trim() !== "")
+        : [];
+      return commands.length === 0
+        ? ""
+        : `Checks (from the Mission Control block, left out here): ${commands.map((c) => `\`${c}\``).join(", ")}.\n`;
+    },
+  );
+}
+
+/**
  * The prompt file's text: the role brief, the restart line, the reference index, then the repo's
  * CLAUDE.md and AGENTS.md, each under its own heading (the repo's rules, not reference material).
  */
@@ -544,7 +587,8 @@ export function rolePrompt(
     [CLAUDE_MD_HEADING, claudeMd],
     [AGENTS_MD_HEADING, agentsMd],
   ] as const) {
-    if (body !== null && body.trim() !== "") out = `${out.trimEnd()}\n\n${heading}\n\n${body}`;
+    const text = body === null ? "" : heading === CLAUDE_MD_HEADING ? withoutHubConfig(body) : body;
+    if (text.trim() !== "") out = `${out.trimEnd()}\n\n${heading}\n\n${text}`;
   }
   if (seatInstructions !== "") out = `${out.trimEnd()}\n\n${seatInstructions}`;
   return out;

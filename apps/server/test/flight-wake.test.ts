@@ -14,7 +14,6 @@ import {
   FLIGHT_NOTE_SECTIONS,
   FLIGHT_OWED_MS,
   FLIGHT_RECENT_LISTED,
-  FLIGHT_REWAKE_MS,
   FLIGHT_TICKETS_LISTED,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
@@ -33,6 +32,8 @@ import {
 } from "../src/flight/state.ts";
 import { changedWakeFacts } from "../src/flight/watch.ts";
 import { Store } from "../src/store.ts";
+
+const HOUR = 60 * 60_000;
 
 const busyBoard = (): FlightState => ({
   signals: [],
@@ -677,16 +678,16 @@ describe("memory in wake deltas", () => {
   });
 });
 
-describe("the re-wake interval", () => {
+describe("no re-wake on a timer", () => {
   const waiting = (): FlightState => ({
     ...busyBoard(),
     questions: [{ id: 1, seat: "guido-1", ticket: "mc#1", text: "Which lane?", ageMin: 1 }],
   });
   const T = 1_000_000_000;
 
-  it("is an hour from the last wake while something waits", () => {
-    expect(nextWakeAt(waiting(), T, T)).toBe(T + FLIGHT_REWAKE_MS);
-    expect(FLIGHT_REWAKE_MS).toBe(60 * 60_000);
+  it("schedules nothing for work that waits: only a changed fact wakes FLIGHT", () => {
+    expect(nextWakeAt(waiting(), T, T)).toBeNull();
+    expect(nextWakeAt(waiting(), T, T + 5 * HOUR)).toBeNull();
   });
 
   it("schedules nothing with nothing waiting", () => {
