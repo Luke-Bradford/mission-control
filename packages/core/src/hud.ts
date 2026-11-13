@@ -410,9 +410,7 @@ function statusColumn(i: Pick<BoardItem, "status" | "state">): HudColumn {
 }
 
 /** A closed issue is Done whatever its Status says. */
-export function hudColumnOf(
-  i: Pick<BoardItem, "status" | "state" | "closed">,
-): HudColumn {
+export function hudColumnOf(i: Pick<BoardItem, "status" | "state" | "closed">): HudColumn {
   return i.closed ? "Done" : statusColumn(i);
 }
 
