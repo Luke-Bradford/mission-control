@@ -1,4 +1,4 @@
-import type { BoardItem } from "mc/core";
+import type { BoardItem } from "@mc/core";
 import type { CcConfig } from "./config.ts";
 import { endedWorkOver, runSubjectGone } from "./hud.ts";
 import type { Store } from "./store.ts";

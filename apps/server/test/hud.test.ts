@@ -2569,7 +2569,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     const keys = (c: CcConfig) => items(c).map((i) => i.key);
 
     it("an ended run with a closed ticket leaves no question or note", () => {
-      const id = setup({ endedAt: NOW - 20 * DAY, status: "done" });
+      const id = setup({ endedAt: NOW - 20 * DAY, status: "ok" });
       expect(keys(withCrew())).not.toContain(`ask:${id}`);
       expect(keys(withCrew())).not.toContain("note:old-note");
     });
@@ -2587,7 +2587,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
           agentId: "GUIDO-1",
           ticket: "shop-app#5",
           endedAt: NOW - 2 * DAY,
-          status: "done",
+          status: "ok",
         }),
       );
       const id = store.addQuestion({
@@ -2603,7 +2603,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
           agentId: "GUIDO-1",
           ticket: "shop-app#5",
           endedAt: NOW - 8 * DAY,
-          status: "done",
+          status: "ok",
         }),
       );
       expect(keys(withCrew())).not.toContain(`ask:${id}`);
@@ -2612,7 +2612,7 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     it("the cleanup pass sets the question aside, and releases a hold and a park, each with a hub event", () => {
       const id = setup({
         endedAt: NOW - 20 * DAY,
-        status: "done",
+        status: "ok",
         loop: {
           ...NEW_LOOP,
           phase: "parked",
