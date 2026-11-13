@@ -274,6 +274,8 @@ export const FLIGHT_LEDGER_OUTCOME_MAX = 300;
 export const FLIGHT_LEDGER_REFS_MAX = 10;
 export const FLIGHT_LEDGER_OPEN_MAX = 200;
 export const FLIGHT_LEDGER_INDEX_MAX = 60;
+/** Conflicting files FLIGHT's state lists; the rest are counted in `conflictsMore`. */
+export const FLIGHT_CONFLICTS_MAX = 20;
 export const FLIGHT_LEDGER_KEEP_MS = 7 * 24 * 60 * 60_000;
 export const FLIGHT_SUMMARY_LISTED = 5;
 export const FLIGHT_METRICS_DAY_MS = 24 * 60 * 60_000;
@@ -1249,6 +1251,10 @@ export interface FlightState {
       idle: boolean;
     }[];
   };
+  /** Files whose merge conflicts between open PRs (a git merge check), with those PRs. */
+  conflicts?: { file: string; prs: number[] }[];
+  /** Conflicting files left off `conflicts` once it reaches FLIGHT_CONFLICTS_MAX. */
+  conflictsMore?: number;
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
   mergeQueue?: { pr: number; waitsOn: string[] }[];
   /** Machine, crew, quota and stopped-seat holds that currently prevent queued work. */

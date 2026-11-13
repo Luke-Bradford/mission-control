@@ -9,6 +9,7 @@ import {
   CREW_PAUSE_SETTING,
   carriedFrom,
   FLIGHT_BATCH_MS,
+  FLIGHT_CONFLICTS_MAX,
   FLIGHT_CONTEXT_GROWTH_TOKENS,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DEBOUNCE_MS,
@@ -577,6 +578,32 @@ describe("FLIGHT's PR list", () => {
     });
     store.upsertPullRequests("mc", [stored(7)], T0);
     expect(listed()).toMatchObject([{ pr: 7, seat: "guido-1", state: "open" }]);
+  });
+});
+
+describe("FLIGHT's conflicting files", () => {
+  const state = (conflicts?: { file: string; prs: number[] }[]) =>
+    flightState({ config, store, busy: [], now: nowMs, ...(conflicts ? { conflicts } : {}) });
+
+  it("lists the conflicting files the caller checked, with their PRs", () => {
+    expect(state([{ file: "b.ts", prs: [7, 8] }]).conflicts).toEqual([
+      { file: "b.ts", prs: [7, 8] },
+    ]);
+  });
+
+  it("has an empty list when none is known", () => {
+    expect(state().conflicts).toEqual([]);
+    expect(state().conflictsMore).toBeUndefined();
+  });
+
+  it("lists FLIGHT_CONFLICTS_MAX files and counts the rest", () => {
+    const all = Array.from({ length: FLIGHT_CONFLICTS_MAX + 3 }, (_, n) => ({
+      file: `f${String(n).padStart(2, "0")}.ts`,
+      prs: [7, 8],
+    }));
+    const s = state(all);
+    expect(s.conflicts).toHaveLength(FLIGHT_CONFLICTS_MAX);
+    expect(s.conflictsMore).toBe(3);
   });
 });
 
