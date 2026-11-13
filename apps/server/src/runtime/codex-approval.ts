@@ -198,6 +198,11 @@ export function createCodexApprover(i: {
         if (check) verdict = { kind: "lock", command: check };
       }
       if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
+      // the same check on the same commit with nothing changed is not run again (waste alarm)
+      if (verdict.kind === "lock" && event.tool === "Bash" && event.input.command !== undefined) {
+        const rerun = await i.checks?.rerun?.(i.runId, event.input.command);
+        if (rerun) return refuse("full-suite", rerun);
+      }
       if (verdict.kind === "lock") {
         const id = params.approvalId ?? params.itemId;
         if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");

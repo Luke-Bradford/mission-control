@@ -83,12 +83,10 @@ describeRendered("Needs you with FLIGHT stopped", () => {
             width,
             height,
             colorScheme: scheme,
-            search: "?path=/overview",
+            search: "?path=/needs-you",
             api: api(),
           });
           try {
-            await page.boxes("#page-overview");
-            await page.click('a[href="/needs-you"]');
             await ready(page);
             if (SHOTS) {
               mkdirSync(SHOTS, { recursive: true });

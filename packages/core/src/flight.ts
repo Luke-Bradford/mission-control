@@ -18,6 +18,7 @@ import type { PromptWakeCost } from "./prompt-cost.ts";
 import type { Verdict } from "./review.ts";
 import type { LoopKind, SeatState } from "./runtime-model.ts";
 import type { LoopPhase } from "./types.ts";
+import type { WasteCounts } from "./waste.ts";
 
 // The FLIGHT seat: the head agent that runs the crew. It is the one `watch` seat, started with no
 // ticket, and it keeps a log of what it decided (`flight_decisions`).
@@ -258,7 +259,7 @@ export const BRIEF_KEY_MAX = 500;
 export const briefNoItemText = (key: string): string =>
   `Not briefed: ${key} is not an item in the operator's Needs-you list.`;
 export const BRIEFED_TEXT = "Briefed. The operator sees your brief on the item in Needs you.";
-export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items. for flight remains lightweight: give assessment/context and recommendation while FLIGHT handles it. Every for operator brief requires assessment, did[] (actions and refs, or []), checked[] (source and finding, or []), nonempty ask, decision { consulted[] (who/finding/ref, or []), costOfDelay, whyOperator?: { kind, explanation }, waiting? }, two to four options with unique IDs, label, answer, consequence, reversibility { kind, detail }, typed action, and recommendedOptionId plus recommendation rationale. whyOperator.kind is money, product-direction, security-exception, irreversible or floor-approval; these always need an explicit waiting condition and never default. Otherwise only a server-validated ordinary-run-guidance or direct-queue-priority-swap action can establish FYI eligibility. Labels, prose, reversibility and caller claims never grant authority. Copy actual target/run/head/scope facts from flight_state; unknown or changed facts require refresh. Use the strict action schema for answers, explicit run-park recovery, review rework/resume, queue proposals, source-bound person replies, controller checks, UAT, exact scoped floor grants, merge holds, breaker recovery or honest external decision recording. Do not substitute navigation for an action. The server retains full original source and rechecks source/run/holds/authentication at final dispatch. Text input accepts ${BRIEF_INPUT_MAX} characters. For an actual wait, hold { condition } supports date, merge, CI, another item, crew or manual conditions; releasing it requires a refreshed choice.`;
+export const BRIEF_ITEM_DESCRIPTION = `Triage an item from items. for flight remains lightweight: give assessment/context and recommendation while FLIGHT handles it. Every for operator brief requires assessment, did[] (actions and refs, or []), checked[] (source and finding, or []), nonempty ask, decision { consulted[] (who/finding/ref, or []), costOfDelay, whyOperator?: { kind, explanation }, waiting? }, two to four options with unique IDs, label, answer, consequence, reversibility { kind, detail }, typed action, and recommendedOptionId plus recommendation rationale. whyOperator.kind is money, product-direction, security-exception, irreversible or floor-approval; these always need an explicit waiting condition and never default. Otherwise only a server-validated ordinary-run-guidance or direct-queue-priority-swap action can establish FYI eligibility. Labels, prose, reversibility and caller claims never grant authority. Copy actual target/run/head/scope facts from flight_state; unknown or changed facts require refresh. Use the strict action schema for answers, explicit run-park recovery, review rework/resume, queue proposals, source-bound person replies, controller checks, UAT, exact scoped floor grants, merge holds, breaker recovery or honest external decision recording. Do not substitute navigation for an action. The server retains full original source and rechecks source/run/holds/authentication at final dispatch. A for operator brief also needs title (one line, at most 90 characters, no web address or bare ticket number), priority (the main ticket's wins; else state P0, P1 or P2), the main ticket (ticket) or noTicket { repo, reason }, optional related and links, one decision in ask, and looks: true with a picture in the text or a branch preview when it is about how something looks. A question a tool of yours settles (sync_main, rerun_ci, dismiss_item, merge_pr, settle_park, close_ticket) is refused: use the tool. Text input accepts ${BRIEF_INPUT_MAX} characters. For an actual wait, hold { condition } supports date, merge, CI, another item, crew or manual conditions; releasing it requires a refreshed choice.`;
 
 export const FLIGHT_LEDGER_KINDS = ["work", "watch", "commitment", "incoming"] as const;
 export type FlightLedgerKind = (typeof FLIGHT_LEDGER_KINDS)[number];
@@ -273,6 +274,8 @@ export const FLIGHT_LEDGER_OUTCOME_MAX = 300;
 export const FLIGHT_LEDGER_REFS_MAX = 10;
 export const FLIGHT_LEDGER_OPEN_MAX = 200;
 export const FLIGHT_LEDGER_INDEX_MAX = 60;
+/** Conflicting files FLIGHT's state lists; the rest are counted in `conflictsMore`. */
+export const FLIGHT_CONFLICTS_MAX = 20;
 export const FLIGHT_LEDGER_KEEP_MS = 7 * 24 * 60 * 60_000;
 export const FLIGHT_SUMMARY_LISTED = 5;
 export const FLIGHT_METRICS_DAY_MS = 24 * 60 * 60_000;
@@ -509,6 +512,8 @@ export interface FlightRetrospective {
   costlyRuns: { runId: string; seat: string; ticket: string | null; costUsd: number | null }[];
   /** Daily visual-quality work for FLIGHT, delivered with the retrospective wake. */
   productPass: { pages: string[]; instruction: string };
+  /** Tickets opened and closed, runs per ticket, review rounds and idle seat-hours. */
+  counts?: WasteCounts;
 }
 
 /** FLIGHT's living brief: its working memory, nine sections the hub keeps per crew session. */
@@ -1061,6 +1066,11 @@ export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
+/**
+ * An open crew PR that conflicts with main or has red CI, with no run on it, is stuck after this
+ * long: the hub offers it to a free seat, and wakes FLIGHT only when no seat can take it.
+ */
+export const FLIGHT_STUCK_PR_MS = 30 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
 export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 /** An item not seen stale for this long, and then stale again, is told as a new reason. */
@@ -1102,7 +1112,12 @@ export const FLIGHT_SIGNAL_KINDS = [
   "wait_over",
   "seat_call",
   "question_changed",
+  "waste_alarm",
+  "stuck_pr",
+  "budget_unused",
 ] as const;
+/** A seat idle while its account is under this share of its week raises `budget_unused`. */
+export const FLIGHT_BUDGET_UNUSED_PCT = 50;
 export interface FlightSignal {
   checks?: string[];
   told?: boolean;
@@ -1192,6 +1207,8 @@ export interface FlightState {
     review: FlightPrReview | null;
     /** The names of the checks failing on the stored head. */
     failingChecks: string[];
+    /** Reviews of the PR that reported blocking findings or a failed verdict. */
+    reviewRounds?: number;
   }[];
   /** Items waiting for triage, oldest first, including those held from the operator. */
   items: {
@@ -1240,6 +1257,10 @@ export interface FlightState {
       idle: boolean;
     }[];
   };
+  /** Files whose merge conflicts between open PRs (a git merge check), with those PRs. */
+  conflicts?: { file: string; prs: number[] }[];
+  /** Conflicting files left off `conflicts` once it reaches FLIGHT_CONFLICTS_MAX. */
+  conflictsMore?: number;
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
   mergeQueue?: { pr: number; waitsOn: string[] }[];
   /** Machine, crew, quota and stopped-seat holds that currently prevent queued work. */
@@ -1373,10 +1394,7 @@ export const FLIGHT_HANDLING_MAX_MS = 24 * 60 * 60_000;
 export const FLIGHT_ANSWER_WAIT_MS = FLIGHT_TRIAGE_WAIT_MS;
 export const FLIGHT_TICK_MS = 5 * 60_000;
 export const FLIGHT_DEBOUNCE_MS = 20_000;
-export const FLIGHT_REWAKE_MS = 60 * 60_000;
-/** What a re-wake says when FLIGHT left reasons of the last wake without a decision. */
-export const FLIGHT_LEFT_HEAD = "You left these:";
-/** The one Needs-you note raised when a second wake leaves the same reasons unhandled. */
+/** The one Needs-you note raised when a wake's reasons are left without a decision (FLIGHT is not woken again for them). */
 export const FLIGHT_LEFT_NOTE_KEY = "flight:left";
 /**
  * The least time between two wakes. FLIGHT's own turn ending checks at once, so a fact its turn

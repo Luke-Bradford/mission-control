@@ -323,6 +323,7 @@ function make(
     lock?: TestLock;
     hubRoot?: string;
     reviewPreviews?: ReviewPreviews;
+    importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
     prEvidence?: import("../src/pr-evidence/store.ts").PrEvidenceStore;
     prEvidenceRepo?: string;
     rolesDir?: string;
@@ -415,6 +416,7 @@ function make(
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
     ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
+    ...(over.importGraph === undefined ? {} : { importGraph: over.importGraph }),
     ...(over.prEvidence === undefined ? {} : { prEvidence: over.prEvidence }),
     ...(over.prEvidenceRepo === undefined ? {} : { prEvidenceRepo: over.prEvidenceRepo }),
     hubPort: HUB_PORT,

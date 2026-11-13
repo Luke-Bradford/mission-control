@@ -18,16 +18,18 @@ import {
   type FlightConversationPage,
   type FlightView,
 } from "@mc/core";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
+import { useSeatName } from "../crew.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { messageStateLine, sendStateLine } from "../flight/conversation.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
-import { ago, dayMonth, hhmm } from "../fmt.ts";
+import { ago, dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket } from "../hud/RepoRef.tsx";
@@ -43,9 +45,10 @@ import {
   ticketPath,
 } from "../router.ts";
 import { toast } from "../shell/Toast.tsx";
-import { CommsEnd, MentionText } from "./messages.tsx";
+import { CommsEnd, useTokenRenderer } from "./messages.tsx";
 import { type CommsView, noticeResource, ticketForRef, useNoticeResource } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
+import { SenderTag } from "./SenderTag.tsx";
 
 const NO_MESSAGES: FlightConversationMessage[] = [];
 
@@ -104,9 +107,12 @@ function RefChip({
   ticket,
   from,
   to,
+  about = false,
 }: {
   refText: string;
   ticket: string | null;
+  /** The message is structurally about this ref (its `ref` field), not a number in its text. */
+  about?: boolean;
   from: string;
   to: string;
 }) {
@@ -114,7 +120,8 @@ function RefChip({
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const repoOf = (id: string) => crew?.rows.find((r) => r.id === id)?.repoId;
   const repoId = refRepo(ticket, repoOf(from) ?? repoOf(to), config);
-  const target = repoId === null ? null : resolveRef(refText, repoId, config);
+  const target =
+    repoId === null ? null : resolveRef(refText, repoId, config, about ? ticket : null);
   const filter = () => navigate(commsTicketPath(refText, ticketForRef(refText, ticket)));
   return (
     <span className="comms-ref-pair">
@@ -166,10 +173,16 @@ function resolveRef(
   refText: string,
   repoId: string,
   config: ConfigView | undefined,
+  ticket: string | null,
 ): { to: string | null; github: string | null } | null {
   const issue = /^#(\d+)$/.exec(refText)?.[1];
   if (issue !== undefined) return { to: ticketPath(repoId, Number(issue)), github: null };
   const pr = /^PR (\d+)$/.exec(refText)?.[1];
+  // a PR the message is about (its own ref) belongs to the message's ticket: open that ticket's
+  // page. A PR named in the text may belong to any ticket, so it keeps its GitHub link.
+  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
+  if (pr !== undefined && parsed)
+    return { to: ticketPath(parsed.repoId, parsed.number), github: null };
   const github = config?.repos.find((r) => r.id === repoId)?.github;
   const href = pr !== undefined && github ? githubItemHref(github, "pr", Number(pr)) : null;
   return href ? { to: null, github: href } : null;
@@ -186,22 +199,22 @@ function MessageRefs({
   from: string;
   to: string;
 }) {
-  const parts = text.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g);
-  const occurrences = new Map<string, number>();
-  return (
-    <>
-      {parts.map((part) => {
-        const n = occurrences.get(part) ?? 0;
-        occurrences.set(part, n + 1);
-        const key = `${part}:${n}`;
-        return /^(?:PR \d+|#\d+)$/.test(part) ? (
-          <RefChip key={key} refText={part} ticket={ticket} from={from} to={to} />
-        ) : (
-          <MentionText key={key} text={part} />
-        );
-      })}
-    </>
-  );
+  const tokens = useTokenRenderer();
+  // The whole message is parsed once as Markdown; each text run then has its references made chips.
+  const renderText = (run: string) => {
+    const occurrences = new Map<string, number>();
+    return run.split(/(\bPR \d+\b|(?<!\w)#\d+\b)/g).map((part) => {
+      const n = occurrences.get(part) ?? 0;
+      occurrences.set(part, n + 1);
+      const key = `${part}:${n}`;
+      return /^(?:PR \d+|#\d+)$/.test(part) ? (
+        <RefChip key={key} refText={part} ticket={ticket} from={from} to={to} />
+      ) : (
+        <Fragment key={key}>{tokens(part)}</Fragment>
+      );
+    });
+  };
+  return <Markdown text={text} renderText={renderText} />;
 }
 
 function Breadcrumb({ view }: { view: CommsView }) {
@@ -389,6 +402,7 @@ function MessagePane({
             >
               <div className="comms-message-meta">
                 <span>{time(message.at)}</span>
+                <SenderTag from={message.from} senderKind={message.senderKind} />
                 <CommsEnd id={message.from} />
                 {message.label && (
                   <Pill tone={message.label === "blocker" ? "crit" : "neutral"}>
@@ -401,6 +415,7 @@ function MessagePane({
                     ticket={message.ticket}
                     from={message.from}
                     to={message.to}
+                    about
                   />
                 )}
                 {message.id.startsWith("comms:") && (
@@ -664,7 +679,9 @@ function MentionsBell({
                   {mention.message.to === COMMS_CREW ? "#crew" : "direct"} ·{" "}
                   {time(mention.message.at)}
                 </span>
-                <em>{mention.message.text}</em>
+                <em>
+                  <MarkdownInline text={mention.message.text} />
+                </em>
               </button>
             );
           })}
@@ -693,6 +710,7 @@ function StoredContacts({
   view: CommsView;
 }) {
   const active = view.kind === "contact" ? view.contactId : null;
+  const seatName = useSeatName();
   return (
     <aside className="comms-contacts" aria-label={`${agentId}'s contacts`}>
       <button
@@ -700,7 +718,7 @@ function StoredContacts({
         className={view.kind === "inbox" ? "on" : ""}
         onClick={() => navigate(commsInboxPath(agentId))}
       >
-        Inbox · what it reads <small>{data?.inboxUnread ?? 0} unread</small>
+        Inbox · what it reads
       </button>
       <button
         type="button"
@@ -716,9 +734,11 @@ function StoredContacts({
           key={contact.id}
           onClick={() => navigate(commsContactPath(agentId, contact.id))}
         >
-          {contact.id} · {contact.count}
+          {contact.id === COMMS_CAPCOM ? "You" : seatName(contact.id)} ·{" "}
+          {plural(contact.count, "message")}
           <small>
-            {contact.unread > 0 ? `${contact.unread} unread · ` : ""}
+            {/* only what is addressed to the operator is "unread"; other counts are messages */}
+            {contact.id === COMMS_CAPCOM && contact.unread > 0 ? `${contact.unread} unread · ` : ""}
             {contact.lastMessage?.text ?? "No messages yet."}
           </small>
         </button>

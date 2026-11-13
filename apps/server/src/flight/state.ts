@@ -17,17 +17,16 @@ import {
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_CONFLICTS_MAX,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_MS,
-  FLIGHT_IDLE_SEAT_WAKE_MS,
   FLIGHT_ITEMS_LISTED,
   FLIGHT_ITEMS_SEEN_SETTING,
   FLIGHT_LEDGER_INDEX_MAX,
   FLIGHT_LEDGER_OPEN,
-  FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
   FLIGHT_MEMORY_HEADING,
@@ -43,7 +42,6 @@ import {
   FLIGHT_RECENT_LISTED,
   FLIGHT_REPORT_MAX,
   FLIGHT_REPORT_PARKS,
-  FLIGHT_REWAKE_MS,
   FLIGHT_STARTABLE,
   FLIGHT_STATE_DECISION_MAX,
   FLIGHT_STATE_TEXT_MAX,
@@ -105,6 +103,7 @@ import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { stuckPrs } from "../engine/stuck-prs.ts";
 import {
   attentionItems,
   crew,
@@ -329,9 +328,8 @@ export function recordFlightWake(store: Store, repo: string, at: number, wokeOn:
   store.setSetting(FLIGHT_WAKE_SETTING, JSON.stringify(record));
 }
 
-/** The fact category a wake cause names: "q (1)" is q; a re-wake for left reasons is "left". */
-const causeReason = (cause: string): string =>
-  cause.startsWith(FLIGHT_LEFT_HEAD) ? "left" : cause.replace(/ \(\d+\)$/, "");
+/** The fact category a wake cause names: "q (1)" is q. */
+const causeReason = (cause: string): string => cause.replace(/ \(\d+\)$/, "");
 
 /** Stores a wake on its run, with the fact categories (not the counts) that caused it. */
 export function recordWakeReasons(
@@ -405,8 +403,9 @@ export function recordNextFlightWake(store: Store, repo: string, next: number | 
 }
 
 /**
- * The next wake the state schedules: the hourly re-wake backstop while work is pending, or a
- * planned entry, or the end of the batch window while routine facts wait in it (`batchAt`).
+ * The next wake the state schedules: a deadline on one fact (a PR-flow time, a planned entry, an
+ * idle seat's period), or the end of the batch window while routine facts wait in it (`batchAt`).
+ * Nothing re-wakes FLIGHT on a timer for pending work: a fact that has not changed stays silent.
  */
 export function nextWakeAt(
   s: FlightState & TeamsDigestState & { discussions?: ItemDiscussion[] },
@@ -415,9 +414,9 @@ export function nextWakeAt(
   batchAt?: number,
 ): number | null {
   const times: number[] = prFlowWakeTimes(s.prFlow).filter((at) => at > lastWakeAt);
-  if (lastWakeAt > 0 && pending(s)) times.push(lastWakeAt + FLIGHT_REWAKE_MS);
   for (const p of s.planned ?? []) if (p.minutesFromNow > 0) times.push(p.dueAt);
-  if (s.wake?.idle) times.push(idleWakeAt(s.wake.idle));
+  const idleAt = s.wake?.idle ? idleWakeAt(s.wake.idle) : null;
+  if (idleAt !== null) times.push(idleAt);
   if (batchAt !== undefined) times.push(batchAt);
   return times.length === 0 ? null : Math.min(...times.map((t) => Math.max(t, now)));
 }
@@ -880,16 +879,12 @@ export function idleSeatLine(idle: FlightIdleSeats, seats: FlightIdleSeats["seat
   return `flight watch: seat idle: ${named} with ${idle.open.length} open ticket${idle.open.length === 1 ? "" : "s"}${triage}; why: ${why}`;
 }
 
-/** When FLIGHT is next woken about idle seats: the soonest period boundary of any seat. */
-export function idleWakeAt(idle: FlightIdleSeats): number {
-  return Math.min(
-    ...idle.seats.map((x) => {
-      const period = idlePeriod(x.ms);
-      return (
-        x.since + FLIGHT_IDLE_MS + (period === null ? 0 : (period + 1) * FLIGHT_IDLE_SEAT_WAKE_MS)
-      );
-    }),
-  );
+/** When FLIGHT is next woken about idle seats: the moment the soonest seat's spell reaches FLIGHT_IDLE_MS; null when none is still short of it. */
+export function idleWakeAt(idle: FlightIdleSeats): number | null {
+  const coming = idle.seats
+    .filter((x) => idlePeriod(x.ms) === null)
+    .map((x) => x.since + FLIGHT_IDLE_MS);
+  return coming.length === 0 ? null : Math.min(...coming);
 }
 
 /** The crew as FLIGHT sees it: its session's other seats, their questions, tickets, PRs and limits. */
@@ -902,6 +897,8 @@ export function flightState(i: {
   lock?: TestLockState;
   /** The repo's area labels and their globs; absent: any Ready ticket fits any build seat. */
   areas?: Record<string, string[]>;
+  /** Files whose merge conflicts between open PRs (see flightConflicts); absent: none known. */
+  conflicts?: readonly { file: string; prs: number[] }[];
 }): FlightState & TeamsDigestState & { discussions: ItemDiscussion[] } {
   const { config, store, busy, now } = i;
   const discussions = store.pendingDiscussions();
@@ -1140,6 +1137,12 @@ export function flightState(i: {
     );
   const stale = store.stalePullRequests(session.repoId);
   const shown = shownPrs(store);
+  const failedRounds = new Map(
+    store.waste
+      .failedReviewRounds()
+      .filter((r) => r.repoId === session.repoId)
+      .map((r) => [r.pr, r.rounds]),
+  );
   const prs = store
     .pullRequests(session.repoId)
     .filter(
@@ -1178,6 +1181,7 @@ export function flightState(i: {
             ? null
             : { ...reviewed.verdict, blocking: reviewed.blocking, sha: reviewed.sha },
         failingChecks: (p.checks ?? []).filter((c) => c.state === "failing").map((c) => c.name),
+        reviewRounds: failedRounds.get(p.number) ?? 0,
       };
     });
 
@@ -1275,6 +1279,9 @@ export function flightState(i: {
         ]
       : []),
   ].join("; ");
+  // Files whose merge conflicts between open PRs, checked by the caller (git merge-tree).
+  const shared = i.conflicts ?? [];
+  const conflicts = shared.slice(0, FLIGHT_CONFLICTS_MAX);
   const flowHolds: NonNullable<FlightState["flowHolds"]> = [
     ...(capacity.blocked && capacity.reason !== null
       ? [
@@ -1428,6 +1435,8 @@ export function flightState(i: {
       session,
       seats,
       aside,
+      ...(i.areas === undefined ? {} : { areas: i.areas }),
+      stuckPrs: stuckPrs({ store, config, repoId: session.repoId, flow, now }),
       triageItems: triageAll.map((x) => ({ key: x.key, kind: x.kind, at: x.at, text: x.text })),
       readyPrs: prs.flatMap((p) => {
         const at = store
@@ -1490,6 +1499,10 @@ export function flightState(i: {
     holds,
     reviewQueue,
     mergeQueue,
+    conflicts,
+    ...(shared.length > conflicts.length
+      ? { conflictsMore: shared.length - conflicts.length }
+      : {}),
     flowHolds,
     recent,
     breaker,
@@ -1727,7 +1740,7 @@ export function wakeFacts(
     q: s.questions.map((q) => q.id).sort((a, b) => a - b),
     free: free.sort(),
     t: startable.sort(),
-    // seats idle with tickets open: a new fact each 30 minutes, until one starts or FLIGHT logs a wait
+    // seats idle with tickets open: one fact per idle spell, until one starts or FLIGHT logs a wait
     idle: idleFacts(s.wake?.idle),
     // a park the engine clears alone is digest-only; old_park says when it has stood too long
     parked: [
@@ -1764,9 +1777,9 @@ export function wakeFacts(
   });
 }
 
-/** The idle-seat facts: each long-idle seat with the period of its own spell, so a new period is a new fact. */
+/** The idle-seat facts: each long-idle seat with the start of its spell, so a spell is one fact however long it lasts. */
 const idleFacts = (idle: FlightIdleSeats | undefined): string[] =>
-  idleLong(idle).map((x) => `${x.id}:${idlePeriod(x.ms)}`);
+  idleLong(idle).map((x) => `${x.id}:${x.since}`);
 
 /** An item as a wake fact: a PR's by its text, so a new state of it is a new fact. */
 export const itemFactId = (x: { kind: string; key: string; text: string }): string =>
@@ -2082,7 +2095,7 @@ export function leftWakeText(
   }
   const parts = [...groups.values()].map((g) => `${g.n} ${g.n === 1 ? g.one : g.many}`);
   const things = left.length === 1 ? "1 thing" : `${left.length} things`;
-  return `FLIGHT was woken at ${clockHm(wokeAt, timeZone)} about ${things} and left ${left.length === 1 ? "it" : "them"} undecided after two tries: ${parts.join(", ")}.`;
+  return `FLIGHT was woken at ${clockHm(wokeAt, timeZone)} about ${things} and left ${left.length === 1 ? "it" : "them"} undecided; it will not be woken again for them: ${parts.join(", ")}.`;
 }
 
 /** Facts whose removal frees work FLIGHT can act on: a lift wakes FLIGHT at once, never batched or settled. */

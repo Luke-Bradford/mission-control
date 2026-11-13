@@ -163,7 +163,7 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
-import { budgetBrake } from "../spend/budget-brake.ts";
+import { restartHold, reviewsHeld } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
@@ -265,6 +265,11 @@ export interface EngineDeps {
   refillQueues: () => Promise<void>;
   /** Starts the seat's next queued ticket; it does nothing for a seat that may not take one. */
   takeNext: (seatId: string) => Promise<void>;
+  /**
+   * Settles or hands out the stuck PRs (conflicting or red, with no run on them); each tick, before
+   * any Ready ticket is taken. Absent: nothing is looked at.
+   */
+  takeStuckPrs?: (onlySeat?: string) => Promise<void>;
   /** false: crew is off, or this is a preview, or loop writes are disabled. */
   enabled: boolean;
   /** Whether this process may act on crew right now (it holds the crew lock); default true. */
@@ -1564,7 +1569,7 @@ export function createEngine(deps: EngineDeps): Engine {
         // not while the seat holds another run (a merged PR found after the run was stopped)
         const holds = supervisor.seat(run.agentId)?.runId ?? null;
         if (!pausedSeat(store, run.agentId, null) && (holds === null || holds === run.id))
-          await deps.takeNext(run.agentId);
+          await takeAfterFree(run.agentId);
         return;
       }
       case "event":
@@ -1663,7 +1668,7 @@ export function createEngine(deps: EngineDeps): Engine {
           !pausedSeat(store, run.agentId, null) &&
           wakeDueAsideRun(store, run.agentId) === undefined
         ) {
-          deps.takeNext(run.agentId).catch((e: unknown) => {
+          takeAfterFree(run.agentId).catch((e: unknown) => {
             log(
               `${run.agentId}: take after set-aside failed: ${e instanceof Error ? e.message : String(e)}`,
             );
@@ -2320,8 +2325,24 @@ export function createEngine(deps: EngineDeps): Engine {
     });
   }
 
+  /** A freed seat is offered a stuck PR in its area before it takes the next queued ticket. */
+  async function takeAfterFree(seatId: string): Promise<void> {
+    try {
+      await deps.takeStuckPrs?.(seatId);
+    } catch (e) {
+      log(`stuck PRs: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    await deps.takeNext(seatId);
+  }
+
   /** Refills the queues, then each writer seat that is idle with no run takes its next ticket. */
   async function takeForSeats(): Promise<void> {
+    // a stuck PR goes to a free seat before any Ready ticket
+    try {
+      await deps.takeStuckPrs?.();
+    } catch (e) {
+      log(`stuck PRs: ${e instanceof Error ? e.message : String(e)}`);
+    }
     try {
       await deps.refillQueues();
     } catch (e) {
@@ -2659,9 +2680,11 @@ export function createEngine(deps: EngineDeps): Engine {
       if (!free || supervisor.busy().some((b) => b.seatId === seat.id)) continue;
       const at = now();
       if (accountAtStop(config, store, seat.accountId, at)) continue;
-      const braked = budgetBrake(config, store, seat.accountId, at) !== null;
+      // a reviewer in a restart storm keeps its queued reviews; they wait, they do not fail
+      if (restartHold(store, seat.id) !== null) continue;
       for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
-        if (braked && !store.reviewBudgetBrakeOverride(row.id)) continue;
+        // a change past its review rounds waits for FLIGHT's decision (waste alarm)
+        if (reviewsHeld(store, row.authorRunId)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;

@@ -795,6 +795,30 @@ describe("reviewBrief", () => {
     );
   });
 
+  it("lists the changed files and the files that import them, with a count of the rest", () => {
+    const t = reviewBrief({
+      ...review,
+      reach: {
+        changed: ["a.ts", "b.ts"],
+        changedMore: 3,
+        importers: ["c.ts", "d.ts"],
+        importersMore: 7,
+      },
+    });
+    expect(t).toContain("- Files changed (5): a.ts, b.ts and 3 more.");
+    expect(t).toContain("- Files that import them (9): c.ts, d.ts and 7 more.");
+    expect(reviewBrief(review)).not.toContain("Files that import them");
+  });
+
+  it("says no file imports the change when none does", () => {
+    const t = reviewBrief({
+      ...review,
+      reach: { changed: ["a.ts"], changedMore: 0, importers: [], importersMore: 0 },
+    });
+    expect(t).toContain("- Files changed (1): a.ts.");
+    expect(t).toContain("- No file in the default branch imports them.");
+  });
+
   it("round 2 with no findings leaves out the findings clause", () => {
     const t = reviewBrief({ ...review, round: 2, prevSha: "c".repeat(40), since: true });
     expect(t).toContain(

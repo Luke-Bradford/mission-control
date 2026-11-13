@@ -2349,6 +2349,54 @@ describe("taking by rule", () => {
     expect(h.taken).toEqual([SEAT]);
   });
 
+  it("offers a freed seat a stuck PR before it takes its next queued ticket", async () => {
+    const order: string[] = [];
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async (seatId) => void order.push(`stuck ${seatId}`),
+      takeNext: async (seatId) => void order.push(`take ${seatId}`),
+    });
+    h.engine.start();
+    order.length = 0;
+    report();
+    await h.engine.reconcileRun(RUN);
+    setPr({ ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    setPr({ state: "merged", ci: "passing", mergedAt: clock });
+    await h.engine.reconcileRun(RUN);
+    expect(order.slice(0, 2)).toEqual([`stuck ${SEAT}`, `take ${SEAT}`]);
+  });
+
+  it("hands out stuck PRs on the tick, before the queues are refilled and any ticket is taken", async () => {
+    seatIdle(null);
+    const order: string[] = [];
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async () => void order.push("stuck"),
+      refillQueues: async () => void order.push("refill"),
+      takeNext: async (seatId) => void order.push(`take ${seatId}`),
+    });
+    h.engine.start();
+    order.length = 0;
+    await h.engine.tick();
+    expect(order).toEqual(["stuck", "refill", `take ${SEAT}`]);
+  });
+
+  it("logs a failing stuck-PR step and still deals the tickets", async () => {
+    seatIdle(null);
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async () => {
+        throw new Error("no git");
+      },
+    });
+    h.engine.start();
+    h.taken.length = 0;
+    await h.engine.tick();
+    expect(h.logs.some((l) => l.includes("stuck PRs: no git"))).toBe(true);
+    expect(h.taken).toEqual([SEAT]);
+  });
+
   it("asks a seat with no seat row, and one whose run has ended", async () => {
     config.crew?.sessions[0]?.seats.push({
       id: "guido-2",
@@ -4034,8 +4082,8 @@ describe("the engine runs reviews", () => {
       expect(reviewerOf(config, "guido-1", undefined, { store, now: clock })?.id).toBe("retro-cx");
     });
 
-    /** Weekly readings that project past 100% by the reset a day on. */
-    const brakeAccount = (accountId: string): void => {
+    /** Weekly readings that project past 100% by the reset a day on (195% in the ticket's replay). */
+    const overPace = (accountId: string): void => {
       for (const [at, pct] of [
         [clock - 6 * 60 * MIN, 40],
         [clock, 60],
@@ -4049,50 +4097,64 @@ describe("the engine runs reviews", () => {
           source: "test",
         });
     };
-    const liftBrake = (accountId: string): void =>
-      store.addUsage({
-        accountId,
-        window: "7d",
-        at: clock + 1,
-        pct: 10,
-        resetAt: clock + 24 * 60 * MIN,
-        source: "test",
-      });
 
-    it("reviewerOf gives the next reviewer while the first one's account has the budget brake on", () => {
+    it("reviewerOf keeps the first reviewer while its account's projection passes 100%", () => {
       addCodexReviewer();
-      const at = { store, now: clock };
-      brakeAccount("codex-main");
-      expect(reviewerOf(config, "guido-1", undefined, at)?.id).toBe(RETRO);
-      liftBrake("codex-main");
-      expect(reviewerOf(config, "guido-1", undefined, at)?.id).toBe("retro-cx");
+      overPace("codex-main");
+      expect(reviewerOf(config, "guido-1", undefined, { store, now: clock })?.id).toBe("retro-cx");
     });
 
-    it("a queued review waits while its reviewer's account has the budget brake on, then starts", async () => {
-      brakeAccount("claude-main");
+    it("a queued review starts although its reviewer's account is on a pace past 100%", async () => {
+      overPace("claude-main");
       await toReview();
-      await h.engine.tick();
-      expect(first()).toMatchObject({ state: "queued", seatId: RETRO });
-      expect(h.starts).toEqual([]);
-      liftBrake("claude-main");
       await h.engine.tick();
       await vi.waitFor(() => expect(h.starts).toEqual([{ seat: RETRO, id: expect.any(Number) }]));
     });
 
-    it("starts a FLIGHT-moved P0 review through its target budget brake only", async () => {
-      addCodexReviewer();
-      brakeAccount("claude-main");
-      brakeAccount("codex-main");
+    it("a queued review waits while its reviewer is in a restart storm, and is not failed", async () => {
+      store.waste.insertAlarm(
+        {
+          check: "restart-storm",
+          subject: RETRO,
+          repoId: REPO,
+          ticket: null,
+          seatId: RETRO,
+          runId: null,
+          level: 7,
+          evidence: "RETRO started 7 times in the last hour.",
+        },
+        clock,
+      );
       await toReview();
       await h.engine.tick();
+      expect(first()).toMatchObject({ state: "queued", seatId: RETRO });
+      expect(h.starts).toEqual([]);
+    });
+
+    it("a queued review of a change past two review rounds stays queued", async () => {
+      await toReview();
       const review = first();
-      expect(store.moveQueuedReview(review.id, "retro-cx", clock, true)).toBe(true);
-
+      const author = store.run(review.authorRunId);
+      if (author === null) throw new Error("no author run");
+      const startsBefore = h.starts.length;
+      store.setReviewState(review.id, ["queued", "starting", "running"], "failed", {
+        at: clock,
+        failure: "test",
+      });
+      const third = store.requestReview({
+        authorRunId: review.authorRunId,
+        repoId: review.repoId,
+        seatId: RETRO,
+        prNumber: review.prNumber,
+        sha: review.sha,
+        epoch: review.epoch,
+        attempt: review.attempt + 1,
+        round: 3,
+        at: clock,
+      });
       await h.engine.tick();
-
-      await vi.waitFor(() =>
-        expect(h.starts).toEqual([{ seat: "retro-cx", id: expect.any(Number) }]),
-      );
+      expect(store.review(third ?? 0)?.state).toBe("queued");
+      expect(h.starts).toHaveLength(startsBefore);
     });
 
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
