@@ -43,7 +43,7 @@ describe("machineCapacity", () => {
     const gb = 1024 ** 3;
     const recovered = sample({
       memTotalBytes: 24 * gb,
-      swapUsedBytes: 5.2 * gb,
+      swapUsedBytes: 6.2 * gb,
       swapTotalBytes: 7.2 * gb,
       memoryPressureFreePct: 46,
     });
@@ -117,6 +117,41 @@ describe("machineCapacity", () => {
     const roomy = { ...full, swapUsedBytes: 16 * gb };
     expect(machineCapacity([roomy], NOW)).toEqual({ blocked: false, reason: null });
     expect(fileServiceFault(roomy)).toBeNull();
+  });
+
+  it("does not block a small, nearly full swap file on a healthy Mac", () => {
+    const gb = 1024 ** 3;
+    const small = sample({
+      memTotalBytes: 24 * gb,
+      swapUsedBytes: 0.9 * gb,
+      swapTotalBytes: 1 * gb,
+      memoryPressureFreePct: 60,
+    });
+    expect(machineCapacity([small], NOW)).toEqual({ blocked: false, reason: null });
+    expect(fileServiceFault(small)).toBeNull();
+  });
+
+  it("blocks on fseventsd's footprint with compressed pages though its RSS is 1 GB", () => {
+    const gb = 1024 ** 3;
+    const s = sample({
+      fileServiceBytes: 28 * gb,
+      topConsumers: [{ pid: 2, command: "Docker", rssBytes: 9 * gb, cpuPct: 1 }],
+    });
+    expect(machineCapacity([s], NOW)).toEqual({
+      blocked: true,
+      reason: "the file-change service (fseventsd) holds 28.0 GB of memory (above 2.0 GB)",
+    });
+    expect(
+      machineCapacity(
+        [
+          sample({
+            fileServiceBytes: 0.3 * gb,
+            topConsumers: [{ pid: 2, command: "fseventsd", rssBytes: 1 * gb, cpuPct: 0 }],
+          }),
+        ],
+        NOW,
+      ),
+    ).toEqual({ blocked: false, reason: null });
   });
 
   it("blocks when fseventsd holds over 2 GB, and names it in plain words", () => {
