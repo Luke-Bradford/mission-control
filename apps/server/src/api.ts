@@ -1117,16 +1117,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       store.pullRequests(repo.id),
       store.board(repo.id),
     );
-  /** The live part, built per request from the map ring: seats, findings and conflicts. */
-  const mapLivePayload = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-    log: FastifyBaseLogger,
-  ): Promise<MapLive> => {
-    mapRingReady();
-    const { rows, lock } = mapCrewRows(repo);
-    return await buildMapLive(checkout, repo.id, rows, lock, store.pullRequests(repo.id), log);
-  };
   /** The cached map payload, built (once, however many ask) when an input has changed. */
   const mapPayloadFor = async (
     repo: (typeof config.repos)[number],
@@ -3640,61 +3630,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (req.headers["if-none-match"] === etag) return reply.code(304).send();
           return graph;
         }),
-      );
-
-      // Reader: apps/web/src/data.ts (none in the web: the tree part of the map snapshot, read for diagnosis)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/tree",
-        mapRoute(async (repo, checkout, req, reply) => {
-          const { etag, tree } = await mapTreePayload(repo, checkout);
-          reply.header("etag", etag).header("cache-control", "no-cache");
-          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
-          const { imports: _imports, hist: _hist, ...light } = tree;
-          return light;
-        }),
-      );
-
-      // Reader: apps/web/src/data.ts (none in the web: the live part of the map snapshot, read for diagnosis)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/live",
-        mapRoute((repo, checkout, _req, reply) => mapLivePayload(repo, checkout, reply.log)),
-      );
-
-      // Reader: apps/web/src/data.ts (none in the web: seats' modified scope, read for diagnosis)
-      api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
-        if (!config.repos.some((r) => r.id === req.params.repoId))
-          return reply.code(404).send({ error: "unknown repo" });
-        if (!deps.mapRing) return reply.code(503).send({ error: "map collector unavailable" });
-        return { seats: deps.mapRing.scopes(req.params.repoId) };
-      });
-
-      // Reader: apps/web/src/data.ts (none in the web: conflicts between open branches, read for diagnosis)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/conflicts",
-        async (req, reply) => {
-          const repo = config.repos.find((r) => r.id === req.params.repoId);
-          if (!repo) return reply.code(404).send({ error: "unknown repo" });
-          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
-          try {
-            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
-              return reply.code(503).send({ error: "map checkout unavailable" });
-            }
-            const { conflicts, unchecked, failures } = await mapConflicts.check(
-              checkout,
-              store.pullRequests(repo.id),
-            );
-            for (const failure of failures)
-              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
-            return { conflicts, unchecked };
-          } catch (e) {
-            reply.log.warn(
-              { reason: e instanceof Error ? e.message : String(e) },
-              "map conflicts unavailable",
-            );
-            return reply.code(503).send({ error: "map conflicts unavailable" });
-          }
-        },
       );
 
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
@@ -6870,10 +6805,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
-      api.get<{ Querystring: { map?: string } }>("/stream", (req, reply) => {
-        const repoId = req.query.map;
-        if (repoId !== undefined && !config.repos.some((r) => r.id === repoId))
-          return reply.code(404).send({ error: "repo not found" });
+      api.get("/stream", (_req, reply) => {
         reply.hijack();
         const res = reply.raw;
         res.writeHead(200, {
@@ -6897,20 +6829,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             send("machine");
           }, 10_000);
         });
-        // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
-        let unsubscribeMap: (() => void) | undefined;
-        if (repoId !== undefined) {
-          stopMapRing ??= mapRing.start();
-          unsubscribeMap = mapRing.subscribe(repoId, (delta) => {
-            res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
-          });
-        }
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
-          unsubscribeMap?.();
           streams.delete(end);
           deps.onStreamCount?.(streams.size);
         };

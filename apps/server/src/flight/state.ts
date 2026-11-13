@@ -896,6 +896,8 @@ export function flightState(i: {
   lock?: TestLockState;
   /** The repo's area labels and their globs; absent: any Ready ticket fits any build seat. */
   areas?: Record<string, string[]>;
+  /** Files whose merge conflicts between open PRs (see flightConflicts); absent: none known. */
+  conflicts?: readonly { file: string; prs: number[] }[];
 }): FlightState & TeamsDigestState & { discussions: ItemDiscussion[] } {
   const { config, store, busy, now } = i;
   const discussions = store.pendingDiscussions();
@@ -1276,16 +1278,8 @@ export function flightState(i: {
         ]
       : []),
   ].join("; ");
-  // Files changed by more than one open PR, from the stored file lists (no git): the likely merge conflicts.
-  const touched = new Map<string, number[]>();
-  for (const p of prs)
-    if (p.state === "open")
-      for (const file of store.prFilePaths(session.repoId, p.pr))
-        touched.set(file, [...(touched.get(file) ?? []), p.pr]);
-  const shared = [...touched]
-    .filter(([, nums]) => nums.length > 1)
-    .map(([file, nums]) => ({ file, prs: nums.sort((a, b) => a - b) }))
-    .sort((a, b) => a.file.localeCompare(b.file));
+  // Files whose merge conflicts between open PRs, checked by the caller (git merge-tree).
+  const shared = i.conflicts ?? [];
   const conflicts = shared.slice(0, FLIGHT_CONFLICTS_MAX);
   const flowHolds: NonNullable<FlightState["flowHolds"]> = [
     ...(capacity.blocked && capacity.reason !== null

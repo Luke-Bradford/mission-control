@@ -274,7 +274,7 @@ export const FLIGHT_LEDGER_OUTCOME_MAX = 300;
 export const FLIGHT_LEDGER_REFS_MAX = 10;
 export const FLIGHT_LEDGER_OPEN_MAX = 200;
 export const FLIGHT_LEDGER_INDEX_MAX = 60;
-/** Files two open PRs both change that FLIGHT's state lists; the rest are counted in `conflictsMore`. */
+/** Conflicting files FLIGHT's state lists; the rest are counted in `conflictsMore`. */
 export const FLIGHT_CONFLICTS_MAX = 20;
 export const FLIGHT_LEDGER_KEEP_MS = 7 * 24 * 60 * 60_000;
 export const FLIGHT_SUMMARY_LISTED = 5;
@@ -1251,7 +1251,7 @@ export interface FlightState {
       idle: boolean;
     }[];
   };
-  /** Files that more than one open PR changes, with those PRs: the ones likely to conflict at merge. */
+  /** Files whose merge conflicts between open PRs (a git merge check), with those PRs. */
   conflicts?: { file: string; prs: number[] }[];
   /** Conflicting files left off `conflicts` once it reaches FLIGHT_CONFLICTS_MAX. */
   conflictsMore?: number;
