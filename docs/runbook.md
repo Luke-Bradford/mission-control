@@ -2979,7 +2979,8 @@ picture. The read returns `story` in order, with each image named by `imageId` i
 **Limits and retention.** A question may hold 24 MB of images in all its packets together; a
 registration past that is refused with a plain message. A repeat registration of the same input is
 the same packet and adds nothing. The hub deletes a question's images 30 days after it first sees the
-question closed (checked on each read, each registration and hourly); the packet then reads
+question closed (checked on each read, each registration and every hour; a preview hub
+skips the hourly pass); the packet then reads
 `imagesRemovedAt` and its image links answer 404, while the text stays.
 
 **Reading.** `GET /api/attention/:key/materials` returns the latest packet for the item and works after the
