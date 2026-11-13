@@ -270,6 +270,11 @@ export interface EngineDeps {
    * any Ready ticket is taken. Absent: nothing is looked at.
    */
   takeStuckPrs?: (onlySeat?: string) => Promise<void>;
+  /**
+   * Releases tickets whose seat is at its account's stop and offers each waiting ticket to a free
+   * seat on an account that can work; each tick, before Ready tickets are taken. Absent: none.
+   */
+  releaseAtAccountStop?: () => Promise<void>;
   /** false: crew is off, or this is a preview, or loop writes are disabled. */
   enabled: boolean;
   /** Whether this process may act on crew right now (it holds the crew lock); default true. */
@@ -2336,6 +2341,11 @@ export function createEngine(deps: EngineDeps): Engine {
 
   /** Refills the queues, then each writer seat that is idle with no run takes its next ticket. */
   async function takeForSeats(): Promise<void> {
+    try {
+      await deps.releaseAtAccountStop?.();
+    } catch (e) {
+      log(`account release: ${e instanceof Error ? e.message : String(e)}`);
+    }
     // a stuck PR goes to a free seat before any Ready ticket
     try {
       await deps.takeStuckPrs?.();

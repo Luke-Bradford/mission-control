@@ -447,6 +447,12 @@ CREATE INDEX IF NOT EXISTS waste_alarms_subject ON waste_alarms(check_id, subjec
 -- Worktree paths a crew start is making (worktree add, then the install); one still here at the
 -- next start was left half-made, and is removed and made again.
 CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER NOT NULL);
+-- Hub-owned ticket waits do not change the GitHub Project Status field. They make the ticket
+-- unowned while it waits, so a free seat can take other Ready work.
+CREATE TABLE IF NOT EXISTS ticket_waits (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, reason TEXT NOT NULL, frees_when TEXT NOT NULL,
+  at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
+);
 CREATE TABLE IF NOT EXISTS attention_materials (
   id TEXT PRIMARY KEY, item_key TEXT NOT NULL, packet TEXT NOT NULL
 );

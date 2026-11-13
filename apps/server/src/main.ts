@@ -75,6 +75,7 @@ import {
 } from "./design-preview/previews.ts";
 import { DISK_SWEEP_EVERY_MS, diskBudgetBytes, sweepDataFolder } from "./disk/sweep.ts";
 import { cachedDiskUse } from "./disk/use.ts";
+import { releaseAtAccountStop } from "./engine/account-release.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
@@ -834,6 +835,16 @@ export async function main(): Promise<void> {
         profiles,
         now: Date.now,
         onNotes: () => bus.emit("attention"),
+      }),
+    releaseAtAccountStop: () =>
+      releaseAtAccountStop({
+        config,
+        store,
+        supervisor,
+        rules: engineRules,
+        enabled: engineOn,
+        now: Date.now,
+        log: (line) => log(`engine: ${line}`),
       }),
     takeStuckPrs: (onlySeat) =>
       takeStuckPrs(
