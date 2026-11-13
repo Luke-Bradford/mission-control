@@ -1567,6 +1567,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa-reports/:id"],
   ["GET", "/api/qa-reports/:id/markdown"],
   ["GET", "/api/qa-report-assets/:id"],
+  ["GET", "/api/attention-material-assets/:id"],
   ["GET", "/api/code-health/recommendations?repo=shop-app"],
   ["POST", "/api/code-health/recommendations/:id?repo=shop-app"],
   ["POST", "/api/code-health/test-reports", {}],
@@ -1601,6 +1602,17 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/comms/comms:1/reply-route"],
   ["GET", "/api/comms/comms:1/state"],
   ["POST", "/api/attention/unknown/choose", { optionId: "yes", briefAt: 1 }],
+  [
+    "POST",
+    "/api/attention/unknown/materials",
+    {
+      repoId: "shop-app",
+      sourceCommit: "a".repeat(40),
+      sourcePath: "docs/plan.md",
+      label: "Plan",
+    },
+  ],
+  ["GET", "/api/attention/unknown/materials"],
   ["POST", "/api/attention/unknown/clear", {}],
   ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
@@ -2709,6 +2721,8 @@ describe("local access", () => {
         continue;
       }
       if (
+        url === "/api/attention-material-assets/:id" ||
+        url === "/api/attention/unknown/materials" ||
         url === "/api/attention/unknown" ||
         url === "/api/attention/unknown/clear" ||
         /^\/api\/attention\/unknown\/choo?[si]/.test(url)
@@ -2998,6 +3012,7 @@ describe("local access", () => {
             .replace(/\/attention\/[^/]+\/dismiss$/, "/attention/:key/dismiss")
             .replace(/\/attention\/[^/]+\/handled$/, "/attention/:key/handled")
             .replace(/\/attention\/[^/]+\/discussion$/, "/attention/:key/discussion")
+            .replace(/\/attention\/[^/]+\/materials$/, "/attention/:key/materials")
             .replace(/\/attention\/[^/]+\/(choose|choice)$/, "/attention/:key/$1")
             .replace(
               /\/attention\/[^/]+\/replies\/[^/]+\/post$/,

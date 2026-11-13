@@ -3005,6 +3005,47 @@ keep their permission checks.
   them keep 365.
 
 
+### Retained Needs-you materials
+
+A Needs-you item can keep two kinds of display material, each tied to a named commit of a
+configured repository: a **plan** (a Markdown file with its images) and a **story** (sections of
+text and captioned pictures). Neither changes a brief, option, approval, hold or decision receipt.
+
+**Plan.** `POST /api/attention/:key/materials` registers one. The body names `repoId`, a full
+40-character `sourceCommit`, a Markdown `sourcePath` below `docs/`, and a human `label`. The item must
+belong to that repository. Preview hubs refuse registration (409) because they do not write loop
+data. Registration reads committed Git blobs only: it never reads a checkout file, follows a
+symlink, or downloads a link. The hub saves the complete Markdown and each linked PNG, JPEG or WebP
+(at most 2 MB each, 64 per packet; a larger file is refused by its committed size, before it is read) under a private, content-addressed asset id. Relative image
+links, including links in tables, resolve from the plan's directory at that commit. The returned
+Markdown rewrites those to `/api/attention-material-assets/:id`. Every other `![` (external,
+SVG, a non-raster file, a reference or shortcut form, spaces or brackets that break the usual
+syntax) loses its `!` and is a plain link or text, and raw HTML is
+made inert (`<` becomes `&lt;`), so nothing is fetched or run when it is shown.
+
+**Story.** FLIGHT attaches one with `attach_materials { key, sourceCommit, label, sections,
+optionImages? }` (a seat's question is the item `ask:<id>`). A seat's `ask_flight` carries no
+materials; only FLIGHT attaches them. Each section has a `heading`, a short
+`text`, `images` (repo-relative PNG, JPEG or WebP paths, each with a `caption`), optional child
+`sections` (up to four deep, 40 sections in all) and an optional `comparison` (`before-after` or
+`options`; needs two or more images) so the page shows its images side by side. `optionImages` lists,
+by a brief option's `id`, the images that show that option, so a choice can be made by picking a
+picture. The read returns `story` in order, with each image named by `imageId` in `images[]`.
+
+**Limits.** A question may hold 24 MB of images in all its packets together; a
+registration past that is refused with a plain message. A repeat registration of the same input is
+the same packet and adds nothing. The hub keeps what it stored and deletes nothing here; clearing
+old images from disk is the housekeeping job's.
+
+**Reading.** `GET /api/attention/:key/materials` returns `{ packets }`, every packet kept for the item, oldest first (a plan, then a story
+attached later, each whole; `AttentionMaterialsResponse` in mc/core), answers 404 when there are none, and works after the
+question is rebriefed, held or closed. `historical` is true, with `historicalReason` (`rebriefed`,
+`source changed`, `question closed` or `repository changed`), when the live item no longer matches
+the packet's brief id, source revision or repository, or its brief is stale.
+`GET /api/attention-material-assets/:id` returns the retained raster bytes. All three routes need
+the normal operator token. These materials are provenance for display, not a current approval or
+source binding.
+
 ### Clearing a Needs-you item
 
 `POST /api/attention/:key/clear` with an empty body returns `{ cleared: key }`. The operator or

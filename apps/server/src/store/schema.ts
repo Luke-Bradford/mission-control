@@ -447,5 +447,8 @@ CREATE INDEX IF NOT EXISTS waste_alarms_subject ON waste_alarms(check_id, subjec
 -- Worktree paths a crew start is making (worktree add, then the install); one still here at the
 -- next start was left half-made, and is removed and made again.
 CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER NOT NULL);
-
+CREATE TABLE IF NOT EXISTS attention_materials (
+  id TEXT PRIMARY KEY, item_key TEXT NOT NULL, packet TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS attention_materials_item ON attention_materials(item_key, id DESC);
 `;
