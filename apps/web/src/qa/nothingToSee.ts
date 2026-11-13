@@ -1,8 +1,5 @@
-import { prEvidenceAffectedPages } from "@mc/core";
-
-/** Said where a change has no screen, so an empty image area is not read as missing evidence. */
+/**
+ * Said where the saved QA report records that visual evidence does not apply, so an empty image
+ * area is not read as missing evidence. The hub never infers this from paths: a reviewer states it.
+ */
 export const NOTHING_TO_SEE = "Nothing to see: this change has no screen.";
-
-/** True when the changed paths are known and touch no page of the app. */
-export const changeHasNoScreen = (files: readonly string[] | undefined): boolean =>
-  files !== undefined && files.length > 0 && prEvidenceAffectedPages(files).length === 0;

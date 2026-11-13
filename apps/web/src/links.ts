@@ -88,33 +88,26 @@ const LOCAL_PATH = /^(?:[A-Za-z]:\\|\/(?:Users|home|private|var|tmp|mnt|opt)\/)/
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
 
 /**
- * Whether a link or path from a ticket points somewhere only its author can open: a `file:` link,
- * a local-machine address, an absolute path on a disk, or a GitHub page in a repo other than
- * `ownRepo` (`owner/name`; any GitHub repo counts as other when it is null).
+ * Whether a link or path from a ticket can only be opened on the author's own machine: a `file:`
+ * link, a localhost address, or an absolute path on a disk. Whether a web link is private is the
+ * hub's call (`TicketView.prototypeProblem`), not this function's.
  */
-export function isPrivateLink(text: string, ownRepo: string | null): boolean {
+export function isLocalOnlyLink(text: string): boolean {
   if (LOCAL_PATH.test(text)) return true;
-  let u: URL;
   try {
-    u = new URL(text);
+    const u = new URL(text);
+    return u.protocol === "file:" || LOCAL_HOSTS.has(u.hostname);
   } catch {
     return false;
   }
-  if (u.protocol === "file:") return true;
-  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
-  if (LOCAL_HOSTS.has(u.hostname)) return true;
-  if (u.hostname !== "github.com") return false;
-  const [owner, name] = u.pathname.split("/").filter(Boolean);
-  if (owner === undefined || name === undefined || ownRepo === null) return owner !== undefined;
-  return `${owner}/${name}`.toLowerCase() !== ownRepo.toLowerCase();
 }
 
-/** The distinct private links and paths written in `text`, in order of first appearance. */
-export function privateLinksIn(text: string, ownRepo: string | null): string[] {
+/** The distinct local-only links and paths written in `text`, in order of first appearance. */
+export function localOnlyLinksIn(text: string): string[] {
   const found = new Set<string>();
   for (const m of text.matchAll(PRIVATE_CANDIDATE)) {
     const link = m[0].replace(TRAILING_PUNCTUATION, "");
-    if (isPrivateLink(link, ownRepo)) found.add(link);
+    if (isLocalOnlyLink(link)) found.add(link);
   }
   return [...found];
 }

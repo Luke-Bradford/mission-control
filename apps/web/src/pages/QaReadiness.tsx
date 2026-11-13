@@ -19,7 +19,6 @@ import { elapsed, percent, plural, prLabel, shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { chainFor, FreesLine, UnblocksMark } from "../qa/frees.tsx";
-import { changeHasNoScreen, NOTHING_TO_SEE } from "../qa/nothingToSee.ts";
 import { NativeQaHistory, QaHistory, QaNavigation } from "../qa/QaHistory.tsx";
 import { ArchivedQaReport, CurrentQaReport, QaReportArchive } from "../qa/QaReport.tsx";
 import { navigate, useSearch } from "../router.ts";
@@ -406,7 +405,6 @@ function Detail({
       <CurrentQaReport repo={pr.repoId} pr={pr.number} head={pr.headSha}>
         <Pairs
           pr={pr}
-          noScreen={changeHasNoScreen(data?.files)}
           manifest={pairs}
           loading={evidence.loading}
           error={
@@ -624,14 +622,11 @@ function Decide({
 
 function Pairs({
   pr,
-  noScreen,
   manifest,
   loading,
   error,
 }: {
   pr: PullRequestSummary;
-  /** The changed paths touch no page of the app. */
-  noScreen: boolean;
   manifest: EvidenceManifest | undefined;
   loading: boolean;
   error: Error | null;
@@ -652,9 +647,7 @@ function Pairs({
             <p className="uat-no-capture">
               {loading
                 ? "Loading screenshot evidence…"
-                : noScreen
-                  ? NOTHING_TO_SEE
-                  : "No before/after pairs have been captured for this head. Ask QA about missing evidence before deciding."}
+                : "No before/after pairs have been captured for this head. Ask QA about missing evidence before deciding."}
             </p>
           )
         ) : (

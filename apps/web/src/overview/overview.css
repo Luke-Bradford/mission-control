@@ -1056,6 +1056,14 @@
   font-weight: 600;
 }
 
+/* The seat link is a click target: 24 px tall, though the row keeps its density. */
+#actList .log-who a {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 24px;
+  margin-block: -4px;
+}
+
 /* away mode */
 .awaystrip {
   display: flex;

@@ -875,6 +875,9 @@ function ModernConversation({
   const [reply, setReply] = useState<FlightConversationMessage | null>(null);
   const [sent, setSent] = useState(0);
   const replyInView = reply && messages.some((message) => message.id === reply.id) ? reply : null;
+  // Read when the cursor moves, never a reason to move it.
+  const mentionsNow = useRef<CommsMention[]>([]);
+  mentionsNow.current = useMentions();
   const read = useRef(new Set<string>());
   const pendingRead = useRef(new Set<string>());
   const [readError, setReadError] = useState<string | null>(null);
@@ -895,6 +898,16 @@ function ModernConversation({
         read.current.add(key);
         setReadError(null);
         hub.refetchTopic("agents");
+        // Opening a conversation reads the messages to the operator in it, so the bell, header and
+        // nav counts drop with the read cursor instead of keeping a second tally.
+        const shown = new Set(messages.map((m) => m.id));
+        const unseen = mentionsNow.current.filter((m) => !m.seen && shown.has(m.message.id));
+        if (unseen.length > 0) {
+          const ids = unseen.map((m) => m.message.id);
+          void apiPost("/api/comms/mentions/seen", { ids })
+            .then(() => recordMentionsSeen(ids))
+            .catch(() => {});
+        }
       })
       .catch((error: unknown) => {
         // Only an answer from the server is a failure to report. A request that got none (a

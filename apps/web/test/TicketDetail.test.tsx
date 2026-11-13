@@ -59,34 +59,50 @@ describe("TicketDetail", () => {
     }
   });
 
-  it("flags private prototype links in the description and leaves public ones alone", async () => {
+  it("shows the hub's verdict on a private prototype, and nothing for an ordinary public link", async () => {
+    ticket(
+      view({
+        body: "Prototype: https://claude.ai/public/artifacts/abc",
+        prototypeProblem: "links a prototype outside docs/prototype/.",
+      }),
+    );
+    show();
+    const note = await screen.findByRole("note", { name: "Private links" });
+    expect(note.textContent).toContain("Private prototype: this ticket links a prototype outside");
+  });
+
+  it("lists local-only links, and flags no link to another GitHub repo", async () => {
     ticket(
       view({
         body: [
           "Prototype: file:///Users/me/proto/index.html",
           "Local: http://localhost:5173/board and /Users/me/notes.md and C:\\mock\\a.html.",
-          `Own repo: ${GH}/pull/9`,
-          "Other repo: https://github.com/someone/secret/pull/1",
+          "Other repo: https://github.com/facebook/react/issues/1",
           "Docs: https://example.com/spec",
         ].join("\n"),
       }),
     );
     show();
     const note = await screen.findByRole("note", { name: "Private links" });
-    const listed = within(note)
-      .getAllByRole("listitem")
-      .map((li) => li.textContent);
-    expect(listed).toEqual([
+    expect(
+      within(note)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual([
       "file:///Users/me/proto/index.html",
       "http://localhost:5173/board",
       "/Users/me/notes.md",
       "C:\\mock\\a.html",
-      "https://github.com/someone/secret/pull/1",
     ]);
+    expect(note.textContent).not.toContain("Private prototype");
   });
 
   it("shows no private-link note for a body with only public links", async () => {
-    ticket(view({ body: `See ${GH}/pull/9 and https://example.com/spec` }));
+    ticket(
+      view({
+        body: `See ${GH}/pull/9, https://github.com/facebook/react/issues/1 and https://example.com/spec`,
+      }),
+    );
     show();
     await screen.findByText(/See/);
     expect(screen.queryByRole("note", { name: "Private links" })).toBeNull();

@@ -1,5 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CommsNav } from "../src/comms/CommsNav.tsx";
 import { CommsConversation } from "../src/comms/Conversation.tsx";
 import { hub } from "../src/data.ts";
 import { DockSummary } from "../src/shell/DockSummary.tsx";
@@ -41,7 +42,7 @@ function stubHub() {
     "/api/config": CONFIG,
     "/api/flight": { seat: null, decisions: [] },
     "/api/flight/summary": { headline: null, headlineAgeMin: 0, session: null },
-    "/api/comms/crew": { messages: [message("comms:1")] },
+    "/api/comms/crew": { messages: [] },
     "/api/comms/mentions": {
       mentions: [
         { message: message("comms:1"), seen: false },
@@ -90,5 +91,48 @@ describe("one read state for mentions", () => {
     });
     expect(screen.getByRole("button", { name: "Mentions, 0 new" })).toBeTruthy();
     expect(screen.queryByText(/Messages to you/)).toBeNull();
+  });
+
+  it("shows one number in the header, the nav and the bell, and opening the conversation clears all three", async () => {
+    const toYou = {
+      ...message("comms:5"),
+      from: "flight",
+      to: "CAPCOM",
+      text: "A question for you",
+      mentions: [],
+    };
+    stubFetch({
+      "/api/attention": [],
+      "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
+      "/api/config": CONFIG,
+      "/api/flight": { seat: null, decisions: [] },
+      // the cursor count says 303; only the shared read state may drive the badge
+      "/api/comms/flight": { messages: [toYou], unread: 303 },
+      "/api/comms/mentions": { mentions: [{ message: toYou, seen: false }] },
+      "/api/comms/pins": { messages: [] },
+      "POST /api/comms/read": { ok: true },
+      "POST /api/comms/mentions/seen": { ok: true },
+    });
+    const top = render(
+      <>
+        <Header page="comms" />
+        <CommsNav rows={[]} flightId="flight" view={{ kind: "flight" }} onNavigate={() => {}} />
+      </>,
+    );
+    const nav = screen.getByRole("navigation", { name: "Comms" });
+    expect(await within(nav).findByTitle("1 unread message to you")).toBeTruthy();
+    expect(within(nav).queryByTitle("303 unread messages to you")).toBeNull();
+    expect(screen.getByRole("button", { name: "FLIGHT chat, 1 unread to you" })).toBeTruthy();
+    // opening the conversation reads what it shows: all three counts drop together
+    top.rerender(
+      <>
+        <Header page="comms" />
+        <CommsNav rows={[]} flightId="flight" view={{ kind: "flight" }} onNavigate={() => {}} />
+        <CommsConversation view={{ kind: "flight" }} row={null} />
+      </>,
+    );
+    await waitFor(() => expect(screen.getByRole("button", { name: "FLIGHT chat" })).toBeTruthy());
+    expect(screen.getByRole("button", { name: "Mentions, 0 new" })).toBeTruthy();
+    expect(within(nav).queryByTitle("1 unread message to you")).toBeNull();
   });
 });

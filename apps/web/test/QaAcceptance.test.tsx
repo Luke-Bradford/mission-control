@@ -213,14 +213,12 @@ describe("QA acceptance", () => {
     await screen.findByText(/No before\/after pairs have been captured/);
     expect(screen.queryByText(/Screenshot evidence is unavailable/)).toBeNull();
   });
-  it("says plainly that a server-only change has no screen to look at", async () => {
-    details = { ...details, files: ["apps/server/src/api.ts", "apps/web/test/Foo.test.tsx"] };
-    await ready();
-    await screen.findByText("Nothing to see: this change has no screen.");
-    expect(screen.queryByText(/Ask QA about missing evidence/)).toBeNull();
-  });
-  it("keeps the missing-evidence warning for a change that touches a page", async () => {
-    details = { ...details, files: ["apps/web/src/App.tsx"] };
+  it.each([
+    ["a server-only change", ["apps/server/src/api.ts"]],
+    ["a change in another repo's layout", ["src/Cart.tsx"]],
+    ["a mockup change", ["docs/prototype/mission-control-hud.html"]],
+  ])("does not guess from paths that %s has no screen", async (_name, files) => {
+    details = { ...details, files };
     await ready();
     await screen.findByText(/No before\/after pairs have been captured/);
     expect(screen.queryByText(/Nothing to see/)).toBeNull();

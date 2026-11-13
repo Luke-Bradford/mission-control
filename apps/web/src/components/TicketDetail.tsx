@@ -16,7 +16,7 @@ import { RESOURCES, useResource } from "../data.ts";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
-import { githubHref, githubRepoOfUrl, privateLinksIn } from "../links.ts";
+import { githubHref, githubRepoOfUrl, localOnlyLinksIn } from "../links.ts";
 import { TicketQaReports } from "../qa/TicketQaReports.tsx";
 import { agentPath, boardPath, followLink } from "../router.ts";
 import { ExternalLink } from "./ExternalLink.tsx";
@@ -87,21 +87,35 @@ function PullRequestRef({ repoId, number, url }: { repoId: string; number: numbe
   );
 }
 
-/** Names the links in a ticket body that only its author can open, so nobody clicks into a dead end. */
-function PrivateLinksNote({ body, ticketUrl }: { body: string; ticketUrl: string }) {
-  const links = privateLinksIn(body, githubRepoOfUrl(ticketUrl));
-  if (links.length === 0) return null;
+/**
+ * Says what the hub says about the ticket's prototype (it refuses to move a ticket whose prototype
+ * the crew cannot read) and lists links that only open on the author's machine.
+ */
+function PrivateLinksNote({ body, problem }: { body: string; problem: string | null | undefined }) {
+  const links = localOnlyLinksIn(body);
+  if (!problem && links.length === 0) return null;
   return (
-    <div className="note warn-t" role="note" aria-label="Private links">
-      <strong>Private {links.length === 1 ? "link" : "links"}:</strong> only the author can open{" "}
-      {links.length === 1 ? "this" : "these"}.
-      <ul className="tlist">
-        {links.map((l) => (
-          <li key={l} className="mono">
-            {l}
-          </li>
-        ))}
-      </ul>
+    <div className="tprivate note warn-t" role="note" aria-label="Private links">
+      {problem && (
+        <p>
+          <strong>Private prototype:</strong> this ticket {problem}
+        </p>
+      )}
+      {links.length > 0 && (
+        <>
+          <p>
+            <strong>Local-only {links.length === 1 ? "link" : "links"}:</strong> only the author can
+            open {links.length === 1 ? "this" : "these"}.
+          </p>
+          <ul className="tlist">
+            {links.map((l) => (
+              <li key={l} className="mono">
+                {l}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }
@@ -203,7 +217,7 @@ export function TicketDetail({
             )}
             {t && t.body.trim() !== "" && (
               <Section title="Description">
-                <PrivateLinksNote body={t.body} ticketUrl={t.url} />
+                <PrivateLinksNote body={t.body} problem={t.prototypeProblem} />
                 <div className="tbody">
                   <Markdown text={t.body} />
                 </div>
