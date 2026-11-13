@@ -1,6 +1,10 @@
 import type { MachineSample } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { MACHINE_CAPACITY_DEFAULTS, machineCapacity } from "../src/machine-capacity.ts";
+import {
+  fileServiceFault,
+  MACHINE_CAPACITY_DEFAULTS,
+  machineCapacity,
+} from "../src/machine-capacity.ts";
 
 const NOW = 1_000_000;
 const sample = (over: Partial<MachineSample> = {}): MachineSample => ({
@@ -39,7 +43,7 @@ describe("machineCapacity", () => {
     const gb = 1024 ** 3;
     const recovered = sample({
       memTotalBytes: 24 * gb,
-      swapUsedBytes: 6.2 * gb,
+      swapUsedBytes: 5.2 * gb,
       swapTotalBytes: 7.2 * gb,
       memoryPressureFreePct: 46,
     });
@@ -48,6 +52,7 @@ describe("machineCapacity", () => {
     const softSwapWithHealthyPressure = sample({
       memTotalBytes: 24 * gb,
       swapUsedBytes: 16 * gb,
+      swapTotalBytes: 40 * gb,
       memoryPressureFreePct: 50,
     });
     expect(machineCapacity([softSwapWithHealthyPressure], NOW)).toEqual({
@@ -58,6 +63,7 @@ describe("machineCapacity", () => {
     const softSwapWithLowPressure = sample({
       memTotalBytes: 24 * gb,
       swapUsedBytes: 16 * gb,
+      swapTotalBytes: 40 * gb,
       memoryPressureFreePct: 9,
     });
     expect(machineCapacity([softSwapWithLowPressure], NOW)).toMatchObject({
@@ -78,13 +84,69 @@ describe("machineCapacity", () => {
 
     expect(
       machineCapacity(
-        [sample({ memTotalBytes: 24 * gb, swapUsedBytes: 22 * gb, memoryPressureFreePct: 50 })],
+        [
+          sample({
+            memTotalBytes: 24 * gb,
+            swapUsedBytes: 22 * gb,
+            swapTotalBytes: 40 * gb,
+            memoryPressureFreePct: 50,
+          }),
+        ],
         NOW,
         { ...MACHINE_CAPACITY_DEFAULTS, swapUsedPct: 97 },
       ),
     ).toMatchObject({
       blocked: true,
       reason: "swap used is 22.0 GB of 24.0 GB RAM (above 90%)",
+    });
+  });
+
+  it("blocks when the swap file is over 85% full, though RAM and memory pressure look fine", () => {
+    const gb = 1024 ** 3;
+    const full = sample({
+      memTotalBytes: 24 * gb,
+      swapUsedBytes: 19 * gb,
+      swapTotalBytes: 20 * gb,
+      memoryPressureFreePct: 44,
+    });
+    expect(machineCapacity([full], NOW)).toEqual({
+      blocked: true,
+      reason: "the swap file is 19.0 GB full of 20.0 GB (above 85%)",
+    });
+    expect(fileServiceFault(full)).toContain("swap file");
+    const roomy = { ...full, swapUsedBytes: 16 * gb };
+    expect(machineCapacity([roomy], NOW)).toEqual({ blocked: false, reason: null });
+    expect(fileServiceFault(roomy)).toBeNull();
+  });
+
+  it("blocks when fseventsd holds over 2 GB, and names it in plain words", () => {
+    const gb = 1024 ** 3;
+    const top = (rssBytes: number) => [
+      { pid: 1, command: "Docker", rssBytes: 9 * gb, cpuPct: 1 },
+      { pid: 2, command: "fseventsd", rssBytes, cpuPct: 1 },
+    ];
+    expect(machineCapacity([sample({ topConsumers: top(28 * gb) })], NOW)).toEqual({
+      blocked: true,
+      reason: "the file-change service (fseventsd) holds 28.0 GB of memory (above 2.0 GB)",
+    });
+    expect(machineCapacity([sample({ topConsumers: top(1.5 * gb) })], NOW)).toEqual({
+      blocked: false,
+      reason: null,
+    });
+  });
+
+  it("clears the file-change block after the usual headroom once the reading recovers", () => {
+    const gb = 1024 ** 3;
+    const bad = sample({
+      topConsumers: [{ pid: 2, command: "fseventsd", rssBytes: 3 * gb, cpuPct: 0 }],
+    });
+    const ok = (at: number) => sample({ at, topConsumers: [] });
+    expect(machineCapacity([bad, ok(NOW + 4 * 60_000)], NOW + 4 * 60_000)).toMatchObject({
+      blocked: true,
+    });
+    expect(machineCapacity([bad, ok(NOW + 5 * 60_000 + 1)], NOW + 5 * 60_000 + 1)).toEqual({
+      blocked: false,
+      reason: null,
     });
   });
 

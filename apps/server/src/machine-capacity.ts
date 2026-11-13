@@ -20,6 +20,14 @@ export const MACHINE_CAPACITY_DEFAULTS = {
 /** Swap alone is an emergency only once it exceeds this share of physical RAM. */
 export const SWAP_USED_HARD_PCT_OF_RAM = 90;
 
+/** Swap alone is an emergency once it fills this share of the swap file itself (#1812). */
+export const SWAP_FILE_USED_HARD_PCT = 85;
+/** The file-change service (`fseventsd`) is swollen once its resident size passes this. */
+export const FSEVENTSD_RSS_HARD_BYTES = 2 * 1024 ** 3;
+/** What a swollen file-change service costs to fix, for the Needs-you item. */
+export const FILE_SERVICE_RESTART_ADVICE =
+  "Restart the file-change service: run `sudo killall fseventsd` in Terminal. macOS starts it again by itself; it takes about 15 seconds and the Mac does not restart.";
+
 export interface MachineCapacityConfig {
   diskFreeGb: number;
   diskFreePct: number;
@@ -121,6 +129,23 @@ export function storedMachineCapacity(
   return machineCapacity(samples, now, config, breachedAt);
 }
 
+/** Why the file-change service or a nearly full swap file needs a restart of that service; null if neither. */
+export function fileServiceFault(s: MachineSample): string | null {
+  const fsevents = s.topConsumers?.find((p) => p.command === "fseventsd");
+  if (fsevents !== undefined && fsevents.rssBytes > FSEVENTSD_RSS_HARD_BYTES)
+    return `the file-change service (fseventsd) holds ${gb(fsevents.rssBytes)} of memory (above ${gb(FSEVENTSD_RSS_HARD_BYTES)})`;
+  if (
+    s.swapUsedBytes !== null &&
+    s.swapUsedBytes !== undefined &&
+    s.swapTotalBytes !== null &&
+    s.swapTotalBytes !== undefined &&
+    s.swapTotalBytes > 0 &&
+    (s.swapUsedBytes / s.swapTotalBytes) * 100 > SWAP_FILE_USED_HARD_PCT
+  )
+    return `the swap file is ${gb(s.swapUsedBytes)} full of ${gb(s.swapTotalBytes)} (above ${SWAP_FILE_USED_HARD_PCT}%)`;
+  return null;
+}
+
 function immediateReason(s: MachineSample, c: MachineCapacityConfig): string | null {
   if (s.diskFreeBytes !== null && s.diskFreeBytes < c.diskFreeGb * 1024 ** 3)
     return `disk free is ${gb(s.diskFreeBytes)} (below ${c.diskFreeGb} GB)`;
@@ -145,6 +170,8 @@ function immediateReason(s: MachineSample, c: MachineCapacityConfig): string | n
     s.memoryPressureFreePct < c.memoryFreePct
   )
     return `${swap.description} (above ${c.swapUsedPct}%) and memory free is ${s.memoryPressureFreePct.toFixed(1)}% (below ${c.memoryFreePct}%)`;
+  const fault = fileServiceFault(s);
+  if (fault !== null) return fault;
   if (
     s.memoryPressureFreePct !== null &&
     s.memoryPressureFreePct !== undefined &&
