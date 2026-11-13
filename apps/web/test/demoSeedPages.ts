@@ -41,6 +41,8 @@ export interface DemoTicket {
   stage: "ready" | "building" | "checks" | "review" | "merged";
   /** The seat working it, when one is. */
   seat: string | null;
+  /** The hub holds it: why, and what frees it. It has no seat. */
+  waiting?: { reason: string; freesWhen: string };
 }
 
 /** The pipeline's tickets: the seats' own work first, then what waits and what has shipped. */
@@ -56,7 +58,17 @@ export const DEMO_TICKETS: readonly DemoTicket[] = [
   { n: 109, title: "Localise the receipt email", stage: "building", seat: "dev-8" },
   { n: 110, title: "Reduce image weight on the home page", stage: "building", seat: "dev-10" },
   { n: 201, title: "Audit the coupon rules", stage: "ready", seat: null },
-  { n: 202, title: "Dark mode for the admin screens", stage: "ready", seat: null },
+  {
+    n: 202,
+    title: "Dark mode for the admin screens",
+    stage: "ready",
+    seat: null,
+    waiting: {
+      reason:
+        "The shared colour tokens are being renamed, so any screen built now would need redoing",
+      freesWhen: "shop-app#251 merges",
+    },
+  },
   { n: 251, title: "Remember the shipping choice", stage: "merged", seat: null },
   { n: 252, title: "Stop double-charging on retry", stage: "merged", seat: null },
   { n: 253, title: "Faster category filters", stage: "merged", seat: null },
@@ -119,6 +131,7 @@ export function boardItems(tickets: readonly DemoTicket[] = DEMO_TICKETS) {
               ? "in progress"
               : "review",
       closed: t.stage === "merged",
+      ...(t.waiting ? { waiting: { ...t.waiting, at: NOW - 2 * HOUR } } : {}),
       labels: [],
       priority: i % 3 === 0 ? "P0" : "P1",
       size: (["S", "M", "L"] as const)[i % 3] ?? "M",

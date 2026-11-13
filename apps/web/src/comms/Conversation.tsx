@@ -261,7 +261,8 @@ function MessageActions({
   onReply,
 }: {
   message: FlightConversationMessage;
-  onReply: () => void;
+  /** Absent in a thread the operator cannot answer in. */
+  onReply?: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const react = (reaction: CommsReactionKind) => {
@@ -279,9 +280,11 @@ function MessageActions({
   };
   return (
     <span className="comms-actions">
-      <button type="button" onClick={onReply} aria-label={`Reply to ${message.from}`}>
-        Reply
-      </button>
+      {onReply && (
+        <button type="button" onClick={onReply} aria-label={`Reply to ${message.from}`}>
+          Reply
+        </button>
+      )}
       <button type="button" onClick={() => react("seen")} aria-label={`Ack ${message.from}`}>
         Ack
       </button>
@@ -309,6 +312,8 @@ function MessagePane({
   onOpenMessage,
   onReply,
   flightId,
+  rightId = COMMS_CAPCOM,
+  readOnly = false,
   sent = 0,
   older,
   emptyText,
@@ -323,6 +328,10 @@ function MessagePane({
   onOpenMessage: OpenMessage;
   onReply: (message: FlightConversationMessage) => void;
   flightId: string | undefined;
+  /** Whose messages sit on the right: the operator's, unless the thread is between two agents. */
+  rightId?: string;
+  /** No Reply: the operator cannot answer in this thread. */
+  readOnly?: boolean;
   /** Counts CAPCOM's sends: each one brings the pane back to the latest, wherever the reader was. */
   sent?: number;
 }) {
@@ -397,7 +406,7 @@ function MessagePane({
           const quote = message.replyTo ? byId.get(message.replyTo) : undefined;
           return (
             <article
-              className={`comms-bubble${message.from === COMMS_CAPCOM ? " capcom" : ""}${highlightId === message.id ? " highlighted" : ""}`}
+              className={`comms-bubble${message.from === rightId ? " right" : ""}${highlightId === message.id ? " highlighted" : ""}`}
               id={`comms-message-${message.id}`}
               key={message.id}
             >
@@ -420,7 +429,10 @@ function MessagePane({
                   />
                 )}
                 {message.id.startsWith("comms:") && (
-                  <MessageActions message={message} onReply={() => onReply(message)} />
+                  <MessageActions
+                    message={message}
+                    onReply={readOnly ? undefined : () => onReply(message)}
+                  />
                 )}
               </div>
               {quote && (
@@ -936,6 +948,9 @@ function ModernConversation({
       : view.kind === "flight"
         ? flightSeat?.id
         : view.agentId;
+  // Two agents talking: the operator reads it, and writes in their own conversation with the agent.
+  const peerAgent =
+    view.kind === "contact" && view.contactId !== COMMS_CAPCOM ? view.agentId : null;
   const showPins = view.kind === "crew" || view.kind === "inbox";
   const ticketContext = ticket.data?.ticket;
   const ticketBoardPath =
@@ -1034,10 +1049,22 @@ function ModernConversation({
         onOpenMessage={onOpenMessage}
         onReply={setReply}
         flightId={flightSeat?.id}
+        rightId={peerAgent ?? COMMS_CAPCOM}
+        readOnly={peerAgent !== null}
         sent={sent}
         older={view.kind === "ticket" ? undefined : olderMessages}
       />
-      {to ? (
+      {peerAgent !== null ? (
+        <p className="pb note comms-peer-note">
+          Read-only: this is between two agents.{" "}
+          <a
+            href={commsContactPath(peerAgent, COMMS_CAPCOM)}
+            onClick={(event) => followLink(event, commsContactPath(peerAgent, COMMS_CAPCOM))}
+          >
+            Your conversation with {peerAgent}
+          </a>
+        </p>
+      ) : to ? (
         <Composer
           key={conversationScope}
           to={to}
@@ -1059,11 +1086,7 @@ function ModernConversation({
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
           flightSeat={view.kind === "flight" && flightView ? flightView.seat : undefined}
-          onSent={() => {
-            setSent((count) => count + 1);
-            if (view.kind === "contact" && view.contactId !== COMMS_CAPCOM)
-              navigate(commsContactPath(view.agentId, COMMS_CAPCOM));
-          }}
+          onSent={() => setSent((count) => count + 1)}
         />
       ) : (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>

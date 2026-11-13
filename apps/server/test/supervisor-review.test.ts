@@ -617,12 +617,27 @@ describe("startReview", () => {
 
   /** An author run with a pushed PR head, and a review of it in `starting`. */
   function reviewOfPush(
-    opts: { state?: "queued" | "starting"; pushSha?: string; profile?: RunProfile } = {},
+    opts: {
+      state?: "queued" | "starting";
+      pushSha?: string;
+      profile?: RunProfile;
+      /** Files committed to main before the PR forks from it. */
+      base?: Record<string, string>;
+      /** Files the PR writes (default: a.txt). */
+      files?: Record<string, string>;
+    } = {},
   ) {
     const seed = join(dir, "seed");
+    if (opts.base !== undefined) {
+      for (const [file, text] of Object.entries(opts.base)) writeFileSync(join(seed, file), text);
+      git(seed, "add", "-A");
+      git(seed, "commit", "-qm", "base files");
+      git(seed, "push", "-q", "origin", "main");
+    }
     const fork = git(seed, "rev-parse", "HEAD");
     git(seed, "checkout", "-q", "-b", "pr");
-    writeFileSync(join(seed, "a.txt"), "a\n");
+    for (const [file, text] of Object.entries(opts.files ?? { "a.txt": "a\n" }))
+      writeFileSync(join(seed, file), text);
     git(seed, "add", "-A");
     git(seed, "commit", "-qm", "pr change");
     git(seed, "push", "-q", "origin", "pr");
@@ -1520,6 +1535,127 @@ describe("startReview", () => {
     );
     const fs = JSON.parse(argv[argv.indexOf("--settings") + 1] as string).sandbox.filesystem;
     expect(fs.denyRead).toContain(join(root, "mc-crew", "guido-1-42"));
+  });
+
+  describe("a PR that changes package.json", () => {
+    const pkg = (extra: Record<string, unknown>) =>
+      `${JSON.stringify({ name: "x", version: "1.0.0", private: true, ...extra })}\n`;
+    const LOCK = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n";
+    const FLIGHT_SEAT: CrewSeatConfig = {
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    };
+    /** Starts the review, ends it with a clean report, and says what the hub did about installing. */
+    async function reviewAndReport(r: ReturnType<typeof reviewOfPush>) {
+      const installs: string[] = [];
+      prep.installRunner = async (command) => {
+        installs.push(command);
+      };
+      const { sup } = make({ scratchRetro: true, extraSeat: FLIGHT_SEAT });
+      sup.start();
+      const { runId } = await sup.startReview("retro", r.reviewId);
+      // the engine marks it running; the reviewer then reports
+      store.setReviewState(r.reviewId, ["starting"], "running", { at: 2, runId });
+      expect(
+        store.recordFindings(r.reviewId, runId, {
+          verdict: { spec: "pass", quality: "pass" },
+          summary: "done",
+          findings: [],
+          at: 3,
+        }),
+      ).toBe(true);
+      // FLIGHT is on the crew here and may get lines of its own: pick out the reviewer's brief
+      const briefLine = () => userLines().find((l) => l.includes("Reviewed, not installed"));
+      await until(() => expect(briefLine()).toBeDefined());
+      return { installs, brief: briefLine() as string, runId };
+    }
+    const flightNotes = () =>
+      store
+        .comms(0)
+        .filter((m) => m.to === "flight-1" && m.text.includes("reviewed without an install"));
+
+    it("reviews a scripts-only change read-only (PR 1520) and reports it", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({ scripts: { check: "old" } }), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ scripts: { check: "new" } }) },
+      });
+      const { installs, brief, runId } = await reviewAndReport(r);
+      expect(installs).toEqual([]);
+      expect(brief).toContain("Reviewed, not installed");
+      expect(flightNotes()).toHaveLength(1);
+      expect(store.review(r.reviewId)?.state).toBe("reported");
+      expect(store.run(runId)?.status).not.toBe("failed");
+    });
+
+    it("reviews an added dependency read-only, says so, tells FLIGHT, and still reports", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({}), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ dependencies: { "new-package": "1.0.0" } }) },
+      });
+      const { installs, brief, runId } = await reviewAndReport(r);
+      expect(installs).toEqual([]);
+      expect(brief).toContain("Reviewed, not installed");
+      expect(brief).toContain("won't install from it. No package from this PR is installed");
+      expect(brief).toContain("Do not run pnpm, npm, npx, node or any test");
+      const [note] = flightNotes();
+      expect(note?.text).toContain("PR #9 is reviewed without an install.");
+      expect(note?.ticket).toBe("mc#42");
+      expect(store.review(r.reviewId)?.installNote).toContain("Reviewed, not installed");
+      expect(store.review(r.reviewId)?.state).toBe("reported");
+      expect(store.run(runId)?.status).not.toBe("failed");
+      // the reviewer's own pnpm must not install before a script (pnpm 11 reads the pnpm_ spelling)
+      const envs = recorded()
+        .map((l) => l.env as Record<string, string> | undefined)
+        .filter((e) => e !== undefined);
+      expect(envs.some((e) => e.pnpm_config_verify_deps_before_run === "false")).toBe(true);
+      expect(envs.some((e) => e.npm_config_verify_deps_before_run === "false")).toBe(true);
+    });
+
+    it("a normal review's env leaves the install check alone", async () => {
+      const r = reviewOfPush();
+      const { sup } = make({ scratchRetro: true });
+      sup.start();
+      await sup.startReview("retro", r.reviewId);
+      await until(() => expect(userLines()).toHaveLength(1));
+      const env = recorded()[0]?.env as Record<string, string>;
+      expect(env.pnpm_config_verify_deps_before_run).toBeUndefined();
+      expect(env.npm_config_verify_deps_before_run).toBeUndefined();
+    });
+
+    it("opens no web preview, which would install the PR's packages", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({}), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ dependencies: { "new-package": "1.0.0" } }) },
+      });
+      const open = vi.fn(async () => true);
+      const reviewPreviews = {
+        origin: () => null,
+        identity: () => null,
+        ready: async () => ({ origin: null, note: null, identity: null }),
+        open,
+        close: async () => {},
+      };
+      prep.installRunner = async () => {};
+      const { sup } = make({ scratchRetro: true, extraSeat: FLIGHT_SEAT, reviewPreviews });
+      sup.start();
+      const { runId } = await sup.startReview("retro", r.reviewId);
+      store.setReviewState(r.reviewId, ["starting"], "running", { at: 2, runId });
+      store.recordFindings(r.reviewId, runId, {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "done",
+        findings: [],
+        at: 3,
+      });
+      await until(() =>
+        expect(userLines().find((l) => l.includes("Reviewed, not installed"))).toBeDefined(),
+      );
+      expect(open).not.toHaveBeenCalled();
+      expect(userLines().join("\n")).not.toContain("Preview:");
+      expect(store.review(r.reviewId)?.state).toBe("reported");
+    });
   });
 
   describe("model", () => {

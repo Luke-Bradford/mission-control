@@ -45,11 +45,13 @@ import {
   CODEX_COMMAND,
   CODEX_SEAT_TOKEN_ENV,
   CODEX_SHELL,
+  COMMS_MC,
   type ContextUsage,
   CREW_CLI_ENV,
   CREW_DISABLED,
   CREW_GIT_ENV,
   CREW_PNPM_ENV,
+  CREW_PNPM_NO_INSTALL_ENV,
   type CrewVendor,
   carriedFrom,
   clockHm,
@@ -1518,7 +1520,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
    * pnpm's store is hub-owned below crew.worktrees, never inside a worktree or seat temp root.
    * Python's caches likewise (`crewPythonEnv`). pnpm stays on its installed version (`CREW_PNPM_ENV`).
    */
-  function crewEnv(seatId: string, tmp: string, fullGit = false): NodeJS.ProcessEnv {
+  function crewEnv(
+    seatId: string,
+    tmp: string,
+    fullGit = false,
+    readOnlyReview = false,
+  ): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const k of CREW_ENV_KEYS) {
       const v = process.env[k];
@@ -1540,7 +1547,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       delete git.GIT_CONFIG_NOSYSTEM;
       delete git.GIT_ATTR_NOSYSTEM;
     }
-    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...git };
+    // a review with nothing installed: a stray pnpm call must not start an install from the PR
+    const noInstall: NodeJS.ProcessEnv = readOnlyReview ? CREW_PNPM_NO_INSTALL_ENV : {};
+    return { ...env, ...CREW_CLI_ENV, ...CREW_PNPM_ENV, ...noInstall, ...git };
   }
 
   /**
@@ -1833,6 +1842,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const pause = pausedSeat(store, info.seat.id, run.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
     const def = seatDef(info.seat);
+    const readOnlyReview =
+      run.reviewId != null && store.review(run.reviewId)?.installNote !== undefined;
     const fullAccess = crewProfileOf(info.seat.role, def.loop) === "flight-full";
     const upgradeFlight =
       fullAccess && store.getSetting(flightProfileKey(run.id)) !== FLIGHT_RUNTIME_PROFILE;
@@ -2056,7 +2067,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const zdotdir = join(runDir, "zsh-empty");
         const env = Object.fromEntries(
           Object.entries(
-            crewEnv(info.seat.id, tmp, crewProfileOf(info.seat.role, def.loop) === "flight-full"),
+            crewEnv(
+              info.seat.id,
+              tmp,
+              crewProfileOf(info.seat.role, def.loop) === "flight-full",
+              readOnlyReview,
+            ),
           ).filter(
             (e): e is [string, string] => !e[0].startsWith("CLAUDE_") && typeof e[1] === "string",
           ),
@@ -2175,6 +2191,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             info.seat.id,
             tmpPath,
             crewProfileOf(info.seat.role, def.loop) === "flight-full",
+            readOnlyReview,
           ),
           node: crew?.node ?? DEFAULT_CREW_NODE,
           entry: join(deps.hubRoot, KEEPER_ENTRY),
@@ -4473,11 +4490,28 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         reviewId,
       };
       store.upsertRun(run);
+      if (scratch.installNote !== undefined) {
+        store.setReviewInstallNote(reviewId, scratch.installNote);
+        const flight = config.crew?.sessions
+          .flatMap((session) => session.seats)
+          .find((seat) => seatDef(seat).loop === "watch");
+        if (flight !== undefined)
+          store.addComms({
+            at: now(),
+            from: COMMS_MC,
+            senderKind: "hub",
+            to: flight.id,
+            ticket: run.ticket,
+            ref: run.ticket,
+            text: `PR #${review.prNumber} is reviewed without an install. ${scratch.installNote}`,
+          });
+      }
       if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
       // A web PR's review gets a preview of its head, built in the background: the review does not
       // wait for it, and one that cannot start does not stop the review.
+      // A read-only review installs nothing from the PR, and a preview would install its packages.
       const previewStarting =
-        deps.reviewPreviews === undefined
+        deps.reviewPreviews === undefined || scratch.installNote !== undefined
           ? false
           : await deps.reviewPreviews.open({
               runId,
@@ -4528,6 +4562,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         since: inputs.since,
         touches: touches?.sha === review.sha ? touches.paths : [],
         ...(screenshots === undefined ? {} : { evidence: screenshots }),
+        ...(scratch.installNote === undefined ? {} : { installNote: scratch.installNote }),
         commands: info.repo.commands?.review ?? [],
         fullSuite: info.repo.fullSuite ?? [],
         ...(previewStarting ? { preview: true } : {}),

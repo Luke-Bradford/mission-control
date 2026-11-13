@@ -1,9 +1,11 @@
 import type { PillSpec } from "@mc/core";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { Card } from "../src/board/Card.tsx";
+import type { CardYou } from "../src/board/cards.ts";
 import { PrChip } from "../src/hud/PrChip.tsx";
-import { boardItem, prView } from "./fixtures.ts";
+import { needsYouPath, ticketPath } from "../src/router.ts";
+import { boardItem, crewRow, prView } from "./fixtures.ts";
 
 const card = (pr: ReturnType<typeof prView>, checkPill: PillSpec | null) =>
   render(
@@ -111,4 +113,38 @@ it("a Done card shows no CI failure, even for a PR whose last CI run failed", ()
   expect(screen.getByText("Merged")).toBeTruthy();
   expect(screen.queryByText("CI failing")).toBeNull();
   expect(document.querySelector(".crit")).toBeNull();
+});
+
+const cardWith = (over: { agent?: ReturnType<typeof crewRow> | null; you?: CardYou | null }) =>
+  render(
+    <Card
+      item={boardItem({ status: "In Progress" })}
+      showRepo={false}
+      agent={over.agent ?? null}
+      step={null}
+      queued={null}
+      reviewer={null}
+      pr={null}
+      mine={false}
+      unacked={false}
+      outcome="Closed"
+      when=""
+      statusOutOfDate={null}
+      you={over.you ?? null}
+    />,
+  );
+
+it("the You chip goes to its Needs you page, not the side pane", () => {
+  window.history.replaceState(null, "", "/board");
+  cardWith({ you: { key: "esc:shop-app#3349", text: "Pick an option", more: 0, title: "t" } });
+  fireEvent.click(screen.getByRole("button", { name: /Pick an option/ }));
+  expect(window.location.pathname).toBe(needsYouPath("esc:shop-app#3349"));
+  expect(window.location.search).toBe("");
+});
+
+it("a card with an agent on it opens the ticket page, not the agent", () => {
+  window.history.replaceState(null, "", "/board");
+  const { container } = cardWith({ agent: crewRow({ id: "dev-1" }) });
+  fireEvent.click(container.querySelector(".ktitle") as Element);
+  expect(window.location.pathname).toBe(ticketPath("shop-app", 3349));
 });
