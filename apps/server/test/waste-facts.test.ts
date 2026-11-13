@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { flightSignals } from "../src/flight/signals.ts";
 import { flightState } from "../src/flight/state.ts";
-import { openWasteAlarms, syncWasteAlarms, wasteReport } from "../src/spend/waste.ts";
+import {
+  openWasteAlarms,
+  resolveWasteAlarm,
+  syncWasteAlarms,
+  wasteReport,
+} from "../src/spend/waste.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
@@ -208,5 +213,51 @@ describe("clearance waiting", () => {
     syncWasteAlarms(config, store, NOW + HOUR);
     const signals = flightSignals({ config, store, session, seats: [], now: NOW + HOUR }).signals;
     expect(signals.filter((s) => s.kind === "waste_alarm")).toHaveLength(1);
+  });
+
+  it("wakes FLIGHT once for each head: a new head restarts the two hours", () => {
+    const keys = (at: number) =>
+      flightSignals({ config, store, session, seats: [], now: at })
+        .signals.filter((s) => s.kind === "waste_alarm" && s.evidence.includes("clearance"))
+        .map((s) => s.key)
+        .sort();
+    const open = () => openWasteAlarms(store).filter((a) => a.check === "clearance-waiting");
+    hold(NOW - 3 * HOUR);
+    syncWasteAlarms(config, store, NOW);
+    const first = keys(NOW);
+    expect(first).toHaveLength(1);
+    // the level grows from 3 to 4 hours: the same fact, not a new wake
+    syncWasteAlarms(config, store, NOW + HOUR);
+    expect(keys(NOW + HOUR)).toEqual(first);
+    // a new head: the wait starts over, so the old head's alarm closes and nothing is raised
+    store.setRunLoop(
+      "r1",
+      { phase: "review", awaitingFlight: "sha2", prNumber: 7 } as unknown as RunLoop,
+      NOW + 2 * HOUR,
+    );
+    syncWasteAlarms(config, store, NOW + 3 * HOUR);
+    expect(open()).toEqual([]);
+    // two hours on the new head: one new fact, then quiet as its level grows
+    syncWasteAlarms(config, store, NOW + 4 * HOUR + 2 * MIN);
+    const second = keys(NOW + 4 * HOUR + 2 * MIN);
+    expect(second.filter((k) => !first.includes(k))).toHaveLength(1);
+    syncWasteAlarms(config, store, NOW + 6 * HOUR);
+    expect(keys(NOW + 6 * HOUR)).toEqual(second);
+  });
+
+  it("a resolved alarm on one head does not silence the next head", () => {
+    hold(NOW - 6 * HOUR);
+    syncWasteAlarms(config, store, NOW);
+    const a1 = openWasteAlarms(store).find((a) => a.check === "clearance-waiting");
+    if (a1 === undefined) throw new Error("no alarm");
+    resolveWasteAlarm(store, a1.id, NOW, "b");
+    store.setRunLoop(
+      "r1",
+      { phase: "review", awaitingFlight: "sha2", prNumber: 7 } as unknown as RunLoop,
+      NOW + MIN,
+    );
+    for (let t = NOW + 2 * MIN; t <= NOW + 3 * HOUR; t += 10 * MIN)
+      syncWasteAlarms(config, store, t);
+    expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toHaveLength(1);
   });
 });
