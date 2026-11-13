@@ -118,4 +118,78 @@ describeRendered("Agents control room in a browser", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "keeps the activity list tall and the figures switch on one line at 1280x800",
+    async () => {
+      const page = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        search: `?at=${encodeURIComponent("/agent/flight-1")}`,
+        api: busyApi(),
+      });
+      await page.box("#streamP");
+      const measure = () =>
+        page.evaluate(() => {
+          const h = (s: string) => document.querySelector(s)?.getBoundingClientRect().height ?? 0;
+          const button = document.querySelector<HTMLElement>(".figs .seg button");
+          return {
+            stream: h("#stream"),
+            instruments: h(".instruments"),
+            seg: h(".figs .seg"),
+            button: button?.getBoundingClientRect().height ?? 0,
+          };
+        }, null);
+      const run = await measure();
+      expect(run.stream, `the list on This run: ${JSON.stringify(run)}`).toBeGreaterThanOrEqual(
+        240,
+      );
+      expect(run.seg, `the switch is one line: ${JSON.stringify(run)}`).toBeLessThanOrEqual(
+        run.button + 4,
+      );
+      await page.click(".figs .seg button:last-child");
+      const all = await measure();
+      expect(all.stream, `the list on All time: ${JSON.stringify(all)}`).toBeGreaterThanOrEqual(
+        240,
+      );
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "cuts In its words to two lines with an ellipsis and shows all of it on click",
+    async () => {
+      const rows = rosterRows(9);
+      const words = "A long summary of what the seat has been doing and why. ".repeat(12);
+      for (const r of rows) r.summary = words;
+      const api = rosterApi(rows);
+      for (const r of rows) api[`/api/agents/${r.id}/runs?limit=50`] = [];
+      const page = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1920,
+        height: 940,
+        search: `?at=${encodeURIComponent("/agent/flight-1")}`,
+        api,
+      });
+      await page.box(".idb-words");
+      const height = () =>
+        page.evaluate(() => {
+          const el = document.querySelector(".idb-words");
+          if (!el) return { box: 0, line: 1 };
+          return {
+            box: el.getBoundingClientRect().height,
+            line: Number.parseFloat(getComputedStyle(el).lineHeight),
+          };
+        }, null);
+      const closed = await height();
+      expect(closed.box, "two lines at most when closed").toBeLessThanOrEqual(closed.line * 2 + 2);
+      await page.click(".idb-words");
+      const open = await height();
+      expect(open.box, "taller when open").toBeGreaterThan(closed.box);
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });

@@ -139,7 +139,30 @@ function mergeTimed(events: StreamEvent[], timed: TimedRow[]): StreamRow[] {
   return out;
 }
 
-function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Relativise }) {
+/** How long before a send an operator row may be stamped and still be that message (clock skew). */
+const SENT_SKEW_MS = 5_000;
+
+/** Is this stream row the message sent from the box: written after it, and saying what it said? */
+function carries(ev: StreamRow, m: { text: string; at: number }): boolean {
+  if (ev.kind !== "op" && ev.kind !== "a2a") return false;
+  if (ev.at === null || ev.at < m.at - SENT_SKEW_MS) return false;
+  const sent = m.text.trim();
+  const text = ev.text.trim();
+  return text === sent || text.startsWith(sent);
+}
+
+function EventRow({
+  ev,
+  tz,
+  rel,
+  mark,
+}: {
+  ev: StreamRow;
+  tz: string | null;
+  rel: Relativise;
+  /** "sent" or "read", on the row that carries a message sent from the box. */
+  mark?: string;
+}) {
   return (
     <div className={`ev ${CLS[ev.kind]}`}>
       <span className="at num">{ev.at !== null && tz ? hhmm(ev.at, tz) : DASH}</span>
@@ -178,6 +201,14 @@ function EventRow({ ev, tz, rel }: { ev: StreamRow; tz: string | null; rel: Rela
           <Markdown text={ev.text} />
         ) : (
           ev.text
+        )}
+        {mark && (
+          <>
+            {" "}
+            <span className="xs muted" title="Read once the seat has written anything after it">
+              {mark}
+            </span>
+          </>
         )}
       </div>
     </div>
@@ -454,9 +485,14 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
   // Messages sent from the box show at once as "sent", then "read" once the seat has written
   // anything after them. They leave the list when the stream carries the message itself.
   const [sentList, setSentList] = useState<{ text: string; at: number }[]>([]);
-  const carried = (text: string) =>
-    all.some((e) => (e.kind === "op" || e.kind === "a2a") && e.text.includes(text.trim()));
-  const pending = sentList.filter((m) => !carried(m.text));
+  // The row that carries a sent message keeps its "sent" or "read" marker.
+  const sentWord = (m: { at: number }) => ((row.lastOutputAt ?? 0) > m.at ? "read" : "sent");
+  const marks = new Map<StreamRow, string>();
+  const pending = sentList.filter((m) => {
+    const ev = all.find((e) => !marks.has(e) && carries(e, m));
+    if (ev) marks.set(ev, sentWord(m));
+    return !ev;
+  });
 
   let empty: string | null = null;
   if (stream.error && !stream.data) empty = `Could not load the activity: ${stream.error.message}`;
@@ -486,6 +522,7 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
               ev={ev}
               tz={tz}
               rel={rel}
+              mark={marks.get(ev)}
             />
           ))}
         {pending.map((m) => (
@@ -497,7 +534,7 @@ export function StreamPanel({ row, tz }: { row: CrewRow; tz: string | null }) {
             <div className="txt">
               {m.text}{" "}
               <span className="xs muted" title="Read once the seat has written anything after it">
-                {(row.lastOutputAt ?? 0) > m.at ? "read" : "sent"}
+                {sentWord(m)}
               </span>
             </div>
           </div>

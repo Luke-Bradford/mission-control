@@ -202,7 +202,7 @@ export function IdentityBand({ view, connected }: { view: AgentDetailView; conne
           title={more ? "Show less" : "Show all"}
         >
           <span className="idb-words-h">In its words</span>
-          {more ? words : firstLine(words)}
+          {words}
         </button>
       )}
     </section>

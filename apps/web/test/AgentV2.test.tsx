@@ -1,7 +1,7 @@
 import type { AgentDetailView } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { hub, RESOURCES } from "../src/data.ts";
+import { hub, RESOURCES, RUNS_LIMIT } from "../src/data.ts";
 import { percent } from "../src/fmt.ts";
 import { contextCapacity } from "../src/overview/ContextCapacity.tsx";
 import { Agent } from "../src/pages/Agent.tsx";
@@ -9,7 +9,7 @@ import { agentDraftKey } from "../src/storage.ts";
 import { rosterRows } from "./agentRosterFixture.ts";
 import { agentView, populatedAgentView } from "./agentV2Fixture.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { CONFIG, crewRow } from "./fixtures.ts";
+import { CONFIG, crewRow, run } from "./fixtures.ts";
 
 const MIN = 60_000;
 
@@ -272,4 +272,97 @@ it("the context percent is the Overview's figure for the same seat", async () =>
   const overview = percent(contextCapacity(row).pct);
   expect(ring.getAttribute("aria-label")).toBe(`Context ${overview} used`);
   expect(container.querySelector(".inst.ctx .inst-big")?.textContent).toBe(overview);
+});
+
+it("says the all-time figures cover only the newest runs once the list is full", async () => {
+  const view = populatedAgentView();
+  const runs = Array.from({ length: RUNS_LIMIT }, (_, i) => ({
+    ...run({
+      id: `r-${i}`,
+      seq: i,
+      startedAt: 1_000_000 * (i + 1),
+      endedAt: 1_000_000 * (i + 1) + 60_000,
+    }),
+    ticket: `shop-app#${i}`,
+  }));
+  setup(view, { [RESOURCES.runs(view.row.id).path]: runs });
+  await screen.findByRole("region", { name: "Instruments" });
+  fireEvent.click(screen.getByRole("button", { name: "All time" }));
+  const figure = async (label: string) => (await screen.findByText(label)).closest(".fig");
+  const runsFig = await figure("Runs");
+  expect(runsFig?.textContent).toContain(`${RUNS_LIMIT}+`);
+  expect(runsFig?.textContent).not.toContain("first");
+  expect(runsFig?.textContent).toContain(`last ${RUNS_LIMIT} runs`);
+  expect((await figure("Tickets"))?.textContent).toContain(`last ${RUNS_LIMIT} runs`);
+});
+
+it("keeps exact all-time figures when the run list is short", async () => {
+  const view = populatedAgentView();
+  setup(view, {
+    [RESOURCES.runs(view.row.id).path]: [
+      run({ id: "r-1", endedAt: 2_000_000, startedAt: 1_000_000 }),
+    ],
+  });
+  await screen.findByRole("region", { name: "Instruments" });
+  fireEvent.click(screen.getByRole("button", { name: "All time" }));
+  const runsFig = (await screen.findByText("Runs")).closest(".fig");
+  expect(runsFig?.textContent).not.toContain("+");
+  expect(runsFig?.textContent).not.toContain("last");
+});
+
+it("shows the whole summary in the band and toggles it on click", async () => {
+  const view = populatedAgentView();
+  view.row.summary = "First line of the summary.\nSecond line goes on and on.\nThird line ends.";
+  setup(view);
+  const button = await screen.findByRole("button", { name: /In its words/ });
+  expect(button.getAttribute("aria-expanded")).toBe("false");
+  expect(button.textContent).toContain("Second line goes on and on.");
+  expect(button.textContent).toContain("Third line ends.");
+  fireEvent.click(button);
+  expect(button.getAttribute("aria-expanded")).toBe("true");
+  expect(button.className).toContain("open");
+});
+
+function idleSetup(
+  events: { id: string; at: number; kind: "op"; text: string }[],
+  lastOutputAt?: number,
+) {
+  const view = populatedAgentView();
+  view.row.run = null;
+  view.row.hudState = "idle";
+  if (lastOutputAt !== undefined) view.row.lastOutputAt = lastOutputAt;
+  return setup(view, {
+    "POST /api/seats/guido-1/message": {},
+    [RESOURCES.stream("guido-1").path]: {
+      runId: "r-old",
+      events,
+      tasks: [],
+      more: false,
+      truncated: false,
+    },
+  });
+}
+
+async function sendFromBox(text: string) {
+  const box = (await screen.findByRole("textbox", {
+    name: "Message this agent",
+  })) as HTMLInputElement;
+  fireEvent.change(box, { target: { value: text } });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+}
+
+it("does not hide a new message because an older operator row contains its text", async () => {
+  idleSetup([
+    { id: "0:0", at: Date.now() - 3_600_000, kind: "op", text: "Please say yes when done" },
+  ]);
+  await sendFromBox("yes");
+  await waitFor(() => expect(screen.getByText("sent")).toBeTruthy());
+});
+
+it("changes sent to read on the row that carries the message once the seat writes after it", async () => {
+  const sentAfter = Date.now() + 1_000;
+  idleSetup([{ id: "1:0", at: sentAfter, kind: "op", text: "yes" }], Date.now() + 60_000);
+  await sendFromBox("yes");
+  await waitFor(() => expect(screen.getByText("read")).toBeTruthy());
+  expect(screen.queryByText("sent")).toBeNull();
 });

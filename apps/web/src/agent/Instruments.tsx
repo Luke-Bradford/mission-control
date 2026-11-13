@@ -2,7 +2,7 @@ import type { ConfigView, CrewRow, RunView } from "@mc/core";
 import { type ReactNode, useState } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { stepMarks } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { RESOURCES, RUNS_LIMIT, useResource } from "../data.ts";
 import { cost, dur, kTokens, percent } from "../fmt.ts";
 import { Seg } from "../hud/Seg.tsx";
 import { contextCapacity } from "../overview/ContextCapacity.tsx";
@@ -202,6 +202,9 @@ function AllFigures({ row }: { row: CrewRow }) {
   const codex = config?.accounts.find((a) => a.id === row.accountId)?.vendor === "codex";
   if (!runs) return <span className="inst-n">Loading…</span>;
   const a = allTime(runs);
+  // The list is the newest RUNS_LIMIT runs; a full one means older runs exist that these figures miss.
+  const capped = runs.length >= RUNS_LIMIT;
+  const lastN = `in the last ${RUNS_LIMIT} runs`;
   const cls = seatClass(row);
   const since =
     a.firstRunAt !== null && tz
@@ -216,13 +219,24 @@ function AllFigures({ row }: { row: CrewRow }) {
     <>
       <Figure
         label="Runs"
-        value={a.runs}
-        note={since ? `first ${since}` : undefined}
-        definition="Runs this seat has made, from its newest recorded runs. Source: the hub's run list."
+        value={capped ? `${a.runs}+` : a.runs}
+        note={
+          since
+            ? capped
+              ? `since ${since} (last ${RUNS_LIMIT} runs)`
+              : `first ${since}`
+            : undefined
+        }
+        definition={
+          capped
+            ? `Runs this seat has made. Only its newest ${RUNS_LIMIT} are read, so it has at least this many. Source: the hub's run list.`
+            : "Runs this seat has made. Source: the hub's run list."
+        }
       />
       <Figure
         label="Tickets"
         value={a.tickets}
+        note={capped ? lastN : undefined}
         definition="Different tickets those runs worked. Source: the hub's run list."
       />
       {cls === "developer" || cls === "reviewer" ? (
@@ -239,12 +253,14 @@ function AllFigures({ row }: { row: CrewRow }) {
         <Figure
           label="Hours in runs"
           value={a.hoursInRuns.toFixed(1)}
+          note={capped ? lastN : undefined}
           definition="Hours from start to end of those runs. Source: the hub's run list."
         />
       )}
       <Figure
         label="Cost"
         value={codex || a.costUsd === null ? NOT_RECORDED : cost(a.costUsd)}
+        note={capped && !codex && a.costUsd !== null ? lastN : undefined}
         definition={
           codex
             ? "Codex runs do not record cost yet, so none is shown."
