@@ -494,7 +494,7 @@ fieldset.needs-controls {
 
 .mat-heading {
   margin: 0;
-  font-size: var(--fs-m);
+  font-size: var(--fs-panel);
   font-weight: 600;
   overflow-wrap: anywhere;
 }
