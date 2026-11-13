@@ -214,11 +214,33 @@ describe("Audit first-screen summary", () => {
     expect(other.past.funnel).toContainEqual({ kind: "dismissed", count: 3 });
     expect(other.past.measured.improved).toBe(1);
     expect(view.outside.state).toBe("not-collected");
-    expect(view.wasteAlarms.state).toBe("not-available");
+    expect(view.wasteAlarms.state).toBe("available");
+    expect(view.wasteAlarms.rows).toEqual([]);
     // The existing routes keep their shapes.
     const old = (await get("/api/code-health?repo=sample")).json<CodeHealthView>();
     expect(old.data.tab).toBe("overview");
     expect((await get("/api/code-health/recommendations?repo=sample")).statusCode).toBe(200);
+  });
+
+  it("lists an open waste alarm at once, and drops it once cleared, without waiting for the TTL", async () => {
+    const id = store.waste.insertAlarm(
+      {
+        check: "runs-per-ticket",
+        subject: "sample#2",
+        repoId: "sample",
+        ticket: "sample#2",
+        seatId: null,
+        runId: null,
+        level: 5,
+        evidence: "sample#2 has taken 5 runs without a merge.",
+      },
+      NOW - 1000,
+    );
+    expect((await overview("repo=sample")).wasteAlarms.rows.map((r) => r.id)).toEqual([
+      "runs-per-ticket:sample#2",
+    ]);
+    store.waste.closeAlarm(id, NOW);
+    expect((await overview("repo=sample")).wasteAlarms.rows).toEqual([]);
   });
 
   it("splits merged-per-day by stored merge time into no-hub-review and reported rounds", async () => {

@@ -13,6 +13,7 @@ import {
 } from "@mc/core";
 import type { Store } from "../store.ts";
 import type { RecommendationRecord } from "./recommendations.ts";
+import { wasteAlarmRows } from "./waste-rows.ts";
 
 /** Open proposals worth showing, strongest cause first; one order for the overview tab and this summary. */
 export function rankProposals(rows: readonly RecommendationRecord[], at: number) {
@@ -202,6 +203,7 @@ export function buildOverview(input: {
   const measured = store.codeHealthRemeasureCounts(repoId);
   const funnel = store.codeHealthFunnel(repoId);
 
+  const wasteRows = wasteAlarmRows(store, repoId, at);
   const rows = rankProposals(store.codeHealthRecommendations(repoId, at), at)
     .slice(0, CODE_HEALTH_OVERVIEW_ROWS_MAX)
     .map((row) => ({ ...row, evidence: [] }));
@@ -246,8 +248,12 @@ export function buildOverview(input: {
       note: "Outside sources (new releases, advisories, vendor guides) are not collected yet, so none are listed rather than guessed.",
     },
     wasteAlarms: {
-      state: "not-available",
-      note: "Waste-alarm rows are not available yet; they arrive with the spend-alarm part of this page.",
+      state: "available",
+      note:
+        wasteRows.length === 0
+          ? "No waste alarms are open for this repo."
+          : "Open alarms from the hub's own waste checks, one row per cause.",
+      rows: wasteRows,
     },
     build: { mergedPerDay: current.days, merged, hubReview, rework, cost: costFigure },
     landing: { files },
