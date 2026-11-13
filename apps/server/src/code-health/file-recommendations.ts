@@ -42,7 +42,7 @@ export function fileRecommendationProposals(
       rule: name,
       ruleVersion: CODE_HEALTH_RULES.version,
       causeId: `file-change-boundary:${hash([file.path, sizes.analysedSha, prs])}`,
-      title: `Reduce change coupling in ${file.path}`,
+      title: `Bring ${file.path} under ${rule.lines} lines: ${file.lines} lines now, touched by ${prs.length} merged PRs in 30 days`,
       scope: {
         kind: "file-risk",
         file: file.path,
