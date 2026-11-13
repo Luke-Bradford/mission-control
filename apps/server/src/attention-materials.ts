@@ -68,7 +68,7 @@ type Item = {
     state?: { freshness?: string };
   };
 } | null;
-type GitBlob = (checkout: string, commit: string, path: string) => Promise<Buffer>;
+type GitBlob = (checkout: string, commit: string, path: string, limit?: number) => Promise<Buffer>;
 export interface AttentionMaterialsService {
   register(itemKey: string, input: AttentionMaterialRegistration): Promise<AttentionMaterials>;
   attachStory(itemKey: string, input: AttentionStoryRegistration): Promise<AttentionMaterials>;
@@ -128,11 +128,16 @@ function packetId(key: string, parts: unknown[]): string {
   return hash(`${key}\0${parts.map((p) => JSON.stringify(p)).join("\0")}`);
 }
 
-async function committedBlob(checkout: string, commit: string, path: string): Promise<Buffer> {
+async function committedBlob(
+  checkout: string,
+  commit: string,
+  path: string,
+  limit = MAX_IMAGE,
+): Promise<Buffer> {
   try {
     const listed = await execFileP(
       "git",
-      [...SAFE_CONFIG, "-C", checkout, "ls-tree", "-z", commit, "--", path],
+      [...SAFE_CONFIG, "-C", checkout, "ls-tree", "-l", "-z", commit, "--", path],
       {
         encoding: "buffer",
         timeout: GIT_TIMEOUT_MS,
@@ -143,15 +148,24 @@ async function committedBlob(checkout: string, commit: string, path: string): Pr
     if (listed.stdout.length === 0)
       throw new AttentionMaterialsError(404, "The named committed file was not found.");
     // A tree read does not dereference symlinks. Only a regular committed blob can enter storage.
-    if (!/^100(?:644|755) blob [0-9a-f]{40,64}\t/.test(listed.stdout.toString("utf8")))
+    const entry = /^100(?:644|755) blob [0-9a-f]{40,64} +(\d+)\t/.exec(
+      listed.stdout.toString("utf8"),
+    );
+    if (!entry)
       throw new AttentionMaterialsError(400, "The named source is not a regular committed file.");
+    // refused by its listed size, before any bytes are read
+    if (Number(entry[1]) > limit)
+      throw new AttentionMaterialsError(
+        400,
+        `${path.slice(0, 160)} is over ${limit / 1024 / 1024} MB.`,
+      );
     const { stdout } = await execFileP(
       "git",
       [...SAFE_CONFIG, "-C", checkout, "cat-file", "blob", "--", `${commit}:${path}`],
       {
         encoding: "buffer",
         timeout: GIT_TIMEOUT_MS,
-        maxBuffer: MAX_IMAGE + MAX_MARKDOWN,
+        maxBuffer: limit,
         env: { ...gitEnv(process.env), GIT_TERMINAL_PROMPT: "0", GIT_NO_REPLACE_OBJECTS: "1" },
       },
     );
@@ -240,7 +254,7 @@ export function createAttentionMaterials(i: {
         if (known) return known;
         if (this.images.length >= ATTENTION_MATERIAL_IMAGES_MAX)
           throw new AttentionMaterialsError(400, "Too many images in one packet.");
-        const bytes = await read(root, commit, path);
+        const bytes = await read(root, commit, path, MAX_IMAGE);
         const type = bytes.length <= MAX_IMAGE ? mediaType(bytes, path) : null;
         if (!type)
           throw new AttentionMaterialsError(
@@ -438,7 +452,7 @@ export function createAttentionMaterials(i: {
       const prior = i.store.attentionMaterials(id);
       if (prior) return view(prior);
       const root = rootOf(input.repoId);
-      const markdownBytes = await read(root, input.sourceCommit, input.sourcePath);
+      const markdownBytes = await read(root, input.sourceCommit, input.sourcePath, MAX_MARKDOWN);
       if (markdownBytes.length > MAX_MARKDOWN || markdownBytes.includes(0))
         throw new AttentionMaterialsError(400, "Plan Markdown is missing or too large.");
       const images = collector(itemKey, root, input.sourceCommit);

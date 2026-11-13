@@ -1194,6 +1194,52 @@ describe("ask_flight", () => {
     expect(emitted).toContain("attention");
   });
 
+  it("sends the seat's pictures up with its question, kept from the commit it names", async () => {
+    const png = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      Buffer.from("seat-shot"),
+    ]);
+    mkdirSync(join(clone, "docs/s"), { recursive: true });
+    writeFileSync(join(clone, "docs/s/now.png"), png);
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "shot");
+    const commit = execFileSync("git", ["-C", clone, "rev-parse", "HEAD"], {
+      encoding: "utf8",
+    }).trim();
+    const materials = (path: string) => ({
+      sourceCommit: commit,
+      label: "Where it breaks",
+      sections: [
+        {
+          heading: "This page",
+          images: [{ path, caption: "Today" }],
+          children: [{ heading: "Here it overflows", text: "The header wraps." }],
+        },
+      ],
+    });
+    const asked = await ask({ question: "Which header?", materials: materials("docs/s/now.png") });
+    expect(asked).toEqual({ text: ASKED_FLIGHT });
+    const [question] = store.openQuestions();
+    const packet = store.attentionMaterialsForItem(`ask:${question?.id}`);
+    expect(packet).toMatchObject({
+      repoId: "mc",
+      sourceCommit: commit,
+      story: [{ heading: "This page", children: [{ heading: "Here it overflows" }] }],
+    });
+    const image = packet?.images[0];
+    expect(readFileSync(join(dir, "data", "attention-material-assets", image?.id ?? ""))).toEqual(
+      png,
+    );
+    // pictures that cannot be kept never lose the question, and the seat is told why
+    const failed = await ask({
+      question: "And this one?",
+      materials: materials("docs/s/gone.png"),
+    });
+    expect(failed.isError).not.toBe(true);
+    expect(failed.text).toContain("its pictures were not kept");
+    expect(store.openQuestions()).toHaveLength(2);
+  });
+
   it("mirrors the question to FLIGHT, not CAPCOM, about its run's ticket (#758)", async () => {
     tools = make({ config: withFlight() });
     await ask({ question: "Lanes per customer?" });

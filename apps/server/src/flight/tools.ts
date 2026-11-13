@@ -337,6 +337,7 @@ import {
   type AttentionMaterialsService,
   createAttentionMaterials,
 } from "../attention-materials.ts";
+import { MaterialsOptionImages, MaterialsStoryShape } from "../attention-materials-schema.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
@@ -816,33 +817,10 @@ const WithdrawQuestionArgs = z.strictObject({
   reason: text(QUESTION_REASON_MAX),
   basis: basisArg,
 });
-const MaterialImageArg = z.strictObject({
-  path: z.string().min(1).max(300),
-  caption: z.string().min(1).max(300),
-});
-const MaterialSectionArg = z.strictObject({
-  heading: z.string().min(1).max(200),
-  text: z.string().max(4000).optional(),
-  images: z.array(MaterialImageArg).max(12).optional(),
-  comparison: z.enum(["before-after", "options"]).optional(),
-  get children() {
-    return z.array(MaterialSectionArg).max(12).optional();
-  },
-});
 const AttachMaterialsArgs = z.strictObject({
   key: z.string().min(1).max(BRIEF_KEY_MAX),
-  sourceCommit: z.string().min(1).max(64),
-  label: z.string().min(1).max(300),
-  sections: z.array(MaterialSectionArg).min(1).max(40),
-  optionImages: z
-    .array(
-      z.strictObject({
-        optionId: z.string().min(1).max(200),
-        imagePaths: z.array(z.string().min(1).max(300)).min(1).max(12),
-      }),
-    )
-    .max(8)
-    .optional(),
+  ...MaterialsStoryShape,
+  optionImages: MaterialsOptionImages.optional(),
 });
 const PassArgs = z.looseObject({
   question_id: z.number().int().min(1),

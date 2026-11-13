@@ -320,6 +320,70 @@ describe("a retained plan", () => {
   });
 });
 
+describe("a held question", () => {
+  it("keeps its materials, and still takes new ones, through the API's own wiring", async () => {
+    const h = repo(PACKET);
+    const store = new Store(join(h.dir, "mc.sqlite"));
+    stores.push(store);
+    store.raiseNote({
+      key: "blocked:demo",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: "sample",
+      text: "Choose",
+      at: 1,
+    });
+    let at = Date.now();
+    const config = {
+      ...(CONFIG as object),
+      crew: {
+        worktrees: join(h.dir, "wt"),
+        maxSeats: 1,
+        sessions: [{ id: "s1", repoId: "sample", checkout: h.checkout, seats: [] }],
+      },
+    } as never;
+    const server = buildApp({
+      store,
+      bus: new ChangeBus(),
+      config,
+      operatorToken: "secret",
+      now: () => at,
+    });
+    const key = "note:blocked:demo";
+    const post = () =>
+      server.inject({
+        method: "POST",
+        url: `/api/attention/${key}/materials`,
+        headers: AUTH,
+        payload: REG(h.commit),
+      });
+    const get = () =>
+      server.inject({ method: "GET", url: `/api/attention/${key}/materials`, headers: AUTH });
+    expect((await post()).statusCode).toBe(201);
+    expect(
+      (
+        await server.inject({
+          method: "POST",
+          url: `/api/attention/${key}/hold`,
+          headers: AUTH,
+          payload: { reason: "Waiting", condition: { kind: "manual" } },
+        })
+      ).statusCode,
+    ).toBe(200);
+    expect(
+      (await server.inject({ method: "GET", url: "/api/attention/held" })).json(),
+    ).toHaveLength(1);
+    expect((await get()).json()).toMatchObject({ historical: false, closedAt: null });
+    at += (ATTENTION_MATERIAL_RETENTION_DAYS + 1) * DAY;
+    const later = (await get()).json();
+    expect(later).toMatchObject({ historical: false, closedAt: null, imagesRemovedAt: null });
+    expect(readdirSync(join(h.dir, "attention-material-assets"))).toHaveLength(2);
+    expect((await post()).statusCode).toBe(201);
+    await server.close();
+  });
+});
+
 describe("refusals", () => {
   const big = (n: number) => Buffer.alloc(n, "x");
   const links = (n: number) => Array.from({ length: n }, (_, i) => `![i](i${i}.png)`).join("\n");
@@ -384,15 +448,19 @@ describe("refusals", () => {
       },
       {},
       400,
-      /PNG, JPEG or WebP|not found/,
+      /over 2 MB/,
     ],
     [
-      "a plan over 1 MB",
-      { "docs/p/README.md": big(1024 * 1024 + 1) },
+      "a 4 MB image",
+      {
+        "docs/p/README.md": "![x](x.png)",
+        "docs/p/x.png": Buffer.concat([SIG, big(4 * 1024 * 1024)]),
+      },
       {},
       400,
-      /missing or too large|not found/,
+      /over 2 MB/,
     ],
+    ["a plan over 1 MB", { "docs/p/README.md": big(1024 * 1024 + 1) }, {}, 400, /over 1 MB/],
     ["65 images", { "docs/p/README.md": links(65), ...pngs(65) }, {}, 400, /Too many images/],
     [
       "images past the question cap",

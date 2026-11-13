@@ -3000,14 +3000,17 @@ text and captioned pictures). Neither changes a brief, option, approval, hold or
 belong to that repository. Preview hubs refuse registration (409) because they do not write loop
 data. Registration reads committed Git blobs only: it never reads a checkout file, follows a
 symlink, or downloads a link. The hub saves the complete Markdown and each linked PNG, JPEG or WebP
-(at most 2 MB each, 64 per packet) under a private, content-addressed asset id. Relative image
+(at most 2 MB each, 64 per packet; a larger file is refused by its committed size, before it is read) under a private, content-addressed asset id. Relative image
 links, including links in tables, resolve from the plan's directory at that commit. The returned
 Markdown rewrites those to `/api/attention-material-assets/:id`. Every other image embed (external,
 SVG, a reference-style `![x][r]`, a non-raster file) becomes a plain link or text, and raw HTML is
 made inert (`<` becomes `&lt;`), so nothing is fetched or run when it is shown.
 
 **Story.** FLIGHT attaches one with `attach_materials { key, sourceCommit, label, sections,
-optionImages? }` (a seat's question is the item `ask:<id>`). Each section has a `heading`, a short
+optionImages? }` (a seat's question is the item `ask:<id>`). A seat sends its own pictures
+with `ask_flight { question, materials }`: `materials` is the same story without `optionImages` and
+without a repository (the seat's own is used); the hub keeps it as that question's story. If the
+pictures cannot be kept, the question still reaches FLIGHT and the seat is told why. Each section has a `heading`, a short
 `text`, `images` (repo-relative PNG, JPEG or WebP paths, each with a `caption`), optional child
 `sections` (up to four deep, 40 sections in all) and an optional `comparison` (`before-after` or
 `options`; needs two or more images) so the page shows its images side by side. `optionImages` lists,
@@ -3022,7 +3025,8 @@ skips the hourly pass); the packet then reads
 `imagesRemovedAt` and its image links answer 404, while the text stays.
 
 **Reading.** `GET /api/attention/:key/materials` returns the latest packet for the item and works after the
-question is rebriefed or closed. `historical` is true, with `historicalReason` (`rebriefed`,
+question is rebriefed, held or closed. A held question still counts as open here: a hold never
+starts the retention window. `historical` is true, with `historicalReason` (`rebriefed`,
 `source changed`, `question closed` or `repository changed`), when the live item no longer matches
 the packet's brief id, source revision or repository, or its brief is stale.
 `GET /api/attention-material-assets/:id` returns the retained raster bytes. All three routes need

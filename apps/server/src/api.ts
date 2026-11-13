@@ -1617,12 +1617,33 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     return attentionMemo.items;
   };
+  // retained materials follow a question that is held too: a hold is not a close
+  let heldMemo: { at: number; items: AttentionItem[] } | undefined;
+  const attentionWithHeld = (): AttentionItem[] => {
+    const at = now();
+    if (!heldMemo || at - heldMemo.at >= HUD_MEMO_MS) {
+      heldMemo = {
+        at,
+        items: attentionItems(
+          config,
+          store,
+          at,
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew(at).rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ),
+      };
+    }
+    return heldMemo.items;
+  };
   const attentionMaterials =
     deps.attentionMaterials ??
     createAttentionMaterials({
       store,
       config,
-      item: (key) => sharedAttention().find((item) => item.key === key) ?? null,
+      item: (key) => attentionWithHeld().find((item) => item.key === key) ?? null,
+      now,
     });
   const notifications = new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
