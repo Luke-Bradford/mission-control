@@ -108,6 +108,15 @@ it("the crawl reaches the body of a page, not just the header", { timeout: 300_0
   expect(board.some((c) => c.text.startsWith("You:"))).toBe(true);
 });
 
+it("the crawl clicks the Comms chart's lines and seats, which are role=button, not buttons", {
+  timeout: 300_000,
+}, async () => {
+  const comms = await crawlRoute("/comms");
+  const lines = comms.filter((c) => c.text.endsWith("Narrow the chart to this conversation"));
+  expect(lines.length).toBeGreaterThan(0);
+  for (const c of lines) expect(c.target, c.text).toMatch(/\?focus=pair%3A/);
+});
+
 it("every page, in Demo, goes where the map says", { timeout: 600_000 }, async () => {
   const problems: string[] = [];
   const seen = new Set<string>();

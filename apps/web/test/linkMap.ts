@@ -170,12 +170,22 @@ export const LINK_MAP: Record<
       rule(/^Inbox · /, /^\/comms\/agents\/[\w-]+\/inbox$/, "What the agent reads."),
       rule(/^All messages$/, /^\/comms\/agents\/[\w-]+$/, "Everything the agent sent and got."),
       rule(
+        /Narrow the chart to this conversation$/,
+        /^\/comms(\/[\w-]+)*\?focus=pair%3A[^&]+$/,
+        "A chart line narrows the chart to that pair and opens their thread.",
+      ),
+      rule(
+        /Narrow the chart to [\w#-]+$/,
+        /^\/comms(\/[\w-]+)*\?focus=seat%3A[\w-]+$/,
+        "A chart seat narrows the chart to that seat and opens its conversations.",
+      ),
+      rule(
         / → /,
         /^\/comms(\/[\w-]+)*\?focus=pair%3A[^&]+$/,
         "A chart line opens that pair's thread.",
       ),
       rule(
-        /^[\w-]+ · \d+ messages?|messages?[^→]*$/,
+        /^[\w-]+ · \d+ messages?/,
         /^\/comms\/agents\/[\w-]+\/contacts\/[\w-]+$/,
         "One of the agent's contacts: that conversation.",
       ),
@@ -192,6 +202,16 @@ export const LINK_MAP: Record<
     rules: [
       rule(/^\d+ waiting for you$/, /^\/needs-you$/, "Needs you."),
       rule(/^← Comms$/, /^\/comms$/, "Back to Comms."),
+      rule(
+        /Narrow the chart to this conversation$/,
+        /^\/comms(\/[\w-]+)*\?focus=pair%3A[^&]+$/,
+        "A chart line narrows the chart to that pair and opens their thread.",
+      ),
+      rule(
+        /Narrow the chart to [\w#-]+$/,
+        /^\/comms(\/[\w-]+)*\?focus=seat%3A[\w-]+$/,
+        "A chart seat narrows the chart to that seat and opens its conversations.",
+      ),
       rule(
         / → /,
         /^\/comms(\/[\w-]+)+\?focus=pair%3A[^&]+$/,

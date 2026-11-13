@@ -1,7 +1,9 @@
 import { act, render } from "@testing-library/react";
 import { vi } from "vitest";
 import { App } from "../src/App.tsx";
+import { hub } from "../src/data.ts";
 import { setDemo } from "../src/demo/mode.ts";
+import { resetMarkedSeen } from "../src/shell/operatorMessages.ts";
 import { closeItem, resetOverlays } from "../src/shell/overlays.ts";
 import { resetSelection } from "../src/shell/selection.ts";
 import { resetSession } from "../src/shell/session.ts";
@@ -54,7 +56,8 @@ function clickOnce(el: HTMLElement): string {
   };
   window.addEventListener("click", before, true);
   try {
-    el.click();
+    // SVG elements have no click(); a dispatched event reaches React's handlers the same way
+    el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
   } finally {
     window.removeEventListener("click", before, true);
     push.mockRestore();
@@ -78,11 +81,23 @@ function clickOnce(el: HTMLElement): string {
  * screen.
  */
 export async function crawlRoute(route: string): Promise<Click[]> {
+  // Demo's data is relative to now; a frozen clock keeps every render of the page the same.
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() });
+  try {
+    return await crawlFrozen(route);
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+async function crawlFrozen(route: string): Promise<Click[]> {
   const out: Click[] = [];
   const pick = () =>
-    [...document.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")].filter(
-      (el) => !el.closest("[data-crawl-skip]"),
-    );
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled]), [role=button]:not(button):not([aria-disabled=true]), [role=link]:not(a), [role=tab]:not(button), [role=option]",
+      ),
+    ].filter((el) => !el.closest("[data-crawl-skip]"));
   /** The clickable words, numbers left out so a ticking "5m" is not a change. */
   const list = () =>
     pick()
@@ -92,6 +107,8 @@ export async function crawlRoute(route: string): Promise<Click[]> {
   const open = async () => {
     window.sessionStorage.clear();
     window.localStorage.clear();
+    hub.clear();
+    resetMarkedSeen();
     resetTheme();
     closeItem();
     resetOverlays();
@@ -103,10 +120,11 @@ export async function crawlRoute(route: string): Promise<Click[]> {
     await settle();
     // Wait until the page stops adding things to click.
     let last = list();
-    for (let tries = 0; tries < 20; tries++) {
+    let same = 0;
+    for (let tries = 0; tries < 40 && same < 3; tries++) {
       await act(async () => void (await new Promise((r) => setTimeout(r, 150))));
       const now = list();
-      if (now.join("\n") === last.join("\n")) break;
+      same = now.join("\n") === last.join("\n") ? same + 1 : 0;
       last = now;
     }
     return view;
@@ -115,7 +133,7 @@ export async function crawlRoute(route: string): Promise<Click[]> {
   const first = list();
   for (let i = 0; i < pick().length; i++) {
     const el = pick()[i] as HTMLElement;
-    const kind = el.tagName === "A" ? "a" : "button";
+    const kind = el.tagName === "A" ? "a" : "button"; // role=button and the like count as buttons
     const text = words(el);
     const cls = el.className;
     const before = document.body.innerHTML;
@@ -125,7 +143,9 @@ export async function crawlRoute(route: string): Promise<Click[]> {
       view.unmount();
       view = await open();
       if (list().join("\n") !== first.join("\n"))
-        throw new Error(`${route}: the page changed after clicking "${text}"`);
+        throw new Error(
+          `${route}: the page changed after clicking "${text}" ${JSON.stringify({ gone: first.filter((w) => !list().includes(w)), added: list().filter((w) => !first.includes(w)) })}`,
+        );
     }
   }
   view.unmount();
