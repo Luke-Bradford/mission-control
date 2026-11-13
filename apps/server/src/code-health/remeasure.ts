@@ -1,7 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { Store } from "../store.ts";
 import type { Remeasure } from "./recommendations.ts";
-import { recommendationRow } from "./recommendations.ts";
+import { blockingAtExactHead, recommendationRow } from "./recommendations.ts";
 
 type Db = Pick<DatabaseSync, "prepare" | "exec">;
 const WINDOW_MS = 30 * 86_400_000;
@@ -17,18 +17,36 @@ function measure(
   at: number,
   checkout: string | undefined,
 ): { current: number | null; note: string } | typeof RETRY {
-  if (row.rule === "recurring-correction" && row.scope?.file && row.scope.category) {
+  // Measure from the immutable accepted baseline, never the mutable scope a later refresh may rewrite.
+  const base = row.baseline?.scope;
+  if (row.rule === "recurring-correction" && base?.category) {
     const source = store.codeHealthReviews(repoId, at - WINDOW_MS, at);
     if (source.observedFrom === null) return RETRY;
-    const ids = new Set(
-      source.findings
-        .filter((f) => f.file === row.scope?.file && f.category === row.scope?.category)
-        .map((f) => f.findingId),
+    if (base.findingSummary === undefined || base.findingFix === undefined) {
+      // A record accepted before lineage existed counted every distinct finding in its category and file.
+      if (!base.file) return { current: null, note: "This rule has no repeatable measure." };
+      const ids = new Set(
+        source.findings
+          .filter((f) => f.file === base.file && f.category === base.category)
+          .map((f) => f.findingId),
+      );
+      return {
+        current: ids.size,
+        note: "Distinct findings in this category and file, last 30 days.",
+      };
+    }
+    const current = blockingAtExactHead(
+      source.findings.filter(
+        (f) =>
+          f.category === base.category &&
+          f.summary === base.findingSummary &&
+          f.fix === base.findingFix,
+      ),
+      source.reviews,
     );
-    return {
-      current: ids.size,
-      note: "Distinct findings in this category and file, last 30 days.",
-    };
+    // The review of a reworked head usually lands after the review date: retry, then give up honestly.
+    if (current === null) return RETRY;
+    return { current, note: "Blocking findings for the recorded cause, last 30 days." };
   }
   if (row.rule === "repeatedly-changed-large-file" && row.scope?.file) {
     if (!checkout) return RETRY;
