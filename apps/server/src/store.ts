@@ -3085,6 +3085,21 @@ export class Store {
       : { reason: row.reason as string, freesWhen: row.frees_when as string, at: row.at as number };
   }
 
+  /** Every ticket of the repo that is waiting, oldest first. */
+  ticketWaits(repoId: RepoId): ({ issue: number } & TicketWait)[] {
+    const rows = this.db
+      .prepare(
+        "SELECT issue, reason, frees_when, at FROM ticket_waits WHERE repo_id = ? ORDER BY at, issue",
+      )
+      .all(repoId) as Row[];
+    return rows.map((row) => ({
+      issue: row.issue as number,
+      reason: row.reason as string,
+      freesWhen: row.frees_when as string,
+      at: row.at as number,
+    }));
+  }
+
   /** Records that a ticket, rather than its former seat, waits for a known condition. */
   setTicketWait({ repoId, issue, ...wait }: { repoId: RepoId; issue: number } & TicketWait): void {
     this.transaction(() => {
