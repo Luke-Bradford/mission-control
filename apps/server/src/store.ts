@@ -42,6 +42,7 @@ import {
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
+  CHATTER_NOTE_PREFIX,
   type CiRunView,
   CODE_HEALTH_FLIGHT_REVIEW_DAYS,
   CODE_HEALTH_FLIGHT_TIER_RULES,
@@ -285,6 +286,7 @@ import {
   type Stray,
   THREAD_COMMS_LIMIT,
 } from "./store/types.ts";
+import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
 
 export * from "./store/types.ts";
 
@@ -777,9 +779,12 @@ export class Store {
     this.db.prepare("DELETE FROM checkouts_pending WHERE path = ?").run(path);
   }
 
+  /** Status rewrites that changed only a time, which `readVersion` does not count. */
+  private timestampOnlyWrites = 0;
+
   /** Cache token for local writes and commits made by another SQLite connection. */
   readVersion(): string {
-    return `${this.db.prepare("SELECT total_changes() AS n").get()?.n}:${this.db.prepare("PRAGMA data_version").get()?.data_version}`;
+    return `${Number(this.db.prepare("SELECT total_changes() AS n").get()?.n) - this.timestampOnlyWrites}:${this.db.prepare("PRAGMA data_version").get()?.data_version}`;
   }
 
   private closed = false;
@@ -818,7 +823,12 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
-    this.addColumn("review_moves", "budget_brake_override", "INTEGER NOT NULL DEFAULT 0");
+    // the forecast brake's Needs-you note is gone with the brake
+    if (
+      this.db.prepare("SELECT 1 FROM attention_notes WHERE key = 'budget-brake'").get() !==
+      undefined
+    )
+      this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
     // Token audit call times (#1646): audits stored before this have none until re-read.
     this.addColumn("run_token_calls", "at", "INTEGER");
     this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
@@ -1260,6 +1270,21 @@ export class Store {
       at: r.at as number,
       data: JSON.parse(r.data as string) as Record<string, unknown>,
     }));
+  }
+
+  /** The waste checks' queries and the alarms table (spend/waste.ts). */
+  get waste(): ReturnType<typeof wasteQueries> {
+    return wasteQueries(this.db);
+  }
+
+  /** A check call the hook refused as an unchanged rerun (same run, command and commit). */
+  addRerunRefusal(runId: string, command: string, sha: string, at: number): void {
+    this.appendAttempt(runId, RERUN_REFUSED_ATTEMPT, at, { command, sha, at });
+  }
+
+  /** A run resumed with the hub's "carry on" line (kind `resume`), counted by the retry-loop check. */
+  addResumeAttempt(runId: string, at: number): void {
+    this.appendAttempt(runId, RESUME_ATTEMPT, at, { at });
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
@@ -2081,6 +2106,22 @@ export class Store {
   }
 
   /** True while a run has not ended and is not set aside (waiting on a review, CI or a merge). */
+  /**
+   * True when one of these agents has an open run that is not set aside and started at or after
+   * `since`: a run left open for longer is a dead row, not work in progress.
+   */
+  hasActiveRunOf(agentIds: readonly string[], since: number): boolean {
+    if (agentIds.length === 0) return false;
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM runs WHERE ended_at IS NULL AND started_at >= ? AND agent_id IN (${agentIds.map(() => "?").join(",")})
+             AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1`,
+        )
+        .get(since, ...agentIds) !== undefined
+    );
+  }
+
   hasActiveRun(): boolean {
     return (
       this.db
@@ -2554,6 +2595,28 @@ export class Store {
   }
 
   /**
+   * Settled-done moves at or after `since`, plus each card's latest done move before it (what a
+   * card's column was at `since`), oldest first.
+   */
+  doneBoardMovesFrom(since: number): BoardMove[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.id, m.run_id, m.repo_id, m.issue, m.board_column, m.state, m.detail, m.at
+           FROM board_moves m
+           JOIN (SELECT repo_id, issue, MAX(at) AS at FROM board_moves
+                  WHERE state = 'done' AND at < ? GROUP BY repo_id, issue) last
+             ON m.repo_id = last.repo_id AND m.issue = last.issue AND m.at = last.at
+          WHERE m.state = 'done'
+         UNION ALL
+         SELECT id, run_id, repo_id, issue, board_column, state, detail, at
+           FROM board_moves WHERE state = 'done' AND at >= ?
+         ORDER BY at, id`,
+      )
+      .all(since, since) as Row[];
+    return rows.map((r) => this.boardMoveOf(r));
+  }
+
+  /**
    * Whether a real run in this store moved the issue's card to a column (done). Rows under
    * `pr:` and `dep:` ids have no run, so another hub's moves never count.
    */
@@ -2906,6 +2969,7 @@ export class Store {
   /** True when any stored row changed. */
   replaceBoard(repoId: RepoId, items: BoardItem[]): boolean {
     return this.changed("board_items", repoId, () => {
+      this.boardViews.delete(repoId);
       const before = new Map(
         (
           this.db
@@ -2982,6 +3046,25 @@ export class Store {
       .all(repoId) as Row[];
     return rows.map(toBoardItem);
   }
+
+  /**
+   * The board for a caller that only reads it: the same cards as `board`, read once and kept
+   * (frozen) until the board is replaced or another connection commits, so a page that reads the
+   * board every few seconds does not rebuild every card each time.
+   */
+  boardView(repoId: RepoId): readonly Readonly<BoardItem>[] {
+    const version = String(this.db.prepare("PRAGMA data_version").get()?.data_version);
+    const kept = this.boardViews.get(repoId);
+    if (kept && kept.version === version) return kept.cards;
+    const cards = this.board(repoId).map((card) => Object.freeze(card));
+    Object.freeze(cards);
+    this.boardViews.set(repoId, { version, cards });
+    return cards;
+  }
+  private boardViews = new Map<
+    RepoId,
+    { version: string; cards: readonly Readonly<BoardItem>[] }
+  >();
 
   /** One board card from the last read, else null. */
   boardItem(repoId: RepoId, issueNumber: number): BoardItem | null {
@@ -4687,7 +4770,7 @@ export class Store {
   setOffset(path: string, offset: number): void {
     this.db
       .prepare(
-        "INSERT INTO file_offsets (path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = excluded.offset",
+        "INSERT INTO file_offsets (path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = excluded.offset WHERE file_offsets.offset != excluded.offset",
       )
       .run(path, offset);
   }
@@ -4695,6 +4778,13 @@ export class Store {
   /** Records a collector's status; `last_ok_at` moves on success and is kept through failures. */
   setStatus(collector: string, ok: boolean, error: string | null): void {
     const at = Date.now();
+    // The same result again moves only its time. That is no news to a view built from the store:
+    // `readVersion` leaves it out, so a tick that found nothing new does not drop every view.
+    const kept = this.db
+      .prepare("SELECT ok, error FROM collector_status WHERE collector = ?")
+      .get(collector) as { ok: number; error: string | null } | undefined;
+    if (kept !== undefined && kept.ok === (ok ? 1 : 0) && kept.error === error)
+      this.timestampOnlyWrites++;
     this.db
       .prepare(
         `INSERT INTO collector_status (collector, ok, error, at, last_ok_at, failing_since)
@@ -4983,7 +5073,7 @@ export class Store {
   }
 
   /** Moves a queued review to another review seat; true only when it was still queued. */
-  moveQueuedReview(id: number, seatId: string, at: number, budgetBrakeOverride = false): boolean {
+  moveQueuedReview(id: number, seatId: string, at: number): boolean {
     let moved = false;
     this.transaction(() => {
       moved =
@@ -4992,10 +5082,8 @@ export class Store {
           .run(seatId, id).changes === 1;
       if (moved)
         this.db
-          .prepare(
-            "INSERT OR REPLACE INTO review_moves (review_id, seat_id, at, budget_brake_override) VALUES (?, ?, ?, ?)",
-          )
-          .run(id, seatId, at, Number(budgetBrakeOverride));
+          .prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)")
+          .run(id, seatId, at);
     });
     return moved;
   }
@@ -5003,14 +5091,6 @@ export class Store {
   /** Whether FLIGHT assigned the queued review to its current seat. */
   reviewMoved(id: number): boolean {
     return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
-  }
-
-  /** Whether FLIGHT explicitly passed the target account's budget brake for this review. */
-  reviewBudgetBrakeOverride(id: number): boolean {
-    const row = this.db
-      .prepare("SELECT budget_brake_override FROM review_moves WHERE review_id = ?")
-      .get(id) as { budget_brake_override?: number } | undefined;
-    return row?.budget_brake_override === 1;
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */
@@ -5828,7 +5908,7 @@ export class Store {
     );
     if (!crossed) return;
     this.raiseNote({
-      key: `chatter:${row.ticket}:${pair[0]}:${pair[1]}`,
+      key: `${CHATTER_NOTE_PREFIX}${row.ticket}:${pair[0]}:${pair[1]}`,
       kind: "blocked",
       runId: null,
       seatId: null,
@@ -7486,6 +7566,24 @@ export class Store {
         };
   }
 
+  /** The newest results (a pass, or a failure with an exit code) of `command` by this run on `headSha`. */
+  latestCheckResults(
+    runId: string,
+    command: string,
+    headSha: string,
+    limit: number,
+  ): { ok: boolean; exitCode: number | null }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT ok, exit_code FROM check_runs
+           WHERE run_id = ? AND command = ? AND head_sha = ? AND (ok = 1 OR exit_code IS NOT NULL)
+           ORDER BY at DESC, id DESC LIMIT ?`,
+        )
+        .all(runId, command, headSha, limit) as Row[]
+    ).map((r) => ({ ok: r.ok === 1, exitCode: (r.exit_code as number | null) ?? null }));
+  }
+
   /** The newest result this run recorded for `command`, regardless of commit. */
   newestCheckRun(
     runId: string,
@@ -8615,6 +8713,15 @@ export class Store {
       .prepare("SELECT * FROM flight_decisions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?")
       .all(since, limit) as Row[];
     return rows.map(toFlightDecision);
+  }
+
+  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
+  flightWaitTimes(since: number): number[] {
+    return (
+      this.db
+        .prepare("SELECT at FROM flight_decisions WHERE kind = 'wait' AND at >= ? ORDER BY at")
+        .all(since) as { at: number }[]
+    ).map((r) => r.at);
   }
 
   /** The decisions of one kind about one ticket, newest first. */

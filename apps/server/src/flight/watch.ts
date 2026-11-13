@@ -21,13 +21,11 @@ import {
   FLIGHT_HANDOVER_TOPIC,
   FLIGHT_HOUR_MS,
   FLIGHT_IDLE_SEAT_WAKE_MS,
-  FLIGHT_LEFT_HEAD,
   FLIGHT_LEFT_NOTE_KEY,
   FLIGHT_MAX_WAKES,
   FLIGHT_MIN_WAKE_GAP_MS,
   FLIGHT_NOTE_KEY,
   FLIGHT_OPERATOR_WAKE_GAP_MS,
-  FLIGHT_REWAKE_MS,
   FLIGHT_ROTATIONS_MAX,
   FLIGHT_RUN_TOOLS_SETTING,
   FLIGHT_STARTS_MAX,
@@ -46,6 +44,7 @@ import {
   memoryTopicKey,
   type SeatSessionRow,
   type TestLockState,
+  WASTE_HELD_PREFIX,
   wakeKey,
   wakeLine,
 } from "@mc/core";
@@ -55,6 +54,7 @@ import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { wakePieces } from "../prompt-cost.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
+import { restartHold } from "../spend/waste.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
@@ -75,7 +75,6 @@ import {
   onlySettled,
   openReasonIds,
   operatorItems,
-  pending,
   recordFlightWake,
   recordNextFlightWake,
   recordWakeReasons,
@@ -129,8 +128,6 @@ export interface FlightWatch {
   seen(runId: string, state: FlightState): void;
 }
 
-type AuditedReason = WakeReason & { round: 1 | 2 };
-
 /** Whether any list of a `wakeFacts` string has an entry. */
 const hasFacts = (facts: string): boolean =>
   Object.values(JSON.parse(facts) as Record<string, unknown[]>).some((l) => l.length > 0);
@@ -169,11 +166,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
   let lastWakeAt = 0;
   /**
    * The last wake's reasons, checked when FLIGHT's turn ends: each needs a decision on its target
-   * (or to be settled). Each reason has its own round: round 2 is a reason already re-woken for
-   * with "You left these", so a second miss retains an internal reminder; a reason new to
-   * that re-wake is on round 1.
+   * (or to be settled). One it left goes to the operator in a note; FLIGHT is not woken again for it.
    */
-  let audit: { wokeAt: number; reasons: AuditedReason[] } | null = null;
+  let audit: { wokeAt: number; reasons: WakeReason[] } | null = null;
   let delivered: { runId: string; snapshot: FlightWakeSnapshot } | null = null;
   /** When FLIGHT's last turn ended: the gap runs from this too, so a long turn can't wake itself. */
   let lastTurnEndAt = 0;
@@ -376,29 +371,9 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
     return false;
   }
 
-  /** The reasons FLIGHT left, when the last audit found some and has not yet re-woken for them. */
-  function leftOf(state: ReturnType<typeof flightState>): WakeReason[] | null {
-    if (audit === null || lastTurnEndAt < audit.wokeAt) return null;
-    const missed = unhandledReasons(store, audit.reasons, audit.wokeAt, openReasonIds(state));
-    const first = missed.filter((r) => audit?.reasons.find((a) => a.id === r.id)?.round === 1);
-    return first.length === 0 ? null : first;
-  }
-  const leftLine = (left: WakeReason[]): string =>
-    `${FLIGHT_LEFT_HEAD} ${left.map((r) => r.label).join("; ")}`;
-  /** What the wake just sent is held to: its new reasons, and the ones left, on their second round. */
-  const nextAudit = (
-    wokeAt: number,
-    reasons: WakeReason[],
-    left: WakeReason[] | null,
-  ): typeof audit => {
-    const all: AuditedReason[] = [
-      ...(left ?? []).map((r) => ({ ...r, round: 2 as const })),
-      ...reasons
-        .filter((r) => !left?.some((l) => l.id === r.id))
-        .map((r) => ({ ...r, round: 1 as const })),
-    ];
-    return all.length === 0 ? null : { wokeAt, reasons: all };
-  };
+  /** What the wake just sent is held to: each of its reasons needs a decision by the turn's end. */
+  const nextAudit = (wokeAt: number, reasons: WakeReason[]): typeof audit =>
+    reasons.length === 0 ? null : { wokeAt, reasons };
 
   /**
    * Seats idle with tickets open are timed and logged whether or not FLIGHT can be woken now: it
@@ -545,6 +520,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         bus.emit("attention");
         return;
       }
+      // a restart-storm alarm holds FLIGHT's starts: it waits, it is not a failed start, no note
+      const storm = restartHold(store, id);
+      if (storm !== null) {
+        lastReason = storm;
+        return;
+      }
       if (starts.length >= FLIGHT_STARTS_MAX && !rotating) {
         clearDown(t);
         store.raiseNote({
@@ -586,7 +567,6 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         );
         const causes = changedWakeFacts(lastFacts, wakeFacts(state));
         const reasons = wakeReasons(lastFacts, wakeFacts(state), state.items);
-        const left = leftOf(state);
         const note = store
           .flightMemory(state.repo)
           .find((m) => memoryTopicKey(m.topic) === FLIGHT_HANDOVER_TOPIC);
@@ -595,16 +575,12 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           first: wakeLine(
             state,
             digest,
-            left === null
-              ? causes.length > 0
-                ? causes
-                : ["initial"]
-              : [leftLine(left), ...causes],
+            causes.length > 0 ? causes : ["initial"],
             freshStartLine(note ?? null),
           ),
         });
         clearDown(t);
-        audit = nextAudit(t, reasons, left);
+        audit = nextAudit(t, reasons);
         processGone = false;
         store.setSetting(
           FLIGHT_RUN_TOOLS_SETTING,
@@ -620,18 +596,19 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         lastWakeAt = t;
         const woke = causes.length > 0 ? causes : ["initial"];
         recordFlightWake(store, found.session.repoId, t, woke);
-        recordWakeReasons(
-          store,
-          runId,
-          t,
-          left === null ? woke : [leftLine(left), ...causes],
-          flightWakeId(runId, 0),
-        );
+        recordWakeReasons(store, runId, t, woke, flightWakeId(runId, 0));
         recordNextFlightWake(store, found.session.repoId, nextWakeAt(state, t, t));
       } catch (e) {
+        const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
+        if (said.startsWith(WASTE_HELD_PREFIX)) {
+          // a hold that landed between the check and the start: not a failure, not counted
+          starts = starts.filter((x) => x !== t);
+          rotations = rotations.filter((x) => x !== t);
+          lastReason = said;
+          return;
+        }
         if (operatorWaiting)
           raiseDown(id, found.session.repoId, "it could not start. Your message is saved", t);
-        const said = (e instanceof Error ? e.message : String(e)).slice(0, 300);
         const failure = processGone ? `its process is gone, and a restart failed: ${said}` : said;
         lastReason = processGone
           ? "its process is gone and it would not restart; the server log has the error"
@@ -722,34 +699,18 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       return;
     }
     // the turn that followed the last wake has ended: each of its reasons needs a decision
-    let left: WakeReason[] | null = null;
     if (audit !== null && lastTurnEndAt >= audit.wokeAt) {
       const missed = unhandledReasons(store, audit.reasons, audit.wokeAt, openReasonIds(state));
-      const rounds = new Map(audit.reasons.map((r) => [r.id, r.round]));
-      const second = missed.filter((r) => rounds.get(r.id) === 2);
-      const first = missed.filter((r) => rounds.get(r.id) === 1);
-      if (missed.length === 0) {
-        audit = null;
-      } else {
-        // a second miss goes to the operator; a first one gets its one re-wake
-        if (second.length > 0) raiseLeft(id, found.session.repoId, second, audit.wokeAt, t);
-        if (first.length > 0) {
-          left = first;
-          audit = { wokeAt: audit.wokeAt, reasons: audit.reasons.filter((r) => r.round === 1) };
-        } else audit = null;
-      }
+      // what it left goes to the operator once; FLIGHT is not woken again for it
+      if (missed.length > 0) raiseLeft(id, found.session.repoId, missed, audit.wokeAt, t);
+      audit = null;
     }
     settleLeft(state, t);
     // only things that went away since the last wake (a question answered, a message read) tell FLIGHT nothing new
-    if (left === null && onlySettled(lastFacts, wake)) lastFacts = wake;
+    if (onlySettled(lastFacts, wake)) lastFacts = wake;
     // routine steps alone (a free seat, a PR moving) wait for the batch window; anything else is at once
     const batchEnds = lastWakeAt + FLIGHT_BATCH_MS;
-    const batched =
-      left === null &&
-      wake !== lastFacts &&
-      listed &&
-      t < batchEnds &&
-      routineOnly(lastFacts, wake);
+    const batched = wake !== lastFacts && listed && t < batchEnds && routineOnly(lastFacts, wake);
     if (batched) {
       later(batchEnds - t);
       recordNextFlightWake(
@@ -758,10 +719,8 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         nextWakeAt(state, lastWakeAt, t, batchEnds),
       );
     }
-    const due =
-      left !== null ||
-      (wake !== lastFacts && listed && !batched) ||
-      (pending(state) && t - lastWakeAt >= FLIGHT_REWAKE_MS);
+    // only a changed fact wakes FLIGHT: a wait, or work it has not got to, stays silent until it changes
+    const due = wake !== lastFacts && listed && !batched;
     const since = Math.max(lastWakeAt, lastTurnEndAt);
     const wakeGap =
       (state.wake?.operator?.length ?? 0) > 0
@@ -780,7 +739,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         t,
       );
       const changed = changedWakeFacts(lastFacts, wake);
-      const causes = left === null ? changed : [leftLine(left), ...changed];
+      const causes = changed;
       const reasons = wakeReasons(lastFacts, wake, state.items);
       if (
         (await supervisor.send(runId, wakeKey(runId, n + 1), wakeLine(state, digest, causes), {
@@ -788,7 +747,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
           pieces: wakePieces(digest),
         })) === "sent"
       ) {
-        audit = nextAudit(t, reasons, left);
+        audit = nextAudit(t, reasons);
         delivered = { runId, snapshot };
         markFlightSignalsShown(store, state, t);
         markPrsShown(store, state);

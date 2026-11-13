@@ -444,23 +444,59 @@ still passes the secret, notifier and HTML-reference checks before its status is
 Publication errors log a fixed, non-sensitive reason after `could not complete its queue/status
 update`; unexpected exceptions keep their content private and log only the generic failure.
 
-### Budget brake
+### Waste alarms
 
-When an account's weekly (7d) usage, projected to its reset at the current pace, passes 100%, the hub
-stops dealing and starting new developer and review runs on that account. It is the same projection
-the Overview Tokens panel shows ("N% by reset"); `weeklyProjection` in `apps/server/src/spend/budget-brake.ts`
-is the one function for both.
+The hub spots spend that buys no progress, names the ticket, run or seat, and stops that loop. Pace
+alone never slows honest work: the forecast "budget brake" is gone. An account stops only at its real
+`stop_at` use. The weekly projection ("N% by reset") stays on the Overview Tokens panel as
+information (`weeklyProjection` in `apps/server/src/spend/projection.ts`). An old config that still
+sets `brake:` on an account loads; the key does nothing.
 
-- Stopped: the engine's deal, the review start, `start_seat`, and the supervisor's `startRun`
-  (refusal "Not started: the budget brake is on ..." with the projection and the reset time). An
-  operator's explicit start and a read-only reader pass.
-- Not stopped: FLIGHT's own seat, runs already in progress (they finish their step), resumes and
-  rework wakes.
-- Needs you shows one hub alert, `budget-brake`, naming each braked account, its projection, its
-  reset and when the brake lifts. The scheduler keeps it current after each usage reading and on the
-  minute tick.
-- It lifts by itself: when the projection falls back to 100% or under, or the week resets. There is
-  nothing to configure and no GitHub write.
+The checks are hub code over recorded runs, check runs and reviews (`apps/server/src/spend/waste.ts`).
+No agent runs them. The scheduler's minute tick scans, so a restart storm shows within minutes. Every
+threshold is in `WASTE_THRESHOLDS` in `packages/core/src/waste.ts`, once.
+
+| Check | Fires when | Then |
+| --- | --- | --- |
+| Unchanged rerun | The same configured check runs again on the same commit with a clean tree (no file changed), by one run | The hook refuses the rerun and says why (Claude hook and Codex approval); each refusal is recorded. A rerun is refused once the newest result on that commit passed, or the last two both failed with an exit code, so one retry after a failure is allowed. A call killed by the Bash timeout, or a failure with no exit code, is not a result and may run again |
+| Retry loop | A ticket has 2 failed attempts (a run that ended failed, or parked as stuck, refused, conflict, no CI or gate), or a run has 3 carry-on resumes and no report | Parks the ticket: no new start of it (the operator's and FLIGHT's start pass) |
+| Review rounds | A change goes past 2 review rounds | Queued reviews of that change do not start |
+| Restart storm | One agent starts more than 6 times in an hour | That agent's new starts are refused (FLIGHT's seat included) until the hour's count falls back |
+| Cost without output | A ticket has cost over 3x the median cost of its size (recorded costs only, 3 merged tickets of the size at least) and has no merge | Alarm to FLIGHT with the runs listed |
+| Coordination overhead | FLIGHT's recorded spend passes the developers' over a day (and is at least $10) | Alarm with the split; controller tokens are named, not priced |
+| Ticket churn | Tickets opened reach tickets closed in a day (5 opened at least), a ticket reads as a half, slice or follow-up, or a parked ticket starts again | Alarm to FLIGHT naming the tickets |
+| Runs per ticket | A ticket takes more than 3 developer runs without a merge | Alarm to FLIGHT with the runs and their blocking review findings |
+| Failed review rounds | An open PR has 2 reviews that reported blocking findings or a failed verdict | Alarm to FLIGHT; reviews go on. FLIGHT's state also lists the count on each PR (`prs[].reviewRounds`) |
+| Clearance waiting | A run has waited 2 hours on FLIGHT's clearance (a hard-rule PR, `awaitingFlight`) | Alarm to FLIGHT, once, with the hours waited. `GET /api/waste` lists it from 24 hours |
+
+- `GET /waste` also serves `flight`: 14 rolling 24-hour buckets (oldest first, the last ending now) of
+  FLIGHT's wakes, its `wait` decisions, and its tokens against every run's new tokens (`tokenShare`, null
+  with no tokens recorded), so the change to activity-only wakes can be read before and after. A bucket
+  is counted by when the wake, decision or run started.
+- `GET /waste` also serves `counts`: the latest daily retrospective's tickets opened and closed, runs per
+  ticket (tickets with runs, mean, busiest), review rounds (reported, failed) and idle seat-hours, over the
+  retrospective's 24 hours; null before the first. `budget_unused` is a FLIGHT signal, not an alarm: a free
+  build seat idle 30 minutes while its account's 7-day use is under 50% raises one fact per idle spell.
+- One alarm per check and subject while the cause stands (`waste_alarms`). It closes when the cause
+  ends: the ticket merges or closes, the count falls back, or the day passes.
+- FLIGHT is woken once per alarm, through the `waste_alarm` signal, except an unchanged-rerun alarm:
+  the hook has already refused that rerun, so Audit records it and FLIGHT is not woken. An alarm is
+  not a question: it never reaches Needs you.
+- FLIGHT lifts a hold with `resolve_waste_alarm` (alarm id and a basis, recorded in Decided without
+  you). The alarm stays closed until its cause grows past the level it had. For a seat's or a
+  repo's alarm (restart storm, coordination overhead, ticket churn) that silence lasts one window,
+  not for good.
+- A held start is not a fault: the engine keeps the card or the review queued and raises no
+  question. Reviews of an external PR are never held by the rounds check.
+- A hold only refuses or parks the hub's own runs. No GitHub write. A seat's live run is never
+  killed by an alarm; the hold bites at the next start, resume of a review, or restart.
+- `GET /api/waste` serves what the Audit page shows: for the past day and week, spend per merged
+  change and the share spent on building (developer runs); every open alarm; and, per check, its
+  threshold, how often it fired in the week and how many of those later saw a merge. A cost is
+  `null` where no run recorded one, never zero or an estimate: Codex runs record tokens but not cost,
+  so each window lists every vendor's runs, runs with a recorded cost, cost and tokens, and the
+  tokens figures (`perMergeTokens`, `buildingShareTokens`; new input, output and cache-write tokens)
+  cover both vendors. The dollar figures cover only the runs that recorded a cost.
 
 ### FLIGHT runaway breaker
 
@@ -1390,18 +1426,19 @@ Routine pipeline steps do not wake FLIGHT: a PR's CI turning green, a review que
 merge queued or done, a PR ready to merge, a park the engine clears alone, and a review that has waited
 under 10 minutes for its seat. They stay in `flight_state` (prs, mergeQueue, seats, reviewQueue) and
 wake FLIGHT only when a timed rule below says they have stood still (`old_park`, `merge_stalled`,
-`idle_seat`, or idle review seats with a review queued 10 minutes). The hourly re-wake fires only while a
-fact FLIGHT must act on is still open, never for a digest change. Each wake stores its reasons (the fact
-categories, e.g. `q`, `signals`, `reminder`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
+`idle_seat`, or idle review seats with a review queued 10 minutes). Nothing re-wakes FLIGHT on a timer: it
+wakes only for activity (an operator message or tag, a seat's question or call, a hub check it could not
+settle, an error in its own work, a merge or clearance only it can give, a fact it waited on changing, a
+`wait_on` deadline passing), plus the daily retrospective. Work that still waits on it, with no fact changed,
+stays silent. Each wake stores its reasons (the fact categories, e.g. `q`, `signals`) on the run; `GET /api/flight` returns `wakeHistory`: wakes
 by reason and by hour over the last day.
 
 **A free seat with open tickets (#1451).** The hub checks this itself, with no FLIGHT tokens: a free
 build seat, open tickets near its area (all open tickets, not only the 30 the digest lists; Backlog, Refinement or Ready; an area label that is the seat's,
 or none or several, which need triage), and no `wait_on` on the seat or the ticket. A ticket with no
 board status counts as work to triage, and the wake says how many. Each seat is timed on its own. Once a seat has stood 10 minutes the
-`idle` wake fact names it, and it changes every 30 minutes (`FLIGHT_IDLE_SEAT_WAKE_MS`), so FLIGHT
-is woken then and every 30 minutes after, until a seat starts, no ticket is open, or FLIGHT logs a wait
-with `wait_on`. An empty Ready with a free seat is a reason to promote, not to wait. The hub records when each seat's
+`idle` wake fact names it, one value for the whole idle spell, so FLIGHT is woken once, at 10 minutes, and not again for
+that spell (it is woken again when the seat starts and goes idle again). An empty Ready with a free seat is a reason to promote, not to wait. The hub records when each seat's
 spell began in the `flight.idle-seat` setting, and counts the time while FLIGHT is in a turn or rate limited. Each 30-minute period over the first one writes a hub log
 line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reason>`.
 The wake text tells FLIGHT to go round a wait on a person, take other work or decide; only money,
@@ -1411,6 +1448,7 @@ direction, irreversible actions and security exceptions go to the operator, park
 |---|---|
 | `idle_seat` | a seat is idle 10 minutes with startable work queued |
 | `idle_no_work` | a build seat is idle 5 minutes and Ready holds nothing startable for its area and lane (for example only another lane's tickets); the evidence names the seat and its area, and FLIGHT promotes work for it. At most one per seat per hour |
+| `budget_unused` | a free build seat is idle 30 minutes while its account has used under 50% of its 7-day window; the evidence names the account and its weekly use. Once per idle spell |
 | `old_park` | a run has been parked for 15 minutes |
 | `push_unseen` | a run parked on "the push or PR has not shown up on GitHub" for 30 minutes; before that the engine lifts it alone the pass the stored PR's head is the pushed sha, so it is digest-only and never `old_park` |
 | `merge_stalled` | a PR its run reported green and reviewed has not merged for 10 minutes |
@@ -1430,14 +1468,13 @@ seat's ticket.
 a reason is handled if its fact is no longer true (the question answered, the seat started, the park
 lifted), or FLIGHT recorded a decision since the wake that names its target (the ref, seat, run or
 question id, or the key such as `ask:12`, in `ref`, `seat`, `about` or `decision`: an act, a brief, a
-note or a `wait`). The reasons not handled wake FLIGHT once more, after the wake gap, with
-`You left these: …`. If that second wake's turn also leaves them, the watch raises one operator item
-(Needs you, key `flight:left`, the operator's own, never FLIGHT's to triage) listing them. The item clears when
+note or a `wait`). FLIGHT is not woken again for the reasons not handled: the watch raises one operator
+item (Needs you, key `flight:left`, the operator's own, never FLIGHT's to triage) listing them. The item clears when
 every reason it lists is handled, not when some later audit is clean. The audit lives in the hub's memory: a restart drops it.
 
 **Wait.** For a reason FLIGHT cannot act on yet: `mcp__mc__wait_on { target, on, until, basis }` records a
-`wait` decision on the target (handled) and wakes FLIGHT again at `until` (at most 7 days) with
-`wait_over`. A `wait_over` signal's id passed back as the target waits on the original target again, so the key
+`wait` decision on the target (handled). The wait silences that fact until its value changes (a new head
+SHA, a stage change, a run ending), and wakes FLIGHT at `until` (at most 7 days) with `wait_over`. A `wait_over` signal's id passed back as the target waits on the original target again, so the key
 never nests. An ended wait stays in the digest until FLIGHT deals with it: a decision made after it ended that
 names the signal key (`wait_over:<target>:<until>`) or has the target as its ref or seat, or a new `wait_on` on
 the target. The hub then drops the wait. The same pass clears waits nested before this rule.
@@ -1446,7 +1483,7 @@ the target. The hub then drops the wait. The same pass clears waits nested befor
 
 **Ledger pointers and wake ids.** A ledger entry can carry `pointers` (`mc track`): each names a `pr` or `ticket` (`repo#n`), a `seat`, `repo`, `person` or `metric`. They live in `flight_pointers`, so a restart keeps them. The hub marks a pointer when its target changes: a stored PR's state, head, CI, review or draft flag, and a card's column or close. No agent runs for that. The wake digest's `moved` lists the pointers marked since FLIGHT last read them, once each; delivering a wake, or a `flight_state` read, stamps their `read_at`. Changes are ordered by a counter (`changed_seq`, `read_seq`), not by clock, so a change the poll stamped before FLIGHT's read still counts as unread. `track` refuses a target the hub could not mark: `<repo id>#<n>` for a pr or ticket, a seat in the session, a configured repo id, a GitHub login, a metric id. The store holds seat, repo, person and metric pointers too, but no hub event feeds them, so `track` accepts only `pr` and `ticket` pointers. The digest lists at most `FLIGHT_MOVED_LISTED` moved pointers (the rest wait, unread, for the next wake) and leaves out a PR pointer whose PR the digest's `prs` already lists and whose change `prs` shows (opened, a state, a new commit); that one is read with the wake. CI, review and draft changes are not in the `prs` entry, so they stay in `moved`. Each wake has an id, `<runId>:<n>` (0 is the start brief), kept on `flight_wakes.wake_id` and on every decision made in it (`flight_decisions.wake_id`).
 
-**Pace.** FLIGHT re-wakes hourly from its last wake, and only while something waits on it; a live run does not speed that up. The sweep's signals above and a seat's call wake it sooner. The next wake time in `/api/flight` follows the same rule.
+**Pace.** FLIGHT has no wake on a timer. It wakes for a changed fact, a seat's call or a deadline on one fact (a `wait_on`, a planned entry, a PR-flow time, an idle seat's next period, the end of the batch window), and for the daily retrospective. The next wake time in `/api/flight` is the soonest such deadline, or none.
 
 ### FLIGHT adds a controller check to a ticket
 
@@ -1547,7 +1584,8 @@ named pause or attributes an unknown grant to FLIGHT.
 | Tool | What it does |
 |---|---|
 | `settle_park` | Lift a stuck park, request a fresh review, accept findings, `rework` (queued for a busy seat), or `second_review` |
-| `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. FLIGHT may pass the target budget brake only with a recorded basis that names a P0 ticket. |
+| `move_review` | Move one queued review to a named review seat. It keeps the review head, round and model rule. It refuses a target account at its usage stop. |
+| `resolve_waste_alarm` | Close an open waste alarm's hold (a parked ticket, stopped reviews, a restart storm) with a recorded basis. See Waste alarms. |
 | `start_seat` | Start a seat the operator stopped or a crew pause holds. A pause exception is granted to the actual prepared run, with FLIGHT, its reason and time recorded. The original pause owner and seat coverage remain unchanged; the exception ends with that run. It never lets the engine deal the seat another ticket while the pause holds. A failed start removes only its own grant and preserves newer operator changes |
 | `resume_seat` | Resume a seat's unfinished run after a stop, a crew pause, an error or a restart; a build or plan seat in FLIGHT's session and a run in its lane. A stop can be lifted, but a crew-pause exception covers that run only. The original pause keeps its owner and seat coverage. Refused for a held run, a budget-parked run, an account usage stop, an Away quota limit (and a planner during Away), an already live unpaused session, and a machine without headroom. A failed resume removes only its own exception and restores the stop unless the operator changed it |
 | `end_run` | End a working, parked or stalled run (a working run must not be held). A run with uncommitted changes is refused before its process is touched, since only the seat can commit them; a seat in a turn is interrupted, then looked at again, and a stalled or idle seat is not interrupted |

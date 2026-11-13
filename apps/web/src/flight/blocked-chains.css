@@ -1,0 +1,248 @@
+/* Blocked chains (FLIGHT, Crew & board): a grid table that scrolls inside its panel. */
+.bc-panel {
+  min-height: 360px;
+}
+
+.bc-scroll {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.bc-scope {
+  margin-left: auto;
+  color: var(--fg-2);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+}
+
+.bc-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1) var(--sp-6);
+  min-height: var(--table-row);
+  padding: var(--sp-1) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.bc-stat {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.bc-k {
+  color: var(--muted);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bc-stat b {
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--display);
+  font-variant-numeric: tabular-nums;
+}
+
+.bc-u {
+  color: var(--muted);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+}
+
+.bc-strip {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 28px;
+  margin: 0;
+  padding: var(--sp-1) var(--sp-4);
+  border-bottom: 1px solid var(--line);
+  background: var(--warn-soft);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+.bc-strip.crit {
+  background: var(--crit-soft);
+  color: var(--crit);
+}
+
+.bc-strip button,
+.bc-note button {
+  min-width: 24px;
+  min-height: 24px;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.bc-note {
+  margin: 0;
+  padding: var(--sp-4);
+  color: var(--fg-2);
+}
+
+.bc-note.crit {
+  color: var(--crit);
+}
+
+/* A real table, laid out as a grid so the columns hold their widths and the header sticks. */
+.bc-table,
+.bc-table thead,
+.bc-table tbody {
+  display: block;
+  min-width: 0;
+}
+
+.bc-table {
+  border-collapse: collapse;
+}
+
+.bc-table th {
+  font-weight: inherit;
+  text-align: left;
+}
+
+.bc-table th.bc-num {
+  text-align: right;
+}
+
+.bc-table td {
+  padding: 0;
+}
+
+.bc-row {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  grid-template-columns: minmax(320px, 640px) 96px minmax(240px, 400px) 160px 88px 88px;
+  justify-content: start;
+  align-items: center;
+  column-gap: var(--sp-3);
+  min-height: var(--table-row);
+  padding: 0 var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+
+.bc-row > * {
+  min-width: 0;
+}
+
+.bc-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  min-height: 28px;
+  background: var(--surface);
+  color: var(--muted);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.bc-root {
+  background: var(--surface-2);
+}
+
+.bc-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.bc-ell {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bc-work {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+}
+
+.bc-ref {
+  flex: none;
+  font: 600 var(--fs-s) / var(--lh-s) var(--mono);
+}
+
+.bc-root .bc-ref {
+  font-size: var(--fs);
+}
+
+.bc-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.bc-edge {
+  flex: none;
+  color: var(--muted);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+}
+
+.bc-also {
+  flex: none;
+  color: var(--warn);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+}
+
+/* Links keep the 24 px control minimum. */
+.bc-row a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+}
+
+.bc-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-height: 20px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: 99px;
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+}
+
+.bc-state.stuck {
+  border-color: var(--crit);
+  background: var(--crit-soft);
+  color: var(--crit);
+}
+
+.bc-state.with-you {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.bc-state.moving {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.bc-state.unknown {
+  color: var(--muted);
+}
+
+.bc-more td {
+  grid-column: 1 / -1;
+}
+
+.bc-more button {
+  min-height: 24px;
+  padding: var(--sp-1);
+  border: 0;
+  background: none;
+  color: var(--accent);
+  cursor: pointer;
+}

@@ -1,5 +1,6 @@
 import type { AttentionItem, Crew, QuestionClosure } from "@mc/core";
 import { useState } from "react";
+import { callSign as callSignOf } from "../crew.ts";
 import { RESOURCES, streamStatus, useResource } from "../data.ts";
 import { isNotTriaging, NotTriagingRow } from "../flight/NotTriaging.tsx";
 import { needsGroups } from "../flight/needsGroups.ts";
@@ -16,7 +17,7 @@ import {
   NO_FILTERS,
   orderNeeds,
 } from "../needs/needsView.ts";
-import { askerOf, QuestionBand } from "../needs/QuestionBand.tsx";
+import { askerIdOf, askerOf, QuestionBand } from "../needs/QuestionBand.tsx";
 import { handledLine, type NotificationsView } from "../notifications.ts";
 import { followLink, NEEDS_YOU_PATH, needsYouPath } from "../router.ts";
 import { ItemDetail, useItemDetail } from "../shell/ItemDetail.tsx";
@@ -33,7 +34,7 @@ export const DISCONNECTED = "Disconnected. Showing the last list received.";
 function Open({ item, items }: { item: AttentionItem; items: readonly AttentionItem[] }) {
   const detail = useItemDetail(item.key);
   const rows = useResource<Crew>(RESOURCES.crew).data?.rows;
-  const row = rows?.find((r) => r.id === item.agentId);
+  const row = rows?.find((r) => r.id === askerIdOf(item));
   return (
     <>
       <QuestionBand item={item} row={row} actions={<HoldItem item={item} />} />
@@ -66,8 +67,10 @@ export function Needs({ item }: { item: string | null }) {
   const crew = useResource<Crew>(RESOURCES.crew).data?.rows;
   const [filters, setFilters] = useState<NeedsFilters>(NO_FILTERS);
   const [order, setOrder] = useState<NeedsOrder>("default");
-  const asker = (i: AttentionItem) =>
-    askerOf(i, crew?.find((r) => r.id === i.agentId)?.displayCallSign);
+  const asker = (i: AttentionItem) => {
+    const row = crew?.find((r) => r.id === askerIdOf(i));
+    return askerOf(i, row ? callSignOf(row) : undefined);
+  };
   // alerts are the hub's, not questions: they get their own chip and group
   const alerts = [...asks, ...defaulted].filter(isAlert);
   const questions = [...asks, ...defaulted].filter((i) => !isAlert(i));

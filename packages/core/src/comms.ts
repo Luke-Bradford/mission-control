@@ -17,6 +17,9 @@ export const COMMS_OPEN_PREFIX = "comms-open:";
 export const COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT = Date.parse("2026-10-29T07:26:35Z");
 /** One ticket conversation is chatter once both participants have exceeded this many rounds. */
 export const COMMS_CHATTER_ROUNDS = 6;
+/** Key prefix of the note the hub raises for a chatter pair (apps/server/src/store.ts). */
+export const CHATTER_NOTE_PREFIX = "chatter:";
+export const isChatterNoteKey = (key: string): boolean => key.startsWith(CHATTER_NOTE_PREFIX);
 /** The rolling conversation window used to spot a pair stuck in a ticket discussion. */
 export const COMMS_CHATTER_WINDOW_MS = 2 * 60 * 60_000;
 /** The only ticket references accepted at Comms boundaries. */

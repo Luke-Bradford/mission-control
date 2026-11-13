@@ -163,6 +163,7 @@ import {
   type UpdateLog,
   type UsageSample,
   type VersionInfo,
+  type WasteReport,
   watchStartRefusedText,
 } from "@mc/core";
 import Fastify, {
@@ -420,7 +421,8 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import { weeklyProjection } from "./spend/budget-brake.ts";
+import { weeklyProjection } from "./spend/projection.ts";
+import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
@@ -892,6 +894,8 @@ export const ACCOUNT_STATUS_CACHE_MS = 60_000;
 
 const NOTIFICATION_RECONCILE_MS = 1000;
 const HUD_MEMO_MS = 2_000;
+/** An unchanged store, lock and login is not reconciled for notifications again before this. */
+const NOTIFICATION_REPEAT_MS = 60_000;
 /** Longest a map payload is reused: the backstop for fields that age without any input changing. */
 const MAP_CACHE_MS = 15_000;
 /** Longest a built map tree is kept without a head change: its history window ends at a fixed time. */
@@ -1610,13 +1614,44 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
+  let reconciled: { at: number; basis: string } | undefined;
+  // A skipped look is retried when the minute is up, so an item that came due on the clock alone
+  // does not wait for an unrelated event.
+  let repeatTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleNotifications = () => {
     if (notificationTimer !== undefined || reconcilingNotifications) return;
     notificationTimer = setTimeout(() => {
       notificationTimer = undefined;
       reconcilingNotifications = true;
       try {
-        reconcileNotifications();
+        // The same store, lock and login as the last reconcile, under a minute ago, would build
+        // the same items: only the clock-only ones turn over, and they do so by the minute.
+        const basisNow = () =>
+          JSON.stringify([
+            store.readVersion(),
+            deps.lock?.state() ?? NO_LOCK,
+            deps.hubLogin?.() ?? null,
+          ]);
+        const at = now();
+        if (
+          reconciled === undefined ||
+          reconciled.basis !== basisNow() ||
+          at < reconciled.at ||
+          at - reconciled.at >= NOTIFICATION_REPEAT_MS
+        ) {
+          reconcileNotifications();
+          // after the reconcile: its own writes are not a change
+          reconciled = { at, basis: basisNow() };
+        } else if (repeatTimer === undefined) {
+          repeatTimer = setTimeout(
+            () => {
+              repeatTimer = undefined;
+              scheduleNotifications();
+            },
+            Math.max(0, reconciled.at + NOTIFICATION_REPEAT_MS - at),
+          );
+          repeatTimer.unref();
+        }
       } finally {
         reconcilingNotifications = false;
       }
@@ -1665,6 +1700,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     unsubscribeNotifications();
     stopMapRing?.();
     clearTimeout(notificationTimer);
+    clearTimeout(repeatTimer);
     for (const end of [...streams]) end();
   });
 
@@ -2757,6 +2793,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+          // the same check on the same commit with nothing changed is not run again (waste alarm);
+          // a suite the guard already sends to the lock is a check too
+          if (
+            (verdict.kind === "allow" || verdict.kind === "lock") &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const rerun = await checks?.rerun?.(who.runId, command);
+            if (rerun) return answer(rerun);
+          }
           if (
             verdict.kind === "allow" &&
             body.data.tool_name === "Bash" &&
@@ -4168,6 +4214,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return shape === "summary" ? tokenAuditSummary(view) : view;
         },
       );
+      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
+      api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
         const footprint =
@@ -4651,7 +4699,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (b.issue !== undefined) {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
-          started = await sup.startWatch(id);
+          started = await sup.startWatch(id, { operator: true });
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
           // FLIGHT calling this route is not the operator: the slow pace still holds its starts
