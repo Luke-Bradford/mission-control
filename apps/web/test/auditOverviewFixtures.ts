@@ -294,7 +294,7 @@ export function overviewFixture(
       items: [],
       note: "Outside sources (new releases, advisories, vendor guides) are not collected yet, so none are listed rather than guessed.",
     },
-    wasteAlarms: { state: "not-available", note: "Waste-alarm rows are not available yet." },
+    wasteAlarms: { state: "available", note: "No open waste alarms.", rows: [] },
     build: { mergedPerDay: days, merged, hubReview, rework, cost },
     landing: { files },
     past: {
