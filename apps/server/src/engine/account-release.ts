@@ -6,9 +6,11 @@
  * each later pass offers it again, so the wait clears when any account can work.
  */
 import { NEW_LOOP, type RepoId, type RepoRules, seatCallSign, seatDef } from "@mc/core";
+import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import { type CcConfig, type CrewSeatConfig, seatUnavailable } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { restartHold } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
@@ -41,10 +43,12 @@ async function releaseStoppedRuns(deps: ReleaseDeps): Promise<void> {
   if (away !== null && !away.may.pickUp) return;
   for (const session of config.crew?.sessions ?? []) {
     for (const seat of session.seats) {
-      if (seatDef(seat).loop !== "build" || !accountAtStop(config, store, seat.accountId, now()))
-        continue;
+      if (seatDef(seat).loop !== "build") continue;
       const row = supervisor.seat(seat.id);
       const run = row?.runId == null ? null : store.run(row.runId);
+      // the run's own account: a completed transfer moves it off the seat's configured one
+      const accountId = runAccountId(store, run?.id ?? null, seat.accountId);
+      if (!accountAtStop(config, store, accountId, now())) continue;
       const loop = run?.loop;
       const facts = supervisor.seatFacts(seat.id);
       // a turn under way finishes; the seat is released once it sits idle (or parked by the
@@ -69,7 +73,7 @@ async function releaseStoppedRuns(deps: ReleaseDeps): Promise<void> {
       store.setTicketWait({
         repoId: run.repoId,
         issue,
-        reason: accountStopWaitText(seatCallSign(seat.id), seat.accountId),
+        reason: accountStopWaitText(seatCallSign(seat.id), accountId),
         freesWhen: ACCOUNT_STOP_FREES_WHEN,
         at: now(),
       });
@@ -112,6 +116,9 @@ export async function releaseAtAccountStop(deps: ReleaseDeps): Promise<void> {
   await releaseStoppedRuns(deps);
   const away = activeAway(store, deps.now(), config.operator.timezone);
   if (away !== null && !away.may.pickUp) return;
+  // a held machine starts nothing; the tickets keep their wait
+  const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
+  if (storedMachineCapacity(store, deps.now(), capacityConfig).blocked) return;
   for (const session of config.crew?.sessions ?? []) {
     const repoId = session.repoId;
     const rules = await deps.rules(repoId);

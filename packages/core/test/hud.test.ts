@@ -99,7 +99,7 @@ describe("hudState", () => {
           hudState({ state, paused, stopped: false, lastOutputAt, now, backgroundInFlight: false });
         expect(h("error")).toBe("error");
         expect(h("working")).toBe(stale ? "stalled" : "running");
-        expect(h("waiting-you")).toBe("waiting");
+        expect(h("waiting-you")).toBe("blocked");
         expect(h("waiting-agent")).toBe("waiting");
         expect(h("idle")).toBe(paused ? "parked" : "idle");
       }
@@ -146,7 +146,7 @@ describe("hudState", () => {
       });
     expect(h("idle", false)).toBe("stopped");
     expect(h("idle", true)).toBe("parked");
-    expect(h("waiting-you", false)).toBe("waiting");
+    expect(h("waiting-you", false)).toBe("blocked");
     expect(h("error", false)).toBe("error");
     expect(driverStopKey("studio-builder")).toBe("driver-stop:studio-builder");
   });
@@ -546,6 +546,15 @@ describe("crewHudState", () => {
     reason: null,
     worktree: null,
     updatedAt,
+  });
+
+  it("never reads blocked for a seat, whatever its state", () => {
+    const states: SeatState[] = ["starting", "running", "idle", "parked", "stopped", "error"];
+    for (const lock of [false, true]) {
+      expect(crewHudState(null, null, now, lock)).not.toBe("blocked");
+      for (const state of states)
+        expect(crewHudState(seat(state), now - 1000, now, lock)).not.toBe("blocked");
+    }
   });
 
   it("no row is idle", () => {

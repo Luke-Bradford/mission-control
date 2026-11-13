@@ -224,6 +224,56 @@ describe("releaseAtAccountStop", () => {
     expect(store.ticketWait(REPO, 7)).toBeNull();
   });
 
+  it("judges a transferred run by the account it was moved to", async () => {
+    store.setSetting(
+      "account-transfer:guido-1:1",
+      JSON.stringify({ source: "acct-a", target: "acct-b", pending: false }),
+    );
+    await release();
+    expect(ended).toEqual([]);
+  });
+
+  it("releases a run transferred onto an account at its stop", async () => {
+    store.addUsage({
+      accountId: "acct-a",
+      window: "7d",
+      at: NOW + 1,
+      pct: 10,
+      resetAt: NOW + DAY,
+      source: "test",
+    });
+    stop("acct-b");
+    store.setSetting(
+      "account-transfer:guido-1:1",
+      JSON.stringify({ source: "acct-a", target: "acct-b", pending: false }),
+    );
+    await release();
+    expect(ended).toEqual(["guido-1:1"]);
+    // acct-a can work again, so its own seat takes the ticket back
+    expect(started).toEqual([{ seatId: "guido-1", issue: 7 }]);
+  });
+
+  it("starts nothing while the machine is held, and the wait stays", async () => {
+    stop("acct-b");
+    await release();
+    store.addUsage({
+      accountId: "acct-b",
+      window: "7d",
+      at: NOW + 1,
+      pct: 10,
+      resetAt: NOW + DAY,
+      source: "test",
+    });
+    store.setSetting(
+      "machine-capacity:disk-percentage-episode",
+      JSON.stringify({ floor: 5, breachedAt: NOW - 1000 }),
+    );
+    store.addMachineSample({ at: NOW - 500, diskFreePct: 1, diskFreeGb: 2 } as never);
+    await release();
+    expect(started).toEqual([]);
+    expect(store.ticketWait(REPO, 7)).not.toBeNull();
+  });
+
   it("leaves a seat's run alone while its turn is under way", async () => {
     await releaseAtAccountStop({
       config,

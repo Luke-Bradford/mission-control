@@ -341,7 +341,7 @@ export function hudState(i: {
       return i.lastOutputAt !== null && i.now - i.lastOutputAt >= limit ? "stalled" : "running";
     }
     case "waiting-you":
-      return "waiting";
+      return "blocked";
     case "waiting-agent":
       return "waiting";
     case "idle":
