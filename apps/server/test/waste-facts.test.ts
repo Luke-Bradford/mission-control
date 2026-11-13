@@ -228,12 +228,8 @@ describe("clearance waiting", () => {
     expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toEqual([]);
     // two hours on the new head: one fact again, then quiet
     syncWasteAlarms(config, store, NOW + 2 * HOUR + 2 * MIN);
-    expect(
-      openWasteAlarms(store).filter((a) => a.check === "clearance-waiting"),
-    ).toHaveLength(1);
+    expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toHaveLength(1);
     syncWasteAlarms(config, store, NOW + 4 * HOUR);
-    expect(
-      openWasteAlarms(store).filter((a) => a.check === "clearance-waiting"),
-    ).toHaveLength(1);
+    expect(openWasteAlarms(store).filter((a) => a.check === "clearance-waiting")).toHaveLength(1);
   });
 });
