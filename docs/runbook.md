@@ -2763,6 +2763,10 @@ If that requested start fails, one outage alert says the message is saved; provi
 stay out of that alert. Waiting crew questions stay with FLIGHT rather than becoming extra
 operator questions.
 
+## A ticket whose seat hits its account's stop
+
+A seat is never the one that waits. Each engine cycle (`engine/account-release.ts`), a build seat that sits idle at its account's usage stop with an unfinished run has that run ended; its branch, PR and handoff notes stay. The ticket records a wait (`ticket_waits`: the reason and what frees it, shown on `GET /api/boards/:repoId` as `waiting`, with no owner). In the same cycle a free seat in the ticket's area on an account that is under its stop resumes the ticket on the same branch and PR, and the wait is cleared. With no such seat the ticket keeps its wait and is offered again each cycle, so it clears as soon as any account in the area can work (including the original one when its window resets). A seat in the middle of a turn finishes it first.
+
 ## FLIGHT's fresh session
 
 FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKENS` (150K tokens: input plus cache read plus cache creation of its last turn), or after `FLIGHT_MAX_WAKES` wakes, whichever comes first.
