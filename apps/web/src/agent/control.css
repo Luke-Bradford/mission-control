@@ -297,9 +297,19 @@
   display: block;
 }
 
-/* A narrow middle column (1280 px wide pages): the instruments stay a short band so the activity list
+/* The figures switch is always one line, whatever width its column gets. */
+.inst.figs > .seg {
+  flex-wrap: nowrap;
+  align-self: flex-start;
+  width: max-content;
+}
+.inst.figs > .seg button {
+  white-space: nowrap;
+}
+
+/* A narrow middle column (1280 px wide pages, or the page stacked beside an open dock): the instruments stay a short band so the activity list
    keeps most of the column. Context, loop and plan share one row; the figures take a row of four. */
-@container control-main (max-width: 700px) {
+@container control-main (max-width: 1100px) {
   .instruments {
     grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
     gap: var(--sp-2) var(--sp-4);
@@ -310,13 +320,6 @@
     grid-template-columns: auto minmax(0, 1fr);
     align-items: center;
     gap: var(--sp-1) var(--sp-3);
-  }
-  .inst.figs > .seg {
-    flex: none;
-    white-space: nowrap;
-  }
-  .inst.figs > .seg button {
-    white-space: nowrap;
   }
   .inst.figs > .figs-row {
     grid-row: 2;

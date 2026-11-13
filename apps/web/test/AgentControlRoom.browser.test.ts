@@ -136,6 +136,8 @@ describeRendered("Agents control room in a browser", () => {
           const button = document.querySelector<HTMLElement>(".figs .seg button");
           return {
             stream: h("#stream"),
+            page: document.querySelector("#page-agent")?.getBoundingClientRect().width ?? 0,
+            main: document.querySelector(".control-main")?.getBoundingClientRect().width ?? 0,
             instruments: h(".instruments"),
             seg: h(".figs .seg"),
             button: button?.getBoundingClientRect().height ?? 0,
