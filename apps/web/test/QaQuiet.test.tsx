@@ -97,11 +97,26 @@ describe("QA page when nothing waits", () => {
     expect(screen.queryByText(/Could not read what this PR frees/)).toBeNull();
     expect(screen.queryByText("No recorded work waits on this PR.")).toBeNull();
   });
+  it("does not say nothing needs you after the queue read failed", async () => {
+    rows = [];
+    serve({ "/api/qa/queue": () => ({ status: 500, body: { error: "down" } }) });
+    render(<QaReadiness />);
+    await screen.findByText(/The queue did not load/);
+    expect(screen.queryByText("Nothing needs you right now.")).toBeNull();
+  });
+  it("does not say nothing needs you while the queue is loading", async () => {
+    rows = [];
+    serve({ "/api/qa/queue": () => new Promise(() => {}) });
+    render(<QaReadiness />);
+    await screen.findByText("Loading the acceptance queue…");
+    expect(screen.queryByText("Nothing needs you right now.")).toBeNull();
+  });
   it("shows an error line for the frees read only when it failed", async () => {
     rows = [pr(1, NOW - 1000)];
     serve({ "/api/dependencies": () => ({ status: 500, body: { error: "down" } }) });
     render(<QaReadiness />);
-    expect(await screen.findByText("Could not read what this PR frees.")).toBeTruthy();
+    const line = await screen.findByText("Could not read what this PR frees.");
+    expect(line.classList.contains("uat-frees")).toBe(false);
   });
   it("shows decisions and missing evidence for a waiting PR with a current report", async () => {
     rows = [pr(1, NOW - 1000), pr(3, null)];

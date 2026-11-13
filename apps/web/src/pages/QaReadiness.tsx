@@ -220,11 +220,11 @@ function CurrentQaReadiness() {
               enabled={connection.connected && !queue.error}
               now={now}
             />
-          ) : (
+          ) : queue.data && !queue.error && !waiting.length ? (
             <div className="uat-empty panel">
               <p>Nothing needs you right now.</p>
             </div>
-          )}
+          ) : null}
         </div>
       </section>
     </>
@@ -365,13 +365,11 @@ function Detail({
             </div>
           </Decide>
           {chains === undefined ? (
-            <p className="uat-frees" role="status">
-              Reading what this PR frees…
-            </p>
+            <p role="status">Reading what this PR frees…</p>
           ) : chains ? (
             <FreesLine chain={chainFor(chains, pr)} repoId={pr.repoId} />
           ) : (
-            <p className="uat-frees crit-t" role="alert">
+            <p className="crit-t" role="alert">
               Could not read what this PR frees.
             </p>
           )}

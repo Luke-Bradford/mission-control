@@ -109,11 +109,18 @@ describeRendered("QA acceptance queue in a browser", () => {
     async () => {
       const page = await renderAt({
         page: "test/qaReadinessBrowser.html",
-        width: 1366,
+        width: 1600,
+        height: 1000,
         colorScheme: "light",
         api: fixture(0),
       });
       await page.boxes(".uat-empty");
+      const rows = await page.evaluate(() => {
+        const title = document.querySelector(".uat-title")?.getBoundingClientRect();
+        const layout = document.querySelector(".uat-layout")?.getBoundingClientRect();
+        return title && layout ? { title: title.height, gap: layout.top - title.bottom } : null;
+      }, null);
+      expect(rows?.gap).toBeLessThan(24);
       expect(
         await page.evaluate(
           () => document.body.textContent?.includes("Nothing is waiting for you"),
