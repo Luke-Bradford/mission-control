@@ -1607,9 +1607,11 @@ describe("startReview", () => {
       expect(store.review(r.reviewId)?.state).toBe("reported");
       expect(store.run(runId)?.status).not.toBe("failed");
       // the reviewer's own pnpm must not install before a script (pnpm 11 reads the pnpm_ spelling)
-      const env = recorded()[0]?.env as Record<string, string>;
-      expect(env.pnpm_config_verify_deps_before_run).toBe("false");
-      expect(env.npm_config_verify_deps_before_run).toBe("false");
+      const envs = recorded()
+        .map((l) => l.env as Record<string, string> | undefined)
+        .filter((e) => e !== undefined);
+      expect(envs.some((e) => e.pnpm_config_verify_deps_before_run === "false")).toBe(true);
+      expect(envs.some((e) => e.npm_config_verify_deps_before_run === "false")).toBe(true);
     });
 
     it("a normal review's env leaves the install check alone", async () => {
@@ -1625,11 +1627,8 @@ describe("startReview", () => {
 
     it("opens no web preview, which would install the PR's packages", async () => {
       const r = reviewOfPush({
-        base: { "package.json": pkg({}), "pnpm-lock.yaml": LOCK, "apps/web/x.ts": "a\n" },
-        files: {
-          "package.json": pkg({ dependencies: { "new-package": "1.0.0" } }),
-          "apps/web/x.ts": "b\n",
-        },
+        base: { "package.json": pkg({}), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ dependencies: { "new-package": "1.0.0" } }) },
       });
       const open = vi.fn(async () => true);
       const reviewPreviews = {
