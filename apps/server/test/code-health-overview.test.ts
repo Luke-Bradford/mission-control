@@ -349,7 +349,10 @@ describe("Audit first-screen summary", () => {
       merged(pr, NOW - (pr % 28) * DAY - 1000, id);
       touch(pr, `src/f${pr % 50}.ts`);
       finding(id, `src/f${pr % 50}.ts`, `cause ${pr % 7}`);
+      run(pr, 1.5);
+      run(pr, 1.5);
     }
+    for (let n = 0; n < 10_000; n++) run(10_000 + n, 1, "other");
     db.exec("COMMIT");
     const timed = async () => {
       const started = performance.now();

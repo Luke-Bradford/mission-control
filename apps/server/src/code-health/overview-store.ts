@@ -141,14 +141,17 @@ export interface CostAggregate {
 export function costAggregate(db: Db, repoId: string, from: number, until: number): CostAggregate {
   const rows = db
     .prepare(
-      `SELECT COUNT(r.id) AS runs, SUM(r.cost_usd IS NULL) AS unpriced, SUM(r.cost_usd) AS cost
+      `WITH spent AS (
+         SELECT branch, COUNT(*) AS runs, SUM(cost_usd IS NULL) AS unpriced, SUM(cost_usd) AS cost
+         FROM runs WHERE repo_id = ? AND branch IS NOT NULL GROUP BY branch
+       )
+       SELECT s.runs AS runs, s.unpriced AS unpriced, s.cost AS cost
        FROM code_health_merged_reviews m
        JOIN pull_requests p ON p.repo_id = m.repo_id AND p.number = m.pr_number
-       JOIN runs r ON r.repo_id = p.repo_id AND r.branch = p.branch
-       WHERE m.repo_id = ? AND m.merged_at >= ? AND m.merged_at < ?
-       GROUP BY m.pr_number`,
+       JOIN spent s ON s.branch = p.branch
+       WHERE m.repo_id = ? AND m.merged_at >= ? AND m.merged_at < ?`,
     )
-    .all(repoId, from, until);
+    .all(repoId, repoId, from, until);
   const costs = rows
     .filter((row) => Number(row.unpriced) === 0 && row.cost !== null)
     .map((row) => Number(row.cost))
