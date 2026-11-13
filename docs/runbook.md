@@ -3063,3 +3063,18 @@ FLIGHT can withdraw its own brief from a protected item. This retains the underl
 source and protections; the original brief remains in history. Its unfinished-wake reminder stays
 in FLIGHT's wake and is omitted from operator attention. Answered and superseded note briefs
 are excluded from the current projection.
+
+## Disk housekeeping
+
+The hub removes its own finished work so its data folder stops growing (#1756). Once an hour (and two minutes after boot) on the live hub, `apps/server/src/disk/sweep.ts` runs one sweep and logs `disk sweep: removed N item(s), B bytes, from the data folder` when it removed anything.
+
+- **Pictures and evidence only while a PR is open.** A PR's `pr-evidence/<repo>/<pr>` folder, its QA report images (`qa-report-assets`) its review screenshots (`review-screenshots`) and the pictures attached to a Needs-you question (`attention-material-assets`, until the question is answered or closed) are removed once the PR is no longer open and its files have sat untouched for an hour. The QA history keeps its text record; its picture links then stop resolving.
+- **Scratch is temporary.** Every folder (plain files, such as the controller monitor's state, are left) under the data folder's `controller/` (except `controller/designs`) and under `pr-evidence-work/` that has been untouched for 3 days is removed.
+- **Only inside the data folder.** The sweep never follows a symlink and never removes a path that resolves outside the data folder. It does not touch observed loops or their worktrees.
+- **What the hub holds.** `GET /api/disk-use` returns bytes by kind: `worktrees` (the crew's worktree folder), `pictures`, `evidence`, `scratch`, `database`, and their `total`. It is measured at most once a minute.
+
+- **One cap.** The hub's budget is 10 GB (`MC_DISK_BUDGET_GB` overrides it), counted over the data folder (worktrees are the tidy's). Over it, the same sweep removes idle scratch (untouched for a day) oldest first, and logs `disk budget: ...` naming what the hub holds by kind. It never removes an open PR's evidence, a QA image or review shot an open PR cites, or scratch touched in the last day (a running preview or capture); when only that is left it logs `only open or in-use work is left` and stops. The disk flag ("Machine headroom is tight") adds `The hub holds: worktrees ..., scratch ..., evidence ..., pictures ..., database ...` when the disk is what is tight.
+- **No stalls.** The sweep, the sizes and the deletes use async file calls, and one measurement (cached for a minute) serves `/api/disk-use`, the sweep and the flag.
+- **Crew worktrees.** Every 10 minutes (where the engine runs) the crew tidy looks at runs from the last 30 days. For an ended run, if the branch's PR has merged or closed, or its ticket is Done or closed on GitHub (PR or not), the clean worktree is removed (the branch stays). A run set aside at review (not ended, no seat running it) keeps its worktree but loses `node_modules`, so it stays small; waking it reinstalls them under the clone lock before the CLI launches. The checks and the removal run under the clone lock, and a worktree a run is starting in (the supervisor marks it from the checkout, or a wake's reinstall, until the seat's session points at it) is never touched. A dirty worktree, a live run's, one a seat still holds and one with a checkout being prepared are left alone. The log line is `worktree tidy: removed N worktree(s), trimmed M node_modules`.
+
+Not built yet: a budget key in `config.yaml`, and the Mac panel's disk view (it reads `/api/disk-use`).

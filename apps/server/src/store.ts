@@ -5298,6 +5298,60 @@ export class Store {
     );
   }
 
+  /** Open PRs as `repoId#number`: the work whose evidence and pictures the disk sweep keeps. */
+  openPrKeys(): Set<string> {
+    return new Set(
+      (
+        this.db
+          .prepare("SELECT repo_id, number FROM pull_requests WHERE state = 'open'")
+          .all() as Row[]
+      ).map((r) => `${r.repo_id as string}#${r.number as number}`),
+    );
+  }
+
+  /** The QA image ids (sha256) that a report of an open PR cites. */
+  qaAssetIdsOfOpenPrs(): Set<string> {
+    const ids = new Set<string>();
+    const rows = this.db
+      .prepare(
+        `SELECT q.report FROM qa_reports q JOIN pull_requests p
+           ON p.repo_id = q.repo_id AND p.number = q.pr_number AND p.state = 'open'`,
+      )
+      .all() as Row[];
+    for (const r of rows)
+      for (const m of (r.report as string).matchAll(/\/api\/qa-report-assets\/([0-9a-f]{64})/g))
+        ids.add(m[1]);
+    return ids;
+  }
+
+  /** The picture ids that packets of the given still-waiting questions cite. */
+  attentionMaterialAssetIds(openItemKeys: ReadonlySet<string>): Set<string> {
+    const ids = new Set<string>();
+    const rows = this.db.prepare("SELECT item_key, packet FROM attention_materials").all() as Row[];
+    for (const r of rows) {
+      if (!openItemKeys.has(r.item_key as string)) continue;
+      for (const m of (r.packet as string).matchAll(
+        /\/api\/attention-material-assets\/([0-9a-f]{64})/g,
+      ))
+        ids.add(m[1]);
+    }
+    return ids;
+  }
+
+  /** The review screenshot ids of reviews of open PRs. */
+  reviewShotIdsOfOpenPrs(): Set<string> {
+    return new Set(
+      (
+        this.db
+          .prepare(
+            `SELECT s.shot_id FROM review_shots s JOIN reviews v ON v.id = s.review_id
+               JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'`,
+          )
+          .all() as Row[]
+      ).map((r) => r.shot_id as string),
+    );
+  }
+
   /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
   externalReviewRows(): ReviewRow[] {
     const rows = this.db
