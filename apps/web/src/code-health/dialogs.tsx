@@ -41,7 +41,7 @@ const testEvidenceLabels: Record<string, string> = {
   reviewer: "Original reviewer",
   specEvidence: "Code/spec rationale",
 };
-function HealthDialog({
+export function HealthDialog({
   title,
   onClose,
   busy = false,

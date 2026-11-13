@@ -15,6 +15,7 @@ import {
   type Telemetry,
 } from "@mc/core";
 import { shiftTimes } from "../src/demo/shift.ts";
+import { auditOverviewApi } from "./auditOverviewFixtures.ts";
 import { codeHealthBrowserApi } from "./codeHealthBrowserFixtures.ts";
 import { codeRiskFixture } from "./codeRiskFixtures.ts";
 import { boardItem, HOUR, MIN, NOW, prView } from "./fixtures.ts";
@@ -873,6 +874,7 @@ export function demoPageAnswers(
       .replaceAll('"repoId":"sample"', `"repoId":"${repo}"`);
   const base = {
     ...codeHealthBrowserApi(NOW),
+    ...auditOverviewApi(NOW),
     ...codeRiskFixture(NOW).api,
     ...testHealthFixture(NOW).api,
   };

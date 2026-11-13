@@ -193,6 +193,11 @@ export const RESOURCES = {
     path: `/api/code-health?repo=${enc(repo)}&window=${enc(window)}&tab=${enc(tab)}`,
     topic: ["agents", "boards", "flight", "health"],
   }),
+  /** The Audit page's stored first-screen summary; only a changed summary raises `health`. */
+  codeHealthOverview: (repo: string, window = "30d"): ResourceRef => ({
+    path: `/api/code-health/overview?repo=${enc(repo)}&window=${enc(window)}`,
+    topic: "health",
+  }),
   codeHealthEvidence: (repo: string, id: string, cursor = "0"): ResourceRef => ({
     path: `/api/code-health/evidence/${enc(id)}?repo=${enc(repo)}&cursor=${enc(cursor)}`,
     topic: null,

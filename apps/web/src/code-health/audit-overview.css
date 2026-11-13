@@ -1,0 +1,610 @@
+/* Audit overview: the approved first screen (docs/prototype/audit/audit.html), in the app's own tokens. */
+.ao {
+  --ao-side: clamp(440px, 34cqw, 780px);
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+.ao > * {
+  flex: none;
+}
+.ao .m {
+  color: var(--muted);
+}
+.ao h1 {
+  margin: 0;
+  font: 600 var(--fs-title) / var(--lh-title) var(--sans);
+}
+.ao-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+  flex-wrap: wrap;
+  min-height: 28px;
+}
+.ao-bar .sp {
+  flex: 1;
+}
+.ao-views {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.ao-views button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--fg-2);
+  padding: 0 var(--sp-2);
+  min-height: 28px;
+}
+.ao-views button:hover {
+  color: var(--accent);
+}
+.ao-views a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-s);
+}
+.ao-read {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao-top {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-5);
+  min-height: 40px;
+}
+.ao-verdict {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  line-height: var(--lh);
+  color: var(--fg-2);
+}
+.ao-verdict b {
+  font-weight: 600;
+  color: var(--fg);
+}
+.ao-verdict b.v-warn {
+  color: var(--warn);
+}
+.ao-ctl {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex: none;
+  white-space: nowrap;
+}
+.ao-ctl label {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.ao-ctl select {
+  min-height: 28px;
+}
+.ao .micro {
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.ao-note {
+  margin: 0;
+}
+
+.ao-cols {
+  --ao-n: 32px;
+  --ao-from: 84px;
+  flex: 1 1 auto;
+  min-height: 560px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--ao-side);
+  gap: var(--sp-4);
+}
+.ao-col {
+  min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.ao-col > .panel {
+  flex: none;
+}
+.ao-col > .ao-next,
+.ao-col > .ao-files {
+  flex: 1 1 0;
+  min-height: 160px;
+}
+.ao-col > .ao-next {
+  min-height: 320px;
+}
+.ao .panel > .ph {
+  flex: none;
+  text-transform: none;
+  letter-spacing: normal;
+}
+.ao .ph .sub {
+  color: var(--fg-2);
+  font-family: var(--sans);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao .ph .act {
+  gap: var(--sp-2);
+}
+.ao-link {
+  background: transparent;
+  border-color: transparent;
+  color: var(--accent);
+  padding: 0 var(--sp-2);
+  min-height: 24px;
+}
+.ao-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+.ao-hscroll {
+  flex: none;
+  max-height: 168px;
+}
+.ao-pscroll {
+  flex: none;
+  max-height: 96px;
+}
+.ao-empty {
+  padding: var(--sp-3) var(--sp-4);
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+
+/* Tables: fixed layout, aligned headers, numbers right-aligned. */
+.ao-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+}
+.ao-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
+  height: 24px;
+  padding: 0 var(--sp-2) var(--sp-1);
+  vertical-align: bottom;
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+  box-shadow: inset 0 -1px 0 var(--line-2);
+}
+.ao-table td {
+  padding: 0 var(--sp-2);
+  border-top: 1px solid var(--line);
+  vertical-align: middle;
+  white-space: normal;
+}
+.ao-table tr {
+  height: auto;
+}
+.ao-table th:first-child,
+.ao-table td:first-child {
+  padding-left: var(--sp-4);
+}
+.ao-table th:last-child,
+.ao-table td:last-child {
+  padding-right: var(--sp-4);
+}
+.ao-table .num {
+  text-align: right;
+  white-space: nowrap;
+}
+.ao-table .c-n {
+  width: var(--ao-n);
+}
+.ao-table .c-from {
+  width: var(--ao-from);
+}
+.ao-table .c-meas {
+  width: 200px;
+}
+.ao-table .c-dec {
+  width: 150px;
+}
+.ao-table .c-act {
+  width: 184px;
+}
+.ao-table .c-fig {
+  width: 84px;
+}
+.ao-table .c-chg {
+  width: 120px;
+}
+.ao-table .c-date {
+  width: 72px;
+}
+.ao-table .c-meas2 {
+  width: 120px;
+}
+.ao-table .c-out {
+  width: 112px;
+}
+.ao-table thead th.num {
+  text-align: right;
+}
+
+/* Do next */
+.ao-row > td {
+  padding-block: var(--sp-2);
+}
+.ao-row .n {
+  font: 600 var(--fs) / var(--lh) var(--mono);
+  color: var(--fg-2);
+}
+.ao-row .src {
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.clamp,
+.clamp1 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.clamp1 {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ao .rt {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  width: 100%;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+  font-size: var(--fs);
+  line-height: var(--lh);
+  font-weight: 500;
+  color: var(--fg);
+}
+.ao .rt:hover {
+  color: var(--accent);
+}
+.ao .rt i {
+  flex: none;
+  width: var(--sp-4);
+  font-style: normal;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+}
+.ao .why.clamp {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+}
+.ao .why {
+  padding-left: var(--sp-4);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+.ao .meas {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao .meas .l {
+  display: block;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ao .meas .v {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font-family: var(--mono);
+  color: var(--fg);
+}
+.ds {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--fg-2);
+}
+.ds.a {
+  background: var(--fg-2);
+}
+.ds.n {
+  background: transparent;
+}
+.ao .dec {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao .dec b {
+  display: block;
+  font-weight: 600;
+  color: var(--fg);
+}
+.ao .dec b.you {
+  color: var(--warn);
+}
+.ao .dec span {
+  display: block;
+  color: var(--muted);
+}
+.ao .acts {
+  display: flex;
+  gap: var(--sp-1);
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+.ao .btn {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  padding: 0 var(--sp-2);
+  min-height: 24px;
+  color: var(--fg-2);
+  background: var(--surface);
+}
+.ao .btn.pri {
+  color: var(--fg);
+}
+.ao .btn:hover {
+  color: var(--accent);
+}
+.ao-more > td {
+  background: var(--surface-2);
+  padding: 0 var(--sp-4) var(--sp-3) calc(var(--sp-4) + var(--ao-n));
+  border-top: 0;
+}
+.ao .mg {
+  display: grid;
+  grid-template-columns: 1.25fr 1fr 1fr 1fr;
+  gap: var(--sp-4);
+}
+.ao .mg h3 {
+  margin: 0 0 var(--sp-1);
+  font: 500 var(--fs-micro) / var(--lh-micro) var(--mono);
+  color: var(--muted);
+}
+.ao .mg p {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.ao .mg .m {
+  color: var(--muted);
+}
+.ao .steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  margin: 0 0 var(--sp-1);
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+}
+.ao .steps li:not(:last-child)::after {
+  content: "›";
+  margin-left: var(--sp-2);
+  color: var(--line-2);
+}
+.ao .steps .cur {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+/* Right column */
+.ao-plot {
+  padding: 0 var(--sp-4) var(--sp-1);
+}
+.ao .lg {
+  display: flex;
+  gap: var(--sp-3);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.ao .lg i {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: var(--sp-1);
+  border: 1px solid var(--line-2);
+}
+.ao-frow > td {
+  height: 32px;
+  font-size: var(--fs);
+}
+.ao-frow .lab {
+  overflow: hidden;
+}
+.ao-frow .lab .sub {
+  display: block;
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao-frow .path {
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.ao .trend {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-s);
+  white-space: nowrap;
+}
+.ao .trend.ok {
+  color: var(--ok);
+}
+.ao .trend.warn {
+  color: var(--warn);
+}
+.ao .mono {
+  font-family: var(--mono);
+}
+.ao .s {
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao .f2 {
+  color: var(--fg-2);
+}
+.ao td.warn {
+  color: var(--warn);
+}
+.ao .fun {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  border-bottom: 1px solid var(--line);
+}
+.ao .fun div {
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
+  border-left: 1px solid var(--line);
+  min-width: 0;
+}
+.ao .fun div:first-child {
+  border-left: 0;
+  padding-left: var(--sp-4);
+}
+.ao .fun b {
+  display: block;
+  font: 600 16px / var(--lh) var(--mono);
+  color: var(--fg);
+}
+.ao .fun span {
+  display: block;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ao .pasttxt {
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  color: var(--fg-2);
+}
+.ao-prow > td {
+  height: 32px;
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao-prow .t {
+  overflow: hidden;
+}
+.ao .vd {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  white-space: nowrap;
+}
+.ao .lamp {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  flex: none;
+}
+.ao .l-worked {
+  background: var(--ok);
+  border-radius: 50%;
+}
+.ao .l-worse,
+.ao .l-no-effect {
+  background: var(--warn);
+  transform: rotate(45deg) scale(0.82);
+}
+.ao .l-unchanged,
+.ao .l-unmeasured,
+.ao .l-waiting {
+  border: 1.5px solid var(--muted);
+  border-radius: 50%;
+}
+
+.ao-row:hover > td,
+.ao-row.open > td {
+  background: var(--surface-2);
+}
+.ao .ph .sub b {
+  color: var(--fg);
+}
+
+/* Wide: the review-date column gets room and the side column grows with the page. */
+@container (min-width: 1900px) {
+  .ao-table .c-meas {
+    width: 260px;
+  }
+  .ao-table .c-dec {
+    width: 190px;
+  }
+  .ao-cols {
+    --ao-from: 120px;
+  }
+  .ao-hscroll {
+    max-height: 232px;
+  }
+  .ao-pscroll {
+    max-height: 144px;
+  }
+}
+
+/* Narrow: one column, the page scrolls. */
+@container (max-width: 1099px) {
+  .ao-cols {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .ao-top {
+    flex-wrap: wrap;
+    gap: var(--sp-3);
+  }
+  .ao-col > .ao-next,
+  .ao-col > .ao-files {
+    flex: none;
+  }
+  .ao-col > .ao-next .ao-scroll {
+    max-height: 560px;
+  }
+  .ao-col > .ao-files .ao-scroll {
+    max-height: 280px;
+  }
+  .ao .mg {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
