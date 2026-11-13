@@ -105,6 +105,13 @@ export function agentDetail({
   } else if (row.reviewing) {
     label = "Checking";
     reason = `PR #${row.reviewing.prNumber}`;
+  } else if (row.hudState === "blocked") {
+    // A seat is never "Blocked" here: no open run is a free seat, an open run is waiting.
+    const open = run !== null && run.endedAt === null;
+    label = open ? "Waiting" : "Free";
+    reason = open
+      ? safe(row.note ?? loop?.loop?.parked?.reason ?? row.loop?.parked)
+      : safe(row.note);
   } else if (row.hudState === "waiting") {
     reason = reason ?? "Waiting for the test lock";
   } else if (next?.kind === "question" && run?.endedAt === null) {

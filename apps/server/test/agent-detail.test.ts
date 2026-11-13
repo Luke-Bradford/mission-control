@@ -47,6 +47,21 @@ it.each([
   save(row);
   expect(view(row).awaiting).toMatchObject({ label, reason: note });
 });
+it("never labels a blocked seat Blocked: Free with no open run", () => {
+  const row = seatRow({ hudState: "blocked", note: "no work", loop: null, run: null });
+  expect(view(row).awaiting.label).toBe("Free");
+});
+it("labels a blocked seat with an open run Waiting, with the note or else the parked reason", () => {
+  const row = seatRow({ hudState: "blocked", note: "needs a decision", loop: null });
+  const r = save(row);
+  expect(view(row).awaiting).toMatchObject({ label: "Waiting", reason: "needs a decision" });
+  const bare = seatRow({ hudState: "blocked", note: null, loop: null });
+  const loop = {
+    runId: r.id,
+    loop: { ...NEW_LOOP, parked: { kind: "review", reason: "Parked reason", ended: false } },
+  } as unknown as RunLoopView;
+  expect(view(bare, loop).awaiting).toMatchObject({ label: "Waiting", reason: "Parked reason" });
+});
 it("keeps a stopped operator reason and an acknowledged but still open decision", () => {
   const row = seatRow({ hudState: "stopped", note: null });
   const r = save(row);
