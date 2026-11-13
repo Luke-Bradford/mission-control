@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { CODE_HEALTH_RULES } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createFileContext, declaredTicketFiles } from "../src/code-health/file-context.ts";
 import { CodeHealthReader } from "../src/code-health/read.ts";
@@ -98,6 +99,15 @@ describe("file triage and declared-ticket context", () => {
       baseline: 1000,
       metric: "measured regular-text lines in this file",
     });
+    expect(first.target).toMatchObject({
+      value: CODE_HEALTH_RULES.repeatedlyChangedLargeFile.lines,
+      source: "CODE_HEALTH_RULES.repeatedlyChangedLargeFile.lines",
+    });
+    expect(first.measure).toMatchObject({ current: 1000, unit: "lines" });
+    expect(first.decision).toEqual({ owner: "FLIGHT", tier: "flight" });
+    expect(first.title).toContain("src/example.ts");
+    expect(first.title).toContain("1000 lines now");
+    expect(first.causeId).toBe(fileRow().causeId);
     expect(first.scope).toMatchObject({
       kind: "file-risk",
       file: "src/example.ts",
@@ -116,6 +126,87 @@ describe("file triage and declared-ticket context", () => {
     db.prepare("DELETE FROM code_health_file_memberships WHERE pr_number=5").run();
     store.refreshCodeHealthRecommendations("sample", NOW + 1, checkout);
     expect(store.codeHealthRecommendation("sample", first.id)?.active).toBe(false);
+  });
+  it("projects a busy repo as distinct causes with numeric now and target pairs", () => {
+    seed(
+      [
+        { path: "src/store.ts", lines: 4200 },
+        { path: "src/api.ts", lines: 1800 },
+      ],
+      5,
+    );
+    const causes: [string, string, string][] = [
+      ["correctness", "Null input crashes the parser", "Guard the null case before parsing"],
+      ["security", "Token is logged in plain text", "Redact the token before logging"],
+      ["spec", "Retry window differs from the spec", "Use the 7 day retry window"],
+      ["test-missing", "No test covers the empty queue", "Add an empty-queue regression test"],
+      ["scope", "Change edits an unrelated guard", "Revert the guard change"],
+    ];
+    const review = db.prepare(
+      "INSERT INTO reviews(id,author_run_id,repo_id,seat_id,pr_number,sha,epoch,attempt,round,state,created_at,ended_at)VALUES(?,?,'sample','reviewer',?,?,0,1,?,'reported',?,?)",
+    );
+    const finding = db.prepare(
+      "INSERT INTO review_findings(review_id,author_run_id,pos,severity,file,line,summary,scenario,fix,category,state)VALUES(?,?,?,'Important',?,1,?,'s',?,?,'open')",
+    );
+    causes.forEach(([category, summary, fix], i) => {
+      for (const [k, pr] of [100 + i * 2, 101 + i * 2].entries()) {
+        const id = 1000 + pr;
+        review.run(id, `run-${id}`, pr, sha(7000 + pr), 1, NOW - DAY, NOW - DAY);
+        for (let pos = 0; pos < 2; pos++)
+          finding.run(
+            id,
+            `run-${id}`,
+            pos,
+            `src/area-${i}/${k ? "b" : "a"}.ts`,
+            summary,
+            fix,
+            category,
+          );
+        store.upsertPullRequests(
+          "sample",
+          [
+            {
+              repoId: "sample",
+              number: pr,
+              title: `PR ${pr}`,
+              url: `https://github.com/example/sample/pull/${pr}`,
+              branch: `fixture/${pr}`,
+              base: "main",
+              ticket: null,
+              state: "open",
+              isDraft: false,
+              review: null,
+              ci: "passing",
+              createdAt: NOW - DAY,
+              updatedAt: NOW,
+              mergedAt: null,
+              headSha: sha(7000 + pr),
+              mergeable: null,
+            } as never,
+          ],
+          NOW,
+        );
+      }
+    });
+    review.run(2900, "run-2900", 300, sha(8300), 3, NOW - DAY, NOW - DAY);
+
+    store.refreshCodeHealthRecommendations("sample", NOW, checkout);
+
+    const rows = store.codeHealthRecommendations("sample");
+    expect(new Set(rows.map((row) => row.causeId)).size).toBe(rows.length);
+    expect(rows.filter((row) => row.rule === "recurring-correction")).toHaveLength(5);
+    expect(rows.filter((row) => row.rule === "repeatedly-changed-large-file")).toHaveLength(2);
+    expect(rows.some((row) => row.rule === "repeated-rounds")).toBe(true);
+    expect(rows.some((row) => row.rule === "collection")).toBe(true);
+    expect(rows.length).toBeGreaterThanOrEqual(8);
+    const measured = rows.filter(
+      (row) => typeof row.measure?.current === "number" && typeof row.target.value === "number",
+    );
+    expect(measured.length).toBeGreaterThanOrEqual(5);
+    for (const row of measured) {
+      expect(row.title).toBeTruthy();
+      expect(row.decision).toBeTruthy();
+    }
   });
   it("keeps an accepted measured baseline when new observations change the proposal", () => {
     seed();
