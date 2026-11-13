@@ -111,6 +111,7 @@ import {
   readKnown,
 } from "./mcp/tools.ts";
 import { releaseWaitingOperator } from "./needs-you-actions.ts";
+import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./no-index.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import {
@@ -519,6 +520,15 @@ export async function main(): Promise<void> {
   // crew config, and only where the guard hook can be found.
   const crewEnabled =
     crewAllowed(preview, process.env) && config.crew !== undefined && hubRoot !== null;
+  // Crew checkouts and evidence images churn constantly; keep Spotlight (and its file-change
+  // service) out of them.
+  keepOutOfSpotlight(
+    [
+      ...EVIDENCE_FOLDERS.map((name) => join(dirname(dbPath), name)),
+      ...(crewEnabled && config.crew !== undefined ? [config.crew.worktrees] : []),
+    ],
+    (line) => log(line),
+  );
   // The template profiles sit beside config.yaml; read afresh for each start, never cached.
   const profilesPath = join(dirname(configPath), PROFILES_FILE);
   const profiles = () => loadProfiles(profilesPath);

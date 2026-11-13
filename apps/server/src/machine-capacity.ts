@@ -1,4 +1,5 @@
 import type { MachineSample } from "@mc/core";
+import { FILE_SERVICE } from "./collectors/machine.ts";
 import type { Store } from "./store.ts";
 
 export const MACHINE_CAPACITY_KEY = "machine-capacity";
@@ -19,6 +20,16 @@ export const MACHINE_CAPACITY_DEFAULTS = {
 
 /** Swap alone is an emergency only once it exceeds this share of physical RAM. */
 export const SWAP_USED_HARD_PCT_OF_RAM = 90;
+
+/** Swap alone is an emergency once it fills this share of the swap file itself (#1812). */
+export const SWAP_FILE_USED_HARD_PCT = 85;
+/** ...but only when that much swap is also a real share of physical RAM. */
+export const SWAP_FILE_MIN_PCT_OF_RAM = 50;
+/** The file-change service (`fseventsd`) is swollen once its resident size passes this. */
+export const FSEVENTSD_RSS_HARD_BYTES = 2 * 1024 ** 3;
+/** What a swollen file-change service costs to fix, for the Needs-you item. */
+export const FILE_SERVICE_RESTART_ADVICE =
+  "Restart the file-change service: run `sudo killall fseventsd` in Terminal. macOS starts it again by itself; it takes about 15 seconds and the Mac does not restart.";
 
 export interface MachineCapacityConfig {
   diskFreeGb: number;
@@ -121,6 +132,30 @@ export function storedMachineCapacity(
   return machineCapacity(samples, now, config, breachedAt);
 }
 
+/** Why the file-change service or a nearly full swap file needs a restart of that service; null if neither. */
+export function fileServiceFault(s: MachineSample): string | null {
+  // `ps` RSS leaves out compressed pages, so the collector's own reading is judged too
+  const held = Math.max(
+    s.fileServiceBytes ?? 0,
+    s.topConsumers?.find((p) => p.command === FILE_SERVICE)?.rssBytes ?? 0,
+  );
+  if (held > FSEVENTSD_RSS_HARD_BYTES)
+    return `the file-change service (fseventsd) holds ${gb(held)} of memory (above ${gb(FSEVENTSD_RSS_HARD_BYTES)})`;
+  if (
+    s.swapUsedBytes !== null &&
+    s.swapUsedBytes !== undefined &&
+    s.swapTotalBytes !== null &&
+    s.swapTotalBytes !== undefined &&
+    s.swapTotalBytes > 0 &&
+    (s.swapUsedBytes / s.swapTotalBytes) * 100 > SWAP_FILE_USED_HARD_PCT &&
+    // macOS shrinks its swap file, so a small one is often nearly full on a healthy Mac (#1052)
+    s.memTotalBytes > 0 &&
+    (s.swapUsedBytes / s.memTotalBytes) * 100 > SWAP_FILE_MIN_PCT_OF_RAM
+  )
+    return `the swap file is ${gb(s.swapUsedBytes)} full of ${gb(s.swapTotalBytes)} (above ${SWAP_FILE_USED_HARD_PCT}%)`;
+  return null;
+}
+
 function immediateReason(s: MachineSample, c: MachineCapacityConfig): string | null {
   if (s.diskFreeBytes !== null && s.diskFreeBytes < c.diskFreeGb * 1024 ** 3)
     return `disk free is ${gb(s.diskFreeBytes)} (below ${c.diskFreeGb} GB)`;
@@ -145,6 +180,8 @@ function immediateReason(s: MachineSample, c: MachineCapacityConfig): string | n
     s.memoryPressureFreePct < c.memoryFreePct
   )
     return `${swap.description} (above ${c.swapUsedPct}%) and memory free is ${s.memoryPressureFreePct.toFixed(1)}% (below ${c.memoryFreePct}%)`;
+  const fault = fileServiceFault(s);
+  if (fault !== null) return fault;
   if (
     s.memoryPressureFreePct !== null &&
     s.memoryPressureFreePct !== undefined &&
