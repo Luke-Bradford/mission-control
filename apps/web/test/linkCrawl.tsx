@@ -2,6 +2,10 @@ import { act, render } from "@testing-library/react";
 import { vi } from "vitest";
 import { App } from "../src/App.tsx";
 import { setDemo } from "../src/demo/mode.ts";
+import { closeItem, resetOverlays } from "../src/shell/overlays.ts";
+import { resetSelection } from "../src/shell/selection.ts";
+import { resetSession } from "../src/shell/session.ts";
+import { resetTheme } from "../src/theme.ts";
 
 /** One clickable thing on a page, and where clicking it went. */
 export interface Click {
@@ -74,19 +78,41 @@ function clickOnce(el: HTMLElement): string {
  * screen.
  */
 export async function crawlRoute(route: string): Promise<Click[]> {
-  setDemo(true);
   const out: Click[] = [];
-  const open = async () => {
-    window.history.replaceState(null, "", route);
-    const view = render(<App />);
-    await settle();
-    return view;
-  };
   const pick = () =>
     [...document.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")].filter(
       (el) => !el.closest("[data-crawl-skip]"),
     );
+  /** The clickable words, numbers left out so a ticking "5m" is not a change. */
+  const list = () =>
+    pick()
+      .map((el) => words(el).replace(/\d+/g, "N"))
+      .sort();
+  /** Every render starts from the same state: storage, stores and Demo as a first visit has them. */
+  const open = async () => {
+    window.sessionStorage.clear();
+    window.localStorage.clear();
+    resetTheme();
+    closeItem();
+    resetOverlays();
+    resetSelection();
+    resetSession();
+    setDemo(true);
+    window.history.replaceState(null, "", route);
+    const view = render(<App />);
+    await settle();
+    // Wait until the page stops adding things to click.
+    let last = list();
+    for (let tries = 0; tries < 20; tries++) {
+      await act(async () => void (await new Promise((r) => setTimeout(r, 150))));
+      const now = list();
+      if (now.join("\n") === last.join("\n")) break;
+      last = now;
+    }
+    return view;
+  };
   let view = await open();
+  const first = list();
   for (let i = 0; i < pick().length; i++) {
     const el = pick()[i] as HTMLElement;
     const kind = el.tagName === "A" ? "a" : "button";
@@ -94,10 +120,12 @@ export async function crawlRoute(route: string): Promise<Click[]> {
     const cls = el.className;
     const before = document.body.innerHTML;
     const target = await act(async () => clickOnce(el));
-    if (kind === "a" || target !== STAYS) out.push({ route, text, cls, kind, target });
+    out.push({ route, text, cls, kind, target });
     if (document.body.innerHTML !== before) {
       view.unmount();
       view = await open();
+      if (list().join("\n") !== first.join("\n"))
+        throw new Error(`${route}: the page changed after clicking "${text}"`);
     }
   }
   view.unmount();

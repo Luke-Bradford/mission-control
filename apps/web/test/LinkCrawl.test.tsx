@@ -1,7 +1,7 @@
 import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { type Click, crawlRoute } from "./linkCrawl.tsx";
+import { type Click, crawlRoute, STAYS } from "./linkCrawl.tsx";
 import { EVERYWHERE, LINK_MAP, type LinkRule, NAVIGATING_FILES } from "./linkMap.ts";
 
 /**
@@ -27,6 +27,7 @@ type Map = Record<string, { routes: string[]; rules: LinkRule[] }>;
 export function problemsOf(clicks: Click[], rules: LinkRule[]): string[] {
   const out: string[] = [];
   for (const c of clicks) {
+    if (c.kind === "button" && c.target === STAYS) continue; // acts in place
     const rule = rules.find((r) => r.text.test(c.text) && (!r.cls || r.cls.test(c.cls)));
     if (!rule)
       out.push(
@@ -96,6 +97,15 @@ it("every navigating source file is in the map, and each mapped file still exist
       ),
   );
   expect(navigating.sort()).toEqual(Object.keys(NAVIGATING_FILES).sort());
+});
+
+it("the crawl reaches the body of a page, not just the header", { timeout: 300_000 }, async () => {
+  const setup = await crawlRoute("/setup/repos");
+  // the header and tabs alone are about 19 things; the page's own body adds more in Demo
+  expect(setup.length).toBeGreaterThan(25);
+  const board = await crawlRoute("/board");
+  expect(board.some((c) => /\bktitle\b/.test(c.cls))).toBe(true);
+  expect(board.some((c) => c.text.startsWith("You:"))).toBe(true);
 });
 
 it("every page, in Demo, goes where the map says", { timeout: 600_000 }, async () => {
