@@ -65,3 +65,27 @@ it("a draft PR chip with a review state shows the pill", () => {
   render(<PrChip pr={prView({ isDraft: true, check: { kind: "ready" } })} />);
   expect(screen.getByText("Ready to merge")).toBeTruthy();
 });
+
+it("a Board card does not repeat the hand-off line", () => {
+  const { container } = render(
+    <Card
+      item={boardItem({
+        handoff: { runId: "r1", fromSeat: "guido-cx", at: 1, acceptedBy: null },
+      })}
+      showRepo={false}
+      agent={null}
+      step={null}
+      queued={null}
+      reviewer={null}
+      pr={null}
+      mine={false}
+      unacked={false}
+      outcome="Closed"
+      when=""
+      statusOutOfDate={null}
+      you={null}
+    />,
+  );
+  expect(screen.queryByText(/Handed off from/)).toBeNull();
+  expect(container.querySelector(".handoff-link")).toBeNull();
+});

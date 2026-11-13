@@ -36,7 +36,6 @@ import {
   briefSavedDecision,
   briefSavedText,
   briefTooLongText,
-  budgetBrakeText,
   CATCH_UP_KINDS,
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
@@ -391,7 +390,7 @@ import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { budgetBrake } from "../spend/budget-brake.ts";
+import { resolveWasteAlarm } from "../spend/waste.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
@@ -1631,8 +1630,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (accountAtStop(config, store, cfg.accountId, at)) {
       return fail(accountStoppedText(call, cfg.accountId));
     }
-    const brake = budgetBrake(config, store, cfg.accountId, at);
-    if (brake !== null) return fail(budgetBrakeText(call, brake, config.operator.timezone));
     // The card as it is now: the cached board is only refreshed by the poll, so a ticket closed or
     // moved since would otherwise be started on its old column. A card that cannot be read fails closed.
     let card: BoardItem | undefined;
@@ -3828,12 +3825,31 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     seat: z.string().regex(SEAT_ID),
     basis: basisArg,
   });
-  const P0_TICKET_BASIS = /(?:\bP0\b.*\b[^\s#]+#[1-9]\d*\b|\b[^\s#]+#[1-9]\d*\b.*\bP0\b)/;
+
+  const ResolveWasteAlarmArgs = z.strictObject({
+    alarm: z.number().int().positive(),
+    basis: basisArg,
+  });
 
   const superTools = [
     superTool(
+      MC_TOOL_NAMES.resolveWasteAlarm,
+      "Close an open waste alarm's hold: a parked ticket may start again, a stopped review may run, a restarted agent may start. Say in the basis what you decided (fix, park, fold back). The alarm stays closed until its cause grows past the level it had.",
+      ResolveWasteAlarmArgs,
+      "status",
+      async (a) => {
+        const at = now();
+        if (!resolveWasteAlarm(store, a.alarm, at, a.basis))
+          return fail("That waste alarm is not open.");
+        return { text: `Waste alarm ${a.alarm} closed; its hold is lifted.` };
+      },
+      z.toJSONSchema(ResolveWasteAlarmArgs),
+      // a hub-side hold: no GitHub write, so it does not need the engine
+      { engine: false },
+    ),
+    superTool(
       MC_TOOL_NAMES.moveReview,
-      "Move one queued review to a named review seat. The target account must not be at its usage stop. A budget-brake pass needs a basis that names a P0 ticket; the basis is recorded. The queued review keeps its head, round and review model rule.",
+      "Move one queued review to a named review seat. The target account must not be at its usage stop. The basis is recorded. The queued review keeps its head, round and review model rule.",
       MoveReviewArgs,
       "status",
       async (a) => {
@@ -3851,10 +3867,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const at = now();
         if (accountAtStop(config, store, target.accountId, at))
           return fail(accountStoppedText(seatCallSign(a.seat), target.accountId));
-        const brakeOverride = budgetBrake(config, store, target.accountId, at) !== null;
-        if (brakeOverride && !P0_TICKET_BASIS.test(a.basis))
-          return fail("The target account's budget brake needs a basis that names a P0 ticket.");
-        if (!store.moveQueuedReview(review.id, target.id, at, brakeOverride))
+        if (!store.moveQueuedReview(review.id, target.id, at))
           return fail("Review is no longer queued.");
         return { text: `Moved queued review ${review.id} to ${seatCallSign(target.id)}.` };
       },

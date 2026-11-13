@@ -7,6 +7,7 @@ import {
   type Crew,
 } from "@mc/core";
 import { Fragment } from "react";
+import { MarkdownInline, type TextRenderer } from "../components/Markdown.tsx";
 import { seatName } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
@@ -57,41 +58,46 @@ export function commsKeys(list: CommsEvent[]): string[] {
 
 /** Plain text with each mention picked out. */
 export function MentionText({ text, onRef }: { text: string; onRef?: (ref: string) => void }) {
+  return <MarkdownInline text={text} renderText={useTokenRenderer(onRef)} />;
+}
+
+/**
+ * Turns a run of plain text into elements: saved QA reports, `#n` and `PR n` references (buttons
+ * when `onRef` is given) and mentions. Hand it to a Markdown component so the whole message is
+ * parsed once and a token can sit inside bold or a list item.
+ */
+export function useTokenRenderer(onRef?: (ref: string) => void): TextRenderer {
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const login = config?.githubLogin;
-  const parts = text.split(COMMS_TOKEN);
-  return (
-    <>
-      {parts.map((part, i) => (
-        // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
-        <Fragment key={i}>
-          {QA_REPORT_REF.test(part) ? (
-            <a
-              href={part}
-              style={{ display: "inline-block", minHeight: 24 }}
-              onClick={(event) => followLink(event, part)}
-            >
-              Open saved QA report
-            </a>
-          ) : COMMS_REF.test(part) && onRef ? (
-            <button
-              type="button"
-              className="comms-ref"
-              aria-label={`Every message about ${part}`}
-              onClick={() => onRef(part)}
-            >
-              {part}
-            </button>
-          ) : part.toLowerCase() === CAPCOM_TAG.toLowerCase() ||
-            (login && part.toLowerCase() === `@${login.toLowerCase()}`) ? (
-            <span className="mention">{part}</span>
-          ) : (
-            part
-          )}
-        </Fragment>
-      ))}
-    </>
-  );
+  return (run: string) =>
+    run.split(COMMS_TOKEN).map((part, i) => (
+      // biome-ignore lint/suspicious/noArrayIndexKey: the parts are positional and never reorder
+      <Fragment key={i}>
+        {QA_REPORT_REF.test(part) ? (
+          <a
+            href={part}
+            style={{ display: "inline-block", minHeight: 24 }}
+            onClick={(event) => followLink(event, part)}
+          >
+            Open saved QA report
+          </a>
+        ) : COMMS_REF.test(part) && onRef ? (
+          <button
+            type="button"
+            className="comms-ref"
+            aria-label={`Every message about ${part}`}
+            onClick={() => onRef(part)}
+          >
+            {part}
+          </button>
+        ) : part.toLowerCase() === CAPCOM_TAG.toLowerCase() ||
+          (login && part.toLowerCase() === `@${login.toLowerCase()}`) ? (
+          <span className="mention">{part}</span>
+        ) : (
+          part
+        )}
+      </Fragment>
+    ));
 }
 
 /** One end of a message: a configured agent's tag, the operator, the engine, or any other id muted. */

@@ -247,8 +247,6 @@ export interface CcConfig {
     vendor: "claude" | "codex";
     alertAt: number;
     stopAt: number;
-    /** false: no budget brake on this account; stop_at alone limits it. Unset: the brake applies. */
-    brake?: boolean;
     cliProfile?: string;
     /** Input + output tokens one review run on this account may use; unset: the vendor's default (reviewTokenBudgetOf). */
     reviewTokenBudget?: number;
@@ -530,6 +528,7 @@ const fileSchema = z
         vendor: z.enum(["claude", "codex"]),
         alert_at: percent,
         stop_at: percent,
+        // the forecast brake is gone: an old file that sets it still loads, and the key does nothing
         brake: z.boolean().optional(),
         cli_profile: nonEmpty.optional(),
         review_token_budget: z.number().int().positive().optional(),
@@ -730,7 +729,6 @@ const fileSchema = z
         vendor: a.vendor,
         alertAt: a.alert_at,
         stopAt: a.stop_at,
-        ...(a.brake === undefined ? {} : { brake: a.brake }),
         ...(a.cli_profile === undefined ? {} : { cliProfile: a.cli_profile }),
         ...(a.review_token_budget === undefined
           ? {}

@@ -12,6 +12,7 @@ import {
   type CheckDropReason,
   type RepoRules,
   splitCommands,
+  unchangedRerunText,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { seatPlace } from "../mcp/tools.ts";
@@ -125,6 +126,11 @@ export interface CheckRecorder {
   keep?(key: CallKey): void;
   /** A turn ended. Only a normal Codex hand-back can keep waiting for an item completion, until its deadline. */
   dropRun(runId: string, options?: { keepWatching?: boolean }): void;
+  /**
+   * The text that refuses this shell call as an unchanged rerun (the same configured check already
+   * ran on this commit and no file has changed), or null. A refusal is recorded for the waste alarm.
+   */
+  rerun?(runId: string, command: string): Promise<string | null>;
   /** The check calls of this run the hub saw start and did not count, oldest first, each with its reason. */
   drops(runId: string): readonly CheckDrop[];
   /** Configured checks still executing or validating their completion, once per command. */
@@ -136,7 +142,8 @@ const DROPS_PER_RUN = 30;
 const DROPPED_RUNS = 200;
 
 export interface CheckRecorderDeps {
-  store: Pick<Store, "addCheckRun">;
+  store: Pick<Store, "addCheckRun"> &
+    Partial<Pick<Store, "latestCheckRun" | "latestCheckResults" | "addRerunRefusal">>;
   /** The run's repo's configured checks; empty when it has none (throws when its rules cannot be read). */
   checks: (runId: string) => Promise<readonly string[]>;
   /** The run's clone now, or null when it cannot be read. */
@@ -290,6 +297,35 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
       const call = started.get(callId(key));
       if (call === undefined) return;
       for (const [id, c] of started) if (c === call) started.delete(id);
+    },
+    async rerun(runId, command) {
+      try {
+        const checks = await d.checks(runId);
+        const own = d.worktree === undefined ? null : await d.worktree(runId).catch(() => null);
+        const matched = checksRun(withoutOwnCd(command, own), checks);
+        if (matched.length === 0 || d.store.latestCheckRun === undefined) return null;
+        const at = await d.state(runId);
+        // a dirty tree is a change: the check would run on something no commit holds
+        if (at === null || !at.clean) return null;
+        for (const check of matched) {
+          const last = d.store.latestCheckRun(runId, check, at.head);
+          // a run that passed, or failed with an exit code, is a result. One killed by the Bash
+          // timeout, or that failed with no exit code (a missing install), is not: it may run again.
+          if (last === null || (!last.ok && last.exitCode === null)) continue;
+          // one retry after a failure is allowed (a flaky test, a busy machine); a pass, or a
+          // second failure on the same commit, is final
+          if (!last.ok) {
+            const results = d.store.latestCheckResults?.(runId, check, at.head, 2) ?? [];
+            if (results.length < 2 || results.some((x) => x.ok)) continue;
+          }
+          d.store.addRerunRefusal?.(runId, check, at.head, now());
+          return unchangedRerunText(check, at.head);
+        }
+        return null;
+      } catch (e) {
+        d.log?.(`checks: could not test a rerun for ${runId}: ${(e as Error).message}`);
+        return null;
+      }
     },
     async begin(key, command, aliases = [], options = {}) {
       const epoch = epochOf(key.runId);

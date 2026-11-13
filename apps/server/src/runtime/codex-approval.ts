@@ -239,6 +239,14 @@ export function createCodexApprover(i: {
         if (admitted !== undefined) i.checks?.cancel?.(admitted);
         return refuse(verdict.rule, verdict.text);
       }
+      // the same check on the same commit with nothing changed is not run again (waste alarm)
+      if (verdict.kind === "lock" && event.tool === "Bash" && event.input.command !== undefined) {
+        const rerun = await i.checks?.rerun?.(i.runId, event.input.command);
+        if (rerun) {
+          if (admitted !== undefined) i.checks?.cancel?.(admitted);
+          return refuse("full-suite", rerun);
+        }
+      }
       if (verdict.kind === "lock") {
         const id = params.approvalId ?? params.itemId;
         if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
