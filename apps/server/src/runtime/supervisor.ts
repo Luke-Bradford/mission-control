@@ -4880,6 +4880,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         return fail(RESUME_MODE_CHANGED);
       }
       let checkout: { path: string; branch: string; gitDir: string };
+      /** Set when the dependencies could not come back: a blip the engine retries, not a lost run. */
+      const reinstall: { failed: boolean; cause: unknown } = { failed: false, cause: null };
       try {
         const branch = run.branch;
         // Under the clone lock, as the crew tidy is: the worktree is marked in use before the lock
@@ -4887,20 +4889,32 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         checkout = await inClone(info.session.checkout, async () => {
           const c = await existingCheckout(info.session.checkout, aside.worktree, branch);
           startingWorktrees.add(aside.worktree);
-          await reinstallTrimmed(
-            {
-              checkout: info.session.checkout,
-              worktreesRoot: crew?.worktrees ?? "",
-              sessionId: info.session.id,
-              peers: clonePeers(deps.config, deps.hubRoot),
-            },
-            aside.worktree,
-            branch,
-          );
+          try {
+            await reinstallTrimmed(
+              {
+                checkout: info.session.checkout,
+                worktreesRoot: crew?.worktrees ?? "",
+                sessionId: info.session.id,
+                peers: clonePeers(deps.config, deps.hubRoot),
+              },
+              aside.worktree,
+              branch,
+            );
+          } catch (e) {
+            reinstall.failed = true;
+            reinstall.cause = e;
+          }
           return c;
         });
       } catch (e) {
         return fail("could not resume: checkout missing", e);
+      }
+      if (reinstall.failed) {
+        // the run, its session and its worktree stay: the engine's next pass tries again
+        log(`${seatId}: could not reinstall dependencies: ${errText(reinstall.cause)}`);
+        throw new SupervisorError(502, "could not resume: dependencies could not be reinstalled", {
+          cause: reinstall.cause,
+        });
       }
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // the check awaited: the engine may have ended the run meanwhile

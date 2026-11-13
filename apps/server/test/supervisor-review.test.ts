@@ -1926,6 +1926,26 @@ describe("a run set aside in review", () => {
     expect(sup.isStartingWorktree(wt())).toBe(false);
   });
 
+  it("wakeRun keeps the run and its worktree when the dependencies cannot be reinstalled (#1756)", async () => {
+    writeFileSync(join(clone, "package.json"), '{"name":"x","private":true}\n');
+    writeFileSync(
+      join(clone, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+    );
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "install inputs");
+    git(clone, "push", "-q", "origin", "main");
+    const { sup, runId } = await aside(false);
+    rmSync(join(wt(), "node_modules"), { recursive: true, force: true });
+    // the network is down: origin points at nothing
+    git(clone, "remote", "set-url", "origin", join(root, "no-such-origin"));
+    await expect(sup.wakeRun(runId)).rejects.toMatchObject({ status: 502 });
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(store.run(runId)?.loop?.aside).not.toBeNull();
+    expect(existsSync(wt())).toBe(true);
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+
   it("wakeRun marks the set-aside worktree in use from the checkout until the seat points at it (#1756)", async () => {
     const { sup, runId } = await aside(false);
     expect(sup.isStartingWorktree(wt())).toBe(false);
