@@ -17,6 +17,7 @@ import {
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_CONFLICTS_MAX,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
@@ -102,6 +103,7 @@ import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { stuckPrs } from "../engine/stuck-prs.ts";
 import {
   attentionItems,
   crew,
@@ -895,6 +897,8 @@ export function flightState(i: {
   lock?: TestLockState;
   /** The repo's area labels and their globs; absent: any Ready ticket fits any build seat. */
   areas?: Record<string, string[]>;
+  /** Files whose merge conflicts between open PRs (see flightConflicts); absent: none known. */
+  conflicts?: readonly { file: string; prs: number[] }[];
 }): FlightState & TeamsDigestState & { discussions: ItemDiscussion[] } {
   const { config, store, busy, now } = i;
   const discussions = store.pendingDiscussions();
@@ -1275,6 +1279,9 @@ export function flightState(i: {
         ]
       : []),
   ].join("; ");
+  // Files whose merge conflicts between open PRs, checked by the caller (git merge-tree).
+  const shared = i.conflicts ?? [];
+  const conflicts = shared.slice(0, FLIGHT_CONFLICTS_MAX);
   const flowHolds: NonNullable<FlightState["flowHolds"]> = [
     ...(capacity.blocked && capacity.reason !== null
       ? [
@@ -1428,6 +1435,8 @@ export function flightState(i: {
       session,
       seats,
       aside,
+      ...(i.areas === undefined ? {} : { areas: i.areas }),
+      stuckPrs: stuckPrs({ store, config, repoId: session.repoId, flow, now }),
       triageItems: triageAll.map((x) => ({ key: x.key, kind: x.kind, at: x.at, text: x.text })),
       readyPrs: prs.flatMap((p) => {
         const at = store
@@ -1490,6 +1499,10 @@ export function flightState(i: {
     holds,
     reviewQueue,
     mergeQueue,
+    conflicts,
+    ...(shared.length > conflicts.length
+      ? { conflictsMore: shared.length - conflicts.length }
+      : {}),
     flowHolds,
     recent,
     breaker,

@@ -77,8 +77,10 @@ import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { takeStuckPrs } from "./engine/stuck-prs.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
+import { flightConflicts } from "./flight/conflicts.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { operatorCall } from "./flight/operator-call.ts";
@@ -95,6 +97,7 @@ import {
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
+import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -490,6 +493,17 @@ export async function main(): Promise<void> {
     const rules = await engineRules(repoId);
     return rules instanceof RepoRulesError ? undefined : rules.areas;
   };
+  const flightMergeChecks = new MapConflicts(undefined, {
+    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
+    put: (kind, scope, key, value, exclusive) =>
+      store.mapCachePut(kind, scope, key, value, exclusive),
+  });
+  const flightConflictFiles = async (repoId: RepoId) => {
+    const checkout = config.crew?.sessions.find((x) => x.repoId === repoId)?.checkout;
+    return checkout === undefined
+      ? undefined
+      : await flightConflicts(flightMergeChecks, checkout, store.pullRequests(repoId));
+  };
   // The checks a repo configures (`mc.checks`): seats' shell calls are recorded against the commit
   // they ran on, and `mc push` asks for the record.
   const runChecks = configuredChecks(store, engineRules);
@@ -799,6 +813,21 @@ export async function main(): Promise<void> {
         now: Date.now,
         onNotes: () => bus.emit("attention"),
       }),
+    takeStuckPrs: (onlySeat) =>
+      takeStuckPrs(
+        {
+          config,
+          store,
+          supervisor,
+          login: hubLogin,
+          rules: engineRules,
+          inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+          enabled: engineOn,
+          now: Date.now,
+          log: (line) => log(`engine: ${line}`),
+        },
+        onlySeat,
+      ),
     takeNext: (seatId) =>
       takeNext(
         {
@@ -885,6 +914,7 @@ export async function main(): Promise<void> {
       prepareQueueReorderSnapshot(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     areas: flightAreas,
+    conflicts: flightConflictFiles,
     config,
     store,
     bus,
@@ -920,6 +950,7 @@ export async function main(): Promise<void> {
     login: hubLogin,
     lockState: () => lock.state(),
     areas: flightAreas,
+    conflicts: flightConflictFiles,
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
       pausedSeat(store, seatId) !== null ||
