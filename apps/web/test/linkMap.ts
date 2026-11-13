@@ -57,6 +57,17 @@ export const EVERYWHERE: LinkRule[] = [
     TICKET,
     "A PR reference on a card opens the ticket page the PR belongs to; its GitHub link is separate.",
   ),
+  rule(/^Setup$/, /^\/setup$/, "Header button: Setup."),
+  rule(
+    /^Machine status:/,
+    /^\/$/,
+    "The machine strip opens the Overview, where its seats and lock are.",
+  ),
+  rule(
+    /^Switch back to Live/,
+    /^\/(setup(\/\w+)?)?$/,
+    "Leaves Demo and stays on the same page (the page's own path, so a Setup tab falls back to its first).",
+  ),
   rule(/^Trace$/, /^\/agent\/[\w-]+\?trace=[\w-]+$/, "The run's trace on its seat's page."),
 ];
 
@@ -67,6 +78,16 @@ export const LINK_MAP: Record<
   overview: {
     routes: ["/"],
     rules: [
+      rule(
+        /^Answer$/,
+        /^\/\?item=[^&]+$/,
+        "Answers in the side pane beside the Overview, which shows the item's brief; the Needs you page is one click on.",
+      ),
+      rule(
+        /^Add agent$/,
+        /^\/setup\/sessions\?add=[\w-]+$/,
+        "Setup sessions, with the add-agent form open.",
+      ),
       rule(/^head agent/, /^\/flight$/, "FLIGHT's seat opens the FLIGHT page, its own view."),
       rule(/^(dev|[a-z]+)-\d+$/, /^\/agent\/[\w-]+$/, "A seat's name opens its Agent page."),
       rule(
@@ -82,6 +103,7 @@ export const LINK_MAP: Record<
   needs: {
     routes: ["/needs-you"],
     rules: [
+      rule(/^FLIGHT chat$/, /^\/comms$/, "FLIGHT's conversation in Comms."),
       rule(
         /^(Decision|Question|Plan|Escalation)/,
         /^\/needs-you\/[^/]+$/,
@@ -94,11 +116,24 @@ export const LINK_MAP: Record<
   },
   flight: {
     routes: ["/flight"],
-    rules: [rule(/^Records$/, /^\/flight#handlingP$/, "Jumps to the records on the same page.")],
+    rules: [
+      rule(/^Records$/, /^\/flight#handlingP$/, "Jumps to the records on the same page."),
+      rule(/^FLIGHT chat$/, /^\/comms$/, "FLIGHT's conversation in Comms."),
+    ],
   },
   board: {
     routes: ["/board", "/board/shop-app"],
     rules: [
+      rule(
+        /^(All repos|shop-app|site-builder)$/,
+        /^\/board(\/[\w-]+)?$/,
+        "A repo lane opens that repo's board.",
+      ),
+      rule(
+        /^You:/,
+        /^\/needs-you\/[^/]+$/,
+        "The chip names what waits on the operator; its Needs you page has the context, pictures, recommendation and options. The side pane has none of them.",
+      ),
       rule(/^QA report for /, /^\/qa\?repo=[\w-]+&pr=\d+$/, "The PR's readiness page in QA."),
       rule(
         /./,
@@ -115,12 +150,35 @@ export const LINK_MAP: Record<
   },
   agent: {
     routes: ["/agent/dev-1", "/agent/flight-1"],
-    rules: [rule(/^Open this seat in Audit$/, /^\/audit\?seat=[\w-]+$/, "The seat's audit rows.")],
+    rules: [
+      rule(/^(dev|flight)-\d+/i, /^\/agent\/[\w-]+$/, "A seat in the roster opens its Agent page."),
+      rule(/^Open this seat in Audit$/, /^\/audit\?seat=[\w-]+$/, "The seat's audit rows."),
+    ],
   },
   comms: {
     routes: ["/comms", "/comms/crew", "/comms/agents/dev-1", "/comms/agents/dev-1/contacts/dev-2"],
     rules: [
       rule(/^\d+ waiting for you$/, /^\/needs-you$/, "Needs you."),
+      rule(/^#crew\d+ members$/, /^\/comms\/crew$/, "The crew channel."),
+      rule(/^FLIGHT and you/, /^\/comms$/, "The operator's thread with FLIGHT."),
+      rule(/^(DEV|[A-Z]+)-\d+[^→]*msgs$/, /^\/comms\/agents\/[\w-]+$/, "An agent's conversations."),
+      rule(
+        /^Show only messages about /,
+        /^\/comms\/tickets\/[^/]+\?ticket=[^&]+$/,
+        "The messages about one ticket.",
+      ),
+      rule(/^Inbox · /, /^\/comms\/agents\/[\w-]+\/inbox$/, "What the agent reads."),
+      rule(/^All messages$/, /^\/comms\/agents\/[\w-]+$/, "Everything the agent sent and got."),
+      rule(
+        / → /,
+        /^\/comms(\/[\w-]+)*\?focus=pair%3A[^&]+$/,
+        "A chart line opens that pair's thread.",
+      ),
+      rule(
+        /^[\w-]+ · \d+ messages?|messages?[^→]*$/,
+        /^\/comms\/agents\/[\w-]+\/contacts\/[\w-]+$/,
+        "One of the agent's contacts: that conversation.",
+      ),
       rule(/^Open the chart full screen$/, /^\/comms\/chart$/, "The chart on its own."),
       rule(
         /^Your conversation with /,
@@ -134,6 +192,11 @@ export const LINK_MAP: Record<
     rules: [
       rule(/^\d+ waiting for you$/, /^\/needs-you$/, "Needs you."),
       rule(/^← Comms$/, /^\/comms$/, "Back to Comms."),
+      rule(
+        / → /,
+        /^\/comms(\/[\w-]+)+\?focus=pair%3A[^&]+$/,
+        "A chart line opens that pair's thread.",
+      ),
     ],
   },
   qa: {
@@ -171,20 +234,20 @@ export const LINK_MAP: Record<
     routes: ["accounts", "sessions", "repos", "loops", "roles", "sources", "access"].map(
       (t) => `/setup/${t}`,
     ),
-    rules: [],
+    rules: [
+      rule(
+        /^(Accounts|Repos & seats|Loops|Roles|Sources|Safety|Sessions)$/,
+        /^\/setup\/\w+$/,
+        "A Setup tab.",
+      ),
+      rule(
+        /^[a-z]+-\d+.*(whole checkout|read-only)/,
+        /^\/agent\/[\w-]+$/,
+        "A seat opens its Agent page.",
+      ),
+    ],
   },
 };
-
-/** Buttons the crawl clicks too (it clicks no others: most act in place), with where they go. */
-export const NAVIGATING_BUTTONS: { routes: string[]; text: RegExp; target: RegExp; why: string }[] =
-  [
-    {
-      routes: ["/board"],
-      text: /^You:/,
-      target: /^\/needs-you\/[^/]+$/,
-      why: "The chip names what waits on the operator; its Needs you page has the context, pictures, recommendation and options. The side pane has none of them.",
-    },
-  ];
 
 /**
  * Every source file that makes something navigate (`navigate(`, `openItem(`, `followLink(` or an

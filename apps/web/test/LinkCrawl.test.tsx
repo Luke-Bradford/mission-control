@@ -2,13 +2,7 @@ import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { type Click, crawlRoute } from "./linkCrawl.tsx";
-import {
-  EVERYWHERE,
-  LINK_MAP,
-  type LinkRule,
-  NAVIGATING_BUTTONS,
-  NAVIGATING_FILES,
-} from "./linkMap.ts";
+import { EVERYWHERE, LINK_MAP, type LinkRule, NAVIGATING_FILES } from "./linkMap.ts";
 
 /**
  * Every page in Demo, every anchor on it clicked: where it went must be where the link map says,
@@ -87,6 +81,9 @@ it("fails on a target that differs from the map, and on a link the map lacks", (
   expect(problemsOf([click("A link nobody mapped", "/flight")], rules)[0]).toContain(
     "not in the link map",
   );
+  // A button that moves history is a link too: Header's Setup button sent to /x must show up.
+  const setup = { ...click("Setup", "/x"), kind: "button" as const };
+  expect(problemsOf([setup], rulesFor(LINK_MAP, "/board"))[0]).toContain("goes to /x");
   const ktitle = { ...click("Cache it", "/agent/dev-1"), cls: "ktitle" };
   expect(problemsOf([ktitle], rules)[0]).toContain("goes to /agent/dev-1");
 });
@@ -106,19 +103,9 @@ it("every page, in Demo, goes where the map says", { timeout: 600_000 }, async (
   const seen = new Set<string>();
   for (const [, entry] of Object.entries(LINK_MAP)) {
     for (const route of entry.routes) {
-      const clicks = await crawlRoute(route, null);
+      const clicks = await crawlRoute(route);
       seen.add(route);
       problems.push(...problemsOf(clicks, rulesFor(LINK_MAP, route)));
-    }
-  }
-  for (const b of NAVIGATING_BUTTONS) {
-    for (const route of b.routes) {
-      const clicks = (await crawlRoute(route, b.text)).filter((c) => c.kind === "button");
-      if (clicks.length === 0)
-        problems.push(`${route}: no button matched ${b.text}, so it was not checked`);
-      for (const c of clicks)
-        if (!b.target.test(c.target))
-          problems.push(`${route}: "${c.text}" goes to ${c.target}, the map says ${b.target}`);
     }
   }
   console.info(`LinkCrawl visited ${[...seen].join(" ")}`);

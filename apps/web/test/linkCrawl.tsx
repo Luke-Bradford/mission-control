@@ -67,19 +67,38 @@ function clickOnce(el: HTMLElement): string {
   return moved ?? STAYS;
 }
 
-/** Every in-page anchor on `route` in Demo, clicked once; buttons only when `buttons` matches. */
-export async function crawlRoute(route: string, buttons: RegExp | null): Promise<Click[]> {
+/**
+ * Every anchor and enabled button on `route` in Demo, clicked once. A button that moves history
+ * went somewhere and is reported; one that does not is an action in place and is left out. After a
+ * click that changed the page the route is rendered afresh, so the next click starts from the same
+ * screen.
+ */
+export async function crawlRoute(route: string): Promise<Click[]> {
   setDemo(true);
-  window.history.replaceState(null, "", route);
-  const view = render(<App />);
-  await settle();
   const out: Click[] = [];
-  const pick = [...document.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")];
-  for (const el of pick) {
+  const open = async () => {
+    window.history.replaceState(null, "", route);
+    const view = render(<App />);
+    await settle();
+    return view;
+  };
+  const pick = () =>
+    [...document.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")].filter(
+      (el) => !el.closest("[data-crawl-skip]"),
+    );
+  let view = await open();
+  for (let i = 0; i < pick().length; i++) {
+    const el = pick()[i] as HTMLElement;
     const kind = el.tagName === "A" ? "a" : "button";
     const text = words(el);
-    if (kind === "button" && !(buttons?.test(text) ?? false)) continue;
-    out.push({ route, text, cls: el.className, kind, target: clickOnce(el) });
+    const cls = el.className;
+    const before = document.body.innerHTML;
+    const target = await act(async () => clickOnce(el));
+    if (kind === "a" || target !== STAYS) out.push({ route, text, cls, kind, target });
+    if (document.body.innerHTML !== before) {
+      view.unmount();
+      view = await open();
+    }
   }
   view.unmount();
   window.history.replaceState(null, "", "/");
