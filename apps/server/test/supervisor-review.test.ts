@@ -1872,6 +1872,26 @@ describe("a run set aside in review", () => {
     expect(sup.isStartingWorktree(wt())).toBe(false);
   });
 
+  it("wakeRun marks the set-aside worktree in use from the checkout until the seat points at it (#1756)", async () => {
+    const { sup, runId } = await aside(false);
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+    // beforeLaunch runs in the gap: the checkout is made, the seat does not hold the worktree yet
+    const inGap: { marked: boolean; seatWorktree: string | null }[] = [];
+    const real = store.setSeatTurnEnded.bind(store);
+    const spy = vi.spyOn(store, "setSeatTurnEnded").mockImplementation((...args) => {
+      inGap.push({
+        marked: sup.isStartingWorktree(wt()),
+        seatWorktree: store.seatSession("guido-1")?.worktree ?? null,
+      });
+      return real(...args);
+    });
+    await sup.wakeRun(runId);
+    spy.mockRestore();
+    expect(inGap).toEqual([{ marked: true, seatWorktree: null }]);
+    expect(store.seatSession("guido-1")?.worktree).toBe(wt());
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+
   it("wakeRun is refused for a run that is not aside and while the seat holds another run", async () => {
     const { sup, runId } = await aside(false);
     const none = await refusal(sup.wakeRun("guido-1:nonesuch"));
