@@ -25,3 +25,10 @@ it("falls back to a generic page for any other route", () => {
   expect(pictureFor(`/api/qa/review-shots/${"f".repeat(32)}`)).toBe("generic");
   expect(pictureFor(`/api/attention-material-assets/${id("a")}`)).toBe("generic");
 });
+
+it("draws the QA before and after review shots differently", () => {
+  const before = pictureFor(`/api/qa/review-shots/3b${"e".repeat(30)}`);
+  const after = pictureFor(`/api/qa/review-shots/3a${"e".repeat(30)}`);
+  expect(before).not.toBe(after);
+  expect(Buffer.from(pictureBytes(before)).equals(Buffer.from(pictureBytes(after)))).toBe(false);
+});

@@ -67,3 +67,22 @@ it.each(Array.from({ length: 25 }, (_, i) => i + 1))(
     expect(rows().some((r) => r.digest?.toolCalls === 0)).toBe(true);
   },
 );
+
+it.each(Array.from({ length: 25 }, (_, i) => i + 1))(
+  "seed %i opens with an idle seat, a stuck one and a red PR already there",
+  (seed) => {
+    setSceneSeed(seed);
+    const s = getState();
+    const states = rows().map((r) => r.hudState);
+    expect(states).toContain("idle");
+    expect(states).toContain("stalled");
+    expect(s.prFlags.size).toBeGreaterThanOrEqual(1);
+  },
+);
+
+it("the next scene does not start from an all-running crew", () => {
+  setSceneSeed(3);
+  for (let i = 0; i < BEATS + 1; i++) playNext();
+  expect(getState().loops).toBe(1);
+  expect(rows().map((r) => r.hudState)).toContain("stalled");
+});

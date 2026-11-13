@@ -80,9 +80,10 @@ export function pictureFor(path: string): keyof typeof PICTURES {
   const named = { "1": "today", "2": "before", "3": "proposed", "4": "corner", "5": "banner" }[
     id.charAt(0)
   ];
-  return id.length === 64 && /^(.)\1+$/.test(id) && named
-    ? (named as keyof typeof PICTURES)
-    : "generic";
+  if (id.length === 64 && /^(.)\1+$/.test(id) && named) return named as keyof typeof PICTURES;
+  // A review shot (32 hex): the reviewer's "before" and "after" of the page, by the id's 2nd digit.
+  if (/^[0-9a-f]{32}$/.test(id)) return { b: "before", a: "proposed" }[id.charAt(1)] ?? "generic";
+  return "generic";
 }
 
 const CRC = (() => {

@@ -107,7 +107,11 @@ function fresh(loops = 0): DemoState {
   const rng = seeded(base + loops);
   // A whole number of minutes, so the per-minute token buckets still start on minute marks.
   const api = shiftTimes(seed.api, NOW, wholeMinutes(Date.now() - NOW));
-  return {
+  // The scene opens part-way through a day: an idle seat, a stuck one and a red PR are already
+  // there, with one more the seed picks; the rest arrive as it plays.
+  const spare = INCIDENTS.map((i) => i.id).filter((id) => !OPENING.includes(id));
+  const opening: IncidentId[] = [...OPENING, pick(rng, spare)];
+  const started: DemoState = {
     api,
     tickets: DEMO_TICKETS.map((t) => ({ ...t })),
     beat: -1,
@@ -115,10 +119,15 @@ function fresh(loops = 0): DemoState {
     rng,
     fixed: new Set(),
     prFlags: new Map(),
-    plan: planScene(rng),
+    plan: planScene(
+      rng,
+      INCIDENTS.map((i) => i.id).filter((id) => !opening.includes(id)),
+    ),
     loops,
     moves: 0,
   };
+  for (const id of opening) startIncident(started, Date.now(), id);
+  return started;
 }
 
 /** The live state, started at beat 0 if nothing has read it yet. */
@@ -366,10 +375,10 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
 }
 
 /** The beats the scene's events fall on, drawn from the seed. */
-function planScene(rng: Random): DemoState["plan"] {
+function planScene(rng: Random, ids: readonly IncidentId[]): DemoState["plan"] {
   const incidents = new Map<number, IncidentId>();
   // Each incident gets its own beat between the 4th and the 41st, in an order the seed picks.
-  const order = [...INCIDENTS.map((i) => i.id)];
+  const order = [...ids];
   for (let i = order.length - 1; i > 0; i--) {
     const j = Math.floor(rng() * (i + 1));
     [order[i], order[j]] = [order[j] as IncidentId, order[i] as IncidentId];
@@ -605,8 +614,15 @@ const INCIDENTS: readonly Incident[] = [
   },
 ];
 
+/** The incidents a scene opens with. */
+const OPENING: readonly IncidentId[] = ["idle", "stuck", "red-pr"];
+
 function runIncident(s: DemoState, at: number, index: number): readonly Topic[] {
   const id = s.plan.incidents.get(index);
+  return id ? startIncident(s, at, id) : [];
+}
+
+function startIncident(s: DemoState, at: number, id: IncidentId): readonly Topic[] {
   const incident = INCIDENTS.find((i) => i.id === id);
   if (!incident) return [];
   const free = WORKERS.filter((w) => !s.fixed.has(w));
