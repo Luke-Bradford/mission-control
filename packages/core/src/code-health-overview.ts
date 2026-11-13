@@ -1,8 +1,9 @@
 /** The Audit page's first screen as one stored, page-shaped summary. The server builds it; the page only shows it. */
 import type { CodeHealthRecommendation, CodeHealthWindow } from "./code-health.ts";
+import type { WasteCheck } from "./waste.ts";
 
 /** Bump when the stored shape changes, so an older stored summary is rebuilt rather than served. */
-export const CODE_HEALTH_OVERVIEW_VERSION = 1;
+export const CODE_HEALTH_OVERVIEW_VERSION = 2;
 /** The ranked rows on the first screen. */
 export const CODE_HEALTH_OVERVIEW_ROWS_MAX = 10;
 /** Files shown under "Where findings land". */
@@ -73,6 +74,42 @@ export interface CodeHealthPastItem {
   outcome: "worked" | "no-effect" | "worse" | "unchanged" | "unmeasured" | "waiting";
 }
 
+/** The waste alarms the first screen lists: the checks that only raise an alarm (the others hold work and show on the waste route). */
+export const CODE_HEALTH_WASTE_FAMILIES = [
+  "cost-without-output",
+  "coordination-overhead",
+  "ticket-churn",
+  "runs-per-ticket",
+  "failed-review-rounds",
+  "clearance-waiting",
+] as const satisfies readonly WasteCheck[];
+
+/** One open waste alarm as a Do next row. One row per alarm cause; the id is that cause's stable identity. */
+export interface CodeHealthWasteAlarmRow {
+  /** `check:subject`; a cleared alarm that recurs returns under the same id. */
+  id: string;
+  check: (typeof CODE_HEALTH_WASTE_FAMILIES)[number];
+  title: string;
+  /** What the alarm is about, from the alarm's own record. */
+  scope: {
+    repoId: string | null;
+    ticket: string | null;
+    runId: string | null;
+    seatId: string | null;
+  };
+  evidence: string;
+  /** How far the cause has gone: the alarm's level and what it counts. */
+  measure: { value: number; unit: string };
+  /** The limit in words. */
+  threshold: string;
+  /** Dollars the alarm itself records; null is unknown, never zero. */
+  costUsd: number | null;
+  /** Who decides what happens next. */
+  owner: string;
+  state: "open";
+  openedAt: number;
+}
+
 export interface CodeHealthOverview {
   version: number;
   repoId: string;
@@ -91,7 +128,12 @@ export interface CodeHealthOverview {
     items: { source: string; recordedAt: number; summary: string }[];
     note: string;
   };
-  wasteAlarms: { state: "not-available"; note: string };
+  wasteAlarms: {
+    state: "available";
+    note: string;
+    /** Open alarms of this repo, newest first. */
+    rows: CodeHealthWasteAlarmRow[];
+  };
   build: {
     mergedPerDay: CodeHealthMergedDay[];
     merged: CodeHealthFigure;
