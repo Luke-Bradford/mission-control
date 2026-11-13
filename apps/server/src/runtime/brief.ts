@@ -365,7 +365,9 @@ export function reviewBrief(i: ReviewBriefInput): string {
       : []),
     `- CI: every check passed on ${sha7}.`,
     ...(i.installNote
-      ? [`- ${i.installNote} No package from this PR is installed in this copy.`]
+      ? [
+          `- ${i.installNote.replace(/[.\s]+$/, "")}. No package from this PR is installed in this copy.`,
+        ]
       : []),
     ...(i.evidence
       ? [

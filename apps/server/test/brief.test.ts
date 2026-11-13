@@ -605,6 +605,14 @@ describe("reviewBrief", () => {
     expect(out).not.toContain("2. Run the test files");
   });
 
+  it("puts a full stop between the install note and the sentence after it", () => {
+    const out = reviewBrief({ ...review, installNote: "Reviewed, not installed: x; no install" });
+    expect(out).toContain("no install. No package from this PR is installed in this copy.");
+    const stopped = reviewBrief({ ...review, installNote: "Reviewed, not installed: x." });
+    expect(stopped).toContain("x. No package");
+    expect(stopped).not.toContain("x.. No package");
+  });
+
   it("names the repo's review commands, with no pnpm", () => {
     const out = reviewBrief({ ...review, commands: ["uv run pytest"] });
     expect(out).toContain("Configured review checks are `uv run pytest`");

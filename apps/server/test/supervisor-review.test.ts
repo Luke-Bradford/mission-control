@@ -1598,7 +1598,8 @@ describe("startReview", () => {
       const { installs, brief, runId } = await reviewAndReport(r);
       expect(installs).toEqual([]);
       expect(brief).toContain("Reviewed, not installed");
-      expect(brief).toContain("Do not run commands that need packages from this PR");
+      expect(brief).toContain("won't install from it. No package from this PR is installed");
+      expect(brief).toContain("Do not run pnpm, npm, npx, node or any test");
       const [note] = flightNotes();
       expect(note?.text).toContain("PR #9 is reviewed without an install.");
       expect(note?.ticket).toBe("mc#42");
