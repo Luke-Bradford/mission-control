@@ -221,6 +221,29 @@
   font: 600 var(--fs-title) / var(--lh-title) var(--display);
 }
 
+.display-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+/* the buttons keep their text width; the legend takes its own line below them */
+.display-controls > button {
+  flex: none;
+  white-space: nowrap;
+}
+.display-controls > .bslegend {
+  flex-basis: 100%;
+}
+/* with the legend open the controls take the title row's full width, so it can sit under them */
+.display-controls:has(> .bslegend:not([hidden])) {
+  flex-basis: 100%;
+}
+
 .sgrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 460px), 1fr));
