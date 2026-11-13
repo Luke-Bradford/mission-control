@@ -1974,6 +1974,20 @@ describe("review scratch checkouts", () => {
     expect(existsSync(scratchPath())).toBe(false);
   });
 
+  it("a pnpm and uv repo: package.json plus uv.lock fails, since every tool's inputs decide", async () => {
+    commit(seed, {
+      "package.json": PKG,
+      "pnpm-lock.yaml": EMPTY_LOCK,
+      "pyproject.toml": PYPROJECT,
+      "uv.lock": UV_LOCK,
+    });
+    git(seed, "push", "-q", "origin", "main");
+    const { head } = pr({ "package.json": `${PKG}\n`, "uv.lock": `${UV_LOCK}\n` });
+    const install = vi.fn(async () => {});
+    expect((await fail(prepareScratch(scratchInput(head), install))).code).toBe("protected");
+    expect(install).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       "several package.json files and the lockfile",

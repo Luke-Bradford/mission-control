@@ -4509,8 +4509,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (inputs.changedSince !== null) store.setReviewChangedSince(reviewId, inputs.changedSince);
       // A web PR's review gets a preview of its head, built in the background: the review does not
       // wait for it, and one that cannot start does not stop the review.
+      // A read-only review installs nothing from the PR, and a preview would install its packages.
       const previewStarting =
-        deps.reviewPreviews === undefined
+        deps.reviewPreviews === undefined || scratch.installNote !== undefined
           ? false
           : await deps.reviewPreviews.open({
               runId,

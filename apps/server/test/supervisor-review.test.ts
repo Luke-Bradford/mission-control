@@ -1606,6 +1606,56 @@ describe("startReview", () => {
       expect(store.review(r.reviewId)?.installNote).toContain("Reviewed, not installed");
       expect(store.review(r.reviewId)?.state).toBe("reported");
       expect(store.run(runId)?.status).not.toBe("failed");
+      // the reviewer's own pnpm must not install before a script (pnpm 11 reads the pnpm_ spelling)
+      const env = recorded()[0]?.env as Record<string, string>;
+      expect(env.pnpm_config_verify_deps_before_run).toBe("false");
+      expect(env.npm_config_verify_deps_before_run).toBe("false");
+    });
+
+    it("a normal review's env leaves the install check alone", async () => {
+      const r = reviewOfPush();
+      const { sup } = make({ scratchRetro: true });
+      sup.start();
+      await sup.startReview("retro", r.reviewId);
+      await until(() => expect(userLines()).toHaveLength(1));
+      const env = recorded()[0]?.env as Record<string, string>;
+      expect(env.pnpm_config_verify_deps_before_run).toBeUndefined();
+      expect(env.npm_config_verify_deps_before_run).toBeUndefined();
+    });
+
+    it("opens no web preview, which would install the PR's packages", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({}), "pnpm-lock.yaml": LOCK, "apps/web/x.ts": "a\n" },
+        files: {
+          "package.json": pkg({ dependencies: { "new-package": "1.0.0" } }),
+          "apps/web/x.ts": "b\n",
+        },
+      });
+      const open = vi.fn(async () => true);
+      const reviewPreviews = {
+        origin: () => null,
+        identity: () => null,
+        ready: async () => ({ origin: null, note: null, identity: null }),
+        open,
+        close: async () => {},
+      };
+      prep.installRunner = async () => {};
+      const { sup } = make({ scratchRetro: true, extraSeat: FLIGHT_SEAT, reviewPreviews });
+      sup.start();
+      const { runId } = await sup.startReview("retro", r.reviewId);
+      store.setReviewState(r.reviewId, ["starting"], "running", { at: 2, runId });
+      store.recordFindings(r.reviewId, runId, {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "done",
+        findings: [],
+        at: 3,
+      });
+      await until(() =>
+        expect(userLines().find((l) => l.includes("Reviewed, not installed"))).toBeDefined(),
+      );
+      expect(open).not.toHaveBeenCalled();
+      expect(userLines().join("\n")).not.toContain("Preview:");
+      expect(store.review(r.reviewId)?.state).toBe("reported");
     });
   });
 

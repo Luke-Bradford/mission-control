@@ -897,6 +897,8 @@ export const CREW_PNPM_ENV = {
 /** A review with nothing installed: pnpm must not install before a script (the PR's setting wins otherwise). */
 export const CREW_PNPM_NO_INSTALL_ENV = {
   npm_config_verify_deps_before_run: "false",
+  // pnpm 11 reads the pnpm_config_ spelling and ignores the npm_config_ one
+  pnpm_config_verify_deps_before_run: "false",
 } as const;
 
 /** pnpm's legacy project-local store directory, excluded from commits as a backstop. */

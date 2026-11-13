@@ -1099,6 +1099,13 @@ async function installAll(
   for (const tool of INSTALL_TOOLS) {
     if (await succeeds(lstat(join(s.path, tool.lockfile)))) picked.push(tool);
   }
+  // Every picked tool's changed inputs are judged together: a first tool's package.json must not
+  // hide a second tool's changed lockfile behind a read-only decision.
+  if (s.compare && picked.length > 1) {
+    const base = await branchBase(s.inClone, s.base, s.rev, s.subject);
+    const inputs = new Set(picked.flatMap((tool) => [...tool.inputs]));
+    await refuseInstallInputs(s.inClone, base, s.rev, s.subject, inputs);
+  }
   for (const tool of picked) await verifyInstall(s, tool);
   const pnpmStore = picked.includes(PNPM_TOOL)
     ? await prepareSharedPnpmStore(s.worktreesRoot, s.name)

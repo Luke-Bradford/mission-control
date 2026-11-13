@@ -74,6 +74,7 @@ import {
   REFUSAL_TRIES,
   REVIEW_STATUS_BLOCKED,
   REVIEW_STATUS_PASSED,
+  REVIEW_STATUS_PASSED_NOT_INSTALLED,
   REVIEW_STATUS_QUEUED,
   REVIEW_STATUS_RUNNING,
   REVIEW_STATUS_WAIVED,
@@ -7052,6 +7053,16 @@ describe("the engine runs reviews", () => {
         expect(h.statusCalls.at(-1)).toEqual(status("success", REVIEW_STATUS_PASSED)),
       );
       expect(h.statusCalls).toContainEqual(status("pending", REVIEW_STATUS_RUNNING));
+    });
+
+    it("a clean review of a PR that was not installed: mc/review is success, saying so", async () => {
+      await toReview();
+      store.setReviewInstallNote(first().id, "Reviewed, not installed: package.json changed");
+      reported(first().id, []);
+      await vi.waitFor(() =>
+        expect(h.statusCalls.at(-1)).toEqual(status("success", REVIEW_STATUS_PASSED_NOT_INSTALLED)),
+      );
+      expect(h.statusCalls.some((c) => c.state === "failure")).toBe(false);
     });
 
     it("blocking findings: mc/review is failure", async () => {
