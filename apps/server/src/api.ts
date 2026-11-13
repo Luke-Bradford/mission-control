@@ -2805,7 +2805,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             if (rerun) return answer(rerun);
           }
           if (
-            verdict.kind === "allow" &&
+            (verdict.kind === "allow" || verdict.kind === "lock") &&
             body.data.tool_name === "Bash" &&
             typeof command === "string"
           ) {

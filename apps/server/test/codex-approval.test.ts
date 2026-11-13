@@ -381,6 +381,15 @@ describe("Codex check records", () => {
     expect(lock.state().holder).toBeNull();
   });
 
+  it("refuses a full suite while a file test is already running in this checkout", async () => {
+    const { checks } = recorder();
+    checks.admit = async (_k, c) => (c === "pnpm -s test" ? "pnpm -s test a.test.ts" : null);
+    const h = approver("writer", [], undefined, checks, new TestLock());
+    expect(
+      await h.approve(request("pnpm -s test", { itemId: "item-4" }), undefined, signal()),
+    ).toBe("decline");
+  });
+
   it("declines a configured check the recorder says is an unchanged rerun, and never starts its record", async () => {
     const { begun, checks } = recorder();
     checks.rerun = async (_run, c) => (c === "pnpm -s typecheck" ? "Not run: unchanged." : null);

@@ -371,6 +371,31 @@ describe("the check recorder", () => {
     expect(rows).toHaveLength(2);
   });
 
+  it("keeps a Codex check past its turn for the hub's longest wait, not the 2-minute default", async () => {
+    const item = { runId: "r1", toolUseId: "item-1" };
+    const other = { runId: "r1", toolUseId: "t2" };
+    let t = 99;
+    const freed: unknown[] = [];
+    const r = createCheckRecorder({
+      store: { addCheckRun: (c) => void rows.push(c) },
+      checks: async () => checks,
+      state: async () => state,
+      worktree: async () => WORKTREE,
+      now: () => t,
+      release: (k) => void freed.push(k),
+    });
+    await r.begin(item, TYPES, [], { receiptEligible: true });
+    t += 60_000;
+    r.dropRun("r1", { keepWatching: true });
+    t += 120_000;
+    expect(await r.admit?.(other, TYPES)).toBe(TYPES);
+    r.cancel?.(other);
+    t += 120_000;
+    await r.end(item, true, 0);
+    expect(rows).toHaveLength(1);
+    expect(freed).toEqual([]);
+  });
+
   it("releases an interrupted call so another check can be admitted", async () => {
     const r = recorder();
     await r.begin(KEY, LINT);

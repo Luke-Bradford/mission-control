@@ -225,8 +225,8 @@ export function createCheckRecorder(d: CheckRecorderDeps): CheckRecorder {
   const keepCalls = (calls: Iterable<StartedCall>): void => {
     let soonest = Number.POSITIVE_INFINITY;
     for (const call of calls) {
-      call.keptUntil ??=
-        call.startedAt + Math.min(call.timeoutMs || CHECK_BASH_TIMEOUT_MS, CHECK_BASH_TIMEOUT_MS);
+      // a Codex call has no client timeout to read (its begin names none), so it gets the hub's maximum
+      call.keptUntil ??= call.startedAt + CHECK_BASH_TIMEOUT_MS;
       soonest = Math.min(soonest, call.keptUntil);
     }
     if (Number.isFinite(soonest)) setTimeout(sweep, Math.max(0, soonest - now()) + 1).unref();

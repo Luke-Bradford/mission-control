@@ -1156,6 +1156,21 @@ describe("POST /api/guard/check", () => {
       expect((await check(tokA, bash("a3", "pnpm -s test b.test.ts"))).body).toBe("{}");
     });
 
+    it("refuses a full suite while a file test runs in the same checkout, though the guard sends the suite to the lock", async () => {
+      const checks = createCheckRecorder({
+        store: { addCheckRun: () => {} },
+        checks: async () => CONFIGURED,
+        state: async () => ({ head: "a".repeat(40), clean: true }),
+        worktree: async () => "/work/trees/guido-1-9",
+      });
+      await app.close();
+      app = await build({ checks });
+      expect((await check(tokA, bash("a1", "pnpm -s test a.test.ts"))).body).toBe("{}");
+      expect(reason((await check(tokA, bash("a2", "pnpm -s test"))).body)).toBe(
+        "A check is already running in this checkout: pnpm -s test a.test.ts. Wait for it to finish.",
+      );
+    });
+
     it("takes the test lock for a configured check: the second seat's typecheck waits for the first's", async () => {
       const { checks } = spy();
       await app.close();

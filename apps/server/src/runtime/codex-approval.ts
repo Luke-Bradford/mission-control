@@ -208,7 +208,7 @@ export function createCodexApprover(i: {
           typeof params.cwd === "string" ? params.cwd : undefined,
         );
       // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
-      if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
+      if ((verdict.kind === "allow" || verdict.kind === "lock") && event.tool === "Bash" && event.input.command !== undefined) {
         const inCheckout = withinDir(params.cwd, i.cwd);
         const tracked =
           inCheckout &&
