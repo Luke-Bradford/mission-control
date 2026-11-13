@@ -17,7 +17,7 @@ const ask = (key: string, over: Partial<AttentionItem> = {}) =>
     ...over,
   });
 
-function mount(items: AttentionItem[]) {
+function mount(items: AttentionItem[], rows = [crewRow()], open: string | null = null) {
   const discussions: Record<string, unknown> = {};
   for (const i of items) {
     const d = { id: `d:${i.key}`, itemKey: i.key, version: "v1", messages: [] };
@@ -27,7 +27,7 @@ function mount(items: AttentionItem[]) {
   }
   stubFetch({
     "/api/config": CONFIG,
-    "/api/crew?shape=summary": { rows: [crewRow()], firstRunToday: null },
+    "/api/crew?shape=summary": { rows, firstRunToday: null },
     "/api/attention": items,
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
@@ -38,7 +38,7 @@ function mount(items: AttentionItem[]) {
     "/api/limits": [],
     ...discussions,
   });
-  render(<Needs item={null} />);
+  render(<Needs item={open} />);
 }
 
 beforeEach(() => {
@@ -101,4 +101,34 @@ it("says so when the filters match nothing, and clears them", async () => {
   expect(rowTexts()).toHaveLength(0);
   fireEvent.click(screen.getByRole("button", { name: "Clear filters" }));
   expect(rowTexts()).toHaveLength(2);
+});
+
+it("names FLIGHT, by call sign, as the asker of a seat's question, with the brief's title and links", async () => {
+  const q = ask("q1", {
+    agentId: "mc-dev-1",
+    asker: "flight-1",
+    brief: brief({
+      for: "operator",
+      title: "Pick a preview port",
+      links: [{ label: "Port design note", url: "https://example.com/ports" }],
+    }),
+  });
+  mount(
+    [q],
+    [
+      crewRow({ id: "mc-dev-1", displayCallSign: "INCO" }),
+      crewRow({ id: "flight-1", kind: "crew", displayCallSign: null, index: 1 }),
+    ],
+    "q1",
+  );
+  const band = await screen.findByRole("region", { name: "The question" });
+  expect(band.textContent).toContain("Asked by FLIGHT-1");
+  expect(band.textContent).not.toMatch(/INCO|flight-1/);
+  expect(within(band).getByRole("heading", { level: 2 }).textContent).toBe("Pick a preview port");
+  const row = document.querySelector(".needs-row-who");
+  expect(row?.textContent).toContain("Asked by FLIGHT-1");
+  expect(row?.textContent).not.toMatch(/INCO|flight-1/);
+  const select = screen.getByLabelText("Asked by") as HTMLSelectElement;
+  expect([...select.options].map((o) => o.textContent)).toContain("FLIGHT-1");
+  expect(await screen.findByRole("link", { name: "Port design note" })).toBeTruthy();
 });

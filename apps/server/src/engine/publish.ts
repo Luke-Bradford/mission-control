@@ -345,8 +345,12 @@ const CROSS_LINE = /^[×✗✕]\s/;
 const STREAM_LINE = /^(?:stderr|stdout) \|/;
 const BLOCK_END = /^(?:[✓×✗✕❯↓]|FAIL\b|RUN\b|Test Files|Tests\s|Duration)/;
 const NOT_A_CAUSE = /Process completed with exit code/;
+/** A stack frame vitest prints under a failure's assertion: `❯ path/to/file.ts:1550:30`. */
+const SOURCE_LINE = /^❯\s+\S+:\d+:\d+$/;
 /** How far under a FAIL line its error line is looked for. */
 const ERROR_WINDOW = 6;
+/** How far under a FAIL line its source line is looked for: a diff may sit between. */
+const SOURCE_WINDOW = 60;
 /** One failing line is cut here. */
 const FAILING_LINE_MAX = 300;
 /** A job's failing lines are kept up to this many, then its last lines follow. */
@@ -413,6 +417,9 @@ export function ciLogBody(log: string, max: number): string {
   };
   let open: string[] | null = null;
   let sinceFail = 0;
+  // lines since the open FAIL line, and whether its source line is already kept
+  let sinceOpen = 0;
+  let sourced = false;
   let stream = false;
   let lastJob: string | null = null;
   for (const raw of log.split("\n")) {
@@ -440,13 +447,28 @@ export function ciLogBody(log: string, max: number): string {
         g.entries.push(open);
         g.fails++;
         sinceFail = 0;
+        sinceOpen = 0;
+        sourced = false;
       } else open = null;
+    } else if (
+      open !== null &&
+      !stream &&
+      !sourced &&
+      sinceOpen < SOURCE_WINDOW &&
+      SOURCE_LINE.test(text)
+    ) {
+      // the failing test's own line, so the seat sees where the assertion sits
+      open.push(line);
+      sourced = true;
+      sinceOpen++;
     } else if (open !== null && !stream && sinceFail < ERROR_WINDOW && ERROR_LINE.test(text)) {
       // under its FAIL line even when another test failed with the same words
       open.push(line);
       sinceFail++;
+      sinceOpen++;
     } else {
       sinceFail++;
+      sinceOpen++;
       if (CHECK_ERROR.test(text)) {
         if (once(`${job}\t${line}`)) g.entries.push([line]);
       } else if (CROSS_LINE.test(text) || BIOME_HEADER.test(text)) addOnce(g.marks, line);
