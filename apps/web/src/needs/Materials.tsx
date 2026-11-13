@@ -162,7 +162,7 @@ function ViewerBody(p: {
             <button
               type="button"
               className="sm"
-              disabled={p.index === last}
+              aria-disabled={p.index === last}
               onClick={() => step(1)}
             >
               Next

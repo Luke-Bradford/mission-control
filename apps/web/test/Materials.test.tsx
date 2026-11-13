@@ -366,12 +366,15 @@ describe("review fixes", () => {
     const close = within(dialog).getByRole("button", { name: "Close" });
     close.focus();
     fireEvent.keyDown(close, { key: "Tab" });
-    expect(dialog.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Previous" }));
     const next = within(dialog).getByRole("button", { name: "Next" });
     next.focus();
     fireEvent.click(next);
     const last = await screen.findByRole("dialog", { name: "Picture: After" });
     expect(last.contains(document.activeElement)).toBe(true);
+    const nextAtEnd = within(last).getByRole("button", { name: "Next" });
+    expect(nextAtEnd.hasAttribute("disabled")).toBe(false);
+    expect(nextAtEnd.getAttribute("aria-disabled")).toBe("true");
     fireEvent.keyDown(document.activeElement as Element, { key: "ArrowLeft" });
     expect(await screen.findByRole("dialog", { name: "Picture: Before" })).toBeTruthy();
   });

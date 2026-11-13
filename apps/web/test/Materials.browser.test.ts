@@ -165,4 +165,38 @@ describeRendered("Plan and mockups in the question", () => {
     },
     BROWSER_TEST_TIMEOUT_MS,
   );
+
+  it(
+    "keeps focus in the viewer when Next reaches the last picture, so the arrow keys still work",
+    async () => {
+      const page = await renderAt({
+        page: "test/needsBrowser.html",
+        width: 1600,
+        height: 700,
+        api: api(0),
+        assets: assets(7),
+      });
+      try {
+        await ready(page, 6);
+        await page.click("[data-comparison='before-after'] .mat-thumb");
+        await page.boxes(".mat-viewer-img");
+        await page.evaluate(() => {
+          const next = [...document.querySelectorAll<HTMLButtonElement>(".mat-viewer button")].find(
+            (b) => b.textContent === "Next",
+          );
+          next?.focus();
+        }, undefined);
+        await page.press("Enter");
+        await page.press("ArrowLeft");
+        const title = await page.evaluate(
+          () => document.querySelector(".mat-viewer-title")?.textContent,
+          undefined,
+        );
+        expect(title).toBe("Before");
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
 });
