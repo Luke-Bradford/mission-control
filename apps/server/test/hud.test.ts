@@ -400,8 +400,8 @@ describe("crew", () => {
     store.replaceEscalations("site-builder", [
       escalation({ id: "ae#2", repoId: "site-builder", kind: "mvp-ready" }),
     ]);
-    expect(rowOf("shop-app-ta")?.hudState).toBe("blocked");
-    expect(rowOf("studio-builder")?.hudState).toBe("blocked");
+    expect(rowOf("shop-app-ta")?.hudState).toBe("waiting");
+    expect(rowOf("studio-builder")?.hudState).toBe("waiting");
   });
 
   it("a label-only escalation is listed in Needs you but never changes a loop's state", () => {
