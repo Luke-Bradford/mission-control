@@ -591,6 +591,28 @@ describe("reviewBrief", () => {
     expect(reviewBrief(review)).not.toContain("Already decided");
   });
 
+  it("a review with nothing installed sends the reviewer to the diff, not to the checks", () => {
+    const out = reviewBrief({
+      ...review,
+      commands: ["pnpm -s vitest"],
+      fullSuite: ["pnpm -s test"],
+      installNote: "Reviewed, not installed: x",
+    });
+    expect(out).toContain("Reviewed, not installed: x");
+    expect(out).toContain("Do not run pnpm, npm, npx, node or any test");
+    expect(out).not.toContain("pnpm -s vitest");
+    expect(out).not.toContain("pnpm -s test");
+    expect(out).not.toContain("2. Run the test files");
+  });
+
+  it("puts a full stop between the install note and the sentence after it", () => {
+    const out = reviewBrief({ ...review, installNote: "Reviewed, not installed: x; no install" });
+    expect(out).toContain("no install. No package from this PR is installed in this copy.");
+    const stopped = reviewBrief({ ...review, installNote: "Reviewed, not installed: x." });
+    expect(stopped).toContain("x. No package");
+    expect(stopped).not.toContain("x.. No package");
+  });
+
   it("names the repo's review commands, with no pnpm", () => {
     const out = reviewBrief({ ...review, commands: ["uv run pytest"] });
     expect(out).toContain("Configured review checks are `uv run pytest`");

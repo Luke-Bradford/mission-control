@@ -151,6 +151,8 @@ export interface ReviewRow {
   createdAt: number;
   startedAt: number | null;
   endedAt: number | null;
+  /** Set when the review read the PR without installing its packages, and why. */
+  installNote?: string;
 }
 
 export type ReviewRequest = Pick<
@@ -316,6 +318,8 @@ export interface ReviewFact {
   blocking: number;
   minor: number;
   failure: string | null;
+  /** Set when the review ran without an install: the status says so. */
+  installNote?: string;
   /** The design pass and screenshot-pair evidence RETRO recorded for this review. */
   design?: Pick<ReviewCheck, "result" | "note"> | null;
 }
@@ -376,6 +380,7 @@ export const REVIEW_STATUS_CONTEXT = "mc/review";
 export const REVIEW_STATUS_QUEUED = "QA review queued";
 export const REVIEW_STATUS_RUNNING = "QA review running";
 export const REVIEW_STATUS_PASSED = "QA review passed";
+export const REVIEW_STATUS_PASSED_NOT_INSTALLED = "QA review passed (reviewed, not installed)";
 export const REVIEW_STATUS_BLOCKED = "QA review found blocking issues";
 export const REVIEW_STATUS_INCOMPLETE = "QA review did not complete";
 export const REVIEW_STATUS_WAIVED = "QA review waived by the operator";
@@ -409,7 +414,12 @@ export function reviewStatusOf(
     case "reported":
       return cur.blocking > 0
         ? say("failure", REVIEW_STATUS_BLOCKED)
-        : say("success", REVIEW_STATUS_PASSED);
+        : say(
+            "success",
+            cur.installNote === undefined
+              ? REVIEW_STATUS_PASSED
+              : REVIEW_STATUS_PASSED_NOT_INSTALLED,
+          );
     default:
       return null;
   }

@@ -196,15 +196,18 @@ export type CheckoutErrorCode =
 export class CheckoutError extends Error {
   readonly code: CheckoutErrorCode;
   readonly detail: string | null;
+  /** Every install input the branch changes, when the refusal is for changed inputs. */
+  readonly changed: readonly string[];
   constructor(
     code: CheckoutErrorCode,
     message: string,
-    options?: { cause?: unknown; detail?: string },
+    options?: { cause?: unknown; detail?: string; changed?: readonly string[] },
   ) {
     super(message, options);
     this.name = "CheckoutError";
     this.code = code;
     this.detail = options?.detail ?? null;
+    this.changed = options?.changed ?? [];
   }
 }
 
@@ -560,11 +563,12 @@ async function refuseInstallInputs(
       { cause: e },
     );
   }
-  const hit = changed.find((f) => inputs.has(f.split("/").pop() ?? ""));
-  if (hit !== undefined) {
+  const hits = changed.filter((f) => inputs.has(f.split("/").pop() ?? ""));
+  if (hits.length > 0) {
     throw new CheckoutError(
       "protected",
-      `${subject} changes ${hit}; Mission Control won't install from it`,
+      `${subject} changes ${hits.join(", ")}; Mission Control won't install from it`,
+      { changed: hits },
     );
   }
 }
@@ -1094,6 +1098,13 @@ async function installAll(
   const picked: InstallTool[] = [];
   for (const tool of INSTALL_TOOLS) {
     if (await succeeds(lstat(join(s.path, tool.lockfile)))) picked.push(tool);
+  }
+  // Every picked tool's changed inputs are judged together: a first tool's package.json must not
+  // hide a second tool's changed lockfile behind a read-only decision.
+  if (s.compare && picked.length > 1) {
+    const base = await branchBase(s.inClone, s.base, s.rev, s.subject);
+    const inputs = new Set(picked.flatMap((tool) => [...tool.inputs]));
+    await refuseInstallInputs(s.inClone, base, s.rev, s.subject, inputs);
   }
   for (const tool of picked) await verifyInstall(s, tool);
   const pnpmStore = picked.includes(PNPM_TOOL)
@@ -1955,7 +1966,12 @@ export interface Scratch {
   /** origin's default tip */
   baseSha: string;
   mergeBase: string;
+  /** Present when this review reads the PR without installing: its package.json or lockfile changed. */
+  installNote?: string;
 }
+
+/** The only changed install inputs a review reads without installing; any other one fails it. */
+const READ_ONLY_REVIEW_INPUTS: ReadonlySet<string> = new Set(["package.json", "pnpm-lock.yaml"]);
 
 const COMMIT_SHA = /^[0-9a-f]{40}$/;
 
@@ -2025,22 +2041,39 @@ export async function prepareScratch(
     if (!COMMIT_SHA.test(mergeBase)) {
       throw new CheckoutError("base", "the PR head has no merge base with origin's default branch");
     }
-    await installAll(
-      {
-        checkout: i.checkout,
-        common,
-        inClone,
-        path,
-        rev: i.sha,
-        base: mergeBase,
-        compare: true,
-        subject,
-        name: subject,
-        worktreesRoot: i.worktreesRoot,
-      },
-      runInstall,
-    );
-    return { path, gitDir, baseSha, mergeBase };
+    let installNote: string | undefined;
+    try {
+      await installAll(
+        {
+          checkout: i.checkout,
+          common,
+          inClone,
+          path,
+          rev: i.sha,
+          base: mergeBase,
+          compare: true,
+          subject,
+          name: subject,
+          worktreesRoot: i.worktreesRoot,
+        },
+        runInstall,
+      );
+    } catch (e) {
+      // Nothing from the PR branch is installed. A branch whose only changed install inputs are
+      // package.json and the lockfile is reviewed read-only, and reported as "reviewed, not
+      // installed"; any other changed input, or any other refusal, still fails.
+      if (
+        e instanceof CheckoutError &&
+        e.code === "protected" &&
+        e.changed.length > 0 &&
+        e.changed.every((f) => READ_ONLY_REVIEW_INPUTS.has(basename(f)))
+      ) {
+        installNote = `Reviewed, not installed: ${e.message}`;
+      } else {
+        throw e;
+      }
+    }
+    return { path, gitDir, baseSha, mergeBase, ...(installNote ? { installNote } : {}) };
   } catch (e) {
     await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch(() => {});
     throw e;

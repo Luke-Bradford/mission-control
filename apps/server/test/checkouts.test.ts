@@ -1945,18 +1945,82 @@ describe("review scratch checkouts", () => {
     expect(worktreeDiskKb() - before).toBeLessThan(20 * 1024);
   });
 
-  it("a PR head that changes an install input is refused and removed", async () => {
+  it("a PR head that changes a protected install input other than the manifest is refused and removed", async () => {
     commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
     git(seed, "push", "-q", "origin", "main");
-    const { head } = pr({ "package.json": `${PKG}\n` });
+    const { head } = pr({ ".npmrc": "ignore-scripts=false\n" });
     const e = await fail(prepareScratch(scratchInput(head)));
     expect(e.code).toBe("protected");
-    expect(e.message).toBe(
-      `the PR head ${head.slice(0, 7)} changes package.json; Mission Control won't install from it`,
-    );
     expect(existsSync(scratchPath())).toBe(false);
     expect(worktrees()).toHaveLength(1);
   });
+
+  it.each([
+    ["package.json plus a root .npmrc", { "package.json": `${PKG}\n`, ".npmrc": "a=b\n" }],
+    ["package.json plus .pnpmfile.cjs", { "package.json": `${PKG}\n`, ".pnpmfile.cjs": "x\n" }],
+    [
+      "package.json plus pnpm-workspace.yaml",
+      { "package.json": `${PKG}\n`, "pnpm-workspace.yaml": "verifyDepsBeforeRun: install\n" },
+    ],
+    ["package.json plus a nested .npmrc", { "package.json": `${PKG}\n`, "sub/.npmrc": "a=b\n" }],
+  ])("a PR head that changes %s fails, whichever input sorts first", async (_n, files) => {
+    commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+    git(seed, "push", "-q", "origin", "main");
+    const { head } = pr(files);
+    const install = vi.fn(async () => {});
+    const e = await fail(prepareScratch(scratchInput(head), install));
+    expect(e.code).toBe("protected");
+    expect(install).not.toHaveBeenCalled();
+    expect(existsSync(scratchPath())).toBe(false);
+  });
+
+  it("a pnpm and uv repo: package.json plus uv.lock fails, since every tool's inputs decide", async () => {
+    commit(seed, {
+      "package.json": PKG,
+      "pnpm-lock.yaml": EMPTY_LOCK,
+      "pyproject.toml": PYPROJECT,
+      "uv.lock": UV_LOCK,
+    });
+    git(seed, "push", "-q", "origin", "main");
+    const { head } = pr({ "package.json": `${PKG}\n`, "uv.lock": `${UV_LOCK}\n` });
+    const install = vi.fn(async () => {});
+    expect((await fail(prepareScratch(scratchInput(head), install))).code).toBe("protected");
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "several package.json files and the lockfile",
+      {
+        "package.json": `${PKG}\n`,
+        "packages/x/package.json": `${PKG}\n`,
+        "pnpm-lock.yaml": `${EMPTY_LOCK}\n`,
+      },
+    ],
+    ["package.json scripts (PR 1520)", { "package.json": `${PKG}\n` }],
+    ["pnpm-lock.yaml", { "pnpm-lock.yaml": `${EMPTY_LOCK}\n` }],
+    [
+      "package.json plus pnpm-lock.yaml (PR 1640)",
+      { "package.json": `${PKG}\n`, "pnpm-lock.yaml": `${EMPTY_LOCK}\n` },
+    ],
+  ])(
+    "a PR head that changes %s is reviewed read-only, with nothing installed",
+    async (_n, files) => {
+      commit(seed, { "package.json": PKG, "pnpm-lock.yaml": EMPTY_LOCK });
+      git(seed, "push", "-q", "origin", "main");
+      const { head } = pr(files);
+      const install = vi.fn(async () => {});
+      const s = await prepareScratch(scratchInput(head), install);
+      expect(install).not.toHaveBeenCalled();
+      expect(s.installNote).toMatch(
+        new RegExp(
+          `^Reviewed, not installed: the PR head ${head.slice(0, 7)} changes .*; Mission Control won't install from it$`,
+        ),
+      );
+      expect(existsSync(scratchPath())).toBe(true);
+      expect(existsSync(join(scratchPath(), "node_modules"))).toBe(false);
+    },
+  );
 
   describe("writeReviewInputs", () => {
     const read = (f: string) => readFileSync(join(scratchPath(), f), "utf8");
