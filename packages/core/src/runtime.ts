@@ -75,7 +75,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.rerunCi,
   MC_TOOL_NAMES.editCard,
   MC_TOOL_NAMES.dismissItem,
-
+  MC_TOOL_NAMES.resolveWasteAlarm,
   MC_TOOL_NAMES.syncMain,
   MC_TOOL_NAMES.createTicket,
   MC_TOOL_NAMES.commentTicket,
