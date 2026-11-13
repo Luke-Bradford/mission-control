@@ -112,6 +112,20 @@ function openItems(): unknown {
   };
 }
 
+/** Stored messages per ticket: the demo gives each of the first few cards on every board some. */
+function ticketCounts(): unknown {
+  const api = getState().api;
+  const tickets = Object.keys(api)
+    .filter((key) => /^\/api\/boards\/[^/?]+$/.test(key))
+    .flatMap((key) =>
+      (api[key] as { repoId: string; issueNumber: number }[]).slice(0, 6).map((card) => ({
+        ticket: `${card.repoId}#${card.issueNumber}`,
+        count: (card.issueNumber % 7) + 1,
+      })),
+    );
+  return { tickets, unassignedCount: 0 };
+}
+
 /** The last day's messages one by one: each link's recent pair, then the crew channel's. */
 function feed(): unknown {
   const links = (getState().api["/api/comms/links"] as { links: { from: string; to: string }[] })
@@ -171,6 +185,7 @@ export function answer(path: string): Response {
   if (path === "/api/comms/traffic") return json(traffic());
   if (path === "/api/comms/open") return json(openItems());
   if (path === "/api/comms/feed") return json(feed());
+  if (path === "/api/comms/ticket-counts") return json(ticketCounts());
   const filtered = history(path);
   if (filtered !== undefined) return json(filtered);
   const range = telemetryRange(path);

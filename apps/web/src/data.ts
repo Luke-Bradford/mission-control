@@ -223,6 +223,8 @@ export const RESOURCES = {
   }),
   commsCrew: { path: "/api/comms/crew", topic: "agents" },
   commsFlight: { path: "/api/comms/flight", topic: "agents" },
+  /** All-time stored messages per ticket (not a recent window). */
+  commsTicketCounts: { path: "/api/comms/ticket-counts", topic: "agents" },
   /** A nav row's read: the conversation list and counts, no messages. */
   commsNav: (agentId: string): ResourceRef => ({
     path: commsNavPath(agentId),
@@ -311,9 +313,20 @@ export const RESOURCES = {
     topic: null,
   }),
   // What Mission Control knows of one ticket: its form and the crew's timeline. `before` pages older.
-  ticketHistory: (repoId: string, issueNumber: number, before = ""): ResourceRef => ({
-    path: `/api/tickets/${enc(repoId)}/${issueNumber}${before ? `?before=${enc(before)}` : ""}`,
-    topic: before ? null : TICKET_TOPICS,
+  ticketHistory: (
+    repoId: string,
+    issueNumber: number,
+    before = "",
+    questionsBefore = "",
+  ): ResourceRef => ({
+    path: `/api/tickets/${enc(repoId)}/${issueNumber}${
+      before
+        ? `?before=${enc(before)}`
+        : questionsBefore
+          ? `?questionsBefore=${enc(questionsBefore)}`
+          : ""
+    }`,
+    topic: before || questionsBefore ? null : TICKET_TOPICS,
   }),
   // Read live from the CLI on each fetch, so not tied to agents events: the Context tile
   // refetches it every SEAT_CONTEXT_REFRESH_MS while the seat runs, and when its turn ends.

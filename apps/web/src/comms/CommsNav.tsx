@@ -1,8 +1,6 @@
 import {
-  COMMS_CAPCOM,
-  COMMS_CREW,
+  COMMS_CONTROLLER,
   type CommsAgentResponse,
-  type CommsMention,
   type CommsMessagesResponse,
   type CrewRow,
 } from "@mc/core";
@@ -11,7 +9,13 @@ import { RESOURCES, useResource } from "../data.ts";
 import { plural } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
-import { type CommsView, commsAgentPath, commsCrewPath, commsFlightPath } from "../router.ts";
+import {
+  type CommsView,
+  commsAgentPath,
+  commsContactPath,
+  commsCrewPath,
+  commsFlightPath,
+} from "../router.ts";
 import { useNoticeResource } from "./model.ts";
 
 /** The short area label belongs in the compact nav; path globs belong in seat detail. */
@@ -23,13 +27,11 @@ export function commsAgentRole(row: CrewRow): string {
 export function AgentNavRow({
   row,
   view,
-  mentions,
   onNavigate,
   hideNotices = false,
 }: {
   row: CrewRow;
   view: CommsView;
-  mentions: number;
   hideNotices?: boolean;
   onNavigate: (path: string) => void;
 }) {
@@ -37,7 +39,6 @@ export function AgentNavRow({
   // The nav row reads counts, not messages: what its contact conversations hold (the crew
   // channel is not among them).
   const total = (data?.contacts ?? []).reduce((n, c) => n + c.count, 0);
-  const unread = data?.unread ?? 0;
   const direct = data?.directUnread ?? 0;
   const active = "agentId" in view && view.agentId === row.id;
   const status = seatStatus(row);
@@ -55,71 +56,58 @@ export function AgentNavRow({
       <span className="comms-nav-counts">
         <small
           className={total === 0 ? "zero" : undefined}
-          title={`${plural(total, "message")} with its contacts`}
+          title={`${plural(total, "message")} with its contacts. A message count, not unread.`}
         >
-          {total}
+          {`${total} msgs`}
         </small>
-        <CountBadges unread={unread} mentions={mentions} direct={direct} />
+        <CountBadges direct={direct} />
       </span>
     </button>
   );
 }
 
-function CountBadges({
-  unread = 0,
-  mentions = 0,
-  direct = 0,
-}: {
-  unread?: number;
-  mentions?: number;
-  /** Unread replies to CAPCOM on the agent's direct line, its transcript included. */
-  direct?: number;
-}) {
-  const unreadLabel = plural(unread, "unread message");
-  const mentionsLabel = plural(mentions, "new mention");
-  const directLabel = plural(direct, "unread reply to you", "unread replies to you");
+/** The only unread mark: replies and messages addressed to the operator (never the controller's). */
+function CountBadges({ direct = 0, flight = 0 }: { direct?: number; flight?: number }) {
+  const n = direct + flight;
+  if (n === 0) return null;
+  const label = plural(n, "unread message to you", "unread messages to you");
   return (
-    <>
-      {direct > 0 && (
-        <span className="comms-unread-count comms-direct-count" title={directLabel}>
-          <span aria-hidden="true">↩{direct}</span>
-          <span className="sr-only">{directLabel}</span>
-        </span>
-      )}
-      {unread > 0 && (
-        <span className="comms-unread-count" title={unreadLabel}>
-          <span aria-hidden="true">{unread}</span>
-          <span className="sr-only">{unreadLabel}</span>
-        </span>
-      )}
-      {mentions > 0 && (
-        <span className="comms-mention-count" title={mentionsLabel}>
-          <span aria-hidden="true">@{mentions}</span>
-          <span className="sr-only">{mentionsLabel}</span>
-        </span>
-      )}
-    </>
+    <span className="comms-unread-count comms-direct-count" title={label}>
+      <span aria-hidden="true">{n}</span>
+      <span className="sr-only">{label}</span>
+    </span>
   );
 }
 
-function unseenMentionsFor(
-  mentions: CommsMention[],
-  kind: "crew" | "flight" | "agent",
-  id?: string,
-): number {
-  return mentions.filter(({ message, seen }) => {
-    if (seen) return false;
-    if (kind === "crew") return message.to === COMMS_CREW || message.from === COMMS_CREW;
-    if (message.to === COMMS_CREW || message.from === COMMS_CREW) return false;
-    if (kind === "flight")
-      return (
-        id !== undefined &&
-        [message.from, message.to].includes(id) &&
-        [message.from, message.to].includes(COMMS_CAPCOM)
-      );
-    const conversationAgent = message.from === COMMS_CAPCOM ? message.to : message.from;
-    return id !== undefined && conversationAgent === id;
-  }).length;
+/** FLIGHT's conversation with the controller; offered only when it has stored messages. */
+function ControllerNavRow({
+  flightId,
+  view,
+  onNavigate,
+}: {
+  flightId: string;
+  view: CommsView;
+  onNavigate: (path: string) => void;
+}) {
+  const contact = useResource<CommsAgentResponse>(RESOURCES.commsNav(flightId)).data?.contacts.find(
+    (c) => c.id === COMMS_CONTROLLER,
+  );
+  if (!contact?.hasMessages) return null;
+  const active =
+    view.kind === "contact" && view.agentId === flightId && view.contactId === COMMS_CONTROLLER;
+  return (
+    <button
+      type="button"
+      className={`comms-nav-top${active ? " on" : ""}`}
+      onClick={() => onNavigate(commsContactPath(flightId, COMMS_CONTROLLER))}
+    >
+      <i aria-hidden="true" />
+      <span className="comms-nav-agent">
+        <b>FLIGHT and the controller</b>
+        <small title="A message count, not unread.">{plural(contact.count, "message")}</small>
+      </span>
+    </button>
+  );
 }
 
 export function CommsNav({
@@ -135,10 +123,7 @@ export function CommsNav({
   onNavigate: (path: string) => void;
   hideNotices?: boolean;
 }) {
-  const crew = useNoticeResource<CommsMessagesResponse>(RESOURCES.commsCrew, hideNotices).data;
   const flight = useNoticeResource<CommsMessagesResponse>(RESOURCES.commsFlight, hideNotices).data;
-  const mentions =
-    useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions).data?.mentions ?? [];
   // Observed loops appear in `/api/crew` too, but are not stored-Comms agents.  In particular,
   // `/api/comms/agents/:id` correctly rejects them, so never mount an AgentNavRow for one.
   const seats = rows.filter((row) => row.kind === "crew" && row.id !== flightId);
@@ -149,7 +134,7 @@ export function CommsNav({
   return (
     <nav className="comms-nav" aria-label="Comms">
       <div className="comms-section-head">
-        <h2>Comms</h2>
+        <h2>Team</h2>
         <span title={agentsLive?.detail ? `${agentsLive.detail}\n${live.title}` : live.title}>
           {live.label}{" "}
           <b className="num" data-metric="agentsLive">
@@ -164,16 +149,14 @@ export function CommsNav({
       >
         <i aria-hidden="true" />
         <span className="comms-nav-agent">
-          <b>FLIGHT ↔ CAPCOM</b>
+          <b>FLIGHT and you</b>
           <small>{plural(flight?.messages.length ?? 0, "message")}</small>
         </span>
         <span className="comms-nav-counts">
-          <CountBadges
-            unread={flight?.unread}
-            mentions={unseenMentionsFor(mentions, "flight", flightId)}
-          />
+          <CountBadges flight={flight?.unread} />
         </span>
       </button>
+      {flightId && <ControllerNavRow flightId={flightId} view={view} onNavigate={onNavigate} />}
       <button
         type="button"
         className={`comms-nav-top${view.kind === "crew" ? " on" : ""}`}
@@ -183,9 +166,6 @@ export function CommsNav({
         <span className="comms-nav-agent">
           <b>#crew</b>
           <small>{plural(crewMembers, "member")}</small>
-        </span>
-        <span className="comms-nav-counts">
-          <CountBadges unread={crew?.unread} mentions={unseenMentionsFor(mentions, "crew")} />
         </span>
       </button>
       <div className="comms-section-head">
@@ -198,7 +178,6 @@ export function CommsNav({
           row={row}
           hideNotices={hideNotices}
           view={view}
-          mentions={unseenMentionsFor(mentions, "agent", row.id)}
           onNavigate={onNavigate}
         />
       ))}

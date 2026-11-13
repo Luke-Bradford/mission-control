@@ -4,7 +4,7 @@ import { isOperatorItem } from "../attention.ts";
 import { CommsGraph } from "../comms/CommsGraph.tsx";
 import { CommsNav } from "../comms/CommsNav.tsx";
 import { CommsConversation } from "../comms/Conversation.tsx";
-import { Decisions } from "../comms/Decisions.tsx";
+import { TicketsList } from "../comms/TicketsList.tsx";
 import { RESOURCES, useResource } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
 import {
@@ -64,7 +64,6 @@ export function Comms({ item, view }: { item: string | null; view: CommsView }) 
             />
             Hide hub notices
           </label>
-          <Decisions items={items} rows={rows} />
           <CommsNav
             rows={rows}
             flightId={flightId}
@@ -72,6 +71,7 @@ export function Comms({ item, view }: { item: string | null; view: CommsView }) 
             onNavigate={navigate}
             hideNotices={hideNotices}
           />
+          <TicketsList />
         </div>
         <CommsConversation
           view={view}
