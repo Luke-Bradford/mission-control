@@ -41,6 +41,8 @@ export function fileRecommendationProposals(
       repoId,
       rule: name,
       ruleVersion: CODE_HEALTH_RULES.version,
+      causeId: `file-change-boundary:${hash([file.path, sizes.analysedSha, prs])}`,
+      title: `Reduce change coupling in ${file.path}`,
       scope: {
         kind: "file-risk",
         file: file.path,
@@ -63,7 +65,18 @@ export function fileRecommendationProposals(
         metric: "measured regular-text lines in this file",
         direction: "decrease",
         baseline: file.lines,
+        value: rule.lines,
+        source: "CODE_HEALTH_RULES.repeatedlyChangedLargeFile.lines",
+        policy: `Existing file-triage line threshold: ${rule.lines} measured lines.`,
       },
+      measure: {
+        current: file.lines,
+        unit: "lines",
+        window: "current snapshot; 30d touches",
+        sourceAt: sizes.collectedAt,
+        coverage: `${prs.length} observed merged PR touches in the recorded 30-day window.`,
+      },
+      decision: { owner: "FLIGHT", tier: "flight" },
     };
   });
   return { proposals, missing };
