@@ -32,6 +32,3 @@ export const MaterialsOptionImages = z
     }),
   )
   .max(8);
-
-/** What a seat may send with its question: the story, without option pictures. */
-export const SeatMaterialsArg = z.strictObject(MaterialsStoryShape);

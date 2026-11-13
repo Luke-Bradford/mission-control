@@ -193,7 +193,6 @@ import {
   AttentionMaterialsError,
   type AttentionMaterialsService,
   createAttentionMaterials,
-  MATERIAL_SWEEP_MS,
 } from "./attention-materials.ts";
 import {
   AWAY_STARTED_SETTING,
@@ -1721,21 +1720,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       preview: repo.id === deps.previewRepoId ? (deps.previews?.get(pr.number) ?? null) : null,
     });
   };
-  // closed questions' images are deleted once past their retention window
-  const materialSweep =
-    deps.noLoopWrites === true
-      ? undefined
-      : setInterval(() => {
-          try {
-            attentionMaterials.sweep();
-          } catch {
-            // the next pass or read tries again
-          }
-        }, MATERIAL_SWEEP_MS);
-  materialSweep?.unref();
   const streams = new Set<() => void>();
   app.addHook("preClose", async () => {
-    clearInterval(materialSweep);
     unsubscribeNotifications();
     stopMapRing?.();
     clearTimeout(notificationTimer);

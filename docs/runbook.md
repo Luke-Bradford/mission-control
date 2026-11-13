@@ -3024,27 +3024,22 @@ syntax) loses its `!` and is a plain link or text, and raw HTML is
 made inert (`<` becomes `&lt;`), so nothing is fetched or run when it is shown.
 
 **Story.** FLIGHT attaches one with `attach_materials { key, sourceCommit, label, sections,
-optionImages? }` (a seat's question is the item `ask:<id>`). A seat sends its own pictures
-with `ask_flight { question, materials }`: `materials` is the same story without `optionImages` and
-without a repository (the seat's own is used); the hub keeps it as that question's story. If the
-pictures cannot be kept, the question still reaches FLIGHT and the seat is told why. Each section has a `heading`, a short
+optionImages? }` (a seat's question is the item `ask:<id>`). A seat's `ask_flight` carries no
+materials; only FLIGHT attaches them. Each section has a `heading`, a short
 `text`, `images` (repo-relative PNG, JPEG or WebP paths, each with a `caption`), optional child
 `sections` (up to four deep, 40 sections in all) and an optional `comparison` (`before-after` or
 `options`; needs two or more images) so the page shows its images side by side. `optionImages` lists,
 by a brief option's `id`, the images that show that option, so a choice can be made by picking a
 picture. The read returns `story` in order, with each image named by `imageId` in `images[]`.
 
-**Limits and retention.** A question may hold 24 MB of images in all its packets together; a
+**Limits.** A question may hold 24 MB of images in all its packets together; a
 registration past that is refused with a plain message. A repeat registration of the same input is
-the same packet and adds nothing. The hub deletes a question's images 30 days after it first sees the
-question closed (checked by the API on each read and registration, and every hour; a preview hub
-skips the hourly pass; a seat's `ask_flight` attaches pictures without checking, because it cannot tell which questions are closed); the packet then reads
-`imagesRemovedAt` and its image links answer 404, while the text stays.
+the same packet and adds nothing. The hub keeps what it stored and deletes nothing here; clearing
+old images from disk is the housekeeping job's.
 
 **Reading.** `GET /api/attention/:key/materials` returns `{ packets }`, every packet kept for the item, oldest first (a plan, then a story
 attached later, each whole; `AttentionMaterialsResponse` in mc/core), answers 404 when there are none, and works after the
-question is rebriefed, held or closed. A held question still counts as open here: a hold never
-starts the retention window. `historical` is true, with `historicalReason` (`rebriefed`,
+question is rebriefed, held or closed. `historical` is true, with `historicalReason` (`rebriefed`,
 `source changed`, `question closed` or `repository changed`), when the live item no longer matches
 the packet's brief id, source revision or repository, or its brief is stale.
 `GET /api/attention-material-assets/:id` returns the retained raster bytes. All three routes need

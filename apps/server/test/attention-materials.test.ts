@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { ATTENTION_MATERIAL_RETENTION_DAYS, type AttentionStoryRegistration } from "@mc/core";
+import type { AttentionStoryRegistration } from "@mc/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { createAttentionMaterials } from "../src/attention-materials.ts";
@@ -377,10 +377,10 @@ describe("a held question", () => {
     expect(
       (await server.inject({ method: "GET", url: "/api/attention/held" })).json(),
     ).toHaveLength(1);
-    expect((await get()).json().packets[0]).toMatchObject({ historical: false, closedAt: null });
-    at += (ATTENTION_MATERIAL_RETENTION_DAYS + 1) * DAY;
+    expect((await get()).json().packets[0]).toMatchObject({ historical: false });
+    at += 60 * DAY;
     const later = (await get()).json().packets[0];
-    expect(later).toMatchObject({ historical: false, closedAt: null, imagesRemovedAt: null });
+    expect(later).toMatchObject({ historical: false });
     expect(readdirSync(join(h.dir, "attention-material-assets"))).toHaveLength(2);
     expect((await post()).statusCode).toBe(201);
     await server.close();
@@ -665,54 +665,6 @@ describe("a story in pictures", () => {
   });
 });
 
-describe("retention", () => {
-  it("deletes the images of a question closed past the window, and says so", async () => {
-    const h = harness(PACKET);
-    const { service } = h.make();
-    const saved = await service.register("k1", REG(h.commit));
-    const id = saved.images[0]?.id ?? "";
-    expect(service.asset(id)).not.toBeNull();
-    h.state.item = null;
-    h.state.at = 5000;
-    expect(one(service, "k1")).toMatchObject({ closedAt: 5000, imagesRemovedAt: null });
-    h.state.at = 5000 + (ATTENTION_MATERIAL_RETENTION_DAYS - 1) * DAY;
-    service.sweep();
-    expect(service.asset(id)).not.toBeNull();
-    h.state.at = 5000 + ATTENTION_MATERIAL_RETENTION_DAYS * DAY;
-    const read = one(service, "k1");
-    expect(read?.imagesRemovedAt).toBe(h.state.at);
-    expect(read?.markdown).toContain("/api/attention-material-assets/");
-    expect(service.asset(id)).toBeNull();
-    expect(readdirSync(h.assets)).toEqual([]);
-  });
-
-  it("keeps an image that a question still open holds", async () => {
-    const h = harness(PACKET);
-    const { service } = h.make();
-    await service.register("k1", REG(h.commit));
-    await service.register("k2", REG(h.commit));
-    // k1 closes while k2 stays open and holds the same two images
-    let k1Open = true;
-    const stored = h.make();
-    const both = createAttentionMaterials({
-      store: stored.store,
-      config: CONFIG,
-      item: (key) => (key === "k1" ? (k1Open ? OPEN : null) : key === "k2" ? OPEN : null),
-      checkout: () => h.checkout,
-      assetsDir: h.assets,
-      now: () => h.state.at,
-    });
-    k1Open = false;
-    h.state.at = 10;
-    both.sweep();
-    h.state.at = 10 + ATTENTION_MATERIAL_RETENTION_DAYS * DAY;
-    both.sweep();
-    expect(readdirSync(h.assets)).toHaveLength(2);
-    expect(one(both, "k1")?.imagesRemovedAt).toBe(h.state.at);
-    expect(one(both, "k2")?.imagesRemovedAt).toBeNull();
-  });
-});
-
 it("imports the full retained layout packet from a self-contained Git fixture", async () => {
   const dir = mkdtempSync(join(tmpdir(), "materials-real-"));
   dirs.push(dir);
@@ -801,6 +753,8 @@ describe("embeds that slip past a pattern", () => {
     expect(p.markdown).not.toContain("![space]");
     expect(p.markdown).not.toContain("![nested");
     expect(p.markdown).toContain("[space]( https://evil.example/space.png )");
+    // the definition no longer defines anything: it reads as plain text
+    expect(p.markdown).toContain("\\[shortcut]: https://evil.example/shortcut.png");
     expect(p.markdown).toMatch(/!\[ok\]\(\/api\/attention-material-assets\/[a-f0-9]{64}\)/);
     expect(p.images).toHaveLength(1);
   });
@@ -861,44 +815,6 @@ describe("one item, several packets", () => {
     });
     expect(got.json().packets.map((p: { label: string }) => p.label)).toEqual(["Layout", "Again"]);
     await server.close();
-  });
-});
-
-describe("a service that cannot tell open from closed", () => {
-  it("never restarts the retention clock of a closed question", async () => {
-    const h = harness(PACKET);
-    const { store, service } = h.make();
-    const saved = await service.register("k1", REG(h.commit));
-    const [kept, gone] = [saved.images[0]?.id ?? "", saved.images[1]?.id ?? ""];
-    h.state.item = null;
-    h.state.at = 1000;
-    service.sweep();
-    expect(one(service, "k1")?.closedAt).toBe(1000);
-    // ask_flight's service answers "open" for every key, and must not sweep
-    const asking = createAttentionMaterials({
-      store,
-      config: CONFIG,
-      item: () => ({ repoId: "sample" }),
-      sweepOnUse: false,
-      checkout: () => h.checkout,
-      assetsDir: h.assets,
-      now: () => h.state.at,
-    });
-    h.state.at = 1000 + (ATTENTION_MATERIAL_RETENTION_DAYS - 1) * DAY;
-    await asking.attachStory("ask:9", {
-      repoId: "sample",
-      sourceCommit: h.commit,
-      label: "Seat pictures",
-      sections: [{ heading: "Now", images: [{ path: "docs/p/before.png", caption: "Today" }] }],
-    });
-    asking.read("ask:9");
-    expect(store.attentionMaterialsAllForItem("k1")[0]?.closedAt).toBe(1000);
-    h.state.at = 1000 + ATTENTION_MATERIAL_RETENTION_DAYS * DAY;
-    service.sweep();
-    expect(store.attentionMaterialsAllForItem("k1")[0]?.imagesRemovedAt).toBe(h.state.at);
-    // the seat's own packet still holds before.png, so only the other file goes
-    expect(existsSync(join(h.assets, kept))).toBe(true);
-    expect(existsSync(join(h.assets, gone))).toBe(false);
   });
 });
 

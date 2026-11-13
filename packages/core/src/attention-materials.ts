@@ -1,7 +1,5 @@
 /** Immutable display material retained for a Needs-you item: a plan, or a story told in pictures. */
 
-/** Days the hub keeps a question's images after the question closes. */
-export const ATTENTION_MATERIAL_RETENTION_DAYS = 30;
 /** The most image bytes one question may hold, summed over every packet it has. */
 export const ATTENTION_MATERIAL_QUESTION_BYTES = 24 * 1024 * 1024;
 /** Deepest nesting of story sections, the sections in one story and the images in one packet. */
@@ -71,10 +69,6 @@ export interface AttentionMaterials {
   /** The item has since been rebriefed, changed source, closed or moved to another repository. */
   historical: boolean;
   historicalReason: AttentionHistoricalReason | null;
-  /** When the hub first saw the question closed; the retention window counts from here. */
-  closedAt: number | null;
-  /** Set once the images were deleted after the window; `images[].url` then answers 404. */
-  imagesRemovedAt: number | null;
 }
 
 export interface AttentionMaterialRegistration {

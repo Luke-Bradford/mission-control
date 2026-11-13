@@ -2,13 +2,12 @@
 
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, posix } from "node:path";
 import { promisify } from "node:util";
 import {
   ATTENTION_MATERIAL_IMAGES_MAX,
   ATTENTION_MATERIAL_QUESTION_BYTES,
-  ATTENTION_MATERIAL_RETENTION_DAYS,
   ATTENTION_STORY_DEPTH_MAX,
   ATTENTION_STORY_SECTIONS_MAX,
   type AttentionHistoricalReason,
@@ -36,11 +35,11 @@ const EMBED_MARK = "\u0000";
 const IMAGE_OPEN = /!\[/g;
 /** The start of raw HTML (`<img`, `</x`, `<!--`) is made inert text, never an element. */
 const RAW_HTML = /<(?=[a-zA-Z/!?])/g;
+/** A reference definition (`[x]: https://...`) whose destination is external. */
+const EXTERNAL_DEFINITION = /^( {0,3})\[(?=[^\]]+\]:[ \t]*<?(?:[a-z][a-z0-9+.-]*:|\/\/))/gim;
 const RASTER_EXT = /\.(?:png|jpe?g|webp)$/i;
 const MAX_MARKDOWN = 1024 * 1024;
 const MAX_IMAGE = 2 * 1024 * 1024;
-const HOUR_MS = 3_600_000;
-const DAY_MS = 86_400_000;
 const IMAGE_REFUSED = "Images must be bounded PNG, JPEG or WebP files.";
 
 export class AttentionMaterialsError extends Error {
@@ -53,11 +52,7 @@ export class AttentionMaterialsError extends Error {
 
 type SavedStore = Pick<
   Store,
-  | "attentionMaterials"
-  | "attentionMaterialsAllForItem"
-  | "attentionMaterialsHeld"
-  | "markAttentionMaterials"
-  | "putAttentionMaterials"
+  "attentionMaterials" | "attentionMaterialsAllForItem" | "putAttentionMaterials"
 >;
 type Item = {
   repoId: string | null;
@@ -75,11 +70,6 @@ export interface AttentionMaterialsService {
   /** Every packet kept for the item, oldest first; empty when there are none. */
   read(itemKey: string): AttentionMaterials[];
   asset(id: string): { bytes: Buffer; mediaType: AttentionMaterialImage["mediaType"] } | null;
-  /**
-   * Marks closed questions, and deletes the images of those closed past the retention window.
-   * Only a service whose `item` lookup knows every open item may sweep.
-   */
-  sweep(): void;
 }
 
 function hash(bytes: Buffer | string): string {
@@ -184,18 +174,12 @@ export function createAttentionMaterials(i: {
   store: SavedStore;
   config: CcConfig;
   item: (key: string) => Item;
-  /**
-   * Sweep on each read and registration. Off for a service whose `item` lookup cannot tell an
-   * open question from a closed one (a seat's ask_flight): it would reopen every closed packet.
-   */
-  sweepOnUse?: boolean;
   checkout?: (repoId: string) => string | undefined;
   git?: GitBlob;
   assetsDir?: string;
   now?: () => number;
 }): AttentionMaterialsService {
   const now = i.now ?? Date.now;
-  const sweepOnUse = i.sweepOnUse ?? true;
   const checkout =
     i.checkout ?? ((repoId) => i.config.crew?.sessions.find((s) => s.repoId === repoId)?.checkout);
   const read = i.git ?? committedBlob;
@@ -218,8 +202,6 @@ export function createAttentionMaterials(i: {
     sourceRevision: packet.sourceRevision ?? null,
     story: packet.story ?? null,
     optionImages: packet.optionImages ?? [],
-    closedAt: packet.closedAt ?? null,
-    imagesRemovedAt: packet.imagesRemovedAt ?? null,
   });
   const historicalReason = (packet: AttentionMaterials): AttentionHistoricalReason | null => {
     const live = i.item(packet.itemKey);
@@ -244,7 +226,6 @@ export function createAttentionMaterials(i: {
   const heldImages = (itemKey: string): Map<string, number> => {
     const held = new Map<string, number>();
     for (const packet of i.store.attentionMaterialsAllForItem(itemKey)) {
-      if ((packet.imagesRemovedAt ?? null) !== null) continue;
       for (const image of packet.images) held.set(image.id, image.size);
     }
     return held;
@@ -329,35 +310,6 @@ export function createAttentionMaterials(i: {
     sourceRevision: item.brief?.binding?.sourceRevision ?? null,
   });
 
-  const sweep = () => {
-    const at = now();
-    const removed: AttentionMaterials[] = [];
-    for (const stored of i.store.attentionMaterialsHeld()) {
-      const packet = withDefaults(stored);
-      const open = i.item(packet.itemKey) !== null;
-      if (open) {
-        if (packet.closedAt !== null) i.store.markAttentionMaterials(packet.id, { closedAt: null });
-        continue;
-      }
-      if (packet.closedAt === null) {
-        i.store.markAttentionMaterials(packet.id, { closedAt: at });
-        continue;
-      }
-      if (at - packet.closedAt >= ATTENTION_MATERIAL_RETENTION_DAYS * DAY_MS) {
-        i.store.markAttentionMaterials(packet.id, { imagesRemovedAt: at });
-        removed.push(packet);
-      }
-    }
-    if (removed.length === 0) return;
-    const stillHeld = new Set(
-      i.store.attentionMaterialsHeld().flatMap((p) => p.images.map((image) => image.id)),
-    );
-    for (const packet of removed)
-      for (const image of packet.images)
-        if (!stillHeld.has(image.id) && /^[a-f0-9]{64}$/.test(image.id))
-          rmSync(join(assetsDir, image.id), { force: true });
-  };
-
   /** `![alt](x)` that does not become a retained image is shown as a plain link, never embedded. */
   const inert = (label: string, link: string) =>
     /^[a-z][a-z0-9+.-]*:/i.test(link) && !/^https?:/i.test(link) ? label : `[${label}](${link})`;
@@ -403,6 +355,7 @@ export function createAttentionMaterials(i: {
     return (output + source.slice(offset))
       .replace(IMAGE_OPEN, "[")
       .replaceAll(EMBED_MARK, "!")
+      .replace(EXTERNAL_DEFINITION, "$1\\[")
       .replace(RAW_HTML, "&lt;");
   };
 
@@ -458,7 +411,6 @@ export function createAttentionMaterials(i: {
           "The source path must be a Markdown file under docs/.",
         );
       const item = precheck(itemKey, input.repoId, input.sourceCommit);
-      if (sweepOnUse) sweep();
       const id = packetId(itemKey, [
         input.repoId,
         input.sourceCommit,
@@ -490,8 +442,6 @@ export function createAttentionMaterials(i: {
         optionImages: [],
         historical: false,
         historicalReason: null,
-        closedAt: null,
-        imagesRemovedAt: null,
       };
       i.store.putAttentionMaterials(packet);
       return packet;
@@ -501,7 +451,6 @@ export function createAttentionMaterials(i: {
       input: AttentionStoryRegistration,
     ): Promise<AttentionMaterials> {
       const item = precheck(itemKey, input.repoId, input.sourceCommit);
-      if (sweepOnUse) sweep();
       const paths = storyPaths(input);
       const optionIds = new Set((item.brief?.options ?? []).flatMap((o) => (o.id ? [o.id] : [])));
       for (const option of input.optionImages ?? []) {
@@ -581,14 +530,11 @@ export function createAttentionMaterials(i: {
         optionImages,
         historical: false,
         historicalReason: null,
-        closedAt: null,
-        imagesRemovedAt: null,
       };
       i.store.putAttentionMaterials(packet);
       return packet;
     },
     read(itemKey: string): AttentionMaterials[] {
-      if (sweepOnUse) sweep();
       return i.store.attentionMaterialsAllForItem(itemKey).map(view);
     },
     asset(id: string): { bytes: Buffer; mediaType: AttentionMaterialImage["mediaType"] } | null {
@@ -603,8 +549,5 @@ export function createAttentionMaterials(i: {
         return null;
       }
     },
-    sweep,
   };
 }
-
-export const MATERIAL_SWEEP_MS = HOUR_MS;

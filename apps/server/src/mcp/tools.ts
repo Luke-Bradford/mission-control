@@ -196,8 +196,6 @@ import {
   withSection,
 } from "@mc/core";
 import { z } from "zod";
-import { AttentionMaterialsError, createAttentionMaterials } from "../attention-materials.ts";
-import { SeatMaterialsArg } from "../attention-materials-schema.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanCodeHealth } from "../code-health/clean.ts";
@@ -265,8 +263,6 @@ export interface McToolsDeps {
   prEvidenceSection?: (run: Run) => string | null;
   /** gh, through its one wrapper (`createGh`): draft_pr lists and opens PRs with it. */
   gh: GhRunner;
-  /** Where retained question pictures are kept; default: beside the DB. */
-  attentionMaterialsDir?: string;
   /** The DB's path: draft_pr writes its PR body file into `{DB dir}/crew/`. */
   dbPath: string;
   /**
@@ -364,10 +360,7 @@ const CommitArgs = z.strictObject({
   remove: z.array(removePath).max(MC_REMOVE_MAX).optional(),
 });
 const PrBodyArgs = z.strictObject({ body: text(MC_PR_BODY_MAX) });
-const AskArgs = z.strictObject({
-  question: text(MC_TEXT_MAX),
-  materials: SeatMaterialsArg.optional(),
-});
+const AskArgs = z.strictObject({ question: text(MC_TEXT_MAX) });
 const CallArgs = z.strictObject({
   reason: text(MC_TEXT_MAX),
   ref: z.string().trim().min(1).max(120).optional(),
@@ -2506,35 +2499,12 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     const live = liveRun(ctx);
     if (live === null) return { text: MC_RUN_ENDED, isError: true };
     const at = now();
-    const questionId = store.addQuestion({
+    store.addQuestion({
       agentId: ctx.seatId,
       runId: ctx.runId,
       text: parsed.data.question,
       at,
     });
-    // the seat's pictures travel up with its question, kept from the commit it names
-    const repoId = seatPlace(config, ctx.seatId)?.session.repoId;
-    let kept = "";
-    if (parsed.data.materials !== undefined) {
-      try {
-        if (repoId === undefined)
-          throw new AttentionMaterialsError(404, "Repository is not configured.");
-        await createAttentionMaterials({
-          store,
-          config,
-          item: () => ({ repoId }),
-          // this lookup says "open" for every key, so it must never sweep
-          sweepOnUse: false,
-          ...(deps.attentionMaterialsDir === undefined
-            ? {}
-            : { assetsDir: deps.attentionMaterialsDir }),
-        }).attachStory(`ask:${questionId}`, { ...parsed.data.materials, repoId });
-      } catch (error) {
-        kept = ` The question is with FLIGHT, but its pictures were not kept: ${
-          error instanceof AttentionMaterialsError ? error.message : "they could not be retained."
-        } Ask FLIGHT to attach them, or ask again.`;
-      }
-    }
     store.addComms({
       at,
       from: ctx.seatId,
@@ -2545,7 +2515,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     });
     bus.emit("attention");
     bus.emit("agents");
-    return { text: `${ASKED_FLIGHT}${kept}` };
+    return { text: ASKED_FLIGHT };
   }
 
   /**
@@ -3236,11 +3206,6 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
             minLength: 1,
             maxLength: MC_TEXT_MAX,
             description: "The question, with the context FLIGHT needs to answer it.",
-          },
-          materials: {
-            ...z.toJSONSchema(SeatMaterialsArg, { io: "input" }),
-            description:
-              "Optional pictures that make the question clear: sections in order (heading, short text, images with captions, child sections up to four deep; a comparison section shows two or more images side by side). Give the full 40-character sourceCommit the images are committed at; image paths are repo-relative PNG, JPEG or WebP files of at most 2 MB. The hub keeps its own copy and shows it to the operator with the question.",
           },
         },
         required: ["question"],
