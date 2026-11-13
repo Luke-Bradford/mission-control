@@ -14,7 +14,11 @@ const json = (body: unknown, status = 200): Response =>
   });
 
 /** Paths the hub answers 404 to on purpose (a PR with no evidence); not a gap in the seed. */
-const INTENDED_404: readonly RegExp[] = [/^\/api\/prs\/\d+\/evidence/];
+const INTENDED_404: readonly RegExp[] = [
+  /^\/api\/prs\/\d+\/evidence/,
+  // No choice was made on a question that is still open.
+  /^\/api\/attention\/[^/]+\/choice$/,
+];
 
 /** Paths asked of Demo that it has no data for, newest last (tests read it). */
 const misses: string[] = [];
