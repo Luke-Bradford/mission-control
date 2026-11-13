@@ -21,6 +21,7 @@ import type { RecommendationRecord } from "./recommendations.ts";
 import { buildRiskTab } from "./risk-view.ts";
 import type { CodeHealthEvidenceKind } from "./source.ts";
 import { buildTestTab } from "./test-view.ts";
+import { wasteAlarmRows } from "./waste-rows.ts";
 
 const CACHE_MS = 60_000;
 const CACHE_MAX = 200;
@@ -139,12 +140,15 @@ export class CodeHealthReader {
       stored.sourceRevision === this.store.codeHealthRevision(repoId) &&
       at >= stored.generatedAt &&
       at - stored.generatedAt < CODE_HEALTH_OVERVIEW_TTL_MS
-    )
-      return {
-        view: JSON.parse(stored.body) as CodeHealthOverview,
-        rebuilt: false,
-        changed: false,
-      };
+    ) {
+      const view = JSON.parse(stored.body) as CodeHealthOverview;
+      // Alarms open and close without touching the code-health source, so the stored rows are compared with the live ones.
+      if (
+        JSON.stringify(view.wasteAlarms.rows) ===
+        JSON.stringify(wasteAlarmRows(this.store, repoId, at))
+      )
+        return { view, rebuilt: false, changed: false };
+    }
     // Refreshing proposals writes the source revision, so the stored revision is read after it.
     this.refreshProposals(repoId, at);
     return this.store.codeHealthSnapshot(() => {
