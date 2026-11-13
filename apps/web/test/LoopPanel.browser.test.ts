@@ -107,7 +107,25 @@ describeRendered("The Agent page's Loop panel, rendered", () => {
       expect(header).toContain("Parked");
       expect(header).toContain("RETRO-CX reviewed c74cdfc");
       expect(header).not.toContain("the grid clips");
-      expect(await page.reachable("#loopP .vstep")).not.toContain(false);
+      const measured = await page.evaluate(() => {
+        const box = (selector: string) => {
+          const r = document.querySelector(selector)?.getBoundingClientRect();
+          return r ? [Math.round(r.top), Math.round(r.bottom)] : null;
+        };
+        return JSON.stringify({
+          window: innerHeight,
+          shell: box(".control-shell"),
+          side: box(".side"),
+          tabs: box(".side-tabs"),
+          body: box(".side-body"),
+          loop: box("#loopP"),
+          steps: [...document.querySelectorAll("#loopP .vstep")].map((el) => {
+            const r = el.getBoundingClientRect();
+            return [Math.round(r.top), Math.round(r.bottom)];
+          }),
+        });
+      }, null);
+      expect(await page.reachable("#loopP .vstep"), measured).not.toContain(false);
       if (process.env.MC_SHOT_DIR) {
         await page.screenshot(`${process.env.MC_SHOT_DIR}/loop-${width}-${scheme}.png`);
       }
