@@ -5,13 +5,17 @@
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  EVIDENCE_DEMO_VIEWPORTS,
   EVIDENCE_KINDS,
   EVIDENCE_PAGE_PATHS,
   EVIDENCE_SCHEMES,
+  type EvidenceDemo,
   type EvidenceManifest,
   type EvidencePage,
   type EvidencePair,
   type EvidenceScheme,
+  evidenceDemoImageName,
+  evidenceDemoMissing,
   evidenceImageName,
   evidenceMissing,
   evidenceRefusalText,
@@ -54,6 +58,16 @@ export interface PrEvidenceDeps {
     origin: string,
     path: string,
     scheme: EvidenceScheme,
+    signal: AbortSignal,
+  ): Promise<Buffer>;
+  /**
+   * One screenshot of a page on the head in Demo, at its busiest, at `viewport`. Without it a
+   * capture makes no Demo renders and none are required.
+   */
+  renderDemo?(
+    origin: string,
+    path: string,
+    viewport: { width: number; height: number },
     signal: AbortSignal,
   ): Promise<Buffer>;
   /**
@@ -137,6 +151,13 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     if (!m) return null;
     return {
       ...m,
+      ...(m.demos === undefined
+        ? {}
+        : {
+            demos: m.demos.filter((d) =>
+              deps.store.hasImage(deps.repoId, t.pr, t.sha, evidenceDemoImageName(d.page, d.width)),
+            ),
+          }),
       pairs: m.pairs.filter((p) =>
         EVIDENCE_KINDS.every((kind) =>
           deps.store.hasImage(deps.repoId, t.pr, t.sha, evidenceImageName(p.page, p.scheme, kind)),
@@ -174,6 +195,38 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     return shots;
   }
 
+  /** The head in Demo: each page at each Demo size. */
+  async function renderDemos(
+    side: EvidenceSide,
+    pages: EvidencePage[],
+    signal: AbortSignal,
+  ): Promise<Map<string, Buffer>> {
+    const shots = new Map<string, Buffer>();
+    const renderDemo = deps.renderDemo;
+    if (renderDemo === undefined) return shots;
+    for (const page of pages)
+      for (const viewport of EVIDENCE_DEMO_VIEWPORTS) {
+        signal.throwIfAborted();
+        try {
+          shots.set(
+            evidenceDemoImageName(page, viewport.width),
+            await abortable(
+              renderDemo(side.origin, EVIDENCE_PAGE_PATHS[page], viewport, signal),
+              signal,
+            ),
+          );
+        } catch (e) {
+          if (signal.aborted) throw e;
+          const why = e instanceof Error ? e.message : String(e);
+          throw new Error(
+            `${page} page, Demo at ${viewport.width}x${viewport.height}, head side: ${why}`,
+            { cause: e },
+          );
+        }
+      }
+    return shots;
+  }
+
   /** Builds one side from its own copy of the snapshot, photographs it, and always stops it. */
   async function photograph(
     sha: string,
@@ -182,6 +235,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     name: string,
     pages: EvidencePage[],
     signal: AbortSignal,
+    demos?: Map<string, Buffer>,
   ): Promise<Map<string, Buffer>> {
     const db = join(dir, `${name}.sqlite`);
     await copyFile(snapshot, db);
@@ -189,7 +243,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     const side = await deps.startSide({ sha, db, signal });
     try {
       signal.throwIfAborted();
-      return await render(side, name, pages, signal);
+      const shots = await render(side, name, pages, signal);
+      if (demos) for (const [k, v] of await renderDemos(side, pages, signal)) demos.set(k, v);
+      return shots;
     } finally {
       await side.stop().catch(() => {});
     }
@@ -208,9 +264,18 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       const snapshot = join(dir, "snapshot.sqlite");
       await abortable(deps.snapshot(snapshot), signal);
       const before = await photograph(mainSha, snapshot, dir, "main", pages, signal);
-      const after = await photograph(t.sha, snapshot, dir, "head", pages, signal);
+      const demoShots = new Map<string, Buffer>();
+      const after = await photograph(t.sha, snapshot, dir, "head", pages, signal, demoShots);
       const pairs: EvidencePair[] = [];
       const images: EvidenceImage[] = [];
+      const demos: EvidenceDemo[] = [];
+      for (const page of pages)
+        for (const v of EVIDENCE_DEMO_VIEWPORTS) {
+          const png = demoShots.get(evidenceDemoImageName(page, v.width));
+          if (png === undefined) continue;
+          demos.push({ page, width: v.width, height: v.height });
+          images.push({ name: evidenceDemoImageName(page, v.width), png });
+        }
       for (const page of pages) {
         for (const scheme of EVIDENCE_SCHEMES) {
           const key = `${page}:${scheme}`;
@@ -231,7 +296,15 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       }
       signal.throwIfAborted();
       deps.store.save(
-        { repoId: deps.repoId, pr: t.pr, sha: t.sha, mainSha, capturedAt: now(), pairs },
+        {
+          repoId: deps.repoId,
+          pr: t.pr,
+          sha: t.sha,
+          mainSha,
+          capturedAt: now(),
+          pairs,
+          ...(deps.renderDemo ? { demos } : {}),
+        },
         images,
       );
     } finally {
@@ -276,6 +349,14 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     return pending;
   }
 
+  /** How many pairs and Demo renders `pages` still lacks at this head. */
+  function missingEvidence(have: EvidenceManifest | null, sha: string, pages: EvidencePage[]) {
+    return (
+      evidenceMissing(have, sha, pages).length +
+      (deps.renderDemo ? evidenceDemoMissing(have, sha, pages).length : 0)
+    );
+  }
+
   async function post(t: EvidenceTarget): Promise<void> {
     const manifest = deps.store.manifest(deps.repoId, t.pr, t.sha);
     if (manifest === null || posted.has(keyOf(t)) || t.onStored === undefined) return;
@@ -295,7 +376,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (stopped || pages.length === 0) return;
       const key = keyOf(t);
       const have = manifest(t);
-      if (evidenceMissing(have, t.sha, pages).length === 0) return post(t);
+      if (missingEvidence(have, t.sha, pages) === 0) return post(t);
       const failed = failedAt.get(key);
       if (failed !== undefined && now() - failed < retryMs) return;
       const going = running.get(key);
@@ -338,13 +419,20 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       if (uncatalogued.length > 0) return evidenceUncataloguedText(uncatalogued);
       const pages = pagesOf.get(keyOf(t)) ?? prEvidenceAffectedPages(t.paths);
       if (pages.length === 0) return null;
-      const missing = evidenceMissing(manifest(t), t.sha, pages);
-      if (missing.length === 0)
+      const have = manifest(t);
+      const missing = evidenceMissing(have, t.sha, pages);
+      const demoGaps = deps.renderDemo ? evidenceDemoMissing(have, t.sha, pages) : [];
+      if (missing.length === 0 && demoGaps.length === 0)
         return posted.has(keyOf(t))
           ? null
           : "kept in draft until its screenshot evidence links are posted to the PR";
       const why = failedWhy.get(keyOf(t));
-      return `${evidenceRefusalText(missing)}; capture failed: ${why ?? ""}`.replace(
+      const gaps = [
+        ...missing,
+        ...demoGaps.map(({ page }) => ({ page, scheme: "light" as const })),
+      ];
+      const demoNote = demoGaps.length > 0 ? " (Demo renders of the head included)" : "";
+      return `${evidenceRefusalText(gaps)}${demoNote}; capture failed: ${why ?? ""}`.replace(
         /; capture failed: $/,
         "",
       );
