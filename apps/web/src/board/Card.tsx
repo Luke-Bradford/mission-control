@@ -16,8 +16,7 @@ import { Pill, PillButton } from "../hud/Pill.tsx";
 import { PrChip, type PreviewPr } from "../hud/PrChip.tsx";
 import { RepoRef, TicketRef } from "../hud/RepoRef.tsx";
 import { ReviewState } from "../hud/ReviewState.tsx";
-import { agentPath, followLink, navigate, ticketPath, tracePath } from "../router.ts";
-import { openItem } from "../shell/overlays.ts";
+import { agentPath, followLink, navigate, needsYouPath, ticketPath, tracePath } from "../router.ts";
 import {
   type CardSeat,
   type CardYou,
@@ -130,8 +129,7 @@ function sameProps(a: CardProps, b: CardProps): boolean {
 }
 
 /**
- * One ticket. Click the card, or Enter or Space on its title link: the agent's page if one is
- * working it, else the ticket beside the board.
+ * One ticket. Click the card, or Enter or Space on its title link: the ticket page.
  */
 export const Card = memo(function Card({
   item,
@@ -158,7 +156,8 @@ export const Card = memo(function Card({
   const col = cardColumn(item);
   const worked = !mine && (agent?.hudState === "running" || reviewer?.hudState === "running");
   const blocker = col === "Done" ? null : firstBlocker(item);
-  const to = agent ? agentPath(agent.id) : ticketPath(item.repoId, item.issueNumber);
+  // Always the ticket: the seat on the card may not be working it. The ticket page shows who is.
+  const to = ticketPath(item.repoId, item.issueNumber);
   const trace = agent?.loop && agent.run ? tracePath(agent.id, agent.run.id) : null;
   const go = () => navigate(to);
   // The title is the link that opens the card (its ::after covers the card); a click on the rest
@@ -264,7 +263,7 @@ export const Card = memo(function Card({
         onClick={(e) => {
           // the card's own click would open the ticket instead
           e.stopPropagation();
-          openItem(you.key);
+          navigate(needsYouPath(you.key));
         }}
       >
         {you.text}
