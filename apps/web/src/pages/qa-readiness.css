@@ -1,5 +1,6 @@
 .uat-page {
   display: grid;
+  align-content: start;
   gap: var(--sp-4);
   min-width: 0;
   padding: var(--sp-3);
