@@ -5,6 +5,7 @@ import { hub, useResource } from "../data.ts";
 import { shortSha } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
+import { NOTHING_TO_SEE } from "./nothingToSee.ts";
 import "./qa-report.css";
 
 const TOPICS = ["agents", "boards"] as const;
@@ -635,6 +636,9 @@ export const QaReportRead = memo(function QaReportRead({
         }
       >
         <div className="pb uat-pairs">
+          {r.visual.applicability === "not_applicable" && !r.visual.pairs.length && (
+            <p className="uat-no-capture">{NOTHING_TO_SEE}</p>
+          )}
           <p>
             {r.visual.reason ?? "QA has not recorded why visual evidence does or does not apply."}
           </p>

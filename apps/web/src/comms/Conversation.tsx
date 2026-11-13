@@ -43,6 +43,7 @@ import {
   navigate,
   ticketPath,
 } from "../router.ts";
+import { recordMentionsSeen, useMentions } from "../shell/operatorMessages.ts";
 import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, useTokenRenderer } from "./messages.tsx";
 import { type CommsView, noticeResource, ticketForRef, useNoticeResource } from "./model.ts";
@@ -584,9 +585,8 @@ function MentionsBell({
   flightId: string | undefined;
 }) {
   const time = useMessageTime();
-  const resource = useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions);
+  const mentions = useMentions();
   const [open, setOpen] = useState(false);
-  const [seen, setSeen] = useState<Set<string>>(() => new Set());
   const [markError, setMarkError] = useState<string[] | null>(null);
   const panel = useRef<HTMLElement>(null);
   // The conversation panel clips what overflows it: fit the list into the room below the bell.
@@ -605,14 +605,12 @@ function MentionsBell({
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, [open]);
-  const mentions = resource.data?.mentions ?? [];
-  const unseen = mentions.filter((mention) => !mention.seen && !seen.has(mention.message.id));
+  const unseen = mentions.filter((mention) => !mention.seen);
   const mark = (ids: string[]) => {
     void apiPost("/api/comms/mentions/seen", { ids })
       .then(() => {
-        setSeen((current) => new Set([...current, ...ids]));
         setMarkError(null);
-        hub.refetch(RESOURCES.commsMentions.path);
+        recordMentionsSeen(ids);
       })
       .catch((e: unknown) => {
         if (writeFailure(e, "") === DEMO_REFUSED) toast(DEMO_REFUSED);
@@ -652,7 +650,7 @@ function MentionsBell({
             </button>
           </header>
           {mentions.map((mention) => {
-            const isSeen = mention.seen || seen.has(mention.message.id);
+            const isSeen = mention.seen;
             return (
               <button
                 className={isSeen ? "seen" : ""}

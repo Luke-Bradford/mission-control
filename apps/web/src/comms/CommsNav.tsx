@@ -7,11 +7,12 @@ import {
   type CrewRow,
 } from "@mc/core";
 import { callSign, seatStatus } from "../crew.ts";
-import { RESOURCES, useResource } from "../data.ts";
+import { RESOURCES } from "../data.ts";
 import { plural } from "../fmt.ts";
 import { agentColor } from "../hud/AgentTag.tsx";
 import { metricText, metricTitle, useMetrics } from "../metrics.ts";
 import { type CommsView, commsAgentPath, commsCrewPath, commsFlightPath } from "../router.ts";
+import { useMentions } from "../shell/operatorMessages.ts";
 import { useNoticeResource } from "./model.ts";
 
 /** The short area label belongs in the compact nav; path globs belong in seat detail. */
@@ -137,8 +138,7 @@ export function CommsNav({
 }) {
   const crew = useNoticeResource<CommsMessagesResponse>(RESOURCES.commsCrew, hideNotices).data;
   const flight = useNoticeResource<CommsMessagesResponse>(RESOURCES.commsFlight, hideNotices).data;
-  const mentions =
-    useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions).data?.mentions ?? [];
+  const mentions = useMentions();
   // Observed loops appear in `/api/crew` too, but are not stored-Comms agents.  In particular,
   // `/api/comms/agents/:id` correctly rejects them, so never mount an AgentNavRow for one.
   const seats = rows.filter((row) => row.kind === "crew" && row.id !== flightId);

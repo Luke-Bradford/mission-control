@@ -79,3 +79,42 @@ export function schemeOf(url: string): string {
   const m = /^([a-z][a-z0-9+.-]*):/i.exec(url.trim());
   return m?.[1]?.toLowerCase() ?? "these";
 }
+
+/** Words, in a ticket, that point at something only the author can open. */
+const PRIVATE_CANDIDATE =
+  /(?:\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()[\]`"']+|\b[A-Za-z]:\\[^\s<>()[\]`"']+|(?<![\w/.:~-])\/(?:Users|home|private|var|tmp|mnt|opt)\/[^\s<>()[\]`"']+)/g;
+const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
+const LOCAL_PATH = /^(?:[A-Za-z]:\\|\/(?:Users|home|private|var|tmp|mnt|opt)\/)/;
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
+
+/**
+ * Whether a link or path from a ticket points somewhere only its author can open: a `file:` link,
+ * a local-machine address, an absolute path on a disk, or a GitHub page in a repo other than
+ * `ownRepo` (`owner/name`; any GitHub repo counts as other when it is null).
+ */
+export function isPrivateLink(text: string, ownRepo: string | null): boolean {
+  if (LOCAL_PATH.test(text)) return true;
+  let u: URL;
+  try {
+    u = new URL(text);
+  } catch {
+    return false;
+  }
+  if (u.protocol === "file:") return true;
+  if (u.protocol !== "http:" && u.protocol !== "https:") return false;
+  if (LOCAL_HOSTS.has(u.hostname)) return true;
+  if (u.hostname !== "github.com") return false;
+  const [owner, name] = u.pathname.split("/").filter(Boolean);
+  if (owner === undefined || name === undefined || ownRepo === null) return owner !== undefined;
+  return `${owner}/${name}`.toLowerCase() !== ownRepo.toLowerCase();
+}
+
+/** The distinct private links and paths written in `text`, in order of first appearance. */
+export function privateLinksIn(text: string, ownRepo: string | null): string[] {
+  const found = new Set<string>();
+  for (const m of text.matchAll(PRIVATE_CANDIDATE)) {
+    const link = m[0].replace(TRAILING_PUNCTUATION, "");
+    if (isPrivateLink(link, ownRepo)) found.add(link);
+  }
+  return [...found];
+}

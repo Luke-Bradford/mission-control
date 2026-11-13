@@ -59,6 +59,39 @@ describe("TicketDetail", () => {
     }
   });
 
+  it("flags private prototype links in the description and leaves public ones alone", async () => {
+    ticket(
+      view({
+        body: [
+          "Prototype: file:///Users/me/proto/index.html",
+          "Local: http://localhost:5173/board and /Users/me/notes.md and C:\\mock\\a.html.",
+          `Own repo: ${GH}/pull/9`,
+          "Other repo: https://github.com/someone/secret/pull/1",
+          "Docs: https://example.com/spec",
+        ].join("\n"),
+      }),
+    );
+    show();
+    const note = await screen.findByRole("note", { name: "Private links" });
+    const listed = within(note)
+      .getAllByRole("listitem")
+      .map((li) => li.textContent);
+    expect(listed).toEqual([
+      "file:///Users/me/proto/index.html",
+      "http://localhost:5173/board",
+      "/Users/me/notes.md",
+      "C:\\mock\\a.html",
+      "https://github.com/someone/secret/pull/1",
+    ]);
+  });
+
+  it("shows no private-link note for a body with only public links", async () => {
+    ticket(view({ body: `See ${GH}/pull/9 and https://example.com/spec` }));
+    show();
+    await screen.findByText(/See/);
+    expect(screen.queryByRole("note", { name: "Private links" })).toBeNull();
+  });
+
   it("shows the header, sub-issues, pull requests and the GitHub link", async () => {
     ticket(view());
     show();
