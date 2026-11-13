@@ -1573,6 +1573,7 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/code-health/test-reports", {}],
   ["POST", "/api/code-health/test-qa", {}],
   ["GET", "/api/code-health?repo=shop-app"],
+  ["GET", "/api/code-health/overview?repo=shop-app"],
   ["GET", "/api/code-health/evidence/:id?repo=shop-app"],
   ["GET", "/api/agents/shop-app-ta/runs"],
   ["GET", "/api/agents/guido-1/runs"],
@@ -2746,8 +2747,11 @@ describe("local access", () => {
         expect(r.json()).toEqual({ error: "map checkout unavailable" });
         continue;
       }
-      if (url.startsWith("/api/code-health/recommendations")) {
-        // This local-access fixture has no operator token; recommendation history and decisions always require it.
+      if (
+        url.startsWith("/api/code-health/recommendations") ||
+        url.startsWith("/api/code-health/overview")
+      ) {
+        // This local-access fixture has no operator token; these reads and decisions always require it.
         expect(r.statusCode).toBe(401);
         continue;
       }
