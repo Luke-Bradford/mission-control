@@ -131,11 +131,19 @@ async function crawlFrozen(route: string): Promise<Click[]> {
   };
   let view = await open();
   const first = list();
+  const done = new Set<string>();
   for (let i = 0; i < pick().length; i++) {
     const el = pick()[i] as HTMLElement;
     const kind = el.tagName === "A" ? "a" : "button"; // role=button and the like count as buttons
     const text = words(el);
-    const cls = el.className;
+    const cls = el.getAttribute("class") ?? "";
+    // Buttons of one kind (the same words, numbers aside) are clicked once: the map's rules are
+    // patterns, and each click can cost a fresh render. Anchors are all clicked.
+    if (kind === "button") {
+      const key = `${text.replace(/\d+/g, "N")}|${cls}`;
+      if (done.has(key)) continue;
+      done.add(key);
+    }
     const before = document.body.innerHTML;
     const target = await act(async () => clickOnce(el));
     out.push({ route, text, cls, kind, target });

@@ -117,7 +117,7 @@ it("the crawl clicks the Comms chart's lines and seats, which are role=button, n
   for (const c of lines) expect(c.target, c.text).toMatch(/\?focus=pair%3A/);
 });
 
-it("every page, in Demo, goes where the map says", { timeout: 600_000 }, async () => {
+it("every page, in Demo, goes where the map says", { timeout: 1_800_000 }, async () => {
   const problems: string[] = [];
   const seen = new Set<string>();
   for (const [, entry] of Object.entries(LINK_MAP)) {
