@@ -208,6 +208,13 @@ const OpenLinksContext = createContext(false);
 export type TextRenderer = (text: string) => ReactNode;
 const TextRendererContext = createContext<TextRenderer | null>(null);
 
+/**
+ * How a caller shows a link or image embed itself (a retained picture opens a viewer); returning
+ * undefined leaves the link to the default.
+ */
+export type LinkRenderer = (url: string, label: ReactNode, image: boolean) => ReactNode | undefined;
+const LinkRendererContext = createContext<LinkRenderer | null>(null);
+
 /** Text, with bare http(s) URLs made links under `OpenLinks`. */
 function MdText({ text }: { text: string }) {
   const open = useContext(OpenLinksContext);
@@ -234,8 +241,18 @@ function MdText({ text }: { text: string }) {
 /** A bare URL ends before whitespace, a closing bracket or sentence punctuation. */
 const BARE_URL = /(https?:\/\/[^\s<>()[\]]*[^\s<>()[\].,;:!?'"])/g;
 
-function MdLink({ url, children }: { url: string; children: ReactNode }) {
+function MdLink({
+  url,
+  children,
+  image = false,
+}: {
+  url: string;
+  children: ReactNode;
+  image?: boolean;
+}) {
   const open = useContext(OpenLinksContext);
+  const custom = useContext(LinkRendererContext)?.(url, children, image);
+  if (custom !== undefined) return <>{custom}</>;
   // The label is plain text: a URL written as the label of a link must not become a link inside it.
   return open ? (
     <SafeLink url={url}>
@@ -258,7 +275,12 @@ function render(nodes: MdNode[]): ReactNode[] {
   const node = (n: MdNode): ReactNode => {
     if (n.t === "code") return <code>{n.text}</code>;
     if (n.t === "bold") return <strong>{render(n.kids)}</strong>;
-    if (n.t === "link") return <MdLink url={n.url}>{render(n.kids)}</MdLink>;
+    if (n.t === "link")
+      return (
+        <MdLink url={n.url} image={n.image}>
+          {render(n.kids)}
+        </MdLink>
+      );
     return <MdText text={n.text} />;
   };
   return nodes.map((n, i) => (
@@ -444,8 +466,18 @@ function blocks(text: string): ReactNode[] {
  * code, fenced blocks, headings as bold lines, links as their text with the URL in `title`.
  * React elements only: raw HTML in the text shows as literal text.
  */
-export function Markdown({ text, renderText }: { text: string; renderText?: TextRenderer }) {
-  const out = <div className="md">{blocks(text)}</div>;
+export function Markdown({
+  text,
+  renderText,
+  renderLink,
+}: {
+  text: string;
+  renderText?: TextRenderer;
+  renderLink?: LinkRenderer;
+}) {
+  let out = <div className="md">{blocks(text)}</div>;
+  if (renderLink)
+    out = <LinkRendererContext.Provider value={renderLink}>{out}</LinkRendererContext.Provider>;
   return renderText ? (
     <TextRendererContext.Provider value={renderText}>{out}</TextRendererContext.Provider>
   ) : (

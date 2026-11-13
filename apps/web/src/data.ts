@@ -129,6 +129,11 @@ export const RESOURCES = {
     path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
     topic: "attention",
   }),
+  /** Retained plans and picture stories of one open item; 404 when it has none. */
+  attentionMaterials: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/materials`,
+    topic: "attention",
+  }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
   answeredAttention: { path: "/api/attention/answered", topic: "attention" },
   attention: { path: "/api/attention", topic: "attention" },
@@ -519,6 +524,7 @@ const readResource = async <T>(path: string): Promise<T> => {
   return path === RESOURCES.prFlow.path ||
     path === RESOURCES.dependencies.path ||
     path === RESOURCES.designPreviews.path ||
+    /^\/api\/attention\/[^/]+\/materials$/.test(path) ||
     path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)
     : apiGet<T>(path);

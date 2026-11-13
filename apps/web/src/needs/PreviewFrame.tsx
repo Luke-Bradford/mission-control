@@ -1,10 +1,13 @@
 import type { AttentionItem, DesignPreviewView, RepoId } from "@mc/core";
 import { useEffect, useRef, useState } from "react";
 import { ApiError, apiPost } from "../api.ts";
+import { useTz } from "../clock.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { useDemo } from "../demo/mode.ts";
+import { raisedAt, shortSha } from "../fmt.ts";
 import { useOverlay } from "../shell/overlays.ts";
 import { store, useStore } from "../shell/store.ts";
+import { mainTicket } from "./materials.ts";
 
 /**
  * Where the hub serves a branch's built app (the server's DESIGN_PREVIEW_PORT, also the one
@@ -31,12 +34,6 @@ export function closePreview(): void {
  * is optional here until the server sends it for every build).
  */
 type StoredPreview = DesignPreviewView & { repoId?: RepoId };
-
-/** The ticket number in `repo#n`, or null for an item without a ticket. */
-export function ticketNumber(ticket: string | null): number | null {
-  const n = /#([1-9]\d*)$/.exec(ticket ?? "")?.[1];
-  return n === undefined ? null : Number(n);
-}
 
 /**
  * A branch's built app over the whole window, under a 40 px bar. The app lays out by viewport
@@ -89,18 +86,23 @@ export function PreviewFrame({ ticket, label }: { ticket: number; label: string 
  * lists only builds whose PR is still open, so a closed PR offers nothing. Demo has no previews.
  */
 export function PreviewOpener({ item }: { item: AttentionItem }) {
-  const ticket = ticketNumber(item.ticket);
+  const ref = mainTicket(item);
+  const ticket = ref?.number ?? null;
   const demo = useDemo();
   const list = useResource<StoredPreview[]>(
     ticket === null || demo ? null : RESOURCES.designPreviews,
   );
+  const tz = useTz();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new item starts without the note
   useEffect(() => setNote(null), [item.key]);
+  // The main ticket is the canonical `repo#n` (a PR-labelled item names it in its brief), and the
+  // build must be this repo's and this ticket's.
   const mine = (v: StoredPreview) =>
-    item.repoId !== null && v.repoId === item.repoId && v.ticket === ticket;
-  if (ticket === null || !list.data?.some(mine)) return null;
+    ref !== null && v.repoId === ref.repoId && v.ticket === ref.number;
+  const stored = list.data?.find(mine);
+  if (ticket === null || !stored) return null;
   const question = item.brief?.ask ?? item.text;
   const run = async () => {
     setBusy(true);
@@ -122,6 +124,11 @@ export function PreviewOpener({ item }: { item: AttentionItem }) {
       <button type="button" className="sm" disabled={busy} onClick={() => void run()}>
         Open preview
       </button>
+      <span className="note">
+        Branch preview of {stored.branch} at {shortSha(stored.sha)}
+        {tz ? `, published ${raisedAt(stored.publishedAt, tz)}` : ""}. It is the built branch, not
+        the mockup this question asks about.
+      </span>
       {note && (
         <span className="note" role="status">
           {note}
