@@ -411,9 +411,9 @@ function statusColumn(i: Pick<BoardItem, "status" | "state">): HudColumn {
 
 /** A closed issue is Done whatever its Status says. */
 export function hudColumnOf(
-  i: Pick<BoardItem, "status" | "state" | "closed" | "waiting">,
+  i: Pick<BoardItem, "status" | "state" | "closed">,
 ): HudColumn {
-  return i.closed ? "Done" : i.waiting !== undefined ? "Waiting" : statusColumn(i);
+  return i.closed ? "Done" : statusColumn(i);
 }
 
 /** GitHub and the project disagree: closed outside Done, or open inside Done. */

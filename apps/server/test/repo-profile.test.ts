@@ -89,7 +89,7 @@ describe("repoProfiles", () => {
       { status: "In Progress", state: "in progress", column: "In progress", items: 1 },
       { status: "Done", state: "done", column: "Done", items: 0 },
     ]);
-    expect(shopApp?.missingColumns).toEqual(["Refinement", "Blocked", "Waiting", "In review", "Ready for QA"]);
+    expect(shopApp?.missingColumns).toEqual(["Refinement", "Blocked", "In review", "Ready for QA"]);
     expect(shopApp?.priority).toEqual({ field: 1, label: 1, none: 2 });
     expect(shopApp?.loops).toEqual(["shop-app-ta"]);
     // 4 items, 2 labels: 60 polls * (1 + 3 + 2 + 1 + 1) = 480; flow 2 * ceil(4/20) + 4 * 4 extra timeline pages = 18.
@@ -195,7 +195,7 @@ describe("repoPreview", () => {
         { status: "In Progress", column: "In progress" },
         { status: "Done", column: "Done" },
       ],
-      missingColumns: ["Refinement", "Blocked", "Waiting", "In review", "Ready for QA"],
+      missingColumns: ["Refinement", "Blocked", "In review", "Ready for QA"],
       priority: "labels",
       loops: [],
     });

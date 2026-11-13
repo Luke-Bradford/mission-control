@@ -176,15 +176,7 @@ describe("hudState", () => {
 
 describe("hudColumnOf", () => {
   it("lets a Status name win, else falls back on state", () => {
-    expect(HUD_COLUMNS).toHaveLength(9);
-    expect(
-      hudColumnOf({
-        status: "In progress",
-        state: "in progress",
-        closed: false,
-        waiting: { reason: "CI is running", freesWhen: "CI finishes", at: 1 },
-      }),
-    ).toBe("Waiting");
+    expect(HUD_COLUMNS).toHaveLength(8);
     expect(hudColumnOf({ status: "Todo", state: "planned", closed: false })).toBe("Ready");
     expect(hudColumnOf({ status: "Backlog", state: "planned", closed: false })).toBe("Backlog");
     expect(hudColumnOf({ status: " ready for qa ", state: "review", closed: false })).toBe(
