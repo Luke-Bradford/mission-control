@@ -1084,3 +1084,24 @@ a.comms-ref {
   min-height: 24px;
   padding: 0 var(--sp-1);
 }
+
+/* A short window also tightens the panel's own chrome, so the list keeps room without taking it from the agents. */
+@media (max-height: 899px) {
+  .comms-tickets {
+    gap: 0;
+    padding-bottom: var(--sp-1);
+  }
+
+  .comms-tickets .comms-section-head {
+    padding-block: var(--sp-1);
+  }
+
+  .comms-tickets .comms-ticket-search {
+    min-height: 24px;
+    margin-bottom: var(--sp-1);
+  }
+
+  .comms-tickets .comms-ticket-open {
+    min-height: 28px;
+  }
+}
