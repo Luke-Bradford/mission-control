@@ -151,6 +151,11 @@ export const LINK_MAP: Record<
   agent: {
     routes: ["/agent/dev-1", "/agent/flight-1"],
     rules: [
+      rule(
+        /^Assign$/,
+        /^\/setup\/sessions$/,
+        "Moves the seat to another repo, which is done in Setup sessions.",
+      ),
       rule(/^(dev|flight)-\d+/i, /^\/agent\/[\w-]+$/, "A seat in the roster opens its Agent page."),
       rule(/^Open this seat in Audit$/, /^\/audit\?seat=[\w-]+$/, "The seat's audit rows."),
     ],
@@ -222,6 +227,7 @@ export const LINK_MAP: Record<
   qa: {
     routes: ["/qa", "/qa?view=history"],
     rules: [
+      rule(/^picture: /, EXTERNAL, "A report picture opens full size in a new tab."),
       rule(/^Current$/, /^\/qa$/, "The queue."),
       rule(/^History$/, /^\/qa\?view=history$/, "Past reviews."),
       rule(/· PR #\d+ ·/, /^\/qa\?repo=[\w-]+&pr=\d+$/, "A queued PR opens its readiness report."),

@@ -26,10 +26,14 @@ export const EXTERNAL = "external";
 export const STAYS = "stays";
 
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 350))));
-const words = (el: Element): string =>
-  (el.getAttribute("aria-label") || el.textContent || el.getAttribute("title") || "")
+const words = (el: Element): string => {
+  const said = (el.getAttribute("aria-label") || el.textContent || el.getAttribute("title") || "")
     .replace(/\s+/g, " ")
     .trim();
+  // A picture link has no text: name it by the picture's alt.
+  const picture = el.querySelector("img")?.getAttribute("alt");
+  return said || (picture ? `picture: ${picture}` : "");
+};
 
 /**
  * Click one element and say where it went. History writes are caught, not made, so the page stays
