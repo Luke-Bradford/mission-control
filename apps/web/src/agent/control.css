@@ -316,6 +316,11 @@
   padding: 0;
   list-style: none;
 }
+/* Beats the shared `.side > .panel { flex: none }`: the tab panel takes the column's remaining height
+   so its body is the thing that scrolls. */
+.side > .panel.side-tabs {
+  flex: 1 1 0;
+}
 .side-tabs {
   flex: 1;
   min-height: 0;
@@ -357,6 +362,12 @@
     grid-template-rows: none;
     grid-auto-rows: auto;
     overflow-y: auto;
+  }
+  .side > .panel.side-tabs {
+    flex: none;
+  }
+  .side-body {
+    max-height: 460px;
   }
   .control-shell > .roster {
     height: auto;
