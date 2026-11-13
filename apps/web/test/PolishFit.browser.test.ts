@@ -41,6 +41,8 @@ describeRendered("Polish list, part two: fit at 1920x940", () => {
             for (const el of document.querySelectorAll<HTMLElement>("body *")) {
               const box = el.getBoundingClientRect();
               if (box.width === 0 || box.height === 0) continue;
+              // text hidden from sight on purpose, for a screen reader only, is not clipped text
+              if (el.closest(".sr-only")) continue;
               const style = getComputedStyle(el);
               const hides = ["hidden", "clip"].includes(style.overflowX);
               if (!hides || el.scrollWidth <= el.clientWidth + 1) continue;
