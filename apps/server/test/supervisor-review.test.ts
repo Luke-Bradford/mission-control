@@ -19,7 +19,7 @@ vi.mock("../src/runtime/codex-version.ts", async (importOriginal) => {
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
@@ -1906,6 +1906,64 @@ describe("a run set aside in review", () => {
       worktree: wt(),
     });
     expect(userLines().filter((l) => l.startsWith("Carry on"))).toEqual([]);
+  });
+
+  it("wakeRun puts back the node_modules the crew tidy trimmed from the set-aside worktree (#1756)", async () => {
+    writeFileSync(join(clone, "package.json"), '{"name":"x","private":true}\n');
+    writeFileSync(
+      join(clone, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+    );
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "install inputs");
+    git(clone, "push", "-q", "origin", "main");
+    const { sup, runId } = await aside(false);
+    expect(existsSync(join(wt(), "node_modules"))).toBe(true);
+    rmSync(join(wt(), "node_modules"), { recursive: true, force: true });
+    await sup.wakeRun(runId);
+    expect(existsSync(join(wt(), "node_modules"))).toBe(true);
+    expect(store.seatSession("guido-1")).toMatchObject({ runId, worktree: wt() });
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+
+  it("wakeRun keeps the run and its worktree when the dependencies cannot be reinstalled (#1756)", async () => {
+    writeFileSync(join(clone, "package.json"), '{"name":"x","private":true}\n');
+    writeFileSync(
+      join(clone, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+    );
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "install inputs");
+    git(clone, "push", "-q", "origin", "main");
+    const { sup, runId } = await aside(false);
+    rmSync(join(wt(), "node_modules"), { recursive: true, force: true });
+    // the network is down: origin points at nothing
+    git(clone, "remote", "set-url", "origin", join(root, "no-such-origin"));
+    await expect(sup.wakeRun(runId)).rejects.toMatchObject({ status: 502 });
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(store.run(runId)?.loop?.aside).not.toBeNull();
+    expect(existsSync(wt())).toBe(true);
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+
+  it("wakeRun marks the set-aside worktree in use from the checkout until the seat points at it (#1756)", async () => {
+    const { sup, runId } = await aside(false);
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+    // beforeLaunch runs in the gap: the checkout is made, the seat does not hold the worktree yet
+    const inGap: { marked: boolean; seatWorktree: string | null }[] = [];
+    const real = store.setSeatTurnEnded.bind(store);
+    const spy = vi.spyOn(store, "setSeatTurnEnded").mockImplementation((...args) => {
+      inGap.push({
+        marked: sup.isStartingWorktree(wt()),
+        seatWorktree: store.seatSession("guido-1")?.worktree ?? null,
+      });
+      return real(...args);
+    });
+    await sup.wakeRun(runId);
+    spy.mockRestore();
+    expect(inGap).toEqual([{ marked: true, seatWorktree: null }]);
+    expect(store.seatSession("guido-1")?.worktree).toBe(wt());
+    expect(sup.isStartingWorktree(wt())).toBe(false);
   });
 
   it("wakeRun is refused for a run that is not aside and while the seat holds another run", async () => {

@@ -238,6 +238,7 @@ import {
   prepareScratch,
   prepareSharedPnpmStore,
   type RepoPeer,
+  reinstallTrimmed,
   removeCheckout,
   sharedPnpmStoreDir,
   sweepPnpmStores,
@@ -738,6 +739,8 @@ export interface Supervisor {
    * does not block what follows. The mc tools' git writes go through here.
    */
   inClone<T>(checkout: string, fn: () => Promise<T>): Promise<T>;
+  /** Whether a run is starting in the worktree: from its install until the seat's session points at it. */
+  isStartingWorktree(path: string): boolean;
 }
 
 /** One seat `busy()` names. */
@@ -951,6 +954,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
+  const startingWorktrees = new Set<string>();
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
   const checkRuns = new Map<string, { stderr: string | null }>();
   const handoffJobs = new Map<string, Promise<void>>();
@@ -3424,6 +3429,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw new SupervisorError(409, ticketInReviewText(ref));
     }
     starting.add(seatId);
+    let startedWorktree: string | null = null;
     let handoff: RunHandoff | null = null;
     const handoffClaim = randomUUID();
     try {
@@ -3605,6 +3611,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                   clearPending: (path) => store.clearCheckoutPending(path),
                 },
               });
+        // still under the clone lock: the tidy never sees the gap before the run row exists
+        if (!planner && !readOnly) {
+          startedWorktree = c.path;
+          startingWorktrees.add(c.path);
+        }
         return {
           checkout: c,
           repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
@@ -3905,6 +3916,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     } finally {
       if (handoff && !readOnly && !planner) store.releaseHandoff(handoff.runId, handoffClaim);
       starting.delete(seatId);
+      if (startedWorktree !== null) startingWorktrees.delete(startedWorktree);
     }
   }
 
@@ -4868,10 +4880,41 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         return fail(RESUME_MODE_CHANGED);
       }
       let checkout: { path: string; branch: string; gitDir: string };
+      /** Set when the dependencies could not come back: a blip the engine retries, not a lost run. */
+      const reinstall: { failed: boolean; cause: unknown } = { failed: false, cause: null };
       try {
-        checkout = await existingCheckout(info.session.checkout, aside.worktree, run.branch);
+        const branch = run.branch;
+        // Under the clone lock, as the crew tidy is: the worktree is marked in use before the lock
+        // lets go, and its dependencies are back (the tidy trims a set-aside run's) before launch.
+        checkout = await inClone(info.session.checkout, async () => {
+          const c = await existingCheckout(info.session.checkout, aside.worktree, branch);
+          startingWorktrees.add(aside.worktree);
+          try {
+            await reinstallTrimmed(
+              {
+                checkout: info.session.checkout,
+                worktreesRoot: crew?.worktrees ?? "",
+                sessionId: info.session.id,
+                peers: clonePeers(deps.config, deps.hubRoot),
+              },
+              aside.worktree,
+              branch,
+            );
+          } catch (e) {
+            reinstall.failed = true;
+            reinstall.cause = e;
+          }
+          return c;
+        });
       } catch (e) {
         return fail("could not resume: checkout missing", e);
+      }
+      if (reinstall.failed) {
+        // the run, its session and its worktree stay: the engine's next pass tries again
+        log(`${seatId}: could not reinstall dependencies: ${errText(reinstall.cause)}`);
+        throw new SupervisorError(502, "could not resume: dependencies could not be reinstalled", {
+          cause: reinstall.cause,
+        });
       }
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // the check awaited: the engine may have ended the run meanwhile
@@ -4968,6 +5011,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
     } finally {
       starting.delete(seatId);
+      startingWorktrees.delete(aside.worktree);
     }
   }
 
@@ -5387,6 +5431,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     },
 
     inClone,
+
+    isStartingWorktree: (path) => startingWorktrees.has(path),
   };
 }
 

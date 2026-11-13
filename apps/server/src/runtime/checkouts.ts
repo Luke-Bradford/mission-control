@@ -1794,6 +1794,47 @@ export async function existingCheckout(
   return { branch, path, gitDir };
 }
 
+/**
+ * A set-aside run's worktree may have lost its `node_modules` to the crew tidy (#1756): puts the
+ * dependencies back before the run resumes. Nothing happens when they are there, or when the
+ * repo has no pnpm lockfile. The caller holds the clone lock.
+ */
+export async function reinstallTrimmed(
+  i: {
+    checkout: string;
+    worktreesRoot: string;
+    sessionId: string;
+    peers?: readonly RepoPeer[];
+  },
+  path: string,
+  branch: string,
+  runInstall: InstallRunner = execFileP,
+): Promise<boolean> {
+  if (await succeeds(lstat(join(path, PNPM_TOOL.installDir)))) return false;
+  if (!(await succeeds(lstat(join(path, PNPM_TOOL.lockfile))))) return false;
+  const { common, inClone, baseSha } = await fetchBaseAs(i, branch);
+  const gitDir = await adminDirOf(common, path);
+  if (gitDir === null) throw new CheckoutError("path", `${path} is not this run's checkout`);
+  const rev = `refs/heads/${branch}`;
+  const subject = `branch ${branch}`;
+  await installReusedPnpm(
+    {
+      checkout: i.checkout,
+      common,
+      inClone,
+      path,
+      rev,
+      base: baseSha,
+      compare: true,
+      subject,
+      name: branch,
+      worktreesRoot: i.worktreesRoot,
+    },
+    runInstall,
+  );
+  return true;
+}
+
 /** Handoffs cannot grant a seat an operator checkout, sibling repo, symlink escape or another clone. */
 export async function checkedHandoffCheckout(
   checkout: string,

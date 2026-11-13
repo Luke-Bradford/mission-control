@@ -286,6 +286,7 @@ import {
 } from "./crew-pause.ts";
 import { readDependencyChains } from "./dependency-chains.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
+import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -527,6 +528,8 @@ export interface AppDeps {
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
+  /** The cached disk-use reader the hub shares with its sweep; absent: the route measures itself. */
+  diskUse?: DiskUseReader;
   /** A web PR's stored screenshot pairs; absent: the evidence routes answer 404. */
   prEvidence?: PrEvidenceStore;
   /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
@@ -3036,6 +3039,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .header("content-disposition", `attachment; filename="qa-${report.id}.md"`)
           .send(qaReportMarkdown(report));
       });
+      // Reader: docs/runbook.md#disk-housekeeping (what the hub holds on disk, by kind; the Mac panel shows it)
+      const holdings =
+        deps.diskUse ??
+        cachedDiskUse({ dataDir: dirname(store.path), worktrees: config.crew?.worktrees });
+      api.get("/disk-use", async () => await holdings.read());
       // Reader: docs/runbook.md#durable-qa-reports (retained before/after and review-browser PNGs)
       api.get<{ Params: { id: string } }>("/qa-report-assets/:id", async (req, reply) => {
         if (
