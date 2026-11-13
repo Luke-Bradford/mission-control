@@ -2059,6 +2059,18 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Ended runs still carrying a merge hold or a parked state, oldest first. */
+  endedRunsWithHoldOrPark(): Run[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM runs WHERE ended_at IS NOT NULL AND loop IS NOT NULL
+           AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.parked') IS NOT NULL)
+         ORDER BY started_at, seq`,
+      )
+      .all() as Row[];
+    return rows.map(toRun);
+  }
+
   /** Live acceptance metadata never needs to decode ended loop history. */
   activeLoopRuns(repoId: RepoId): Run[] {
     const rows = this.statement(
