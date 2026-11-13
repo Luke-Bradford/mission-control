@@ -446,6 +446,8 @@ export interface FlightToolsDeps {
   prepareQueueReorder?: BriefPreparationDeps["prepareQueue"];
   /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
   areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
+  /** Files whose merge conflicts between the repo's open PRs; absent or undefined: none known. */
+  conflicts?: (repoId: string) => Promise<{ file: string; prs: number[] }[] | undefined>;
   /** Refresh the wake baseline when FLIGHT receives a full state mid-turn. */
   seen?: (runId: string, state: ReturnType<typeof flightState>) => void;
   config: CcConfig;
@@ -2886,6 +2888,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       hubLogin: deps.login,
       lock: deps.lockState?.(),
       areas: repo ? await deps.areas?.(repo.id) : undefined,
+      conflicts: repo ? await deps.conflicts?.(repo.id) : undefined,
     });
     markFlightSignalsShown(store, state, now());
     markPrsShown(store, state);

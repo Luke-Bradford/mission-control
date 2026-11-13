@@ -4201,6 +4201,7 @@ describe("flight_state", () => {
         seats: [{ seat: "retro-1", queued: 0, running: 0, waitMin: 0, idle: true }],
       },
       mergeQueue: [{ pr: 9, waitsOn: ["review"] }],
+      conflicts: [],
       flowHolds: [],
       recent: [
         { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
