@@ -914,6 +914,8 @@ export interface MachineSample {
   load1?: number | null;
   /** Bounded highest-RSS process rows, sampled for a machine-capacity alert. */
   topConsumers?: { pid: number; command: string; rssBytes: number; cpuPct: number }[];
+  /** The file-change service's memory with compressed pages counted (`ps` RSS leaves them out); null when not measured. */
+  fileServiceBytes?: number | null;
   /** The `claude` and `codex` processes on this machine (editor sessions included). */
   agents: { count: number; rssBytes: number; cpuPct: number } | null;
   /** The test-lock holder's command and every process under it; null when the lock is free. Optional: older stored samples lack it. */

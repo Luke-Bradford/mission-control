@@ -6,6 +6,7 @@ import { type ConfigView, type Crew, OPERATOR_HEADER } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppDeps } from "../src/api.ts";
+import { EVIDENCE_FOLDERS, NO_INDEX_MARKER } from "../src/no-index.ts";
 import type { CodexModels, ModelDeps } from "../src/runtime/codex-models.ts";
 import { fakeModels, MODEL_PAGES } from "./config-codex.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -263,6 +264,32 @@ describe("mixed hub startup", () => {
     expect(boot.serving).toBe(true);
     expect(boot.discoveryStarted).toBe(true);
     await expect(boot.app?.close()).resolves.toBeUndefined();
+  });
+
+  const evidenceMarkers = () =>
+    EVIDENCE_FOLDERS.map((name) => join(dir, "data", name, NO_INDEX_MARKER));
+  const crewMarker = join("/tmp/mc-startup-worktrees", NO_INDEX_MARKER);
+
+  it("keeps Spotlight out of the evidence folders and the crew worktrees folder at start", async () => {
+    rmSync(crewMarker, { force: true });
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    expect(evidenceMarkers().map((path) => existsSync(path))).toEqual(
+      EVIDENCE_FOLDERS.map(() => true),
+    );
+    expect(existsSync(crewMarker)).toBe(true);
+  });
+
+  it("leaves the crew worktrees folder alone when crew is off", async () => {
+    rmSync(crewMarker, { force: true });
+    vi.stubEnv("MC_CREW", "0");
+    vi.stubEnv("MC_NO_CREW", "1");
+    boot.models = preparing.deps;
+    boot.expectSupervisorEnabled = false;
+    await (await import("../src/main.ts")).main();
+    expect(evidenceMarkers().every((path) => existsSync(path))).toBe(true);
+    expect(existsSync(crewMarker)).toBe(false);
   });
 
   const plantStaleWork = (): string[] => {

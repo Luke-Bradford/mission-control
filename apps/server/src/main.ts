@@ -97,6 +97,7 @@ import {
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { markHubStarted } from "./hud.ts";
+import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./leftovers.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
@@ -111,6 +112,7 @@ import {
   readKnown,
 } from "./mcp/tools.ts";
 import { releaseWaitingOperator } from "./needs-you-actions.ts";
+import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./no-index.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import {
@@ -519,6 +521,15 @@ export async function main(): Promise<void> {
   // crew config, and only where the guard hook can be found.
   const crewEnabled =
     crewAllowed(preview, process.env) && config.crew !== undefined && hubRoot !== null;
+  // Crew checkouts and evidence images churn constantly; keep Spotlight (and its file-change
+  // service) out of them.
+  keepOutOfSpotlight(
+    [
+      ...EVIDENCE_FOLDERS.map((name) => join(dirname(dbPath), name)),
+      ...(crewEnabled && config.crew !== undefined ? [config.crew.worktrees] : []),
+    ],
+    (line) => log(line),
+  );
   // The template profiles sit beside config.yaml; read afresh for each start, never cached.
   const profilesPath = join(dirname(configPath), PROFILES_FILE);
   const profiles = () => loadProfiles(profilesPath);
@@ -1230,6 +1241,17 @@ export async function main(): Promise<void> {
   };
   setInterval(audit, CODE_HEALTH_AUDIT_EVERY_MS).unref();
   setTimeout(audit, 60_000).unref();
+  // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
+  const leftovers = () => {
+    try {
+      for (const text of clearLeftovers({ store, config, now: Date.now() }))
+        log(`leftovers: ${text}`);
+    } catch (e) {
+      log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  setInterval(leftovers, LEFTOVERS_EVERY_MS).unref();
+  setTimeout(leftovers, 5_000).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({
