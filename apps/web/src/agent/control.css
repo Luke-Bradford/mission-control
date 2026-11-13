@@ -363,6 +363,10 @@
     grid-auto-rows: auto;
     overflow-y: auto;
   }
+  /* The shell scrolls here, so the column takes the height its panels need instead of clipping them. */
+  .side {
+    overflow: visible;
+  }
   .side > .panel.side-tabs {
     flex: none;
   }
