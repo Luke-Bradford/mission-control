@@ -5021,6 +5021,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return codeHealthFailure(error, reply);
         }
       });
+      // Reader: docs/runbook.md (the Audit page's stored first-screen summary)
+      api.get("/code-health/overview", async (req, reply) => {
+        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const parsed = z
+          .strictObject({
+            repo: z.string().trim().min(1).max(128),
+            window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
+          })
+          .safeParse(req.query);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
+        reply.header("cache-control", "no-store");
+        try {
+          const { view, changed } = codeHealth.overview(parsed.data.repo, parsed.data.window);
+          // Only a rebuild that changed what the page shows tells open pages to read again.
+          if (changed) bus.emit("health");
+          return await codeHealthOutput(view);
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
       // Reader: docs/runbook.md (the code-health dashboard's bounded evidence drawer)
       api.get("/code-health/evidence/:id", async (req, reply) => {
         if (

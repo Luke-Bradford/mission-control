@@ -69,6 +69,22 @@ Re-measuring never ends the work; `assess` stays a manual, evidence-backed decis
 The recommendation history reply also carries `groups`: one-per-PR proposals (repeated review rounds)
 with the same rule and cause (the PR's most common finding category) read as one group listing each PR.
 
+**Audit first-screen summary.** `GET /api/code-health/overview?repo=&window=` (operator token) returns the
+whole first screen in one reply: verdict, ranked proposals (without evidence references; the evidence
+drawer stays on `/api/code-health`), figures, outside sources, waste alarms, merged-per-day and rework,
+findings per touch, and the proposal funnel and outcomes. Each figure carries unit, window, comparison
+(the equal window before), source, coverage and last update. Definitions: merged-per-day uses the stored
+merge time and keeps "no hub review record" apart from rounds 1, 2 and 3 or more; rework is the share of
+reviewed PRs reaching round 2, with the reviewed count as denominator; findings per touch counts a finding
+once per PR, file, category, summary and fix, over merged PRs that changed that exact path, and zero
+touches is null (undefined), not 0; the funnel counts every stored proposal in SQL, not the newest 200;
+after-date results come only from stored remeasure records; a PR with a run whose cost is not recorded
+(for example Codex) is left out of the median cost and counted as unpriced, never as free. Outside sources
+read "not collected" and waste alarms "not available" until those parts exist. The summary is stored in
+`code_health_overview`, one row per repo and window, and served while the code-health source revision is
+unchanged and the row is under 10 minutes old; a new hub process serves the stored row without rebuilding.
+The hub emits the `health` topic only when a rebuild changes the content shown (`summaryRevision`).
+
 Granted read-only FLIGHT/FAO sessions can call `mc code_health` with tab, optional window,
 issued evidence/cursor, or a recommendation ID. The authenticated session repo bounds every
 read. Tool responses use the same reader and credential cleaning as HTTP. Stored evidence and

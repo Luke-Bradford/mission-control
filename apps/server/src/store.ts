@@ -56,6 +56,7 @@ import {
   COMMS_NOTICE,
   COMMS_OPEN_PREFIX,
   COMMS_TEXT_MAX,
+  type CodeHealthWindow,
   type CommsKind,
   type CommsLabel,
   type CommsReaction,
@@ -178,16 +179,29 @@ import {
   recordMergedReviews,
 } from "./code-health/merged-reviews.ts";
 import {
+  costAggregate,
+  installOverview,
+  landingAggregate,
+  mergedAggregate,
+  mergedObserved,
+  readOverviewRow,
+  type StoredOverview,
+  writeOverviewRow,
+} from "./code-health/overview-store.ts";
+import {
+  decidedRecommendationRows,
   installRecommendations,
   linkRecommendation,
   type Mutation,
   mutateRecommendation,
   openRepeatedRoundsRows,
   RecommendationMutation,
+  recommendationFunnel,
   recommendationProposals,
   recommendationRow,
   recommendationRows,
   recommendationRowsForFiles,
+  remeasureCounts,
   upsertRecommendation,
 } from "./code-health/recommendations.ts";
 import { remeasureDue } from "./code-health/remeasure.ts";
@@ -432,6 +446,7 @@ export class Store {
     installMergedReviews(this.db);
     installTestReports(this.db);
     installTestQa(this.db);
+    installOverview(this.db);
     installCodeHealthRevisions(this.db);
   }
 
@@ -665,6 +680,33 @@ export class Store {
   }
   recordCodeHealthMembership(input: Parameters<typeof recordRiskMembership>[1]) {
     recordRiskMembership(this.db, input);
+  }
+  codeHealthOverviewRow(repoId: string, window: CodeHealthWindow) {
+    return readOverviewRow(this.db, repoId, window);
+  }
+  saveCodeHealthOverview(repoId: string, window: CodeHealthWindow, row: StoredOverview) {
+    writeOverviewRow(this.db, repoId, window, row);
+  }
+  codeHealthMergedAggregate(repoId: string, from: number, until: number) {
+    return mergedAggregate(this.db, repoId, from, until);
+  }
+  codeHealthMergedObserved(repoId: string) {
+    return mergedObserved(this.db, repoId);
+  }
+  codeHealthCostAggregate(repoId: string, from: number, until: number) {
+    return costAggregate(this.db, repoId, from, until);
+  }
+  codeHealthLandingAggregate(repoId: string, from: number, until: number, limit: number) {
+    return landingAggregate(this.db, repoId, from, until, limit);
+  }
+  codeHealthDecidedRecommendations(repoId: string, limit: number) {
+    return decidedRecommendationRows(this.db, repoId, limit);
+  }
+  codeHealthFunnel(repoId: string) {
+    return recommendationFunnel(this.db, repoId);
+  }
+  codeHealthRemeasureCounts(repoId: string) {
+    return remeasureCounts(this.db, repoId);
   }
   codeHealthRevision(repoId: string): string {
     return codeHealthSourceRevision(this.db, repoId);
