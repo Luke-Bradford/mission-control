@@ -87,7 +87,6 @@ function ImageViewer({
   if (!current || !route) return null;
   return (
     <ViewerBody
-      key={current.url}
       group={group}
       index={index}
       current={current}
