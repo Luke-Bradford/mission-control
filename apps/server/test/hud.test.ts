@@ -2567,6 +2567,30 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       return id;
     };
     const keys = (c: CcConfig) => items(c).map((i) => i.key);
+    const putPr = (number: number, state: PullRequestView["state"], mergedAt: number | null) =>
+      store.upsertPullRequests(
+        "shop-app",
+        [
+          {
+            repoId: "shop-app",
+            number,
+            title: "pr",
+            url: `https://github.com/o/shop-app/pull/${number}`,
+            branch: `b${number}`,
+            ticket: null,
+            state,
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW - DAY,
+            updatedAt: NOW - DAY,
+            mergedAt,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
 
     it("an ended run with a closed ticket leaves no question or note", () => {
       const id = setup({ endedAt: NOW - 20 * DAY, status: "ok" });
@@ -2609,6 +2633,23 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       expect(keys(withCrew())).not.toContain(`ask:${id}`);
     });
 
+    it("the unfiled minor findings flag outlives its merged run", () => {
+      store.replaceBoard("shop-app", [boardItem({ issueNumber: 5 })]);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - MIN,
+          status: "ok",
+          loop: { ...NEW_LOOP, phase: "done", prNumber: 12 },
+        }),
+      );
+      putPr(12, "merged", NOW - MIN);
+      raise("c1:file-minor", "c1");
+      expect(keys(withCrew())).toContain("note:c1:file-minor");
+    });
+
     it("the cleanup pass sets the question aside, and releases a hold and a park, each with a hub event", () => {
       const id = setup({
         endedAt: NOW - 20 * DAY,
@@ -2628,15 +2669,43 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
           loop: { ...NEW_LOOP, mergeHold: { by: "FLIGHT", reason: "wait", at: NOW } },
         }),
       );
+      store.replaceBoard("shop-app", [
+        boardItem({ issueNumber: 5, closed: true }),
+        boardItem({ issueNumber: 6 }),
+      ]);
+      putPr(13, "open", null);
+      const parkedEnded = {
+        kind: "ended",
+        reason: "run ended (stopped)",
+        ended: true,
+      };
+      store.upsertRun(
+        run({
+          id: "held",
+          agentId: "GUIDO-2",
+          ticket: "shop-app#6",
+          endedAt: NOW - DAY,
+          status: "ok",
+          loop: {
+            ...NEW_LOOP,
+            prNumber: 13,
+            phase: "parked",
+            parked: parkedEnded,
+            mergeHold: { by: "FLIGHT", reason: "wait", at: NOW - DAY },
+          },
+        }),
+      );
       const cleared = clearLeftovers({ store, config: withCrew(), now: NOW });
       expect(cleared).toHaveLength(3);
+      expect(store.run("held")?.loop?.mergeHold).not.toBeNull();
+      expect(store.run("held")?.loop?.parked).not.toBeNull();
       expect(store.question(id)).toMatchObject({ answeredAt: null });
       expect(store.openQuestions().map((q) => q.id)).not.toContain(id);
       expect(store.asideQuestions().map((q) => q.id)).toContain(id);
       const ended = store.run("c1")?.loop;
       expect(ended?.mergeHold).toBeNull();
       expect(ended?.parked).toBeNull();
-      expect(store.endedRunsWithHoldOrPark()).toEqual([]);
+      expect(store.endedRunsWithHoldOrPark().map((r) => r.id)).toEqual(["held"]);
       expect(store.run("live")?.loop?.mergeHold).not.toBeNull();
       expect(store.hubEvents(0).map((e) => e.text)).toEqual(
         expect.arrayContaining([

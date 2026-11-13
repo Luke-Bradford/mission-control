@@ -1994,7 +1994,9 @@ function crewItems(
     if (n.dismissedAt !== null) continue;
     if (isHardRulesFlagKey(n.key) || isFlakeNoteKey(n.key)) continue;
     const run = n.runId === null ? null : store.run(n.runId);
+    // the unfiled-minor-findings flag is raised after the merge and waits for a fix: it outlives its run
     if (
+      !n.key.endsWith(":file-minor") &&
       noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
       run !== null &&
       endedWorkOver(config, store, run, boardOf, now)
