@@ -61,6 +61,8 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
     const sessions = (deps.config.crew?.sessions ?? []).filter((s) => s.repoId === run.repoId);
     return sessions.find((s) => s.seats.some((x) => x.id === run.agentId)) ?? sessions[0];
   };
+  /** Set aside at review: not ended, but no seat runs it. */
+  const isAside = (r: Run): boolean => r.endedAt === null && r.loop?.aside != null;
   /** The run's ticket (`repo#number`) is Done on the board: its work is finished, PR or not. */
   const ticketDone = (run: Run): boolean => {
     const m = /^(.+)#([1-9][0-9]*)$/.exec(run.ticket ?? "");
@@ -136,8 +138,9 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
       const out = { removed: [] as string[], trimmed: [] as string[] };
       const runs = deps.store
         .runsActiveSince(now - TIDY_FINISHED_WINDOW_MS)
-        .filter((r) => r.endedAt !== null && r.branch !== null)
-        .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
+        // an ended run, or one set aside at review (no end, its seat freed): both wait for days
+        .filter((r) => (r.endedAt !== null || isAside(r)) && r.branch !== null)
+        .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt));
       for (const run of runs) {
         const key = `${run.repoId}:${run.branch}`;
         if (seen.has(key)) continue;
@@ -149,10 +152,17 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
         await inClone(checkout, async () => {
           const live = deps.store
             .runsActiveSince(Number.MAX_SAFE_INTEGER)
-            .some((r) => r.endedAt === null && r.repoId === run.repoId && r.branch === run.branch);
+            .some(
+              (r) =>
+                r.endedAt === null &&
+                r.repoId === run.repoId &&
+                r.branch === run.branch &&
+                !isAside(r),
+            );
           if (live) return;
           const pr = deps.store.pullRequestOfBranch(run.repoId, run.branch as string);
-          if ((pr !== null && pr.state !== "open") || ticketDone(run)) {
+          // a set-aside run is the engine's to end: its worktree is trimmed, never removed here
+          if (!isAside(run) && ((pr !== null && pr.state !== "open") || ticketDone(run))) {
             if ((await this.removeWorktree(run.id)).ok) out.removed.push(run.id);
             return;
           }

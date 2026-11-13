@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Run } from "@mc/core";
+import { NEW_LOOP, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { boardItem, prView } from "../../web/test/fixtures.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -213,4 +213,27 @@ it("keeps node_modules of a run that is resuming, in the supervisor's real order
   rowWritten();
   await resuming;
   expect(existsSync(join(wt, "node_modules"))).toBe(true);
+});
+
+it("trims node_modules of a run set aside at review: no end, no seat, its PR open", async () => {
+  const wt = worktree("guido-1-10", "mc/10");
+  store.upsertRun({ ...run("r10", "mc/10"), endedAt: null, status: "running" });
+  store.setRunLoop("r10", {
+    ...NEW_LOOP,
+    phase: "review",
+    aside: { worktree: wt, wake: false },
+  });
+  prs("open", "mc/10", 10);
+  expect(await tidyOf().tidyFinished(NOW)).toEqual({ removed: [], trimmed: ["r10"] });
+  expect(existsSync(wt)).toBe(true);
+  expect(existsSync(join(wt, "node_modules"))).toBe(false);
+});
+
+it("never removes a set-aside run's worktree, even when its PR has merged", async () => {
+  const wt = worktree("guido-1-11", "mc/11");
+  store.upsertRun({ ...run("r11", "mc/11"), endedAt: null, status: "running" });
+  store.setRunLoop("r11", { ...NEW_LOOP, phase: "review", aside: { worktree: wt, wake: false } });
+  prs("merged", "mc/11", 11);
+  expect((await tidyOf().tidyFinished(NOW)).removed).toEqual([]);
+  expect(existsSync(wt)).toBe(true);
 });

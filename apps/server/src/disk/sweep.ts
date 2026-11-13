@@ -86,10 +86,15 @@ export async function sweepDataFolder(i: SweepInput): Promise<SweepResult> {
   const stale = (newest: number): boolean => now - newest > SCRATCH_MAX_AGE_MS;
   const idle = (newest: number): boolean => now - newest > SCRATCH_IN_USE_MS;
   const scratchDirs = [DATA_DIRS.controller, DATA_DIRS.evidenceWork];
-  const scratchOf = async (dir: string): Promise<string[]> =>
-    (await safeList(join(root, dir))).filter(
-      (name) => !(dir === DATA_DIRS.controller && name === CONTROLLER_KEEP),
-    );
+  // Folders only: plain files under controller/ are the controller monitor's own state.
+  const scratchOf = async (dir: string): Promise<string[]> => {
+    const out: string[] = [];
+    for (const name of await safeList(join(root, dir))) {
+      if (dir === DATA_DIRS.controller && name === CONTROLLER_KEEP) continue;
+      if ((await lstat(join(root, dir, name)).catch(() => null))?.isDirectory()) out.push(name);
+    }
+    return out;
+  };
 
   // evidence: <repo>/<pr>/<head sha>/...
   const evidence = join(root, DATA_DIRS.evidence);

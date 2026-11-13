@@ -236,6 +236,7 @@ import {
   prepareScratch,
   prepareSharedPnpmStore,
   type RepoPeer,
+  reinstallTrimmed,
   removeCheckout,
   sharedPnpmStoreDir,
   sweepPnpmStores,
@@ -4859,7 +4860,24 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
       let checkout: { path: string; branch: string; gitDir: string };
       try {
-        checkout = await existingCheckout(info.session.checkout, aside.worktree, run.branch);
+        const branch = run.branch;
+        // Under the clone lock, as the crew tidy is: the worktree is marked in use before the lock
+        // lets go, and its dependencies are back (the tidy trims a set-aside run's) before launch.
+        checkout = await inClone(info.session.checkout, async () => {
+          const c = await existingCheckout(info.session.checkout, aside.worktree, branch);
+          startingWorktrees.add(aside.worktree);
+          await reinstallTrimmed(
+            {
+              checkout: info.session.checkout,
+              worktreesRoot: crew?.worktrees ?? "",
+              sessionId: info.session.id,
+              peers: clonePeers(deps.config, deps.hubRoot),
+            },
+            aside.worktree,
+            branch,
+          );
+          return c;
+        });
       } catch (e) {
         return fail("could not resume: checkout missing", e);
       }
@@ -4958,6 +4976,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       }
     } finally {
       starting.delete(seatId);
+      startingWorktrees.delete(aside.worktree);
     }
   }
 

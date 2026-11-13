@@ -105,3 +105,19 @@ it("does not count this sweep's removals twice against the budget", async () => 
   expect(existsSync(join(data, "controller", "idle"))).toBe(false);
   expect(r.bytes).toBe(800);
 });
+
+it("never removes a plain file under controller/, such as the monitor's state", async () => {
+  const data = folder();
+  file(join(data, "controller", "mon-lastnote"), 30 * DAY, 4);
+  file(join(data, "controller", "mon-told.txt"), 4 * DAY, 4);
+  await sweepDataFolder({
+    dataDir: data,
+    now: () => NOW,
+    ...open,
+    budgetBytes: 1,
+    holdings: () => diskUse({ dataDir: data, worktrees: undefined }),
+    log: () => {},
+  });
+  expect(existsSync(join(data, "controller", "mon-lastnote"))).toBe(true);
+  expect(existsSync(join(data, "controller", "mon-told.txt"))).toBe(true);
+});
