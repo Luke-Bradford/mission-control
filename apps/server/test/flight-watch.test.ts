@@ -580,6 +580,41 @@ describe("FLIGHT's PR list", () => {
   });
 });
 
+describe("FLIGHT's conflicting files", () => {
+  const withFiles = (n: number, paths: string[], over: Partial<PullRequestView> = {}) =>
+    stored(n, { files: paths.map((path) => ({ path, changeType: "modified" })), ...over });
+  const state = () => flightState({ config, store, busy: [], now: nowMs });
+
+  it("names each file two open PRs both change, with the PRs", () => {
+    store.upsertPullRequests(
+      "mc",
+      [
+        withFiles(7, ["a.ts", "b.ts"]),
+        withFiles(8, ["b.ts", "c.ts"]),
+        withFiles(9, ["b.ts", "c.ts", "d.ts"]),
+      ],
+      T0,
+    );
+    expect(state().conflicts).toEqual([
+      { file: "b.ts", prs: [7, 8, 9] },
+      { file: "c.ts", prs: [8, 9] },
+    ]);
+  });
+
+  it("ignores a PR that has merged and a file only one PR changes", () => {
+    store.upsertPullRequests(
+      "mc",
+      [
+        withFiles(7, ["a.ts"]),
+        withFiles(8, ["a.ts"], { state: "merged", mergedAt: T0 }),
+        withFiles(9, ["z.ts"]),
+      ],
+      T0,
+    );
+    expect(state().conflicts).toEqual([]);
+  });
+});
+
 describe("FLIGHT's evidence", () => {
   const check = (name: string, state: "passing" | "failing" | "pending") => ({
     name,

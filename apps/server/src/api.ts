@@ -3621,13 +3621,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         };
 
-      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
+      // The map snapshot: apps/web/src/qa/useRepoGraph.ts and the Setup repo list read it through RESOURCES.repoMap.
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map",
         mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
       );
 
-      // Reader: apps/web/src/map/useGraphSnapshot.ts (lazy QA Impact and History analysis)
+      // Reader: apps/web/src/qa/useRepoGraph.ts (lazy QA Impact and History analysis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/graph",
         mapRoute(async (repo, checkout, req, reply) => {
@@ -3642,7 +3642,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }),
       );
 
-      // Reader: apps/web/src/data.ts (the Map page's tree-once read lands with its web ticket; for diagnosis until then)
+      // Reader: apps/web/src/data.ts (none in the web: the tree part of the map snapshot, read for diagnosis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/tree",
         mapRoute(async (repo, checkout, req, reply) => {
@@ -3654,13 +3654,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }),
       );
 
-      // Reader: apps/web/src/data.ts (the Map page's live read lands with its web ticket; for diagnosis until then)
+      // Reader: apps/web/src/data.ts (none in the web: the live part of the map snapshot, read for diagnosis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/live",
         mapRoute((repo, checkout, _req, reply) => mapLivePayload(repo, checkout, reply.log)),
       );
 
-      // Reader: apps/web/src/data.ts (none in the web: the Map reads modified scope from the snapshot; for diagnosis)
+      // Reader: apps/web/src/data.ts (none in the web: seats' modified scope, read for diagnosis)
       api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
         if (!config.repos.some((r) => r.id === req.params.repoId))
           return reply.code(404).send({ error: "unknown repo" });
@@ -3668,7 +3668,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { seats: deps.mapRing.scopes(req.params.repoId) };
       });
 
-      // Reader: apps/web/src/data.ts (none in the web: the Map reads conflicts from the snapshot; for diagnosis)
+      // Reader: apps/web/src/data.ts (none in the web: conflicts between open branches, read for diagnosis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/conflicts",
         async (req, reply) => {
@@ -3782,25 +3782,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
           return { ...pr, ...prPreviewFor(repo)(pr), ...prAcceptanceFor(store, repo.id)(pr) };
-        },
-      );
-
-      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
-      // Reader: apps/web/src/map/CrewMap.tsx (a QA deep link selects the PR's exact changed paths)
-      api.get<{ Params: { repoId: string; number: string } }>(
-        "/repos/:repoId/prs/:number/files",
-        (req, reply) => {
-          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
-            ? store.pullRequest(req.params.repoId, Number(req.params.number))
-            : null;
-          if (!config.repos.some((r) => r.id === req.params.repoId) || !pr)
-            return reply.code(404).send({ error: "unknown pull request" });
-          return {
-            repoId: pr.repoId,
-            number: pr.number,
-            sha: pr.headSha,
-            files: store.prFilePaths(pr.repoId, pr.number),
-          };
         },
       );
 

@@ -17,6 +17,7 @@ import {
   clockHm,
   FLIGHT_BRIEF_SECTIONS,
   FLIGHT_BRIEF_TITLES,
+  FLIGHT_CONFLICTS_MAX,
   FLIGHT_CONTEXT_ROTATE_TOKENS,
   FLIGHT_DECISIONS_SCAN_LIMIT,
   FLIGHT_HEADLINE,
@@ -1275,6 +1276,17 @@ export function flightState(i: {
         ]
       : []),
   ].join("; ");
+  // Files changed by more than one open PR, from the stored file lists (no git): the likely merge conflicts.
+  const touched = new Map<string, number[]>();
+  for (const p of prs)
+    if (p.state === "open")
+      for (const file of store.prFilePaths(session.repoId, p.pr))
+        touched.set(file, [...(touched.get(file) ?? []), p.pr]);
+  const shared = [...touched]
+    .filter(([, nums]) => nums.length > 1)
+    .map(([file, nums]) => ({ file, prs: nums.sort((a, b) => a - b) }))
+    .sort((a, b) => a.file.localeCompare(b.file));
+  const conflicts = shared.slice(0, FLIGHT_CONFLICTS_MAX);
   const flowHolds: NonNullable<FlightState["flowHolds"]> = [
     ...(capacity.blocked && capacity.reason !== null
       ? [
@@ -1490,6 +1502,10 @@ export function flightState(i: {
     holds,
     reviewQueue,
     mergeQueue,
+    conflicts,
+    ...(shared.length > conflicts.length
+      ? { conflictsMore: shared.length - conflicts.length }
+      : {}),
     flowHolds,
     recent,
     breaker,

@@ -1056,6 +1056,46 @@ describe("startReview", () => {
     await until(() => expect(closed).toContain(runId));
   });
 
+  it("a review brief lists the files that import what the PR changed, and starts without a graph", async () => {
+    const r = reviewOfPush();
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "t",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: r.sha,
+          mergeable: null,
+          author: null,
+          assignees: [],
+          files: [{ path: "a.txt", changeType: "modified" }],
+        },
+      ],
+      1,
+    );
+    const { sup } = make({
+      scratchRetro: true,
+      importGraph: async () => [{ from: "uses-a.ts", to: "a.txt" }],
+    });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("- Files changed (1): a.txt.");
+    expect(brief).toContain("- Files that import them (1): uses-a.ts.");
+  });
+
   it("a review still starts when its preview build never finishes", async () => {
     const r = reviewOfPush();
     const reviewPreviews = createReviewPreviews({
