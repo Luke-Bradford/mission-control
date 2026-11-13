@@ -387,7 +387,7 @@ describe("Codex check records", () => {
     const lock = new TestLock();
     const h = approver("writer", [], undefined, checks, lock);
     // with a configured full suite the guard sends `pnpm -s test` to the lock, not to allow
-    h.config.repos[0]!.fullSuite = ["pnpm -s test"];
+    Object.assign(h.config.repos[0] ?? {}, { fullSuite: ["pnpm -s test"] });
     expect(
       await h.approve(request("pnpm -s test", { itemId: "item-4" }), undefined, signal()),
     ).toBe("decline");
