@@ -547,7 +547,7 @@ export const LOOP_PHASE_LABEL: Record<LoopPhase, string> = {
   working: "Working",
   ci: "CI",
   review: "In review",
-  parked: "Blocked",
+  parked: "Parked",
   done: "Done",
 };
 
@@ -746,7 +746,7 @@ export function seatStatus(row: CrewRow): SeatStatus {
   if (row.kind === "crew" && row.hudState === "blocked") {
     if (isSeatFree(row)) return { label: SEAT_STATUS_LABEL.free, tone: "neutral" };
     const waiting = { label: HUD_STATE_LABEL.waiting, tone: HUD_STATE_TONE.waiting };
-    return row.note ? { ...waiting, reason: row.note } : waiting;
+    return reason ? { ...waiting, reason } : waiting;
   }
   if (row.kind !== "crew" || ENGINE_STATES.includes(row.hudState)) {
     return (row.hudState === "blocked" || row.hudState === "parked") && reason

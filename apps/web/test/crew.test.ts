@@ -9,6 +9,7 @@ import {
   isFinishedWork,
   isLoopInFlight,
   LOOP_PATH_TITLE,
+  LOOP_PHASE_LABEL,
   lockSince,
   loopLine,
   loopMarks,
@@ -961,6 +962,24 @@ describe("seatStatus", () => {
     const open = seatStatus(seat({ hudState: "blocked", note: "own command" }));
     expect(open.label).not.toBe("Blocked");
     expect(open.label).toBe("Waiting");
+  });
+
+  it("a stuck seat keeps its parked loop's reason in the pill tooltip", () => {
+    const parked: CrewLoop = {
+      phase: "parked",
+      text: "x",
+      prNumber: null,
+      parked: "needs you",
+      wait: "operator",
+    };
+    const status = seatStatus(seat({ hudState: "blocked", note: null, loop: parked }));
+    expect(status.label).toBe("Waiting");
+    expect(status.reason).toBe("needs you");
+  });
+
+  it("a parked loop's phase never reads Blocked", () => {
+    expect(LOOP_PHASE_LABEL.parked).not.toBe("Blocked");
+    expect(Object.values(LOOP_PHASE_LABEL)).not.toContain("Blocked");
   });
 
   it("an observed loop keeps the engine's Blocked", () => {

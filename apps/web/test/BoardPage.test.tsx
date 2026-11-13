@@ -290,28 +290,52 @@ describe("columns", () => {
   });
 
   it("shows a Waiting column with the reason and what frees each ticket, and no owner", async () => {
+    // ticket 3349 is held, yet a seat has an open run on it and a reviewer is on its PR
+    const working = crewRow({
+      loop: { phase: "working", text: "Editing", prNumber: null, parked: null },
+    });
+    const retro = crewRow({
+      id: "RETRO-1",
+      index: 3,
+      kind: "crew",
+      ticket: null,
+      reviewing: { prNumber: 40, sha: "c".repeat(40), ref: null },
+    });
     stub({
       shopApp: [
-        todo(1, {
+        todo(3349, {
+          status: "In review",
+          state: "review",
           waiting: { reason: "Needs the schema change", freesWhen: "shop-app#9 merges", at: NOW },
           owner: "Agent",
         }),
         todo(2, { blockedBy: [{ ref: "shop-app#7", closed: false }] }),
+        todo(4, { status: "Ready", state: "planned" }),
       ],
+      prs: [pr()],
+      crew: [working, retro],
     });
     const { container } = await open();
-    await screen.findByText("Ticket 1");
+    await screen.findByText("Ticket 3349");
     const heads = [...container.querySelectorAll(".kcol .kh")].map((h) => h.textContent);
     expect(heads).toContain("Waiting 1");
     expect(heads).toContain("Blocked 1");
     const col = [...container.querySelectorAll<HTMLElement>(".kcol")].find((c) =>
       c.querySelector(".kh")?.textContent?.startsWith("Waiting"),
     ) as HTMLElement;
-    expect(within(col).getByText("Ticket 1")).toBeTruthy();
+    expect(within(col).getByText("Ticket 3349")).toBeTruthy();
     expect(within(col).queryByText("Ticket 2")).toBeNull();
     expect(within(col).getByText(/Needs the schema change/)).toBeTruthy();
     expect(within(col).getByText(/shop-app#9 merges/)).toBeTruthy();
-    expect(col.querySelector(".kowner, [data-owner]")).toBeNull();
+    // no seat anywhere on the card: no agent, run trace, reviewer or queue line
+    expect(col.querySelector(".atag")).toBeNull();
+    expect(within(col).queryByText(working.id)).toBeNull();
+    expect(within(col).queryByText("RETRO-1")).toBeNull();
+    expect(within(col).queryByRole("link", { name: "Trace" })).toBeNull();
+    expect(within(col).queryByText("Reviewing:")).toBeNull();
+    expect(within(col).queryByText("Next for")).toBeNull();
+    expect(within(col).queryByText(NOT_QUEUED)).toBeNull();
+    expect(within(col).queryByText(NO_REVIEWER)).toBeNull();
   });
 
   it("an empty column is collapsed with a tooltip", async () => {
