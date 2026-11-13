@@ -288,7 +288,7 @@ review data includes its PR, head and waiting reason even when the reviewer cann
 The hub posts `mc/review` and a report comment containing the SHA, findings and recorded checks and
 tests. It links the available before/after screenshot manifest for that head, or states that no pairs
 were captured. Web changes require the configured screenshot gate before queueing. Evidence uses
-isolated previews and copied data; it never reconstructs a historical approval. Which pages a web change is photographed on comes from the static imports of the PR head's
+isolated previews and copied data; it never reconstructs a historical approval. Each affected page is also rendered on the head alone in the web app's Demo mode at 1920×940 and 2560×1145 (the Demo scene at its busiest), stored beside the live pairs and linked in the PR body; a Demo render that fails keeps the PR in draft like a live one. Which pages a web change is photographed on comes from the static imports of the PR head's
 `apps/web/src`: each file in `pages/` is a page (a lazy `import()` of it is the boundary), what
 `main.tsx` and `App.tsx` reach counts for every page, and CSS belongs to the file that imports it.
 A file listed with no photographed pages needs no pairs (for example, one reached only by the unphotographed Ticket page). A file the graph does not list, or a graph that cannot be read, falls back to the folder rule. Graph reads use a temporary archive of the fetched head, share one read per head, retry after failure and are cancelled on shutdown. A reviewer run is
