@@ -1703,6 +1703,50 @@ describe("scheduler", () => {
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
     });
 
+    it("tells the operator to restart the file-change service, and drops the item when it recovers", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      let t = minute + 1000;
+      let swollen = true;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              memTotalBytes: 24 * 1024 ** 3,
+              swapUsedBytes: 1024 ** 3,
+              swapTotalBytes: 20 * 1024 ** 3,
+              memoryPressureFreePct: 44,
+              load1: 1,
+              topConsumers: [
+                {
+                  pid: 7,
+                  command: "fseventsd",
+                  rssBytes: (swollen ? 28 : 0.1) * 1024 ** 3,
+                  cpuPct: 1,
+                },
+              ],
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      const note = store.notes().filter((n) => n.key === "machine-capacity");
+      expect(note).toHaveLength(1);
+      expect(note[0]?.text).toContain("file-change service (fseventsd) holds 28.0 GB");
+      expect(note[0]?.text).toContain("sudo killall fseventsd");
+      expect(note[0]?.text).toContain("about 15 seconds");
+      swollen = false;
+      t += 5 * 60_000 + 1;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+    });
+
     it("keeps one disk-capacity item and FLIGHT wake while headroom flaps around the percentage floor", async () => {
       let t = Math.floor(NOW / 60_000) * 60_000;
       const diskFreeGb = [4.5, 5.3, 4.6];

@@ -119,6 +119,8 @@ import {
   stateInputs,
 } from "./hud.ts";
 import {
+  FILE_SERVICE_RESTART_ADVICE,
+  fileServiceFault,
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
   storedMachineCapacity,
@@ -1419,7 +1421,7 @@ export function createScheduler(deps: SchedulerDeps): Scheduler {
             runId: null,
             seatId: null,
             repoId: null,
-            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap used: ${gb(r.sample.swapUsedBytes)}. RAM: ${gb(r.sample.memTotalBytes)}. Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}.${holds} New crew runs and reviews are paused; running work continues.`,
+            text: `Machine headroom is tight: ${capacity.reason}. Disk: ${gb(r.sample.diskFreeBytes)} free (${diskPct}). Swap used: ${gb(r.sample.swapUsedBytes)}. RAM: ${gb(r.sample.memTotalBytes)}. Memory pressure free: ${r.sample.memoryPressureFreePct?.toFixed(1) ?? "—"}%. Load: ${r.sample.load1?.toFixed(1) ?? "—"} on ${r.sample.cores} cores. Top consumers: ${consumers}.${holds} New crew runs and reviews are paused; running work continues.${fileServiceFault(r.sample) === null ? "" : ` ${FILE_SERVICE_RESTART_ADVICE}`}`,
             at,
           });
         } else {
