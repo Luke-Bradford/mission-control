@@ -112,7 +112,6 @@ import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { LocalNotifications } from "../src/local-notifications.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
-import { CallRing } from "../src/map/ring.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
@@ -1654,12 +1653,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/boards/shop-app/setup"],
   ["GET", "/api/repos/shop-app/prs"],
   ["GET", "/api/repos/shop-app/prs/4"],
-  ["GET", "/api/repos/shop-app/map/conflicts"],
   ["GET", "/api/repos/shop-app/map"],
-  ["GET", "/api/repos/shop-app/map/diff"],
-  ["GET", "/api/repos/shop-app/map/tree"],
   ["GET", "/api/repos/shop-app/map/graph"],
-  ["GET", "/api/repos/shop-app/map/live"],
   ["GET", "/api/repos/shop-app/prs?linked=1"],
   ["GET", "/api/escalations"],
   ["GET", "/api/drafts"],
@@ -1826,7 +1821,6 @@ const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/qa/review-shots/:id"],
   ["GET", "/api/qa/uat/:repoId/:number"],
   ["GET", "/api/qa/queue"],
-  ["GET", "/api/repos/:repoId/prs/:number/files"],
 ];
 
 describe("repo profiles and the add-repo preview", () => {
@@ -2591,11 +2585,6 @@ describe("local access", () => {
                 payload: body,
               })
             : await post(url, json, body);
-      if (url === "/api/repos/:repoId/prs/:number/files") {
-        // This DB-backed read has no placeholder PR; unlike worktree files it answers unknown.
-        expect(r.statusCode).toBe(404);
-        continue;
-      }
       if (url.endsWith("/files") || url.includes("/files/diff")) {
         // the shared fixture has no git worktree: answered (503), not refused
         expect([401, 403, 404], `${method} ${url}`).not.toContain(r.statusCode);
@@ -2739,18 +2728,7 @@ describe("local access", () => {
         expect(r.statusCode).toBe(404);
         continue;
       }
-      if (url === "/api/repos/shop-app/map/diff") {
-        expect(r.statusCode).toBe(503);
-        expect(r.json()).toEqual({ error: "map collector unavailable" });
-        continue;
-      }
-      if (
-        url === "/api/repos/shop-app/map/conflicts" ||
-        url === "/api/repos/shop-app/map" ||
-        url === "/api/repos/shop-app/map/tree" ||
-        url === "/api/repos/shop-app/map/graph" ||
-        url === "/api/repos/shop-app/map/live"
-      ) {
+      if (url === "/api/repos/shop-app/map" || url === "/api/repos/shop-app/map/graph") {
         // This fixture has no crew checkout to check.
         expect(r.statusCode).toBe(503);
         expect(r.json()).toEqual({ error: "map checkout unavailable" });
@@ -4861,9 +4839,6 @@ describe("boards, escalations, health", () => {
       });
       return { a, builds, checkout };
     };
-    const call = (name: string, input: Record<string, string>) =>
-      `${JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: name, name: "Read", input }] } })}\n`;
-
     it("builds the tree once however often the map loads, and again when the head moves", async () => {
       const { a, builds, checkout } = openMap(join(dir, "tree.jsonl"));
       try {
@@ -4879,51 +4854,6 @@ describe("boards, escalations, health", () => {
         expect(unpackMap(moved.json()).tree).toContainEqual(
           expect.objectContaining({ path: "added.ts" }),
         );
-      } finally {
-        await a.close();
-      }
-    });
-
-    it("answers a repeat tree request with 304 and a seat's move rebuilds only the live part", async () => {
-      const transcriptPath = join(dir, "move.jsonl");
-      const { a, builds } = openMap(transcriptPath);
-      try {
-        const tree = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/tree" });
-        expect(tree.statusCode).toBe(200);
-        const etag = tree.headers.etag as string;
-        expect(etag).toBeTruthy();
-        expect(tree.json()).not.toHaveProperty("seats");
-        const repeat = await a.inject({
-          method: "GET",
-          url: "/api/repos/shop-app/map/tree",
-          headers: { "if-none-match": etag },
-        });
-        expect(repeat.statusCode).toBe(304);
-
-        const before = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
-        expect(before.json()).not.toHaveProperty("tree");
-        expect(before.json().seats[0].recent).toEqual([]);
-        appendFileSync(transcriptPath, call("r1", { file_path: "packages/core/src/map.ts" }));
-        clock += 5000;
-        const after = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
-        expect(after.json().seq).toBeGreaterThan(before.json().seq);
-        expect(after.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
-          "packages/core/src/map.ts",
-        ]);
-        appendFileSync(transcriptPath, call("r2", { file_path: "packages/core/src/types.ts" }));
-        clock += 5000;
-        const moved = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/live" });
-        expect(moved.json().seats[0].recent.map((r: { file: string }) => r.file)).toEqual([
-          "packages/core/src/map.ts",
-          "packages/core/src/types.ts",
-        ]);
-        const same = await a.inject({
-          method: "GET",
-          url: "/api/repos/shop-app/map/tree",
-          headers: { "if-none-match": etag },
-        });
-        expect(same.statusCode).toBe(304);
-        expect(builds).toHaveLength(1);
       } finally {
         await a.close();
       }
@@ -5423,143 +5353,6 @@ describe("boards, escalations, health", () => {
       }
     });
   }
-  it("exposes repo-scoped modified seat entries from the live map ring", async () => {
-    const cwd = join(dir, "diff-checkout");
-    mkdirSync(cwd);
-    const git = (...args: string[]) => execFileSync("git", ["-C", cwd, ...args]);
-    git("init", "-q");
-    git("config", "user.name", "Fixture");
-    git("config", "user.email", "fixture");
-    writeFileSync(join(cwd, "file.ts"), "base\n");
-    git("add", ".");
-    git("commit", "-qm", "base");
-    git("update-ref", "refs/remotes/origin/main", "HEAD");
-    git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
-    writeFileSync(join(cwd, "file.ts"), "edited\nextra\n");
-    const transcriptPath = join(cwd, "transcript.jsonl");
-    writeFileSync(transcriptPath, "");
-    const ring = new CallRing(() => [
-      { id: "run", seat: "seat", repoId: "shop-app", cwd, transcriptPath },
-      { id: "other", seat: "seat", repoId: "site-builder", cwd, transcriptPath },
-    ]);
-    const a = buildApp({ config, store, bus, mapRing: ring });
-    const unsubscribe = ring.subscribe("shop-app", () => {});
-    const stop = ring.start();
-    try {
-      await expect
-        .poll(
-          async () => {
-            const r = await a.inject({ method: "GET", url: "/api/repos/shop-app/map/diff" });
-            expect(r.statusCode).toBe(200);
-            return r.json();
-          },
-          { timeout: 4500 },
-        )
-        .toEqual({
-          seats: [
-            {
-              seat: "seat",
-              scope: { modified: [{ file: "file.ts", add: 2, rem: 1, source: "diff" }] },
-            },
-          ],
-        });
-      expect((await a.inject({ method: "GET", url: "/api/repos/nope/map/diff" })).statusCode).toBe(
-        404,
-      );
-      // the snapshot reads the same per-run diff (map/seats.ts runChanges)
-      expect(ring.diff("run")).toEqual([{ file: "file.ts", add: 2, rem: 1, source: "diff" }]);
-      expect(ring.diff("unknown")).toBeNull();
-    } finally {
-      unsubscribe();
-      stop();
-      await a.close();
-    }
-  });
-
-  it("serves computed map conflicts from stored open PR tips without changing the checkout", async () => {
-    withCrew();
-    const checkout = join(dir, "clone");
-    mkdirSync(checkout, { recursive: true });
-    const git = (...args: string[]) =>
-      execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8" }).trim();
-    git("init", "-q");
-    git("config", "user.name", "Fixture");
-    git("config", "user.email", "fixture@example.invalid");
-    writeFileSync(join(checkout, "file.txt"), "base\n");
-    git("add", ".");
-    git("commit", "-qm", "base");
-    const base = git("rev-parse", "HEAD");
-    git("checkout", "-qb", "left");
-    writeFileSync(join(checkout, "file.txt"), "left\n");
-    git("commit", "-qam", "left");
-    const left = git("rev-parse", "HEAD");
-    git("checkout", "-qb", "right", base);
-    writeFileSync(join(checkout, "file.txt"), "right\n");
-    git("commit", "-qam", "right");
-    const right = git("rev-parse", "HEAD");
-    git("branch", "-f", "left", base);
-    const prs = [left, right].map((headSha, i) => ({
-      repoId: "shop-app",
-      number: i + 1,
-      title: "Fixture",
-      url: "https://example.invalid/pr",
-      branch: i === 0 ? "left" : "right",
-      ticket: null,
-      state: "open" as const,
-      isDraft: false,
-      review: null,
-      ci: "pending" as const,
-      createdAt: 1,
-      updatedAt: 2,
-      mergedAt: null,
-      mergeCommitSha: null,
-      headSha,
-      mergeable: null,
-      author: null,
-      assignees: [],
-      checks: [],
-      closingIssues: [],
-    }));
-    store.upsertPullRequests("shop-app", prs, 0);
-    const before = git("count-objects", "-v");
-    const response = await get("/api/repos/shop-app/map/conflicts");
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      conflicts: [
-        { file: "file.txt", branches: ["right", "left"], shas: [right, left], prs: [2, 1] },
-      ],
-      unchecked: [],
-    });
-    expect(git("count-objects", "-v")).toBe(before);
-    expect(git("status", "--porcelain")).toBe("");
-    expect(readFileSync(join(checkout, "file.txt"), "utf8")).toBe("right\n");
-    store.upsertPullRequests(
-      "shop-app",
-      prs.map((pr) => ({ ...pr, state: "closed" })),
-      0,
-    );
-    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toEqual({
-      conflicts: [],
-      unchecked: [],
-    });
-    // a head the checkout hasn't fetched is named unchecked, never reported clean
-    store.upsertPullRequests(
-      "shop-app",
-      [prs[0], { ...prs[1], headSha: "f".repeat(40) }].map((pr) => ({ ...pr, state: "open" })),
-      0,
-    );
-    expect((await get("/api/repos/shop-app/map/conflicts")).json()).toMatchObject({
-      unchecked: [{ reason: "head not fetched" }],
-    });
-  });
-
-  it("does not report a clean merge when the map checkout is unavailable", async () => {
-    expect((await get("/api/repos/nope/map/conflicts")).statusCode).toBe(404);
-    expect((await get("/api/repos/shop-app/map/conflicts")).statusCode).toBe(503);
-    withCrew();
-    expect((await get("/api/repos/shop-app/map/conflicts")).statusCode).toBe(503);
-  });
-
   it("repos/:repoId/prs returns the stored pull requests, 404 for an unknown repo", async () => {
     expect((await get("/api/repos/shop-app/prs")).json()).toEqual([]);
     const pr = {
@@ -6671,133 +6464,6 @@ describe("SSE stream", () => {
 
     expect(counts).toEqual([1, 2, 1, 0]);
   });
-
-  it("stops map polling after the last map stream closes", async () => {
-    vi.useFakeTimers();
-    await app.close();
-    const poll = vi.spyOn(CallRing.prototype, "poll");
-    app = buildApp({ config, store, bus });
-    try {
-      const client = await open("/api/stream?map=shop-app");
-      await client.until(": connected");
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(poll).toHaveBeenCalledOnce();
-
-      client.res.raw.res.emit("close");
-      await vi.advanceTimersByTimeAsync(1_000);
-      expect(poll).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it.each(["claude", "codex"] as const)(
-    "%s: sends ordered map calls only to the selected repo and keeps changed pings",
-    async (vendor) => {
-      withCrew();
-      const transcriptPath = join(dir, "map.jsonl");
-      writeFileSync(transcriptPath, "");
-      store.upsertRun(run({ id: "map-run", agentId: "guido-1", vendor, transcriptPath }));
-      store.setSeatSession({
-        seatId: "guido-1",
-        runId: "map-run",
-        cliSessionId: null,
-        state: "running",
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      });
-      const selected = await open("/api/stream?map=shop-app");
-      const other = await open("/api/stream?map=site-builder");
-      const plain = await open();
-      await Promise.all([
-        selected.until(": connected"),
-        other.until(": connected"),
-        plain.until(": connected"),
-      ]);
-      const otherWrite = vi.spyOn(other.res.raw.res, "write");
-      const plainWrite = vi.spyOn(plain.res.raw.res, "write");
-      const frames = mapFixture(vendor).trim().split("\n");
-      appendFileSync(transcriptPath, `${frames[0]}\n${frames[1]}\n`);
-      bus.emit("boards");
-      await selected.until('"type":"invalidate"');
-      const deltas = selected
-        .text()
-        .split("\n")
-        .filter((line) => line.startsWith("data: "))
-        .map((line) => JSON.parse(line.slice(6)))
-        .filter((d) => d.seq !== undefined);
-      expect(deltas.map((d) => [d.seq, d.type])).toEqual([
-        [1, "call.start"],
-        [2, "edit"],
-        [3, "call.end"],
-        [4, "invalidate"],
-      ]);
-      expect(deltas[0]).toMatchObject({
-        seat: "guido-1",
-        tool: "Edit",
-        files: ["file.ts"],
-        writeTok: 3,
-      });
-      expect(deltas[2]).toMatchObject({
-        seat: "guido-1",
-        files: ["file.ts"],
-        error: false,
-        refused: false,
-      });
-      for (const writes of [otherWrite, plainWrite]) {
-        expect(writes.mock.calls.some(([chunk]) => String(chunk).includes("event: map"))).toBe(
-          false,
-        );
-        expect(
-          writes.mock.calls.some(([chunk]) => String(chunk).includes('"topic":"boards"')),
-        ).toBe(true);
-      }
-      for (const client of [selected, other, plain]) client.res.raw.res.emit("close");
-    },
-  );
-
-  it.each(["cleared", "reassigned"] as const)(
-    "finishes the previous run's calls after its seat is %s",
-    async (transition) => {
-      withCrew();
-      const transcriptPath = join(dir, "previous-map.jsonl");
-      const frames = mapFixture("claude").trim().split("\n");
-      writeFileSync(transcriptPath, `${frames[0]}\n`);
-      store.upsertRun(run({ id: "previous-map", agentId: "guido-1", transcriptPath }));
-      const session = {
-        seatId: "guido-1",
-        runId: "previous-map",
-        cliSessionId: null,
-        state: "running" as const,
-        reason: null,
-        worktree: dir,
-        updatedAt: NOW,
-      };
-      store.setSeatSession(session);
-      const client = await open("/api/stream?map=shop-app");
-      await client.until('"type":"call.start"');
-      store.setSeatSession({
-        ...session,
-        runId: transition === "cleared" ? null : "next-map",
-        worktree: null,
-      });
-      appendFileSync(transcriptPath, `${frames[1]}\n`);
-      const write = vi.spyOn(client.res.raw.res, "write");
-      try {
-        await vi.waitFor(
-          () => {
-            expect(
-              write.mock.calls.some(([chunk]) => String(chunk).includes('"type":"call.end"')),
-            ).toBe(true);
-          },
-          { timeout: 2000 },
-        );
-      } finally {
-        client.res.raw.res.emit("close");
-      }
-    },
-  );
 
   it("emits event: changed with the topic, sends heartbeats, and cleans up on close", async () => {
     const s = await open();

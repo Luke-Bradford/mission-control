@@ -1444,9 +1444,25 @@ line, `flight watch: seat idle: <seat> <N> min with <K> open tickets; why: <reas
 The wake text tells FLIGHT to go round a wait on a person, take other work or decide; only money,
 direction, irreversible actions and security exceptions go to the operator, parked with a brief.
 
+**Stuck PRs (#1791).** The engine's tick (`engine/stuck-prs.ts`) finds, with no FLIGHT or seat tokens, open PRs on a
+branch this hub has a run on (so not an external PR) in a `merge` repo that conflict with main (`CONFLICTING`) or have
+red CI, that `prFlow` shows owned by nobody, with no unended run on the ticket. The hub notes when it first saw each
+stuck state on a head (the `stuck-prs` setting), and the PR is stuck once it has stood 30 minutes since that, or since
+the last run on it ended, whichever is later. Never taken: a ticket labelled `waiting:operator`, a ticket with an open
+retry-loop waste alarm, a ticket or PR with a running `wait_on`, a ticket held behind a PR, a PR whose author run holds a
+merge hold (operator or FLIGHT), a PR the operator holds in Needs you, a PR that has failed two reviews or whose run FLIGHT ended (the two-attempt rule: that call stays FLIGHT's, whether or not a wait has expired), a stacked PR, a closed card.
+A conflicting PR is first tried without a model: the hub merges main into the branch with `git merge-tree` in the
+session's clone, commits `Merge main into <branch>` as Mission Control, and pushes it plain (never forced), the same
+push `mc push` makes; a clean merge ends there. A real conflict, and a red PR, are started on a free build seat of the
+ticket's area through the ordinary `startRun` (the ended author's branch is handed to the new run), before any Ready ticket
+is dealt that tick; the seat is told the reason by a hub line and Comms. A refused start is tried again after 10 minutes.
+The hub does not take while the operator is away or the machine has no headroom. A seat idle 10 minutes with such a PR in
+its area raises `idle_seat`; `stuck_pr` is raised when no seat of its area could take it at all.
+
 | Signal | Raised when |
 |---|---|
-| `idle_seat` | a seat is idle 10 minutes with startable work queued |
+| `idle_seat` | a seat is idle 10 minutes with startable work queued, or with a stuck PR in its area that no run is on (see Stuck PRs) |
+| `stuck_pr` | an open crew PR in conflict with main or red has had no run on it for 30 minutes and no seat of its area can take it (see Stuck PRs); once per PR head and kind |
 | `idle_no_work` | a build seat is idle 5 minutes and Ready holds nothing startable for its area and lane (for example only another lane's tickets); the evidence names the seat and its area, and FLIGHT promotes work for it. At most one per seat per hour |
 | `budget_unused` | a free build seat is idle 30 minutes while its account has used under 50% of its 7-day window; the evidence names the account and its weekly use. Once per idle spell |
 | `old_park` | a run has been parked for 15 minutes |

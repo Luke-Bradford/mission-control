@@ -46,7 +46,6 @@ import {
   issueOf,
   type McToolsDeps,
   openDraftPr,
-  originHeads,
   prTextProblem,
   pushRun,
   queued,
@@ -67,6 +66,7 @@ import {
   mainMergeArgs,
 } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
+import { originHeads } from "../runtime/origin-heads.ts";
 import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
 import { onlyHubMerges, yes } from "./hub-merges.ts";
 import { mcSection } from "./rules.ts";

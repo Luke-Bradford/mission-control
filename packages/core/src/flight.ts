@@ -274,6 +274,8 @@ export const FLIGHT_LEDGER_OUTCOME_MAX = 300;
 export const FLIGHT_LEDGER_REFS_MAX = 10;
 export const FLIGHT_LEDGER_OPEN_MAX = 200;
 export const FLIGHT_LEDGER_INDEX_MAX = 60;
+/** Conflicting files FLIGHT's state lists; the rest are counted in `conflictsMore`. */
+export const FLIGHT_CONFLICTS_MAX = 20;
 export const FLIGHT_LEDGER_KEEP_MS = 7 * 24 * 60 * 60_000;
 export const FLIGHT_SUMMARY_LISTED = 5;
 export const FLIGHT_METRICS_DAY_MS = 24 * 60 * 60_000;
@@ -1064,6 +1066,11 @@ export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
+/**
+ * An open crew PR that conflicts with main or has red CI, with no run on it, is stuck after this
+ * long: the hub offers it to a free seat, and wakes FLIGHT only when no seat can take it.
+ */
+export const FLIGHT_STUCK_PR_MS = 30 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
 export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 /** An item not seen stale for this long, and then stale again, is told as a new reason. */
@@ -1106,6 +1113,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "seat_call",
   "question_changed",
   "waste_alarm",
+  "stuck_pr",
   "budget_unused",
 ] as const;
 /** A seat idle while its account is under this share of its week raises `budget_unused`. */
@@ -1249,6 +1257,10 @@ export interface FlightState {
       idle: boolean;
     }[];
   };
+  /** Files whose merge conflicts between open PRs (a git merge check), with those PRs. */
+  conflicts?: { file: string; prs: number[] }[];
+  /** Conflicting files left off `conflicts` once it reaches FLIGHT_CONFLICTS_MAX. */
+  conflictsMore?: number;
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
   mergeQueue?: { pr: number; waitsOn: string[] }[];
   /** Machine, crew, quota and stopped-seat holds that currently prevent queued work. */
