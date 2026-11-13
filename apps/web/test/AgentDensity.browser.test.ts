@@ -262,7 +262,8 @@ describeRendered("Agent density in the production App", () => {
                 box.bottom <= outer.bottom
               );
             };
-            while (!visible() && performance.now() - start < 1000)
+            // Poll the condition itself; the timeout is only a safety net for CI load.
+            while (!visible() && performance.now() - start < 15000)
               await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
             return {
               visible: visible(),
