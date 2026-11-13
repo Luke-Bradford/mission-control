@@ -89,3 +89,26 @@ it("a Board card does not repeat the hand-off line", () => {
   expect(screen.queryByText(/Handed off from/)).toBeNull();
   expect(container.querySelector(".handoff-link")).toBeNull();
 });
+
+it("a Done card shows no CI failure, even for a PR whose last CI run failed", () => {
+  render(
+    <Card
+      item={boardItem({ status: "Done" })}
+      showRepo={false}
+      agent={null}
+      step={null}
+      queued={null}
+      reviewer={null}
+      pr={prView({ state: "merged", ci: "failing" })}
+      mine={false}
+      unacked={false}
+      outcome="Merged"
+      when="today"
+      statusOutOfDate={null}
+      you={null}
+    />,
+  );
+  expect(screen.getByText("Merged")).toBeTruthy();
+  expect(screen.queryByText("CI failing")).toBeNull();
+  expect(document.querySelector(".crit")).toBeNull();
+});

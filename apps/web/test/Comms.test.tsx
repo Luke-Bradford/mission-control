@@ -14,6 +14,26 @@ const ROWS = [
   crewRow({ id: "studio", repoId: "site-builder", index: 1, hudState: "idle", run: null }),
 ];
 
+/** An unseen message from `from` to the operator: what every unread-to-you badge counts. */
+const toOperator = (id: string, from: string) => ({
+  message: {
+    id,
+    at: NOW,
+    from,
+    to: "CAPCOM",
+    text: `reply ${id}`,
+    ticket: null,
+    label: null,
+    ref: null,
+    replyTo: null,
+    mentions: [],
+    reactions: [],
+    pinned: false,
+    operator: false,
+  },
+  seen: false,
+});
+
 beforeEach(() => {
   hub.clear();
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -661,7 +681,11 @@ describe("Comms routes", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/crew": { messages: [message], unread: 3 },
-      "/api/comms/mentions": { mentions: [{ message, seen: false }] },
+      "/api/comms/crew?history=1": { messages: [message], unread: 3 },
+      // not among the messages shown: opening the channel reads the ones it shows
+      "/api/comms/mentions": {
+        mentions: [{ message: { ...message, id: "comms:10" }, seen: false }],
+      },
       "/api/comms/pins": { messages: [message] },
       "POST /api/comms/read": { ok: true },
       "POST /api/comms/mentions/seen": { ok: true },
@@ -718,7 +742,7 @@ describe("Comms routes", () => {
     };
     let attempts = 0;
     stubFetch({
-      "/api/comms/crew": { messages: [message] },
+      "/api/comms/crew": { messages: [] },
       "/api/comms/mentions": { mentions: [{ message, seen: false }] },
       "/api/comms/pins": { messages: [] },
       "/api/flight": { seat: null, decisions: [] },
@@ -756,7 +780,9 @@ describe("Comms routes", () => {
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/crew": { messages: [], unread: 0 },
       "/api/comms/flight": { messages: [], unread: 0 },
-      "/api/comms/mentions": { mentions: [] },
+      "/api/comms/mentions": {
+        mentions: [toOperator("comms:71", "alpha"), toOperator("comms:72", "alpha")],
+      },
       "/api/comms/pins": { messages: [] },
       "/api/comms/agents/alpha": {
         messages: [],
@@ -1280,7 +1306,7 @@ describe("Comms routes", () => {
 
 describe("the record, not a place to answer", () => {
   const SEAT = crewRow({ id: "alpha", kind: "crew", role: "Developer" });
-  const routes = (agent: Record<string, unknown> = {}) => ({
+  const routes = (agent: Record<string, unknown> = {}, mentions: unknown[] = []) => ({
     "/api/config": CONFIG,
     "/api/attention": [
       item({ key: "ask:1", kind: "question", text: "Which cache should we use?", brief: brief() }),
@@ -1289,7 +1315,7 @@ describe("the record, not a place to answer", () => {
     "/api/flight": { seat: { id: "flight-1" }, decisions: [] },
     "/api/comms/crew": { messages: [] },
     "/api/comms/flight": { messages: [], unread: 0 },
-    "/api/comms/mentions": { mentions: [] },
+    "/api/comms/mentions": { mentions },
     "/api/comms/pins": { messages: [] },
     [`/api/comms/agents/${SEAT.id}`]: { messages: [], inbox: [], contacts: [], ...agent },
     [`/api/comms/agents/${SEAT.id}?summary=1`]: { messages: [], inbox: [], contacts: [], ...agent },
@@ -1308,11 +1334,14 @@ describe("the record, not a place to answer", () => {
 
   it("marks unread only for what is addressed to the operator", async () => {
     stubFetch(
-      routes({
-        unread: 7,
-        directUnread: 2,
-        contacts: [{ id: "studio", lastMessage: null, count: 3, unread: 3 }],
-      }),
+      routes(
+        {
+          unread: 7,
+          directUnread: 99,
+          contacts: [{ id: "studio", lastMessage: null, count: 3, unread: 3 }],
+        },
+        [toOperator("comms:81", "alpha"), toOperator("comms:82", "alpha")],
+      ),
     );
     render(<Comms item={null} view={{ kind: "crew" }} />);
     const nav = await screen.findByRole("navigation", { name: "Comms" });

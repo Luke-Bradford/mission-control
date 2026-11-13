@@ -1,6 +1,9 @@
 import {
+  COMMS_CAPCOM,
   COMMS_CONTROLLER,
+  COMMS_CREW,
   type CommsAgentResponse,
+  type CommsMention,
   type CommsMessagesResponse,
   type CrewRow,
 } from "@mc/core";
@@ -16,12 +19,35 @@ import {
   commsCrewPath,
   commsFlightPath,
 } from "../router.ts";
+import { useMentions } from "../shell/operatorMessages.ts";
 import { useNoticeResource } from "./model.ts";
 
 /** The short area label belongs in the compact nav; path globs belong in seat detail. */
 export function commsAgentRole(row: CrewRow): string {
   const area = row.area.find((label) => label.startsWith("area:"));
   return area?.slice("area:".length) || row.role?.toLowerCase() || "crew";
+}
+
+/**
+ * The messages to the operator still unseen in one conversation: the same read state the header
+ * chat button, the dock and the bell count, so every view shows one number.
+ */
+export function unseenMentionsFor(
+  mentions: readonly CommsMention[],
+  kind: "flight" | "agent",
+  id?: string,
+): number {
+  return mentions.filter(({ message, seen }) => {
+    if (seen || message.to === COMMS_CREW || message.from === COMMS_CREW) return false;
+    if (kind === "flight")
+      return (
+        id !== undefined &&
+        [message.from, message.to].includes(id) &&
+        [message.from, message.to].includes(COMMS_CAPCOM)
+      );
+    const other = message.from === COMMS_CAPCOM ? message.to : message.from;
+    return id !== undefined && other === id;
+  }).length;
 }
 
 export function AgentNavRow({
@@ -39,7 +65,7 @@ export function AgentNavRow({
   // The nav row reads counts, not messages: what its contact conversations hold (the crew
   // channel is not among them).
   const total = (data?.contacts ?? []).reduce((n, c) => n + c.count, 0);
-  const direct = data?.directUnread ?? 0;
+  const direct = unseenMentionsFor(useMentions(), "agent", row.id);
   const active = "agentId" in view && view.agentId === row.id;
   const status = seatStatus(row);
   return (
@@ -124,6 +150,7 @@ export function CommsNav({
   hideNotices?: boolean;
 }) {
   const flight = useNoticeResource<CommsMessagesResponse>(RESOURCES.commsFlight, hideNotices).data;
+  const toYou = unseenMentionsFor(useMentions(), "flight", flightId);
   // Observed loops appear in `/api/crew` too, but are not stored-Comms agents.  In particular,
   // `/api/comms/agents/:id` correctly rejects them, so never mount an AgentNavRow for one.
   const seats = rows.filter((row) => row.kind === "crew" && row.id !== flightId);
@@ -153,7 +180,7 @@ export function CommsNav({
           <small>{plural(flight?.messages.length ?? 0, "message")}</small>
         </span>
         <span className="comms-nav-counts">
-          <CountBadges flight={flight?.unread} />
+          <CountBadges flight={toYou} />
         </span>
       </button>
       {flightId && <ControllerNavRow flightId={flightId} view={view} onNavigate={onNavigate} />}
