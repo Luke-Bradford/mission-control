@@ -50,8 +50,8 @@ import {
   NO_LOCK,
   pinned,
 } from "../src/hud.ts";
-import { clearLeftovers } from "../src/leftovers.ts";
 import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
+import { clearLeftovers } from "../src/leftovers.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
@@ -2549,9 +2549,20 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     const setup = (over: Partial<Run>) => {
       store.replaceBoard("shop-app", [boardItem({ issueNumber: 5, closed: true })]);
       store.upsertRun(
-        run({ id: "c1", agentId: "GUIDO-1", ticket: "shop-app#5", startedAt: NOW - 21 * DAY, ...over }),
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          startedAt: NOW - 21 * DAY,
+          ...over,
+        }),
       );
-      const id = store.addQuestion({ agentId: "GUIDO-1", runId: "c1", text: "Lanes?", at: NOW - 20 * DAY });
+      const id = store.addQuestion({
+        agentId: "GUIDO-1",
+        runId: "c1",
+        text: "Lanes?",
+        at: NOW - 20 * DAY,
+      });
       raise("old-note", "c1");
       return id;
     };
@@ -2571,12 +2582,29 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     it("a run ended under 7 days ago on an open ticket keeps its question; past 7 days it goes", () => {
       store.replaceBoard("shop-app", [boardItem({ issueNumber: 5 })]);
       store.upsertRun(
-        run({ id: "c1", agentId: "GUIDO-1", ticket: "shop-app#5", endedAt: NOW - 2 * DAY, status: "done" }),
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - 2 * DAY,
+          status: "done",
+        }),
       );
-      const id = store.addQuestion({ agentId: "GUIDO-1", runId: "c1", text: "Lanes?", at: NOW - 2 * DAY });
+      const id = store.addQuestion({
+        agentId: "GUIDO-1",
+        runId: "c1",
+        text: "Lanes?",
+        at: NOW - 2 * DAY,
+      });
       expect(keys(withCrew())).toContain(`ask:${id}`);
       store.upsertRun(
-        run({ id: "c1", agentId: "GUIDO-1", ticket: "shop-app#5", endedAt: NOW - 8 * DAY, status: "done" }),
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - 8 * DAY,
+          status: "done",
+        }),
       );
       expect(keys(withCrew())).not.toContain(`ask:${id}`);
     });
@@ -2593,7 +2621,12 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
         },
       });
       store.upsertRun(
-        run({ id: "live", agentId: "GUIDO-2", ticket: "shop-app#6", loop: { ...NEW_LOOP, mergeHold: { by: "FLIGHT", reason: "wait", at: NOW } } }),
+        run({
+          id: "live",
+          agentId: "GUIDO-2",
+          ticket: "shop-app#6",
+          loop: { ...NEW_LOOP, mergeHold: { by: "FLIGHT", reason: "wait", at: NOW } },
+        }),
       );
       const cleared = clearLeftovers({ store, config: withCrew(), now: NOW });
       expect(cleared).toHaveLength(3);
@@ -2606,7 +2639,10 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       expect(store.endedRunsWithHoldOrPark()).toEqual([]);
       expect(store.run("live")?.loop?.mergeHold).not.toBeNull();
       expect(store.hubEvents(0).map((e) => e.text)).toEqual(
-        expect.arrayContaining([expect.stringContaining("merge hold"), expect.stringContaining("parked")]),
+        expect.arrayContaining([
+          expect.stringContaining("merge hold"),
+          expect.stringContaining("parked"),
+        ]),
       );
       expect(clearLeftovers({ store, config: withCrew(), now: NOW })).toEqual([]);
     });
