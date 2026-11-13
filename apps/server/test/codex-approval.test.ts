@@ -384,10 +384,20 @@ describe("Codex check records", () => {
   it("refuses a full suite while a file test is already running in this checkout", async () => {
     const { checks } = recorder();
     checks.admit = async (_k, c) => (c === "pnpm -s test" ? "pnpm -s test a.test.ts" : null);
-    const h = approver("writer", [], undefined, checks, new TestLock());
+    const lock = new TestLock();
+    const h = approver("writer", [], undefined, checks, lock);
+    // with a configured full suite the guard sends `pnpm -s test` to the lock, not to allow
+    h.config.repos[0]!.fullSuite = ["pnpm -s test"];
     expect(
       await h.approve(request("pnpm -s test", { itemId: "item-4" }), undefined, signal()),
     ).toBe("decline");
+    expect(h.record).toHaveBeenCalledWith(
+      "full-suite",
+      expect.stringContaining(
+        "A check is already running in this checkout: pnpm -s test a.test.ts.",
+      ),
+    );
+    expect(lock.state().holder).toBeNull();
   });
 
   it("declines a configured check the recorder says is an unchanged rerun, and never starts its record", async () => {
