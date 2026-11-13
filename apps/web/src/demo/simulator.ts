@@ -3,6 +3,7 @@
  * same scene plays each time. The state starts from the seed, moved to the present, and is dropped
  * when the last stream disconnects. This module is its own chunk, loaded only once Demo is on.
  */
+
 import type {
   ActivityRow,
   AgentDetailView,
@@ -15,6 +16,7 @@ import type {
   QuestionClosure,
   Topic,
 } from "@mc/core";
+import { mergeHoldParkText } from "@mc/core";
 import { DEMO_PLAIN_KEY, demoArriving } from "../../test/demoNeeds.ts";
 import {
   boardItems,
@@ -30,6 +32,7 @@ import {
 } from "../../test/demoSeedPages.ts";
 import { NOW } from "../../test/fixtures.ts";
 import { demoSeed } from "../../test/overviewDensityFixtures.ts";
+import { pick, type Random, seeded, seedFromSearch } from "./random.ts";
 import { shiftTimes } from "./shift.ts";
 
 export const DEMO_BEAT_MS = 4000;
@@ -43,12 +46,26 @@ export interface DemoState {
   tickets: DemoTicket[];
   /** The beat last played; -1 before the first. */
   beat: number;
+  /** The seed this scene plays from; the same seed gives the same scene. */
+  seed: number;
+  rng: Random;
+  /** Seats an incident holds still: the scene's ordinary work leaves them as they are. */
+  fixed: Set<string>;
+  /** Pull requests an incident marked: red CI or a merge conflict, by number. */
+  prFlags: Map<number, { ci?: "failing"; mergeable?: "CONFLICTING" }>;
+  /** The beats the scene's events fall on, drawn from the seed when the scene starts. */
+  plan: { arrives: number; answered: number; incidents: Map<number, IncidentId> };
+  /** How many scenes have played; the next one draws from `seed + loops`. */
+  loops: number;
+  /** How many ticket moves have played. */
+  moves: number;
 }
 
 export interface DemoBeat {
+  /** Topics every beat changes; `apply` names any more it touched. */
   topics: readonly Topic[];
-  /** Change `state` as of `at`. */
-  apply(state: DemoState, at: number): void;
+  /** Change `state` as of `at`; returns the further topics it changed. */
+  apply(state: DemoState, at: number): readonly Topic[];
 }
 
 type Emit = (type: "changed", data: unknown) => void;
@@ -57,6 +74,7 @@ interface Subscriber {
 }
 
 let seed: ReturnType<typeof demoSeed> | undefined;
+let sceneSeed: number | undefined;
 let state: DemoState | undefined;
 let beatMs = DEMO_BEAT_MS;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -73,11 +91,34 @@ export function setBeatMs(ms: number): void {
 
 const wholeMinutes = (ms: number): number => Math.round(ms / 60_000) * 60_000;
 
-function fresh(): DemoState {
+/** Harness only: play the scene a seed names. The next scene to start uses it. */
+export function setSceneSeed(value: number | undefined): void {
+  sceneSeed = value;
+  state = undefined;
+}
+
+type SearchHolder = { location?: { search: string } };
+const startingSeed = (): number =>
+  sceneSeed ?? seedFromSearch((globalThis as SearchHolder).location?.search ?? "");
+
+function fresh(loops = 0): DemoState {
   seed ??= demoSeed();
+  const base = startingSeed();
+  const rng = seeded(base + loops);
   // A whole number of minutes, so the per-minute token buckets still start on minute marks.
   const api = shiftTimes(seed.api, NOW, wholeMinutes(Date.now() - NOW));
-  return { api, tickets: DEMO_TICKETS.map((t) => ({ ...t })), beat: -1 };
+  return {
+    api,
+    tickets: DEMO_TICKETS.map((t) => ({ ...t })),
+    beat: -1,
+    seed: base,
+    rng,
+    fixed: new Set(),
+    prFlags: new Map(),
+    plan: planScene(rng),
+    loops,
+    moves: 0,
+  };
 }
 
 /** The live state, started at beat 0 if nothing has read it yet. */
@@ -149,7 +190,7 @@ function logActivity(s: DemoState, at: number, who: string, text: string, kind: 
 
 function say(s: DemoState, at: number, index: number) {
   const id = 1000 + s.beat * 10 + index;
-  const from = WORKERS[(s.beat + index) % WORKERS.length] ?? "dev-1";
+  const from = pick(s.rng, WORKERS);
   const text = commsMessage(s.beat + index, at).text;
   const message: CommsMessage = commsMessage(id, at, { from, text });
   const crew = s.api["/api/comms/crew"] as { messages: CommsMessage[] };
@@ -202,14 +243,13 @@ function bumpLink(s: DemoState, from: string, at: number, text: string, id: stri
 }
 
 function work(s: DemoState, at: number) {
-  const seat = WORKERS[s.beat % WORKERS.length] ?? "dev-1";
-  const tool = TOOLS[s.beat % TOOLS.length] ?? "Read";
+  const free = WORKERS.filter((id) => !s.fixed.has(id));
+  const seat = pick(s.rng, free);
+  const tool = pick(s.rng, TOOLS);
   const row = rowsOf(s).find((r) => r.id === seat);
   if (!row) return;
   // The seat moves through its loop: build, checks, review, a wait for the test lock, build again.
-  const phase = PHASES[
-    Math.floor(s.beat / WORKERS.length + WORKERS.indexOf(seat)) % PHASES.length
-  ] as SeatPhase;
+  const phase = pick(s.rng, PHASES);
   if (row.hudState !== phase.state || row.loop?.phase !== phase.phase) row.stateSince = at;
   row.hudState = phase.state;
   if (row.loop)
@@ -310,7 +350,7 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
       rowsOf(s).find((r) => r.id === move.seat),
       s.api[`/api/crew/${move.seat}`] as CrewRow | undefined,
     ])
-      if (row) {
+      if (row && !s.fixed.has(row.id)) {
         row.ticket = `${DEMO_REPO}#${ticket.n}`;
         row.ticketTitle = ticket.title;
         row.stateSince = at;
@@ -325,14 +365,28 @@ function moveTicket(s: DemoState, at: number, move: (typeof TICKET_MOVES)[number
   );
 }
 
-/** The beat a new question reaches Needs you, and the beat the operator answers another. */
-const QUESTION_ARRIVES = 12;
-const QUESTION_ANSWERED = 30;
+/** The beats the scene's events fall on, drawn from the seed. */
+function planScene(rng: Random): DemoState["plan"] {
+  const incidents = new Map<number, IncidentId>();
+  // Each incident gets its own beat between the 4th and the 41st, in an order the seed picks.
+  const order = [...INCIDENTS.map((i) => i.id)];
+  for (let i = order.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [order[i], order[j]] = [order[j] as IncidentId, order[i] as IncidentId];
+  }
+  const slot = Math.floor(37 / order.length);
+  for (const [i, id] of order.entries()) incidents.set(4 + i * slot + Math.floor(rng() * slot), id);
+  return {
+    arrives: 6 + Math.floor(rng() * 12),
+    answered: 26 + Math.floor(rng() * 12),
+    incidents,
+  };
+}
 
 function needsYou(s: DemoState, at: number, index: number): boolean {
   const list = s.api["/api/attention"] as AttentionItem[];
-  if (index === QUESTION_ARRIVES) list.push(demoArriving(at));
-  else if (index === QUESTION_ANSWERED) {
+  if (index === s.plan.arrives) list.push(demoArriving(at));
+  else if (index === s.plan.answered) {
     const at2 = list.findIndex((q) => q.key === DEMO_PLAIN_KEY);
     const [done] = at2 < 0 ? [] : list.splice(at2, 1);
     if (!done) return false;
@@ -352,29 +406,243 @@ function needsYou(s: DemoState, at: number, index: number): boolean {
   return true;
 }
 
+// ---- Incidents: the states a busy crew shows besides working ------------------------------------
+
+export type IncidentId =
+  | "idle"
+  | "stuck"
+  | "red-pr"
+  | "conflicted-pr"
+  | "rework"
+  | "usage-stop"
+  | "held-merge"
+  | "crashed"
+  | "odd";
+
+interface Incident {
+  id: IncidentId;
+  /** Whether it holds a seat; the pull-request incidents hold none. */
+  seat: boolean;
+  /** Change the state; the seat is one no other incident holds. Returns the topics it touched. */
+  apply(s: DemoState, at: number, seat: string): readonly Topic[];
+}
+
+/** Every field but the state names, as the hub's own records carry them. */
+function setSeat(s: DemoState, seat: string, change: (row: CrewRow) => void) {
+  for (const row of [
+    rowsOf(s).find((r) => r.id === seat),
+    s.api[`/api/crew/${seat}`] as CrewRow | undefined,
+  ])
+    if (row) change(row);
+  const view = s.api[`/api/agents/${seat}`] as AgentDetailView | undefined;
+  if (view) change(view.row);
+}
+
+const openPrNumbers = (s: DemoState): number[] =>
+  openPrs(s.tickets).map((pr) => pr.number as number);
+
+/** Mark the PR lists and the QA queue from `prFlags`; run again after any list is rebuilt. */
+function applyPrFlags(s: DemoState) {
+  // A pull request that merged or closed drops its mark; another open one takes it over.
+  const open = openPrNumbers(s);
+  for (const [number, flag] of [...s.prFlags]) {
+    if (open.includes(number)) continue;
+    s.prFlags.delete(number);
+    const next = open.find((n) => !s.prFlags.has(n));
+    if (next !== undefined) s.prFlags.set(next, flag);
+  }
+  const lists = [
+    s.api[`/api/repos/${DEMO_REPO}/prs?linked=1&shape=summary`],
+    s.api[`/api/repos/${DEMO_REPO}/prs`],
+    (s.api["/api/qa/queue"] as { prs?: unknown[] } | undefined)?.prs,
+  ];
+  for (const list of lists)
+    for (const pr of (list ?? []) as { number: number; ci?: string; mergeable?: string }[]) {
+      const flags = s.prFlags.get(pr.number);
+      if (flags?.ci) pr.ci = flags.ci;
+      if (flags?.mergeable) pr.mergeable = flags.mergeable;
+    }
+}
+
+function flagPr(s: DemoState, flag: { ci?: "failing"; mergeable?: "CONFLICTING" }) {
+  const numbers = openPrNumbers(s).filter((n) => !s.prFlags.has(n));
+  if (!numbers.length) return;
+  s.prFlags.set(pick(s.rng, numbers), flag);
+  applyPrFlags(s);
+}
+
+/** The park reason of a merge CAPCOM holds, worded as the hub words it. */
+const HELD = mergeHoldParkText("CAPCOM", "check the release notes first");
+
+const INCIDENTS: readonly Incident[] = [
+  {
+    id: "idle",
+    seat: true,
+    apply(s, at, seat) {
+      setSeat(s, seat, (row) => {
+        row.hudState = "idle";
+        row.loop = null;
+        row.ticket = null;
+        row.ticketTitle = null;
+        row.note = "Waiting for the next ticket.";
+        row.stateSince = at;
+      });
+      return [];
+    },
+  },
+  {
+    id: "stuck",
+    seat: true,
+    apply(s, at, seat) {
+      setSeat(s, seat, (row) => {
+        row.hudState = "stalled";
+        row.note = "No output for 12 minutes.";
+        row.stateSince = at - 12 * 60_000;
+        row.lastOutputAt = at - 12 * 60_000;
+      });
+      return [];
+    },
+  },
+  {
+    id: "red-pr",
+    seat: false,
+    apply(s) {
+      flagPr(s, { ci: "failing" });
+      return ["boards"];
+    },
+  },
+  {
+    id: "conflicted-pr",
+    seat: false,
+    apply(s) {
+      flagPr(s, { mergeable: "CONFLICTING" });
+      return ["boards"];
+    },
+  },
+  {
+    id: "rework",
+    seat: true,
+    apply(s, at, seat) {
+      setSeat(s, seat, (row) => {
+        row.hudState = "running";
+        row.stateSince = at;
+        if (row.loop)
+          row.loop = {
+            ...row.loop,
+            phase: "working",
+            step: "review",
+            text: "Fixing review findings, round 2 of 3",
+            tries: { n: 2, max: 3 },
+            wait: null,
+          };
+      });
+      return [];
+    },
+  },
+  {
+    id: "usage-stop",
+    seat: true,
+    apply(s, at, seat) {
+      for (const limit of s.api["/api/limits"] as LimitRow[])
+        limit.used = Math.max(limit.used, limit.stopAt);
+      setSeat(s, seat, (row) => {
+        row.hudState = "stopped";
+        row.note = "Stopped: the account is at its usage limit.";
+        row.stateSince = at;
+      });
+      return ["limits"];
+    },
+  },
+  {
+    id: "held-merge",
+    seat: true,
+    apply(s, at, seat) {
+      setSeat(s, seat, (row) => {
+        row.hudState = "parked";
+        row.stateSince = at;
+        if (row.loop)
+          row.loop = {
+            ...row.loop,
+            phase: "parked",
+            text: `Blocked: ${HELD}`,
+            parked: HELD,
+            wait: null,
+          };
+      });
+      return [];
+    },
+  },
+  {
+    id: "crashed",
+    seat: true,
+    apply(s, at, seat) {
+      setSeat(s, seat, (row) => {
+        row.hudState = "error";
+        row.note = "The run crashed: the process exited unexpectedly.";
+        row.stateSince = at;
+        if (row.run) row.run = { ...row.run, status: "failed", endedAt: at };
+      });
+      return [];
+    },
+  },
+  {
+    id: "odd",
+    seat: true,
+    apply(s, at, seat) {
+      // A long title, and a seat whose numbers are tiny or zero.
+      setSeat(s, seat, (row) => {
+        row.ticketTitle =
+          "Rework the checkout flow so that a returning customer with several saved addresses and two gift cards can pay in one step";
+        if (row.digest) {
+          row.digest.toolCalls = 0;
+          row.digest.turns = 1;
+          row.digest.contextTokens = 7;
+        }
+        row.stateSince = at;
+      });
+      return [];
+    },
+  },
+];
+
+function runIncident(s: DemoState, at: number, index: number): readonly Topic[] {
+  const id = s.plan.incidents.get(index);
+  const incident = INCIDENTS.find((i) => i.id === id);
+  if (!incident) return [];
+  const free = WORKERS.filter((w) => !s.fixed.has(w));
+  const seat = incident.seat ? pick(s.rng, free) : "flight-1";
+  if (incident.seat) s.fixed.add(seat);
+  logActivity(s, at, seat, incident.id.replace("-", " "), "note");
+  return incident.apply(s, at, seat);
+}
+
 function makeBeat(index: number): DemoBeat {
-  const move = index % 5 === 4 ? TICKET_MOVES[Math.floor(index / 5) % TICKET_MOVES.length] : null;
-  const topics: Topic[] = ["agents"];
-  if (index === QUESTION_ARRIVES || index === QUESTION_ANSWERED) topics.push("attention");
-  if (move) topics.push("boards");
-  else if (index % 4 === 0) topics.push("limits");
-  else if (index % 3 === 0) topics.push("machine");
   return {
-    topics,
+    topics: ["agents"],
     apply(s, at) {
       s.beat = index;
+      const topics: Topic[] = [];
       work(s, at);
       burn(s);
-      if (index % 2 === 0) say(s, at, 0);
-      if (index % 7 === 3) say(s, at, 1);
-      needsYou(s, at, index);
-      if (move) moveTicket(s, at, move);
-      return;
+      if (s.rng() < 0.5) say(s, at, 0);
+      if (s.rng() < 0.15) say(s, at, 1);
+      if (needsYou(s, at, index)) topics.push("attention");
+      // A ticket moves on a beat the seed picks, along the scene's sequence of moves.
+      const move = s.rng() < 0.2 ? TICKET_MOVES[s.moves % TICKET_MOVES.length] : undefined;
+      if (move) {
+        s.moves += 1;
+        moveTicket(s, at, move);
+        applyPrFlags(s);
+        topics.push("boards");
+      } else if (index % 4 === 0) topics.push("limits");
+      else if (index % 3 === 0) topics.push("machine");
+      topics.push(...runIncident(s, at, index));
+      return topics;
     },
   };
 }
 
-/** The scene: 45 beats, 4 seconds apart, a 3-minute loop. No randomness. */
+/** The scene: 45 beats, 4 seconds apart, a 3-minute loop. Its choices come from the seed. */
 export const DEMO_SCENE: readonly DemoBeat[] = Array.from({ length: SCENE_BEATS }, (_, i) =>
   makeBeat(i),
 );
@@ -404,13 +672,13 @@ export function playNext(): void {
   const s = getState();
   const index = s.beat + 1;
   if (index >= SCENE_BEATS) {
-    state = fresh();
+    state = fresh(s.loops + 1);
     tell(EVERY_TOPIC);
     return;
   }
   const beat = DEMO_SCENE[index] as DemoBeat;
-  beat.apply(s, Date.now());
-  tell(beat.topics);
+  const more = beat.apply(s, Date.now());
+  tell([...new Set([...beat.topics, ...more])]);
 }
 
 function tick() {

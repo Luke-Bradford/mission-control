@@ -693,7 +693,17 @@ function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
           .replaceAll('"mission-control"', `"${DEMO_REPO}"`)
           .replaceAll("mission-control/", `${DEMO_REPO}/`)
           .replaceAll("1011", String(pr.number));
-      out[own(path)] = JSON.parse(own(JSON.stringify(value)));
+      const read = JSON.parse(own(JSON.stringify(value)));
+      // QA's browser checks: the reviewer's before and after shots of the page the PR touches.
+      if (path.startsWith("/api/qa/uat/"))
+        read.screenshots = ["before", "after"].map((side, i) => ({
+          id: `${(pr.number % 16).toString(16)}${side === "before" ? "b" : "a"}`.padEnd(32, "e"),
+          label: `${side === "before" ? "Before" : "After"} · address form`,
+          width: 1920,
+          theme: i === 0 ? "dark" : "light",
+          at: NOW - 30 * MIN,
+        }));
+      out[own(path)] = read;
     }
     out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}`] = { reports: [] };
     out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {

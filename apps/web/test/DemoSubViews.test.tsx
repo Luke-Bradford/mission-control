@@ -233,13 +233,15 @@ describe("Demo findings from round 3", () => {
   });
 
   it("a ticket that moved shows where it is on every page", async () => {
-    play(44);
+    // The scene's moves fall on beats its seed picks; play until the second (ticket 201) has.
+    for (let i = 0; i < 45 && getState().moves < 2; i++) playNext();
+    expect(getState().tickets.find((t) => t.n === 201)?.stage).toBe("building");
     await at("/tickets/shop-app/201");
     expect(document.body.textContent).not.toContain("has not touched this ticket");
     expect(document.body.textContent).not.toMatch(/Status\s*Ready/);
     document.body.innerHTML = "";
     await at("/");
-    expect(document.body.textContent).toMatch(/dev-7.*#201/i);
+    expect(document.body.textContent).toMatch(/#201/);
   });
 
   it("seats change state and the Step column fills", async () => {

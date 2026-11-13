@@ -56,7 +56,7 @@ it("the scene brings a question and answers another", () => {
   const keys = () => (getState().api["/api/attention"] as { key: string }[]).map((q) => q.key);
   expect(keys()).toContain(DEMO_PLAIN_KEY);
   expect(keys()).not.toContain(DEMO_ARRIVING_KEY);
-  for (let i = 0; i < 31; i++) playNext();
+  for (let i = 0; i < 45; i++) playNext();
   expect(keys()).toContain(DEMO_ARRIVING_KEY);
   expect(keys()).not.toContain(DEMO_PLAIN_KEY);
   expect((getState().api["/api/attention/answered"] as unknown[]).length).toBeGreaterThan(1);

@@ -1,7 +1,7 @@
 import { act, fireEvent, render } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../src/App.tsx";
-import { setDemo } from "../src/demo/mode.ts";
+import { DEMO_NO_DATA, setDemo } from "../src/demo/mode.ts";
 import { demoMisses } from "../src/demo/source.ts";
 import { PAGE_PATHS, type Route, route, SETUP_TABS, tabOf } from "../src/router.ts";
 
@@ -57,6 +57,17 @@ it("covers every page of the router, each path resolving to the page it is liste
   }
 });
 
+/** What an empty page says in the app's own words; a page that says it has no demo data. */
+const EMPTY_PHRASES = [DEMO_NO_DATA, "Nobody is waiting on you", "no longer open"] as const;
+/** Evidence a page is busy: words that appear only with data, and pictures it must have loaded. */
+const MUST_SHOW: Record<string, { text?: string; images?: number }> = {
+  "/needs-you": { text: "address form layout" },
+  "/needs-you/demo-design-signoff": { text: "Proposed", images: 2 },
+  "/needs-you/demo-picture-options": { text: "Corner badge", images: 2 },
+  "/qa": { images: 2 },
+  "/agent": { text: "DEV-1" },
+  "/board/shop-app": { text: "Retry failed payment webhooks" },
+};
 const CHOICE =
   "main [role=tab], main [role=tablist] button, main .seg button, main .tabs button, main nav button";
 const settle = () => act(async () => void (await new Promise((r) => setTimeout(r, 350))));
@@ -80,6 +91,19 @@ it("every page, tab, choice and select ends in data", { timeout: 600_000 }, asyn
         problems.push(`${what}: ${JSON.stringify({ misses: [...misses], bad })}`);
     };
     check(route);
+    const main = document.querySelector("main")?.textContent ?? "";
+    for (const phrase of EMPTY_PHRASES)
+      if (main.includes(phrase)) problems.push(`${route}: says "${phrase}"`);
+    const shows = MUST_SHOW[route];
+    if (shows?.text && !main.includes(shows.text)) problems.push(`${route}: lacks "${shows.text}"`);
+    // Pictures are read and decoded after the page paints, so give them a few seconds.
+    for (let wait = 0; shows?.images && wait < 10; wait++) {
+      if (document.querySelectorAll("main img").length >= shows.images) break;
+      await settle();
+    }
+    const images = document.querySelectorAll("main img").length;
+    if (shows?.images && images < shows.images)
+      problems.push(`${route}: shows ${images} pictures, wants ${shows.images}`);
     const labels = [...document.querySelectorAll<HTMLElement>(CHOICE)].map((e) =>
       (e.textContent ?? "").trim(),
     );
@@ -108,5 +132,5 @@ it("every page, tab, choice and select ends in data", { timeout: 600_000 }, asyn
     window.history.replaceState(null, "", "/");
   }
   console.info(`DemoCrawl visited ${visited.length} views:\n${visited.join("\n")}`);
-  expect(problems).toEqual([]);
+  expect(problems.join("\n")).toBe("");
 });

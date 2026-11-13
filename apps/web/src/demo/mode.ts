@@ -32,10 +32,6 @@ export function setDemo(on: boolean): void {
 const OPEN = 1;
 const CLOSED = 2;
 
-/** An 1×1 PNG, the answer to a review-image read in Demo. */
-export const DEMO_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVEsAAAAASUVORK5CYII=";
-
 /** The words for a failed write: the demo refusal when that is what it was, else `fallback`. */
 export function writeFailure(error: unknown, fallback: string): string {
   const body = (error as { body?: { error?: unknown } } | null)?.body;
@@ -54,7 +50,7 @@ const unavailable = (): Response =>
     headers: { "content-type": "application/json" },
   });
 
-/** Image routes the hub serves; Demo answers each with the one demo picture. */
+/** Image routes the hub serves; Demo answers each with the a mock screen drawn for it. */
 const DEMO_PICTURE_ROUTES: readonly string[] = [
   "/api/qa/review-shots/",
   "/api/qa-report-assets/",
@@ -67,7 +63,8 @@ export async function demoSend(path: string, init: RequestInit): Promise<Respons
   const method = (init.method ?? "GET").toUpperCase();
   if (method !== "GET") return demoRefusal();
   if (DEMO_PICTURE_ROUTES.some((prefix) => path.startsWith(prefix))) {
-    const bytes = Uint8Array.from(atob(DEMO_PNG_BASE64), (c) => c.charCodeAt(0));
+    const { pictureBytes, pictureFor } = await import("./picture.ts");
+    const bytes = pictureBytes(pictureFor(path));
     return new Response(bytes, { status: 200, headers: { "content-type": "image/png" } });
   }
   try {
