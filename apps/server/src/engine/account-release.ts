@@ -6,6 +6,7 @@
  * each later pass offers it again, so the wait clears when any account can work.
  */
 import { NEW_LOOP, type RepoId, type RepoRules, seatCallSign, seatDef } from "@mc/core";
+import { activeAway } from "../away.ts";
 import { type CcConfig, type CrewSeatConfig, seatUnavailable } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
@@ -34,6 +35,10 @@ const refOf = (repoId: RepoId, issue: number) => `${repoId}#${issue}`;
 /** Ends each idle seat's unfinished run when its account is at the stop, and records the ticket's wait. */
 async function releaseStoppedRuns(deps: ReleaseDeps): Promise<void> {
   const { config, store, supervisor, now } = deps;
+  // away mode refuses new pick-ups, and the resume is one: the run stays on its seat and the
+  // engine wakes it when the window resets
+  const away = activeAway(store, now(), config.operator.timezone);
+  if (away !== null && !away.may.pickUp) return;
   for (const session of config.crew?.sessions ?? []) {
     for (const seat of session.seats) {
       if (seatDef(seat).loop !== "build" || !accountAtStop(config, store, seat.accountId, now()))
@@ -41,12 +46,17 @@ async function releaseStoppedRuns(deps: ReleaseDeps): Promise<void> {
       const row = supervisor.seat(seat.id);
       const run = row?.runId == null ? null : store.run(row.runId);
       const loop = run?.loop;
-      // a turn under way finishes; the seat is released once it sits idle and cannot be woken
+      const facts = supervisor.seatFacts(seat.id);
+      // a turn under way finishes; the seat is released once it sits idle (or parked by the
+      // CLI's own rate limit) and cannot be woken
+      const sitting =
+        row?.state === "idle" ||
+        (row?.state === "parked" && (facts?.rateLimitedUntil ?? null) !== null);
       if (
         run == null ||
         run.endedAt !== null ||
-        row?.state !== "idle" ||
-        supervisor.seatFacts(seat.id)?.inTurn === true ||
+        !sitting ||
+        facts?.inTurn === true ||
         run.ticket == null ||
         run.branch === null ||
         run.reviewId != null ||
@@ -100,6 +110,8 @@ export async function releaseAtAccountStop(deps: ReleaseDeps): Promise<void> {
   if (!deps.enabled) return;
   const { config, store, supervisor } = deps;
   await releaseStoppedRuns(deps);
+  const away = activeAway(store, deps.now(), config.operator.timezone);
+  if (away !== null && !away.may.pickUp) return;
   for (const session of config.crew?.sessions ?? []) {
     const repoId = session.repoId;
     const rules = await deps.rules(repoId);

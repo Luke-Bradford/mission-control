@@ -1,8 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type BoardItem, NEW_LOOP, type Run } from "@mc/core";
+import { AWAY_SETTING, type BoardItem, NEW_LOOP, type Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { CLOSED_AWAY } from "../src/away.ts";
 import type { CcConfig } from "../src/config.ts";
 import { ACCOUNT_STOP_FREES_WHEN, releaseAtAccountStop } from "../src/engine/account-release.ts";
 import { Store } from "../src/store.ts";
@@ -108,6 +109,8 @@ const rules = {
   areas: { "area:server": ["apps/server/**"] },
 } as never;
 
+let facts: () => { inTurn: boolean; rateLimitedUntil: number | null } | null = () => null;
+
 const release = () =>
   releaseAtAccountStop({
     config,
@@ -117,7 +120,7 @@ const release = () =>
     now: () => NOW,
     supervisor: {
       seat: (id) => store.seatSession(id),
-      seatFacts: () => null,
+      seatFacts: () => facts() as never,
       async endRunByEngine(runId) {
         ended.push(runId);
         const r = store.run(runId);
@@ -145,6 +148,7 @@ beforeEach(() => {
   store = new Store(join(dir, "mc.sqlite"));
   ended = [];
   started = [];
+  facts = () => null;
   store.replaceBoard(REPO, [card]);
   store.upsertRun(authorRun());
   store.setSeatSession({
@@ -193,6 +197,30 @@ describe("releaseAtAccountStop", () => {
     });
     await release();
     expect(started).toEqual([{ seatId: "guido-2", issue: 7 }]);
+    expect(store.ticketWait(REPO, 7)).toBeNull();
+  });
+
+  it("releases a seat the CLI parked on a rate limit", async () => {
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId: "guido-1:1",
+      cliSessionId: "cli",
+      state: "parked",
+      reason: "rate limited until 14:00",
+      worktree: "/w/x",
+      updatedAt: NOW,
+    });
+    facts = () => ({ inTurn: false, rateLimitedUntil: NOW + DAY });
+    await release();
+    expect(ended).toEqual(["guido-1:1"]);
+    expect(started).toEqual([{ seatId: "guido-2", issue: 7 }]);
+  });
+
+  it("keeps the run on its seat while away mode refuses pick-ups", async () => {
+    store.setSetting(AWAY_SETTING, JSON.stringify(CLOSED_AWAY));
+    await release();
+    expect(ended).toEqual([]);
+    expect(started).toEqual([]);
     expect(store.ticketWait(REPO, 7)).toBeNull();
   });
 
