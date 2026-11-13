@@ -57,3 +57,17 @@ it("keeps only the QA images that a report of an open PR cites", () => {
   store.putQaReport(report("r6", 6, "b".repeat(64)));
   expect([...store.qaAssetIdsOfOpenPrs()]).toEqual(["a".repeat(64)]);
 });
+
+it("keeps only the Needs-you pictures that a waiting question's packet cites", () => {
+  const store = new Store(":memory:");
+  const open = "a".repeat(64);
+  const answered = "b".repeat(64);
+  const packet = (id: string, itemKey: string, image: string) => ({
+    id,
+    itemKey,
+    images: [{ id: image, url: `/api/attention-material-assets/${image}` }],
+  });
+  store.putAttentionMaterials(packet("p1", "question:1", open) as never);
+  store.putAttentionMaterials(packet("p2", "question:2", answered) as never);
+  expect([...store.attentionMaterialAssetIds(new Set(["question:1"]))]).toEqual([open]);
+});

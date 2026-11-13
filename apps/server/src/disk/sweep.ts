@@ -38,6 +38,8 @@ export interface SweepInput {
   citedAssets: ReadonlySet<string>;
   /** Review screenshot ids that belong to a review of an open PR. */
   keptShots: ReadonlySet<string>;
+  /** Needs-you picture ids (file names) cited by a packet of a question still waiting. */
+  keptMaterials: ReadonlySet<string>;
   /** The most the hub may hold. Over it, idle scratch goes oldest first; open work is never removed. Absent: no cap. */
   budgetBytes?: number;
   /** What the hub holds by kind, for the budget check and its log line (worktrees are the tidy's). */
@@ -105,14 +107,16 @@ export async function sweepDataFolder(i: SweepInput): Promise<SweepResult> {
     }
   }
   // a picture file keyed by an id: gone unless an open PR's work still cites it
-  const pictures = async (dir: string, keep: ReadonlySet<string>): Promise<void> => {
+  const pictures = async (dir: string, keep: ReadonlySet<string>, ext = ".png"): Promise<void> => {
     for (const name of await safeList(join(root, dir))) {
-      if (!name.endsWith(".png") || keep.has(name.slice(0, -4))) continue;
+      if (!name.endsWith(ext) || keep.has(name.slice(0, name.length - ext.length))) continue;
       await remove(join(root, dir, name), finished);
     }
   };
   await pictures(DATA_DIRS.qaAssets, i.citedAssets);
   await pictures(DATA_DIRS.reviewShots, i.keptShots);
+  // Needs-you pictures have no extension: the whole name is the id
+  await pictures(DATA_DIRS.attentionMaterials, i.keptMaterials, "");
   // scratch: every child of these folders, once untouched for 3 days
   for (const dir of scratchDirs) {
     for (const name of await scratchOf(dir)) await remove(join(root, dir, name), stale);

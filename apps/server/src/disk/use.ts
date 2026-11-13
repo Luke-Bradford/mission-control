@@ -31,7 +31,12 @@ export async function diskUse(i: DiskUseSource): Promise<DiskUse> {
   const at = (dir: string): string => join(i.dataDir, dir);
   const use = {
     worktrees: i.worktrees === undefined ? 0 : await sum(i.worktrees),
-    pictures: await sum(at(DATA_DIRS.qaAssets), at(DATA_DIRS.reviewShots), at(DATA_DIRS.hudShots)),
+    pictures: await sum(
+      at(DATA_DIRS.qaAssets),
+      at(DATA_DIRS.reviewShots),
+      at(DATA_DIRS.hudShots),
+      at(DATA_DIRS.attentionMaterials),
+    ),
     evidence: await sum(at(DATA_DIRS.evidence)),
     scratch: await sum(
       at(DATA_DIRS.controller),

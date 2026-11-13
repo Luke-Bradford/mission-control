@@ -10,6 +10,7 @@ export const DATA_DIRS = {
   qaAssets: "qa-report-assets",
   reviewShots: "review-screenshots",
   hudShots: "hud-screenshots",
+  attentionMaterials: "attention-material-assets",
   designPreviews: "design-previews",
   controller: "controller",
 } as const;

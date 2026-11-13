@@ -5313,6 +5313,20 @@ export class Store {
     return ids;
   }
 
+  /** The picture ids that packets of the given still-waiting questions cite. */
+  attentionMaterialAssetIds(openItemKeys: ReadonlySet<string>): Set<string> {
+    const ids = new Set<string>();
+    const rows = this.db.prepare("SELECT item_key, packet FROM attention_materials").all() as Row[];
+    for (const r of rows) {
+      if (!openItemKeys.has(r.item_key as string)) continue;
+      for (const m of (r.packet as string).matchAll(
+        /\/api\/attention-material-assets\/([0-9a-f]{64})/g,
+      ))
+        ids.add(m[1]);
+    }
+    return ids;
+  }
+
   /** The review screenshot ids of reviews of open PRs. */
   reviewShotIdsOfOpenPrs(): Set<string> {
     return new Set(

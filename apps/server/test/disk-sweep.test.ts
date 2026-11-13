@@ -47,6 +47,9 @@ function fixture(): string {
   // review screenshots: one of an open PR, one of a finished PR
   file(join(data, "review-screenshots", `${shot("a")}.png`), 5 * DAY);
   file(join(data, "review-screenshots", `${shot("b")}.png`), 5 * DAY, 100);
+  // Needs-you pictures (no extension): one of a waiting question, one of an answered one
+  file(join(data, "attention-material-assets", hash("c")), 5 * DAY);
+  file(join(data, "attention-material-assets", hash("d")), 5 * DAY, 100);
   // scratch
   file(join(data, "controller", "old-copy", "mc.sqlite"), 4 * DAY, 1000);
   file(join(data, "controller", "fresh-copy", "mc.sqlite"), 1 * DAY);
@@ -59,6 +62,7 @@ const open = {
   openPrs: new Set(["mc#5"]),
   citedAssets: new Set([hash("a")]),
   keptShots: new Set([shot("a")]),
+  keptMaterials: new Set([hash("c")]),
 };
 
 describe("sweepDataFolder", () => {
@@ -71,6 +75,8 @@ describe("sweepDataFolder", () => {
       ...open,
       log: (l) => lines.push(l),
     });
+    expect(existsSync(join(data, "attention-material-assets", hash("d")))).toBe(false);
+    expect(existsSync(join(data, "attention-material-assets", hash("c")))).toBe(true);
     expect(existsSync(join(data, "pr-evidence", "mc", "6"))).toBe(false);
     expect(existsSync(join(data, "pr-evidence", "mc", "5"))).toBe(true);
     expect(existsSync(join(data, "qa-report-assets", `${hash("b")}.png`))).toBe(false);
@@ -81,9 +87,9 @@ describe("sweepDataFolder", () => {
     expect(existsSync(join(data, "controller", "fresh-copy"))).toBe(true);
     expect(existsSync(join(data, "controller", "designs", "keep.html"))).toBe(true);
     expect(existsSync(join(data, "pr-evidence-work", "capture-old"))).toBe(false);
-    expect(r.files).toBe(5);
-    expect(r.bytes).toBe(100 + 100 + 100 + 1000 + 500);
-    expect(lines.join("\n")).toMatch(/removed 5 .*1800 bytes/);
+    expect(r.files).toBe(6);
+    expect(r.bytes).toBe(100 + 100 + 100 + 100 + 1000 + 500);
+    expect(lines.join("\n")).toMatch(/removed 6 .*1900 bytes/);
   });
 
   it("leaves a PR's files for a grace period after it finishes", async () => {

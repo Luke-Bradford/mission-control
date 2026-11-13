@@ -97,7 +97,7 @@ import {
   seatWorktree,
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
-import { markHubStarted } from "./hud.ts";
+import { attentionItems, markHubStarted, NO_LOCK } from "./hud.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
@@ -1241,6 +1241,13 @@ export async function main(): Promise<void> {
         openPrs: store.openPrKeys(),
         citedAssets: store.qaAssetIdsOfOpenPrs(),
         keptShots: store.reviewShotIdsOfOpenPrs(),
+        keptMaterials: store.attentionMaterialAssetIds(
+          new Set(
+            attentionItems(config, store, Date.now(), NO_LOCK, undefined, null, true).map(
+              (item) => item.key,
+            ),
+          ),
+        ),
         budgetBytes: diskBudgetBytes(process.env),
         holdings: () => hubDiskUse.read(),
         log,

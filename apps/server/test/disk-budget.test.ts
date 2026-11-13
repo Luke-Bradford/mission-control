@@ -35,6 +35,7 @@ const open = {
   openPrs: new Set(["mc#5"]),
   citedAssets: new Set([hash("a")]),
   keptShots: new Set<string>(),
+  keptMaterials: new Set<string>(),
 };
 
 it("over the budget, idle scratch goes oldest first and the log says what the hub holds", async () => {
