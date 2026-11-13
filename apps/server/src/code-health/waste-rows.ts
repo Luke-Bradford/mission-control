@@ -18,11 +18,19 @@ type Family = CodeHealthWasteAlarmRow["check"];
 const MEASURE_UNIT: Record<Family, string> = {
   "cost-without-output": "x the median cost of its size",
   "coordination-overhead": "USD FLIGHT spent in a day",
-  "ticket-churn": "tickets in the cause",
+  "ticket-churn": "tickets opened in a day",
   "runs-per-ticket": "runs without a merge",
   "failed-review-rounds": "failed review rounds",
   "clearance-waiting": "hours waiting on clearance",
 };
+
+/** Ticket churn has three causes, told apart by the subject's suffix; each counts something different. */
+const churnUnit = (subject: string): string =>
+  subject.endsWith(":restarted")
+    ? "runs since it was parked"
+    : subject.endsWith(":split")
+      ? "ticket that reads as split work"
+      : MEASURE_UNIT["ticket-churn"];
 
 const isFamily = (check: string): check is Family =>
   (CODE_HEALTH_WASTE_FAMILIES as readonly string[]).includes(check);
@@ -34,7 +42,10 @@ function toRow(a: WasteAlarm, check: Family): CodeHealthWasteAlarmRow {
     title: WASTE_CHECK_TITLES[check],
     scope: { repoId: a.repoId, ticket: a.ticket, runId: a.runId, seatId: a.seatId },
     evidence: a.evidence,
-    measure: { value: a.level, unit: MEASURE_UNIT[check] },
+    measure: {
+      value: a.level,
+      unit: check === "ticket-churn" ? churnUnit(a.subject) : MEASURE_UNIT[check],
+    },
     threshold: wasteThresholdText(check),
     // Only FLIGHT's own spend is recorded in dollars on the alarm; the others do not say.
     costUsd: check === "coordination-overhead" ? a.level : null,

@@ -102,10 +102,12 @@ describe("Audit Do next: waste alarm rows", () => {
       store.waste.closeAlarm(alarm.id, NOW);
     expect(a).toBeGreaterThan(0);
     expect(wasteAlarmRows(store, "sample", NOW)).toEqual([]);
-    // resolved also leaves
     // recurrence: a new alarm for the same cause returns as the same identity
     open(finding("runs-per-ticket", { level: 5 }), NOW);
     expect(wasteAlarmRows(store, "sample", NOW).map((r) => r.id)).toEqual([id]);
+    const live = store.waste.alarms("WHERE closed_at IS NULL")[0];
+    expect(store.waste.resolveAlarm(live?.id ?? 0, NOW, "basis")).toBe(true);
+    expect(wasteAlarmRows(store, "sample", NOW)).toEqual([]);
   });
 
   it("shows an unrecorded cost as unknown, never zero", () => {
@@ -125,6 +127,17 @@ describe("Audit Do next: waste alarm rows", () => {
     expect(cost("runs-per-ticket")).toBeNull();
     // FLIGHT's dollars are the alarm's own figure
     expect(cost("coordination-overhead")).toBe(31);
+  });
+
+  it("names what a ticket-churn alarm counts by its cause", () => {
+    open(finding("ticket-churn", { subject: "sample#4:restarted", ticket: "sample#4", level: 2 }));
+    open(finding("ticket-churn", { subject: "sample#5:split", ticket: "sample#5", level: 1 }));
+    open(finding("ticket-churn", { subject: "sample:day", ticket: null, level: 6 }));
+    const unit = (id: string) =>
+      wasteAlarmRows(store, "sample", NOW).find((r) => r.id === id)?.measure.unit;
+    expect(unit("ticket-churn:sample#4:restarted")).toBe("runs since it was parked");
+    expect(unit("ticket-churn:sample#5:split")).toBe("ticket that reads as split work");
+    expect(unit("ticket-churn:sample:day")).toBe("tickets opened in a day");
   });
 
   it("takes ticket, run and seat from the alarm's own record", () => {
