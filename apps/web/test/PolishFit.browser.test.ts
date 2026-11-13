@@ -70,6 +70,8 @@ describeRendered("Polish list, part two: fit at 1920x940", () => {
             const scrolls = (v: string) => v === "auto" || v === "scroll";
             for (const el of document.querySelectorAll<HTMLElement>("body *")) {
               if (el.closest(".sr-only")) continue;
+              // a label pushed out of its box by text-indent is replaced by a mark on purpose
+              if (parseFloat(getComputedStyle(el).textIndent) !== 0) continue;
               const own = [...el.childNodes].filter(
                 (n) => n.nodeType === Node.TEXT_NODE && (n.textContent ?? "").trim() !== "",
               );
