@@ -10,6 +10,7 @@
   height: 100%;
   min-height: 0;
   overflow: hidden;
+  container-type: inline-size;
 }
 .control-banner {
   margin-bottom: var(--sp-3);
@@ -19,9 +20,12 @@
 }
 .control-shell {
   grid-row: 3;
+  display: grid;
+  gap: var(--sp-3);
   height: auto;
   overflow: hidden;
   grid-template-columns: 348px minmax(0, 1fr) 320px;
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
 }
 .control-main {
@@ -353,6 +357,10 @@
     grid-template-rows: none;
     grid-auto-rows: auto;
     overflow-y: auto;
+  }
+  .control-shell > .roster {
+    height: auto;
+    max-height: min(calc(40 * var(--vh)), 360px);
   }
   .control-main,
   .control-main.trace {
