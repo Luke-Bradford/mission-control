@@ -741,6 +741,13 @@ export function seatStatus(row: CrewRow): SeatStatus {
     return { label: "Checking", tone: "neutral" };
   const engine = { label: HUD_STATE_LABEL[row.hudState], tone: HUD_STATE_TONE[row.hudState] };
   const reason = row.loop?.parked ?? row.note ?? undefined;
+  // The hub holds a stuck ticket on the ticket, not on a seat: a crew seat is never "Blocked".
+  // Without an open run it is free; with one it waits on its own command.
+  if (row.kind === "crew" && row.hudState === "blocked") {
+    if (isSeatFree(row)) return { label: SEAT_STATUS_LABEL.free, tone: "neutral" };
+    const waiting = { label: HUD_STATE_LABEL.waiting, tone: HUD_STATE_TONE.waiting };
+    return row.note ? { ...waiting, reason: row.note } : waiting;
+  }
   if (row.kind !== "crew" || ENGINE_STATES.includes(row.hudState)) {
     return (row.hudState === "blocked" || row.hudState === "parked") && reason
       ? { ...engine, reason }

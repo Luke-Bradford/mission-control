@@ -2,7 +2,6 @@ import {
   type BoardItem,
   CI_PILL,
   type CrewRow,
-  type HudColumn,
   type PillTone,
   type PullRequestView,
   prPill,
@@ -19,6 +18,7 @@ import { ReviewState } from "../hud/ReviewState.tsx";
 import { agentPath, followLink, navigate, ticketPath, tracePath } from "../router.ts";
 import { openItem } from "../shell/overlays.ts";
 import {
+  type BoardColumn,
   type CardSeat,
   type CardYou,
   cardColumn,
@@ -28,6 +28,7 @@ import {
   NO_REVIEWER,
   NOT_QUEUED,
   ticketRef,
+  WAITING_COLUMN,
 } from "./cards.ts";
 
 /** Tests count card renders through this (#26 A1); null outside tests. */
@@ -36,7 +37,7 @@ export const cardRenderProbe: { onRender: ((ref: string) => void) | null } = { o
 const MAX_LABELS = 3;
 const MILESTONE_SPLIT = " — ";
 /** Columns where a card should have a PR already. */
-const PR_EXPECTED: readonly HudColumn[] = ["In progress", "In review", "Ready for QA"];
+const PR_EXPECTED: readonly BoardColumn[] = ["In progress", "In review", "Ready for QA"];
 
 /** The card's PR; the card's own header names the repo, so the PR does not. */
 function PrLine({
@@ -180,6 +181,12 @@ export const Card = memo(function Card({
             Trace
           </a>
         )}
+      </span>
+    ),
+    col === WAITING_COLUMN && item.waiting && (
+      <span key="waiting" className="kwait">
+        <span className="xs warn-t">Waiting: {item.waiting.reason}</span>
+        <span className="xs muted">Frees when: {item.waiting.freesWhen}</span>
       </span>
     ),
     rework && (

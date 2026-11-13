@@ -289,6 +289,31 @@ describe("columns", () => {
     ).toEqual(heads);
   });
 
+  it("shows a Waiting column with the reason and what frees each ticket, and no owner", async () => {
+    stub({
+      shopApp: [
+        todo(1, {
+          waiting: { reason: "Needs the schema change", freesWhen: "shop-app#9 merges", at: NOW },
+          owner: "Agent",
+        }),
+        todo(2, { blockedBy: [{ ref: "shop-app#7", closed: false }] }),
+      ],
+    });
+    const { container } = await open();
+    await screen.findByText("Ticket 1");
+    const heads = [...container.querySelectorAll(".kcol .kh")].map((h) => h.textContent);
+    expect(heads).toContain("Waiting 1");
+    expect(heads).toContain("Blocked 1");
+    const col = [...container.querySelectorAll<HTMLElement>(".kcol")].find((c) =>
+      c.querySelector(".kh")?.textContent?.startsWith("Waiting"),
+    ) as HTMLElement;
+    expect(within(col).getByText("Ticket 1")).toBeTruthy();
+    expect(within(col).queryByText("Ticket 2")).toBeNull();
+    expect(within(col).getByText(/Needs the schema change/)).toBeTruthy();
+    expect(within(col).getByText(/shop-app#9 merges/)).toBeTruthy();
+    expect(col.querySelector(".kowner, [data-owner]")).toBeNull();
+  });
+
   it("an empty column is collapsed with a tooltip", async () => {
     stub({ shopApp: [todo(1)] });
     const { container } = await open();
