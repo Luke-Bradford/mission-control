@@ -357,6 +357,8 @@ it("does not hide a new message because an older operator row contains its text"
   ]);
   await sendFromBox("yes");
   await waitFor(() => expect(screen.getByText("sent")).toBeTruthy());
+  // The mark is on the new row, not drawn on the older row that merely contains "yes".
+  expect(screen.getByText("sent").closest(".ev")?.textContent).not.toContain("Please say yes");
 });
 
 it("changes sent to read on the row that carries the message once the seat writes after it", async () => {
