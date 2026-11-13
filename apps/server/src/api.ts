@@ -11,6 +11,7 @@ import {
   API_PREFIX,
   type AttentionCompactItem,
   type AttentionItem,
+  type AttentionMaterialsResponse,
   type AuditRunKind,
   AWAY_SETTING,
   type AwaySettings,
@@ -188,6 +189,11 @@ import {
   nothingForOperator,
   releaseHold,
 } from "./attention/holds.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "./attention-materials.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -506,6 +512,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
@@ -1603,6 +1610,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     return attentionMemo.items;
   };
+  // retained materials follow a question that is held too: a hold is not a close
+  let heldMemo: { at: number; items: AttentionItem[] } | undefined;
+  const attentionWithHeld = (): AttentionItem[] => {
+    const at = now();
+    if (!heldMemo || at - heldMemo.at >= HUD_MEMO_MS) {
+      heldMemo = {
+        at,
+        items: attentionItems(
+          config,
+          store,
+          at,
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew(at).rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ),
+      };
+    }
+    return heldMemo.items;
+  };
+  const attentionMaterials =
+    deps.attentionMaterials ??
+    createAttentionMaterials({
+      store,
+      config,
+      item: (key) => attentionWithHeld().find((item) => item.key === key) ?? null,
+      now,
+    });
   const notifications = new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -6276,6 +6311,67 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ? pinnedFor(item) : reply.code(404).send({ error: "Item is no longer open." });
+      });
+      const materialInput = z.strictObject({
+        repoId: z.string().min(1).max(200),
+        sourceCommit: z.string().max(40),
+        sourcePath: z.string().min(1).max(1000),
+        label: z.string().min(1).max(300),
+      });
+      // Reader: docs/runbook.md#retained-needs-you-materials (operator registers an inspectable source packet)
+      api.post<{ Params: { key: string } }>("/attention/:key/materials", async (req, reply) => {
+        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const input = materialInput.safeParse(req.body);
+        if (!input.success)
+          return reply
+            .code(400)
+            .send({ error: "Give a repository, full commit, docs Markdown path and label." });
+        try {
+          return reply
+            .code(201)
+            .send(await attentionMaterials.register(req.params.key, input.data));
+        } catch (error) {
+          return reply.code(error instanceof AttentionMaterialsError ? error.status : 503).send({
+            error:
+              error instanceof AttentionMaterialsError
+                ? error.message
+                : "Materials could not be retained.",
+          });
+        }
+      });
+      // Reader: apps/web/src/pages/Needs.tsx (selected item material panel; planned #1705)
+      api.get<{ Params: { key: string } }>("/attention/:key/materials", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const packets = attentionMaterials.read(req.params.key);
+        if (packets.length === 0)
+          return reply.code(404).send({ error: "No retained materials for this item." });
+        const body: AttentionMaterialsResponse = { packets };
+        return body;
+      });
+      // Reader: apps/web/src/pages/Needs.tsx (authenticated raster image in a retained packet; planned #1705)
+      api.get<{ Params: { id: string } }>("/attention-material-assets/:id", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const asset = attentionMaterials.asset(req.params.id);
+        return asset
+          ? reply
+              .type(asset.mediaType)
+              .header("x-content-type-options", "nosniff")
+              .header("cache-control", "private, no-store")
+              .send(asset.bytes)
+          : reply.code(404).send({ error: "Material image not found." });
       });
       // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>

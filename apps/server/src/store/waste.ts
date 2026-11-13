@@ -157,6 +157,7 @@ export function wasteQueries(db: DatabaseSync) {
       return all(
         `SELECT r.id AS runId, r.agent_id AS agentId, r.repo_id AS repoId, r.ticket AS ticket,
            json_extract(r.loop, '$.prNumber') AS pr,
+           json_extract(r.loop, '$.awaitingFlight') AS head,
            (SELECT a.at FROM run_attempts a WHERE a.run_id = r.id AND a.kind = 'wait'
               ORDER BY a.id DESC LIMIT 1) AS since
          FROM runs r
@@ -167,6 +168,8 @@ export function wasteQueries(db: DatabaseSync) {
         repoId: string;
         ticket: string | null;
         pr: number | null;
+        /** The head sha FLIGHT is asked to clear. */
+        head: string;
         since: number | null;
       }[];
     },

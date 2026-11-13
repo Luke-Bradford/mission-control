@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
+  AttentionMaterials,
   BriefChoiceReceipt,
   ChoiceTargetKind,
   ItemChatMessage,
@@ -242,6 +243,7 @@ import {
   toRun,
   toSample,
 } from "./store/rows.ts";
+import { SCHEMA } from "./store/schema.ts";
 import {
   ACK_ABSENT_MS,
   ACTIVE_SEAT_STATES,
@@ -294,8 +296,6 @@ export * from "./store/types.ts";
 const COMMS_QUESTION_THREAD_SQL =
   "COALESCE(label, '') = 'question' OR COALESCE(reply_to, -1) IN (SELECT q.id FROM comms q WHERE q.label = 'question')";
 const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
-
-import { SCHEMA } from "./store/schema.ts";
 
 type Row = Record<string, SQLInputValue>;
 
@@ -5121,6 +5121,35 @@ export class Store {
     } catch {
       return null;
     }
+  }
+
+  /** Immutable display material for a Needs-you item; packets never alter its brief or choice. */
+  putAttentionMaterials(packet: AttentionMaterials): boolean {
+    return (
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO attention_materials (id, item_key, packet) VALUES (?, ?, ?)",
+        )
+        .run(packet.id, packet.itemKey, JSON.stringify(packet)).changes > 0
+    );
+  }
+
+  attentionMaterials(id: string): AttentionMaterials | null {
+    const row = this.db.prepare("SELECT packet FROM attention_materials WHERE id = ?").get(id) as
+      | { packet: string }
+      | undefined;
+    return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
+  }
+
+  /** Every packet saved for one item, oldest first; the per-question image cap sums over them. */
+  attentionMaterialsAllForItem(itemKey: string): AttentionMaterials[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') ASC, rowid ASC",
+        )
+        .all(itemKey) as { packet: string }[]
+    ).map((row) => JSON.parse(row.packet) as AttentionMaterials);
   }
 
   qaReports(repoId: string, pr: number, headSha?: string): QaReport[] {

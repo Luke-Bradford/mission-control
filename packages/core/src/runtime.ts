@@ -98,6 +98,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.releaseHold,
   MC_TOOL_NAMES.returnQuestion,
   MC_TOOL_NAMES.withdrawQuestion,
+  MC_TOOL_NAMES.attachMaterials,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
   MC_TOOL_NAMES.operator,
