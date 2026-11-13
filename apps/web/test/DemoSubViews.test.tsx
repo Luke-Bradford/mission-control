@@ -191,11 +191,11 @@ describe("Demo choices end in data", () => {
 });
 
 describe("Demo findings from round 3", () => {
-  it("the Agent page's Queue and Files tabs, and the Setup update log", async () => {
+  it("the Agent page's Recent runs and Setup tabs, and the Setup update log", async () => {
     await at("/agent/dev-1");
-    await clickText(/^queue$/i);
+    await clickText(/^recent runs$/i);
     clean();
-    await clickText(/^files$/i);
+    await clickText(/^setup$/i);
     clean();
     document.body.innerHTML = "";
     await at("/setup");

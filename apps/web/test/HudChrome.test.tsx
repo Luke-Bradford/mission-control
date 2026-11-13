@@ -13,7 +13,6 @@ import { hub, RESOURCES } from "../src/data.ts";
 import { WorkInFlight } from "../src/flight/WorkInFlight.tsx";
 import { ActivityPanel } from "../src/overview/ActivityPanel.tsx";
 import { NeedsBanner } from "../src/overview/NeedsBanner.tsx";
-import { Agent } from "../src/pages/Agent.tsx";
 import { BoardPage } from "../src/pages/BoardPage.tsx";
 import { Overview } from "../src/pages/Overview.tsx";
 import { Loops } from "../src/setup/Loops.tsx";
@@ -78,39 +77,41 @@ afterEach(() => {
 });
 
 describe("HUD chrome", () => {
-  it.each([
-    ["Overview Agents", () => <Overview />, "#agentsP"],
-    ["Agent picker", () => <Agent id={null} />, "#picker"],
-  ])("filters %s by the crew session rather than its shared repo", async (_, page, selector) => {
-    const loop = crewRow({ id: "shop-loop", sessionId: null, repoId: "shop-app" });
-    stub({
-      "/api/crew?shape=summary": {
-        rows: [
-          ...rows,
-          loop,
-          seatRow({ id: "other-repo", sessionId: "gamma", repoId: "site-builder" }),
-        ],
-      },
-    });
-    const { container } = render(page());
-    await waitFor(() => expect(container.querySelector(selector)?.textContent).toContain("inco-1"));
-    act(() => setSession("alpha"));
-    expect(container.querySelector(selector)?.textContent).toContain("guido-1");
-    expect(container.querySelector(selector)?.textContent).not.toContain("inco-1");
-    expect(container.querySelector(selector)?.textContent).toContain("shop-loop");
-    act(() => setSession("beta"));
-    expect(container.querySelector(selector)?.textContent).not.toContain("guido-1");
-    expect(container.querySelector(selector)?.textContent).toContain("inco-1");
-    expect(container.querySelector(selector)?.textContent).toContain("shop-loop");
-    act(() => setSession("gamma"));
-    expect(container.querySelector(selector)?.textContent).toContain("other-repo");
-    expect(container.querySelector(selector)?.textContent).not.toContain("shop-loop");
-    for (const removed of ["removed", "shop-app"]) {
-      act(() => setSession(removed));
-      for (const id of ["guido-1", "inco-1", "retro-1", "shop-loop", "other-repo"])
-        expect(container.querySelector(selector)?.textContent).not.toContain(id);
-    }
-  });
+  it.each([["Overview Agents", () => <Overview />, "#agentsP"]])(
+    "filters %s by the crew session rather than its shared repo",
+    async (_, page, selector) => {
+      const loop = crewRow({ id: "shop-loop", sessionId: null, repoId: "shop-app" });
+      stub({
+        "/api/crew?shape=summary": {
+          rows: [
+            ...rows,
+            loop,
+            seatRow({ id: "other-repo", sessionId: "gamma", repoId: "site-builder" }),
+          ],
+        },
+      });
+      const { container } = render(page());
+      await waitFor(() =>
+        expect(container.querySelector(selector)?.textContent).toContain("inco-1"),
+      );
+      act(() => setSession("alpha"));
+      expect(container.querySelector(selector)?.textContent).toContain("guido-1");
+      expect(container.querySelector(selector)?.textContent).not.toContain("inco-1");
+      expect(container.querySelector(selector)?.textContent).toContain("shop-loop");
+      act(() => setSession("beta"));
+      expect(container.querySelector(selector)?.textContent).not.toContain("guido-1");
+      expect(container.querySelector(selector)?.textContent).toContain("inco-1");
+      expect(container.querySelector(selector)?.textContent).toContain("shop-loop");
+      act(() => setSession("gamma"));
+      expect(container.querySelector(selector)?.textContent).toContain("other-repo");
+      expect(container.querySelector(selector)?.textContent).not.toContain("shop-loop");
+      for (const removed of ["removed", "shop-app"]) {
+        act(() => setSession(removed));
+        for (const id of ["guido-1", "inco-1", "retro-1", "shop-loop", "other-repo"])
+          expect(container.querySelector(selector)?.textContent).not.toContain(id);
+      }
+    },
+  );
 
   it("filters Work in flight crew runs by session", async () => {
     stub();

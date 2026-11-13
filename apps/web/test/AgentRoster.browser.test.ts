@@ -227,7 +227,24 @@ describeRendered("Agents roster in a browser", () => {
             ?.getBoundingClientRect();
           return !!(f && c && c.top >= f.top - 1 && c.bottom <= f.bottom + 1);
         }, null);
-      expect(await inFrame(), "beside the content").toBe(true);
+      const measured = () =>
+        page.evaluate(() => {
+          const box = (selector: string) => {
+            const r = document.querySelector(selector)?.getBoundingClientRect();
+            return r ? [Math.round(r.top), Math.round(r.bottom)] : null;
+          };
+          const list = document.querySelector<HTMLElement>(".roster-list");
+          return JSON.stringify({
+            window: innerHeight,
+            shell: box(".control-shell"),
+            roster: box("#roster"),
+            frame: box(".roster-list"),
+            card: box('#roster [aria-current="true"]'),
+            scrollTop: list?.scrollTop,
+            scrollHeight: list?.scrollHeight,
+          });
+        }, null);
+      expect(await inFrame(), `beside the content ${await measured()}`).toBe(true);
       await page.resize(980, 800);
       await page.evaluate(
         () =>
@@ -256,7 +273,7 @@ describeRendered("Agents roster in a browser", () => {
       const r = await page.evaluate(
         () => ({
           roster: document.querySelector("#roster")?.getBoundingClientRect().height ?? 0,
-          mainTop: document.querySelector(".agent-v2-main")?.getBoundingClientRect().top ?? 0,
+          mainTop: document.querySelector(".control-main")?.getBoundingClientRect().top ?? 0,
           inner: innerHeight,
         }),
         null,

@@ -448,8 +448,14 @@ it("places the same lazy instructions in Agent without fetching every configured
     },
   });
   render(<Agent id="guido-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Setup" }));
   const toggle = await screen.findByText("Instructions · guido-1");
-  expect(fn.mock.calls.some(([path]) => path.includes("/instructions?"))).toBe(false);
+  // The seat's own queue shares the same read; no other seat's instructions are fetched.
+  expect(
+    fn.mock.calls.some(
+      ([path]) => path.includes("/instructions?") && !path.includes("/seats/guido-1/"),
+    ),
+  ).toBe(false);
   fireEvent.click(toggle);
   await screen.findByText("Agent seat instruction");
   expect(
@@ -593,6 +599,7 @@ it("keeps Queue Clear authoritative until an explicit revoke reveals FLIGHT focu
     },
   });
   const { container } = render(<Agent id="guido-1" />);
+  fireEvent.click(await screen.findByRole("button", { name: "Setup" }));
   await screen.findByText("label:old");
   fireEvent.click(screen.getByRole("button", { name: "Change" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Focus" }), { target: { value: "" } });

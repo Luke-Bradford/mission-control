@@ -663,10 +663,34 @@ export function HeaderReviewState({ check }: { check: ReviewCheckState }) {
   );
 }
 
-/** Existing seat actions, grouped for the Agent v2 header. Opening More loads its settings. */
-export function AgentHeaderActions({ row }: { row: CrewRow }) {
+/** The More menu: pop out, switch account, seat settings. Opening it loads its settings. */
+export function SeatMore({ row }: { row: CrewRow }) {
   const [open, setOpen] = useState(false);
   const popout = useIsPopout();
+  return (
+    <details className="seat-more" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>More</summary>
+      {open && (
+        <div className="agent-v2-menu">
+          {!popout && (
+            <button type="button" onClick={() => popOut(row.id)}>
+              Pop out
+            </button>
+          )}
+          {row.kind === "crew" && (
+            <>
+              <SwitchAccount row={row} />
+              <SeatSettings row={row} />
+            </>
+          )}
+        </div>
+      )}
+    </details>
+  );
+}
+
+/** Existing seat actions, grouped for the Agent v2 header. */
+export function AgentHeaderActions({ row }: { row: CrewRow }) {
   return (
     <span className="agent-v2-actions">
       {row.kind === "crew" ? (
@@ -674,24 +698,7 @@ export function AgentHeaderActions({ row }: { row: CrewRow }) {
       ) : row.loopKind === "ta-loop" ? (
         <PauseButton row={row} />
       ) : null}
-      <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-        <summary>More</summary>
-        {open && (
-          <div className="agent-v2-menu">
-            {!popout && (
-              <button type="button" onClick={() => popOut(row.id)}>
-                Pop out
-              </button>
-            )}
-            {row.kind === "crew" && (
-              <>
-                <SwitchAccount row={row} />
-                <SeatSettings row={row} />
-              </>
-            )}
-          </div>
-        )}
-      </details>
+      <SeatMore row={row} />
     </span>
   );
 }
