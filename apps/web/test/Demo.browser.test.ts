@@ -216,6 +216,9 @@ describeRendered("Demo, rendered", () => {
       await page.evaluate(() => {
         window.__noReload = true;
       }, undefined);
+      // Display controls belong in Setup, rather than competing with operational-page shortcuts.
+      await page.click("button[aria-label=Setup]");
+      await page.box(".demo-switch");
       const clickedAt = page.requests().length;
 
       await page.click(".demo-switch");
@@ -234,6 +237,7 @@ describeRendered("Demo, rendered", () => {
         async () => (await count(page, ".demo-marker")) === 0,
         "the marker to go",
       );
+      await page.click('a[href="/"]');
       await eventually(page, () => bodyHas(page, SENTINEL), "the Live sentinel back");
       const back = page
         .requests()
@@ -268,6 +272,8 @@ describeRendered("Demo, rendered", () => {
         async () => (await count(page, "#agentsList .trow:not(.head)")) >= 10,
         "the Demo crew",
       );
+      await page.click("button[aria-label=Setup]");
+      await page.box(".demo-switch");
       expect(apiRequests(page)).toEqual([]);
       await page.click(".demo-switch");
       await eventually(
@@ -275,6 +281,7 @@ describeRendered("Demo, rendered", () => {
         async () => (await count(page, ".demo-marker")) === 0,
         "the marker to go",
       );
+      await page.click('a[href="/"]');
       await page.evaluate(() => new Promise((r) => setTimeout(r, 800)), undefined);
       expect(await count(page, "[role=alert]")).toBe(0);
       expect(page.errors()).toEqual([]);

@@ -1,9 +1,11 @@
-import type { TicketEvent, TicketHistory } from "@mc/core";
+import type { ItemDiscussion, TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
 import { useEffect, useMemo, useState } from "react";
 import { ApiError, apiGet } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { MentionText } from "../comms/messages.tsx";
+import { SenderTag } from "../comms/SenderTag.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
+import { useSeatName } from "../crew.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
@@ -14,14 +16,48 @@ import {
   eventLine,
   findingsOf,
   findingWord,
-  KIND_WORD,
+  kindWord,
   mergeEvents,
   type PageEvent,
   prEvents,
+  questionState,
 } from "../ticket/ticketTimeline.ts";
 import "../ticket/ticket.css";
 
 const dash = "—";
+
+/** What was said on a question: read-only, fetched when opened. Replying happens on Needs you. */
+function QuestionConversation({ itemKey, tz }: { itemKey: string; tz: ReturnType<typeof useTz> }) {
+  const [open, setOpen] = useState(false);
+  const res = useResource<ItemDiscussion>(open ? RESOURCES.discussion(itemKey) : null);
+  const messages = res.data?.messages;
+  return (
+    <details className="tk-convo" onToggle={(e) => setOpen(e.currentTarget.open)}>
+      <summary>Conversation</summary>
+      {res.error && !messages ? (
+        <p className="crit-t s">Could not load the conversation.</p>
+      ) : !messages ? (
+        <p className="muted">Loading…</p>
+      ) : messages.length === 0 ? (
+        <p className="muted">No messages yet.</p>
+      ) : (
+        <ol className="tk-convo-list" aria-label="Conversation on this question">
+          {messages.map((m) => (
+            <li key={m.id}>
+              <span className="tk-when">
+                {tz ? `${dayMonth(m.at, tz)} ${hhmm(m.at, tz)}` : dash}
+              </span>
+              <strong>{m.role === "operator" ? "YOU" : "FLIGHT"}</strong>
+              <p className="tk-text">
+                <MentionText text={m.text} />
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </details>
+  );
+}
 
 function Field({ label, value }: { label: string; value: string | null }) {
   return (
@@ -37,7 +73,8 @@ function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null
   return (
     <li className="tk-event" data-kind={e.kind}>
       <span className="tk-when">{tz ? `${dayMonth(e.at, tz)} ${hhmm(e.at, tz)}` : dash}</span>
-      <Pill tone="plain">{KIND_WORD[e.kind]}</Pill>
+      <Pill tone="plain">{kindWord(e)}</Pill>
+      {e.kind === "comms" && <SenderTag from={e.from} senderKind={e.senderKind} />}
       <span className="tk-line">{eventLine(e)}</span>
       {(e.kind === "comms" || e.kind === "decision") && (
         <details className="tk-more">
@@ -73,17 +110,25 @@ function Entry({ e, t, tz }: { e: PageEvent; t: TicketHistory; tz: string | null
 export function TicketPage({ repoId, number }: { repoId: string; number: number }) {
   const res = useResource<TicketHistory>(RESOURCES.ticketHistory(repoId, number));
   const tz = useTz();
+  const nameOf = useSeatName();
   const t = res.data;
   const [older, setOlder] = useState<{ events: TicketEvent[]; next: string | null } | null>(null);
   // every live event seen, so one that slides out of the newest page stays
   const [kept, setKept] = useState<TicketEvent[]>([]);
   const [paging, setPaging] = useState<"idle" | "loading" | "failed">("idle");
+  // older question pages, with their own cursor
+  const [olderQ, setOlderQ] = useState<{ items: TicketQuestion[]; next: string | null } | null>(
+    null,
+  );
+  const [qPaging, setQPaging] = useState<"idle" | "loading" | "failed">("idle");
   // another ticket starts with no older pages of the last one
   // biome-ignore lint/correctness/useExhaustiveDependencies: repoId and number name the ticket
   useEffect(() => {
     setOlder(null);
     setKept([]);
     setPaging("idle");
+    setOlderQ(null);
+    setQPaging("idle");
   }, [repoId, number]);
   useEffect(() => {
     if (t) setKept((k) => mergeEvents(k, t.timeline));
@@ -98,6 +143,29 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
     );
     return mergeEvents<PageEvent>(all, prs);
   }, [t, kept, older, next]);
+
+  const questions = useMemo(() => {
+    const seen = new Map<number, TicketQuestion>();
+    for (const q of [...(t?.questions ?? []), ...(olderQ?.items ?? [])]) seen.set(q.id, q);
+    return [...seen.values()].sort((a, b) => b.at - a.at || b.id - a.id);
+  }, [t, olderQ]);
+  const qNext = olderQ ? olderQ.next : (t?.questionsNextBefore ?? null);
+  const loadOlderQuestions = async () => {
+    if (qNext === null) return;
+    setQPaging("loading");
+    try {
+      const page = await apiGet<TicketHistory>(
+        RESOURCES.ticketHistory(repoId, number, "", qNext).path,
+      );
+      setOlderQ((o) => ({
+        items: [...(o?.items ?? []), ...(page.questions ?? [])],
+        next: page.questionsNextBefore ?? null,
+      }));
+      setQPaging("idle");
+    } catch {
+      setQPaging("failed");
+    }
+  };
 
   const loadOlder = async () => {
     if (next === null) return;
@@ -223,29 +291,81 @@ export function TicketPage({ repoId, number }: { repoId: string; number: number 
             </p>
           </div>
         </Panel>
-        <Panel id="timelineP" title="Timeline" sub="newest first" className="tk-timeline">
-          <div className="pb scroll">
-            {events.length === 0 ? (
-              <p className="muted">The crew has not touched this ticket yet.</p>
-            ) : (
-              <ol className="tk-events" aria-label="Timeline events">
-                {events.map((e) => (
-                  <Entry key={e.key} e={e} t={t} tz={tz} />
-                ))}
-              </ol>
-            )}
-            {paging === "failed" && <p className="crit-t s">Could not load older events.</p>}
-            {next !== null && (
-              <button
-                type="button"
-                disabled={paging === "loading"}
-                onClick={() => void loadOlder()}
-              >
-                {paging === "loading" ? "Loading…" : "Load older"}
-              </button>
-            )}
-          </div>
-        </Panel>
+        <div className={`tk-main${questions.length > 0 ? " has-questions" : ""}`}>
+          {questions.length > 0 && (
+            <Panel id="questionsP" title="Questions" sub="newest first" className="tk-questions">
+              <div className="pb scroll">
+                <ol className="tk-qlist" aria-label="Questions">
+                  {questions.map((q) => (
+                    <li key={q.id} className="tk-question" data-state={questionState(q)}>
+                      <p className="tk-qhead">
+                        <Pill tone="plain">{questionState(q)}</Pill>
+                        <span>{nameOf(q.seat)}</span>
+                        <span className="tk-when">
+                          {tz ? `${dayMonth(q.at, tz)} ${hhmm(q.at, tz)}` : dash}
+                        </span>
+                      </p>
+                      <p className="tk-text">
+                        <MentionText text={q.text} />
+                      </p>
+                      {q.answer !== null && (
+                        <div className="tk-answer">
+                          <h4>Answer</h4>
+                          <p className="tk-text">
+                            <MentionText text={q.answer} />
+                          </p>
+                          {q.answerBasis && (
+                            <p className="tk-text muted">
+                              <MentionText text={q.answerBasis} />
+                            </p>
+                          )}
+                        </div>
+                      )}
+                      {q.discussionKey && (
+                        <QuestionConversation itemKey={q.discussionKey} tz={tz} />
+                      )}
+                    </li>
+                  ))}
+                </ol>
+                {qPaging === "failed" && (
+                  <p className="crit-t s">Could not load older questions.</p>
+                )}
+                {qNext !== null && (
+                  <button
+                    type="button"
+                    disabled={qPaging === "loading"}
+                    onClick={() => void loadOlderQuestions()}
+                  >
+                    {qPaging === "loading" ? "Loading…" : "Load older questions"}
+                  </button>
+                )}
+              </div>
+            </Panel>
+          )}
+          <Panel id="timelineP" title="Timeline" sub="newest first" className="tk-timeline">
+            <div className="pb scroll">
+              {events.length === 0 ? (
+                <p className="muted">The crew has not touched this ticket yet.</p>
+              ) : (
+                <ol className="tk-events" aria-label="Timeline events">
+                  {events.map((e) => (
+                    <Entry key={e.key} e={e} t={t} tz={tz} />
+                  ))}
+                </ol>
+              )}
+              {paging === "failed" && <p className="crit-t s">Could not load older events.</p>}
+              {next !== null && (
+                <button
+                  type="button"
+                  disabled={paging === "loading"}
+                  onClick={() => void loadOlder()}
+                >
+                  {paging === "loading" ? "Loading…" : "Load older"}
+                </button>
+              )}
+            </div>
+          </Panel>
+        </div>
       </div>
     </section>
   );
