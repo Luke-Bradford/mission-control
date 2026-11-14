@@ -177,7 +177,7 @@ export function AuditOverview({
               {v.label}
             </button>
           ))}
-          <a href="/telemetry">Cost and flow</a>
+          <a href="/telemetry">Cost and flow context</a>
           <a href="/qa">PR readiness and tests in QA</a>
         </nav>
         <span className="sp" />

@@ -378,7 +378,7 @@ it("reaches every earlier Audit view in one click and returns with the same repo
   await screen.findByText("Workflow history and earlier proposals");
   fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
   await ready();
-  expect(screen.getByRole("link", { name: "Cost and flow" }).getAttribute("href")).toBe(
+  expect(screen.getByRole("link", { name: "Cost and flow context" }).getAttribute("href")).toBe(
     "/telemetry",
   );
   expect(
