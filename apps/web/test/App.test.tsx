@@ -202,19 +202,18 @@ describe("App", () => {
     sessionStorage.removeItem("mc-dock-collapsed");
   });
 
-  it("opens the fly-out over the FLIGHT page on f, without leaving it", async () => {
-    act(() => toggleDock(true));
-    sessionStorage.setItem("mc-dock-collapsed", "true");
+  it("opens the fly-out as a drawer over the FLIGHT page on f, without leaving it", async () => {
     const { container } = at("/flight");
     await waitFor(() => expect(container.querySelector("#page-flight")).not.toBeNull());
     expect(container.querySelector(".shell.shell-cover")).not.toBeNull();
-    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(true);
+    expect(container.querySelector(".app.dock-cover")).not.toBeNull();
+    expect(container.querySelector<HTMLElement>("#dock")?.hidden).toBe(true);
     act(() => {
       fireEvent.keyDown(document.body, { key: "f" });
     });
     expect(window.location.pathname).toBe("/flight");
-    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(false);
-    sessionStorage.removeItem("mc-dock-collapsed");
+    expect(container.querySelector<HTMLElement>("#dock")?.hidden).toBe(false);
+    expect(screen.getByTestId("dock-scrim")).toBeTruthy();
   });
 
   it("i off the agent page toasts", () => {

@@ -57,6 +57,16 @@ export function FlightThread({
     const el = log.current;
     if (stick.current && el) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
+  // A thread that was hidden (a folded fly-out) opens at the newest message, as one that is open does.
+  useEffect(() => {
+    const el = log.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => {
+      if (stick.current) el.scrollTop = el.scrollHeight;
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, []);
   const run = res.data?.flight;
 
   const send = async () => {

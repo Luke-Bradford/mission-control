@@ -6,6 +6,7 @@ import {
   type ReactNode,
   Suspense,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -43,6 +44,7 @@ import {
   closeItem,
   ITEM_GONE,
   openHelp,
+  setDockCover,
   syncItem,
   toggleDock,
   useBuildStatus,
@@ -159,6 +161,10 @@ function Shell({
   // have no column for it, so on a wide screen it covers their right edge, as the narrow drawer does.
   const showDock = !notFound;
   const coversShell = tabOf(shown) === "comms" || FULL_WIDTH_PAGES.has(tabOf(shown));
+  useLayoutEffect(() => {
+    setDockCover(showDock && coversShell);
+    return () => setDockCover(false);
+  }, [showDock, coversShell]);
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -166,6 +172,7 @@ function Shell({
     overviewOverlay && "overview-flight-overlay",
     dock.wide && !dock.visible && "dock-hidden",
     dock.visible && dock.collapsed && "dock-collapsed",
+    showDock && coversShell && "dock-cover",
     !dock.wide && dock.visible && "dock-open",
     buildStatus && "bs-on",
   ]

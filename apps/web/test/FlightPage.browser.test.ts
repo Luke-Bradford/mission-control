@@ -595,7 +595,9 @@ describeRendered("FLIGHT page in a browser", () => {
             return {
               pageScroll: doc.scrollHeight - doc.clientHeight,
               sideScroll: doc.scrollWidth - doc.clientWidth,
-              dock: document.querySelectorAll(".dock").length,
+              dock: [...document.querySelectorAll<HTMLElement>(".dock")].filter(
+                (d) => d.getClientRects().length > 0,
+              ).length,
               bandBottom: box(".fp-band")?.bottom ?? 0,
               midTop: box(".fp-mid")?.top ?? 0,
               decTop: box("#decisionsP")?.top ?? 0,

@@ -185,7 +185,7 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
         search: "?at=/comms",
         api: flightApi,
       });
-      await page.box(".flight-thread-message");
+      await page.box("main .flight-thread-message");
       expect(await page.evaluate(() => document.body.textContent ?? "", undefined)).not.toContain(
         "Could not mark this conversation read",
       );

@@ -60,15 +60,15 @@ describeRendered("the shared FLIGHT thread in Comms", () => {
         api,
       });
       try {
-        await page.box(".flight-thread-message");
+        await page.box("main .flight-thread-message");
         const text = await page.evaluate(
-          () => document.querySelector(".flight-thread-log")?.textContent ?? "",
+          () => document.querySelector("main .flight-thread-log")?.textContent ?? "",
           undefined,
         );
         expect(text).not.toContain("**");
         expect(text).toContain("You chose: Keep working");
-        expect(await page.boxes(".flight-thread-message")).toHaveLength(messages.length);
-        expect(await page.unclipped(".flight-thread-input")).toEqual([true]);
+        expect(await page.boxes("main .flight-thread-message")).toHaveLength(messages.length);
+        expect(await page.unclipped("main .flight-thread-input")).toEqual([true]);
         expect(page.errors()).toEqual([]);
         await page.screenshot(join(SHOTS, `flight-thread-${width}-light.png`));
       } finally {
