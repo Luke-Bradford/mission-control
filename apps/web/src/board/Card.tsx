@@ -35,7 +35,7 @@ import {
 /** Tests count card renders through this (#26 A1); null outside tests. */
 export const cardRenderProbe: { onRender: ((ref: string) => void) | null } = { onRender: null };
 
-/** FLIGHT's Blocked chains panel: where `+n` and `Unblocks n` lead. */
+/** FLIGHT's Blocked chains panel (the `chainsP` panel): where `+n` and `Unblocks n` lead. */
 const CHAINS_HREF = "/flight#chainsP";
 const MAX_LABELS = 3;
 const MILESTONE_SPLIT = " — ";
