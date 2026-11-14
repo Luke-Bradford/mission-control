@@ -320,6 +320,7 @@ describe("flightShellBreakerWrite", () => {
     "wget --spider https://example.test",
     "wget -q --spider https://example.test",
     "wget -O - https://example.test",
+    "wget -q --spider --header=X:y -t 3 -T5 -U agent https://example.test",
     "wget -qO- https://example.test",
     "wget --output-document=- https://example.test",
   ])("neither audits nor counts a read-only wget: %s", (command) => {
@@ -337,6 +338,12 @@ describe("flightShellBreakerWrite", () => {
     "wget -qO- --save-cookies /outside/c https://example.test",
     "wget -qO- --warc-file=/outside/w https://example.test",
     "wget --spider -r https://example.test",
+    "wget --spider -rl2 https://example.test",
+    "wget -qO- -qa /outside/log https://example.test",
+    "wget -qO- --rejected-log=/outside/r https://example.test",
+    "wget --spider -e spider=off https://example.test",
+    "wget --spider --config=/tmp/rc https://example.test",
+    "wget -qO- --use-askpass=/tmp/cmd https://example.test",
   ])("still counts a wget that writes a file: %s", (command) => {
     expect(flightShellWrite(command)).toBe(true);
     expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(
@@ -348,6 +355,9 @@ describe("flightShellBreakerWrite", () => {
     "wget -O - --method=DELETE https://api.github.com/x",
     "wget --spider --method=DELETE https://api.github.com/x",
     "wget -O - --body-file=b.json --method=PATCH https://api.github.com/x",
+    "wget --spider -e method=DELETE https://api.github.com/x",
+    "wget -qO- -e post_data=x https://api.github.com/x",
+    "wget -qO- --execute=method=DELETE https://api.github.com/x",
   ])("counts a wget that sends: %s", (command) => {
     expect(flightShellWrite(command)).toBe(true);
     expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(

@@ -3459,8 +3459,61 @@ const SHELL_READERS = new Set([
 ]);
 const SHELL_GH_READS = new Set(["view", "list", "status", "diff", "checks", "search", "watch"]);
 
-/** The wget options that send a request body or set a method: a network write, as curl's -X and -d. */
-const WGET_SEND = /^--(?:post-data|post-file|method|body-data|body-file)(?:=|$)/;
+const WGET_READ_FLAGS = new Set([
+  "--quiet",
+  "--no-verbose",
+  "--server-response",
+  "--no-check-certificate",
+  "--spider",
+]);
+const WGET_READ_VALUE_FLAGS = new Set([
+  "--header",
+  "--user-agent",
+  "--timeout",
+  "--tries",
+  "--max-redirect",
+  "--output-document",
+]);
+
+/**
+ * wget is a read only when every option is a known read option and it writes no file: --spider
+ * or `-O -`. Any other option (a method or body, -e, --config, a log, cookie or WARC file,
+ * recursion, ...) is a write with unknown targets, so a new wget option counts until listed here.
+ */
+function wgetWriteTargets(args: readonly string[]): string[] | null {
+  const files: string[] = [];
+  let spider = false;
+  let stdout = false;
+  const document = (value: string): void => {
+    if (value === "-") stdout = true;
+    else files.push(value);
+  };
+  for (let n = 0; n < args.length; n++) {
+    const arg = args[n] ?? "";
+    if (!arg.startsWith("-") || arg === "-") continue;
+    if (arg.startsWith("--")) {
+      const [flag = "", ...rest] = arg.split("=");
+      const value = rest.join("=");
+      if (WGET_READ_FLAGS.has(flag) && rest.length === 0) spider ||= flag === "--spider";
+      else if (WGET_READ_VALUE_FLAGS.has(flag)) {
+        const given = rest.length ? value : (args[++n] ?? "");
+        if (flag === "--output-document") document(given);
+      } else return [];
+      continue;
+    }
+    const cluster = /^-([qSnv]*)([OUTt])?(.*)$/.exec(arg);
+    if (cluster === null) return [];
+    const [, , option, attached = ""] = cluster;
+    if (option === undefined) {
+      if (attached !== "") return [];
+      continue;
+    }
+    const given = attached !== "" ? attached : (args[++n] ?? "");
+    if (option === "O") document(given);
+  }
+  if (files.length) return files;
+  return spider || stdout ? null : [];
+}
 
 /** Explicit file destinations. Null is a read; an empty list is a write with unknown targets. */
 function shellWriteTargets(program: string, args: readonly string[]): string[] | null {
@@ -3472,8 +3525,8 @@ function shellWriteTargets(program: string, args: readonly string[]): string[] |
       else if (arg.startsWith(`${long}=`)) paths.push(arg.slice(long.length + 1));
       else if (arg.startsWith(short) && arg.length > short.length)
         paths.push(arg.slice(short.length));
-      else if (short === "-o" || short === "-O") {
-        const cluster = new RegExp(`^-[a-zA-Z]*?${short[1]}(.*)$`).exec(arg);
+      else if (short === "-o") {
+        const cluster = /^-[a-zA-Z]*?o(.*)$/.exec(arg);
         if (cluster) paths.push(cluster[1] || args[++n] || "");
       }
     }
@@ -3490,25 +3543,7 @@ function shellWriteTargets(program: string, args: readonly string[]): string[] |
     const files = paths.filter((path) => path !== "-");
     return files.length ? files : null;
   }
-  if (program === "wget") {
-    const paths = [
-      ...output("-O", "--output-document"),
-      ...output("-o", "--output-file"),
-      ...output("-a", "--append-output"),
-    ];
-    for (let n = 0; n < args.length; n++) {
-      const arg = args[n] ?? "";
-      const [flag, ...value] = arg.split("=");
-      if (flag === "--save-cookies" || flag === "--warc-file")
-        paths.push(value.length ? value.join("=") : (args[++n] ?? ""));
-    }
-    // A recursive fetch saves pages to disk to follow their links, even with --spider or -O -.
-    if (args.some((a) => /^--(?:recursive|mirror)$|^-[a-zA-Z]*[rm][a-zA-Z]*$/.test(a))) return [];
-    const files = paths.filter((path) => path !== "-");
-    if (files.length) return files;
-    // --spider fetches nothing to disk, and -O - sends the body to stdout: both are reads.
-    return args.includes("--spider") || paths.includes("-") ? null : [];
-  }
+  if (program === "wget") return wgetWriteTargets(args);
   if (program === "sed" || program === "perl") {
     if (!args.some((arg) => /^-[a-zA-Z]*i|^--in-place(?:=|$)/.test(arg))) return null;
     const files: string[] = [];
@@ -3607,11 +3642,8 @@ export function flightShellWrite(command: string): boolean {
       if (ghReadVerb(args)) continue;
       return true;
     }
-    // wget reaches here only when its targets are null (--spider or -O -): a read unless it sends.
-    if (program === "wget") {
-      if (args.some((a) => WGET_SEND.test(a))) return true;
-      continue;
-    }
+    // wget reaches here only when its targets are null (--spider or -O - and nothing else): a read.
+    if (program === "wget") continue;
     if (program === "curl") {
       if (args.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
         return true;
@@ -3771,8 +3803,6 @@ export function flightShellBreakerWrite(
     } else if (program === "curl") {
       if (raw.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
         return true;
-    } else if (program === "wget") {
-      if (raw.some((a) => WGET_SEND.test(a))) return true;
     }
   }
   return false;
