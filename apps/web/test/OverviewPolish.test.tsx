@@ -156,7 +156,7 @@ describe("Overview polish", () => {
       .map((el) => el.textContent ?? "")
       .filter((text) => /^(?:last hour|peak|now) /.test(text));
     expect(readings.length).toBeGreaterThan(0);
-    for (const reading of readings) expect(reading).toContain("tokens");
+    for (const reading of readings) expect(reading).toContain("tok");
   });
 
   it("links a ticket once for a run of rows from one agent", async () => {

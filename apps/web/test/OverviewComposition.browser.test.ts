@@ -16,13 +16,19 @@ async function settled(page: RenderedPage) {
   }, undefined);
 }
 
-function open(scenario: OverviewScenario, width: number, height: number, dark = true) {
+function open(
+  scenario: OverviewScenario,
+  width: number,
+  height: number,
+  dark = true,
+  extraApi: Record<string, unknown> = {},
+) {
   return renderAt({
     page: "test/overviewDensityBrowser.html",
     width,
     height,
     colorScheme: dark ? "dark" : "light",
-    api: overviewDensityFixture(scenario).api,
+    api: { ...overviewDensityFixture(scenario).api, ...extraApi },
   });
 }
 
@@ -85,6 +91,86 @@ describeRendered("Overview composition", () => {
       expect(m.order).toEqual(["macP", "tokensP", "actP"]);
       expect(m.spill).toBe(0);
       expect(m.heads).toEqual(m.cells);
+    },
+    60_000,
+  );
+
+  it.each([
+    [1920, 940],
+    [2560, 1145],
+  ])(
+    "keeps the key bar and the unread badge inside the window at %ix%i",
+    async (width, height) => {
+      const unread = {
+        mentions: [
+          {
+            seen: false,
+            message: {
+              id: "m1",
+              at: 1,
+              from: "flight-1",
+              to: "CAPCOM",
+              text: "Needs you",
+              ticket: null,
+              label: null,
+              ref: null,
+              replyTo: null,
+              mentions: ["CAPCOM"],
+              reactions: [],
+              operator: false,
+            },
+          },
+        ],
+      };
+      const page = await open("mixed", width, height, true, { "/api/comms/mentions": unread });
+      await settled(page);
+      await page.boxes(".iconbtn .dock-unread");
+      const edges = await page.evaluate(() => {
+        const caps = [...document.querySelectorAll<HTMLElement>("footer.keys > span")];
+        const badge = document.querySelector(".iconbtn .dock-unread")?.getBoundingClientRect();
+        const button = document.querySelector(".iconbtn .dock-unread")?.closest(".iconbtn");
+        return {
+          first: caps[0]?.getBoundingClientRect().left ?? Number.NaN,
+          last: caps.at(-1)?.getBoundingClientRect().right ?? Number.NaN,
+          badgeRight: badge?.right ?? Number.NaN,
+          buttonRight: button?.getBoundingClientRect().right ?? Number.NaN,
+          width: innerWidth,
+        };
+      }, undefined);
+      expect(edges.first).toBeGreaterThanOrEqual(8);
+      expect(edges.last).toBeLessThanOrEqual(edges.width - 8);
+      expect(edges.badgeRight).toBeLessThanOrEqual(edges.width);
+      expect(edges.badgeRight).toBeLessThanOrEqual(edges.buttonRight + 0.5);
+    },
+    60_000,
+  );
+
+  it.each([
+    [1600, 900],
+    [1920, 940],
+    [2560, 1145],
+  ])(
+    "keeps each token reading on one line, with the hour axes level at %ix%i",
+    async (width, height) => {
+      const page = await open("mixed", width, height);
+      await settled(page);
+      await page.boxes("#tokensP .plot-reading span");
+      const m = await page.evaluate(() => {
+        const lineHeight = (el: Element) => Number.parseFloat(getComputedStyle(el).lineHeight);
+        const wrapped = [...document.querySelectorAll("#tokensP .plot-reading span")].filter(
+          (el) => el.getBoundingClientRect().height > lineHeight(el) + 1,
+        ).length;
+        const gaps = [...document.querySelectorAll<HTMLElement>("#tokensP .token-account")].flatMap(
+          (account) => {
+            const hour = account.querySelector(".hourbars .plot-axis")?.getBoundingClientRect();
+            const week = account.querySelector(".burnup-axis")?.getBoundingClientRect();
+            return hour && week ? [Math.abs(hour.bottom - week.bottom)] : [];
+          },
+        );
+        return { wrapped, gaps };
+      }, undefined);
+      expect(m.wrapped).toBe(0);
+      for (const gap of m.gaps) expect(gap).toBeLessThanOrEqual(2);
     },
     60_000,
   );

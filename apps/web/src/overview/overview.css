@@ -2595,6 +2595,10 @@ button.quota-details {
   font: var(--fs-micro) / var(--lh-axis) var(--mono);
   color: var(--muted);
 }
+.plot-reading span,
+.plot-axis span {
+  white-space: nowrap;
+}
 .plot-reading {
   display: flex;
   justify-content: space-between;
