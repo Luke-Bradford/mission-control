@@ -505,7 +505,11 @@ export function createQuietGate(
       if (waitingSince === undefined || at - lastCallAt > 2 * maxHoldMs) waitingSince = at;
       lastCallAt = at;
       if (at - waitingSince >= forceAfterMs) {
+        // the hold now lasts until the route releases it (or the hub exits): an earlier call's
+        // lapse must not end it while the pull, install and build run
         hold.hold(UPDATE_HOLD_TEXT, UPDATE_HOLD_OWNER);
+        clearTimeout(lapse);
+        lapse = undefined;
         return null;
       }
       hold.hold(UPDATE_HOLD_TEXT, UPDATE_HOLD_OWNER);

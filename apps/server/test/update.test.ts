@@ -1776,6 +1776,21 @@ describe("auto update", () => {
       await expect(gate.wait(() => seats("guido-1"), "flight-1")).resolves.toBeNull();
     });
 
+    it("keeps the hold through a forced call's whole Update: an earlier call's lapse does not end it", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      const gate = createQuietGate(hold, { waitMs: 1_000, pollMs: 500 });
+      const first = gate.wait(() => seats("guido-1"), "flight-1");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await first;
+      await vi.advanceTimersByTimeAsync(UPDATE_HOLD_MAX_MS - 60_000);
+      await expect(gate.wait(() => seats("guido-1"), "flight-1")).resolves.toBeNull();
+      await vi.advanceTimersByTimeAsync(3 * 60_000);
+      expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
+      gate.release();
+      expect(hold.reason).toBeNull();
+    });
+
     it("leaves another owner's hold alone", async () => {
       vi.useFakeTimers();
       const hold = new CliHold();

@@ -9893,6 +9893,29 @@ describe("brief_item with a hold (#760)", () => {
     expect(store.briefs().has(key)).toBe(false);
   });
 
+  it("refuses to brief the held Update with a hold, even when FLIGHT may run it (#1834)", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.raiseNote({
+      key: "hub-update-held",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW - 1,
+    });
+    expect(
+      await call(
+        "brief_item",
+        brief({
+          key: "note:hub-update-held",
+          hold: { condition: { kind: "date", at: NOW + 7 * 86_400_000 } },
+        }),
+      ),
+    ).toEqual(refused(PROTECTED_ITEM_REFUSED));
+    expect(store.getSetting("attention-holds")).toBeNull();
+  });
+
   it("refuses an item hold that closes a cycle, storing neither brief nor hold", async () => {
     store.raiseNote({
       key: "blocked:other",
