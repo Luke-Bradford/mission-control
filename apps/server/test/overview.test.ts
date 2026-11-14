@@ -978,3 +978,33 @@ it("does not count an open In-review ticket whose PR merged as in flight", () =>
     ticketOpen: true,
   });
 });
+
+it("leaves a head out while a check still runs, and a head superseded mid-run is not a pass", () => {
+  readHead(
+    1,
+    "p1",
+    [ciCheck("SUCCESS", "passing", "validate"), ciCheck("IN_PROGRESS", "pending", "server")],
+    NOW - HOUR,
+  );
+  expect(summary().kpis.ciPassRate24h).toMatchObject({ runs: 0, pct: null });
+  readHead(1, "x2", [ciCheck("FAILURE", "failing", "validate")], NOW - MIN);
+  expect(summary().kpis.ciPassRate24h).toMatchObject({ runs: 1, pct: 0 });
+});
+
+it("reads a Blocked ticket's reason from a run older than the Overview window", () => {
+  store.replaceBoard("repo", [card(1, "Blocked")]);
+  store.upsertRun(
+    run(1, {
+      startedAt: NOW - 30 * HOUR,
+      endedAt: NOW - 26 * HOUR,
+      status: "ok",
+      loop: {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: "ask", reason: "needs a key", ended: true },
+      },
+    }),
+  );
+  const blocked = summary().pipeline.find((p) => p.stage === "blocked");
+  expect(blocked?.cards[0]?.blockedReason).toBe("needs a key");
+});

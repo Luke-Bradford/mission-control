@@ -245,18 +245,24 @@ function ciHeads(rows: readonly CiRunView[], repos: ReadonlySet<string>): CiHead
   }
   const heads: CiHead[] = [];
   for (const [head, checks] of byHead) {
-    // unfinished checks, and ones GitHub skipped or left neutral, say nothing about the head
-    const done = [...checks.values()].filter(
-      (c) => c.state !== "pending" && !["skipped", "neutral"].includes(c.conclusion.toLowerCase()),
+    // checks GitHub skipped or left neutral say nothing about the head
+    const counted = [...checks.values()].filter(
+      (c) => !["skipped", "neutral"].includes(c.conclusion.toLowerCase()),
     );
-    if (done.length === 0) continue;
+    const done = counted.filter((c) => c.state !== "pending");
     const cancelled = (c: CiRunView) => c.conclusion.toLowerCase() === "cancelled";
     const real = done.filter((c) => !cancelled(c));
+    // A failed check decides the head at once; otherwise it is not finished while any check runs
+    // (a head superseded mid-run is never read again, so it must not count as a pass).
+    const running = counted.length > done.length;
     const outcome = real.some((c) => c.state === "failing")
       ? "fail"
-      : real.length > 0
-        ? "pass"
-        : "cancelled";
+      : running || done.length === 0
+        ? null
+        : real.length > 0
+          ? "pass"
+          : "cancelled";
+    if (outcome === null) continue;
     heads.push({ at: firstSeen.get(head) ?? 0, outcome });
   }
   return heads;
@@ -338,12 +344,6 @@ export function pipelineStages(
         : [];
   const agentStates = store.latestAgentStates();
   const boardsRead = new Map<string, readonly Readonly<BoardItem>[]>();
-  const lastRun = new Map<string, Run>();
-  for (const run of runs) {
-    const have = run.ticket === null ? undefined : lastRun.get(run.ticket);
-    if (run.ticket !== null && run.reviewId == null && (!have || run.startedAt > have.startedAt))
-      lastRun.set(run.ticket, run);
-  }
   for (const repoId of pipelineRepos) {
     const readyMoves = store.overviewReadyMoves(repoId);
     const board = boardOf?.get(repoId) ?? store.boardView(repoId);
@@ -413,7 +413,9 @@ export function pipelineStages(
         who: run?.agentId ?? null,
         priority: item.priority,
         size: item.size,
-        ...(stage === "blocked" ? { blockedReason: blockedReason(item, lastRun.get(ref)) } : {}),
+        ...(stage === "blocked"
+          ? { blockedReason: blockedReason(item, newestRun(store.runsOnTicket(repoId, ref))) }
+          : {}),
         ...(review === null ? {} : { rework: reworkFacts(store, review, run, agentStates) }),
       });
     }
@@ -460,6 +462,9 @@ export function pipelineStages(
   });
   return pipeline;
 }
+
+const newestRun = (runs: readonly Run[]): Run | undefined =>
+  runs.reduce<Run | undefined>((a, r) => (!a || r.startedAt > a.startedAt ? r : a), undefined);
 
 /** Why a Blocked ticket is blocked: its run's parked reason, else the open tickets it waits on. */
 function blockedReason(item: Pick<BoardItem, "blockedBy">, run: Run | undefined): string {
