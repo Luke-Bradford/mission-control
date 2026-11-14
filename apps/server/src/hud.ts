@@ -110,7 +110,6 @@ import {
   type CcConfig,
   type ConfiguredAgent,
   configuredAgents,
-  flightPowersOf,
   seatUnavailable,
 } from "./config.ts";
 import { pausedSeat } from "./crew-pause.ts";
@@ -894,8 +893,7 @@ interface FlightTriage {
 /**
  * The operator's call (#758): FLIGHT may brief it for the operator but never keep it. Unless it is
  * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, the
- * held hub Update (unless FLIGHT owns it, see noteOwner), and a run parked on its budget or account,
- * or on the operator's acceptance.
+ * held hub Update, and a run parked on its budget or account, or on the operator's acceptance.
  */
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
@@ -1276,8 +1274,6 @@ function buildAttentionItems(
     }
   }
 
-  // A question asked inside a Needs-you item's conversation, by the item it belongs to (below).
-  const threadOf = new Map<string, { parent: string; at: number }>();
   // A labelled direct question or blocker stays in its conversation while its addressee has the
   // first fifteen minutes to react. After that it is a durable FLIGHT triage item, rather than an
   // unbounded stream of unread-chatter items.
@@ -1317,16 +1313,12 @@ function buildAttentionItems(
     // FLIGHT's message for the controller is the controller's, never a stuck run the operator keeps
     const forController = message.from === flight?.seat.id && isForTheController(message.text);
     if (flightQuestion && flightQuestionChoice(store, message.id, message.from)) continue;
-    const openKey =
-      message.from === flight?.seat.id && message.to === COMMS_CAPCOM
-        ? canonicalFlightQuestionKey(store, message.id, flight.seat.id)
-        : `${COMMS_OPEN_PREFIX}${message.id}`;
-    // only a message to the operator: a seat's blocker to FLIGHT keeps its own triage item
-    if (message.itemKey !== undefined && message.to === COMMS_CAPCOM)
-      threadOf.set(openKey, { parent: message.itemKey, at: message.at });
     items.push({
       owner: forController ? OWNER_CONTROLLER : OWNER_OPERATOR,
-      key: openKey,
+      key:
+        message.from === flight?.seat.id && message.to === COMMS_CAPCOM
+          ? canonicalFlightQuestionKey(store, message.id, flight.seat.id)
+          : `${COMMS_OPEN_PREFIX}${message.id}`,
       kind: message.label === "blocker" && !forController ? "blocked" : "question",
       agentId: message.from,
       repoId: repoId ?? null,
@@ -1745,20 +1737,7 @@ function buildAttentionItems(
     !needsYouAlert(item)
       ? { ...item, asker: flightId }
       : item;
-  const routed = partition.items.map(entryCheck).map(asFlights);
-  // A question asked in an open item's conversation shows in that conversation, not as a second
-  // item, while that item, raised before it, is on the same owner's list.
-  const parents = new Map(routed.map((i) => [i.key, i]));
-  const checked = routed.filter((i) => {
-    const thread = threadOf.get(i.key);
-    const parent = thread === undefined ? undefined : parents.get(thread.parent);
-    if (parent === undefined || thread === undefined || parent.owner !== i.owner) return true;
-    // a note key is raised again later; only its current run owns the conversation
-    const since = parent.key.startsWith(NOTE_KEY)
-      ? store.noteRunStart(parent.key.slice(NOTE_KEY.length), parent.at)
-      : 0;
-    return thread.at < since;
-  });
+  const checked = partition.items.map(entryCheck).map(asFlights);
   const shown =
     triage === null
       ? checked
@@ -1906,8 +1885,6 @@ function noteOwner(
   store: Store,
   n: Pick<AttentionNote, "key" | "repoId" | "runId">,
   flightSeated: boolean,
-  /** FLIGHT is triaging and may run Update (superuser powers on its repo). */
-  flightRunsUpdate = false,
 ): AttentionOwner {
   if (
     n.repoId !== null &&
@@ -1927,9 +1904,6 @@ function noteOwner(
     return OWNER_CONTROLLER;
   }
   if (flightSeated && (isChatterNoteKey(n.key) || isHardRulesFlagKey(n.key))) return OWNER_FLIGHT;
-  // FLIGHT runs a held Update in a quiet gap while it is triaging and allowed to (the operator,
-  // 13 November: nobody asked him for it). Stopped, or without the power, it stays his alert.
-  if (flightRunsUpdate && n.key === HUB_UPDATE_HELD_KEY) return OWNER_FLIGHT;
   return OWNER_OPERATOR;
 }
 
@@ -1942,13 +1916,7 @@ function crewItems(
   now: number,
 ): OwnedItem[] {
   const sessions = config.crew?.sessions ?? [];
-  const flight = flightSeat(config);
-  const flightSeated = flight !== null;
-  const flightRunsUpdate =
-    flight !== null &&
-    flightPowersOf(config, flight.session.repoId) === "superuser" &&
-    flightTriage(config, store, now)?.triaging === true &&
-    flightLive(config, store);
+  const flightSeated = flightSeat(config) !== null;
   const repoOfSeat = (seatId: string) =>
     sessions.find((s) => s.seats.some((x) => x.id === seatId))?.repoId ?? null;
   const item = (
@@ -2029,14 +1997,14 @@ function crewItems(
     // the unfiled-minor-findings flag is raised after the merge and waits for a fix: it outlives its run
     if (
       !n.key.endsWith(":file-minor") &&
-      noteOwner(store, n, flightSeated, flightRunsUpdate) !== OWNER_CONTROLLER &&
+      noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
       run !== null &&
       endedWorkOver(config, store, run, boardOf, now)
     )
       continue;
     if (
       n.kind === "blocked" &&
-      noteOwner(store, n, flightSeated, flightRunsUpdate) !== OWNER_CONTROLLER &&
+      noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
       run !== null &&
       endedParkGone(config, store, run, boardOf)
     )
@@ -2046,7 +2014,7 @@ function crewItems(
         ? undefined
         : (store.pullRequest(run.repoId, run.loop.prNumber) ?? undefined);
     const noteItem: OwnedItem = {
-      owner: noteOwner(store, n, flightSeated, flightRunsUpdate),
+      owner: noteOwner(store, n, flightSeated),
       key: `${NOTE_KEY}${n.key}`,
       kind: n.kind,
       agentId: n.seatId,

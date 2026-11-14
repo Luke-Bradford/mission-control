@@ -24,7 +24,9 @@ export function answerTarget(
 
 /** The line that tells FLIGHT which item a message is about. */
 export function itemLead(key: string, about: string): string {
-  return about.trim() === "" ? `Re: ${key}` : `Re: ${key} · ${about}`;
+  // one line, so the item's conversation can drop it at the first blank line
+  const line = about.replace(/\s+/g, " ").trim();
+  return line === "" ? `Re: ${key}` : `Re: ${key} · ${line}`;
 }
 
 export function flightText(key: string, about: string, body: string): string {

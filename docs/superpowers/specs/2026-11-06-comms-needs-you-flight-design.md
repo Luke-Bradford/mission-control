@@ -189,9 +189,7 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
 
 1. **A hub alert the operator alone can act on.** Hub code writes its words. The alerts:
    - FLIGHT is not triaging;
-   - an Update only a person can run (the alert says how much changed, not which commits or paths).
-     While FLIGHT is triaging with superuser powers it is FLIGHT's to run instead, and never reaches
-     the operator (the operator, 13 November: "who is asking for this and why is this in needs you?");
+   - an Update only a person can run (the alert says how much changed, not which commits or paths);
    - the runaway breaker tripped;
    - a run stopped on a budget or account limit;
    - an account at its rate limit;

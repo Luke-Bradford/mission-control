@@ -4763,7 +4763,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             b.itemKey === undefined
               ? undefined
               : store
-                  .itemThread(b.itemKey)
+                  .itemThreadNow(b.itemKey)
                   .filter((m) => m.from === id && m.to === sender.from)
                   .at(-1)?.id;
           try {
@@ -6550,9 +6550,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (key.length > 200) return reply.code(400).send({ error: "key too long" });
         // A note key is raised again later: only this run of the note owns the conversation.
         // Other item keys name one message, question or issue, so all of theirs is the item's.
-        const item = key.startsWith("note:") ? currentDiscussionItem(key) : undefined;
-        const since = item === undefined ? 0 : store.noteRunStart(key.slice(5), item.at);
-        return itemThread(store.itemThread(key, since));
+        return itemThread(store.itemThreadNow(key));
       });
       // Reader: apps/web/src/shell/ItemPanel.tsx
       api.get<{ Params: { key: string }; Querystring: { id?: string } }>(

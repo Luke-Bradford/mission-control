@@ -1052,6 +1052,10 @@ export class Store {
     this.addColumn("comms", "item_key", "TEXT");
     // A Needs-you item's conversation reads by item (itemThread).
     this.db.exec("CREATE INDEX IF NOT EXISTS comms_item_key ON comms(item_key, at, id)");
+    // A note's unbroken run walks its episodes by key (noteRunStart).
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS attention_episodes_key ON attention_episodes(key, at)",
+    );
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
     // Turns in a row that ended with no new commit; the resume line reads it.
@@ -7045,21 +7049,38 @@ export class Store {
   }
 
   /**
-   * When a note's unbroken run began: a note raised again within a minute of clearing (a held
-   * Update re-raised as main moves) is the same item to the operator, so its conversation stays.
+   * When a note's unbroken run began (its open run, or its last one once cleared): a note raised
+   * again within a minute of clearing (a held Update re-raised as main moves) is the same item to
+   * the operator, so its conversation stays; an earlier run's does not carry over. Read from the
+   * episodes, since a refresh moves the note's own time forward. 0 for a key never raised.
    */
-  noteRunStart(noteKey: string, raisedAt: number): number {
+  noteRunStart(noteKey: string): number {
+    const latest = this.db
+      .prepare(
+        `SELECT at FROM attention_episodes WHERE key = ?
+         ORDER BY (cleared_at IS NULL) DESC, at DESC LIMIT 1`,
+      )
+      .get(noteKey) as { at: number } | undefined;
+    if (latest === undefined) return 0;
     const before = this.db.prepare(
       `SELECT at FROM attention_episodes WHERE key = ? AND at < ? AND cleared_at >= ?
        ORDER BY at DESC LIMIT 1`,
     );
-    let start = raisedAt;
+    let start = latest.at;
     for (let i = 0; i < 1000; i++) {
       const row = before.get(noteKey, start, start - 60_000) as { at: number } | undefined;
       if (row === undefined) break;
       start = row.at;
     }
     return start;
+  }
+
+  /** An item's conversation since its current run (`noteRunStart` for a note key, else all). */
+  itemThreadNow(itemKey: string): (CommsRow & { choice?: string })[] {
+    return this.itemThread(
+      itemKey,
+      itemKey.startsWith("note:") ? this.noteRunStart(itemKey.slice("note:".length)) : 0,
+    );
   }
 
   /**
