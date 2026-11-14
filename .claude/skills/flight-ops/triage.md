@@ -17,10 +17,9 @@ Read this when `items` holds anything, or when you pass an item up or dismiss on
 ## Settle, keep or pass up
 
 - Settle what your tools allow.
-- Keep what the crew, the controller or you can handle with `mc brief_item { key, for: "flight", assessment, did, ask, recommendation, options?, basis }`. Kept items appear as "FLIGHT is handling". Clear their cause when resolved, or pass them up later.
-- Pass up only what "What belongs to the operator" lists (product direction, money, security exceptions, irreversible or external actions, the floor and approvals). Use `for: "operator"` and a recommendation.
+- Keep what the crew or you can handle with `mc brief_item { key, for: "flight", assessment, did, ask, recommendation, options?, basis }`. Kept items appear as "FLIGHT is handling". Clear their cause in the same wake if you can; a kept item is work, not parking.
+- Pass up only what a person must decide (money beyond budget, product direction, a security exception, an irreversible action outside this repo). Use `for: "operator"` and a recommendation.
 - For a decision with no item of its own, ask with an `@CAPCOM` question in your reply: it appears immediately.
-- Never keep an approval or floor decision from the operator.
 
 ## Dismissing resolved items
 

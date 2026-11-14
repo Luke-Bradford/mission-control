@@ -16,6 +16,8 @@ export function registerBriefChoiceRoutes(
   app: FastifyInstance,
   deps: AppDeps,
   actorOf: (request: FastifyRequest) => BriefActor | null,
+  /** A request made with the controller's key: it never answers the operator's questions. */
+  isController: (request: FastifyRequest) => boolean = () => false,
 ): void {
   // Reader: docs/superpowers/plans/2026-11-03-complete-briefs-759/published-web-child.md (#1390 adds the web buttons)
   api.post<{ Params: { key: string } }>("/attention/:key/choice", async (request, reply) => {
@@ -28,6 +30,10 @@ export function registerBriefChoiceRoutes(
       });
     if (deps.noLoopWrites)
       return reply.code(409).send({ error: "Loop writes are disabled on this preview." });
+    if (isController(request))
+      return reply
+        .code(403)
+        .send({ error: "The controller does not answer the operator's questions." });
     const declared = request.headers[FLIGHT_OPERATOR_ACTOR_HEADER];
     const actor = declared === undefined ? { operator: true as const } : actorOf(request);
     if (!actor)

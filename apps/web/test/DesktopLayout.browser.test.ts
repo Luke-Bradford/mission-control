@@ -294,6 +294,7 @@ describeRendered("Approved compact desktop shell", () => {
             mentions: [
               {
                 seen: false,
+                needsReply: true,
                 message: {
                   id: "comms:1",
                   from: "flight-1",

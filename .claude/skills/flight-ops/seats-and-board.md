@@ -9,8 +9,7 @@ Read this when a seat is free, before you start or promote a ticket, or when a c
 - **Triage the board:** triage the digest's `triage` list (new Backlog and Refinement tickets, finished plans, resolved dependencies), including when Ready is empty.
 - **Choosing work:** go in Priority order, oldest first within a Priority. Match the ticket's one area label to the seat's area. Keep `research` tickets out of developer seats.
 - **Readiness:** a `## Plan` heading or a Ready column is not enough. Check the requirements, size and done-when.
-- **Controller check:** if a done-when item needs evidence only the controller can produce, ask the ticket's planner (`mc comment_ticket`) to move it under `## Controller check` before promoting. Don't edit a started ticket's body.
-  - A ticket whose done-when names controller-only evidence, but has no controller-check heading, isn't held at merge. Ask its planner to move that item under the heading before the PR's review is clean and CI is green.
+- **Controller check:** if a done-when item needs evidence from a running hub, add it with `mc add_controller_check` before promoting (`mc edit_issue` refuses that section); you produce it at merge (`stalls.md`).
   - How a controller-check park behaves: `stalls.md`.
 - **Overlap:** before a start or a promotion, compare the ticket's intended changes with work already active. Keep tickets that change the same files apart. The hub doesn't enforce this.
 

@@ -1304,20 +1304,20 @@ const raiseBlocked = (key = "blocked:r1:0", over: Record<string, unknown> = {}) 
 describe("FLIGHT's items to brief", () => {
   const items = () => flightState({ config, store, busy: [], now: T0 + 5 * MIN }).items;
 
-  it("lists the operator's items with no brief, not a briefed or controller one", () => {
+  it("lists the items with no brief, a failed cleanup included, but not a briefed one", () => {
     live("flight-1", "r-flight");
     raiseBlocked();
     raiseBlocked("cleanup-branch:x");
-    expect(items()).toEqual([
-      {
-        key: "note:blocked:r1:0",
-        kind: "blocked",
-        ticket: null,
-        text: "mc#7 parked",
-        ageMin: 5,
-        triageRemainingMs: 15 * MIN,
-      },
-    ]);
+    // a failed cleanup is FLIGHT's to clear: there is no controller to take it
+    expect(items().map((i) => i.key)).toContain("note:cleanup-branch:x");
+    expect(items().find((i) => i.key === "note:blocked:r1:0")).toEqual({
+      key: "note:blocked:r1:0",
+      kind: "blocked",
+      ticket: null,
+      text: "mc#7 parked",
+      ageMin: 5,
+      triageRemainingMs: 15 * MIN,
+    });
     // an incomplete brief fails the Needs you entry check: still FLIGHT's to rewrite (#1543)
     store.addBrief({
       key: "note:blocked:r1:0",
@@ -1327,7 +1327,7 @@ describe("FLIGHT's items to brief", () => {
       basis: "b",
       at: T0,
     });
-    expect(items().map((i) => i.key)).toEqual(["note:blocked:r1:0"]);
+    expect(items().map((i) => i.key)).toContain("note:blocked:r1:0");
     // a complete one settles it
     store.addBrief({
       key: "note:blocked:r1:0",
@@ -1342,7 +1342,7 @@ describe("FLIGHT's items to brief", () => {
       basis: "b",
       at: T0 + 1,
     });
-    expect(items()).toEqual([]);
+    expect(items().map((i) => i.key)).toEqual(["note:cleanup-branch:x"]);
   });
 
   it("leaves out FLIGHT's own replies and tags, and keeps another seat's reply", () => {

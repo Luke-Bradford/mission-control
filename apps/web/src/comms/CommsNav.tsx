@@ -37,8 +37,9 @@ export function unseenMentionsFor(
   kind: "flight" | "agent",
   id?: string,
 ): number {
-  return mentions.filter(({ message, seen }) => {
-    if (seen || message.to === COMMS_CREW || message.from === COMMS_CREW) return false;
+  return mentions.filter(({ message, seen, needsReply }) => {
+    if (seen || !needsReply || message.to === COMMS_CREW || message.from === COMMS_CREW)
+      return false;
     if (kind === "flight")
       return (
         id !== undefined &&

@@ -110,6 +110,7 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
   PR_LIST_DAYS,
@@ -1421,6 +1422,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // The controller's own key. A request that carries it passes where the operator token does (it
   // grants nothing new) and is marked, so what it sends is recorded as the controller's.
   const controllerRequests = new WeakSet<FastifyRequest>();
+  /** A Needs-you key built from a Comms message: `comms-open:<id>`, `tag:<seat>:<id>`, `message:<agent>:<id>`. */
+  const COMMS_ITEM_KEY = /^(?:comms-open|tag:[^:]+|message:[^:]+):(comms:\d+)$/;
+  const CONTROLLER_HOLD_REFUSED =
+    "the controller does not hold or release merges; tell FLIGHT what is wrong";
   if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
     const { controllerToken, operatorToken: held } = deps;
     app.addHook("onRequest", async (req) => {
@@ -2461,12 +2466,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
-      api.get("/comms/mentions", () => ({
-        mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
-          message: storedCommsMessage(row),
-          seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
-        })),
-      }));
+      api.get("/comms/mentions", () => {
+        // A message needs the operator's reply when its question is open on their Needs you: the
+        // same rules close it in both places, so the badge and Needs you never disagree. Every
+        // Comms-sourced item key (an open question, a tag or a direct line) ends in its message id.
+        const asks = new Set<string>();
+        for (const item of sharedAttention()) {
+          if (item.owner !== OWNER_OPERATOR) continue;
+          const id = COMMS_ITEM_KEY.exec(item.key)?.[1];
+          if (id !== undefined) asks.add(id);
+        }
+        return {
+          mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
+            message: storedCommsMessage(row),
+            seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
+            needsReply: asks.has(row.id),
+          })),
+        };
+      });
       // Reader: apps/web/src/App.tsx#App (CAPCOM mention read state)
       api.post("/comms/mentions/seen", (req, reply) => {
         const body = z
@@ -5193,7 +5210,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.get("/flight/memory", async (req, reply) => {
         const parsed = z.object({ repo: z.string().min(1) }).safeParse(req.query);
         if (!parsed.success) return reply.code(400).send({ error: "Invalid repo" });
@@ -5232,7 +5249,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true, id: approval.id };
       });
       const MemoryParams = z.object({ repo: z.string().min(1), topic: FlightMemoryTopic });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.put("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         const body = FlightMemoryInput.omit({ topic: true }).strict().safeParse(req.body);
@@ -5254,7 +5271,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("flight");
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.delete("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         if (!params.success) return reply.code(400).send({ error: "Invalid memory topic" });
@@ -5855,6 +5872,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             (body.data.action === "hold" && !body.data.reason)
           )
             return reply.code(400).send({ error: "invalid merge-hold request" });
+          // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+          if (controllerRequests.has(req))
+            return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
           const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
           if (!target) return reply;
           const previous = externalMergeHold(store, target.repo.id, number);
@@ -5862,7 +5882,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (actor && previous !== null && !previous.startsWith("FLIGHT: "))
             return reply
               .code(403)
-              .send({ error: "Only the controller may change this operator merge hold." });
+              .send({ error: "Only the operator may change this operator merge hold." });
           if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
           checkBriefDispatch();
           setExternalMergeHold(
@@ -5956,8 +5976,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
-      // The controller holds a run's PR from merging, or releases a hold (FLIGHT's or its own).
-      // FLIGHT's hold_pr tool cannot release one set here; the operator token is required.
+      // The operator holds a run's PR from merging, or releases a hold (FLIGHT's or their own).
+      // FLIGHT's hold_pr tool cannot release one set here. The controller's key is refused.
       // Reader: docs/runbook.md#hold-a-run-from-merging
       api.post<{ Params: { id: string } }>("/runs/:id/merge-hold", async (req, reply) => {
         const run = store.run(req.params.id);
@@ -5966,6 +5986,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!crewGate(run.agentId, reply)) return reply;
         const body = MergeHoldBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+        if (controllerRequests.has(req))
+          return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
         if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
         const engine = deps.engine;
         if (!engine?.holdMerge || !engine.releaseMergeHold || engine.status().on !== true) {
@@ -6376,7 +6399,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
-      registerBriefChoiceRoutes(api, app, deps, flightActor);
+      registerBriefChoiceRoutes(api, app, deps, flightActor, (req) => controllerRequests.has(req));
       // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-flight-s-side-flight-is-the-gate (the Answered group; the web side is a follow-up ticket)
       api.get("/attention/answered", async () =>
         store.questionClosures(now() - ANSWERED_WINDOW_MS, ANSWERED_LIMIT),

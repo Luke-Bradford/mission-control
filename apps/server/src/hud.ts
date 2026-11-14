@@ -1321,16 +1321,17 @@ function buildAttentionItems(
       ) !== null
     )
       continue;
-    // FLIGHT's message for the controller is the controller's, never a stuck run the operator keeps
-    const forController = message.from === flight?.seat.id && isForTheController(message.text);
     if (flightQuestion && flightQuestionChoice(store, message.id, message.from)) continue;
+    // FLIGHT's old "For the controller:" notes: there is no controller to read them, and they
+    // were never questions for the operator
+    if (message.from === flight?.seat.id && isForTheController(message.text)) continue;
     items.push({
-      owner: forController ? OWNER_CONTROLLER : OWNER_OPERATOR,
+      owner: OWNER_OPERATOR,
       key:
         message.from === flight?.seat.id && message.to === COMMS_CAPCOM
           ? canonicalFlightQuestionKey(store, message.id, flight.seat.id)
           : `${COMMS_OPEN_PREFIX}${message.id}`,
-      kind: message.label === "blocker" && !forController ? "blocked" : "question",
+      kind: message.label === "blocker" ? "blocked" : "question",
       agentId: message.from,
       repoId: repoId ?? null,
       text: message.text,
@@ -1457,15 +1458,15 @@ function buildAttentionItems(
         owner: loopOwner
           ? OWNER_LOOP
           : lane === null
-            ? pr.isDraft
-              ? OWNER_CONTROLLER
+            ? pr.isDraft && flightId !== null
+              ? OWNER_FLIGHT
               : OWNER_OPERATOR
             : laneOwner(lane),
         key: `pr:${pr.repoId}#${pr.number}:${pr.updatedAt}`,
         kind: "pr",
         agentId: loopOwner?.id ?? null,
         repoId: pr.repoId,
-        text: `PR #${pr.number} · ${loopOwner ? (loopOwner.displayCallSign ?? loopOwner.id) : pr.isDraft ? "Controller" : "You"}: ${action}`,
+        text: `PR #${pr.number} · ${loopOwner ? (loopOwner.displayCallSign ?? loopOwner.id) : pr.isDraft && flightId !== null ? "FLIGHT" : "You"}: ${action}`,
         tool: null,
         at: pr.updatedAt,
         url: pr.url,
@@ -1615,8 +1616,6 @@ function buildAttentionItems(
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
     const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
     const unansweredComms = i.key.startsWith(COMMS_OPEN_PREFIX);
-    // FLIGHT's message for the controller stays the controller's, whatever FLIGHT's triage state
-    if (unansweredComms && i.owner === OWNER_CONTROLLER) return item;
     if (unansweredComms && triage !== null) {
       if (brief !== undefined && brief.for !== "flight") return item;
       if (!triaging) return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
@@ -1922,8 +1921,9 @@ function noteOwner(
     const loop = n.runId === null ? null : store.run(n.runId)?.loop;
     return loop?.touches ? OWNER_FLIGHT : OWNER_OPERATOR;
   }
+  // there is no controller in the loop: FLIGHT clears these, or the operator with no FLIGHT
   if (isCleanupNoteKey(n.key) || isFlakeNoteKey(n.key) || isNoReportNoteKey(n.key))
-    return OWNER_CONTROLLER;
+    return flightSeated ? OWNER_FLIGHT : OWNER_OPERATOR;
   if (
     isHardRulesFlagKey(n.key) &&
     n.repoId !== null &&
@@ -2019,6 +2019,12 @@ function crewItems(
 
   // The engine's notes: blocked, ready for review, check before merging, rate-limited. Each
   // goes when the engine clears it.
+  // these notes are about ended runs by nature: they stay until someone clears them (a flake
+  // note is information, skipped below)
+  const outlivesRun = (n: Pick<AttentionNote, "key" | "repoId" | "runId">): boolean =>
+    isCleanupNoteKey(n.key) ||
+    isNoReportNoteKey(n.key) ||
+    noteOwner(store, n, flightSeated, flightRuns) === OWNER_CONTROLLER;
   for (const n of store.notes()) {
     if (n.dismissedAt !== null) continue;
     if (isHardRulesFlagKey(n.key) || isFlakeNoteKey(n.key)) continue;
@@ -2026,14 +2032,14 @@ function crewItems(
     // the unfiled-minor-findings flag is raised after the merge and waits for a fix: it outlives its run
     if (
       !n.key.endsWith(":file-minor") &&
-      noteOwner(store, n, flightSeated, flightRuns) !== OWNER_CONTROLLER &&
+      !outlivesRun(n) &&
       run !== null &&
       endedWorkOver(config, store, run, boardOf, now)
     )
       continue;
     if (
       n.kind === "blocked" &&
-      noteOwner(store, n, flightSeated, flightRuns) !== OWNER_CONTROLLER &&
+      !outlivesRun(n) &&
       run !== null &&
       endedParkGone(config, store, run, boardOf)
     )
@@ -2077,7 +2083,7 @@ function crewItems(
       (run === null || store.seatSession(run.agentId)?.state !== "stopped");
     if (
       (n.kind === "blocked" || n.kind === "review") &&
-      noteItem.owner !== OWNER_CONTROLLER &&
+      !outlivesRun(n) &&
       resolved &&
       !approvalPending &&
       (subjectClosed || !protectedDecisionItem(store, { ...noteItem, acked: false }, config, now))

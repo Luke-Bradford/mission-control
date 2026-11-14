@@ -392,10 +392,10 @@ export interface Engine {
   /**
    * Holds the run's merge: the engine does not merge it, even after a clean review and green CI,
    * until the hold is released; it parks as `merge-hold` when it would otherwise merge. The
-   * controller (CAPCOM) may replace any hold; FLIGHT only sets one when none is held.
+   * operator (CAPCOM) may replace any hold; FLIGHT only sets one when none is held.
    */
   holdMerge(runId: string, by: MergeHoldBy, reason: string): Promise<MergeHoldResult>;
-  /** Releases the hold. FLIGHT cannot release one the controller set; the controller can release any. */
+  /** Releases the hold. FLIGHT cannot release one the operator set; the operator can release any. */
   releaseMergeHold(runId: string, by: MergeHoldBy): Promise<MergeHoldResult>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
@@ -3358,7 +3358,7 @@ export function createEngine(deps: EngineDeps): Engine {
           return refuse("the run's PR is already merged");
         if (loop.merging?.done.includes("merge")) return refuse("the run's PR is already merged");
         if (loop.mergeHold && loop.mergeHold.by === "CAPCOM" && by !== "CAPCOM")
-          return refuse("the controller already holds this run's merge");
+          return refuse("the operator already holds this run's merge");
         const at = now();
         // a run already parked on the hold keeps the phase it left, and its park names the new holder
         const parkedOnHold = loop.phase === "parked" && loop.parked?.kind === MERGE_HOLD_PARK;
@@ -3391,7 +3391,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const hold = loop?.mergeHold;
         if (run === null || !loop || !hold) return refuse("the run's merge is not held");
         if (hold.by === "CAPCOM" && by !== "CAPCOM")
-          return refuse("the controller set this hold; only the controller can release it");
+          return refuse("the operator set this hold; only the operator can release it");
         const at = now();
         const next: RunLoop = { ...loop, mergeHold: null };
         if (loop.phase === "parked" && loop.parked?.kind === MERGE_HOLD_PARK) {
