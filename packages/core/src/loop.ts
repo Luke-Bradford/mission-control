@@ -133,7 +133,7 @@ export const CI_PENDING_P90_FACTOR = 2;
 /** ...but never sooner than this. */
 export const CI_PENDING_MIN_MS = 10 * 60_000;
 
-/** How long a job may stay pending: twice its recent p90, else the fixed default. */
+/** How long a running job may stay pending: twice its recent p90, else the fixed default. */
 export function ciPendingLimitMs(p90Ms: number | undefined): number {
   return p90Ms === undefined || !(p90Ms > 0)
     ? CI_PENDING_MAX_MS
@@ -776,9 +776,16 @@ function ciOverdue(
       : null;
   }
   // a running job is judged from its start, but never from before the push or un-park
+  // a check that has not started (missing or queued) may be waiting on a slow job, so it gets the
+  // longest limit among the repo's jobs, never below the fixed default
+  const unstarted = Math.max(
+    CI_PENDING_MAX_MS,
+    ...Object.values(s.ciP90Ms ?? {}).map((p90) => ciPendingLimitMs(p90)),
+  );
   const over = (name: string) => {
-    const limit = ciPendingLimitMs(s.ciP90Ms?.[name]);
-    return now - Math.max(since, checks.startedAt?.[name] ?? 0) > limit ? limit : null;
+    const startedAt = checks.startedAt?.[name];
+    const limit = startedAt === undefined ? unstarted : ciPendingLimitMs(s.ciP90Ms?.[name]);
+    return now - Math.max(since, startedAt ?? 0) > limit ? limit : null;
   };
   const pending = checks.pending.filter((n) => over(n) !== null);
   const missing = checks.missing.filter((n) => over(n) !== null);

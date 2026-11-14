@@ -757,6 +757,29 @@ describe("state step", () => {
       expect(r.loop.parked?.reason).toBe("CI pending for 60 minutes on aaaaaaa (pending: web)");
     });
 
+    describe("a short gate job waiting on a slow one", () => {
+      const gate = (m: number, checks: { pending: string[]; missing: string[] }) =>
+        inCi({
+          pushed: { sha: SHA, at: NOW - m * min },
+          ciP90Ms: { "web-core": 30 * min, check: 10_000 },
+          pr: pr({ checks: { failing: [], ...checks } }),
+        });
+
+      it("a missing check is not parked while the slowest job may still run", () => {
+        const r = reconcile(gate(12, { pending: [], missing: ["check"] }));
+        expect(r.loop.parked).toBeNull();
+        const late = reconcile(gate(61, { pending: [], missing: ["check"] }));
+        expect(late.loop.parked?.reason).toBe(
+          "CI pending for 60 minutes on aaaaaaa (missing: check)",
+        );
+      });
+
+      it("a queued check with no start is judged the same way", () => {
+        const r = reconcile(gate(26, { pending: ["check"], missing: [] }));
+        expect(r.loop.parked).toBeNull();
+      });
+    });
+
     it("a job with no history keeps the fixed limit", () => {
       const r = reconcile(inCi({ ...runningFor(31, 31), ciP90Ms: {} }));
       expect(r.loop.parked?.kind).toBe("ci-pending");
