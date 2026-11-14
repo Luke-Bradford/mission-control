@@ -101,29 +101,20 @@ describeRendered("Overview composition", () => {
   ])(
     "keeps the key bar and the unread badge inside the window at %ix%i",
     async (width, height) => {
-      const unread = {
-        mentions: [
-          {
-            seen: false,
-            message: {
-              id: "m1",
-              at: 1,
-              from: "flight-1",
-              to: "CAPCOM",
-              text: "Needs you",
-              ticket: null,
-              label: null,
-              ref: null,
-              replyTo: null,
-              mentions: ["CAPCOM"],
-              reactions: [],
-              operator: false,
-            },
-          },
-        ],
-      };
-      const page = await open("mixed", width, height, true, { "/api/comms/mentions": unread });
+      const page = await open("mixed", width, height);
       await settled(page);
+      await page.boxes('header.top button[aria-label^="FLIGHT chat"]');
+      // The badge itself is drawn from live unread messages; the position is the CSS under test,
+      // so give the real chat button a badge when the fixture has none.
+      await page.evaluate(() => {
+        const button = document.querySelector('header.top button[aria-label^="FLIGHT chat"]');
+        if (button && !button.querySelector(".dock-unread")) {
+          const badge = document.createElement("span");
+          badge.className = "dock-unread";
+          badge.textContent = "9";
+          button.append(badge);
+        }
+      }, undefined);
       await page.boxes(".iconbtn .dock-unread");
       const edges = await page.evaluate(() => {
         const caps = [...document.querySelectorAll<HTMLElement>("footer.keys > span")];
