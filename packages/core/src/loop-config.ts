@@ -4,6 +4,7 @@
  * gates, caps and plan sizes, and a loop the engine cannot run is refused at load.
  */
 import { PLAN_SIZES } from "./flight.ts";
+import { TICKET_SIZES } from "./hud.ts";
 import {
   LOOP_CAP_MAX,
   LOOP_RETURN_FROM,
@@ -74,6 +75,18 @@ export function validateLoop(def: LoopDef): string | null {
   for (const s of def.steps) {
     if ((s.runner === "agent" || s.runner === "fresh-agent") && s.report === undefined)
       return refuse(`agent step ${s.id} has no report tool`);
+  }
+  for (const s of def.steps) {
+    if (s.sizes === undefined) continue;
+    if (s.id !== "plan") return refuse(`step ${s.id} takes no sizes`);
+    if (s.sizes.length === 0) return refuse("step plan sizes must be a nonempty list");
+    const repeat = s.sizes.find((z, i) => s.sizes?.indexOf(z) !== i);
+    if (repeat !== undefined) return refuse(`step plan sizes must not repeat ${repeat}`);
+    const other = s.sizes.find((z) => !(TICKET_SIZES as readonly string[]).includes(z));
+    if (other !== undefined)
+      return refuse(
+        `step plan sizes must be board sizes (${TICKET_SIZES.join(", ")}), not ${other}`,
+      );
   }
   const ids = def.steps.map((s) => s.id);
   const rest = ids[0] === "plan" ? ids.slice(1) : ids;

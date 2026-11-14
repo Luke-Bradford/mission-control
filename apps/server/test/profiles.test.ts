@@ -305,6 +305,7 @@ describe("loops in the file", () => {
   });
 
   it.each([
+    [{ name: "other" }, "name does not match the loop's name"],
     [{ labels: ["x"] }, "labels do not match the loop's trigger labels"],
     [{ plan_required: false }, "plan_required does not match the loop's plan step"],
     [{ rounds: 3 }, "rounds does not match the cap of review-changes"],
