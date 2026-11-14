@@ -41,7 +41,11 @@ Write so the message makes sense by itself.
   - **title (the item's heading):** what the decision is about, in words: "Approve the new dependencies view on the
     Board", not "PR · You: review";
   - **context:** two or three sentences: what this is, why it comes up now, and what happens if
-    nothing is decided;
+    nothing is decided. When the question exists only because of a rule the operator set, say
+    that first: the rule in his words, when he set it, and what it is stopping now ("On 11
+    November you said parked tickets wait until the working list is done. The list's work is all
+    in CI, so two developers have been idle since 21:36."). Say what the waiting work is in
+    plain words. Say something waits on the operator only when it does;
   - **the question (`ask`):** one sentence ending in "?", at most 300 characters;
   - **options:** two to four, each a plain action and its consequence: "Approve: the crew builds
     it next; you can change it later.";
