@@ -2849,6 +2849,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         try {
           const checkout = await readOnlyCheckout(info, row, run);
           if (def.loop === "watch" && needsDirectionContext(store, run.id)) {
+            // A rebuilt direction means the delivered text can no longer be vouched for.
+            if (store.getSetting(deliveredKey(run.id)))
+              store.setSetting(deliveredKey(run.id), NO_DELIVERY);
             const sha = (
               await crewGit(
                 checkout.path,
