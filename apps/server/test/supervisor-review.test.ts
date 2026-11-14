@@ -78,12 +78,6 @@ import {
 
 skipTestsIf(await blockedHere("crew-run"));
 
-/** The complete first message: delivery has stored its marker, so clear it before rebuilding. */
-const firstDelivery = (runId: string, text: string): string => {
-  store.setSetting(deliveredKey(runId), NO_DELIVERY);
-  return instructionEnvelope(store, FLIGHT, runId, true, text).text;
-};
-
 describe("questions and strays", () => {
   const stray = (path: string, agentId = "guido-1") => ({
     sessionId: "mc-crew",
@@ -425,6 +419,12 @@ describe("startWatch", () => {
     accountId: "claude-main",
     model: "opus",
     area: [],
+  };
+
+  /** The complete first message: delivery has stored its marker, so clear it before rebuilding. */
+  const firstDelivery = (runId: string, text: string): string => {
+    store.setSetting(deliveredKey(runId), NO_DELIVERY);
+    return instructionEnvelope(store, FLIGHT, runId, true, text).text;
   };
   const flightMake = (
     flightEnvironment?: import("../src/runtime/supervisor.ts").SupervisorDeps["flightEnvironment"],
