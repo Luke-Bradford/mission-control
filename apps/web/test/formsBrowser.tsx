@@ -39,6 +39,12 @@ const fixture = window.fetch.bind(window);
 window.fetch = (input, init) => {
   const path =
     typeof input === "string" ? input : input instanceof URL ? input.pathname : input.url;
+  // The runner answers by path alone, so a Focus save would read as the focus read and succeed:
+  // refuse that write here, with no effect.
+  if (init?.method === "POST" && path === RESOURCES.focus("guido-1").path)
+    return Promise.resolve(
+      new Response(JSON.stringify({ error: "Unknown selector: catalog." }), { status: 400 }),
+    );
   if (path === RESOURCES.accountStatus.path && state === "status-loading")
     return new Promise(() => {});
   if (path === RESOURCES.config.path) {
