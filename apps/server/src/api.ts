@@ -2461,12 +2461,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
-      api.get("/comms/mentions", () => ({
-        mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
-          message: storedCommsMessage(row),
-          seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
-        })),
-      }));
+      api.get("/comms/mentions", () => {
+        const open = new Set(
+          store
+            .openCommsItems()
+            .filter((row) => row.to === COMMS_CAPCOM)
+            .map((row) => row.id),
+        );
+        return {
+          mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
+            message: storedCommsMessage(row),
+            seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
+            needsReply: open.has(row.id),
+          })),
+        };
+      });
       // Reader: apps/web/src/App.tsx#App (CAPCOM mention read state)
       api.post("/comms/mentions/seen", (req, reply) => {
         const body = z

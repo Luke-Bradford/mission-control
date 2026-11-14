@@ -7,7 +7,7 @@ description: FLIGHT only. Use when a seat, PR, ticket, comms item or the hub is 
 
 Your job: keep every seat unblocked, and keep the work flowing to merged, live code. Find the real cause of a stall, get it fixed through a tool, a seat or a ticket, and stop it recurring. The playbook below is the minimum. When a stall doesn't fit it, investigate: read the code in your checkout, the CI logs and `mc flight_state`, then solve it.
 
-`roles/FLIGHT.md` sets the order of each wake ("How you run the crew") and what is not yours. Where this skill or its reference files and the role differ, the role wins.
+`roles/FLIGHT.md` sets the order of each wake ("Each wake") and how to unblock and pass things on. Where this skill or its reference files and the role differ, the role wins.
 
 ## Reference files
 
@@ -41,7 +41,7 @@ Use `docs/runbook.md` and the hub's operator routes when the `mc` shortcuts do n
 
 ## Playbook: what a stop means and how to clear it
 
-Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`, `mc gh_write`, `mc crew_tidy` or the shell. On a superuser repo, make a protected change through a seat’s PR and clear it with `mc merge_pr` after its required review, CI and any reserved independent check. On a standard repo, brief the operator for a matching approval when the refusal requires one. FLIGHT never grants itself an approval through POST `/api/flight/approvals`; that route belongs to the operator or independent controller. Start an eligible seat with `mc start_seat`; preserve a stopped or paused seat until its recorded operator instruction permits a lift. In a merge workspace the hub deals the work, except to a seat in `error`, which you start; your part is to promote.
+Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`, `mc gh_write`, `mc crew_tidy` or the shell. There is no controller: a hold, park or check nobody else will clear is yours. Keep only a hold the operator set in person, until its reason is met.
 
 | The run says | Cause | Clear it |
 |---|---|---|
@@ -51,13 +51,15 @@ Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`,
 | `could not create a worktree for <branch>` (a `start_seat` refusal) | an ended run's worktree still holds the branch | use `mc crew_tidy` on the ended run; preserve dirty work and the branch |
 | `conflicts with main` | main moved under the PR | `mc sync_main { runId }`. If the seat already resolved it and can't push, `mc message_seat { unpark: true }` |
 | `found blocking issues in` | the review-round cap | the cap is the stop, so don't buy another round by default. A Critical finding, a failed `design` verdict, or the `floor-enforced` refusal (`stalls.md`): `mc settle_park { action: "rework", note }`. Your accept is refused while the run's last design verdict is a fail (`design-failed`). If the review after one rework fails the design again, brief the operator: the review's images (`mc operator` GET `/api/qa-reports?repoId=<repo>&prNumber=<n>&headSha=<full sha>`; its `/api/qa-report-assets` links open for the operator), the failed points, and that they accept with Waive on the run's review park. Your accept stays refused after they answer. Anything else, on a hard-rule path too: file the findings on a ticket or fold them into one, narrowing the ticket if the same findings keep coming, then `mc settle_park { action: "accept", basis }` |
-| `controller check on <sha>` | the ticket asks for head-bound evidence | produce an ordinary ticket’s required evidence and record its head-bound verdict with `mc operator`. A check reserved for the operator or independent controller stays with them; record the evidence and the one outstanding action |
+| `controller check on <sha>` | the ticket asks for head-bound evidence | produce the evidence yourself (a screenshot with `mc screenshot_hud`, a CI rerun, a live check) and record the head-bound verdict with `mc operator` POST `/api/runs/:id/controller-check` |
 | `run ended (the process crashed)` / interrupted | a crash | resume the run through `mc operator`; with no resumable PR, return the preserved ticket to the board. On a second failure of the same seat or ticket, read why first |
 | `stopped after 3 carry-on resumes without reporting` | the seat lost the thread | `mc message_seat { unpark: true, text }` with the exact next step (often "push and report") |
 | a ticket In review or In progress with no run | its run ended with a PR open | resume the existing PR owner through `mc operator`. Preserve the branch and avoid a second competing PR |
-| a PR that changes what confines seats (guard, runtime, path grants or the push gate), or its approval guidance | it needs the repository’s required review and clearance | Read the hunk and use `mc merge_pr` only after independent clean QA, exact-head green CI and every required approval or reserved controller check. On a superuser repo, ordinary hard-rule clearance belongs to FLIGHT. On a standard repo, confinement changes need the operator’s independent controller verdict; the Mission Control block in `CLAUDE.md` and `.github/**` need recorded merge-floor approval. A change to FLIGHT’s own authority never supplies its own independent verdict. |
-| a PR green and reviewed, not merging | it waits on clearance | Use `mc merge_pr` for an `awaiting-flight` PR in your lane after reading the hard-rule hunk. Preserve operator holds, reserved independent checks and required controller approvals. On a superuser repo, complete ordinary clearance yourself. On a standard repo, obtain the approvals its rules require. |
-| merged, not live | auto-Update held (hard-rule change) or a stale version cache | the held Update is yours: use `mc operator` for an authorised Update when the hub is idle. Keep explicit operator or controller holds in force |
+| a PR that changes what confines seats (guard, runtime, path grants or the push gate) | it needs a careful review | read the hunk, make sure its review ran on the most capable model, then `mc merge_pr` |
+| a PR green and reviewed, not merging | it waits on clearance or a merge hold | `mc merge_pr`. A merge hold: release it with `mc hold_pr { action: "release" }` once its reason is met, whoever set it |
+| a draft PR no run owns | nobody else will decide it | read it: mark it ready and route it to review, take it over with a seat, or close it with its reason |
+| an evidence hold on a web PR (`screenshot`, `capture`) that never parks | the capture keeps failing on the head | read why it fails; send the seat the fix with `mc message_seat`, or end the set-aside run with `mc end_run` and restart the ticket |
+| merged, not live | auto-Update held (hard-rule change) or a stale version cache | run the Update with `mc operator` when the hub is idle, then check the hub answers |
 
 For a stop not listed here, find its text with `rg -F '<text>' apps/server/src packages/core/src`, read what clears it, and act. Write what you learned with `mc remember { kind: "playbook", … }`. If the skill itself should change, file a ticket.
 
@@ -71,7 +73,7 @@ For a stop not listed here, find its text with `rg -F '<text>' apps/server/src p
 
 - Seats ask you, never the operator. Answer with `mc answer_question`, naming your source.
 - Write to the operator with the `plain-talk` skill: the main thing first, the decision and your recommendation, and no hub state names.
-- Bring the operator only what "What belongs to the operator" in `roles/FLIGHT.md` lists. Act on everything else and tell them after.
+- Bring the operator only what "How to pass things on" in `roles/FLIGHT.md` lists. Act on everything else and tell them after.
 
 ## Repo skills and rules
 
@@ -84,4 +86,4 @@ For a stop not listed here, find its text with `rg -F '<text>' apps/server/src p
 - When a stall recurs, find its cause: the hub, the ticket or the seat. Fix the cause with a ticket that names the evidence.
 - Look across the crew, not just at the event that woke you: idle seats with work, a queue behind one seat, PRs ageing in one stage.
 - When many things fail at once, check the GitHub rate limit (`mc gh_read`), and read the Mac panel (`mc operator` GET `/api/machine`).
-- If you can't solve something, follow "When the work needs something your role can't do" in `roles/FLIGHT.md`.
+- If you cannot clear something this wake, tell the operator in one line what is stuck, why, and what you do next.

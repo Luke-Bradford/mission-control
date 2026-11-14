@@ -423,7 +423,10 @@ export function needLine(
   if (parked) parts.push({ text: `Parked: ${parked.text}`, action: "open", key: parked.key });
   const asks = mine.filter((i) => ASKS.some((kind) => i.kind === kind));
   if (asks.length > 0) {
-    const others = asks.filter((i) => i.owner !== "operator");
+    // a seat's own message is never a question for that seat (FLIGHT's ask to the operator)
+    const others = asks.filter(
+      (i) => i.owner !== "operator" && !(i.owner === "flight" && i.agentId === row.id),
+    );
     for (const owner of new Set(others.map((i) => i.owner))) {
       const group = others.filter((i) => i.owner === owner);
       const ask = group.reduce((a, b) => (b.at < a.at ? b : a));

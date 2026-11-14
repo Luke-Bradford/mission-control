@@ -16,25 +16,18 @@ describe("roles/FLIGHT.md", () => {
   it("no line of the role waits on a controller", () => {
     const sentences = role
       .split("\n")
-      .filter((line) => /controller/i.test(line))
       .flatMap((line) => line.split(/(?<=\.)\s+/))
-      .filter((sentence) => /controller/i.test(sentence))
-      // the controller steps that remain are for a standard repo
-      .filter((sentence) => !/^On a standard repo/.test(sentence));
-    // the ticket's own check is the one mention that names the word, and it is FLIGHT's to do
-    expect(sentences.some((s) => /## Controller check.*is yours/.test(s))).toBe(true);
+      .filter((sentence) => /controller/i.test(sentence));
+    expect(sentences.some((s) => /There is no controller/.test(s))).toBe(true);
     expect(sentences.filter((s) => WAITS_ON_CONTROLLER.test(s))).toEqual([]);
   });
 
-  it("clears every PR itself and keeps only the operator's holds", () => {
-    expect(role).toContain("Clear every other PR yourself with `mc merge_pr`");
-    expect(role).toContain("`CLAUDE.md` and `.github/**` included");
-    expect(role).toContain("Keep a hold the operator set in force");
-    expect(role).toContain("- change branch protection or rulesets on GitHub;");
-    expect(role).not.toMatch(/loosen a gate/i);
-    expect(role).not.toContain("The hub tells the operator");
-    expect(role).toContain("logged as a merge decision on the FLIGHT page");
-    expect(role).toContain("On a standard repo, a PR that changes what confines seats");
-    expect(role).toContain("`git push origin <name>:<branch>`");
+  it("starts from the purpose and says how to unblock and pass things on", () => {
+    expect(role).toContain("## What this is for");
+    expect(role).toContain("## What the operator sees");
+    expect(role).toContain("## How to unblock");
+    expect(role).toContain("## How to pass things on");
+    expect(role).toContain("Clear a PR yourself with `mc merge_pr`".replace("Clear", "clear"));
+    expect(role).toContain("Never leave a block silent");
   });
 });

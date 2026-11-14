@@ -818,7 +818,7 @@ describe("scheduler", () => {
         at = NOW + 30_000;
         await s.tick("ta");
         expect(store.agentEvents(0).map((e) => [e.agentId, e.at, e.text])).toEqual([
-          ["seat-guido", NOW + 15_000, "Idle → Running (your message)"],
+          ["seat-guido", NOW + 15_000, "Idle → Running"],
           ["seat-guido", NOW + 30_000, "Running → Idle (turn ended)"],
         ]);
       });
@@ -847,9 +847,7 @@ describe("scheduler", () => {
           expect(store.agentEvents(0)).toEqual([]);
           await vi.advanceTimersByTimeAsync(1000);
           expect(crewCalls()).toBe(before + 1);
-          expect(store.agentEvents(0).map((e) => e.text)).toEqual([
-            "Idle → Running (your message)",
-          ]);
+          expect(store.agentEvents(0).map((e) => e.text)).toEqual(["Idle → Running"]);
           await s.stop();
         });
 
@@ -1175,9 +1173,7 @@ describe("scheduler", () => {
           expect(store.agentEvents(0)).toEqual([]);
           bus.emit("agents");
           await vi.advanceTimersByTimeAsync(1000);
-          expect(store.agentEvents(0).map((e) => e.text)).toEqual([
-            "Idle → Running (your message)",
-          ]);
+          expect(store.agentEvents(0).map((e) => e.text)).toEqual(["Idle → Running"]);
           expect(row("scheduler:crew")).toMatchObject({ ok: true, error: null });
           await s.stop();
         });

@@ -450,7 +450,7 @@ describe("stateChangeText", () => {
 
 describe("seatTurnText", () => {
   it("words a seat's turn start and end, and nothing else", () => {
-    expect(seatTurnText("idle", "running")).toBe("Idle → Running (your message)");
+    expect(seatTurnText("idle", "running")).toBe("Idle → Running");
     expect(seatTurnText("running", "idle")).toBe("Running → Idle (turn ended)");
     expect(seatTurnText("running", "stalled")).toBeNull();
     expect(seatTurnText("idle", "idle")).toBeNull();

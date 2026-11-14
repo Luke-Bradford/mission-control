@@ -201,10 +201,10 @@ export function stateChangeText(
 }
 
 /**
- * Activity text for a crew seat's turn starting: a message took it from idle to running.
- * Assumes only the operator messages seats today (FLIGHT and other seats arrive later).
+ * Activity text for a crew seat's turn starting. The hub, FLIGHT, another seat or the operator
+ * can wake a seat, so the text names no sender.
  */
-export const SEAT_TURN_START_TEXT = "Idle → Running (your message)";
+export const SEAT_TURN_START_TEXT = "Idle → Running";
 /** Activity text for a crew seat's turn ending. */
 export const SEAT_TURN_END_TEXT = "Running → Idle (turn ended)";
 

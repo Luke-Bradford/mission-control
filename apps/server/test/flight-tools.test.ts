@@ -7857,7 +7857,7 @@ describe("superuser housekeeping", () => {
     });
     expect(engineCalls).toHaveLength(5);
   });
-  it("keeps a budget park, an operator stop and a CAPCOM merge hold in force, each with its own refusal", async () => {
+  it("keeps a budget park and an operator stop in force, and releases a CAPCOM merge hold", async () => {
     elevated();
     runPr();
     store.setRunLoop("r-pr", {
@@ -7877,9 +7877,10 @@ describe("superuser housekeeping", () => {
       ...need(store.run("r-pr")?.loop),
       mergeHold: { by: "CAPCOM", reason: "veto", at: NOW },
     });
-    expect(await call("hold_pr", { runId: "r-pr", action: "release", basis: "fine now" })).toEqual(
-      refused("The controller set this hold; only the controller can release it."),
-    );
+    expect(
+      await call("hold_pr", { runId: "r-pr", action: "release", basis: "fine now" }),
+    ).not.toHaveProperty("isError", true);
+    expect(holdCalls.at(-1)).toEqual(["release", "r-pr", "FLIGHT"]);
     expect(store.getSetting("flight.runaway")).toBeNull();
   });
   it("keeps budget, ruling and operator-held parks out of rework", async () => {

@@ -2146,10 +2146,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const { run, seat, call } = found;
     const { basis } = c.args;
     const at = now();
-    // on its seat: any unended run, working included; set aside: parked
+    // on its seat: any unended run, working included; set aside: in any phase, so a run held
+    // where it never parks (an evidence hold) can still be ended
     const onSeat = store.seatSession(seat)?.runId === run.id;
     const parked = run.loop?.phase === "parked";
-    if (!(onSeat || parked) || (!onSeat && !run.loop?.aside)) return fail(notEndableRunText(call));
+    if (!onSeat && !run.loop?.aside) return fail(notEndableRunText(call));
     // a parked or stalled run keeps the old rule; ending one that is working is a controller power
     const stalled = onSeat && stalledSeats(config, store, at).has(seat);
     const working = onSeat && !parked && !stalled;
@@ -4233,7 +4234,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.holdPr,
-      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release your own hold. The engine parks the run instead of merging it until the hold is released. You can never release a hold the operator or controller set.",
+      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release a hold, whoever set it. The engine parks the run instead of merging it until the hold is released.",
       HoldArgs,
       "hold",
       async (a) => {
@@ -4253,8 +4254,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         }
         const hold = run.loop?.mergeHold;
         if (!hold) return fail("Run's merge is not held.");
-        if (hold.by !== "FLIGHT")
-          return fail("The controller set this hold; only the controller can release it.");
         const r = await engine.releaseMergeHold(run.id, "FLIGHT");
         return r.ok
           ? { text: `Released the hold on ${run.id}.` }

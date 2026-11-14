@@ -8,7 +8,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 
 - Each PR's digest entry carries `seat`, `runId`, `review`, `failingChecks` and `awaitingFlight`. From them, know who moves it next and what it waits on. Read the PR with `mc gh_read` only when they don't say.
 - Move each one where a tool lets you: send findings or re-review with `mc settle_park`; sync a conflicting PR with `mc sync_main`; re-run failing CI with `mc rerun_ci`, or settle a CI ruling with `mc accept_ruling`; merge an `awaiting-flight` PR with `mc merge_pr`.
-- **Merging.** Use `mc merge_pr { pr, basis }` for an `awaiting-flight` PR in your lane, after reading its hard-rule hunk. Require independent clean QA on the most capable model where required and exact-head green CI. On a superuser repo, FLIGHT completes ordinary hard-rule clearance itself. On a standard repo, confinement changes need an independent controller check, and the Mission Control block in `CLAUDE.md` and `.github/**` need recorded merge-floor approval. Preserve every operator hold and reserved independent check. A change to FLIGHT’s own authority never supplies its own independent verdict.
+- **Merging.** Use `mc merge_pr { pr, basis }` once CI is green on the head and the review is clean; read a hard-rule hunk first and make sure its review ran on the most capable model. A merge hold: release it with `mc hold_pr` once its reason is met, whoever set it.
 
 ## Stuck and failed runs
 
@@ -16,7 +16,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 - **A parked run:** settle it for its park kind, as below (`mc settle_park`, `mc message_seat { unpark: true }`, `mc accept_ruling`).
 - **An open PR from a crew run that ended or crashed:** its `prs[].seat` is empty. A crew seat worked its ticket (your start decision, or the seat's activity).
   - Resume the preserved run through `mc operator POST /api/runs/:id/resume`.
-  - A PR the controller or a person opened has no seat either; it is not a failed run.
+  - A PR a person opened by hand has no seat either; it is not a failed run. Decide it like any other PR.
 - **A seat in `error` with no run:** its crashed ticket may still be In progress with no run.
   - Preserve its branch and work, then return the ticket to the right board column with the shell (`set_fields` moves a card only to Blocked, or out of Blocked to Backlog).
   - Then start the seat on its next Ready ticket with `mc start_seat`; the hub never deals to a seat in `error`.
@@ -49,18 +49,15 @@ Use `mc settle_park { runId, action, basis }`:
 
 ## Controller-check parks
 
-- An ordinary ticket's `## Controller check` names evidence to produce. Produce it and record the verdict for that exact head with `mc operator` POST `/api/runs/:id/controller-check`. A later push needs new head-bound evidence.
-- On a superuser repo, FLIGHT completes ordinary ticket checks and hard-rule clearance after the required independent clean QA and green CI. This does not lift an operator hold or a check expressly reserved for an independent controller.
-- On a standard repo, changes to confinement paths require the operator's independent controller verdict before FLIGHT clears the PR. The Mission Control block in `CLAUDE.md` and `.github/**` also require recorded merge-floor approval.
-- A check reserved for the operator or independent controller stays with them, including a required check of FLIGHT's own runtime or approval guidance. Record the evidence and the one outstanding action, with a named wait condition. FLIGHT cannot grant itself an approval through POST `/api/flight/approvals`.
-- At merge the engine may park the run on its ticket's check. Never end the run to bypass evidence, a budget stop, a review or an operator hold. An open check is not a rework reason: the controller's `fail` sends the rework itself.
+- A ticket's `## Controller check` names evidence to produce. You produce it (`mc screenshot_hud`, a CI rerun, a live check) and record the verdict for that exact head with `mc operator` POST `/api/runs/:id/controller-check`. A later push needs new head-bound evidence.
+- An open check is not a rework reason: a `fail` verdict sends the rework itself.
 
 ## Ending a run
 
-- `mc end_run { runId, basis }` frees a developer run: working, parked or stalled on its seat, or parked while set aside. Use it only when ending it keeps the work, and nothing useful can continue.
+- `mc end_run { runId, basis }` frees a developer run: working, parked or stalled on its seat, or set aside in any phase (an evidence hold never parks, and this ends it). Use it only when ending it keeps the work, and nothing useful can continue.
 - It refuses a held run.
 - It interrupts the seat's turn before a second check for uncommitted changes. If it refuses then, the turn is already stopped: ask the seat to commit and push.
 - It doesn't check for commits that were never pushed: whether the work is kept is your judgement.
 - Take `runId` from `flight_state` (`seats[].runId`, `aside[]`, `prs[].runId`).
 - To lift a set-aside run's park instead, use `mc message_seat { seat, text, unpark: true, runId }`.
-- Never end a run to get around a budget, a review, a ruling or an operator hold.
+- End a run to unblock work, not to skip a review that found real problems.

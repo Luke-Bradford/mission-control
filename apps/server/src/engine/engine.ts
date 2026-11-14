@@ -395,7 +395,7 @@ export interface Engine {
    * controller (CAPCOM) may replace any hold; FLIGHT only sets one when none is held.
    */
   holdMerge(runId: string, by: MergeHoldBy, reason: string): Promise<MergeHoldResult>;
-  /** Releases the hold. FLIGHT cannot release one the controller set; the controller can release any. */
+  /** Releases the hold, whoever set it: FLIGHT and the operator can release any. */
   releaseMergeHold(runId: string, by: MergeHoldBy): Promise<MergeHoldResult>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
@@ -3379,8 +3379,6 @@ export function createEngine(deps: EngineDeps): Engine {
         const loop = run?.loop;
         const hold = loop?.mergeHold;
         if (run === null || !loop || !hold) return refuse("the run's merge is not held");
-        if (hold.by === "CAPCOM" && by !== "CAPCOM")
-          return refuse("the controller set this hold; only the controller can release it");
         const at = now();
         const next: RunLoop = { ...loop, mergeHold: null };
         if (loop.phase === "parked" && loop.parked?.kind === MERGE_HOLD_PARK) {
