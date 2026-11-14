@@ -716,6 +716,7 @@ const itemHash = (
   store: Store,
   x: { key: string; text: string; ownBriefAt?: number | undefined },
 ): string => {
+  // FLIGHT's own question grows with each line it writes: wake once per brief, not per line
   if (x.ownBriefAt !== undefined) return entryHash(`${x.key}:${x.ownBriefAt}`);
   if (x.key === `${NOTE_KEY}${MACHINE_CAPACITY_KEY}`) {
     const episode = store.notes().find((note) => note.key === MACHINE_CAPACITY_KEY);
