@@ -1,0 +1,138 @@
+.bc-box {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.bc {
+  display: grid;
+  gap: var(--sp-2);
+  min-width: 0;
+  max-width: 960px;
+}
+
+.bc-question {
+  margin: 0;
+  max-width: 800px;
+  overflow-wrap: anywhere;
+}
+
+.bc-fresh {
+  margin: 0;
+}
+
+.bc-fields {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+}
+
+.bc-field {
+  display: grid;
+  grid-template-columns: minmax(96px, 160px) minmax(0, 1fr);
+  gap: var(--sp-2);
+}
+
+.bc-field dt {
+  color: var(--muted);
+}
+
+.bc-field dd {
+  margin: 0;
+  max-width: 800px;
+  overflow-wrap: anywhere;
+}
+
+.bc-list {
+  margin: 0;
+  padding-left: var(--sp-3);
+}
+
+.bc-options {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bc-option {
+  display: grid;
+  grid-template-columns: minmax(160px, 200px) minmax(0, 1fr) minmax(180px, 240px);
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r-s);
+  background: var(--surface);
+  overflow-wrap: anywhere;
+}
+
+.bc-option.rec {
+  border-color: var(--ok);
+}
+
+.bc-option.active {
+  background: var(--surface-2);
+}
+
+.bc-id {
+  display: grid;
+  gap: 2px;
+  align-content: start;
+}
+
+.bc-oid {
+  color: var(--muted);
+}
+
+.bc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+
+.bc-actions button {
+  min-height: 32px;
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.bc-input {
+  display: grid;
+  gap: 2px;
+}
+
+.bc-input textarea {
+  width: 100%;
+  max-width: 800px;
+  box-sizing: border-box;
+}
+
+.bc-error {
+  border: 1px solid var(--crit);
+  border-radius: var(--r-s);
+  padding: var(--sp-2);
+}
+
+.bc-error:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@container (max-width: 640px) {
+  .bc-option {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bc-field {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+
+  .bc-cons::before,
+  .bc-rev::before {
+    content: attr(data-label) ": ";
+    color: var(--muted);
+  }
+}

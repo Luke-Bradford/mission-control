@@ -9,7 +9,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
-import { brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
+import { boundBrief, brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR;
@@ -394,5 +394,85 @@ describeRendered("Needs you page", () => {
       }
     },
     BROWSER_TEST_TIMEOUT_MS,
+  );
+});
+
+/** The same open ask, with the server's complete bound brief and `optionCount` options. */
+function boundApi(optionCount: number, longText = false) {
+  const base = api();
+  const asks = base["/api/attention"];
+  const options = Array.from({ length: optionCount }, (_, i) => ({
+    id: i === 0 ? "list" : `option-${i}`,
+    label: i === 0 ? "List and open item" : `Another layout ${i}`,
+    answer: `Use layout ${i}.`,
+    consequence: `Layout ${i} is used from the next release. ${longText ? "A long consequence that keeps going. ".repeat(40) : ""}`,
+    reversibility: {
+      kind: "reversible" as const,
+      detail: longText ? "x".repeat(300) : "Switch back at any time.",
+    },
+    action: { kind: "answer" as const, seatId: "guido-1", runId: "r1", text: `Use layout ${i}.` },
+  }));
+  const first = asks[0];
+  return {
+    ...base,
+    "/api/attention": [
+      { ...first, brief: boundBrief({ ...first.brief, options, recommendedOptionId: "list" }) },
+      ...asks.slice(1),
+    ],
+  };
+}
+
+describeRendered("Needs you page, a complete bound brief", () => {
+  it(
+    "keeps the whole comparison inside the card and the actions reachable",
+    async () => {
+      for (const scheme of ["light", "dark"] as const) {
+        for (const [width, height, options, long] of [
+          [1280, 900, 2, false],
+          [1600, 900, 4, false],
+          [1920, 940, 2, false],
+          [1600, 700, 4, true],
+        ] as const) {
+          const label = `${width}x${height} ${scheme} ${options} options`;
+          const page = await renderAt({
+            page: "test/needsBrowser.html",
+            width,
+            height,
+            colorScheme: scheme,
+            api: boundApi(options, long),
+            assets: ASSETS,
+          });
+          try {
+            await ready(page);
+            const card = await page.box(".bc");
+            const rows = await page.boxes(".bc-option");
+            expect(rows, `${label}: every option is shown`).toHaveLength(options);
+            for (const row of rows)
+              expect(
+                row.x >= card.x - 1 && row.x + row.width <= card.x + card.width + 1,
+                `${label}: an option sits inside the card`,
+              ).toBe(true);
+            const overflow = await page.evaluate(
+              () => document.documentElement.scrollWidth - innerWidth,
+              undefined,
+            );
+            expect(overflow, `${label}: no sideways page scroll`).toBeLessThanOrEqual(0);
+            expect(
+              await page.reachable(".bc-actions button.primary"),
+              `${label}: Accept is reachable`,
+            ).toEqual([true]);
+            expect(await page.reachable(".bc-actions button:not(.primary)")).toEqual([true]);
+            expect(card.width, `${label}: the card is not squeezed`).toBeGreaterThanOrEqual(480);
+            if (SHOTS) {
+              mkdirSync(SHOTS, { recursive: true });
+              await page.screenshot(join(SHOTS, `needs-bound-${width}x${height}-${scheme}.png`));
+            }
+          } finally {
+            await page.close();
+          }
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS * 2,
   );
 });

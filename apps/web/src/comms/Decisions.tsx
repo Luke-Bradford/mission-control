@@ -3,6 +3,7 @@ import { needsYouItems } from "../attention.ts";
 import { useSecond } from "../clock.ts";
 import { mss } from "../fmt.ts";
 import { followLink, NEEDS_YOU_PATH, needsYouPath } from "../router.ts";
+import { BriefChoice } from "./BriefChoice.tsx";
 
 export function DecisionCard({ item, row }: { item: AttentionItem; row: CrewRow | undefined }) {
   const now = useSecond();
@@ -13,6 +14,24 @@ export function DecisionCard({ item, row }: { item: AttentionItem; row: CrewRow 
   const countdown = dueAt === undefined ? null : Math.max(0, Math.ceil((dueAt - now) / 1000));
   const clock = countdown === null ? null : mss(countdown * 1000);
   const ticket = item.ticket?.match(/#\d+$/)?.[0] ?? item.ticket;
+  const complete = Boolean(
+    item.brief?.binding && !item.brief.person && item.brief.options.length > 0,
+  );
+  if (complete)
+    return (
+      <article className="decision-card complete">
+        <div className="decision-meta">
+          <span className="decision-from">{row?.displayCallSign ?? item.agentId ?? "FLIGHT"}</span>
+          {ticket && <span className="decision-ticket">{ticket}</span>}
+        </div>
+        <BriefChoice item={item} />
+        <div className="acts">
+          <a href={needsYouPath(item.key)} onClick={(e) => followLink(e, needsYouPath(item.key))}>
+            Open in Needs you
+          </a>
+        </div>
+      </article>
+    );
   return (
     <article className="decision-card">
       <div className="decision-meta">

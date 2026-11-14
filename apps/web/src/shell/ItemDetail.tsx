@@ -1,25 +1,9 @@
-import type {
-  AttentionItem,
-  BriefOption,
-  ChoiceReceipt,
-  Crew,
-  ItemDiscussion as Discussion,
-  Escalation,
-  FlightView,
-  TicketView,
-} from "@mc/core";
+import type { AttentionItem, Crew, Escalation, FlightView, TicketView } from "@mc/core";
 import { type FormEvent, useEffect, useRef, useState } from "react";
-import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
-import {
-  answerTarget,
-  askFlight,
-  choiceLine,
-  choosable,
-  dismissItem,
-  sendAnswer,
-  sendChoice,
-} from "../comms/answer.ts";
+import { answerTarget, dismissItem, sendAnswer } from "../comms/answer.ts";
+import { BriefChoice } from "../comms/BriefChoice.tsx";
+import { REFRESH_NEEDED } from "../comms/briefChoice.ts";
 import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
 import {
   BRIEF_FOLD_AFTER,
@@ -34,7 +18,7 @@ import { MentionText } from "../comms/messages.tsx";
 import { Expandable, Toggle } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
-import { hub, RESOURCES, useResource } from "../data.ts";
+import { RESOURCES, useResource } from "../data.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import { dayMonth, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
@@ -52,7 +36,6 @@ import {
 } from "../notifications.ts";
 import { agentPath, followLink } from "../router.ts";
 import { openItem, useOpenedItem } from "./overlays.ts";
-import { toast } from "./Toast.tsx";
 import "./ItemPanel.css";
 
 /**
@@ -100,11 +83,6 @@ export function useItemDetail(key: string | null) {
   };
   const [busy, setBusy] = useState(false);
   const [justHandled, setJustHandled] = useState<Record<string, string>>({});
-  const [receipts, setReceipts] = useState<
-    Record<string, { id: string; text: string; note?: string }>
-  >({});
-  const [chosenLocal, setChosen] = useState<Record<string, string>>({});
-  const [choices, setChoices] = useState<Record<string, ChoiceReceipt>>({});
   const [err, setErr] = useState<string | null>(null);
   const tz = useTz();
   const now = useNow();
@@ -118,17 +96,6 @@ export function useItemDetail(key: string | null) {
   const k: string = key ?? "";
 
   const item = currentItem ?? savedPerson?.item ?? (savedAsk?.key === key ? savedAsk : undefined);
-  // The choice already made on this item, so a reload still shows it recorded.
-  const choiceRes = useResource<ChoiceReceipt>(
-    item?.brief && item.brief.options.length > 0 ? RESOURCES.choice(item.key) : null,
-  );
-  const serverChoice =
-    choiceRes.data?.key === k && item?.brief && choiceRes.data.chosenAt >= item.brief.at
-      ? choiceRes.data
-      : undefined;
-  const recorded = choices[k] ?? serverChoice;
-  const chosen =
-    recorded && !chosenLocal[k] ? { ...chosenLocal, [k]: recorded.label } : chosenLocal;
   const esc = item?.escalationId ? escalations?.find((e) => e.id === item.escalationId) : undefined;
   // An escalation item waits for its escalations rather than flash the generic view.
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
@@ -138,7 +105,6 @@ export function useItemDetail(key: string | null) {
   // Led by the item's title, so the answer reads in context.
   const about = esc?.title ?? item?.text ?? "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
-  const queueApproval = item?.kind === "approval" && item.key.startsWith("note:queue-reorder:");
   // FLIGHT being stopped never blocks the operator: the hub keeps the message for its next start.
   const replyOk = target?.to === "seat" || target?.to === "flight";
   const act = async (run: () => Promise<string | null>) => {
@@ -162,100 +128,6 @@ export function useItemDetail(key: string | null) {
       return failed;
     });
   };
-  const pick = (o: BriefOption) => {
-    if (item && queueApproval) {
-      if (busy || chosen[item.key] || (o.id !== "approve" && o.id !== "deny")) return;
-      void act(async () => {
-        try {
-          const result = await apiPost<{ ok: boolean; text: string }>(
-            `/api/queue/reorder/${encodeURIComponent(item.key)}`,
-            { action: o.id },
-          );
-          if (!result.ok) return result.text;
-          setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-          setReceipts((prev) => ({
-            ...prev,
-            [item.key]: { id: crypto.randomUUID(), text: result.text },
-          }));
-          hub.refetchTopic("attention");
-          hub.refetchTopic("agents");
-          hub.refetchTopic("boards");
-          return null;
-        } catch (e) {
-          const explanation =
-            e instanceof ApiError ? (e.body as { text?: unknown } | undefined)?.text : undefined;
-          return typeof explanation === "string"
-            ? explanation
-            : e instanceof Error
-              ? e.message
-              : String(e);
-        }
-      });
-      return;
-    }
-    if (!item || !target || !replyOk || busy || chosen[item.key]) return;
-    if (item.kind === "person") {
-      void act(() => sendAnswer(target, seat, item, about, o.answer));
-      return;
-    }
-    if (item.kind === "approval" && o.label === "Edit") {
-      toast("Opens the draft so you can change it before approving.");
-      return;
-    }
-    if (choosable(item, o)) {
-      void act(async () => {
-        const result = await sendChoice(item, o);
-        if ("error" in result) return result.error;
-        setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-        setChoices((prev) => ({ ...prev, [item.key]: result.receipt }));
-        hub.refetch(RESOURCES.choice(item.key).path);
-        return null;
-      });
-      return;
-    }
-    const resource = RESOURCES.discussion(item.key);
-    const discussion = hub.snapshot(resource.path, resource.topic).data as Discussion | undefined;
-    const id = crypto.randomUUID();
-    const receiptText = `You chose: ${o.label}\n\n${o.answer}`;
-    const receipt = (note?: string) =>
-      setReceipts((prev) => ({ ...prev, [item.key]: { id, text: receiptText, note } }));
-    const refresh = () => {
-      hub.refetch(resource.path);
-      if (discussion) hub.refetch(RESOURCES.discussion(item.key, discussion.id).path);
-    };
-    void act(async () => {
-      if (target.to !== "flight") {
-        const failed = await sendAnswer(target, seat, item, about, o.answer);
-        if (failed !== null) return failed;
-      } else {
-        if (!discussion)
-          return "The discussion couldn't be loaded. Refresh discussion and try again.";
-        try {
-          await askFlight(item.key, discussion.version, id, o.answer);
-          refresh();
-        } catch (e) {
-          return e instanceof Error ? e.message : "server unreachable";
-        }
-      }
-      // These results belong to the captured item even if another item is now open.
-      setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-      if (target.to === "flight") {
-        receipt("FLIGHT hasn't replied yet.");
-      } else if (discussion && live) {
-        receipt("FLIGHT hasn't replied yet.");
-        void askFlight(item.key, discussion.version, id, `You chose: ${o.label}`)
-          .catch(() => receipt("Answer sent. FLIGHT hasn't replied yet."))
-          .finally(refresh);
-      } else {
-        receipt(
-          discussion
-            ? "FLIGHT hasn't replied yet."
-            : "Answer sent. The discussion couldn't be loaded.",
-        );
-      }
-      return null;
-    });
-  };
   const dismiss = (after?: () => void) => {
     if (!item) return;
     void act(async () => {
@@ -272,7 +144,6 @@ export function useItemDetail(key: string | null) {
 
   return {
     key,
-    k,
     item,
     items,
     holding,
@@ -289,20 +160,15 @@ export function useItemDetail(key: string | null) {
     live,
     flight,
     target,
-    queueApproval,
     replyOk,
     text,
     setText,
     busy,
     err,
-    chosen,
-    recorded,
-    receipts,
     handledHow,
     options,
     currentItem,
     submit,
-    pick,
     dismiss,
     act,
     setJustHandled,
@@ -322,7 +188,6 @@ export function ItemDetail({
 }) {
   const {
     key,
-    k,
     item,
     items,
     holding,
@@ -335,20 +200,15 @@ export function ItemDetail({
     live,
     flight,
     target,
-    queueApproval,
     replyOk,
     text,
     setText,
     busy,
     err,
-    chosen,
-    recorded,
-    receipts,
     handledHow,
     options,
     currentItem,
     submit,
-    pick,
     act,
     setJustHandled,
   } = detail;
@@ -357,6 +217,10 @@ export function ItemDetail({
   const p = page ? "needs" : "ds";
   const flightSeat = flight === undefined ? undefined : flight.seat;
   const previewBlock = item && !holding ? <PreviewOpener item={item} /> : null;
+  // A complete operator brief decides in one inline component; an escalation keeps its GitHub reply.
+  const bound = Boolean(
+    item && !holding && !esc && !item.brief?.person && options.length > 0 && item.brief?.binding,
+  );
   const briefBlock = (
     <div className="pb" id={`${p}Brief`}>
       {!item || holding ? (
@@ -366,6 +230,7 @@ export function ItemDetail({
       ) : (
         <ItemBrief
           plain={page}
+          decided={bound}
           key={item.key}
           brief={item.brief}
           approval={item.kind === "approval"}
@@ -428,45 +293,30 @@ export function ItemDetail({
   );
   const answerBlock = (
     <>
-      {item?.brief && !holding && <h3 className="bsec answer-heading">Your answer</h3>}
+      {item && bound && <BriefChoice item={item} />}
+      {item?.brief && !holding && !bound && <h3 className="bsec answer-heading">Your answer</h3>}
       {item?.brief && options.length === 0 && !holding && (
         <div className="composer">
           <Recommendation text={item.brief.recommendation} />
         </div>
       )}
-      {item && !item.brief?.person && !holding && (esc || options.length > 0) && (
+      {item && !bound && !item.brief?.person && !holding && (esc || options.length > 0) && (
         <div className="composer" id={`${p}Opts`}>
           {options.length > 0 && (
-            <>
-              {chosen[k] && (
-                <p>
-                  You chose: <b>{chosen[k]}</b>
-                  {recorded && (
-                    <span className="note" data-testid="choice-line">
-                      {" "}
-                      · {choiceLine(recorded, tz ?? "UTC")}
-                    </span>
-                  )}
-                </p>
-              )}
-              <BriefOptions
-                options={options}
-                recommendedOptionId={item.brief?.recommendedOptionId}
-                recommendation={item.brief?.recommendation}
-                live={queueApproval || target?.to !== "github"}
-                disabled={busy || (!queueApproval && !replyOk) || Boolean(chosen[k])}
-                title={
-                  !queueApproval && target?.to === "github"
-                    ? "Reply on GitHub to answer this item."
-                    : undefined
-                }
-                variant={item.kind === "approval" ? "row" : "panel"}
-                rowLabel={item.kind === "approval" ? "Your call:" : undefined}
-                primaryFirst={item.kind === "approval"}
-                onPick={pick}
-              />
-              {!queueApproval && target?.to === "flight" && <FlightStoppedNote seat={flightSeat} />}
-            </>
+            <BriefOptions
+              options={options}
+              recommendedOptionId={item.brief?.recommendedOptionId}
+              recommendation={item.brief?.recommendation}
+              live={false}
+              disabled
+              title={
+                esc
+                  ? "Reply on GitHub to answer this item."
+                  : `${REFRESH_NEEDED}: this brief has no bound choices. Reply below or ask FLIGHT.`
+              }
+              variant="panel"
+              onPick={() => {}}
+            />
           )}
           {esc && (
             <div className="row">
@@ -543,13 +393,12 @@ export function ItemDetail({
   );
   const discussionBlock = (
     <>
-      {item && !holding && (
+      {item && !holding && !bound && (
         <ItemDiscussion
           layout={layout}
           itemKey={item.key}
           live={flight === undefined ? undefined : live}
           seat={flightSeat}
-          receipt={queueApproval ? undefined : receipts[item.key]}
           focus={options.length === 0 && !item.brief?.person?.replies?.length}
           collapsed={options.length > 0 || Boolean(item.brief?.person?.replies?.length)}
         />
@@ -558,16 +407,6 @@ export function ItemDetail({
   );
   const notesBlock = (
     <>
-      {queueApproval && busy && (
-        <p className="note" role="status">
-          Saving…
-        </p>
-      )}
-      {queueApproval && receipts[k] && (
-        <p className="note" role="status">
-          {receipts[k].text}
-        </p>
-      )}
       {err !== null && (
         <p className="note err" role="alert">
           {err}

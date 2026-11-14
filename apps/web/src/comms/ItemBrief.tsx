@@ -57,8 +57,11 @@ export function ItemBrief({
   viewLinks,
   approval = false,
   plain = false,
+  decided = false,
 }: {
   plain?: boolean;
+  /** The complete decision component shows the view, ask and recommendation; keep only evidence. */
+  decided?: boolean;
   brief?: AttentionBrief;
   original?: ReactNode;
   links?: ReactNode;
@@ -97,39 +100,43 @@ export function ItemBrief({
       </BriefSection>
       {brief && (
         <>
-          <BriefSection
-            plain={plain}
-            title={approval ? "If you approve" : "FLIGHT's view"}
-            after={
-              <>
-                {brief.basis && <p className="note">checked: {brief.basis}</p>}
-                {viewLinks}
-              </>
-            }
-          >
-            <Markdown text={brief.assessment ?? brief.context} />
-            <TextList title="FLIGHT's assessment" lines={brief.person?.assessment} />
-            {brief.person && (
-              <p className="s qtext">
-                Here is what I know. {brief.person.take} I drafted{" "}
-                {brief.person.replies?.length ?? 0} replies below: send one, edit it first, or tell
-                me what you want to say.
-              </p>
-            )}
-            {Boolean(brief.checked?.length) && (
-              <>
-                <div className="bsec">What FLIGHT checked</div>
-                <ul className="checked">
-                  {brief.checked?.map((check, i) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: sources remain in source order
-                    <li key={i}>
-                      <span className="chipref">{check.source}</span> {check.finding}
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
-          </BriefSection>
+          {(!decided || Boolean(brief.checked?.length) || Boolean(brief.basis)) && (
+            <BriefSection
+              plain={plain}
+              title={
+                decided ? "What FLIGHT checked" : approval ? "If you approve" : "FLIGHT's view"
+              }
+              after={
+                <>
+                  {brief.basis && <p className="note">checked: {brief.basis}</p>}
+                  {viewLinks}
+                </>
+              }
+            >
+              {!decided && <Markdown text={brief.assessment ?? brief.context} />}
+              <TextList title="FLIGHT's assessment" lines={brief.person?.assessment} />
+              {brief.person && (
+                <p className="s qtext">
+                  Here is what I know. {brief.person.take} I drafted{" "}
+                  {brief.person.replies?.length ?? 0} replies below: send one, edit it first, or
+                  tell me what you want to say.
+                </p>
+              )}
+              {Boolean(brief.checked?.length) && (
+                <>
+                  {!decided && <div className="bsec">What FLIGHT checked</div>}
+                  <ul className="checked">
+                    {brief.checked?.map((check, i) => (
+                      // biome-ignore lint/suspicious/noArrayIndexKey: sources remain in source order
+                      <li key={i}>
+                        <span className="chipref">{check.source}</span> {check.finding}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+            </BriefSection>
+          )}
           {Boolean(brief.did?.length) && (
             <BriefSection plain={plain} title="What FLIGHT did">
               <ul className="checked">
@@ -150,7 +157,7 @@ export function ItemBrief({
               </ul>
             </BriefSection>
           )}
-          {ask?.trim() && (
+          {!decided && ask?.trim() && (
             <BriefSection plain={plain} title="What FLIGHT needs from you">
               <Markdown text={ask} />
             </BriefSection>

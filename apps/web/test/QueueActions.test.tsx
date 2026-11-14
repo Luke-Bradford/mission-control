@@ -1,11 +1,12 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SideTabs } from "../src/agent/SideTabs.tsx";
+import { resetChoiceAttempts } from "../src/comms/briefChoice.ts";
 import { hub } from "../src/data.ts";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { closeItem, openItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { boardItem, brief, crewRow, item } from "./fixtures.ts";
+import { boardItem, boundBrief, crewRow, item } from "./fixtures.ts";
 
 const proposal = item({
   key: "note:queue-reorder:fiction",
@@ -13,12 +14,33 @@ const proposal = item({
   agentId: null,
   escalationId: null,
   text: "Move shop-app#2 above shop-app#1 in GUIDO-2's queue? That swaps their Priority on the delivery board (P2 ↔ P1).",
-  brief: brief({
-    options: [
-      { id: "approve", label: "Approve", answer: "Approve" },
-      { id: "deny", label: "Deny", answer: "Deny" },
-    ],
-  }),
+  brief: boundBrief(
+    {
+      id: 77,
+      ask: "Move shop-app#2 above shop-app#1?",
+      recommendedOptionId: "approve",
+      recommendation: "Approve the swap; the cards are the displayed ones.",
+      options: [
+        {
+          id: "approve",
+          label: "Approve",
+          answer: "Approve",
+          consequence: "Swaps the two cards' Priority on the board.",
+          reversibility: { kind: "reversible", detail: "Swap them back." },
+          action: { kind: "queue-proposal", key: "note:queue-reorder:fiction", action: "approve" },
+        },
+        {
+          id: "deny",
+          label: "Deny",
+          answer: "Deny",
+          consequence: "Leaves the order as it is.",
+          reversibility: { kind: "reversible", detail: "FLIGHT can propose it again." },
+          action: { kind: "queue-proposal", key: "note:queue-reorder:fiction", action: "deny" },
+        },
+      ],
+    },
+    "Priority swapped",
+  ),
 });
 const row = crewRow({
   id: "guido-2",
@@ -30,8 +52,9 @@ const row = crewRow({
   ],
 });
 const focusPath = "/api/seats/guido-2/focus";
-const actionPath = `/api/queue/reorder/${encodeURIComponent(proposal.key)}`;
+const actionPath = `/api/attention/${encodeURIComponent(proposal.key)}/choice`;
 afterEach(() => {
+  resetChoiceAttempts();
   cleanup();
   hub.clear();
   closeItem();
@@ -96,55 +119,88 @@ it("opens the returned approval without any board write", async () => {
     expect.objectContaining({ body: JSON.stringify({ move: "shop-app#2", above: "shop-app#1" }) }),
   );
 });
-it.each(["Approve", "Deny"])(
-  "%s uses only the server action and refreshes board and queue",
+const choose = async (label: "Approve" | "Deny") => {
+  if (label === "Deny") fireEvent.click(await screen.findByRole("radio", { name: /Deny/ }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: label === "Approve" ? /^Accept recommendation: Approve/ : /^Choose: Deny/,
+    }),
+  );
+};
+it.each(["Approve", "Deny"] as const)(
+  "%s sends only the bound choice and shows its receipt",
   async (label) => {
+    const text = label === "Deny" ? "Left the order as it is." : "Changed Priority on the board.";
     const fn = setup({
       [`POST ${actionPath}`]: {
-        ok: true,
-        text: label === "Deny" ? "Left the order as it is." : "Changed Priority on the board.",
+        epoch: "epoch-1",
+        requestId: "r",
+        optionId: label.toLowerCase(),
+        at: 1,
+        state: "applied",
+        text,
+        actor: { operator: true },
       },
     });
     act(() => openItem(proposal.key));
-    fireEvent.click(await screen.findByRole("button", { name: label }));
+    await choose(label);
     await waitFor(() =>
       expect(fn).toHaveBeenCalledWith(
         actionPath,
-        expect.objectContaining({ body: JSON.stringify({ action: label.toLowerCase() }) }),
+        expect.objectContaining({
+          body: expect.stringContaining(`"optionId":"${label.toLowerCase()}"`),
+        }),
       ),
     );
-    expect(
-      await screen.findByText(
-        label === "Deny" ? "Left the order as it is." : "Changed Priority on the board.",
-      ),
-    ).toBeTruthy();
+    const sent = JSON.parse(
+      fn.mock.calls.find(([path]) => path === actionPath)?.[1]?.body as string,
+    );
+    expect(sent).toMatchObject({ briefId: 77, sourceRevision: "a".repeat(64) });
+    expect((await screen.findByTestId("choice-receipt")).textContent).toContain(text);
     expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-    await waitFor(() =>
-      expect(
-        fn.mock.calls.filter(([path, init]) => path === "/api/boards/shop-app" && !init?.method)
-          .length,
-      ).toBeGreaterThan(1),
+    expect(fn).not.toHaveBeenCalledWith(
+      `/api/queue/reorder/${encodeURIComponent(proposal.key)}`,
+      expect.anything(),
     );
     expect(row.queue?.map((q) => q.ref)).toEqual(["shop-app#1", "shop-app#2"]);
   },
 );
-it("retains the proposal and server explanation on failure", async () => {
+it("retains the proposal and the server's refusal on failure", async () => {
   setup({
     [`POST ${actionPath}`]: () => ({
       status: 409,
-      body: { ok: false, text: "Priority swap unconfirmed. Check both cards." },
+      body: {
+        epoch: "epoch-1",
+        requestId: "r",
+        optionId: "approve",
+        at: 1,
+        state: "refused",
+        text: "Priority swap unconfirmed. Check both cards.",
+        actor: { operator: true },
+        status: 409,
+      },
     }),
   });
   act(() => openItem(proposal.key));
-  fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
-  expect(
-    (await screen.findByText("Priority swap unconfirmed. Check both cards.")).getAttribute("role"),
-  ).toBe("alert");
-  expect(screen.getByText(proposal.text)).toBeTruthy();
+  await choose("Approve");
+  expect((await screen.findByTestId("choice-receipt")).textContent).toContain(
+    "Priority swap unconfirmed. Check both cards.",
+  );
+  expect(screen.getAllByText(/Move shop-app#2 above shop-app#1/).length).toBeGreaterThan(0);
 });
 
 it("keeps the ask visible and disables both choices while the server action is pending", async () => {
-  const fn = setup({ [`POST ${actionPath}`]: { ok: true, text: "Left the order as it is." } });
+  const fn = setup({
+    [`POST ${actionPath}`]: {
+      epoch: "epoch-1",
+      requestId: "r",
+      optionId: "deny",
+      at: 1,
+      state: "applied",
+      text: "Left the order as it is.",
+      actor: { operator: true },
+    },
+  });
   const respond = fn.getMockImplementation();
   if (!respond) throw new Error("Missing fetch stub");
   let release = () => {};
@@ -156,17 +212,19 @@ it("keeps the ask visible and disables both choices while the server action is p
     return respond(path, init);
   });
   act(() => openItem(proposal.key));
-  fireEvent.click(await screen.findByRole("button", { name: "Deny" }));
-  expect(screen.getByText(proposal.text)).toBeTruthy();
-  expect((screen.getByRole("button", { name: "Approve" }) as HTMLButtonElement).disabled).toBe(
-    true,
-  );
-  expect((screen.getByRole("button", { name: "Deny" }) as HTMLButtonElement).disabled).toBe(true);
+  await choose("Deny");
+  expect(screen.getAllByText(/Move shop-app#2 above shop-app#1/).length).toBeGreaterThan(0);
+  await screen.findByText("Sending your choice…");
+  const buttons = screen
+    .getAllByRole("button")
+    .filter((b) => /^(Accept recommendation|Choose):/.test(b.textContent ?? ""));
+  expect(buttons.length).toBeGreaterThan(0);
+  for (const b of buttons) expect((b as HTMLButtonElement).disabled).toBe(true);
   await act(async () => {
     release();
     await gate;
   });
-  await screen.findByText("Left the order as it is.");
+  await screen.findByText("Left the order as it is.", { exact: false });
 });
 
 it("retains edited Focus and validation explanation after a failed save", async () => {
@@ -231,27 +289,23 @@ it("cancels Focus with Escape and returns keyboard focus to Change", async () =>
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Change" }));
 });
 
-it("keeps the returned approval actionable when the attention refresh fails", async () => {
+it("keeps the returned approval readable but unsendable when the attention refresh fails", async () => {
   let reads = 0;
   const fn = setup({
     "/api/attention": () =>
-      ++reads === 1 ? [] : { status: 503, body: { error: "Attention unavailable" } },
+      ++reads === 1 ? [proposal] : { status: 503, body: { error: "Attention unavailable" } },
     "POST /api/seats/guido-2/queue/reorder": { item: proposal },
-    [`POST ${actionPath}`]: () => ({
-      status: 409,
-      body: { ok: false, text: "Priority swap unconfirmed. Check both cards." },
-    }),
   });
   fireEvent.click(await screen.findByTitle("Ask FLIGHT to move this up"));
   await waitFor(() => expect(reads).toBeGreaterThan(1));
-  expect(await screen.findByText(proposal.text)).toBeTruthy();
-  expect(screen.queryByText("This item is no longer open.")).toBeNull();
-  expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-  fireEvent.click(screen.getByRole("button", { name: "Approve" }));
-  await screen.findByText("Priority swap unconfirmed. Check both cards.");
-  expect(screen.getByText(proposal.text)).toBeTruthy();
-  expect(fn).toHaveBeenCalledWith(
-    actionPath,
-    expect.objectContaining({ body: JSON.stringify({ action: "approve" }) }),
+  expect((await screen.findAllByText(/Move shop-app#2 above shop-app#1/)).length).toBeGreaterThan(
+    0,
   );
+  const button = (await screen.findByRole("button", {
+    name: /^Accept recommendation: Approve/,
+  })) as HTMLButtonElement;
+  await waitFor(() => expect(button.disabled).toBe(true));
+  expect(screen.getByTestId("choice-blocked").textContent).toContain("could not be loaded");
+  fireEvent.click(button);
+  expect(fn.mock.calls.filter(([path]) => path === actionPath)).toEqual([]);
 });

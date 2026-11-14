@@ -1,4 +1,4 @@
-import type { AttentionItem, BriefOption, ChoiceReceipt, CrewRow, ItemDiscussion } from "@mc/core";
+import type { AttentionItem, CrewRow, ItemDiscussion } from "@mc/core";
 import { ApiError, apiPost, errorNote } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
@@ -88,51 +88,4 @@ export async function dismissItem(key: string): Promise<string | null> {
   } catch (e) {
     return failure(e);
   }
-}
-
-/**
- * Whether an option can be picked through the choose route: the brief is FLIGHT's (the hub's own
- * briefs act through their own buttons) and the option carries the id the route binds the choice to.
- */
-export function choosable(item: AttentionItem, option: BriefOption): boolean {
-  const brief = item.brief;
-  return (
-    brief !== undefined &&
-    brief.by !== "hub" &&
-    brief.for === "operator" &&
-    option.id !== undefined &&
-    item.escalationId === null
-  );
-}
-
-/** Picks `option` on the item's brief. Resolves to the server's receipt, or the text of its refusal. */
-export async function sendChoice(
-  item: AttentionItem,
-  option: BriefOption,
-): Promise<{ receipt: ChoiceReceipt } | { error: string }> {
-  if (!item.brief || option.id === undefined)
-    return { error: "That option cannot be picked here." };
-  try {
-    const receipt = await apiPost<ChoiceReceipt>(ACTIONS.choose(item.key), {
-      optionId: option.id,
-      briefAt: item.brief.at,
-    });
-    hub.refetch(RESOURCES.attention.path);
-    return { receipt };
-  } catch (e) {
-    return { error: e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e) };
-  }
-}
-
-/** The line under a recorded choice: where it went and whether the recipient has it yet. */
-export function choiceLine(r: ChoiceReceipt, timeZone: string): string {
-  const where = r.target === "flight-for-next-run" ? "FLIGHT, for the next run" : r.to;
-  if (r.deliveredAt === null) return `Recorded. Stored for ${where}.`;
-  const time = new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone,
-  }).format(new Date(r.deliveredAt));
-  return `Recorded. ${where} took it at ${time}.`;
 }

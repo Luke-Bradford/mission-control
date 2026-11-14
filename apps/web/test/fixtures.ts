@@ -3,6 +3,8 @@ import type {
   AttentionBrief,
   AttentionItem,
   BoardItem,
+  BriefAction,
+  BriefOption,
   ConfigView,
   Crew,
   CrewRow,
@@ -481,3 +483,61 @@ export const OVERVIEW: OverviewSummary = {
   pipeline: [],
   machine: { cpu: [], mem: [], diskFreeGb: null },
 };
+
+export const SOURCE_REVISION = "a".repeat(64);
+
+/** A server-bound complete operator brief: two options, each with a prepared typed action. */
+export function boundBrief(
+  over: Partial<AttentionBrief> = {},
+  effect = "Answer sent",
+): AttentionBrief {
+  const options: BriefOption[] = over.options ?? [
+    {
+      id: "port-5174",
+      label: "5174",
+      answer: "Use port 5174.",
+      consequence: "The seat previews on 5174.",
+      reversibility: { kind: "reversible", detail: "The seat can switch ports again." },
+      action: { kind: "answer", seatId: "mc-dev-1", runId: "r1", text: "Use port 5174." },
+    },
+    {
+      id: "port-5180",
+      label: "5180",
+      answer: "Use port 5180.",
+      consequence: "The seat previews on 5180.",
+      reversibility: { kind: "partly-reversible", detail: "A running preview restarts." },
+      action: { kind: "answer", seatId: "mc-dev-1", runId: "r1", text: "Use port 5180." },
+    },
+  ];
+  return brief({
+    id: 41,
+    for: "operator",
+    ask: "Which port should the preview use?",
+    recommendedOptionId: options[0]?.id,
+    recommendation: "Use 5174; nothing else listens there.",
+    options,
+    decision: {
+      whyOperator: { kind: "product-direction", explanation: "The port is shown to customers." },
+      consulted: [{ who: "GUIDO-1", finding: "5174 is free on the preview host." }],
+      costOfDelay: "The preview stays down.",
+      waiting: "An explicit operator choice.",
+    },
+    binding: {
+      version: 2,
+      sourceRevision: SOURCE_REVISION,
+      meaningKey: "meaning",
+      epoch: "epoch-1",
+      epochId: 41,
+      preparedAt: NOW,
+      preparedBy: { seatId: "flight-1", runId: "f1" },
+      actions: options.map((o) => ({
+        optionId: o.id as string,
+        action: o.action as BriefAction,
+        defaultable: false,
+        effect,
+      })),
+    },
+    state: { completeness: "complete", freshness: "current", reason: "Matches the source." },
+    ...over,
+  });
+}

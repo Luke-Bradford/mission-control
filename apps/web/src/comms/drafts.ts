@@ -2,7 +2,7 @@
  * Text typed and not yet sent, by item key, so switching items on Needs you does not lose it. It
  * lives in the module (not a component) and is cleared when the message is sent.
  */
-export type DraftKind = "answer" | "ask";
+export type DraftKind = "answer" | "ask" | "choice";
 
 const drafts = new Map<string, string>();
 const id = (kind: DraftKind, key: string): string => `${kind}\u0000${key}`;
