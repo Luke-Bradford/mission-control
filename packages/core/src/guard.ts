@@ -3607,7 +3607,7 @@ export function flightShellWrite(command: string): boolean {
       if (ghReadVerb(args)) continue;
       return true;
     }
-    // wget reaches here only when its targets are null: --spider or -O -, both reads unless it sends.
+    // wget reaches here only when its targets are null (--spider or -O -): a read unless it sends.
     if (program === "wget") {
       if (args.some((a) => WGET_SEND.test(a))) return true;
       continue;
