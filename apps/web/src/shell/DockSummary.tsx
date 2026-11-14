@@ -58,7 +58,7 @@ export function DockSummary({ canMessage }: { canMessage: boolean }) {
       )}
       {unread.length > 0 && (
         <div className="dock-messages" id="dockMessages">
-          <h3>Messages to you · {unread.length}</h3>
+          <h3>Waiting for your answer · {unread.length}</h3>
           {unread.slice(0, 3).map((m) => (
             <a
               key={m.message.id}

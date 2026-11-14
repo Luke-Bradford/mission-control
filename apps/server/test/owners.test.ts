@@ -208,19 +208,19 @@ describe("Needs-you owners", () => {
     },
   );
 
-  it("a cleanup note is the controller's, and a review note the operator's", () => {
+  it("a cleanup note is FLIGHT's (the operator's with no FLIGHT seat), and a review note the operator's", () => {
     note("review:r1:abc", "review");
     note("cleanup-branch:r1", "blocked");
     note("cleanup:r2", "blocked");
     const o = owners();
     expect(o["note:review:r1:abc"]).toBe("operator");
-    expect(o["note:cleanup-branch:r1"]).toBe("controller");
-    expect(o["note:cleanup:r2"]).toBe("controller");
+    expect(o["note:cleanup-branch:r1"]).toBe("operator");
+    expect(o["note:cleanup:r2"]).toBe("operator");
   });
 
-  it("a missing-report note is the controller's", () => {
+  it("a missing-report note is FLIGHT's, or the operator's with no FLIGHT seat", () => {
     note(noReportNoteKey("r1"), "flag");
-    expect(owners()[`note:${noReportNoteKey("r1")}`]).toBe("controller");
+    expect(owners()[`note:${noReportNoteKey("r1")}`]).toBe("operator");
   });
 
   it("keeps a flake as information rather than an attention item", () => {
@@ -229,7 +229,7 @@ describe("Needs-you owners", () => {
     expect(store.notes().some((n) => n.key === "flake:r1:abc")).toBe(true);
   });
 
-  it("a draft PR from another login's run is that lane's; the hub's own is the controller's", () => {
+  it("a draft PR from another login's run is that lane's; the hub's own is FLIGHT's, or the operator's with no FLIGHT seat", () => {
     store.replaceBoard("shop-app", [boardItem({})]);
     const key = `pr:shop-app#7:${NOW - 9 * DAY}`;
     store.replacePullRequests("shop-app", [pr({ author: "someone" })], 0);
@@ -237,10 +237,10 @@ describe("Needs-you owners", () => {
     store.replacePullRequests("shop-app", [pr({ author: HUB, assignees: ["other"] })], 0);
     expect(owners()[key]).toBe("lane:other");
     store.replacePullRequests("shop-app", [pr({ author: HUB, assignees: [HUB] })], 0);
-    expect(owners()[key]).toBe("controller");
+    expect(owners()[key]).toBe("operator");
     // the hub's login unknown: nothing can be said to be another's
     store.replacePullRequests("shop-app", [pr({ author: "someone" })], 0);
-    expect(owners(base, null)[key]).toBe("controller");
+    expect(owners(base, null)[key]).toBe("operator");
   });
 
   it("an escalation is the loop's, unless it names the operator", () => {
@@ -300,9 +300,9 @@ describe("Needs-you items clear themselves", () => {
         .filter((i) => i.kind === "pr")
         .map((i) => i.text);
     store.replacePullRequests("shop-app", [pr({ author: "someone" })], 0);
-    expect(texts()).toEqual(["PR #7 · Controller: decide on the draft"]);
+    expect(texts()).toEqual(["PR #7 · You: decide on the draft"]);
     store.replacePullRequests("shop-app", [pr({ author: "someone", isDraft: false })], 0);
-    expect(texts()).not.toContain("PR #7 · Controller: decide on the draft");
+    expect(texts()).not.toContain("PR #7 · You: decide on the draft");
     store.replacePullRequests("shop-app", [pr({ state: "merged" })], 0);
     expect(texts()).toEqual([]);
     store.replacePullRequests("shop-app", [pr({ state: "closed" })], 0);

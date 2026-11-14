@@ -4728,7 +4728,7 @@ describe("the engine runs reviews", () => {
         expect(h.steps).not.toContain("merge");
       });
 
-      it("FLIGHT cannot release a hold the controller set; the controller can", async () => {
+      it("FLIGHT cannot release a hold the operator set; the operator can", async () => {
         await toReview();
         await h.engine.holdMerge(RUN, "CAPCOM", "veto");
         const refused = await h.engine.releaseMergeHold(RUN, "FLIGHT");

@@ -198,6 +198,8 @@ export interface CommsContact {
 export interface CommsMention {
   message: CommsMessage;
   seen: boolean;
+  /** A question or blocker to the operator that nobody has answered yet: what the bell counts. */
+  needsReply: boolean;
 }
 export interface CommsLinkCount {
   from: string;

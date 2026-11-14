@@ -32,6 +32,7 @@ const toOperator = (id: string, from: string) => ({
     operator: false,
   },
   seen: false,
+  needsReply: true,
 });
 
 beforeEach(() => {
@@ -684,7 +685,7 @@ describe("Comms routes", () => {
       "/api/comms/crew?history=1": { messages: [message], unread: 3 },
       // not among the messages shown: opening the channel reads the ones it shows
       "/api/comms/mentions": {
-        mentions: [{ message: { ...message, id: "comms:10" }, seen: false }],
+        mentions: [{ message: { ...message, id: "comms:10" }, seen: false, needsReply: true }],
       },
       "/api/comms/pins": { messages: [message] },
       "POST /api/comms/read": { ok: true },
@@ -698,7 +699,7 @@ describe("Comms routes", () => {
     // #crew is not addressed to the operator, so it makes no unread mark, and nor does a mention
     expect(within(nav).queryByTitle("3 unread messages")).toBeNull();
     expect(within(nav).queryByTitle("1 new mention")).toBeNull();
-    const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
+    const bell = await screen.findByRole("button", { name: "Mentions, 1 waiting for your answer" });
     expect(bell.closest(".act")).toBeTruthy();
     fireEvent.click(bell);
     const panel = screen.getByRole("region", { name: "Mentions" });
@@ -743,7 +744,7 @@ describe("Comms routes", () => {
     let attempts = 0;
     stubFetch({
       "/api/comms/crew": { messages: [] },
-      "/api/comms/mentions": { mentions: [{ message, seen: false }] },
+      "/api/comms/mentions": { mentions: [{ message, seen: false, needsReply: true }] },
       "/api/comms/pins": { messages: [] },
       "/api/flight": { seat: null, decisions: [] },
       "POST /api/comms/read": { ok: true },
@@ -753,7 +754,7 @@ describe("Comms routes", () => {
       }),
     });
     render(<CommsConversation view={{ kind: "crew" }} row={null} />);
-    const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
+    const bell = await screen.findByRole("button", { name: "Mentions, 1 waiting for your answer" });
     fireEvent.click(bell);
     fireEvent.click(screen.getByText("@CAPCOM check this"));
     expect(screen.queryByRole("region", { name: "Mentions" })).toBeNull();
@@ -1183,7 +1184,7 @@ describe("Comms routes", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/flight": { messages: [] },
-      "/api/comms/mentions": { mentions: [{ message: mention, seen: false }] },
+      "/api/comms/mentions": { mentions: [{ message: mention, seen: false, needsReply: true }] },
       "/api/comms/pins": { messages: [] },
       "/api/comms/agents/guido-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
       "/api/comms/agents/guido-cx?summary=1": { messages: [], inbox: [], contacts: [], unread: 0 },

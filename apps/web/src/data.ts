@@ -252,7 +252,8 @@ export const RESOURCES = {
     path: `/api/comms/agents/${enc(agentId)}/contacts/${enc(contactId)}`,
     topic: "agents",
   }),
-  commsMentions: { path: "/api/comms/mentions", topic: "agents" },
+  // a mention's needsReply follows its Needs-you item, so attention changes refresh it too
+  commsMentions: { path: "/api/comms/mentions", topic: ITEM_THREAD_TOPICS },
   commsPins: { path: "/api/comms/pins", topic: "agents" },
   commsLinks: { path: "/api/comms/links", topic: "agents" },
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },

@@ -787,7 +787,7 @@ export const syncConflictText = (call: string, files: readonly string[]): string
   syncConflictDecision(call, files) + RECORDED;
 
 export const notEndableRunText = (call: string): string =>
-  `Not ended: ${call}'s run is not parked or stalled.`;
+  `Not ended: ${call}'s run is neither on its seat nor set aside.`;
 export const END_UNREADABLE_TEXT = "Not ended: the run's worktree could not be read.";
 export const endDirtyText = (call: string, paths: readonly string[]): string =>
   `Not ended: ${call} has uncommitted changes in ${pathsText(paths)}.`;

@@ -30,10 +30,13 @@ export function useMentions(): CommsMention[] {
   );
 }
 
-/** The unseen messages that name the operator (CAPCOM): what the header's chat badge counts. */
+/**
+ * What the header's chat badge counts: unseen questions and blockers to the operator that nobody
+ * has answered. Routine replies and status messages are in the conversation, not the count.
+ */
 export function useOperatorUnread(): CommsMention[] {
   const mentions = useMentions();
-  return useMemo(() => mentions.filter((m) => !m.seen), [mentions]);
+  return useMemo(() => mentions.filter((m) => !m.seen && m.needsReply), [mentions]);
 }
 
 /** Where a message to the operator is read: #crew, or the conversation with the other end. */

@@ -4,6 +4,7 @@ import {
   type ConfigView,
   type Crew,
   HUD_STATE_LABEL,
+  LEGACY_SEAT_TURN_START_TEXT,
   SEAT_TURN_END_TEXT,
   SEAT_TURN_START_TEXT,
 } from "@mc/core";
@@ -216,7 +217,12 @@ export function ActivityPanel() {
       if (filter === "comms") return isComms(e);
       return (
         !isComms(e) &&
-        !(e.kind === "state" && (e.text === SEAT_TURN_START_TEXT || e.text === SEAT_TURN_END_TEXT))
+        !(
+          e.kind === "state" &&
+          (e.text === SEAT_TURN_START_TEXT ||
+            e.text === LEGACY_SEAT_TURN_START_TEXT ||
+            e.text === SEAT_TURN_END_TEXT)
+        )
       );
     })
     .filter((e) => {
