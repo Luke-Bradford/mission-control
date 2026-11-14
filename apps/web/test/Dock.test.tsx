@@ -1,8 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import * as markdown from "../src/components/Markdown.tsx";
 import { hub, streamStatus } from "../src/data.ts";
-import * as conversation from "../src/flight/conversation.ts";
 import {
   FLIGHT_NO_SEAT,
   FLIGHT_STOPPED_NOTICE,
@@ -20,7 +18,7 @@ import {
 } from "../src/shell/overlays.ts";
 import { DOCK_COLLAPSED_KEY, DOCK_KEY } from "../src/storage.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { brief, CONFIG, crewRow, HOUR, item, NOW, prView, seatRow } from "./fixtures.ts";
+import { brief, CONFIG, crewRow, item, NOW, prView, seatRow } from "./fixtures.ts";
 import { flightSummary } from "./flightSummaryFixture.ts";
 import { readStyles } from "./styles.ts";
 
@@ -76,7 +74,9 @@ describe("Dock content", () => {
     expect(css).toMatch(/\.panel \{[^}]*display: flex;[^}]*flex-direction: column/);
     expect(css).toMatch(/\.dock \.dh \{[^}]*flex: none/);
     expect(css).toMatch(/\.dwait \{[^}]*flex: none;[^}]*max-height: 40%;[^}]*overflow: auto/);
-    expect(css).toMatch(/\.flight-thread-log \{[^}]*flex: 1;[^}]*min-height: 0;[^}]*overflow: auto/);
+    expect(css).toMatch(
+      /\.flight-thread-log \{[^}]*flex: 1;[^}]*min-height: 0;[^}]*overflow: auto/,
+    );
   });
 
   it("keeps Head agent visible in the dock header on phones", async () => {
@@ -98,7 +98,9 @@ describe("Dock content", () => {
       },
     );
     const { container } = render(<Dock />);
-    await waitFor(() => expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3));
+    await waitFor(() =>
+      expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3),
+    );
     expect(container.querySelector('[aria-label="FLIGHT summary"]')).toBeTruthy();
     expect(container.querySelector("#dockWaiting")).toBeNull();
     expect(screen.queryAllByTestId("waiting-ask")).toHaveLength(0);
@@ -509,7 +511,9 @@ describe("live FLIGHT", () => {
   it("the dock shows no decisions and no wake lines, and has no tabs", async () => {
     stubFlight({ seat: flightSeat(), decisions: [DECISION as FlightView["decisions"][number]] });
     const { container } = render(<Dock />);
-    await waitFor(() => expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3));
+    await waitFor(() =>
+      expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3),
+    );
     const rows = [...container.querySelectorAll(".flight-thread-message")];
     expect(rows.map((r) => r.className)).toEqual([
       "flight-thread-message operator",
@@ -525,7 +529,9 @@ describe("live FLIGHT", () => {
       { "POST /api/comms": {} },
     );
     const { container } = render(<Dock />);
-    await waitFor(() => expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3));
+    await waitFor(() =>
+      expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3),
+    );
     expect(container.querySelector(".meta")?.textContent).toBe("opus · waiting for a wake");
     const rows = [...container.querySelectorAll(".flight-thread-message")];
     expect(rows.map((r) => r.className)).toEqual([
@@ -570,8 +576,12 @@ describe("live FLIGHT", () => {
   it("highlights @CAPCOM in a FLIGHT row", async () => {
     stubFlight({ seat: flightSeat(), decisions: [] });
     const { container } = render(<Dock />);
-    await waitFor(() => expect(container.querySelector(".flight-thread-message:not(.operator) strong")).toBeTruthy());
-    expect(container.querySelector(".flight-thread-message:not(.operator) strong")?.textContent).toBe("@CAPCOM");
+    await waitFor(() =>
+      expect(container.querySelector(".flight-thread-message:not(.operator) strong")).toBeTruthy(),
+    );
+    expect(
+      container.querySelector(".flight-thread-message:not(.operator) strong")?.textContent,
+    ).toBe("@CAPCOM");
   });
 });
 
@@ -681,7 +691,7 @@ describe("Esc", () => {
 });
 
 describe("the conversation", () => {
-  const sendText = (container: HTMLElement, value: string) => {
+  const _sendText = (container: HTMLElement, value: string) => {
     const input = screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement;
     fireEvent.change(input, { target: { value } });
     fireEvent.submit(form(container));
@@ -691,15 +701,21 @@ describe("the conversation", () => {
   it("keeps only the operator's and FLIGHT's messages on Chat", async () => {
     stubFlight({ seat: flightSeat(), decisions: [DECISION as FlightView["decisions"][number]] });
     const { container } = render(<Dock />);
-    await waitFor(() => expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3));
+    await waitFor(() =>
+      expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3),
+    );
     expect(screen.queryByRole("tab")).toBeNull();
   });
 
   it("renders a reply as Markdown", async () => {
     stubFlight({ seat: flightSeat(), decisions: [] });
     const { container } = render(<Dock />);
-    await waitFor(() => expect(container.querySelector(".flight-thread-message:not(.operator) strong")).toBeTruthy());
-    const md = container.querySelectorAll(".flight-thread-message:not(.operator) .md")[1] as HTMLElement;
+    await waitFor(() =>
+      expect(container.querySelector(".flight-thread-message:not(.operator) strong")).toBeTruthy(),
+    );
+    const md = container.querySelectorAll(
+      ".flight-thread-message:not(.operator) .md",
+    )[1] as HTMLElement;
     expect(md.querySelector("strong")?.textContent).toBe("both");
     expect(md.querySelectorAll("li")).toHaveLength(2);
   });
@@ -724,7 +740,9 @@ describe("the conversation", () => {
         <Dock />
       </>,
     );
-    await waitFor(() => expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3));
+    await waitFor(() =>
+      expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3),
+    );
     expect(screen.getByTestId("unread").textContent).toBe("0");
     act(() => toggleDock(false));
     comms = [...COMMS, reply];
@@ -756,7 +774,9 @@ describe("the conversation", () => {
         <Dock />
       </>,
     );
-    await waitFor(() => expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3));
+    await waitFor(() =>
+      expect(container.querySelectorAll(".flight-thread-message")).toHaveLength(3),
+    );
     expect(dockEl(container)?.classList.contains("collapsed")).toBe(true);
     comms = [...COMMS, reply];
     await act(async () => {
@@ -766,5 +786,4 @@ describe("the conversation", () => {
     fireEvent.click(screen.getByRole("button", { name: /Expand FLIGHT/ }));
     await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("0"));
   });
-
 });

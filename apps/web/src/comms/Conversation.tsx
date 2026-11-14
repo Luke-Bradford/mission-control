@@ -955,20 +955,24 @@ function ModernConversation({
           </button>
         </div>
       )}
-      {view.kind === "flight" ? <FlightThread /> : <MessagePane
-        emptyText={
-          view.kind === "crew" && !crew.data && (crew.loading || crew.error) ? null : undefined
-        }
-        messages={messages}
-        lookupMessages={lookupMessages}
-        jumpId={jumpId}
-        onJumped={onJumped}
-        onOpenMessage={onOpenMessage}
-        onReply={setReply}
-        flightId={flightSeat?.id}
-        sent={sent}
-        older={view.kind === "ticket" ? undefined : olderMessages}
-      />}
+      {view.kind === "flight" ? (
+        <FlightThread />
+      ) : (
+        <MessagePane
+          emptyText={
+            view.kind === "crew" && !crew.data && (crew.loading || crew.error) ? null : undefined
+          }
+          messages={messages}
+          lookupMessages={lookupMessages}
+          jumpId={jumpId}
+          onJumped={onJumped}
+          onOpenMessage={onOpenMessage}
+          onReply={setReply}
+          flightId={flightSeat?.id}
+          sent={sent}
+          older={view.kind === "ticket" ? undefined : olderMessages}
+        />
+      )}
       {to && view.kind !== "flight" ? (
         <Composer
           key={conversationScope}
@@ -980,11 +984,9 @@ function ModernConversation({
               ? "Post to #crew as CAPCOM · @name pings one agent"
               : view.kind === "ticket"
                 ? `Post to #crew as CAPCOM · tagged ${view.ref}`
-              : `Message ${to} as CAPCOM`
+                : `Message ${to} as CAPCOM`
           }
-          placeholder={
-            "Write a message…"
-          }
+          placeholder={"Write a message…"}
           messageRef={view.kind === "ticket" ? view.ref : undefined}
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}

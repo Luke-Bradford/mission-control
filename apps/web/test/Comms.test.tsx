@@ -1347,7 +1347,9 @@ describe("Comms: the operator can always talk to FLIGHT", () => {
     );
     replyView();
     fireEvent.click(await screen.findByRole("button", { name: "Reply to alpha" }));
-    const input = screen.getByLabelText("Post to #crew as CAPCOM · @name pings one agent") as HTMLInputElement;
+    const input = screen.getByLabelText(
+      "Post to #crew as CAPCOM · @name pings one agent",
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Please continue" } });
     expect(input.disabled).toBe(false);
     fireEvent.submit(input.closest("form") as HTMLFormElement);
@@ -1387,7 +1389,9 @@ describe("Comms: the operator can always talk to FLIGHT", () => {
     });
     replyView();
     fireEvent.click(await screen.findByRole("button", { name: "Reply to alpha" }));
-    const input = screen.getByLabelText("Post to #crew as CAPCOM · @name pings one agent") as HTMLInputElement;
+    const input = screen.getByLabelText(
+      "Post to #crew as CAPCOM · @name pings one agent",
+    ) as HTMLInputElement;
     fireEvent.change(input, { target: { value: "Keep this draft" } });
     fireEvent.click(await screen.findByRole("button", { name: "Retry reply route" }));
     await screen.findByTestId("reply-route-note");

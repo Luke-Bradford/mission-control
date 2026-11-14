@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, streamStatus } from "../src/data.ts";
-import { FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
 import { FlightThread } from "../src/flight/FlightThread.tsx";
+import { FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
 import { stubFetch } from "./fetchStub.ts";
 import { NOW, seatRow } from "./fixtures.ts";
 
@@ -63,7 +63,9 @@ describe("FlightThread", () => {
   it("sends on Enter and breaks the line on Shift+Enter", async () => {
     const fn = stub([]);
     render(<FlightThread />);
-    const box = (await screen.findByRole("textbox", { name: "Message FLIGHT" })) as HTMLTextAreaElement;
+    const box = (await screen.findByRole("textbox", {
+      name: "Message FLIGHT",
+    })) as HTMLTextAreaElement;
     await waitFor(() => expect(box.disabled).toBe(false));
     fireEvent.change(box, { target: { value: "hello" } });
     fireEvent.keyDown(box, { key: "Enter", shiftKey: true });

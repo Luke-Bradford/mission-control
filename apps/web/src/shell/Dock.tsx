@@ -1,18 +1,10 @@
-import {
-  type CommsMessagesResponse,
-  type Crew,
-  flightTurnText,
-} from "@mc/core";
+import { type CommsMessagesResponse, type Crew, flightTurnText } from "@mc/core";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNow, useTz } from "../clock.ts";
 import { contextPct, doingLine } from "../crew.ts";
 import { RESOURCES, useResource, useReviewPrs } from "../data.ts";
 import { FlightThread } from "../flight/FlightThread.tsx";
-import {
-  FLIGHT_NO_SEAT,
-  type FlightSeat,
-  type FlightView,
-} from "../flight/flightTypes.ts";
+import { FLIGHT_NO_SEAT, type FlightSeat, type FlightView } from "../flight/flightTypes.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { BuildChips } from "./buildStatus.tsx";
 import { DockSummary } from "./DockSummary.tsx";

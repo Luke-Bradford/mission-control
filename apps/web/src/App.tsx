@@ -12,8 +12,8 @@ import {
 import { useNeedsCount } from "./attention.ts";
 import { RESOURCES, useResource } from "./data.ts";
 import { DEMO_MARKER_TEXT, DEMO_REFUSED, useDemo } from "./demo/mode.ts";
+import { FLIGHT_THREAD_INPUT } from "./flight/FlightThread.tsx";
 import type { FlightView } from "./flight/flightTypes.ts";
-
 import {
   agentPath,
   FULL_WIDTH_PAGES,
@@ -31,7 +31,6 @@ import {
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
 import { CommandPalette } from "./shell/CommandPalette.tsx";
-import { FLIGHT_THREAD_INPUT } from "./flight/FlightThread.tsx";
 import { Dock, useOverviewDockOverlay } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
 import { Header } from "./shell/Header.tsx";
@@ -379,13 +378,11 @@ function useShellKeys(current: Route, popout: boolean) {
         if (route(to)?.page !== latest.current.current.page) navigate(to);
       },
       toggleDock: () => {
-        const { current: on, popout: isPopout } = latest.current;
+        const { popout: isPopout } = latest.current;
         // A pop-out is the Agent page alone. Where a thread box is already on screen outside the
         // fly-out (Comms), `f` moves to it; everywhere else it opens the fly-out.
         if (isPopout) return;
-        const box = document.querySelector<HTMLElement>(
-          `#${FLIGHT_THREAD_INPUT}:not(:disabled)`,
-        );
+        const box = document.querySelector<HTMLElement>(`#${FLIGHT_THREAD_INPUT}:not(:disabled)`);
         if (box) box.focus();
         else toggleDock();
       },
