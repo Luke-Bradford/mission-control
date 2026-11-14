@@ -15,7 +15,6 @@ const G_PAGES: Record<string, Page> = {
   f: "flight",
   b: "board",
   a: "agent",
-  m: "map",
   c: "comms",
   t: "telemetry",
   d: "audit",

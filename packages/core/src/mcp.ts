@@ -39,6 +39,7 @@ export const MC_TOOL_NAMES = {
   endRun: "end_run",
   resumeSeat: "resume_seat",
   moveReview: "move_review",
+  resolveWasteAlarm: "resolve_waste_alarm",
   acceptRuling: "accept_ruling",
   mergePr: "merge_pr",
   settlePark: "settle_park",
@@ -68,6 +69,7 @@ export const MC_TOOL_NAMES = {
   releaseHold: "release_hold",
   returnQuestion: "return_question",
   withdrawQuestion: "withdraw_question",
+  attachMaterials: "attach_materials",
   screenshotHud: "screenshot_hud",
   previewBrowser: "preview_browser",
   editIssue: "edit_issue",
@@ -116,6 +118,7 @@ export const MC_TOOLS = {
   endRun: mcTool(MC_TOOL_NAMES.endRun),
   resumeSeat: mcTool(MC_TOOL_NAMES.resumeSeat),
   moveReview: mcTool(MC_TOOL_NAMES.moveReview),
+  resolveWasteAlarm: mcTool(MC_TOOL_NAMES.resolveWasteAlarm),
   acceptRuling: mcTool(MC_TOOL_NAMES.acceptRuling),
   mergePr: mcTool(MC_TOOL_NAMES.mergePr),
   settlePark: mcTool(MC_TOOL_NAMES.settlePark),
@@ -145,6 +148,7 @@ export const MC_TOOLS = {
   releaseHold: mcTool(MC_TOOL_NAMES.releaseHold),
   returnQuestion: mcTool(MC_TOOL_NAMES.returnQuestion),
   withdrawQuestion: mcTool(MC_TOOL_NAMES.withdrawQuestion),
+  attachMaterials: mcTool(MC_TOOL_NAMES.attachMaterials),
   screenshotHud: mcTool(MC_TOOL_NAMES.screenshotHud),
   previewBrowser: mcTool(MC_TOOL_NAMES.previewBrowser),
   editIssue: mcTool(MC_TOOL_NAMES.editIssue),
@@ -211,7 +215,7 @@ function pathList(paths: readonly string[]): string {
 const isAre = (paths: readonly string[]) => (paths.length === 1 ? "is" : "are");
 
 export const clashText = (paths: readonly string[], call: string, ticket: string): string =>
-  `Note: ${pathList(paths)} ${isAre(paths)} also changed by ${call} on ${ticket}, which is still open; the two PRs may conflict when the second one is merged, and the operator or the controller will resolve it.`;
+  `Note: ${pathList(paths)} ${isAre(paths)} also changed by ${call} on ${ticket}, which is still open; the two PRs may conflict when the second one is merged, and FLIGHT will sort out the order.`;
 
 /** The most paths one commit may remove, and the longest path. */
 export const MC_REMOVE_MAX = 50;

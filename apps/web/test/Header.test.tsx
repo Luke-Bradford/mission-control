@@ -69,6 +69,7 @@ describe("Header chat button", () => {
   it("badges only the unread messages to the operator, not the Needs-you items", async () => {
     const mention = (id: string, seen: boolean) => ({
       seen,
+      needsReply: true,
       message: { id, from: "inco-1", to: "CAPCOM", text: "hello", at: NOW },
     });
     routes({
@@ -114,7 +115,6 @@ describe("Header", () => {
       "Flight",
       "Board",
       "Agents",
-      "Map",
       "Comms",
       "QA",
       "Telemetry",
@@ -126,7 +126,6 @@ describe("Header", () => {
       "/flight",
       "/board",
       "/agent",
-      "/map",
       "/comms",
       "/qa",
       "/telemetry",
@@ -164,15 +163,7 @@ describe("Header", () => {
     render(<Header page="overview" />);
     const btn = await screen.findByRole("link", { name: "Needs you: 2 waiting" });
     expect(btn.querySelector(".lamp.crit")).not.toBeNull();
-    for (const name of [
-      /^Overview/,
-      /^Flight/,
-      /^Board/,
-      /^Agents/,
-      /^Map/,
-      /^Comms/,
-      /^Telemetry/,
-    ])
+    for (const name of [/^Overview/, /^Flight/, /^Board/, /^Agents/, /^Comms/, /^Telemetry/])
       expect(within(tab(name)).queryByRole("img")).toBeNull();
   });
 

@@ -140,27 +140,9 @@
 
 /* A message in flight rides its line. Under reduced motion none is drawn. */
 .comms-particle {
-  offset-rotate: 0deg;
-  animation: comms-travel 1150ms linear both;
   stroke: var(--surface);
   stroke-width: 1.5;
   pointer-events: none;
-}
-@keyframes comms-travel {
-  from {
-    offset-distance: 0%;
-    opacity: 0;
-  }
-  10% {
-    opacity: 1;
-  }
-  90% {
-    opacity: 1;
-  }
-  to {
-    offset-distance: 100%;
-    opacity: 0;
-  }
 }
 @media (prefers-reduced-motion: reduce) {
   .comms-particle {
@@ -196,6 +178,16 @@
   stroke: var(--warn);
   stroke-dasharray: 3 2;
   opacity: 1;
+}
+.comms-node.arrival .comms-node-core {
+  fill: var(--node-color);
+  stroke: var(--fg);
+  stroke-width: 2.5;
+}
+.comms-node.arrival .comms-node-ring {
+  opacity: 1;
+  stroke: var(--fg);
+  stroke-width: 2;
 }
 .comms-node-name {
   fill: var(--fg-2);

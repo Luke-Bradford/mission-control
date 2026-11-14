@@ -15,9 +15,16 @@ it("fits measured attempts and long live task text into narrow panels", () => {
   expect(narrow).toMatch(/\.agrid \{\s+grid-template-columns: minmax\(0, 1fr\);/);
 });
 
-it("wraps the rename editor and long call signs within narrow headers", () => {
-  expect(rule(".rename-editor")).toContain("flex-wrap: wrap;");
-  expect(rule(".rename-editor")).toContain("max-width: 100%;");
-  expect(rule(".rename-editor input")).toContain("min-width: 0;");
+it("holds the rename form to its row and wraps long call signs within narrow headers", () => {
+  // a grouped form (components/forms.css): one row of its own, never wider than its parent
+  expect(rule(".rename-editor")).toContain("flex-basis: 100%;");
+  expect(rule(".rename-editor")).toContain("min-width: 0;");
+  expect(rule(".rename-editor")).toContain("overflow-wrap: anywhere;");
   expect(rule(".idrow .big")).toContain("overflow-wrap: anywhere;");
+});
+
+it("gives the Setup tab's links, queue and instructions the whole list, not its narrow second column", () => {
+  expect(css).toMatch(
+    /\.setup-list \.setup-links,\s*\.setup-list \.setup-queue,\s*\.setup-list \.setup-instructions \{\s*grid-column: 1 \/ -1;/,
+  );
 });

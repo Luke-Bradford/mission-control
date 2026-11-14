@@ -13,7 +13,7 @@ Read this before you fold work into a ticket or file one. Where this file and `r
 
 - File with `mc create_ticket` when no open ticket fits, or when the one it belongs to has started.
 - Give an outcome, a reason, what to change and done-when. Done-when holds only what the seat can produce and prove.
-- Put evidence only the controller can produce (a screenshot of a running hub, repeated CI runs, a live seat start) under `## Controller check`.
+- Put evidence that needs a running hub (a screenshot, repeated CI runs, a live seat start) under `## Controller check`; you produce it at merge.
 - Give one area label and the lane of the machine that should build it. Never add a second area to a ticket.
 - Add `Follows #N` after a started ticket.
 - Add `Depends on #N` whenever the ticket is cut from or builds on an open PR, naming the ticket that PR carries. Use `After PR N` only when no ticket can be identified.

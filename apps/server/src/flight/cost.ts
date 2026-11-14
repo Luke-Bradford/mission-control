@@ -3,16 +3,91 @@ import {
   COMMS_CAPCOM,
   FLIGHT_COST_DAYS,
   type FlightWakeCost,
+  type FlightWakeRecord,
   type FlightWakeWaits,
 } from "@mc/core";
-import { runSpend } from "../spend.ts";
-import type { Store } from "../store.ts";
+import { runSpend } from "../spend/spend.ts";
+import type { FinancialRun, Store } from "../store.ts";
+import { endOf } from "../views.ts";
 import { flightSignalHistory } from "./signals.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 /** The reason for cost before a run's first wake: its start brief. */
 export const START_REASON = "start";
 const UNATTRIBUTED = "unattributed";
+
+/**
+ * The stored history the cost and wait figures read, taken once: the runs of `agentIds` overlapping
+ * [since, now] with their attempt usage, and the wake records from `since`. A request builds one
+ * and passes it to both figures; nothing is kept past the request.
+ */
+export interface FlightFinancialFacts {
+  since: number;
+  now: number;
+  agentIds: ReadonlySet<string>;
+  runs: FinancialRun[];
+  wakes: FlightWakeRecord[];
+}
+
+export function flightFinancialFacts(
+  store: Store,
+  now: number,
+  agentIds: ReadonlySet<string>,
+  days = FLIGHT_COST_DAYS,
+): FlightFinancialFacts {
+  const since = now - days * DAY_MS;
+  return {
+    since,
+    now,
+    agentIds,
+    runs: store.financialRuns(since, now + 1, agentIds),
+    wakes: store.flightWakes(since),
+  };
+}
+
+/** The shared facts when they cover this question, else a fresh read. */
+function factsFor(
+  facts: FlightFinancialFacts | undefined,
+  store: Store,
+  now: number,
+  days: number,
+  agentIds: ReadonlySet<string>,
+): FlightFinancialFacts {
+  const since = now - days * DAY_MS;
+  if (
+    facts !== undefined &&
+    facts.since === since &&
+    facts.now === now &&
+    [...agentIds].every((id) => facts.agentIds.has(id))
+  )
+    return facts;
+  return flightFinancialFacts(store, now, agentIds, days);
+}
+
+/**
+ * API-equivalent cost for FLIGHT's runs that overlap [since, now], from the shared facts (same
+ * timestamped attempt usage and wall-time fallback as the daily wake-cost figure). null when no
+ * FLIGHT run with a recorded cost overlaps the window: no data is not zero.
+ */
+export function flightCostInWindow(
+  facts: FlightFinancialFacts,
+  since: number,
+  now: number,
+  flightId: string,
+): number | null {
+  const runs = facts.runs.filter(
+    (run) =>
+      run.agentId === flightId &&
+      run.costUsd !== null &&
+      run.startedAt < now + 1 &&
+      Math.max(endOf(run, now), run.startedAt + 1) > since,
+  );
+  if (runs.length === 0) return null;
+  return runs.reduce(
+    (total, run) => total + runSpend(run, run, since, now).reduce((n, usd) => n + usd, 0),
+    0,
+  );
+}
 
 const median = (values: number[]): number | null => {
   if (values.length === 0) return null;
@@ -37,12 +112,13 @@ export function flightWakeCost(
   flightId: string,
   crewIds: ReadonlySet<string>,
   days = FLIGHT_COST_DAYS,
+  shared?: FlightFinancialFacts,
 ): FlightWakeCost {
   const since = now - days * DAY_MS;
-  const runs = store.runsOverlapping(since, now + 1).filter((r) => crewIds.has(r.agentId));
-  const digests = store.digests(runs.map((r) => r.id));
+  const facts = factsFor(shared, store, now, days, new Set([...crewIds, flightId]));
+  const runs = facts.runs.filter((r) => crewIds.has(r.agentId));
   const wakes = new Map<string, { at: number; reasons: string[] }[]>();
-  for (const w of store.flightWakes(since)) {
+  for (const w of facts.wakes) {
     const list = wakes.get(w.runId) ?? [];
     list.push(w);
     wakes.set(w.runId, list);
@@ -62,8 +138,7 @@ export function flightWakeCost(
   let totalUsd = 0;
   let crewUsd = 0;
   for (const run of runs) {
-    const digest = digests.get(run.id);
-    const spend = runSpend(run, digest, since, now, DAY_MS);
+    const spend = runSpend(run, run, since, now, DAY_MS);
     for (let i = 0; i < days; i++) {
       const day = byDay[i];
       if (day !== undefined) day.crewUsd += spend[i] ?? 0;
@@ -71,8 +146,8 @@ export function flightWakeCost(
     crewUsd += spend.reduce((n, x) => n + x, 0);
     if (run.agentId !== flightId) continue;
     const own = (wakes.get(run.id) ?? []).sort((a, b) => a.at - b.at);
-    const entries = (digest?.attemptUsage ?? []).filter((u) => u.at !== null);
-    const tokens = (digest?.attemptUsage ?? []).reduce((n, u) => n + u.tokens, 0);
+    const entries = run.attemptUsage.filter((u) => u.at !== null);
+    const tokens = run.attemptUsage.reduce((n, u) => n + u.tokens, 0);
     if (tokens <= 0) {
       // no timestamped usage: the cost is by wall time, with no wake to blame
       const usd = spend.reduce((n, x) => n + x, 0);
@@ -130,13 +205,14 @@ export function flightWakeWaits(
   flightId: string,
   repo?: string,
   days = FLIGHT_COST_DAYS,
+  shared?: FlightFinancialFacts,
 ): FlightWakeWaits {
   const since = now - days * DAY_MS;
-  const seen = new Set(store.flightWakes(since).map((w) => w.at));
-  const flightRuns = store.runsOverlapping(since, now + 1).filter((r) => r.agentId === flightId);
-  const digests = store.digests(flightRuns.map((r) => r.id));
-  for (const run of flightRuns)
-    for (const u of digests.get(run.id)?.attemptUsage ?? []) if (u.at !== null) seen.add(u.at);
+  const facts = factsFor(shared, store, now, days, new Set([flightId]));
+  const seen = new Set(facts.wakes.map((w) => w.at));
+  for (const run of facts.runs)
+    if (run.agentId === flightId)
+      for (const u of run.attemptUsage) if (u.at !== null) seen.add(u.at);
   const times = [...seen].sort((a, b) => a - b);
   const operator: number[][] = Array.from({ length: days }, () => []);
   const blocker: number[][] = Array.from({ length: days }, () => []);

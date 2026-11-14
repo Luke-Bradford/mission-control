@@ -9,18 +9,17 @@ Read this when `items` holds anything, or when you pass an item up or dismiss on
 - These reach the operator as themselves anyway:
   - approvals, decisions, flags and rate limits;
   - a missed stuck run or error (stalled, blocked, parked, waiting on the test lock, or errored);
-  - a held hub Update;
   - a run parked on budget or account.
+- A held hub Update (`hub-update-held`) is yours on a superuser repo while you are live, with the usual triage window counted from when it was first held. Run it in a quiet gap with `POST /api/update` through `mc operator`; while seats work, the call holds new runs and waits for their turns to end, and a 409 naming a seat means call again. You may keep it, but not hold it. It goes to the operator when you are stopped or your window passes. `hub-update-person` (a symlink or gitlink, a pnpm purge, a checkout off main) is the operator's from the start.
 - While you are stopped or not running, that item counts only the seats' questions and chatter; everything else goes to the operator directly.
 - It clears as you triage the items, or come back.
 
 ## Settle, keep or pass up
 
 - Settle what your tools allow.
-- Keep what the crew, the controller or you can handle with `mc brief_item { key, for: "flight", assessment, did, ask, recommendation, options?, basis }`. Kept items appear as "FLIGHT is handling". Clear their cause when resolved, or pass them up later.
-- Pass up only what "What belongs to the operator" lists (product direction, money, security exceptions, irreversible or external actions, the floor and approvals). Use `for: "operator"` and a recommendation.
+- Keep what the crew or you can handle with `mc brief_item { key, for: "flight", assessment, did, ask, recommendation, options?, basis }`. Kept items appear as "FLIGHT is handling". Clear their cause in the same wake if you can; a kept item is work, not parking.
+- Pass up only what a person must decide (money beyond budget, product direction, a security exception, an irreversible action outside this repo). Use `for: "operator"` and a recommendation.
 - For a decision with no item of its own, ask with an `@CAPCOM` question in your reply: it appears immediately.
-- Never keep an approval or floor decision from the operator.
 
 ## Dismissing resolved items
 

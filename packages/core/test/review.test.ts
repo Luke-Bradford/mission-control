@@ -17,6 +17,7 @@ import {
   REVIEW_NUDGE_TEXT,
   REVIEW_RESUME_TEXT,
   REVIEW_RUN_MAX_MS,
+  REVIEW_STATUS_PASSED_NOT_INSTALLED,
   REVIEW_TOKEN_BUDGET,
   type ReviewFact,
   type ReviewFinding,
@@ -303,6 +304,14 @@ describe("reviewStatusOf", () => {
     minor: 0,
     failure: null,
     ...o,
+  });
+
+  it("a reported review that ran without an install says so, still as a success", () => {
+    const row = fact({ state: "reported", installNote: "Reviewed, not installed: x" });
+    expect(reviewStatusOf([row], 0, A, null)).toEqual({
+      state: "success",
+      description: REVIEW_STATUS_PASSED_NOT_INSTALLED,
+    });
   });
 
   it("no current row: null", () => {

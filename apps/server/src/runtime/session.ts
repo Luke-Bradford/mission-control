@@ -28,7 +28,7 @@ import {
   STOP_GRACE_MS,
 } from "@mc/core";
 import { cleanText } from "../clean.ts";
-import { CLAUDE_COMMAND } from "../cli-version.ts";
+import { CLAUDE_COMMAND } from "../cli/version.ts";
 import { toolResultBytes } from "../prompt-cost.ts";
 import { STREAM_EVENT_PREFIX } from "../streamjson.ts";
 import { sleep, str } from "../util.ts";

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { CODEX_COMMAND, CODEX_PROJECT_DOC_CONFIG } from "@mc/core";
 import { z } from "zod";
-import { type CliBinding, codexProfile } from "../account-bindings.ts";
+import { type CliBinding, codexProfile } from "../accounts/bindings.ts";
 
 const MODEL_TIMEOUT_MS = 20_000;
 const MAX_MODEL_BYTES = 1024 * 1024;

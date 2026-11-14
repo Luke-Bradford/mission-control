@@ -3,12 +3,23 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
+import { CliHold } from "../src/cli/update.ts";
 import { type CcConfig, crewSeatDef } from "../src/config.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../src/flight/operator-call.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import type { Supervisor } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
-import { HUB_UPDATE_HELD_KEY, type Updater } from "../src/update.ts";
+import {
+  createQuietGate,
+  HUB_HEAD_OFF_MAIN,
+  HUB_INSTALL_NEEDS_PERSON,
+  HUB_UNSAFE_NEEDS_PERSON,
+  HUB_UPDATE_HELD_KEY,
+  HUB_UPDATE_PERSON_KEY,
+  UPDATE_HOLD_OWNER,
+  UpdateError,
+  type Updater,
+} from "../src/update.ts";
 
 const NOW = Date.UTC(2026, 10, 7, 12),
   SEAT = "flight-1",
@@ -45,24 +56,33 @@ const configFor = (powers: "standard" | "superuser"): CcConfig => ({
     ],
   },
 });
-let store: Store, app: FastifyInstance, calls: string[], busy: { seatId: string; state: string }[];
+let store: Store,
+  app: FastifyInstance,
+  calls: string[],
+  busy: { seatId: string; state: string }[],
+  hold: CliHold,
+  supervisorBusy: () => { seatId: string; state: string }[],
+  updateError: UpdateError | null,
+  updateOpts: unknown;
 const headers = { "content-type": "application/json", [OPERATOR_HEADER]: TOKEN };
 const asFlight = {
   ...headers,
   [FLIGHT_OPERATOR_ACTOR_HEADER]: JSON.stringify({ seatId: SEAT, runId: RUN }),
 };
-const build = (powers: "standard" | "superuser") => {
+const build = (powers: "standard" | "superuser", gate = false) => {
   const config = configFor(powers);
   expect(crewProfileOf("FLIGHT", crewSeatDef(config, SEAT).loop)).toBe("flight-full");
   const updater = {
-    update: async () => {
+    update: async (opts?: unknown) => {
       calls.push("update");
+      updateOpts = opts;
+      if (updateError !== null) throw updateError;
       return { swapped: true };
     },
     restart: () => calls.push("restart"),
   } as unknown as Updater;
   const supervisor = {
-    busy: () => busy,
+    busy: () => supervisorBusy(),
     status: () => ({ enabled: true }),
   } as unknown as Supervisor;
   app = buildApp({
@@ -74,11 +94,16 @@ const build = (powers: "standard" | "superuser") => {
     now: () => NOW,
     updater,
     supervisor,
+    ...(gate ? { updateGate: createQuietGate(hold, { waitMs: 50, pollMs: 5 }) } : {}),
   });
 };
 beforeEach(() => {
   calls = [];
+  hold = new CliHold();
+  updateError = null;
+  updateOpts = undefined;
   busy = [{ seatId: SEAT, state: "running" }];
+  supervisorBusy = () => busy;
   store = new Store(":memory:");
   store.upsertRun({
     id: RUN,
@@ -160,4 +185,69 @@ it("leaves the operator's own Update alone while seats are busy", async () => {
   const r = await update(headers);
   expect(r.statusCode).toBe(200);
   expect(calls).toEqual(["update"]);
+});
+
+it("holds new runs and runs FLIGHT's Update once the working seat's turn ends", async () => {
+  build("superuser", true);
+  busy = [...busy, { seatId: "guido-1", state: "running" }];
+  // the seat's turn ends on the gate's own first poll that sees the hold set, not on a timer
+  let heldWhenFreed: boolean | undefined;
+  supervisorBusy = () => {
+    if (hold.heldBy(UPDATE_HOLD_OWNER)) {
+      heldWhenFreed = true;
+      busy = busy.filter((b) => b.seatId !== "guido-1");
+    }
+    return busy;
+  };
+  const r = await update(asFlight);
+  expect(heldWhenFreed).toBe(true);
+  expect(r.statusCode).toBe(200);
+  expect(calls).toEqual(["update"]);
+  expect(updateOpts).toEqual({ refuseUnsafe: true });
+  // the Update is done: new runs start again
+  expect(hold.reason).toBeNull();
+});
+
+it("answers 409 naming the seat when it is still working after the wait, and keeps new runs held", async () => {
+  build("superuser", true);
+  busy = [...busy, { seatId: "guido-1", state: "running" }];
+  const r = await update(asFlight);
+  expect(r.statusCode).toBe(409);
+  expect(r.json<{ error: string }>().error).toContain("GUIDO-1");
+  expect(calls).toEqual([]);
+  expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
+  // a repeat call finds the quiet gap the hold made
+  busy = busy.filter((b) => b.seatId !== "guido-1");
+  expect((await update(asFlight)).statusCode).toBe(200);
+  expect(hold.reason).toBeNull();
+});
+
+it("never asks a person-only Update of FLIGHT: a shortcut in the change goes to the operator with its reason", async () => {
+  build("superuser", true);
+  updateError = new UpdateError(409, HUB_UNSAFE_NEEDS_PERSON, {
+    held: { commits: ["a1 one"], paths: ["docs/linked"], unsafePaths: ["docs/linked"] },
+  });
+  const r = await update(asFlight);
+  expect(r.statusCode).toBe(409);
+  const person = store.notes().find((n) => n.key === HUB_UPDATE_PERSON_KEY);
+  expect(person?.text).toContain("adds a shortcut to another file or folder");
+  expect(store.notes().some((n) => n.key === HUB_UPDATE_HELD_KEY)).toBe(false);
+});
+
+it("raises a person-only note when pnpm needs a person", async () => {
+  build("superuser", true);
+  updateError = new UpdateError(409, HUB_INSTALL_NEEDS_PERSON);
+  expect((await update(asFlight)).statusCode).toBe(409);
+  expect(store.notes().find((n) => n.key === HUB_UPDATE_PERSON_KEY)?.text).toContain(
+    "node_modules",
+  );
+});
+
+it("raises the operator's note when the checkout has drifted off main", async () => {
+  build("superuser", true);
+  updateError = new UpdateError(409, HUB_HEAD_OFF_MAIN);
+  expect((await update(asFlight)).statusCode).toBe(409);
+  expect(store.notes().find((n) => n.key === HUB_UPDATE_PERSON_KEY)?.text).toContain(
+    "drifted off main",
+  );
 });

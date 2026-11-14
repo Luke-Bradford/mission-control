@@ -12,7 +12,7 @@ import {
   claudeProjectSlug,
   commandClass,
   realAuditFiles,
-} from "../src/token-audit.ts";
+} from "../src/token-audit/audit.ts";
 
 interface Usage {
   input?: number;

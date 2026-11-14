@@ -25,13 +25,36 @@ import {
 } from "@mc/core";
 import { useCallback, useRef, useSyncExternalStore } from "react";
 import { apiGet, apiOperatorGet, openStream, type StreamSource } from "./api.ts";
-import { shareMap } from "./map/structural.ts";
 import { store } from "./shell/store.ts";
 
 export interface Resource<T> {
   data: T | undefined;
   error: Error | null;
   loading: boolean;
+}
+
+/** Preserve unchanged repository-analysis data across a refetch. */
+function shareMap(previous: MapSnapshot | undefined, next: MapSnapshot): MapSnapshot {
+  if (!previous || previous.repoId !== next.repoId) return next;
+  const out = { ...next };
+  for (const key of [
+    "tree",
+    "rules",
+    "imports",
+    "hist",
+    "seats",
+    "findings",
+    "conflicts",
+    "conflictsUnchecked",
+  ] as const) {
+    if (previous[key] === next[key] || JSON.stringify(previous[key]) === JSON.stringify(next[key]))
+      Object.assign(out, { [key]: previous[key] });
+  }
+  return Object.keys(out).every(
+    (key) => out[key as keyof MapSnapshot] === previous[key as keyof MapSnapshot],
+  )
+    ? previous
+    : out;
 }
 
 /**
@@ -66,12 +89,19 @@ type PageDocument = {
 const pageDocument = (): PageDocument | undefined =>
   (globalThis as { document?: PageDocument }).document;
 
+/** One array, so a resource's subscription keeps its identity between renders. */
+const ITEM_THREAD_TOPICS = ["attention", "agents"] as const;
+
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
   agentDetail: (id: string): ResourceRef => ({
     path: `/api/agents/${enc(id)}`,
     topic: AGENT_DETAIL_TOPICS,
   }),
+  dependencies: {
+    path: "/api/dependencies",
+    topic: ["agents", "boards", "attention", "flight"],
+  },
   prFlow: { path: "/api/prs/flow", topic: ["agents", "boards", "attention", "flight"] },
   teams: { path: "/api/sources/teams", topic: "attention" },
   teamsSelection: { path: "/api/sources/teams/selection", topic: null },
@@ -102,7 +132,18 @@ export const RESOURCES = {
     path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
     topic: "attention",
   }),
+  /** One item's conversation: the messages sent from it and their replies, from Comms. */
+  itemThread: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/thread`,
+    topic: ITEM_THREAD_TOPICS,
+  }),
+  /** Retained plans and picture stories of one open item; 404 when it has none. */
+  attentionMaterials: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/materials`,
+    topic: "attention",
+  }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
+  answeredAttention: { path: "/api/attention/answered", topic: "attention" },
   attention: { path: "/api/attention", topic: "attention" },
   attentionItem: (key: string): ResourceRef => ({
     path: `/api/attention/${enc(key)}`,
@@ -195,6 +236,8 @@ export const RESOURCES = {
   }),
   commsCrew: { path: "/api/comms/crew", topic: "agents" },
   commsFlight: { path: "/api/comms/flight", topic: "agents" },
+  /** All-time stored messages per ticket (not a recent window). */
+  commsTicketCounts: { path: "/api/comms/ticket-counts", topic: "agents" },
   /** A nav row's read: the conversation list and counts, no messages. */
   commsNav: (agentId: string): ResourceRef => ({
     path: commsNavPath(agentId),
@@ -209,7 +252,8 @@ export const RESOURCES = {
     path: `/api/comms/agents/${enc(agentId)}/contacts/${enc(contactId)}`,
     topic: "agents",
   }),
-  commsMentions: { path: "/api/comms/mentions", topic: "agents" },
+  // a mention's needsReply follows its Needs-you item, so attention changes refresh it too
+  commsMentions: { path: "/api/comms/mentions", topic: ITEM_THREAD_TOPICS },
   commsPins: { path: "/api/comms/pins", topic: "agents" },
   commsLinks: { path: "/api/comms/links", topic: "agents" },
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },
@@ -283,9 +327,20 @@ export const RESOURCES = {
     topic: null,
   }),
   // What Mission Control knows of one ticket: its form and the crew's timeline. `before` pages older.
-  ticketHistory: (repoId: string, issueNumber: number, before = ""): ResourceRef => ({
-    path: `/api/tickets/${enc(repoId)}/${issueNumber}${before ? `?before=${enc(before)}` : ""}`,
-    topic: before ? null : TICKET_TOPICS,
+  ticketHistory: (
+    repoId: string,
+    issueNumber: number,
+    before = "",
+    questionsBefore = "",
+  ): ResourceRef => ({
+    path: `/api/tickets/${enc(repoId)}/${issueNumber}${
+      before
+        ? `?before=${enc(before)}`
+        : questionsBefore
+          ? `?questionsBefore=${enc(questionsBefore)}`
+          : ""
+    }`,
+    topic: before || questionsBefore ? null : TICKET_TOPICS,
   }),
   // Read live from the CLI on each fetch, so not tied to agents events: the Context tile
   // refetches it every SEAT_CONTEXT_REFRESH_MS while the seat runs, and when its turn ends.
@@ -346,6 +401,9 @@ export const ACTIONS = {
   resume: (agentId: string) => `/api/agents/${enc(agentId)}/resume`,
   /** Body `{ keys: string[] }`. */
   hold: (key: string) => `/api/attention/${enc(key)}/hold`,
+  notNow: (key: string) => `/api/attention/${enc(key)}/not-now`,
+  drop: (key: string) => `/api/attention/${enc(key)}/drop`,
+  clear: (key: string) => `/api/attention/${enc(key)}/clear`,
   releaseHold: (key: string) => `/api/attention/${enc(key)}/hold/release`,
   ack: "/api/attention/ack",
   /** Body `{}`; a 404 `{ error }` when the server will not dismiss it. */
@@ -473,7 +531,9 @@ const readResource = async <T>(path: string): Promise<T> => {
     return next as T;
   }
   return path === RESOURCES.prFlow.path ||
+    path === RESOURCES.dependencies.path ||
     path === RESOURCES.designPreviews.path ||
+    /^\/api\/attention\/[^/]+\/materials$/.test(path) ||
     path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)
     : apiGet<T>(path);

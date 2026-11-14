@@ -1316,6 +1316,28 @@ describe("POST /api/guard/check", () => {
     ]);
   });
 
+  it("refuses a check the recorder says is an unchanged rerun, takes no lock and starts no record", async () => {
+    lock = new TestLock({ now: () => NOW, holds: store });
+    await app.close();
+    const begun: string[] = [];
+    app = await build({
+      checks: {
+        begin: async (_k, c) => void begun.push(c),
+        end: async () => {},
+        lockedBy: async (_run, c) => c,
+        rerun: async () => "Not run: pnpm -s test already ran on commit abc1234.",
+        dropRun: () => {},
+        drops: () => [],
+        pending: () => [],
+      },
+    });
+    const res = await check(tokA, bash("a1", "pnpm -s test"));
+    expect(res.body).toContain("Not run: pnpm -s test already ran");
+    expect(res.body).not.toContain('"allow"');
+    expect(lock.state().holder).toBeNull();
+    expect(begun).toEqual([]);
+  });
+
   it("drops a waiter whose hook hung up (its reply closed before an answer)", async () => {
     await check(tokA, bash("a1", "pnpm -s test"));
     const b = check(tokB, bash("b1", "pnpm -s test"));

@@ -111,6 +111,11 @@ function RenameSeat({ row }: { row: CrewRow }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [issue, setIssue] = useState<string | null>(null);
+  const [uncertain, setUncertain] = useState(false);
+  const [focusKey, setFocusKey] = useState(0);
+  const guard = useSubmitGuard();
+  const fieldId = useId();
   const button = useRef<HTMLButtonElement>(null);
   const changes = useResource<CrewChanges>(editing ? RESOURCES.crewChanges : null);
   const base = changes.data?.sessions.find((s) => s.id === row.sessionId)?.seats;
@@ -120,13 +125,20 @@ function RenameSeat({ row }: { row: CrewRow }) {
     button.current?.focus();
   };
   const save = async () => {
-    if (busy || !base || !inConfig || row.sessionId === null) return;
+    if (!base || !inConfig || row.sessionId === null) return;
+    if (!guard.take()) return;
     if (name.length > 64 || !name.trim() || /\p{Cc}/u.test(name)) {
-      setError("Use 1–64 characters, with no control characters or blank call sign.");
+      guard.release();
+      setIssue("Use 1–64 characters, with no control characters or blank call sign.");
+      setError(null);
+      setUncertain(false);
+      setFocusKey((key) => key + 1);
       return;
     }
     setBusy(true);
     setError(null);
+    setIssue(null);
+    setUncertain(false);
     try {
       await apiPost(ACTIONS.crewSeats(row.sessionId), {
         base,
@@ -135,13 +147,17 @@ function RenameSeat({ row }: { row: CrewRow }) {
       close();
     } catch (e) {
       setError(seatError(e));
+      setUncertain(isUncertain(e instanceof ApiError ? e.status : undefined));
+      setFocusKey((key) => key + 1);
     } finally {
       hub.refetch(RESOURCES.crewChanges.path);
       hub.refetch(RESOURCES.config.path);
       hub.refetchCrew(row.id);
+      guard.release();
       setBusy(false);
     }
   };
+  const loadError = changes.error?.message ?? null;
   return (
     <>
       <button
@@ -154,6 +170,8 @@ function RenameSeat({ row }: { row: CrewRow }) {
           if (editing) return;
           setName(callSign(row));
           setError(null);
+          setIssue(null);
+          setUncertain(false);
           setEditing(true);
           toast(
             `Rename ${callSign(row)}: call signs default to the role's console plus a number. Any name works.`,
@@ -164,7 +182,9 @@ function RenameSeat({ row }: { row: CrewRow }) {
       </button>
       {editing && (
         <form
-          className="rename-editor"
+          className="rename-editor fform fform-480"
+          noValidate
+          aria-label={`Rename ${callSign(row)}`}
           onSubmit={(e) => {
             e.preventDefault();
             void save();
@@ -177,35 +197,61 @@ function RenameSeat({ row }: { row: CrewRow }) {
             }
           }}
         >
-          <label>
-            Call sign
-            <input
-              // biome-ignore lint/a11y/noAutofocus: focus the editor opened by the Rename button
-              autoFocus
-              value={name}
-              disabled={busy}
-              aria-invalid={!!error}
-              onChange={(e) => {
-                setName(e.target.value);
-                setError(null);
-              }}
-            />
-          </label>
-          <button type="submit" className="sm" disabled={busy || !inConfig}>
-            Save call sign
-          </button>
-          <button type="button" className="sm ghost" disabled={busy} onClick={close}>
-            Cancel
-          </button>
-          {changes.loading && !changes.data && <span className="s muted">Loading call sign…</span>}
-          {!changes.loading && !changes.error && !inConfig && (
-            <span className="s muted">Not in config.yaml</span>
+          <fieldset className="fgroup">
+            <legend>Rename {callSign(row)}</legend>
+            <div className="ffield">
+              <label htmlFor={fieldId}>Call sign</label>
+              <input
+                {...fieldProps(fieldId, issue ?? undefined, `${fieldId}-hint`)}
+                // biome-ignore lint/a11y/noAutofocus: focus the editor opened by the Rename button
+                autoFocus
+                value={name}
+                disabled={busy}
+                onChange={(e) => {
+                  setName(e.target.value);
+                  setIssue(null);
+                }}
+              />
+              <span id={`${fieldId}-hint`} className="fhint muted xs">
+                1–64 characters. Any name works: call signs default to the role's console plus a
+                number.
+              </span>
+              <FieldError id={fieldId} error={issue ?? undefined} />
+            </div>
+            {changes.loading && !changes.data && <p className="s muted">Loading call sign…</p>}
+            {!changes.loading && !changes.error && !inConfig && (
+              <p className="s muted">Not in config.yaml</p>
+            )}
+          </fieldset>
+          <ErrorSummary
+            title={
+              issue
+                ? "Fix before saving"
+                : uncertain
+                  ? "Result unknown"
+                  : error
+                    ? "Call sign not saved"
+                    : "Call sign unavailable"
+            }
+            issues={issue ? [{ id: fieldId, message: issue }] : []}
+            message={error ?? loadError}
+            focusKey={focusKey}
+          >
+            {uncertain && <p className="s">{UNCERTAIN_TEXT}</p>}
+          </ErrorSummary>
+          {busy && (
+            <p role="status" className="fstatus s">
+              Saving…
+            </p>
           )}
-          {(error || changes.error) && (
-            <span className="crit-t s" role="alert">
-              {error ?? changes.error?.message}
-            </span>
-          )}
+          <div className="fact">
+            <button type="submit" className="primary" disabled={busy || !inConfig}>
+              Save call sign
+            </button>
+            <button type="button" disabled={busy} onClick={close}>
+              Cancel
+            </button>
+          </div>
         </form>
       )}
     </>
@@ -663,10 +709,34 @@ export function HeaderReviewState({ check }: { check: ReviewCheckState }) {
   );
 }
 
-/** Existing seat actions, grouped for the Agent v2 header. Opening More loads its settings. */
-export function AgentHeaderActions({ row }: { row: CrewRow }) {
+/** The More menu: pop out, switch account, seat settings. Opening it loads its settings. */
+export function SeatMore({ row }: { row: CrewRow }) {
   const [open, setOpen] = useState(false);
   const popout = useIsPopout();
+  return (
+    <details className="seat-more" onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary>More</summary>
+      {open && (
+        <div className="agent-v2-menu">
+          {!popout && (
+            <button type="button" onClick={() => popOut(row.id)}>
+              Pop out
+            </button>
+          )}
+          {row.kind === "crew" && (
+            <>
+              <SwitchAccount row={row} />
+              <SeatSettings row={row} />
+            </>
+          )}
+        </div>
+      )}
+    </details>
+  );
+}
+
+/** Existing seat actions, grouped for the Agent v2 header. */
+export function AgentHeaderActions({ row }: { row: CrewRow }) {
   return (
     <span className="agent-v2-actions">
       {row.kind === "crew" ? (
@@ -674,24 +744,7 @@ export function AgentHeaderActions({ row }: { row: CrewRow }) {
       ) : row.loopKind === "ta-loop" ? (
         <PauseButton row={row} />
       ) : null}
-      <details onToggle={(event) => setOpen(event.currentTarget.open)}>
-        <summary>More</summary>
-        {open && (
-          <div className="agent-v2-menu">
-            {!popout && (
-              <button type="button" onClick={() => popOut(row.id)}>
-                Pop out
-              </button>
-            )}
-            {row.kind === "crew" && (
-              <>
-                <SwitchAccount row={row} />
-                <SeatSettings row={row} />
-              </>
-            )}
-          </div>
-        )}
-      </details>
+      <SeatMore row={row} />
     </span>
   );
 }

@@ -5,6 +5,7 @@ import { hub } from "../src/data.ts";
 import { buildBlockers, waitOwner } from "../src/flight/page/blockers.ts";
 import { decisionLine, readableText } from "../src/flight/page/decisionText.ts";
 import { NOT_RECORDED } from "../src/flight/page/StatusBand.tsx";
+import { isFlightRecordHash, recordPanelForHash } from "../src/flight/records.ts";
 import { Flight } from "../src/pages/Flight.tsx";
 import { stubFetch } from "./fetchStub.ts";
 import { HOUR, item, MIN, NOW } from "./fixtures.ts";
@@ -97,6 +98,113 @@ describe("buildBlockers", () => {
 });
 
 describe("the FLIGHT page", () => {
+  it.each([
+    ["#ordersP", "ordersP"],
+    ["#instructionsP", "instructionsP"],
+    ["#memoryP", "memoryP"],
+    ["#briefP", "briefP"],
+    ["#order-7", "ordersP"],
+    ["#flight-note-project", "briefP"],
+    ["#draft-7", "draftsP"],
+    ["#handlingP", "handlingP"],
+    ["#heldP", "heldP"],
+    ["#waitingP", "waitingP"],
+    ["#draftsP", "draftsP"],
+    ["#decidedP", "decidedP"],
+    ["#outcomesP", "outcomesP"],
+    ["#powersP", "powersP"],
+    ["#incP", "incP"],
+    ["#logP", "logP"],
+    ["#wifP", "wifP"],
+    ["#ledgerP", "ledgerP"],
+    ["#watchP", "watchP"],
+  ])("routes old %s links to the %s Records panel", async (hash, panel) => {
+    expect(isFlightRecordHash(hash)).toBe(true);
+    expect(recordPanelForHash(hash)).toBe(panel);
+    window.history.replaceState(null, "", `/flight${hash}`);
+    show("blocked");
+    await waitFor(() => expect(document.getElementById(panel)).not.toBeNull());
+  });
+
+  it.each([
+    ["What FLIGHT did", "decidedP"],
+    ["Crew & board", "wifP"],
+    ["What FLIGHT knows", "ordersP"],
+  ])("keeps Records open while selecting %s", async (tab, panel) => {
+    window.history.replaceState(null, "", "/flight#handlingP");
+    show("blocked");
+    fireEvent.click(await screen.findByRole("tab", { name: tab }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "Records" })).not.toBeNull());
+    expect(document.getElementById(panel)).not.toBeNull();
+  });
+
+  it("scrolls a decision outside the main screen into the Records decision list", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    expect(isFlightRecordHash("#decision-30")).toBe(true);
+    expect(recordPanelForHash("#decision-30")).toBe("decidedP");
+    window.history.replaceState(null, "", "/flight#decision-30");
+    show("blocked");
+    await waitFor(() => {
+      expect(document.getElementById("decision-30")).not.toBeNull();
+    });
+    const target = document.getElementById("decision-30") as HTMLElement;
+    try {
+      expect(target.dataset.testid).toBe("decided-row");
+      await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }));
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: () => void }).scrollIntoView;
+    }
+  });
+
+  it.each(["#askP", "#defaultsP"])("keeps the old %s redirect to Needs you", async (hash) => {
+    window.history.replaceState(null, "", `/flight${hash}`);
+    show("blocked");
+    await waitFor(() => expect(window.location.pathname).toBe("/needs-you"));
+  });
+
+  it("shows held work in its Watch list and releases it", async () => {
+    const held = item({
+      key: "hold:1",
+      text: "Wait for CI to finish",
+      hold: { reason: "CI is still running", condition: { kind: "manual" }, at: NOW } as never,
+    });
+    const fetch = stubFetch(
+      flightPageApi("running", {
+        "/api/attention/held": [held],
+        "POST /api/attention/hold%3A1/hold/release": { ok: true },
+      }),
+    );
+    render(<Flight />);
+    const panel = await waitFor(() => {
+      const found = document.getElementById("heldWatchP");
+      expect(found).not.toBeNull();
+      return found as HTMLElement;
+    });
+    expect(within(panel).getByText("Wait for CI to finish")).toBeTruthy();
+    fireEvent.click(within(panel).getByRole("button", { name: "Release" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/attention/hold%3A1/hold/release",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("names an empty and failed Watch list", async () => {
+    show("running");
+    expect(await screen.findByText("Nothing is held.")).toBeTruthy();
+    cleanup();
+    hub.clear();
+    show("running", {
+      "/api/attention/held": () => ({ status: 500, body: { error: "held down" } }),
+    });
+    expect(await screen.findByText("Could not load Watch list: held down")).toBeTruthy();
+  });
+
   it("shows the four tiles with their definitions, and says Not recorded yet for cost and sessions", async () => {
     show("blocked");
     const band = await screen.findByLabelText("FLIGHT status");
@@ -108,6 +216,46 @@ describe("the FLIGHT page", () => {
     expect(text.split(NOT_RECORDED)).toHaveLength(3);
     expect(text).toContain("74.2k");
     expect(text).toContain("37%");
+  });
+
+  it("shows the served cost per hour, sessions per hour and run start", async () => {
+    const view = flightPageApi("running")["/api/flight"];
+    show("running", {
+      "/api/flight": {
+        ...view,
+        costLastHour: 4.5,
+        sessionsLastHour: 3,
+        runStartedAt: NOW - 90 * MIN,
+      },
+    });
+    const band = await screen.findByLabelText("FLIGHT status");
+    await waitFor(() => expect(band.textContent).toContain("~$4.50"));
+    const text = band.textContent ?? "";
+    expect(text).not.toContain(NOT_RECORDED);
+    expect(text).not.toContain("Run start not recorded");
+    expect(text).toContain("Run started");
+    expect(text).toContain("90 min ago");
+    const sessions = [...band.querySelectorAll(".fp-stat")].find((e) =>
+      e.textContent?.startsWith("Sessions per hour"),
+    );
+    expect(sessions?.querySelector(".fp-v")?.textContent).toBe("3");
+  });
+
+  it("shows zero sessions as 0 and null figures as the empty state, never a made-up 0", async () => {
+    const view = flightPageApi("running")["/api/flight"];
+    show("running", {
+      "/api/flight": { ...view, costLastHour: null, sessionsLastHour: 0, runStartedAt: null },
+    });
+    const band = await screen.findByLabelText("FLIGHT status");
+    await waitFor(() => expect(band.textContent).toContain("Running"));
+    const text = band.textContent ?? "";
+    expect(text.split(NOT_RECORDED)).toHaveLength(2);
+    expect(text).toContain("Run start not recorded yet");
+    expect(text).not.toContain("$0");
+    const sessions = [...band.querySelectorAll(".fp-stat")].find((e) =>
+      e.textContent?.startsWith("Sessions per hour"),
+    );
+    expect(sessions?.querySelector(".fp-v")?.textContent).toBe("0");
   });
 
   it("shows a punctuated stopped sentence on the read-only page", async () => {

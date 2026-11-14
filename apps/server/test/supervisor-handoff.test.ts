@@ -3,7 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { NEW_LOOP } from "@mc/core";
 import { expect, it } from "vitest";
-import { externalReviewKey } from "../src/external-reviews.ts";
+import { externalReviewKey } from "../src/review/external.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { clone, git, make, prep, store, until, userLines } from "./supervisor-harness.ts";
 

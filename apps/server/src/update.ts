@@ -16,6 +16,10 @@
  * depends on changed: Update skips the crew refusals, swaps the page in and answers `{ swapped }`
  * (200) without restarting; the running SHA becomes the new HEAD.
  *
+ * FLIGHT's own call (`update({ refuseUnsafe: true })`) refuses a change that adds a symlink or
+ * gitlink and pulls exactly the commit it checked; `createQuietGate` holds new runs while it waits
+ * for running turns to end.
+ *
  * No command takes request input. git runs with hooks and fsmonitor off and none of the server's
  * `GIT_*` settings, like every other git call the server makes.
  */
@@ -35,6 +39,7 @@ import {
 } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
 import { cleanText } from "./clean.ts";
+import type { CliHold } from "./cli/update.ts";
 import { type CcConfig, configuredAgents } from "./config.ts";
 import { gitEnv } from "./files.ts";
 import { installEnv } from "./runtime/checkouts.ts";
@@ -102,50 +107,103 @@ export interface HeldRange {
   /** Symlinks and gitlinks, regardless of their path. */
   unsafePaths?: string[];
 }
-/** The one Needs-you item for a range auto-Update holds. */
+/**
+ * The one item for a range auto-Update holds. FLIGHT runs it in a quiet moment while it is seated
+ * and on a superuser repo (hud.ts gives it the triage window); otherwise it is the operator's.
+ */
 export const HUB_UPDATE_HELD_KEY = "hub-update-held";
+/** An Update only a person can run (a shortcut in the change, pnpm, a checkout off main): the operator's at once. */
+export const HUB_UPDATE_PERSON_KEY = "hub-update-person";
+/** Setting: when the current held Update was first held, so a note rewritten as main moves keeps its window. */
+export const HUB_UPDATE_HELD_SINCE = "hub-update-held-since";
 /** The 409 `update({ auto: true })` answers for a range that is not all on the allowlist. */
 export const HUB_CODE_NEEDS_PERSON =
   "main changes more than the page and docs; a person runs this Update";
+/** The 409 `update({ refuseUnsafe: true })` answers when the change adds a symlink or gitlink. */
+export const HUB_UNSAFE_NEEDS_PERSON =
+  "the change adds a shortcut or submodule; a person runs this Update";
 /** Update refuses rather than letting pnpm remove the running hub's modules directory. */
 export const HUB_INSTALL_NEEDS_PERSON =
   "Update waits for you: pnpm needs to rebuild node_modules. The running hub will not purge its modules; stop the hub and run pnpm install --frozen-lockfile from an interactive shell, then start it again.";
+/** The part of the shortcut variant's words that marks it, so a later plain range can replace it. */
+const UNSAFE_PHRASE = "adds a shortcut to another file or folder";
 /** The held-Update alert in plain words: how much main changed, never the commits or paths. */
 export const hubCodeHeldText = (held: HeldRange): string => {
   const beyond = heldPaths(held).length;
   const size = `${counted(held.commits.length, "change", "changes")} touching ${counted(held.paths.length, "file", "files")}, ${beyond} of them beyond the page and docs`;
   return held.unsafePaths !== undefined && held.unsafePaths.length > 0
-    ? `A new version of Mission Control is waiting for you: ${size}. One of the changes adds a shortcut to another file or folder, which automatic updating never applies. Check it, then run Update, or FLIGHT may run it for you once the crew is idle; nothing changes until you do.`
-    : `A new version of Mission Control is waiting for you: ${size}. Automatic updating leaves changes beyond the page and docs to you. Run Update when you are ready, or FLIGHT may run it for you once the crew is idle; nothing changes until you do.`;
+    ? `A new version of Mission Control is waiting for you: ${size}. One of the changes ${UNSAFE_PHRASE}, which automatic updating never applies and FLIGHT does not run. Check it, then run Update yourself; nothing changes until you do.`
+    : `A new version of Mission Control is waiting: ${size}. Automatic updating leaves changes beyond the page and docs to FLIGHT or you. FLIGHT runs Update in a quiet moment; if you are reading this it has not yet, so run Update when you are ready. Nothing changes until it runs.`;
 };
 /** Auto-Update's refusal when the checkout's HEAD is not on origin/main's history. */
 export const HUB_HEAD_OFF_MAIN =
   "the checkout's HEAD is not on origin/main's history; a person runs this Update";
 
-/** Keeps the one held Update note current, notifying Needs you only when it changes. */
+/** The words for an Update only a person can run, by the refusal that says so. */
+export const updatePersonText = (reason: string): string =>
+  reason === HUB_INSTALL_NEEDS_PERSON
+    ? "A new version of Mission Control is waiting for you, and only you can run it: pnpm needs to rebuild node_modules, and the running hub will not purge its own. Stop the hub, run pnpm install --frozen-lockfile in a terminal, then start it again."
+    : reason === HUB_HEAD_OFF_MAIN
+      ? "A new version of Mission Control is waiting for you, and only you can run it: the hub's copy of the code has drifted off main's history, so Update will not run by itself. Look at the checkout, then run Update."
+      : `A new version of Mission Control is waiting for you, and only you can run it: ${reason}`;
+
+/** Makes the note under `key` read `want` (null: none). Returns whether anything changed. */
+function syncNote(store: Store, key: string, want: string | null, at: number): boolean {
+  const open = store.notes().find((n) => n.key === key);
+  if (want === (open?.text ?? null)) return false;
+  if (open !== undefined) store.clearNote(key, at);
+  if (want !== null) {
+    store.raiseNote({
+      key,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: want,
+      at,
+    });
+  }
+  return true;
+}
+
+/** Raises the operator's item for an Update only a person can run (a refusal's `message`). */
+export function raiseUpdatePersonNote(store: Store, bus: ChangeBus, reason: string): void {
+  const at = Date.now();
+  if (!syncNote(store, HUB_UPDATE_PERSON_KEY, updatePersonText(reason), at)) return;
+  if (store.getSetting(HUB_UPDATE_HELD_SINCE) === null)
+    store.setSetting(HUB_UPDATE_HELD_SINCE, String(at));
+  bus.emit("attention");
+}
+
+/**
+ * Keeps the held Update note current, notifying Needs you only when it changes. A range that adds
+ * a shortcut goes under the person key (the operator's at once); a plain one under the held key
+ * (FLIGHT's to run while it can). A person note about something else (pnpm, a checkout off main)
+ * stays until the range is current.
+ */
 export function createHeldUpdateNote(
   store: Store,
   bus: ChangeBus,
   enabled = true,
 ): AutoUpdateDeps["held"] {
   const held: AutoUpdateDeps["held"] = (range) => {
-    const open = store.notes().find((n) => n.key === HUB_UPDATE_HELD_KEY);
     const text = range === null ? null : hubCodeHeldText(range);
-    if (text === (open?.text ?? null)) return;
+    const unsafe = range !== null && (range.unsafePaths?.length ?? 0) > 0;
+    const person = store.notes().find((n) => n.key === HUB_UPDATE_PERSON_KEY);
+    const wantPerson = unsafe
+      ? text
+      : range !== null && person !== undefined && !person.text.includes(UNSAFE_PHRASE)
+        ? person.text
+        : null;
     const at = Date.now();
-    if (open !== undefined) store.clearNote(HUB_UPDATE_HELD_KEY, at);
-    if (text !== null) {
-      store.raiseNote({
-        key: HUB_UPDATE_HELD_KEY,
-        kind: "blocked",
-        runId: null,
-        seatId: null,
-        repoId: null,
-        text,
-        at,
-      });
-    }
-    bus.emit("attention");
+    const changed = [
+      syncNote(store, HUB_UPDATE_HELD_KEY, range !== null && !unsafe ? text : null, at),
+      syncNote(store, HUB_UPDATE_PERSON_KEY, wantPerson, at),
+    ].some(Boolean);
+    if (range === null) store.deleteSetting(HUB_UPDATE_HELD_SINCE);
+    else if (changed && store.getSetting(HUB_UPDATE_HELD_SINCE) === null)
+      store.setSetting(HUB_UPDATE_HELD_SINCE, String(at));
+    if (changed) bus.emit("attention");
   };
   // The scheduler runs no tick when updates.hub is off; clear a persisted note now.
   if (!enabled) held(null);
@@ -342,6 +400,8 @@ export interface Updater {
    */
   update(opts?: {
     auto?: boolean;
+    /** Refuse (409, `held` set) a change that adds a symlink or gitlink, and pull exactly the commit checked. */
+    refuseUnsafe?: boolean;
   }): Promise<{ upToDate: true } | { restarting: true } | { swapped: true }>;
   /**
    * The commits (`<sha> <subject>`) and changed paths from the running code to origin/main, as of
@@ -385,12 +445,97 @@ export function crewRefusal(
   }
 }
 
+/** Who holds new runs while FLIGHT's Update waits for running turns (a `CliHold` owner). */
+export const UPDATE_HOLD_OWNER = "hub-update";
+/** What one FLIGHT call to Update waits for the running turns to end. */
+export const UPDATE_QUIET_WAIT_MS = 2 * 60_000;
+/** How often the wait looks at the crew. */
+export const UPDATE_QUIET_POLL_MS = 1_000;
+/** The hold on new runs lets go after this unless FLIGHT calls again: a missed call never stalls the crew. */
+export const UPDATE_HOLD_MAX_MS = 15 * 60_000;
+/**
+ * Once FLIGHT has waited this long, its next call runs Update even with seats mid-turn: a
+ * mid-turn seat keeps working under its keeper through the restart, so only a seat that is
+ * starting still refuses (`crewRefusal`). A long turn can never keep an Update held for good.
+ */
+export const UPDATE_FORCE_AFTER_MS = 10 * 60_000;
+/** The reason shown while new runs are held for Update. */
+export const UPDATE_HOLD_TEXT =
+  "Update is waiting for running turns to end; new runs start again as soon as it has run";
+
+/** Holds new runs so FLIGHT's Update finds a quiet gap on a busy crew. */
+export interface QuietGate {
+  /**
+   * Null once no seat but `except` is mid-turn or starting (the hold on new runs stays until
+   * `release`); else, after at most UPDATE_QUIET_WAIT_MS, why Update must wait: the seat still
+   * working. Each call re-arms the hold's lapse.
+   */
+  wait(busy: () => { seatId: string }[], except: string): Promise<string | null>;
+  /** Ends the hold now and drops its lapse timer. */
+  release(): void;
+}
+
+export function createQuietGate(
+  hold: Pick<CliHold, "hold" | "release">,
+  opts: { waitMs?: number; pollMs?: number; maxHoldMs?: number; forceAfterMs?: number } = {},
+): QuietGate {
+  const { waitMs = UPDATE_QUIET_WAIT_MS, pollMs = UPDATE_QUIET_POLL_MS } = opts;
+  const maxHoldMs = opts.maxHoldMs ?? UPDATE_HOLD_MAX_MS;
+  const forceAfterMs = opts.forceAfterMs ?? UPDATE_FORCE_AFTER_MS;
+  let lapse: NodeJS.Timeout | undefined;
+  /** When FLIGHT first had to wait, and its latest call; kept through a lapse so the bound holds. */
+  let waitingSince: number | undefined;
+  let lastCallAt = 0;
+  const endHold = () => {
+    clearTimeout(lapse);
+    lapse = undefined;
+    hold.release(UPDATE_HOLD_OWNER);
+  };
+  const release = () => {
+    endHold();
+    waitingSince = undefined;
+  };
+  return {
+    release,
+    async wait(busy, except) {
+      const others = () => busy().filter((b) => b.seatId !== except);
+      if (others().length === 0) return null;
+      const at = Date.now();
+      // a call long after the last one is a new Update, not the same wait
+      if (waitingSince === undefined || at - lastCallAt > 2 * maxHoldMs) waitingSince = at;
+      lastCallAt = at;
+      if (at - waitingSince >= forceAfterMs) {
+        // the hold now lasts until the route releases it (or the hub exits): an earlier call's
+        // lapse must not end it while the pull, install and build run
+        hold.hold(UPDATE_HOLD_TEXT, UPDATE_HOLD_OWNER);
+        clearTimeout(lapse);
+        lapse = undefined;
+        return null;
+      }
+      hold.hold(UPDATE_HOLD_TEXT, UPDATE_HOLD_OWNER);
+      clearTimeout(lapse);
+      lapse = setTimeout(endHold, maxHoldMs);
+      lapse.unref();
+      const deadline = Date.now() + waitMs;
+      for (;;) {
+        const working = others()[0];
+        if (working === undefined) return null;
+        if (Date.now() >= deadline)
+          return `${seatCallSign(working.seatId)} is still working: new runs are held until it ends (at most ${Math.round(maxHoldMs / 60_000)} minutes). Run Update again.`;
+        await new Promise((resolve) => setTimeout(resolve, pollMs));
+      }
+    },
+  };
+}
+
 export interface AutoUpdateDeps {
   /** `updates.hub` is `auto`. */
   enabled: boolean;
   updater: Pick<Updater, "check" | "update" | "restart" | "changes">;
   /** Raises (a range) or clears (null) the Needs-you item for a range auto-Update holds. */
   held: (range: HeldRange | null) => void;
+  /** Raises the operator's item for an Update only a person can run (pnpm needs a person, HEAD off main). */
+  person?: (reason: string) => void;
   /** Why the hub may not restart now (a seat starting, the test lock held), or null. */
   blocked: () => string | null;
   /** The test lock is held (why), or null. */
@@ -457,6 +602,11 @@ export function createAutoUpdate(deps: AutoUpdateDeps): () => Promise<AutoUpdate
         out = await deps.updater.update({ auto: true }); // re-checks every refusal itself
       } catch (e) {
         if (e instanceof UpdateError && e.held !== undefined) deps.held(e.held);
+        else if (
+          e instanceof UpdateError &&
+          (e.message === HUB_INSTALL_NEEDS_PERSON || e.message === HUB_HEAD_OFF_MAIN)
+        )
+          deps.person?.(e.message);
         throw e;
       }
       deps.held(null);
@@ -842,6 +992,38 @@ export function createUpdater(deps: UpdaterDeps): Updater {
           }
           // HEAD on tip's history and both ranges checked: a retry after a failed install or build
           // (HEAD already pulled, not yet restarted) goes through
+          if (!ancestor) {
+            await log("failed: HEAD is not on origin/main's history\n");
+            throw new UpdateError(409, HUB_HEAD_OFF_MAIN);
+          }
+          checked = tip;
+        } else if (opts?.refuseUnsafe === true) {
+          // FLIGHT's run: only a person applies a shortcut, so check what was fetched and pull that commit
+          const tip = await gitOut(["rev-parse", `origin/${MAIN}`]).catch(() => null);
+          if (tip === null || !/^[0-9a-f]{40,64}$/.test(tip)) {
+            throw new UpdateError(409, HUB_CODE_NEEDS_PERSON);
+          }
+          const [range, local] = await Promise.all([changes(tip), changes("HEAD")]);
+          if (range === null || local === null) {
+            await log("failed: cannot read the range Update would apply\n");
+            throw new UpdateError(409, HUB_CODE_NEEDS_PERSON);
+          }
+          const unsafe = [...new Set([...(range.unsafePaths ?? []), ...(local.unsafePaths ?? [])])];
+          if (unsafe.length > 0) {
+            await log(`held for a person: a shortcut or submodule at ${unsafe.join(", ")}\n`);
+            throw new UpdateError(409, HUB_UNSAFE_NEEDS_PERSON, {
+              held: {
+                commits: [...new Set([...range.commits, ...local.commits])],
+                paths: [...new Set([...range.paths, ...local.paths])],
+                unsafePaths: unsafe,
+              },
+            });
+          }
+          // the same guard as auto: a checkout off main's history fails the pull, so say why instead
+          const ancestor = await git(["merge-base", "--is-ancestor", "HEAD", tip]).then(
+            () => true,
+            () => false,
+          );
           if (!ancestor) {
             await log("failed: HEAD is not on origin/main's history\n");
             throw new UpdateError(409, HUB_HEAD_OFF_MAIN);

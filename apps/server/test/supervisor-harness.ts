@@ -21,11 +21,11 @@ import {
 } from "@mc/core";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
-import type { CliHold } from "../src/cli-update.ts";
+import type { CliHold } from "../src/cli/update.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
-import type { ReviewPreviews } from "../src/review-preview.ts";
+import type { ReviewPreviews } from "../src/preview/review.ts";
 import { endKeeper } from "../src/runtime/keeper.ts";
 import {
   createSupervisor,
@@ -86,6 +86,8 @@ const prep = vi.hoisted(() => ({
   peers: [] as unknown[],
   handoffGate: null as Promise<void> | null,
   handoffChecks: 0,
+  /** Set: the install command a review's checkout runs (the real one when null). */
+  installRunner: null as import("../src/runtime/checkouts.ts").InstallRunner | null,
 }));
 vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
   const real = await importOriginal<typeof import("../src/runtime/checkouts.ts")>();
@@ -115,7 +117,7 @@ vi.mock("../src/runtime/checkouts.ts", async (importOriginal) => {
     },
     prepareScratch: async (i: Parameters<typeof real.prepareScratch>[0]) => {
       prep.peers.push(i.peers);
-      return real.prepareScratch(i);
+      return real.prepareScratch(i, prep.installRunner ?? undefined);
     },
     prepareCheckout: async (i: Parameters<typeof real.prepareCheckout>[0]) => {
       prep.peers.push(i.peers);
@@ -321,6 +323,7 @@ function make(
     lock?: TestLock;
     hubRoot?: string;
     reviewPreviews?: ReviewPreviews;
+    importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
     prEvidence?: import("../src/pr-evidence/store.ts").PrEvidenceStore;
     prEvidenceRepo?: string;
     rolesDir?: string;
@@ -413,6 +416,7 @@ function make(
     lock,
     ...(over.checks === undefined ? {} : { checks: over.checks }),
     ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
+    ...(over.importGraph === undefined ? {} : { importGraph: over.importGraph }),
     ...(over.prEvidence === undefined ? {} : { prEvidence: over.prEvidence }),
     ...(over.prEvidenceRepo === undefined ? {} : { prEvidenceRepo: over.prEvidenceRepo }),
     hubPort: HUB_PORT,
@@ -492,6 +496,7 @@ beforeEach(() => {
   prep.peers = [];
   prep.handoffGate = null;
   prep.handoffChecks = 0;
+  prep.installRunner = null;
   dir = realpathSync(mkdtempSync(join(tmpRoot, "t-")));
   const origin = join(dir, "origin.git");
   const seed = join(dir, "seed");

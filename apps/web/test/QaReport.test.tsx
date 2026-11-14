@@ -135,6 +135,13 @@ it("requires an explicit non-visual reason while keeping the rest of the report"
   expect(screen.getByText(report.visual.reason ?? "")).toBeTruthy();
   expect(screen.getByText("Not applicable · reason required")).toBeTruthy();
   expect(screen.queryByText(/Before\/after pairs are missing/)).toBeNull();
+  expect(screen.getByText("Nothing to see: this change has no screen.")).toBeTruthy();
+});
+it("does not say nothing to see when visual evidence is merely missing", () => {
+  const report = qaReportFixture();
+  report.visual = { applicability: "unknown", pairs: [] };
+  render(<QaReportRead report={report} />);
+  expect(screen.queryByText(/Nothing to see/)).toBeNull();
 });
 it("marks another head stale even when its historical review passed", () => {
   render(<QaReportRead report={qaReportFixture()} currentHead={"d".repeat(40)} />);

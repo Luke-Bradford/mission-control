@@ -6,7 +6,7 @@ import {
   PreviewHubError,
   PreviewManager,
   type PreviewProcess,
-} from "../src/previews.ts";
+} from "../src/preview/previews.ts";
 
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 

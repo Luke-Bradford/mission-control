@@ -359,6 +359,16 @@ describe("Codex check records", () => {
     ]);
   });
 
+  it("declines a configured check the recorder says is an unchanged rerun, and never starts its record", async () => {
+    const { begun, checks } = recorder();
+    checks.rerun = async (_run, c) => (c === "pnpm -s typecheck" ? "Not run: unchanged." : null);
+    const h = approver("writer", [], undefined, checks, new TestLock());
+    expect(
+      await h.approve(request("pnpm -s typecheck", { itemId: "item-3" }), undefined, signal()),
+    ).toBe("decline");
+    expect(begun).toEqual([]);
+  });
+
   it("takes the test lock for a configured check, and refuses it while another seat holds the lock", async () => {
     const { checks } = recorder();
     const lock = new TestLock();

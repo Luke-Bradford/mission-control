@@ -111,6 +111,7 @@ describe("Dock content", () => {
   it("lists the unread messages to the operator, opens one and marks it read", async () => {
     const mention = (id: string, seen: boolean) => ({
       seen,
+      needsReply: true,
       message: { id, from: "inco-1", to: "CAPCOM", text: `Question ${id}`, at: NOW },
     });
     let mentions = [mention("comms:1", false), mention("comms:2", false), mention("comms:3", true)];
@@ -130,7 +131,7 @@ describe("Dock content", () => {
       expect(el).toBeTruthy();
       return el as HTMLElement;
     });
-    expect(box.textContent).toContain("Messages to you · 2");
+    expect(box.textContent).toContain("Waiting for your answer · 2");
     expect(box.textContent).not.toContain("Question comms:3");
     fireEvent.click(within(box).getByText("Question comms:1"));
     await waitFor(() =>

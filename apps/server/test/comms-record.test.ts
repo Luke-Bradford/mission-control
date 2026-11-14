@@ -13,7 +13,7 @@ import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { commsTicketCounts } from "../src/comms-ticket-counts.ts";
+import { commsTicketCounts } from "../src/comms/ticket-counts.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
@@ -386,6 +386,7 @@ describe("Comms record reads", () => {
         runId: "r",
         seat: "guido-1",
         text: "Which version?",
+        discussionKey: null,
         at: 1,
         passedAt: null,
         asideAt: 2,
@@ -410,6 +411,43 @@ describe("Comms record reads", () => {
       answerAt: null,
       answerBasis: null,
     });
+  });
+
+  it("links a ticket question to its stored discussion, without inventing one", async () => {
+    store.upsertRun(run("r"));
+    const withConversation = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r",
+      text: "What changed?",
+      at: 1,
+    });
+    const withoutConversation = store.addQuestion({
+      agentId: "guido-1",
+      runId: "r",
+      text: "What remains?",
+      at: 2,
+    });
+    const key = `ask:${withConversation}`;
+    const thread = store.ensureDiscussion(key, "question-version", {
+      text: "The first change.",
+      at: 3,
+    });
+    store.answerQuestion(withConversation, 4);
+
+    const page = await get("/api/tickets/shop/7");
+    expect(page.questions).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: withConversation, discussionKey: key }),
+        expect.objectContaining({ id: withoutConversation, discussionKey: null }),
+      ]),
+    );
+    expect((await app.inject({ url: `/api/attention/${key}/discussion` })).json()).toMatchObject({
+      id: thread.id,
+      messages: [{ text: "The first change." }],
+    });
+
+    store.upsertRun(run("no-questions", { ticket: "shop#8" }));
+    expect((await get("/api/tickets/shop/8")).questions).toEqual([]);
   });
 
   it("pages questions with tied timestamps separately from the existing timeline cursor", async () => {

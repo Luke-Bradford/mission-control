@@ -19,10 +19,16 @@ export function resolveRef(
   refText: string,
   repoId: string,
   config: ConfigView | undefined,
+  ticket: string | null = null,
 ): { to: string | null; github: string | null } | null {
   const issue = /^#(\d+)$/.exec(refText)?.[1];
   if (issue !== undefined) return { to: ticketPath(repoId, Number(issue)), github: null };
   const pr = /^PR (\d+)$/.exec(refText)?.[1];
+  // a PR the message is about (its own ref) belongs to the message's ticket: open that ticket's
+  // page. A PR named in the text may belong to any ticket, so it keeps its GitHub link.
+  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
+  if (pr !== undefined && parsed)
+    return { to: ticketPath(parsed.repoId, parsed.number), github: null };
   const github = config?.repos.find((r) => r.id === repoId)?.github;
   const href = pr !== undefined && github ? githubItemHref(github, "pr", Number(pr)) : null;
   return href ? { to: null, github: href } : null;

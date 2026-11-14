@@ -1,6 +1,0 @@
-{
-  "exit": 0,
-  "baseline": "a63e0412accce1d632baf629c1a86f879f439ae7",
-  "arrival": "Overview -> Comms nav",
-  "source": "Exact old Conversation.tsx; same real App and operator send/state fixtures"
-}

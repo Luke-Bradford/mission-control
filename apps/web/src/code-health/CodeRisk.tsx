@@ -16,13 +16,11 @@ export function CodeRisk({
   data,
   window,
   coverage,
-  repo,
   onInspect,
 }: {
   data: Risk;
   window: CodeHealthView["window"];
   coverage: CodeHealthCoverage[];
-  repo: string;
   onInspect: (
     title: string,
     refs: CodeHealthEvidenceRef[],
@@ -188,12 +186,7 @@ export function CodeRisk({
           <button type="button" onClick={() => onInspect("File collection coverage", [], coverage)}>
             Inspect collection coverage
           </button>
-          <a href={`/map/${encodeURIComponent(repo)}`} target="_blank" rel="noreferrer">
-            Open repo in Map
-          </a>
-          <span className="ch-secondary">
-            Map has its own fixed 90-day history; this selection stays open.
-          </span>
+          <a href="/audit?tab=risk">Open code risk in Audit</a>
         </div>
       </Panel>
       <div className="ch-risk-lower">

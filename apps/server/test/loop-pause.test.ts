@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { BoardItem } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AdoptedLoop } from "../src/config.ts";
-import { loopPause } from "../src/loop-pause.ts";
+import { loopPause } from "../src/loop/pause.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;

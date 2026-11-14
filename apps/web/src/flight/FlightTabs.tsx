@@ -1,9 +1,17 @@
 import { type KeyboardEvent, type ReactNode, useEffect, useState } from "react";
-import { LEGACY_NEEDS_HASHES, NEEDS_YOU_PATH, navigate, useHash } from "../router.ts";
+import {
+  followLink,
+  LEGACY_NEEDS_HASHES,
+  NEEDS_YOU_PATH,
+  navigate,
+  PAGE_PATHS,
+  useHash,
+} from "../router.ts";
 import { CrewBoardTab } from "./CrewBoardTab.tsx";
 import { DidTab } from "./DidTab.tsx";
 import { KnowsTab } from "./KnowsTab.tsx";
 import { NeedsYouTab } from "./NeedsYouTab.tsx";
+import { recordsHashForTab } from "./records.ts";
 import { StatusStrip } from "./Situation.tsx";
 import { FLIGHT_TABS, type FlightTab, TAB_LABEL, tabForHash } from "./tabs.ts";
 import "./flight.css";
@@ -63,7 +71,7 @@ function TabPanel({
  * The tabbed FLIGHT page: a status strip over four tabs named for the operator's questions. The
  * one-screen FLIGHT page replaced it; it stays, with its tests, until its panels have a new home.
  */
-export function FlightTabs() {
+export function FlightTabs({ records = false }: { records?: boolean } = {}) {
   const hash = useHash();
   const [tab, setTab] = useState<FlightTab>(() => tabForHash(hash));
   // A link to a section opens its tab, on load and when the fragment changes on this page.
@@ -76,27 +84,57 @@ export function FlightTabs() {
     }
     setTab(tabForHash(hash));
     // The target was hidden while its tab was, so the browser could not scroll to it.
-    requestAnimationFrame(() => {
+    let observer: MutationObserver | undefined;
+    const reveal = () => {
       const target = document.getElementById(hash.slice(1));
+      if (!target) return false;
       // A section folded in a collapsed disclosure (working context) opens to show the link's target.
-      for (let d = target?.closest("details"); d; d = d.parentElement?.closest("details")) {
+      for (let d = target?.closest("details"); d; d = d.parentElement?.closest("details") ?? null) {
         d.open = true;
       }
       target?.scrollIntoView?.({ block: "nearest" });
+      observer?.disconnect();
+      return true;
+    };
+    requestAnimationFrame(() => {
+      if (reveal()) return;
+      observer = new MutationObserver(() => reveal());
+      observer.observe(document.body, { childList: true, subtree: true });
     });
+    return () => observer?.disconnect();
   }, [hash]);
   // A tab chosen by hand drops a section link the page no longer shows, so following it again
   // switches back.
   const select = (next: FlightTab) => {
     setTab(next);
+    if (records) {
+      navigate(`${window.location.pathname}${window.location.search}#${recordsHashForTab(next)}`, {
+        replace: true,
+      });
+      return;
+    }
     if (window.location.hash !== "") {
       navigate(window.location.pathname + window.location.search, { replace: true });
     }
   };
   return (
     <section id="page-flight">
-      <h1 className="sr-only">Flight</h1>
-      <StatusStrip onOpen={select} />
+      {records ? (
+        <div className="flight-records-title">
+          <div>
+            <h1>Records</h1>
+            <p>Orders, instructions, memory, decisions, and FLIGHT's operating record.</p>
+          </div>
+          <a href={PAGE_PATHS.flight} onClick={(event) => followLink(event, PAGE_PATHS.flight)}>
+            Back to FLIGHT
+          </a>
+        </div>
+      ) : (
+        <>
+          <h1 className="sr-only">Flight</h1>
+          <StatusStrip onOpen={select} />
+        </>
+      )}
       <div className="flight-tabs" role="tablist" aria-label="Flight views">
         {FLIGHT_TABS.map((item) => (
           <button

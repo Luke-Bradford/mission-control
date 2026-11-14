@@ -14,7 +14,7 @@ import {
   editCardFields,
   followPrs,
   moveCard,
-} from "../src/github-board.ts";
+} from "../src/github/board.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
 
