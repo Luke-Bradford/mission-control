@@ -16,8 +16,12 @@ import type { AttentionItem } from "./types.ts";
 /** Item keys of the hub's own alerts. Their words are fixed in hub code, not written by an agent. */
 const ALERT_KEYS = new Set([
   FLIGHT_NOT_TRIAGING_KEY,
-  // apps/server/src/update.ts HUB_UPDATE_HELD_KEY; the server test pins the two together
+  // apps/server/src/update.ts HUB_UPDATE_HELD_KEY and HUB_UPDATE_PERSON_KEY; the server test pins
+  // them together. The held note is FLIGHT's to run while it can (hud.ts) and an alert only once it
+  // reaches the operator (FLIGHT stopped or not on a superuser repo, or its window passed); the
+  // person-only note (a shortcut in the change, pnpm, a checkout off main) is one from the start.
   "note:hub-update-held",
+  "note:hub-update-person",
 ]);
 
 /** A hub alert: the operator alone can act on it, and hub code wrote its words. */

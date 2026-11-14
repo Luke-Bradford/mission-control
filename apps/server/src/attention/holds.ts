@@ -16,9 +16,10 @@ import type { z } from "zod";
 import { runAccountId } from "../accounts/bindings.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { flightRunsUpdate } from "../flight/seat.ts";
 import { NOTE_KEY } from "../hud.ts";
 import type { Store } from "../store.ts";
-import { HUB_UPDATE_HELD_KEY } from "../update.ts";
+import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 
 import { holds, ATTENTION_HOLDS_SETTING as SETTING } from "./holds-read.ts";
 
@@ -200,7 +201,10 @@ export function protectedDecisionItem(
     store.notes().some((n) => `${NOTE_KEY}${n.key}` === item.key && n.runId !== null);
   if (item.kind === "approval" || (item.kind === "flag" && !runFlag) || item.kind === "ratelimit")
     return true;
-  if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
+  if (item.key === `${NOTE_KEY}${HUB_UPDATE_PERSON_KEY}`) return true;
+  // the held Update is FLIGHT's to run where it can (#1834); only the operator's is protected
+  if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)
+    return config === undefined || !flightRunsUpdate(config);
   if (item.key.startsWith(`${NOTE_KEY}${GUARD_ACK_PREFIX}`)) return true;
   const note = store.notes().find((n) => `${NOTE_KEY}${n.key}` === item.key);
   // A Comms question or blocker has no note: it is held when its sender's run is.

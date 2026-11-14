@@ -445,7 +445,18 @@ import { overviewTimeline } from "./timeline.ts";
 import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
-import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
+import {
+  createHeldUpdateNote,
+  HUB_HEAD_OFF_MAIN,
+  HUB_INSTALL_NEEDS_PERSON,
+  HUB_UNSAFE_NEEDS_PERSON,
+  HUB_UPDATE_HELD_KEY,
+  type QuietGate,
+  raiseUpdatePersonNote,
+  UPDATE_FAILED,
+  UpdateError,
+  type Updater,
+} from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
 
@@ -548,6 +559,8 @@ export interface AppDeps {
   operatorToken?: string;
   /** The per-boot controller token: the controller's own key, which labels its messages. */
   controllerToken?: string;
+  /** Holds new runs while FLIGHT's Update waits for running turns; without it FLIGHT's Update refuses a busy crew. */
+  updateGate?: QuietGate;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
@@ -6255,26 +6268,48 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(409)
               .send({ error: "No Update is held for a person.", logged: false });
-          const working = (supervisor?.busy() ?? []).find((b) => b.seatId !== actor.seatId);
-          if (working !== undefined)
-            return reply.code(409).send({
-              error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
-              logged: false,
-            });
+          // a busy crew: hold new runs and wait for the running turns to end (a quiet gap)
+          const busy = () => supervisor?.busy() ?? [];
+          if (deps.updateGate === undefined) {
+            const working = busy().find((b) => b.seatId !== actor.seatId);
+            if (working !== undefined)
+              return reply.code(409).send({
+                error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
+                logged: false,
+              });
+          } else {
+            const wait = await deps.updateGate.wait(busy, actor.seatId);
+            if (wait !== null) return reply.code(409).send({ error: wait, logged: false });
+          }
         }
+        let restarting = false;
         try {
-          const out = await updater.update();
-          if ("restarting" in out) updater.restart();
+          // FLIGHT's run never applies a shortcut: only a person does
+          const out = await updater.update(actor === null ? undefined : { refuseUnsafe: true });
+          if ("restarting" in out) {
+            restarting = true;
+            updater.restart();
+          }
           if (!("upToDate" in out))
             store.addHubEvent(actor === null ? "Updated manually" : "Updated by FLIGHT", now());
           return "restarting" in out ? reply.code(202).send(out) : out;
         } catch (e) {
           captureError(reply, e);
+          // a person-only refusal is the operator's at once, with its reason in the note
+          if (actor !== null && e instanceof UpdateError) {
+            if (e.message === HUB_UNSAFE_NEEDS_PERSON && e.held !== undefined)
+              createHeldUpdateNote(store, bus)(e.held);
+            else if (e.message === HUB_INSTALL_NEEDS_PERSON || e.message === HUB_HEAD_OFF_MAIN)
+              raiseUpdatePersonNote(store, bus, e.message);
+          }
           // logged: update.log says why (the page opens it); false for a refusal before the log
           if (e instanceof UpdateError)
             return reply.code(e.status).send({ error: e.message, logged: e.logged });
           reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
           return reply.code(500).send({ error: UPDATE_FAILED, logged: false });
+        } finally {
+          // the hub exits after a restart; otherwise new runs start again
+          if (!restarting) deps.updateGate?.release();
         }
       });
       // Reader: apps/web/src/setup/UpdateLog.tsx (why the last update failed)

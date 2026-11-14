@@ -1,7 +1,7 @@
 import type { FlightView } from "@mc/core";
 import type { ReactNode } from "react";
 import { useTz } from "../../clock.ts";
-import { hhmm, kTokens, rel } from "../../fmt.ts";
+import { cost, hhmm, kTokens, rel } from "../../fmt.ts";
 import type { FlightRun } from "../Situation.tsx";
 
 export const NOT_RECORDED = "Not recorded yet";
@@ -49,8 +49,8 @@ function Stat({
 }
 
 /**
- * Four tiles: FLIGHT running or stopped, cost per hour, sessions per hour and context size. The hub
- * serves neither an hourly cost nor a session count, so those two say so rather than guess.
+ * Four tiles: FLIGHT running or stopped, cost per hour, sessions per hour and context size. A figure
+ * the hub does not serve (null) says so rather than show 0.
  */
 export function StatusBand({
   run,
@@ -66,6 +66,13 @@ export function StatusBand({
   const last = view?.wake?.lastWakeAt ?? null;
   const lastWake =
     last !== null && tz !== null ? `Last woke ${hhmm(last, tz)} · ${rel(last, now, tz)}.` : "";
+  const started = view?.runStartedAt ?? null;
+  const runStart =
+    started !== null && tz !== null
+      ? `Run started ${hhmm(started, tz)} · ${rel(started, now, tz)}.`
+      : "Run start not recorded yet.";
+  const costHour = view?.costLastHour ?? null;
+  const sessionsHour = view?.sessionsLastHour ?? null;
   const why = run.kind === "loading" ? "" : run.why.replace(/[.!?]+\s*$/, "");
   const state =
     run.kind === "loading" ? null : (
@@ -78,7 +85,7 @@ export function StatusBand({
         definition={
           run.kind === "loading"
             ? "Loading FLIGHT's state."
-            : `${why.charAt(0).toUpperCase()}${why.slice(1)}. ${lastWake} Run start not recorded yet.`
+            : `${why.charAt(0).toUpperCase()}${why.slice(1)}. ${lastWake} ${runStart}`
         }
       >
         {state ?? <span className="fp-muted">…</span>}
@@ -87,13 +94,17 @@ export function StatusBand({
         label="Cost per hour"
         definition="API-equivalent cost of FLIGHT's sessions over the last 60 minutes, in dollars. Not a bill."
       >
-        <span className="fp-muted">{NOT_RECORDED}</span>
+        {costHour === null ? <span className="fp-muted">{NOT_RECORDED}</span> : cost(costHour)}
       </Stat>
       <Stat
         label="Sessions per hour"
         definition="FLIGHT sessions started in the last 60 minutes. A handover starts a new one."
       >
-        <span className="fp-muted">{NOT_RECORDED}</span>
+        {sessionsHour === null ? (
+          <span className="fp-muted">{NOT_RECORDED}</span>
+        ) : (
+          sessionsHour.toLocaleString("en-GB")
+        )}
       </Stat>
       <Stat
         label="Context size"
