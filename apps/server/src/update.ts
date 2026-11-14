@@ -16,6 +16,10 @@
  * depends on changed: Update skips the crew refusals, swaps the page in and answers `{ swapped }`
  * (200) without restarting; the running SHA becomes the new HEAD.
  *
+ * FLIGHT's own call (`update({ refuseUnsafe: true })`) refuses a change that adds a symlink or
+ * gitlink and pulls exactly the commit it checked; `createQuietGate` holds new runs while it waits
+ * for running turns to end.
+ *
  * No command takes request input. git runs with hooks and fsmonitor off and none of the server's
  * `GIT_*` settings, like every other git call the server makes.
  */
