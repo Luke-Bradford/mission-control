@@ -3502,7 +3502,7 @@ function shellWriteTargets(program: string, args: readonly string[]): string[] |
       if (flag === "--save-cookies" || flag === "--warc-file")
         paths.push(value.length ? value.join("=") : (args[++n] ?? ""));
     }
-    // A recursive fetch saves pages to disk to follow their links, even with --spider.
+    // A recursive fetch saves pages to disk to follow their links, even with --spider or -O -.
     if (args.some((a) => /^--(?:recursive|mirror)$|^-[a-zA-Z]*[rm][a-zA-Z]*$/.test(a))) return [];
     const files = paths.filter((path) => path !== "-");
     if (files.length) return files;
