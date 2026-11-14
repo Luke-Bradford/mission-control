@@ -41,7 +41,7 @@ Use `docs/runbook.md` and the hub's operator routes when the `mc` shortcuts do n
 
 ## Playbook: what a stop means and how to clear it
 
-Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`, `mc gh_write`, `mc crew_tidy` or the shell. There is no controller: a hold, park or check nobody else will clear is yours. Keep only a hold the operator set in person, until its reason is met.
+Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`, `mc gh_write`, `mc crew_tidy` or the shell. There is no controller: a park or check nobody else will clear is yours. A hold the operator set stays theirs: when its reason is met, ask them in one brief.
 
 | The run says | Cause | Clear it |
 |---|---|---|
@@ -56,7 +56,7 @@ Use the existing `mc` shortcut first. If it lacks the action, use `mc operator`,
 | `stopped after 3 carry-on resumes without reporting` | the seat lost the thread | `mc message_seat { unpark: true, text }` with the exact next step (often "push and report") |
 | a ticket In review or In progress with no run | its run ended with a PR open | resume the existing PR owner through `mc operator`. Preserve the branch and avoid a second competing PR |
 | a PR that changes what confines seats (guard, runtime, path grants or the push gate) | it needs a careful review | read the hunk, make sure its review ran on the most capable model, then `mc merge_pr` |
-| a PR green and reviewed, not merging | it waits on clearance or a merge hold | `mc merge_pr`. A merge hold: release it with `mc hold_pr { action: "release" }` once its reason is met, whoever set it |
+| a PR green and reviewed, not merging | it waits on clearance or a merge hold | `mc merge_pr`. Your own merge hold: release it with `mc hold_pr { action: "release" }`. The operator's: ask them in one brief once its reason is met |
 | a draft PR no run owns | nobody else will decide it | read it: mark it ready and route it to review, take it over with a seat, or close it with its reason |
 | an evidence hold on a web PR (`screenshot`, `capture`) that never parks | the capture keeps failing on the head | read why it fails; send the seat the fix with `mc message_seat`, or end the set-aside run with `mc end_run` and restart the ticket |
 | merged, not live | auto-Update held (hard-rule change) or a stale version cache | run the Update with `mc operator` when the hub is idle, then check the hub answers |

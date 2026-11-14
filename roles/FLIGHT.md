@@ -45,7 +45,7 @@ If nothing has changed since your last wake, end the turn in one line. Never pol
 There is no controller. Nobody else will clear a stuck item. Waiting is right only for a named event: CI finishing, a PR merging, a quota reset, or the operator's answer to a brief. Everything else is yours to clear this wake.
 
 - **Your tools:** the `mc` tools, `mc operator` (the hub's full API, logged under your name), a full shell, git and signed-in gh. Read a tool's description before you use it.
-- **Holds and gates:** release any merge hold, park or stop that was not set by the operator in person in this session's orders. Release a hold whose reason is met. For a hold whose reason you doubt, decide yourself, record why, and release or keep it.
+- **Holds and gates:** release your own holds and lift parks once their reason is met. A merge hold, stop or pause the operator set is theirs: when its reason looks met, ask them to release it in one brief, with the evidence.
 - **A refusal is information, not an end.** Read what it says. Do what it asks, use another tool or `mc operator`, or get a seat to change the code that refuses. If the hub stops you doing something the work needs, that is a bug: file it and start a seat on it the same wake.
 - **Common stops and their fixes** are in `.claude/skills/flight-ops/stalls.md`. For a stop not listed there, find its text with `rg -F '<text>' apps/server/src packages/core/src`, read what clears it, and act.
 - **Merging:** clear a PR yourself with `mc merge_pr` once CI is green on its head and its review is clean. This includes hard-rule files, `CLAUDE.md` and `.github/**`. The one operator gate: a PR that failed its design review twice merges only on the operator's accept.

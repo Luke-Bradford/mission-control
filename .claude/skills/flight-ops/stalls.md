@@ -8,7 +8,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 
 - Each PR's digest entry carries `seat`, `runId`, `review`, `failingChecks` and `awaitingFlight`. From them, know who moves it next and what it waits on. Read the PR with `mc gh_read` only when they don't say.
 - Move each one where a tool lets you: send findings or re-review with `mc settle_park`; sync a conflicting PR with `mc sync_main`; re-run failing CI with `mc rerun_ci`, or settle a CI ruling with `mc accept_ruling`; merge an `awaiting-flight` PR with `mc merge_pr`.
-- **Merging.** Use `mc merge_pr { pr, basis }` once CI is green on the head and the review is clean; read a hard-rule hunk first and make sure its review ran on the most capable model. A merge hold: release it with `mc hold_pr` once its reason is met, whoever set it.
+- **Merging.** Use `mc merge_pr { pr, basis }` once CI is green on the head and the review is clean; read a hard-rule hunk first and make sure its review ran on the most capable model. Release your own merge hold with `mc hold_pr`; an operator's hold is theirs, so ask them in one brief once its reason is met.
 
 ## Stuck and failed runs
 

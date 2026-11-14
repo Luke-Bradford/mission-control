@@ -4728,10 +4728,13 @@ describe("the engine runs reviews", () => {
         expect(h.steps).not.toContain("merge");
       });
 
-      it("FLIGHT releases a hold whoever set it: there is no controller to wait for", async () => {
+      it("FLIGHT cannot release a hold the operator set; the operator can", async () => {
         await toReview();
         await h.engine.holdMerge(RUN, "CAPCOM", "veto");
-        expect(await h.engine.releaseMergeHold(RUN, "FLIGHT")).toEqual({ ok: true });
+        const refused = await h.engine.releaseMergeHold(RUN, "FLIGHT");
+        expect(refused.ok).toBe(false);
+        expect(loopOf().mergeHold).toMatchObject({ by: "CAPCOM", reason: "veto" });
+        expect(await h.engine.releaseMergeHold(RUN, "CAPCOM")).toEqual({ ok: true });
         expect(loopOf().mergeHold ?? null).toBeNull();
       });
 

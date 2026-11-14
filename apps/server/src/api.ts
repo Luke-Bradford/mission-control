@@ -1421,6 +1421,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // The controller's own key. A request that carries it passes where the operator token does (it
   // grants nothing new) and is marked, so what it sends is recorded as the controller's.
   const controllerRequests = new WeakSet<FastifyRequest>();
+  const CONTROLLER_HOLD_REFUSED = "the controller does not hold merges; tell FLIGHT what is wrong";
   if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
     const { controllerToken, operatorToken: held } = deps;
     app.addHook("onRequest", async (req) => {
@@ -5864,6 +5865,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             (body.data.action === "hold" && !body.data.reason)
           )
             return reply.code(400).send({ error: "invalid merge-hold request" });
+          // The controller is not a gate in the crew's path: it may release a hold, never set one.
+          if (body.data.action === "hold" && controllerRequests.has(req))
+            return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
           const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
           if (!target) return reply;
           const previous = externalMergeHold(store, target.repo.id, number);
@@ -5965,8 +5969,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
-      // The controller holds a run's PR from merging, or releases a hold (FLIGHT's or its own).
-      // FLIGHT's hold_pr tool cannot release one set here; the operator token is required.
+      // The operator holds a run's PR from merging, or releases a hold (FLIGHT's or their own).
+      // FLIGHT's hold_pr tool cannot release one set here. The controller may only release.
       // Reader: docs/runbook.md#hold-a-run-from-merging
       api.post<{ Params: { id: string } }>("/runs/:id/merge-hold", async (req, reply) => {
         const run = store.run(req.params.id);
@@ -5975,6 +5979,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!crewGate(run.agentId, reply)) return reply;
         const body = MergeHoldBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        // The controller is not a gate in the crew's path: it may release a hold, never set one.
+        if (body.data.action === "hold" && controllerRequests.has(req))
+          return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
         if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
         const engine = deps.engine;
         if (!engine?.holdMerge || !engine.releaseMergeHold || engine.status().on !== true) {

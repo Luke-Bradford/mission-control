@@ -4234,7 +4234,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.holdPr,
-      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release a hold, whoever set it. The engine parks the run instead of merging it until the hold is released.",
+      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release your own hold. The engine parks the run instead of merging it until the hold is released.",
       HoldArgs,
       "hold",
       async (a) => {
@@ -4254,6 +4254,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         }
         const hold = run.loop?.mergeHold;
         if (!hold) return fail("Run's merge is not held.");
+        if (hold.by !== "FLIGHT")
+          return fail(
+            "The operator set this hold; only the operator can release it. If its reason is met, ask them in one brief.",
+          );
         const r = await engine.releaseMergeHold(run.id, "FLIGHT");
         return r.ok
           ? { text: `Released the hold on ${run.id}.` }

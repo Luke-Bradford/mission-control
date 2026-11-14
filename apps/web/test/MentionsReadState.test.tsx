@@ -45,8 +45,8 @@ function stubHub() {
     "/api/comms/crew": { messages: [] },
     "/api/comms/mentions": {
       mentions: [
-        { message: message("comms:1"), seen: false },
-        { message: message("comms:2"), seen: false },
+        { message: message("comms:1"), seen: false, needsReply: true },
+        { message: message("comms:2"), seen: false, needsReply: true },
       ],
     },
     "/api/comms/pins": { messages: [] },
@@ -74,7 +74,7 @@ describe("one read state for mentions", () => {
       expect(screen.getByRole("button", { name: "FLIGHT chat, 1 unread to you" })).toBeTruthy(),
     );
     expect(screen.getByRole("button", { name: "Mentions, 1 new" })).toBeTruthy();
-    expect(screen.getByText("Messages to you · 1")).toBeTruthy();
+    expect(screen.getByText("Waiting for your answer · 1")).toBeTruthy();
   });
 
   it("lowers the bell when the dock's Mark all read marks them", async () => {
@@ -90,7 +90,7 @@ describe("one read state for mentions", () => {
       await markMentionsSeen(["comms:1", "comms:2"]);
     });
     expect(screen.getByRole("button", { name: "Mentions, 0 new" })).toBeTruthy();
-    expect(screen.queryByText(/Messages to you/)).toBeNull();
+    expect(screen.queryByText(/Waiting for your answer/)).toBeNull();
   });
 
   it("shows one number in the header, the nav and the bell, and opening the conversation clears all three", async () => {
@@ -108,7 +108,7 @@ describe("one read state for mentions", () => {
       "/api/flight": { seat: null, decisions: [] },
       // the cursor count says 303; only the shared read state may drive the badge
       "/api/comms/flight": { messages: [toYou], unread: 303 },
-      "/api/comms/mentions": { mentions: [{ message: toYou, seen: false }] },
+      "/api/comms/mentions": { mentions: [{ message: toYou, seen: false, needsReply: true }] },
       "/api/comms/pins": { messages: [] },
       "POST /api/comms/read": { ok: true },
       "POST /api/comms/mentions/seen": { ok: true },
@@ -156,7 +156,10 @@ describe("one read state for mentions", () => {
       "/api/comms/flight": { messages: [toYou], unread: 1 },
       "/api/comms/mentions": async () => {
         await gate;
-        return { status: 200, body: { mentions: [{ message: toYou, seen: false }] } };
+        return {
+          status: 200,
+          body: { mentions: [{ message: toYou, seen: false, needsReply: true }] },
+        };
       },
       "/api/comms/pins": { messages: [] },
       "POST /api/comms/read": { ok: true },

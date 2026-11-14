@@ -1306,7 +1306,32 @@ describe("Comms API", () => {
       ).toMatchObject({
         message: { id: mention.id },
         seen: false,
+        // a plain mention is read in the conversation; the bell counts only open asks
+        needsReply: false,
       });
+      const ask = store.addComms({
+        at: clock++,
+        from: "alpha",
+        to: "CAPCOM",
+        ticket: null,
+        text: "Which layout?",
+        label: "question",
+      });
+      if (ask === null) throw new Error("question not stored");
+      const needsReply = async (id: string) =>
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
+          .json()
+          .mentions.find((m: { message: { id: string } }) => m.message.id === id)?.needsReply;
+      expect(await needsReply(ask.id)).toBe(true);
+      store.addComms({
+        at: clock++,
+        from: "CAPCOM",
+        to: "alpha",
+        ticket: null,
+        text: "The first one.",
+        replyTo: ask.id,
+      });
+      expect(await needsReply(ask.id)).toBe(false);
       expect(
         (
           await comms.inject({
@@ -9999,6 +10024,7 @@ describe("operator token", () => {
         configPath,
         supervisor: stubSupervisor(),
         operatorToken: "tok-1",
+        controllerToken: "ctl-1",
         get noLoopWrites() {
           return noWrites;
         },
@@ -10039,7 +10065,16 @@ describe("operator token", () => {
       expect(calls).toEqual([]);
     });
 
-    it("holds and releases as the controller, and names a refusal", async () => {
+    it("refuses a hold from the controller's key but lets it release", async () => {
+      const ctl = { "x-mc-controller": "ctl-1" };
+      const held = await post(ctl, { action: "hold", reason: "my check" });
+      expect(held.statusCode).toBe(403);
+      expect(held.json().error).toContain("tell FLIGHT");
+      expect((await post(ctl, { action: "release" })).statusCode).toBe(409);
+      expect(calls).toEqual([["release", "mh", "CAPCOM"]]);
+    });
+
+    it("holds and releases as the operator, and names a refusal", async () => {
       expect((await post(key, { action: "hold", reason: "design vetoed" })).statusCode).toBe(200);
       const refused = await post(key, { action: "release" });
       expect(refused.statusCode).toBe(409);

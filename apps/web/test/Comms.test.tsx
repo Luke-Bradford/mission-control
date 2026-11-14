@@ -32,6 +32,7 @@ const toOperator = (id: string, from: string) => ({
     operator: false,
   },
   seen: false,
+  needsReply: true,
 });
 
 beforeEach(() => {
@@ -684,7 +685,7 @@ describe("Comms routes", () => {
       "/api/comms/crew?history=1": { messages: [message], unread: 3 },
       // not among the messages shown: opening the channel reads the ones it shows
       "/api/comms/mentions": {
-        mentions: [{ message: { ...message, id: "comms:10" }, seen: false }],
+        mentions: [{ message: { ...message, id: "comms:10" }, seen: false, needsReply: true }],
       },
       "/api/comms/pins": { messages: [message] },
       "POST /api/comms/read": { ok: true },
@@ -743,7 +744,7 @@ describe("Comms routes", () => {
     let attempts = 0;
     stubFetch({
       "/api/comms/crew": { messages: [] },
-      "/api/comms/mentions": { mentions: [{ message, seen: false }] },
+      "/api/comms/mentions": { mentions: [{ message, seen: false, needsReply: true }] },
       "/api/comms/pins": { messages: [] },
       "/api/flight": { seat: null, decisions: [] },
       "POST /api/comms/read": { ok: true },
@@ -1183,7 +1184,7 @@ describe("Comms routes", () => {
       "/api/config": CONFIG,
       "/api/flight": { seat: null, decisions: [] },
       "/api/comms/flight": { messages: [] },
-      "/api/comms/mentions": { mentions: [{ message: mention, seen: false }] },
+      "/api/comms/mentions": { mentions: [{ message: mention, seen: false, needsReply: true }] },
       "/api/comms/pins": { messages: [] },
       "/api/comms/agents/guido-cx": { messages: [], inbox: [], contacts: [], unread: 0 },
       "/api/comms/agents/guido-cx?summary=1": { messages: [], inbox: [], contacts: [], unread: 0 },
