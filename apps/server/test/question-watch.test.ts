@@ -303,7 +303,13 @@ describe("the hub closes a question on a recorded fact", () => {
     });
     store.passQuestion(second, NOW + 6);
     store.endRunQuestions("r-guido", NOW + 10);
-    const app = buildApp({ config: config(), store, bus: new ChangeBus(), operatorToken: "t" });
+    const app = buildApp({
+      config: config(),
+      store,
+      bus: new ChangeBus(),
+      operatorToken: "t",
+      now: () => NOW + 10,
+    });
     try {
       const res = await app.inject({
         method: "GET",
