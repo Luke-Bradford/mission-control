@@ -2577,10 +2577,26 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         store.markCommsScopeRead(scope.key, body.data.messageId);
         // Opening an agent's direct thread also moves the cursor its attention items key on (the
         // web reads through this route, not the per-thread one)
-        const direct = scope.key.match(/^agent-all:(.+)$/)?.[1] ?? directAgent(scope.key);
+        const all = scope.key.match(/^agent-all:(.+)$/)?.[1];
+        const direct = all ?? directAgent(scope.key);
         if (direct !== undefined && store.threadOwnsMessage(direct, body.data.messageId)) {
-          store.markThreadRead(direct, [body.data.messageId]);
-          bus.emit("attention");
+          let through: string | null = body.data.messageId;
+          if (all === undefined) {
+            // The pair view shows only the CAPCOM line: its agent's other lines stay unread, and
+            // the cursor stops before the first one the view did not show
+            const shown = new Set(scope.rows.map((row) => row.id));
+            const limit = Number(body.data.messageId.slice("comms:".length));
+            const after = store.threadReadCursors(direct).get("comms")?.offset ?? 0;
+            through = null;
+            for (const row of store.threadComms(direct, after)) {
+              if (Number(row.id.slice("comms:".length)) > limit || !shown.has(row.id)) break;
+              through = row.id;
+            }
+          }
+          if (through !== null) {
+            store.markThreadRead(direct, [through]);
+            bus.emit("attention");
+          }
         }
         return { ok: true };
       });
