@@ -1229,9 +1229,17 @@ describe("ItemPanel item chat isolation", () => {
         seat: { id: "flight-1", live: true, call: "FLIGHT-1", model: "opus", state: "idle" },
         decisions: [],
       },
-      "/api/agents/flight-1/stream?limit=20": {
-        events: [{ id: "global", kind: "msg", text: "Global conversation", at: NOW }],
-        total: 1,
+      "/api/comms/flight": {
+        messages: [
+          {
+            id: "comms:global",
+            at: NOW,
+            from: "flight-1",
+            to: "CAPCOM",
+            text: "Global conversation",
+            operator: false,
+          },
+        ],
       },
       "POST /api/seats/mc-dev-1/message": {},
       [discussionPath(a.key)]: first,

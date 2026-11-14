@@ -31,6 +31,7 @@ import {
 import { AwayDigest } from "./shell/AwayDigest.tsx";
 import { AwayModal } from "./shell/AwayModal.tsx";
 import { CommandPalette } from "./shell/CommandPalette.tsx";
+import { FLIGHT_THREAD_INPUT } from "./flight/FlightThread.tsx";
 import { Dock, useOverviewDockOverlay } from "./shell/Dock.tsx";
 import { Footer } from "./shell/Footer.tsx";
 import { Header } from "./shell/Header.tsx";
@@ -152,9 +153,9 @@ function Shell({
   const dock = useDock();
   const overview = shown.page === "overview";
   const overviewOverlay = useOverviewDockOverlay(overview, dock);
-  // The approved rail is site-wide. Comms already has the conversation; the full FLIGHT view
-  // keeps its own workspace instead of duplicating it beside the page.
-  const showDock = tabOf(shown) !== "comms" && !FULL_WIDTH_PAGES.has(tabOf(shown));
+  // The fly-out is site-wide. Comms and the full-width pages have no column for it, so on a wide
+  // screen it covers their right edge, as the narrow drawer does.
+  const coversShell = tabOf(shown) === "comms" || FULL_WIDTH_PAGES.has(tabOf(shown));
   const [buildStatus] = useBuildStatus();
   const cls = [
     "app",
@@ -218,7 +219,7 @@ function Shell({
         </a>
       )}
       <Header page={tabOf(shown)} />
-      <div className={`shell${showDock ? "" : " shell-full"}`}>
+      <div className={`shell${coversShell ? " shell-cover" : ""}`}>
         <main>
           <AwayDigest>
             <Suspense fallback={<p>Loading…</p>}>
@@ -233,7 +234,7 @@ function Shell({
             </Suspense>
           </AwayDigest>
         </main>
-        {showDock && <Dock coversPage={overviewOverlay} />}
+        <Dock coversPage={overviewOverlay} />
       </div>
       <Footer />
       <Toast />
@@ -379,10 +380,13 @@ function useShellKeys(current: Route, popout: boolean) {
       },
       toggleDock: () => {
         const { current: on, popout: isPopout } = latest.current;
-        // The full FLIGHT page opens the conversation in Comms. Comms and pop-outs already own
-        // their workspace; every other page has the same site-wide rail.
-        if (isPopout || tabOf(on) === "comms") return;
-        if (FULL_WIDTH_PAGES.has(tabOf(on))) navigate(PAGE_PATHS.comms);
+        // A pop-out is the Agent page alone. Where a thread box is already on screen outside the
+        // fly-out (Comms), `f` moves to it; everywhere else it opens the fly-out.
+        if (isPopout) return;
+        const box = document.querySelector<HTMLElement>(
+          `#${FLIGHT_THREAD_INPUT}:not(:disabled)`,
+        );
+        if (box) box.focus();
         else toggleDock();
       },
       help: openHelp,

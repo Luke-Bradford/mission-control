@@ -4,3 +4,6 @@
 .flight-thread-message.operator { justify-items: end; }
 .flight-thread-message > div { max-width: min(68%, 760px); padding: var(--sp-2) var(--sp-3); overflow-wrap: anywhere; background: var(--surface-2); border: 1px solid var(--line); border-radius: 2px; }
 .flight-thread-message.operator > div { background: color-mix(in srgb, var(--accent) 7%, var(--surface)); }
+.flight-thread-form { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-2); padding: var(--sp-3); border-top: 1px solid var(--line); }
+.flight-thread-form > :not(textarea):not(button[type="submit"]) { grid-column: 1 / -1; }
+.flight-thread-input { min-width: 0; resize: vertical; font: inherit; }

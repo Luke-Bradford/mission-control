@@ -811,6 +811,25 @@ select {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Comms and the full-width pages keep their canvas; the fly-out covers its right edge. */
+@media (min-width: 1200px) {
+  .shell.shell-cover {
+    position: relative;
+  }
+  .app:not(.dock-collapsed):not(.dock-hidden) .shell.shell-cover {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .app:not(.dock-collapsed):not(.dock-hidden) .shell.shell-cover .dock {
+    position: absolute;
+    top: var(--shell-gutter);
+    right: var(--shell-gutter);
+    bottom: var(--shell-gutter);
+    width: 380px;
+    z-index: 30;
+    box-shadow: var(--shadow);
+  }
+}
+
 @media (max-width: 1199px) {
   .shell,
   .app.dock-hidden .shell {
