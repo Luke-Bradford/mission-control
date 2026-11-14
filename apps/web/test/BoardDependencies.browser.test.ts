@@ -1,5 +1,6 @@
 // @vitest-environment node
 
+import { join } from "node:path";
 import type { BoardItem, ChainNode, DependencyChain } from "@mc/core";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
@@ -119,6 +120,8 @@ describeRendered("Board dependency chips, rendered", () => {
       expect(read.blocked.sort()).toEqual(["shop-app#11", "shop-app#12"]);
       expect(await page.unclipped("[data-chip]")).toEqual([true, true, true]);
       expect(page.errors()).toEqual([]);
+      const shots = process.env.MC_BOARD_DEPS_SHOTS;
+      if (shots) await page.screenshot(join(shots, `board-deps-${width}x${height}-${theme}.png`));
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,
@@ -142,6 +145,8 @@ describeRendered("Board dependency chips, rendered", () => {
         ).toBe(true);
       }
       expect(await page.unclipped("[data-chip]")).toEqual([true, true, true]);
+      const shots = process.env.MC_BOARD_DEPS_SHOTS;
+      if (shots) await page.screenshot(join(shots, "board-deps-210px-dark.png"));
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

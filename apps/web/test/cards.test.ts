@@ -504,12 +504,19 @@ describe("dependency chips", () => {
     expect(cardColumn(b, index)).toBe("Blocked");
     expect(cardColumn(b)).toBe("Ready");
   });
+  it("a Depends on that has landed leaves a held or stacked ticket in Ready", () => {
+    const idx = dependencyIndex([
+      chain(node("PR 22", { edge: null, children: [node("shop-app#5", { edge: "held" })] })),
+    ]);
+    const b = boardItem({ ...ready, issueNumber: 5, after: { issues: [2], prs: [] } });
+    expect(cardColumn(b, idx)).toBe("Ready");
+  });
   it("a ticket with no Depends on line, or no open wait, stays put", () => {
     expect(cardColumn(boardItem({ ...ready, issueNumber: 5 }), index)).toBe("Ready");
     const closed = boardItem({ ...ready, issueNumber: 6, after: { issues: [2], prs: [] } });
     expect(cardColumn(closed, index)).toBe("Ready");
   });
-  it("a root's card counts what merging frees; a Done card has none", () => {
+  it("a root's card counts what merging frees, found by its ticket or its PR ref", () => {
     expect(unblocksCount(index, "shop-app", ["shop-app#9", "PR 9"])).toBe(1);
     expect(unblocksCount(index, "shop-app", ["shop-app#3"])).toBe(0);
   });

@@ -1126,6 +1126,40 @@ describe("cards", () => {
     expect(root.querySelector("[data-chip=unblocks]")?.textContent).toBe("Unblocks 1");
   });
 
+  it("Done cards show no chip, even for a root with frees or a dependent in a chain", async () => {
+    const node = (ref: string, children: unknown[] = []) => ({
+      ref,
+      title: null,
+      edge: children.length ? null : "depends",
+      waitedMs: 3_600_000,
+      alsoWaitsOn: [],
+      children,
+    });
+    const chain = {
+      repoId: "shop-app",
+      root: node("shop-app#2", [node("shop-app#8")]),
+      state: "moving",
+      reason: "",
+      owner: "retro-1",
+      seatId: null,
+      longestWaitMs: null,
+      frees: ["shop-app#8"],
+      stillWaiting: [],
+    };
+    stub({
+      shopApp: [
+        todo(2, { status: "Done", state: "done", closed: true }),
+        todo(8, { status: "Done", state: "done", closed: true }),
+      ],
+      extra: { "/api/dependencies": [chain] },
+    });
+    const { container } = await open();
+    await screen.findByText("Ticket 2");
+    expect(card(container, "shop-app#2")).toBeTruthy();
+    expect(card(container, "shop-app#8")).toBeTruthy();
+    expect(container.querySelectorAll("[data-chip]").length).toBe(0);
+  });
+
   it("a Ready ticket whose blockers are closed stays in Ready", async () => {
     stub({
       shopApp: [
