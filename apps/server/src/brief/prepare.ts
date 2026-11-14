@@ -135,7 +135,7 @@ export function prepareOrdinaryGuidance(
   checkBriefRun(deps, action.seatId, action.runId, qid === undefined ? undefined : Number(qid));
   const question = qid ? store.question(Number(qid)) : null;
   if (
-    isOperatorCall(item, store) ||
+    isOperatorCall(item, store, config) ||
     protectedDecisionItem(store, item, config, at) ||
     (question && questionWithOperator(question, store.briefs().get(item.key)))
   )
@@ -276,7 +276,7 @@ export async function prepareBriefActions(
       }
       case "direct-queue-priority-swap": {
         if (
-          isOperatorCall(item, store) ||
+          isOperatorCall(item, store, config) ||
           protectedDecisionItem(store, item, config, at) ||
           item.key.startsWith("note:queue-reorder:")
         )

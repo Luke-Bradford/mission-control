@@ -34,6 +34,7 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { protectedDecisionItem } from "../src/attention/holds.ts";
 import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
 import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -56,7 +57,11 @@ import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
-import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
+import {
+  HUB_UPDATE_HELD_KEY,
+  HUB_UPDATE_HELD_SINCE,
+  HUB_UPDATE_PERSON_KEY,
+} from "../src/update.ts";
 import { defined } from "./defined.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
@@ -4563,6 +4568,105 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate(NOW, noFlight)).toBeUndefined();
     expect(all(NOW, noFlight).find((i) => i.key === `ask:${id}`)).toMatchObject({
       owner: "operator",
+    });
+  });
+
+  describe("a held hub Update (#1834)", () => {
+    const superuser = (): CcConfig => ({
+      ...c,
+      repos: c.repos.map((r) => (r.id === "shop-app" ? { ...r, flightPowers: "superuser" } : r)),
+    });
+    const held = (key: string, at = NOW - 5 * MIN) =>
+      store.raiseNote({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "A new version is waiting.",
+        at,
+      });
+    const heldItem = (cfg: CcConfig, at = NOW, key = HUB_UPDATE_HELD_KEY) =>
+      attentionItems(cfg, store, at, NO_LOCK, []).find((i) => i.key === `note:${key}`);
+
+    it("is FLIGHT's, inside its window, while FLIGHT is live on a superuser repo", () => {
+      flight();
+      held(HUB_UPDATE_HELD_KEY);
+      const cfg = superuser();
+      const item = heldItem(cfg);
+      expect(item).toMatchObject({
+        owner: "flight",
+        flightTriage: "waiting",
+        triageDueAt: NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS,
+      });
+      expect(
+        needsYouItems(attentionItems(cfg, store, NOW, NO_LOCK, [])).map((i) => i.key),
+      ).not.toContain(`note:${HUB_UPDATE_HELD_KEY}`);
+      // the predicates agree with the owner: FLIGHT may keep it
+      expect(
+        isOperatorCall({ key: `note:${HUB_UPDATE_HELD_KEY}`, kind: "blocked" }, store, cfg),
+      ).toBe(false);
+      expect(item && protectedDecisionItem(store, item, cfg, NOW)).toBe(false);
+    });
+
+    it("goes to the operator once FLIGHT's window has passed", () => {
+      flight();
+      held(HUB_UPDATE_HELD_KEY);
+      const late = heldItem(superuser(), NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS);
+      expect(late).toMatchObject({ owner: "operator", flightTriage: "missed" });
+    });
+
+    it("counts the window from when the Update was first held, not from the latest rewrite", () => {
+      flight();
+      held(HUB_UPDATE_HELD_KEY, NOW - MIN);
+      store.setSetting(HUB_UPDATE_HELD_SINCE, String(NOW - 25 * MIN));
+      expect(heldItem(superuser())).toMatchObject({ owner: "operator", flightTriage: "missed" });
+    });
+
+    it("is the operator's at once when FLIGHT is stopped", () => {
+      flight({ state: "stopped" });
+      held(HUB_UPDATE_HELD_KEY);
+      expect(heldItem(superuser())).toMatchObject({ owner: "operator" });
+    });
+
+    it("is the operator's on a standard repo, and with no FLIGHT seat", () => {
+      flight();
+      held(HUB_UPDATE_HELD_KEY, NOW - 30 * MIN);
+      // as before this change: nobody can run it for FLIGHT, so it is the operator's once missed
+      const item = heldItem(c);
+      expect(item).toMatchObject({ owner: "operator", flightTriage: "missed" });
+      expect(
+        isOperatorCall({ key: `note:${HUB_UPDATE_HELD_KEY}`, kind: "blocked" }, store, c),
+      ).toBe(true);
+      const noFlight: CcConfig = {
+        ...superuser(),
+        crew: c.crew && {
+          ...c.crew,
+          sessions: c.crew.sessions.map((s) => ({
+            ...s,
+            seats: s.seats.filter((x) => x.id !== "flight-1"),
+          })),
+        },
+      };
+      expect(heldItem(noFlight)).toMatchObject({ owner: "operator" });
+      expect(item && protectedDecisionItem(store, item, c, NOW)).toBe(true);
+    });
+
+    it("keeps a person-only Update the operator's from the start, whoever FLIGHT is", () => {
+      flight();
+      held(HUB_UPDATE_PERSON_KEY);
+      const cfg = superuser();
+      const item = heldItem(cfg, NOW, HUB_UPDATE_PERSON_KEY);
+      expect(item).toMatchObject({ owner: "operator" });
+      expect(item?.flightTriage).toBeUndefined();
+      expect(needsYouAlert({ key: `note:${HUB_UPDATE_PERSON_KEY}`, kind: "blocked" })).toBe(true);
+      expect(
+        isOperatorCall({ key: `note:${HUB_UPDATE_PERSON_KEY}`, kind: "blocked" }, store, cfg),
+      ).toBe(true);
+      expect(item && protectedDecisionItem(store, item, cfg, NOW)).toBe(true);
+      expect(
+        needsYouItems(attentionItems(cfg, store, NOW, NO_LOCK, [])).map((i) => i.key),
+      ).toContain(`note:${HUB_UPDATE_PERSON_KEY}`);
     });
   });
 });

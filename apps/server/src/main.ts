@@ -148,9 +148,11 @@ import { Store } from "./store.ts";
 import {
   createAutoUpdate,
   createHeldUpdateNote,
+  createQuietGate,
   createUpdater,
   crewRefusal,
   headSha,
+  raiseUpdatePersonNote,
   UPDATE_LOG,
 } from "./update.ts";
 
@@ -1028,6 +1030,7 @@ export async function main(): Promise<void> {
           enabled: config.updates?.hub === "auto",
           updater,
           held: heldUpdateNote,
+          person: (reason) => raiseUpdatePersonNote(store, bus, reason),
           blocked: () =>
             crewRefusal(config, supervisor, (id) => store.seatSession(id)) ??
             (lock.state().holder !== null ? "the test lock is held" : null),
@@ -1131,6 +1134,8 @@ export async function main(): Promise<void> {
     supervisor,
     engine,
     updater,
+    // FLIGHT's Update holds new runs while it waits for running turns to end
+    updateGate: createQuietGate(cliHold),
     // the guard and /mcp: tokens, the test lock, and each seat judged by its configured role
     ...crewGuardDeps(config, tokens, lock, store),
     repoRules: engineRules,

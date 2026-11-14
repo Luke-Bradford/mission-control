@@ -400,7 +400,7 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { resolveWasteAlarm } from "../spend/waste.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
-import { HUB_UPDATE_HELD_KEY } from "../update.ts";
+import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
 import { mergeExternalPr } from "./external-merge.ts";
@@ -3064,7 +3064,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (partFaults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${partFaults.join("; ")}.`);
     }
     if (structured.for === "flight") {
-      if (isOperatorCall(item, store))
+      if (isOperatorCall(item, store, config))
         return fail(
           "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
         );
@@ -4434,6 +4434,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           !note ||
           key.startsWith(GUARD_ACK_PREFIX) ||
           key === HUB_UPDATE_HELD_KEY ||
+          key === HUB_UPDATE_PERSON_KEY ||
           note.kind === "ratelimit"
         )
           return fail(note ? protectedItem : notFound);

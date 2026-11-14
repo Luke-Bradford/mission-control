@@ -118,6 +118,7 @@ import { reviewerOf } from "./engine/engine.ts";
 import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
+import { flightRunsUpdate } from "./flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
 import { loopTries } from "./loop/history.ts";
 import { loopPause } from "./loop/pause.ts";
@@ -133,7 +134,7 @@ import {
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
-import { HUB_UPDATE_HELD_KEY } from "./update.ts";
+import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_HELD_SINCE, HUB_UPDATE_PERSON_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
 /** A crew error's attention key: this, then its row id (an ack of it acks the row). */
@@ -892,12 +893,19 @@ interface FlightTriage {
 
 /**
  * The operator's call (#758): FLIGHT may brief it for the operator but never keep it. Unless it is
- * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, the
- * held hub Update, and a run parked on its budget or account, or on the operator's acceptance.
+ * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, an Update
+ * only a person can run, the held hub Update (when FLIGHT cannot run it), and a run parked on its budget or account, or on the operator's acceptance.
  */
-export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
+export function isOperatorCall(
+  item: Pick<AttentionItem, "key" | "kind">,
+  store: Store,
+  config?: CcConfig,
+): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
-  if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
+  if (item.key === `${NOTE_KEY}${HUB_UPDATE_PERSON_KEY}`) return true;
+  // the held Update is FLIGHT's to run where it can (#1834); without a config, or without that, it is the operator's
+  if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)
+    return config === undefined || !flightRunsUpdate(config);
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
   const park = noteParkOf(item, store);
@@ -1010,8 +1018,11 @@ function noteParkOf(item: Pick<AttentionItem, "key">, store: Store): string | un
 }
 
 /** Whether an item missed by FLIGHT reaches the operator as itself rather than being counted. */
-const keptRaw = (item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean =>
-  isOperatorCall(item, store) || STUCK_KINDS.includes(item.kind);
+const keptRaw = (
+  item: Pick<AttentionItem, "key" | "kind">,
+  store: Store,
+  config?: CcConfig,
+): boolean => isOperatorCall(item, store, config) || STUCK_KINDS.includes(item.kind);
 
 /**
  * A seat's question FLIGHT passed to the operator with its brief: the operator's to answer, not
@@ -1502,7 +1513,7 @@ function buildAttentionItems(
    */
   const missed = (item: AttentionItem, triageDueAt?: number): AttentionItem => ({
     ...item,
-    ...(triage === null || keptRaw(item, store) ? {} : { owner: OWNER_FLIGHT }),
+    ...(triage === null || keptRaw(item, store, config) ? {} : { owner: OWNER_FLIGHT }),
     flightTriage: "missed",
     ...(triageDueAt === undefined ? {} : { triageDueAt }),
   });
@@ -1586,6 +1597,20 @@ function buildAttentionItems(
       (i.owner === OWNER_CONTROLLER || i.owner === OWNER_FLIGHT)
     )
       return { ...item, owner: OWNER_OPERATOR };
+    // An Update only a person can run reaches the operator at once, with its reason
+    if (i.key === `${NOTE_KEY}${HUB_UPDATE_PERSON_KEY}`) return item;
+    // The held Update (#1834): FLIGHT's to run in a quiet gap. Its window runs from when the
+    // Update was first held, whatever FLIGHT keeps or briefs; past it, or with FLIGHT not
+    // triaging, it is the operator's as itself.
+    if (i.owner === OWNER_FLIGHT && i.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) {
+      if (triage === null || !triaging) return { ...item, owner: OWNER_OPERATOR };
+      const since = Number(store.getSetting(HUB_UPDATE_HELD_SINCE));
+      const raisedAt = Number.isFinite(since) && since > 0 ? Math.min(since, i.at) : i.at;
+      const triageDueAt = Math.max(raisedAt, triage.liveSince) + FLIGHT_TRIAGE_WAIT_MS;
+      return now < triageDueAt
+        ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
+        : { ...item, owner: OWNER_OPERATOR, flightTriage: "missed", triageDueAt };
+    }
     // A seat's question is FLIGHT's from the start (#758); only FLIGHT's brief makes it the
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.
     const seatAsk = i.kind === "question" && i.key.startsWith("ask:") && !flightAsks.has(i.key);
@@ -1620,7 +1645,7 @@ function buildAttentionItems(
     if (unownedReviews.has(i.key) && (!live || !triaging))
       return { ...item, owner: OWNER_FLIGHT, flightTriage: "down" };
     // nobody is triaging: an operator's call or a stuck run goes straight to the operator
-    if (!live || (!triaging && keptRaw(i, store))) return item;
+    if (!live || (!triaging && keptRaw(i, store, config))) return item;
     if (brief?.for === "flight") return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
     // A PR only becomes an attention item after its existing quiet wait.
     const raisedAt =
@@ -1885,7 +1910,10 @@ function noteOwner(
   store: Store,
   n: Pick<AttentionNote, "key" | "repoId" | "runId">,
   flightSeated: boolean,
+  flightRuns: boolean,
 ): AttentionOwner {
+  // a held Update FLIGHT can run is FLIGHT's; route() gives it the window (#1834)
+  if (n.key === HUB_UPDATE_HELD_KEY) return flightRuns ? OWNER_FLIGHT : OWNER_OPERATOR;
   if (
     n.repoId !== null &&
     store.getSetting(hardRulesBySettingKey(n.repoId)) === "flight" &&
@@ -1917,6 +1945,7 @@ function crewItems(
 ): OwnedItem[] {
   const sessions = config.crew?.sessions ?? [];
   const flightSeated = flightSeat(config) !== null;
+  const flightRuns = flightRunsUpdate(config);
   const repoOfSeat = (seatId: string) =>
     sessions.find((s) => s.seats.some((x) => x.id === seatId))?.repoId ?? null;
   const item = (
@@ -1997,14 +2026,14 @@ function crewItems(
     // the unfiled-minor-findings flag is raised after the merge and waits for a fix: it outlives its run
     if (
       !n.key.endsWith(":file-minor") &&
-      noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
+      noteOwner(store, n, flightSeated, flightRuns) !== OWNER_CONTROLLER &&
       run !== null &&
       endedWorkOver(config, store, run, boardOf, now)
     )
       continue;
     if (
       n.kind === "blocked" &&
-      noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
+      noteOwner(store, n, flightSeated, flightRuns) !== OWNER_CONTROLLER &&
       run !== null &&
       endedParkGone(config, store, run, boardOf)
     )
@@ -2014,7 +2043,7 @@ function crewItems(
         ? undefined
         : (store.pullRequest(run.repoId, run.loop.prNumber) ?? undefined);
     const noteItem: OwnedItem = {
-      owner: noteOwner(store, n, flightSeated),
+      owner: noteOwner(store, n, flightSeated, flightRuns),
       key: `${NOTE_KEY}${n.key}`,
       kind: n.kind,
       agentId: n.seatId,
