@@ -417,6 +417,75 @@ describe("PrEvidence capture", () => {
     expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
   });
 
+  it("retries a render that times out once straight away, before the attempt fails", async () => {
+    let tries = 0;
+    const t = setup({
+      render: async (origin, _path, scheme) => {
+        if (origin.endsWith(HEAD) && scheme === "dark" && tries++ === 0)
+          throw new Error("HUD screenshot timed out after 30000 ms");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(tries).toBe(2);
+    expect(t.store.manifest("mc", 7, HEAD)).not.toBeNull();
+  });
+
+  it("keeps the renders that worked and renders only the missing page on the next attempt", async () => {
+    let now = 5000;
+    let broken = true;
+    const paths = ["apps/web/src/board/Card.tsx", "apps/web/src/comms/ItemBrief.tsx"];
+    const seen: { path: string }[] = [];
+    const t = setup({
+      now: () => now,
+      webGraph: async () => ({ "apps/web/src/comms/ItemBrief.tsx": ["comms"] }),
+      render: async (origin, path, scheme) => {
+        seen.push({ path });
+        if (broken && path.startsWith("/comms") && origin.endsWith(HEAD))
+          throw new Error("HUD screenshot timed out after 30000 ms");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths };
+    await t.evidence.ensure(target);
+    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+    const why = t.evidence.gate(target) ?? "";
+    expect(why).toContain("missing pages: comms");
+    expect(why).not.toContain("board");
+    broken = false;
+    now += 1001;
+    seen.length = 0;
+    await t.evidence.ensure(target);
+    expect(new Set(seen.map((r) => r.path))).toEqual(new Set(["/comms"]));
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.pairs.map((p) => p.page).sort()).toEqual(["board", "board", "comms", "comms"]);
+    expect(t.evidence.gate(target)).toBeNull();
+  });
+
+  it("throws the kept renders away when the PR gets a new head", async () => {
+    let now = 5000;
+    let broken = true;
+    let renders = 0;
+    const t = setup({
+      now: () => now,
+      render: async (origin, _path, scheme) => {
+        renders++;
+        if (broken && scheme === "dark" && origin.endsWith(HEAD)) throw new Error("timed out");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    broken = false;
+    now += 1001;
+    renders = 0;
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    expect(renders).toBe(4); // both sides, both schemes: nothing reused
+    // and the old head's kept renders are gone: going back to it renders everything again
+    renders = 0;
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(renders).toBe(4);
+  });
+
   it("names the page, scheme and side of a render that times out, in the log and the gate", async () => {
     const lines: string[] = [];
     const t = setup({
