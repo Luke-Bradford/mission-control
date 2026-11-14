@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { SideTabs } from "../src/agent/SideTabs.tsx";
 import { hub } from "../src/data.ts";
@@ -177,9 +177,98 @@ it("retains edited Focus and validation explanation after a failed save", async 
     target: { value: "catalog bugs" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
-  await screen.findByText("Use selectors.");
+  await screen.findByRole("link", { name: "Use selectors." });
   expect((screen.getByRole("textbox", { name: "Focus" }) as HTMLInputElement).value).toBe(
     "catalog bugs",
+  );
+});
+
+const focusForm = () => screen.getByRole("form", { name: "Focus for GUIDO-2" });
+const summary = () => screen.getByRole("region", { name: "Focus not saved" });
+const writes = (fn: ReturnType<typeof setup>) =>
+  fn.mock.calls.filter(([, init]) => init?.method === "POST");
+
+it("an invalid focus selector explains itself and keeps the draft", async () => {
+  const fn = setup({
+    [`POST ${focusPath}`]: () => ({ status: 400, body: { error: "Unknown selector: catalog." } }),
+  });
+  await screen.findByText("label:catalog");
+  fireEvent.click(screen.getByRole("button", { name: "Change" }));
+  const input = screen.getByRole("textbox", { name: "Focus" }) as HTMLInputElement;
+  fireEvent.change(input, { target: { value: "catalog bugs" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  const link = await screen.findByRole("link", { name: "Unknown selector: catalog." });
+  // focus moved to the named summary, which links to the invalid field
+  await waitFor(() => expect(document.activeElement).toBe(summary()));
+  expect(within(focusForm()).getByRole("group", { name: "Focus for GUIDO-2" })).toBeTruthy();
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  expect(input.getAttribute("aria-describedby")).toContain(`${input.id}-error`);
+  fireEvent.click(link);
+  expect(document.activeElement).toBe(input);
+  expect(input.value).toBe("catalog bugs");
+  expect(screen.queryByText(/result is unknown/)).toBeNull();
+  expect(writes(fn)).toHaveLength(1);
+});
+
+it("keeps the Focus draft and says the result is unknown after a network loss", async () => {
+  const fn = setup({
+    [`POST ${focusPath}`]: () => {
+      throw new TypeError("Failed to fetch");
+    },
+  });
+  await screen.findByText("label:catalog");
+  fireEvent.click(screen.getByRole("button", { name: "Change" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Focus" }), {
+    target: { value: "label:bugs" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  const box = await screen.findByRole("region", { name: "Result unknown" });
+  await waitFor(() => expect(document.activeElement).toBe(box));
+  expect(box.textContent).toContain("Your entries are kept");
+  const input = screen.getByRole("textbox", { name: "Focus" }) as HTMLInputElement;
+  expect(input.value).toBe("label:bugs");
+  expect(input.getAttribute("aria-invalid")).toBeNull();
+  expect(writes(fn)).toHaveLength(1);
+});
+
+it("posts Focus once when it is submitted twice", async () => {
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fn = setup({
+    [`POST ${focusPath}`]: async () => {
+      await gate;
+      return { status: 200, body: { focus: "label:bugs" } };
+    },
+  });
+  await screen.findByText("label:catalog");
+  fireEvent.click(screen.getByRole("button", { name: "Change" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Focus" }), {
+    target: { value: "label:bugs" },
+  });
+  const form = screen.getByRole("textbox", { name: "Focus" }).closest("form") as HTMLFormElement;
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  await act(async () => {
+    release();
+    await gate;
+  });
+  await waitFor(() => expect(screen.queryByRole("textbox", { name: "Focus" })).toBeNull());
+  expect(writes(fn)).toHaveLength(1);
+});
+
+it("clears Focus when it is saved empty", async () => {
+  const fn = setup({ [`POST ${focusPath}`]: { focus: null } });
+  await screen.findByText("label:catalog");
+  fireEvent.click(screen.getByRole("button", { name: "Change" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Focus" }), { target: { value: "  " } });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() =>
+    expect(fn).toHaveBeenCalledWith(
+      focusPath,
+      expect.objectContaining({ body: JSON.stringify({ focus: null }) }),
+    ),
   );
 });
 

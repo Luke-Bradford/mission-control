@@ -40,6 +40,12 @@ window.fetch = (input, init) => {
         }),
       );
   }
+  // The runner answers by path alone, so a Focus save would read as the focus read and succeed:
+  // refuse that write here, with no effect.
+  if (init?.method === "POST" && path === RESOURCES.focus("guido-1").path)
+    return Promise.resolve(
+      new Response(JSON.stringify({ error: "Unknown selector: catalog." }), { status: 400 }),
+    );
   return fetchFixture(input, init);
 };
 window.addEventListener("fixture-stale-agent", () => {

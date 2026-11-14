@@ -1,26 +1,8 @@
+/* The rename form is a grouped form (components/forms.css) that takes its own row. */
 .rename-editor {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--sp-1);
+  flex-basis: 100%;
   min-width: 0;
-  max-width: 100%;
-}
-
-.rename-editor label {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.rename-editor input {
-  min-width: 0;
-  width: 16ch;
-  max-width: 100%;
-}
-
-.rename-editor [role="alert"] {
   overflow-wrap: anywhere;
-  max-width: 100%;
 }
 
 /* The Switch account form is a grouped form (components/forms.css) that takes its own row. */
