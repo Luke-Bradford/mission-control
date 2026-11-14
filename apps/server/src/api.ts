@@ -2575,7 +2575,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
         store.markCommsScopeRead(scope.key, body.data.messageId);
-        // Opening an agent's direct thread also moves the cursor its attention items key on
+        // Opening an agent's direct thread also moves the cursor its attention items key on (the
+        // web reads through this route, not the per-thread one)
         const direct = scope.key.match(/^agent-all:(.+)$/)?.[1] ?? directAgent(scope.key);
         if (direct !== undefined && store.threadOwnsMessage(direct, body.data.messageId)) {
           store.markThreadRead(direct, [body.data.messageId]);
