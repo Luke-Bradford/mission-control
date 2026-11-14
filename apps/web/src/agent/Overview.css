@@ -78,8 +78,8 @@
   border: 1px solid var(--line-2);
   box-shadow: 0 4px 12px var(--bg);
 }
-/* The account switch is a 480px grouped form: the menu grows to hold it while it is open. */
-.agent-v2-menu:has(.account-chooser) {
+/* The account switch and the rename are 480px grouped forms: the menu grows to hold one while it is open. */
+.agent-v2-menu:has(.account-chooser, .rename-editor) {
   width: min(calc(480px + 2 * var(--sp-2) + 2px), calc(100vw - 2 * var(--sp-4)));
   box-sizing: border-box;
 }

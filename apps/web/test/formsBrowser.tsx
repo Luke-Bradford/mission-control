@@ -11,6 +11,7 @@ import "../src/hud.css";
 import "../src/agent/Overview.css";
 import { createRoot } from "react-dom/client";
 import { AgentHeaderActions } from "../src/agent/Header.tsx";
+import { Queue } from "../src/agent/SideTabs.tsx";
 import { CrewPauseControl } from "../src/components/CrewPause.tsx";
 import { RESOURCES, streamStatus } from "../src/data.ts";
 import { Setup } from "../src/pages/Setup.tsx";
@@ -18,8 +19,8 @@ import { AwayModal } from "../src/shell/AwayModal.tsx";
 import { openAway } from "../src/shell/overlays.ts";
 import { NOW, seatRow } from "./fixtures.ts";
 
-// One harness for the repo, seat and account-switch forms: `?form=F06` is the Agent page header
-// that holds Switch account; `loops` and `sources` are Setup's Loops and Sources tabs (the template
+// One harness for the repo, seat and account-switch forms: `?form=F06` and `F17` are the Agent page header
+// that holds Switch account and Rename; `F16` is the Queue tab that holds the Focus form; `loops` and `sources` are Setup's Loops and Sources tabs (the template
 // editor and the Teams feeds); anything else is Setup's Repos & seats tab. `?state=` is how the
 // data arrives: loading (never), error (refused), status-loading (accounts load, their login state does not) or
 // disconnected (the live stream is down). `pause` is the crew pause control and `away` the Away
@@ -64,7 +65,11 @@ createRoot(root).render(
           </div>
         ) : params.get("form") === "away" ? (
           <AwayModal />
-        ) : params.get("form") === "F06" ? (
+        ) : params.get("form") === "F16" ? (
+          <section className="panel">
+            <Queue row={seatRow({ queue: [] })} />
+          </section>
+        ) : params.get("form") === "F06" || params.get("form") === "F17" ? (
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <AgentHeaderActions
               row={seatRow({ accountId: params.get("account") ?? "codex-main" })}

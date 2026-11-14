@@ -93,6 +93,19 @@ function world(kind: World) {
     [RESOURCES.crewSessions.path]: [],
     [RESOURCES.attention.path]: [],
     [RESOURCES.crew.path]: { rows: [], firstRunToday: null },
+    // the Agent page's Queue tab (F16)
+    [RESOURCES.focus("guido-1").path]: {
+      focus: "label:catalog",
+      effectiveFocus: "label:catalog",
+      focusInstructionId: null,
+    },
+    [RESOURCES.seatInstructions("guido-1").path]: {
+      active: [],
+      history: [],
+      effectiveFocus: "label:catalog",
+      focusInstructionId: null,
+    },
+    [RESOURCES.runs("guido-1").path]: [],
   };
 }
 
@@ -190,6 +203,21 @@ const FORMS = [
     cap: 640,
     steps: [["field", "Feed name"]],
   },
+  {
+    id: "F16",
+    form: 'form[aria-label="Focus for GUIDO-1"]',
+    cap: 480,
+    steps: [["click", "Change"]],
+  },
+  {
+    id: "F17",
+    form: 'form[aria-label="Rename GUIDO-1"]',
+    cap: 480,
+    steps: [
+      ["css", ".agent-v2-actions details summary"],
+      ["click", "Rename"],
+    ],
+  },
 ] as const satisfies readonly {
   id: string;
   form: string;
@@ -198,7 +226,13 @@ const FORMS = [
 }[];
 type Form = (typeof FORMS)[number];
 const pageOf = (form: Form) =>
-  form.id === "F06" ? "F06" : form.id === "F14" ? "loops" : form.id === "F15" ? "sources" : "repos";
+  form.id === "F06" || form.id === "F16" || form.id === "F17"
+    ? form.id
+    : form.id === "F14"
+      ? "loops"
+      : form.id === "F15"
+        ? "sources"
+        : "repos";
 
 /** The Setup tab a form lives on, as a path under /setup. */
 const tabOf = (form: Form) =>
@@ -513,6 +547,9 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
     F12: { steps: [["click", "Save seat"]] },
     F14: { steps: [["click", "Save template"]] },
     F15: { steps: [["click", "Add feed"]] },
+    // the fixture refuses every write it does not list, so Save is answered with an explained 404
+    F16: { steps: [["click", "Save"]] },
+    F17: { steps: [["click", "Save call sign"]] },
   };
   for (const form of FORMS) {
     it(
