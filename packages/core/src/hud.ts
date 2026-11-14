@@ -42,6 +42,8 @@ export const STALL_MS = 10 * 60_000;
 export const BACKGROUND_STALL_MS = 60 * 60_000;
 /** The Needs-you text of a stalled agent. */
 export const STALL_TEXT = "No output";
+/** Shown on a blocked ticket that has no parked reason and no open blocked-by ticket. */
+export const BLOCKED_NO_REASON_TEXT = "No reason recorded";
 export const STREAM_TEXT_MAX = 2000;
 /** A file's diff (`/api/agents/:id/files/diff`) is cut at this many characters. */
 export const DIFF_MAX_CHARS = 200_000;

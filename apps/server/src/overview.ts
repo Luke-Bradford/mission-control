@@ -1,15 +1,16 @@
 import {
   type AttentionItem,
+  BLOCKED_NO_REASON_TEXT,
   type BoardItem,
-  CI_PASSED_EVENT_PREFIX,
+  type CiRunView,
   type HudState,
   hudColumnOf,
-  isCiFailureEvent,
   needsYouItems,
   type OverviewSummary,
   type PipelineCard,
   type PipelineStage,
   type PullRequestView,
+  REVIEW_STATUS_CONTEXT,
   type ReviewRow,
   type Run,
   startOfLocalDay,
@@ -32,6 +33,7 @@ const STAGES: PipelineStage["stage"][] = [
   "review",
   "merging",
   "merged",
+  "blocked",
 ];
 const CI: Record<NonNullable<PullRequestView["ci"]>, PipelineCard["ci"][number]> = {
   passing: "pass",
@@ -78,13 +80,11 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
   );
   const linked = prs.filter(isLinked);
   const pipelineRepos = new Set(scope.pipelineRepoIds ?? scope.repoIds);
-  const ci = scope.repoIds
-    .flatMap((id) => store.loopEvents(since - DAY_MS, id))
-    .filter((e) => e.at <= now);
-  const passed = ci.filter(
-    (e) => e.at >= now - DAY_MS && e.text.startsWith(CI_PASSED_EVENT_PREFIX),
-  ).length;
-  const failed = ci.filter((e) => e.at >= now - DAY_MS && isCiFailureEvent(e.text)).length;
+  const heads = ciHeads(store.ciRuns(since - DAY_MS), repos).filter((h) => h.at <= now);
+  const inDay = heads.filter((h) => h.at >= now - DAY_MS);
+  const passed = inDay.filter((h) => h.outcome === "pass").length;
+  const failed = inDay.filter((h) => h.outcome === "fail").length;
+  const cancelled = inDay.filter((h) => h.outcome === "cancelled").length;
   // The registry's Needs you is the operator's whole inbox (`needsYouItems`): one per key, and no
   // session filter narrows it, so its history is one series whatever the scope.
   const needs = needsYouItems(scope.attention).filter((i) => i.at <= now);
@@ -134,9 +134,9 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     return tickets.size;
   });
   const ciSeries = minuteEnds.map((at) => {
-    const outcomes = ci.filter((e) => e.at >= at - DAY_MS && e.at < at);
-    const pass = outcomes.filter((e) => e.text.startsWith(CI_PASSED_EVENT_PREFIX)).length;
-    const fail = outcomes.filter((e) => isCiFailureEvent(e.text)).length;
+    const outcomes = heads.filter((h) => h.at >= at - DAY_MS && h.at < at);
+    const pass = outcomes.filter((h) => h.outcome === "pass").length;
+    const fail = outcomes.filter((h) => h.outcome === "fail").length;
     return pass + fail ? (100 * pass) / (pass + fail) : null;
   });
   // Keep episodes after disappearance so resolving a need cannot rewrite prior minutes.
@@ -203,6 +203,7 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
         series: ciSeries,
         pct: passed + failed === 0 ? null : (100 * passed) / (passed + failed),
         runs: passed + failed,
+        cancelled,
         redNow: linked.filter((p) => p.state === "open" && p.ci === "failing").length,
       },
       needsYou: {
@@ -214,6 +215,57 @@ export function overviewSummary(store: Store, now: number, scope: OverviewScope)
     pipeline,
     machine: { cpu, mem, disk: diskSeries, diskFreeGb: disk === null ? null : disk / 1024 ** 3 },
   };
+}
+
+interface CiHead {
+  at: number;
+  outcome: "pass" | "fail" | "cancelled";
+}
+
+/**
+ * One outcome per PR head from its check runs: the latest attempt of each check, skipping checks
+ * still running. Any failure fails the head; else any pass passes it; a head whose finished checks
+ * were all cancelled is `cancelled` (left out of the rate); a head with nothing finished has none.
+ * `at` is when the hub first read the head's checks, which a later poll does not move.
+ */
+function ciHeads(rows: readonly CiRunView[], repos: ReadonlySet<string>): CiHead[] {
+  const byHead = new Map<string, Map<string, CiRunView>>();
+  const firstSeen = new Map<string, number>();
+  for (const r of rows) {
+    // the hub's own review status is not CI, whatever its state
+    if (!repos.has(r.repoId) || r.name === REVIEW_STATUS_CONTEXT) continue;
+    const head = `${r.repoId}:${r.sha}`;
+    firstSeen.set(head, Math.min(firstSeen.get(head) ?? r.firstSeenAt, r.firstSeenAt));
+    const checks = byHead.get(head) ?? new Map<string, CiRunView>();
+    byHead.set(head, checks);
+    const key = `${r.workflow ?? ""}:${r.name}`;
+    const have = checks.get(key);
+    if (!have || r.attempt > have.attempt || (r.attempt === have.attempt && r.at > have.at))
+      checks.set(key, r);
+  }
+  const heads: CiHead[] = [];
+  for (const [head, checks] of byHead) {
+    // checks GitHub skipped or left neutral say nothing about the head
+    const counted = [...checks.values()].filter(
+      (c) => !["skipped", "neutral"].includes(c.conclusion.toLowerCase()),
+    );
+    const done = counted.filter((c) => c.state !== "pending");
+    const cancelled = (c: CiRunView) => c.conclusion.toLowerCase() === "cancelled";
+    const real = done.filter((c) => !cancelled(c));
+    // A failed check decides the head at once; otherwise it is not finished while any check runs
+    // (a head superseded mid-run is never read again, so it must not count as a pass).
+    const running = counted.length > done.length;
+    const outcome = real.some((c) => c.state === "failing")
+      ? "fail"
+      : running || done.length === 0
+        ? null
+        : real.length > 0
+          ? "pass"
+          : "cancelled";
+    if (outcome === null) continue;
+    heads.push({ at: firstSeen.get(head) ?? 0, outcome });
+  }
+  return heads;
 }
 
 const isLinked = (p: PullRequestView): boolean =>
@@ -291,9 +343,11 @@ export function pipelineStages(
         ? [CI[pr.ci]]
         : [];
   const agentStates = store.latestAgentStates();
+  const boardsRead = new Map<string, readonly Readonly<BoardItem>[]>();
   for (const repoId of pipelineRepos) {
     const readyMoves = store.overviewReadyMoves(repoId);
     const board = boardOf?.get(repoId) ?? store.boardView(repoId);
+    boardsRead.set(repoId, board);
     const items = board.map((item) => ({ ...item, column: hudColumnOf(item) }));
     const missing = [...live.values()].flatMap((run) => {
       const ticket = run.ticket === null ? null : parseTicket(run.ticket);
@@ -310,6 +364,7 @@ export function pipelineStages(
           closed: false,
           updatedAt: run.startedAt,
           column: null,
+          blockedBy: [],
           priority: null,
           size: null,
         },
@@ -329,19 +384,21 @@ export function pipelineStages(
       // Review found blocking problems on the PR's head: a developer owes a fix, so it is building
       const review = pr ? reworkReview(store, pr) : null;
       const stage =
-        run?.loop?.merging && phase !== "done"
-          ? "merging"
-          : phase === "working" ||
-              (phase === "parked" && column !== "In review") ||
-              (phase === "review" && review !== null)
-            ? "building"
-            : phase === "ci"
-              ? "checks"
-              : phase === "review" || column === "In review"
-                ? "review"
-                : column === "Ready" && !run
-                  ? "ready"
-                  : null;
+        column === "Blocked"
+          ? "blocked"
+          : run?.loop?.merging && phase !== "done"
+            ? "merging"
+            : phase === "working" ||
+                (phase === "parked" && column !== "In review") ||
+                (phase === "review" && review !== null)
+              ? "building"
+              : phase === "ci"
+                ? "checks"
+                : phase === "review" || column === "In review"
+                  ? "review"
+                  : column === "Ready" && !run
+                    ? "ready"
+                    : null;
       if (!stage) continue;
       cards.get(stage)?.push({
         repoId,
@@ -356,15 +413,19 @@ export function pipelineStages(
         who: run?.agentId ?? null,
         priority: item.priority,
         size: item.size,
+        ...(stage === "blocked"
+          ? { blockedReason: blockedReason(item, newestRun(store.runsOnTicket(repoId, ref))) }
+          : {}),
         ...(review === null ? {} : { rework: reworkFacts(store, review, run, agentStates) }),
       });
     }
   }
   for (const pr of linked) {
     if (!pipelineRepos.has(pr.repoId)) continue;
-    if (pr.mergedAt === null || pr.mergedAt < doneSince || pr.mergedAt > now) continue;
+    if (pr.mergedAt === null || pr.mergedAt <= doneSince || pr.mergedAt > now) continue;
     const ticket = pr.ticket === null ? pr.closingIssues?.[0] : parseTicket(pr.ticket)?.number;
     if (ticket === undefined) continue;
+    const open = boardsRead.get(pr.repoId)?.some((b) => b.issueNumber === ticket && !b.closed);
     cards.get("merged")?.push({
       repoId: pr.repoId,
       ticket,
@@ -373,7 +434,22 @@ export function pipelineStages(
       ci: checks(pr),
       since: pr.mergedAt,
       who: null,
+      ...(open ? { ticketOpen: true } : {}),
     });
+  }
+  // A ticket whose PR has merged is not in review or merging, whatever the board still says: the
+  // counts and the cards come from this one list.
+  const mergedPrs = new Set((cards.get("merged") ?? []).map((c) => `${c.repoId}#${c.pr}`));
+  const mergedTickets = new Set((cards.get("merged") ?? []).map((c) => `${c.repoId}#${c.ticket}`));
+  for (const stage of ["review", "merging"] as const) {
+    cards.set(
+      stage,
+      (cards.get(stage) ?? []).filter((c) =>
+        c.pr !== null
+          ? !mergedPrs.has(`${c.repoId}#${c.pr}`)
+          : !mergedTickets.has(`${c.repoId}#${c.ticket}`),
+      ),
+    );
   }
   const pipeline = STAGES.map((stage): PipelineStage => {
     const all = cards.get(stage) ?? [];
@@ -387,6 +463,17 @@ export function pipelineStages(
   return pipeline;
 }
 
+const newestRun = (runs: readonly Run[]): Run | undefined =>
+  runs.reduce<Run | undefined>((a, r) => (!a || r.startedAt > a.startedAt ? r : a), undefined);
+
+/** Why a Blocked ticket is blocked: its run's parked reason, else the open tickets it waits on. */
+function blockedReason(item: Pick<BoardItem, "blockedBy">, run: Run | undefined): string {
+  const parked = run?.loop?.parked?.reason;
+  if (parked) return parked;
+  const waits = item.blockedBy.filter((b) => !b.closed).map((b) => b.ref);
+  return waits.length ? `Waiting on ${waits.join(", ")}` : BLOCKED_NO_REASON_TEXT;
+}
+
 /**
  * The registry's In progress (`METRICS.inProgress`): tickets building, in checks, in review or
  * merging, and when the oldest of them entered its stage.
@@ -395,7 +482,9 @@ export function inProgressOf(pipeline: readonly PipelineStage[]): {
   count: number;
   oldestAt: number | null;
 } {
-  const stages = pipeline.filter((p) => p.stage !== "merged" && p.stage !== "ready");
+  const stages = pipeline.filter(
+    (p) => p.stage !== "merged" && p.stage !== "ready" && p.stage !== "blocked",
+  );
   const oldest = stages.flatMap((p) => (p.oldestAt === null ? [] : [p.oldestAt]));
   return {
     count: stages.reduce((n, p) => n + p.count, 0),

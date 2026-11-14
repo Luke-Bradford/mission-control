@@ -78,7 +78,8 @@ it("counts PRs merged in the last 24 hours in the crew's repos; loop repos apart
     "repo",
     [
       pr(1, { mergedAt: NOW - MIN, ticket: "repo#1" }),
-      pr(2, { mergedAt: NOW - 23 * HOUR }), // before local midnight, still inside 24 h
+      pr(2, { mergedAt: NOW - 23 * HOUR, ticket: "repo#2" }), // before local midnight, still inside 24 h
+      pr(7, { mergedAt: NOW - MIN }), // linked to no ticket: no card, so not counted
       pr(3, { mergedAt: NOW - DAY }), // exactly 24 h ago: outside
       pr(4, { mergedAt: NOW + MIN }), // the future
       pr(5, { state: "open" }),
