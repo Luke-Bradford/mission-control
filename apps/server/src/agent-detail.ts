@@ -105,6 +105,19 @@ export function agentDetail({
   } else if (row.reviewing) {
     label = "Checking";
     reason = `PR #${row.reviewing.prNumber}`;
+  } else if (row.hudState === "blocked") {
+    // Never "Blocked". An observed loop held for the operator is waiting on them; a crew seat is
+    // free with no open run, otherwise waiting.
+    const open = run !== null && run.endedAt === null;
+    if (row.kind !== "crew") {
+      label = "Waiting on you";
+      reason = safe(row.note);
+    } else {
+      label = open ? "Waiting" : "Free";
+      reason = open
+        ? safe(row.note ?? loop?.loop?.parked?.reason ?? row.loop?.parked)
+        : safe(row.note);
+    }
   } else if (row.hudState === "waiting") {
     reason = reason ?? "Waiting for the test lock";
   } else if (next?.kind === "question" && run?.endedAt === null) {
