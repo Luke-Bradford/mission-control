@@ -245,7 +245,10 @@ function ciHeads(rows: readonly CiRunView[], repos: ReadonlySet<string>): CiHead
   }
   const heads: CiHead[] = [];
   for (const [head, checks] of byHead) {
-    const done = [...checks.values()].filter((c) => c.state !== "pending");
+    // unfinished checks, and ones GitHub skipped or left neutral, say nothing about the head
+    const done = [...checks.values()].filter(
+      (c) => c.state !== "pending" && !["skipped", "neutral"].includes(c.conclusion.toLowerCase()),
+    );
     if (done.length === 0) continue;
     const cancelled = (c: CiRunView) => c.conclusion.toLowerCase() === "cancelled";
     const real = done.filter((c) => !cancelled(c));
@@ -431,6 +434,20 @@ export function pipelineStages(
       who: null,
       ...(open ? { ticketOpen: true } : {}),
     });
+  }
+  // A ticket whose PR has merged is not in review or merging, whatever the board still says: the
+  // counts and the cards come from this one list.
+  const mergedPrs = new Set((cards.get("merged") ?? []).map((c) => `${c.repoId}#${c.pr}`));
+  const mergedTickets = new Set((cards.get("merged") ?? []).map((c) => `${c.repoId}#${c.ticket}`));
+  for (const stage of ["review", "merging"] as const) {
+    cards.set(
+      stage,
+      (cards.get(stage) ?? []).filter((c) =>
+        c.pr !== null
+          ? !mergedPrs.has(`${c.repoId}#${c.pr}`)
+          : !mergedTickets.has(`${c.repoId}#${c.ticket}`),
+      ),
+    );
   }
   const pipeline = STAGES.map((stage): PipelineStage => {
     const all = cards.get(stage) ?? [];

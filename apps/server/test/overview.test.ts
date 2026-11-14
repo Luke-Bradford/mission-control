@@ -955,3 +955,26 @@ it("marks a merged PR whose ticket is still open, and not one whose ticket close
     [2, false],
   ]);
 });
+
+it("leaves skipped checks out: a cancelled head with a skipped dependent job is cancelled", () => {
+  readHead(
+    1,
+    "s1",
+    [ciCheck("CANCELLED", "failing", "build"), ciCheck("SKIPPED", "passing", "deploy")],
+    NOW - MIN,
+  );
+  readHead(2, "s2", [ciCheck("SKIPPED", "passing")], NOW - MIN);
+  expect(summary().kpis.ciPassRate24h).toMatchObject({ runs: 0, cancelled: 1, pct: null });
+});
+
+it("does not count an open In-review ticket whose PR merged as in flight", () => {
+  store.replaceBoard("repo", [card(1, "In review")]);
+  store.replacePullRequests("repo", [pr(1, { state: "merged", mergedAt: NOW - MIN })], NOW);
+  const result = summary();
+  expect(result.pipeline.find((p) => p.stage === "review")?.count).toBe(0);
+  expect(result.kpis.inFlight.count).toBe(0);
+  expect(result.pipeline.find((p) => p.stage === "merged")?.cards[0]).toMatchObject({
+    ticket: 1,
+    ticketOpen: true,
+  });
+});
