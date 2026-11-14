@@ -30,6 +30,8 @@ import {
 } from "../board/boardView.ts";
 import { standup, weekly } from "../board/brief.ts";
 import {
+  BOARD_COLUMNS,
+  type BoardColumn,
   type CardRework,
   cardAgent,
   cardColumn,
@@ -82,11 +84,11 @@ function prioritySource(p: RepoProfile): string {
 }
 
 /** The columns a repo's statuses reach, plus Backlog and Done (and any column its cards sit in). */
-function columnsOf(p: RepoProfile | undefined, items: BoardItem[]): HudColumn[] {
+function columnsOf(p: RepoProfile | undefined, items: BoardItem[]): BoardColumn[] {
   if (!p) return [...HUD_COLUMNS];
-  const reached = new Set<HudColumn>(["Backlog", "Done", ...p.statuses.map((s) => s.column)]);
+  const reached = new Set<BoardColumn>(["Backlog", "Done", ...p.statuses.map((s) => s.column)]);
   for (const i of items) reached.add(cardColumn(i));
-  return HUD_COLUMNS.filter((c) => reached.has(c));
+  return BOARD_COLUMNS.filter((c) => reached.has(c));
 }
 
 function isInPipelineLane(lane: PipelineLane, stage: PipelineStage["stage"] | null): boolean {

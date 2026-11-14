@@ -32,10 +32,6 @@ export function setDemo(on: boolean): void {
 const OPEN = 1;
 const CLOSED = 2;
 
-/** An 1×1 PNG, the answer to a review-image read in Demo. */
-export const DEMO_PNG_BASE64 =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aVEsAAAAASUVORK5CYII=";
-
 /** The words for a failed write: the demo refusal when that is what it was, else `fallback`. */
 export function writeFailure(error: unknown, fallback: string): string {
   const body = (error as { body?: { error?: unknown } } | null)?.body;
@@ -54,12 +50,21 @@ const unavailable = (): Response =>
     headers: { "content-type": "application/json" },
   });
 
+/** Image routes the hub serves; Demo answers each with the a mock screen drawn for it. */
+const DEMO_PICTURE_ROUTES: readonly string[] = [
+  "/api/qa/review-shots/",
+  "/api/qa-report-assets/",
+  "/api/attention-material-assets/",
+  "/api/hud-screenshots/",
+];
+
 /** Answer a Demo request: writes are refused here, reads come from the lazily loaded source. */
 export async function demoSend(path: string, init: RequestInit): Promise<Response> {
   const method = (init.method ?? "GET").toUpperCase();
   if (method !== "GET") return demoRefusal();
-  if (path.startsWith("/api/qa/review-shots/") || path.startsWith("/api/qa-report-assets/")) {
-    const bytes = Uint8Array.from(atob(DEMO_PNG_BASE64), (c) => c.charCodeAt(0));
+  if (DEMO_PICTURE_ROUTES.some((prefix) => path.startsWith(prefix))) {
+    const { pictureBytes, pictureFor } = await import("./picture.ts");
+    const bytes = pictureBytes(pictureFor(path));
     return new Response(bytes, { status: 200, headers: { "content-type": "image/png" } });
   }
   try {
@@ -71,7 +76,7 @@ export async function demoSend(path: string, init: RequestInit): Promise<Respons
 }
 
 /** What the fake stream hands the simulator to deliver an event with. */
-type Emit = (type: "changed" | "map", data: unknown) => void;
+type Emit = (type: "changed", data: unknown) => void;
 
 /** An `EventTarget` that behaves as the hub's stream, fed by the simulator's timer. */
 export function demoStream(path: string): StreamSource {

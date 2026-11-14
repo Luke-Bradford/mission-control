@@ -21,6 +21,7 @@ import { Sessions } from "../setup/Sessions.tsx";
 import { Sources } from "../setup/Sources.tsx";
 import { UpdateLogModal } from "../setup/UpdateLog.tsx";
 import { BuildChips } from "../shell/buildStatus.tsx";
+import { DisplayControls } from "../shell/DisplayControls.tsx";
 import { toast } from "../shell/Toast.tsx";
 import "../setup/setup.css";
 
@@ -240,6 +241,7 @@ export function Setup({ tab }: { tab: SetupTab }) {
             <h2>{SECTIONS.find((item) => item.tab === section)?.label ?? TAB_LABEL[tab]}</h2>
             <BuildChips panel={`setup-${tab}`} />
             <span className="spacer" />
+            <DisplayControls />
             <CrewPauseControl />
             <UpdateControl />
           </div>

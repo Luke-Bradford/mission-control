@@ -18,7 +18,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
   - Resume the preserved run through `mc operator POST /api/runs/:id/resume`.
   - A PR the controller or a person opened has no seat either; it is not a failed run.
 - **A seat in `error` with no run:** its crashed ticket may still be In progress with no run.
-  - Preserve its branch and work, then return the ticket to the right board column with `set_fields` or the shell.
+  - Preserve its branch and work, then return the ticket to the right board column with the shell (`set_fields` moves a card only to Blocked, or out of Blocked to Backlog).
   - Then start the seat on its next Ready ticket with `mc start_seat`; the hub never deals to a seat in `error`.
 - **A seat with `seats[].runId` set and no live session** after an error or a hub restart: `mc resume_seat`. A stopped or paused seat follows the role's step 4.
 - **A repeat failure** of the same seat or ticket: read why (the error, signals, `mc read_ci_log`) before acting.

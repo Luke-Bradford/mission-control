@@ -1,7 +1,7 @@
 import { TYPE_LABELS } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import type { Gql } from "../src/collectors/github.ts";
-import { ensureFields, ensureLabels, readStatusField, setupStatus } from "../src/github-setup.ts";
+import { ensureFields, ensureLabels, readStatusField, setupStatus } from "../src/github/setup.ts";
 
 type Field = { name: string; options?: { name: string }[] };
 

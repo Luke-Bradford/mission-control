@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import type { MapSnapshot, MapUnchecked, PullRequestView } from "@mc/core";
 import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
@@ -242,8 +242,9 @@ async function assertCheckout(worktree: string): Promise<void> {
     { env: isolatedEnv(), timeout: GIT_TIMEOUT_MS },
   );
   const [inside, root] = stdout.trim().split("\n");
-  if (inside !== "true" || !root || resolve(root) !== resolve(worktree))
-    throw new Error("checkout is not a Git worktree");
+  if (inside !== "true" || !root) throw new Error("checkout is not a Git worktree");
+  const [actualRoot, actualWorktree] = await Promise.all([realpath(root), realpath(worktree)]);
+  if (actualRoot !== actualWorktree) throw new Error("checkout is not a Git worktree");
 }
 
 /** A git failure's first line, for the log; never sent to the page. */

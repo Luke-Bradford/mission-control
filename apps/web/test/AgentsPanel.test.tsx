@@ -523,7 +523,16 @@ it.each([
 it.each([
   ["running engine", () => seatRow({ id: "short-state", hudState: "running" }), "Running"],
   ["stalled engine", () => seatRow({ id: "short-state", hudState: "stalled" }), "Stalled"],
-  ["blocked engine", () => seatRow({ id: "short-state", hudState: "blocked" }), "Blocked"],
+  [
+    "blocked engine, open run",
+    () => seatRow({ id: "short-state", hudState: "blocked" }),
+    "Waiting",
+  ],
+  [
+    "blocked engine, no run",
+    () => seatRow({ id: "short-state", hudState: "blocked", run: null }),
+    "Free",
+  ],
   ["parked engine", () => seatRow({ id: "short-state", hudState: "parked" }), "Parked"],
   ["waiting engine", () => seatRow({ id: "short-state", hudState: "waiting" }), "Waiting"],
   ["idle engine", () => seatRow({ id: "short-state", hudState: "idle" }), "Idle"],

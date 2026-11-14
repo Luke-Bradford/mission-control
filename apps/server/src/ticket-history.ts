@@ -266,6 +266,7 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
     doneWhen: body === null ? [] : doneWhenChecklist(body),
     body,
     bodyTruncated: i.issue?.bodyTruncated ?? false,
+    prototypeProblem: i.issue?.prototypeProblem ?? null,
     githubError: i.githubError,
     runs: runs.map(runView),
     prs,

@@ -75,7 +75,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.rerunCi,
   MC_TOOL_NAMES.editCard,
   MC_TOOL_NAMES.dismissItem,
-
+  MC_TOOL_NAMES.resolveWasteAlarm,
   MC_TOOL_NAMES.syncMain,
   MC_TOOL_NAMES.createTicket,
   MC_TOOL_NAMES.commentTicket,
@@ -98,6 +98,7 @@ export const FLIGHT_TOOLS: readonly McToolName[] = [
   MC_TOOL_NAMES.releaseHold,
   MC_TOOL_NAMES.returnQuestion,
   MC_TOOL_NAMES.withdrawQuestion,
+  MC_TOOL_NAMES.attachMaterials,
   MC_TOOL_NAMES.editIssue,
   MC_TOOL_NAMES.setFields,
   MC_TOOL_NAMES.operator,
@@ -891,6 +892,13 @@ export const CREW_CLI_ENV = {
 export const CREW_PNPM_ENV = {
   pnpm_config_pm_on_fail: "ignore",
   npm_config_update_notifier: "false",
+} as const;
+
+/** A review with nothing installed: pnpm must not install before a script (the PR's setting wins otherwise). */
+export const CREW_PNPM_NO_INSTALL_ENV = {
+  npm_config_verify_deps_before_run: "false",
+  // pnpm 11 reads the pnpm_config_ spelling and ignores the npm_config_ one
+  pnpm_config_verify_deps_before_run: "false",
 } as const;
 
 /** pnpm's legacy project-local store directory, excluded from commits as a backstop. */

@@ -51,6 +51,8 @@ export interface CodeHealthReviewRound {
   repoId: string;
   pr: number;
   headSha: string;
+  /** Latest polled PR head; absent coverage cannot prove an exact-head measure. */
+  currentHeadSha?: string | null;
   round: number;
   state: "reported" | "pending" | "failed";
 }
@@ -62,8 +64,15 @@ export interface CodeHealthFinding {
   pr: number;
   reviewId: string;
   headSha: string;
+  /** Epoch milliseconds of the review that recorded this finding. */
+  reportedAt: number;
+  /** Latest polled PR head. A different value means this finding is not an exact-head measure. */
+  currentHeadSha?: string | null;
   file: string | null;
   category: string | null;
+  /** Reviewer-recorded lineage; categories alone never identify one cause. */
+  summary: string;
+  fix: string;
   /** Disposition and later resolution are independent in the source. */
   state: StoredFinding["state"];
   resolution: FindingResolutionOutcome | null;
@@ -144,11 +153,34 @@ export interface CodeHealthRecommendation {
   rule: string;
   ruleVersion: number;
   evidenceFingerprint: string;
+  /** Stable recorded-finding or rule identity. Equal causes can span files. */
+  causeId?: string;
+  /** One concrete, recorded change to make for this cause. */
+  title?: string;
   observation: string;
   uncertainty: string;
   proposal: string;
   rankingReason: string;
-  target: { metric: string; direction: "increase" | "decrease"; baseline: number | null };
+  measure?: {
+    /** Null means the current head has changed without a completed review. */
+    current: number | null;
+    unit: string;
+    window: string;
+    sourceAt: number | null;
+    coverage: string;
+  };
+  target: {
+    metric: string;
+    direction: "increase" | "decrease";
+    /** The immutable accepted baseline. */
+    baseline: number | null;
+    /** A numeric policy target. Null names a missing prerequisite instead of guessing. */
+    value?: number | null;
+    source?: string;
+    policy?: string;
+  };
+  /** The authority that decides whether this proposal becomes work. */
+  decision?: { owner: string; tier: "operator" | "flight" };
   createdAt: number;
   updatedAt: number;
   state: CodeHealthRecommendationState;

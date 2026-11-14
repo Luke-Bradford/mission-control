@@ -1,8 +1,0 @@
-file://[controller]/supplement-overview-1360-final025.ts:24
-   if(!facts.focus||!facts.lastColumnVisible||!facts.paintVisible)throw Error('Allowance last column not visibly accessible');
-                                                                        ^
-
-Error: Allowance last column not visibly accessible
-    at file://[controller]/supplement-overview-1360-final025.ts:24:73
-
-Node.js v25.9.0

@@ -1,12 +1,13 @@
 import { ATTENTION_LABEL, type AttentionItem, type Crew, type QuestionClosure } from "@mc/core";
 import { useSecond, useTz } from "../clock.ts";
 import { MarkdownInline } from "../components/Markdown.tsx";
+import { callSign as callSignOf } from "../crew.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import { Pending } from "../flight/Pending.tsx";
 import { raisedAt, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { followLink, needsYouPath } from "../router.ts";
-import { askerOf, questionOf, titleOf } from "./QuestionBand.tsx";
+import { askerIdOf, askerOf, questionOf, titleOf } from "./QuestionBand.tsx";
 
 /** Times tick here, in the row's child, so the list is not rebuilt each second. */
 function RowAge({ at }: { at: number }) {
@@ -23,9 +24,8 @@ function RowAge({ at }: { at: number }) {
 function Row({ item, current }: { item: AttentionItem; current: boolean }) {
   const to = needsYouPath(item.key);
   // the band's name for the asker, so the list and the open item agree
-  const callSign = useResource<Crew>(RESOURCES.crew).data?.rows.find(
-    (r) => r.id === item.agentId,
-  )?.displayCallSign;
+  const row = useResource<Crew>(RESOURCES.crew).data?.rows.find((r) => r.id === askerIdOf(item));
+  const callSign = row ? callSignOf(row) : undefined;
   return (
     <a
       className={current ? "needs-row on" : "needs-row"}
@@ -46,7 +46,10 @@ function Row({ item, current }: { item: AttentionItem; current: boolean }) {
           <MarkdownInline text={questionOf(item)} max={120} />
         </span>
       )}
-      <span className="needs-row-who s">{`Asked by ${askerOf(item, callSign)}`}</span>
+      <span className="needs-row-who s">
+        {`Asked by ${askerOf(item, callSign)}`}
+        {item.ticket !== null && ` · ${item.ticket}`}
+      </span>
     </a>
   );
 }
@@ -106,6 +109,8 @@ function Answered({
 export function NeedsList({
   asks,
   defaulted,
+  alerts = [],
+  controls,
   answered,
   answeredError,
   selected,
@@ -113,6 +118,10 @@ export function NeedsList({
 }: {
   asks: readonly AttentionItem[];
   defaulted: readonly AttentionItem[];
+  /** Hub alerts: not questions, so they are not in the question count. */
+  alerts?: readonly AttentionItem[];
+  /** Above the groups: the filters and order. */
+  controls?: React.ReactNode;
   answered: readonly QuestionClosure[] | undefined;
   answeredError: Error | null;
   selected: string | null;
@@ -121,6 +130,12 @@ export function NeedsList({
 }) {
   return (
     <nav className="needs-list" aria-label="Waiting on you">
+      {controls}
+      <Group title="Alerts" n={alerts.length}>
+        {alerts.map((i) => (
+          <Row key={i.key} item={i} current={i.key === selected} />
+        ))}
+      </Group>
       <Group title="Waiting on you" n={asks.length}>
         {asks.map((i) => (
           <Row key={i.key} item={i} current={i.key === selected} />

@@ -548,6 +548,15 @@ describe("crewHudState", () => {
     updatedAt,
   });
 
+  it("never reads blocked for a seat, whatever its state", () => {
+    const states: SeatState[] = ["starting", "running", "idle", "parked", "stopped", "error"];
+    for (const lock of [false, true]) {
+      expect(crewHudState(null, null, now, lock)).not.toBe("blocked");
+      for (const state of states)
+        expect(crewHudState(seat(state), now - 1000, now, lock)).not.toBe("blocked");
+    }
+  });
+
   it("no row is idle", () => {
     expect(crewHudState(null, null, now)).toBe("idle");
   });

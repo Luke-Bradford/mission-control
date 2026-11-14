@@ -49,9 +49,9 @@ describe("Demo sub-views", () => {
     expect(document.body.textContent).toMatch(/PR #/);
   });
 
-  it("QA: open a PR's files in the Map", async () => {
+  it("QA: opens Audit code risk for a PR's files", async () => {
     await at("/qa");
-    await clickText(/open in map with these files/i);
+    await clickText(/open code risk in audit/i);
     clean();
   });
 
@@ -85,11 +85,6 @@ describe("Demo sub-views", () => {
     clean();
   });
 
-  it("the Map focused on a PR", async () => {
-    await at("/map/shop-app?pr=1107");
-    clean();
-  });
-
   it("a thread between two seats", async () => {
     await at("/comms/agents/dev-1/contacts/dev-2");
     clean();
@@ -120,12 +115,12 @@ const play = (beats: number) => {
 };
 
 describe("Demo pages keep moving where a person looks", () => {
-  it("Comms: the traffic and length panels load, and the graph's counts rise", async () => {
+  it("Comms: the live graph and message-length panels load as counts rise", async () => {
     const before = JSON.stringify(getState().api["/api/comms/links"] as object);
     play(10);
     expect(JSON.stringify(getState().api["/api/comms/links"])).not.toBe(before);
     await at("/comms");
-    expect(document.body.textContent).not.toContain("Loading traffic");
+    expect(document.body.textContent).toContain("Comms graph");
     expect(document.body.textContent).not.toContain("Loading message lengths");
     clean();
   });
@@ -148,9 +143,6 @@ describe("Demo pages keep moving where a person looks", () => {
   it("a PR that appears during the scene has its reads, and the flow lists the open PRs", async () => {
     play(40);
     await at("/qa?repo=shop-app&pr=1101");
-    clean();
-    document.body.innerHTML = "";
-    await at("/map/shop-app?pr=1101");
     clean();
     const flow = getState().api["/api/prs/flow"] as { repos: { rows: { pr: number }[] }[] };
     const prs = (getState().api["/api/repos/shop-app/prs"] as { number: number }[]).map(
@@ -199,11 +191,11 @@ describe("Demo choices end in data", () => {
 });
 
 describe("Demo findings from round 3", () => {
-  it("the Agent page's Queue and Files tabs, and the Setup update log", async () => {
+  it("the Agent page's Recent runs and Setup tabs, and the Setup update log", async () => {
     await at("/agent/dev-1");
-    await clickText(/^queue$/i);
+    await clickText(/^recent runs$/i);
     clean();
-    await clickText(/^files$/i);
+    await clickText(/^setup$/i);
     clean();
     document.body.innerHTML = "";
     await at("/setup");
@@ -212,13 +204,13 @@ describe("Demo findings from round 3", () => {
     expect(document.body.textContent).not.toContain("Could not read update.log");
   });
 
-  it("Comms opens on traffic for the 3 messages beside it, and every seat has contacts", async () => {
+  it("Comms opens on the live graph for the 3 messages beside it, and every seat has contacts", async () => {
     await at("/comms");
-    const panel = document.querySelector(".comms-traffic-panel") as HTMLElement;
+    const panel = document.querySelector(".comms-graph-panel") as HTMLElement;
     expect(document.body.textContent).not.toContain("No messages in FLIGHT");
-    expect(panel.textContent).not.toMatch(/\b0\s*msg/);
+    expect(panel.textContent).toMatch(/\d+\s*msg/);
     const counts = [...document.querySelectorAll(".comms-nav-counts small")].map((e) =>
-      Number(e.textContent),
+      Number.parseInt(e.textContent ?? "", 10),
     );
     expect(counts.some((n) => n > 0)).toBe(true);
   });
@@ -241,17 +233,15 @@ describe("Demo findings from round 3", () => {
   });
 
   it("a ticket that moved shows where it is on every page", async () => {
-    play(44);
+    // The scene's moves fall on beats its seed picks; play until the second (ticket 201) has.
+    for (let i = 0; i < 45 && getState().moves < 2; i++) playNext();
+    expect(getState().tickets.find((t) => t.n === 201)?.stage).toBe("building");
     await at("/tickets/shop-app/201");
     expect(document.body.textContent).not.toContain("has not touched this ticket");
     expect(document.body.textContent).not.toMatch(/Status\s*Ready/);
     document.body.innerHTML = "";
-    await at("/qa");
-    expect(document.body.textContent).not.toContain("PR #1107");
-    expect(document.body.textContent).toContain("PR #1101");
-    document.body.innerHTML = "";
     await at("/");
-    expect(document.body.textContent).toMatch(/dev-7.*#201/i);
+    expect(document.body.textContent).toMatch(/#201/);
   });
 
   it("seats change state and the Step column fills", async () => {

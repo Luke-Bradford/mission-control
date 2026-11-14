@@ -53,7 +53,6 @@
   --r8: #9cc8f5;
   --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   --glow: radial-gradient(1200px 300px at 20% -120px, rgba(86, 216, 230, 0.08), transparent 70%);
-  /* The Map's stage stays the void in both themes (map/map.css), so these do not move with them. */
   --void: #04060c;
   --void-2: #0a0f1d;
   --void-line: #1a2440;

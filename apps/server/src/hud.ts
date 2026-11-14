@@ -12,7 +12,6 @@ import {
   type AttentionOwner,
   agentState,
   type BoardItem,
-  BUDGET_BRAKE_KEY,
   CI_TRIES,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
@@ -44,6 +43,7 @@ import {
   flightNotTriagingText,
   hardRulesBySettingKey,
   hudState,
+  isChatterNoteKey,
   isCleanupNoteKey,
   isFlakeNoteKey,
   isForTheController,
@@ -55,6 +55,7 @@ import {
   lockBlockedText,
   loopText,
   modeOfSeat,
+  needsYouAlert,
   needsYouEntryFaults,
   OPERATOR_CALL_KINDS,
   OWNER_CONTROLLER,
@@ -84,26 +85,26 @@ import {
   type TokenUsage,
   UAT_PARK,
 } from "@mc/core";
-import { runAccountId } from "./account-bindings.ts";
+import { runAccountId } from "./accounts/bindings.ts";
 import {
   decisionDefault,
   partitionAttention,
   protectedDecisionItem,
   questionAskAt,
-} from "./attention-holds.ts";
-import { confirmedResumeAfter, pendingRunApproval } from "./attention-subjects.ts";
-import { briefReadState, briefSourceRevision } from "./brief-source.ts";
-import { claudeVersion } from "./cli-version.ts";
+} from "./attention/holds.ts";
+import { confirmedResumeAfter, pendingRunApproval } from "./attention/subjects.ts";
+import { briefReadState, briefSourceRevision } from "./brief/source.ts";
+import { claudeVersion } from "./cli/version.ts";
 import { cloneData } from "./clone.ts";
 import { collectorName, noteCollectorName } from "./collectors/common.ts";
 import { notificationOpen, personKey, personText } from "./collectors/notifications.ts";
-import { attentionChatter, resolvedCommsReason } from "./comms.ts";
+import { attentionChatter, resolvedCommsReason } from "./comms/index.ts";
 import {
   canonicalFlightQuestionKey,
   flightQuestionChoice,
   flightQuestionMessageId,
   isFlightOperatorQuestion,
-} from "./comms-question.ts";
+} from "./comms/question.ts";
 import {
   agentIds,
   type CcConfig,
@@ -118,9 +119,9 @@ import { accountAtStop } from "./engine/queue.ts";
 import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "./file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "./flight/runaway.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "./flight/state.ts";
-import { loopPause } from "./loop-pause.ts";
-import { loopTries } from "./loophistory.ts";
-import { reviewCheckFor } from "./review-check.ts";
+import { loopTries } from "./loop/history.ts";
+import { loopPause } from "./loop/pause.ts";
+import { reviewCheckFor } from "./review/check.ts";
 import {
   type PrCache,
   parseTicket,
@@ -128,10 +129,10 @@ import {
   runSummary,
   runTicket,
   runTicketTitle,
-} from "./runview.ts";
+} from "./run/view.ts";
 import type { AttentionNote, Store } from "./store.ts";
 import { lastOutputAt } from "./stream.ts";
-import { transcriptFilePath } from "./transcript-file.ts";
+import { transcriptFilePath } from "./transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY } from "./update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
@@ -991,16 +992,14 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 /**
  * Hub stops that only the operator clears, by note key or key prefix: machine capacity
  * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
- * auto-rollback (cli-auto.ts) and a seat's focus import (instruction-notices.ts). hud.test.ts pins
+ * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
  * them to those modules' keys.
  */
 export const HUB_STOP_KEYS = [
   `${NOTE_KEY}machine-capacity`,
-  // the budget brake on an account (budget-brake.ts)
-  `${NOTE_KEY}${BUDGET_BRAKE_KEY}`,
   `${NOTE_KEY}cli:claude`,
   `${NOTE_KEY}cli-auto`,
-  // a seat's focus could not be imported: the operator's config to fix (instruction-notices.ts)
+  // a seat's focus could not be imported: the operator's config to fix (instructions/notices.ts)
   `${NOTE_KEY}instruction-focus`,
 ] as const;
 
@@ -1724,7 +1723,21 @@ function buildAttentionItems(
     acks,
   );
   // last, after a released hold has handed an item back to the operator
-  const checked = partition.items.map(entryCheck);
+  // A seat's question reaches the operator only as FLIGHT's own question about a product choice, so
+  // the page never shows the seat as the asker (#1510). `agentId` stays the seat: the question's
+  // answer and its Not now and Drop checks still read it.
+  const crewIds = new Set(crewSeatIds(config));
+  const asFlights = (item: AttentionItem): AttentionItem =>
+    flightId !== null &&
+    item.owner === OWNER_OPERATOR &&
+    item.brief?.for === "operator" &&
+    item.agentId !== null &&
+    item.agentId !== flightId &&
+    crewIds.has(item.agentId) &&
+    !needsYouAlert(item)
+      ? { ...item, asker: flightId }
+      : item;
+  const checked = partition.items.map(entryCheck).map(asFlights);
   const shown =
     triage === null
       ? checked
@@ -1817,8 +1830,19 @@ function endedParkGone(
 ): boolean {
   const loop = run.loop;
   if (loop?.phase !== "parked" || loop.parked?.kind !== "ended") return false;
+  return runSubjectGone(config, store, run, boardOf);
+}
+
+/** Whether a run's PR is merged or closed, or its ticket is closed, off its board or unconfigured. */
+export function runSubjectGone(
+  config: CcConfig,
+  store: Store,
+  run: Run,
+  boardOf: (repoId: string) => BoardItem[],
+): boolean {
+  const loop = run.loop;
   const pr =
-    loop.prNumber !== null
+    loop?.prNumber !== undefined && loop.prNumber !== null
       ? store.pullRequest(run.repoId, loop.prNumber)
       : run.branch === null
         ? null
@@ -1833,13 +1857,34 @@ function endedParkGone(
   return item === undefined || item.closed;
 }
 
+/** How long an ended run's question, note, hold or park lingers when its ticket never closes. */
+export const LEFTOVER_MAX_AGE_MS = 7 * 24 * 3_600_000;
+
 /**
- * Who an engine note waits on: housekeeping is the controller's; a hard-rule flag is the
- * operator's, unless the repo's rules say the controller merges hard-rule PRs.
+ * Whether an ended run's work is over, so what it left behind (a question, a note, a hold, a park)
+ * is a leftover: its ticket is closed or gone, or it ended more than 7 days ago.
+ */
+export function endedWorkOver(
+  config: CcConfig,
+  store: Store,
+  run: Run,
+  boardOf: (repoId: string) => BoardItem[],
+  now: number,
+): boolean {
+  if (run.endedAt === null) return false;
+  return now - run.endedAt >= LEFTOVER_MAX_AGE_MS || runSubjectGone(config, store, run, boardOf);
+}
+
+/**
+ * Who an engine note waits on: housekeeping is the controller's. A chatter note and a hard-rule
+ * flag are FLIGHT's (#1510): hub-internal, they reach the operator only through FLIGHT's brief. The
+ * rest stay the operator's raw, and go through FLIGHT's triage like any raw item. With no FLIGHT
+ * seat nobody else can act on a note, so it is the operator's.
  */
 function noteOwner(
   store: Store,
   n: Pick<AttentionNote, "key" | "repoId" | "runId">,
+  flightSeated: boolean,
 ): AttentionOwner {
   if (
     n.repoId !== null &&
@@ -1858,6 +1903,7 @@ function noteOwner(
   ) {
     return OWNER_CONTROLLER;
   }
+  if (flightSeated && (isChatterNoteKey(n.key) || isHardRulesFlagKey(n.key))) return OWNER_FLIGHT;
   return OWNER_OPERATOR;
 }
 
@@ -1870,6 +1916,7 @@ function crewItems(
   now: number,
 ): OwnedItem[] {
   const sessions = config.crew?.sessions ?? [];
+  const flightSeated = flightSeat(config) !== null;
   const repoOfSeat = (seatId: string) =>
     sessions.find((s) => s.seats.some((x) => x.id === seatId))?.repoId ?? null;
   const item = (
@@ -1925,6 +1972,8 @@ function crewItems(
   }
 
   for (const q of store.openQuestions()) {
+    const asker = store.run(q.runId);
+    if (asker !== null && endedWorkOver(config, store, asker, boardOf, now)) continue;
     out.push({
       ...item({
         key: `ask:${q.id}`,
@@ -1945,9 +1994,17 @@ function crewItems(
     if (n.dismissedAt !== null) continue;
     if (isHardRulesFlagKey(n.key) || isFlakeNoteKey(n.key)) continue;
     const run = n.runId === null ? null : store.run(n.runId);
+    // the unfiled-minor-findings flag is raised after the merge and waits for a fix: it outlives its run
+    if (
+      !n.key.endsWith(":file-minor") &&
+      noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
+      run !== null &&
+      endedWorkOver(config, store, run, boardOf, now)
+    )
+      continue;
     if (
       n.kind === "blocked" &&
-      noteOwner(store, n) !== OWNER_CONTROLLER &&
+      noteOwner(store, n, flightSeated) !== OWNER_CONTROLLER &&
       run !== null &&
       endedParkGone(config, store, run, boardOf)
     )
@@ -1957,7 +2014,7 @@ function crewItems(
         ? undefined
         : (store.pullRequest(run.repoId, run.loop.prNumber) ?? undefined);
     const noteItem: OwnedItem = {
-      owner: noteOwner(store, n),
+      owner: noteOwner(store, n, flightSeated),
       key: `${NOTE_KEY}${n.key}`,
       kind: n.kind,
       agentId: n.seatId,

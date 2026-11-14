@@ -192,7 +192,7 @@ do not silently attach them to today's run or replay them with fabricated author
 - Hub producers: comms-decisions.ts and queue-reorder.ts. Explain generated consultations/unknown
   delay honestly; no producer is exempted by casting it to AttentionBrief.
 - Storage/read model: store.ts (brief ID/history, source/action/choice/outbox state), hud.ts,
-  attention-subjects.ts and attention-holds.ts. Keep person-source and existing hold services.
+  attention/subjects.ts and attention/holds.ts. Keep person-source and existing hold services.
 - Dispatch: small shared brief-choice/action module; api.ts owns protected route entrypoints.
   Reuse comms.ts, crew-pause.ts/supervisor final delivery, flight/access.ts, flight/runaway.ts,
   queue-reorder.ts, flight-approvals.ts, external-pr-control.ts and existing engine services.

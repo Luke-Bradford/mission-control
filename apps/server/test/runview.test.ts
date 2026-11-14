@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { NEW_LOOP, type PullRequestView, type Run, type RunPlan } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { runPrs, runTicket, runView } from "../src/runview.ts";
+import { runPrs, runTicket, runView } from "../src/run/view.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;
@@ -167,7 +167,7 @@ describe("runTicket", () => {
 });
 
 it("serves full recorded usage with model, turns and duration", async () => {
-  const { runView } = await import("../src/runview.ts");
+  const { runView } = await import("../src/run/view.ts");
   const r = run({
     tokens: { input: 2, output: 3, cacheRead: 100, cacheCreate: 20 },
     costUsd: 0.4,

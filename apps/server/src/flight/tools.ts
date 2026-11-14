@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import {
   ANSWER_OWN_QUESTION,
   AREA_LABEL_PREFIX,
+  ATTACH_MATERIALS_DESCRIPTION,
   type AttentionBrief,
   type AttentionItem,
   AWAY_BUG_VERIFIED,
@@ -32,10 +33,10 @@ import {
   briefAboutText,
   briefClearedText,
   briefNoItemText,
+  briefPartFaults,
   briefSavedDecision,
   briefSavedText,
   briefTooLongText,
-  budgetBrakeText,
   CATCH_UP_KINDS,
   CI_FAILED_STATES,
   CI_LOG_EMPTY,
@@ -149,6 +150,7 @@ import {
   type FlightPrRead,
   FORGET_DESCRIPTION,
   flightClearanceReasons,
+  flightToolFor,
   GH_READ_BAD_PATH,
   GH_READ_DESCRIPTION,
   GH_READ_NOT_FOUND,
@@ -315,10 +317,11 @@ import {
   waitingOperatorStartText,
   withControllerCheckItem,
   withdrawnText,
+  withTicketTitles,
   wrongColumnText,
 } from "@mc/core";
 import { z } from "zod";
-import { runAccountId } from "../account-bindings.ts";
+import { runAccountId } from "../accounts/bindings.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
@@ -328,21 +331,26 @@ import {
   protectedDecisionItem,
   questionAskAt,
   releaseHold,
-} from "../attention-holds.ts";
+} from "../attention/holds.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "../attention-materials.ts";
+import { MaterialsOptionImages, MaterialsStoryShape } from "../attention-materials-schema.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
   bindCompleteBrief,
   bindPreparedBrief,
   completeBriefError,
-} from "../brief-prepare.ts";
-import { BriefActionInput, BriefDecisionInput } from "../brief-schema.ts";
-import { budgetBrake } from "../budget-brake.ts";
+} from "../brief/prepare.ts";
+import { BriefActionInput, BriefDecisionInput } from "../brief/schema.ts";
 import type { ChangeBus } from "../bus.ts";
 import { cleanText } from "../clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
-import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms.ts";
+import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms/index.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
@@ -351,7 +359,7 @@ import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import { seatFocus } from "../focus.ts";
-import type { Move, MoveResult } from "../github-board.ts";
+import type { Move, MoveResult } from "../github/board.ts";
 import {
   attentionItems,
   CREW_ERROR_KEY,
@@ -363,12 +371,9 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud.ts";
-import { announceInstruction } from "../instruction-notices.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "../machine-capacity.ts";
+import { announceInstruction } from "../instructions/notices.ts";
+import { InstructionInput } from "../instructions/standing.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
@@ -385,13 +390,16 @@ import {
 } from "../mcp/tools.ts";
 import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
+import { prototypeLinkProblem } from "../prototype-links.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
-import { handoffTarget } from "../run-handoffs.ts";
+import { handoffTarget } from "../run/handoffs.ts";
+import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";
 import { CheckoutError } from "../runtime/checkouts.ts";
 import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
-import { InstructionInput } from "../standing-instructions.ts";
-import { crewDir, type Store } from "../store.ts";
+import { resolveWasteAlarm } from "../spend/waste.ts";
+import { crewDir } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
@@ -406,6 +414,7 @@ import { markRetrospectiveShown } from "./retrospective.ts";
 import { isReadCall, noteFlightWrite, runawayTrip } from "./runaway.ts";
 import { markFlightSignalsShown, recordFlightWait, waitTargetOf } from "./signals.ts";
 import {
+  compactSignals,
   crewSeatIds,
   flightArrivalSource,
   flightSeat,
@@ -421,6 +430,8 @@ import { cardProblem as cardProblemOf, closeBlocker } from "./ticket-close.ts";
 import type { CrewTidy } from "./tidy.ts";
 
 export interface FlightToolsDeps {
+  /** Keeps the pictures of an attached story; absent: the hub's own, over its stored copies. */
+  attentionMaterials?: Pick<AttentionMaterialsService, "attachStory">;
   /** Read-only HUD renderer. It must apply hudRenderRequest to every browser request. */
   screenshotHud?: (url: string, guard: ReturnType<typeof hudRenderRequest>) => Promise<Buffer>;
   hubOrigin?: string;
@@ -435,6 +446,8 @@ export interface FlightToolsDeps {
   prepareQueueReorder?: BriefPreparationDeps["prepareQueue"];
   /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
   areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
+  /** Files whose merge conflicts between the repo's open PRs; absent or undefined: none known. */
+  conflicts?: (repoId: string) => Promise<{ file: string; prs: number[] }[] | undefined>;
   /** Refresh the wake baseline when FLIGHT receives a full state mid-turn. */
   seen?: (runId: string, state: ReturnType<typeof flightState>) => void;
   config: CcConfig;
@@ -471,6 +484,8 @@ export interface FlightToolsDeps {
           >
         >)
     | null;
+  /** Whether a branch preview is published for this ticket (#1510's looks check). */
+  hasPreview?: (repoId: string, ticket: number) => boolean;
   /** The repo's rules (the area labels), as the engine reads them. */
   rules: (repoId: string) => Promise<RepoRules | RepoRulesError>;
   fetchTicket: (repo: CcConfig["repos"][number], n: number) => Promise<TicketView | null>;
@@ -541,7 +556,7 @@ const WaitOnArgs = z.strictObject({
   until: z.iso.datetime({ offset: true }),
   basis: basisArg,
 });
-const FlightStateArgs = z.strictObject({});
+const FlightStateArgs = z.strictObject({ full: z.boolean().optional() });
 const ScreenshotHudArgs = z.strictObject({ page: z.string().min(1).max(200) });
 const ReadTicketArgs = z.strictObject({
   issue: issueNumber,
@@ -616,6 +631,21 @@ const BriefItemArgs = z
       .string()
       .regex(/^[A-Za-z0-9._-]{1,100}#[1-9]\d{0,9}$/)
       .optional(),
+    /** One line, at most 90 characters, no web address or bare ticket number (#1510). */
+    title: text(MC_TEXT_MAX).optional(),
+    /** The main ticket's board priority wins; FLIGHT states one when the ticket has none. */
+    priority: z.enum(PRIORITIES).optional(),
+    related: z
+      .array(z.string().regex(/^[A-Za-z0-9._-]{1,100}#[1-9]\d{0,9}$/))
+      .max(20)
+      .optional(),
+    noTicket: z.strictObject({ repo: text(100), reason: text(BRIEF_LABEL_MAX) }).optional(),
+    links: z
+      .array(z.strictObject({ label: text(BRIEF_LABEL_MAX), url: z.url().max(2000) }))
+      .max(20)
+      .optional(),
+    /** Set when the question is about how something looks: it needs a picture or a preview. */
+    looks: z.boolean().optional(),
     assessment: text(BRIEF_INPUT_MAX).optional(),
     context: text(BRIEF_INPUT_MAX).optional(),
     did: z
@@ -788,6 +818,11 @@ const WithdrawQuestionArgs = z.strictObject({
   key: z.string().min(1).max(BRIEF_KEY_MAX),
   reason: text(QUESTION_REASON_MAX),
   basis: basisArg,
+});
+const AttachMaterialsArgs = z.strictObject({
+  key: z.string().min(1).max(BRIEF_KEY_MAX),
+  ...MaterialsStoryShape,
+  optionImages: MaterialsOptionImages.optional(),
 });
 const PassArgs = z.looseObject({
   question_id: z.number().int().min(1),
@@ -1383,6 +1418,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   /** The attention item with this key, held or not; undefined when it has left Needs you. */
+  const materials =
+    deps.attentionMaterials ??
+    createAttentionMaterials({ store, config, item: (key) => itemByKey(key) ?? null });
   const itemByKey = (key: string): AttentionItem | undefined => {
     const lock = deps.lockState?.() ?? NO_LOCK;
     const rows = crew(config, store, now(), lock, NO_CLI_VERSION).rows;
@@ -1500,6 +1538,30 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return { text: returnedText(call) };
   }
 
+  /** Retains a nested picture story, from committed images, with a question's Needs-you item. */
+  async function attachMaterials(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, AttachMaterialsArgs, args);
+    if (!c.ok) return c.result;
+    const { key, ...story } = c.args;
+    const item = itemByKey(key);
+    if (item === undefined || item.repoId === null)
+      return fail("Not attached: that question is no longer open.");
+    try {
+      const packet = await materials.attachStory(key, { ...story, repoId: item.repoId });
+      bus.emit("attention");
+      const pictures = packet.images.length;
+      return {
+        text: `Attached "${packet.label}" to ${key}: ${pictures} image${pictures === 1 ? "" : "s"}, kept from commit ${packet.sourceCommit.slice(0, 7)}. The operator reads it with the question.`,
+      };
+    } catch (error) {
+      return fail(
+        error instanceof AttentionMaterialsError
+          ? `Not attached: ${error.message}`
+          : "Not attached: the materials could not be retained.",
+      );
+    }
+  }
+
   /** Takes a question FLIGHT wrote for the operator off Needs you, with a one-line reason. */
   async function withdrawQuestion(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, WithdrawQuestionArgs, args);
@@ -1594,11 +1656,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const ref = `${repo.id}#${issue}`;
     const at = now();
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    const capacity = machineCapacity(
-      store.machineSamples(machineCapacitySince(at, capacityConfig)),
-      at,
-      capacityConfig,
-    );
+    const capacity = storedMachineCapacity(store, at, capacityConfig);
     if (capacity.blocked) return fail(`the machine has insufficient headroom: ${capacity.reason}`);
     const loopKind = seatDef(cfg).loop;
     if (loopKind !== "build" && loopKind !== "plan") return fail(notStartableSeatText(call));
@@ -1615,8 +1673,6 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (accountAtStop(config, store, cfg.accountId, at)) {
       return fail(accountStoppedText(call, cfg.accountId));
     }
-    const brake = budgetBrake(config, store, cfg.accountId, at);
-    if (brake !== null) return fail(budgetBrakeText(call, brake, config.operator.timezone));
     // The card as it is now: the cached board is only refreshed by the poll, so a ticket closed or
     // moved since would otherwise be started on its old column. A card that cannot be read fails closed.
     let card: BoardItem | undefined;
@@ -2212,7 +2268,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     if (to === "Ready") {
       let body: string;
       try {
-        body = (await deps.fetchTicket(repo, issue))?.body ?? "";
+        const ticket = await deps.fetchTicket(repo, issue);
+        body = ticket?.body ?? "";
+        const prototypeProblem =
+          ticket?.prototypeProblem ?? prototypeLinkProblem(body, repo.github);
+        if (prototypeProblem !== null) return fail(`Not moved: ${ref} ${prototypeProblem}`);
       } catch {
         return fail(PROMOTE_NO_GITHUB);
       }
@@ -2816,6 +2876,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   async function readState(ctx: McToolContext, args: unknown): Promise<Result> {
     const c = flightCall(deps, ctx, FlightStateArgs, args);
     if (!c.ok) return c.result;
+    const full = c.args.full === true;
     const repo = repoOf();
     if (repo)
       await refreshAuthors(store, deps.gh, crewDir(deps.dbPath), repo.id, repo.github, now());
@@ -2827,6 +2888,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       hubLogin: deps.login,
       lock: deps.lockState?.(),
       areas: repo ? await deps.areas?.(repo.id) : undefined,
+      conflicts: repo ? await deps.conflicts?.(repo.id) : undefined,
     });
     markFlightSignalsShown(store, state, now());
     markPrsShown(store, state);
@@ -2838,6 +2900,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     return {
       text: JSON.stringify({
         ...shown,
+        signals: full ? shown.signals : compactSignals(shown.signals, now()),
         items: state.items.map((item) => {
           const thread = parsePersonKey(item.key);
           const n = thread ? store.notification(thread.id) : null;
@@ -2938,6 +3001,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     }
     // a protected item always reaches the operator: it is briefed, never held back
     if (hold && protectedDecisionItem(store, item, config, at)) return fail(PROTECTED_ITEM_REFUSED);
+    // an item FLIGHT holds a tool for is FLIGHT's to settle, never the operator's (#1510)
+    if (structured.for === "operator" && !hubAlert(item, store)) {
+      // a money, security, irreversible or floor decision is the operator's whatever the seat's words
+      const ownCall = ["money", "security-exception", "irreversible", "floor-approval"].includes(
+        structured.decision?.whyOperator?.kind ?? "",
+      );
+      // the item's key names a hub-internal note outright; its words only suggest a tool, and a
+      // protected item's words never override the operator's stop
+      const tool =
+        flightToolFor({ key: item.key, kind: item.kind, text: "" }) ??
+        (protectedDecisionItem(store, item, config, at) || ownCall
+          ? null
+          : flightToolFor({ key: item.key, kind: item.kind, text: item.text }));
+      if (tool !== null)
+        return fail(
+          `Not briefed: you settle this yourself with ${tool}; the operator is asked only what no tool of yours settles.`,
+        );
+    }
     // the Needs you entry check (#1543), at the source: a brief that would not reach the operator
     // is refused here, with what it lacks, so FLIGHT fixes it in one try
     if (structured.for === "operator" && !hubAlert(item, store)) {
@@ -2953,12 +3034,34 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
             basis,
             at,
             ...(structured.ticket === undefined ? {} : { ticket: structured.ticket }),
+            ...(structured.noTicket === undefined ? {} : { noTicket: structured.noTicket }),
             ...(structured.person === undefined ? {} : { person: structured.person }),
           },
         },
         crewSeatIds(config),
       );
       if (faults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${faults.join("; ")}.`);
+      // rule 4's added parts (#1510)
+      const main = parseTicket(structured.ticket ?? item.ticket ?? "");
+      const card = main
+        ? store.board(main.repoId).find((b) => b.issueNumber === main.number)
+        : null;
+      const partFaults = briefPartFaults({
+        title: structured.title,
+        ask: structured.ask ?? "",
+        priority: card?.priority ?? structured.priority ?? null,
+        hasTicket: main !== null || item.url !== null,
+        noTicket: structured.noTicket,
+        looks: structured.looks === true,
+        texts: [
+          assessment,
+          structured.ask ?? "",
+          recommendation,
+          ...(options ?? []).flatMap((o) => [o.label, o.answer, o.description ?? ""]),
+        ],
+        hasPreview: main !== null && (deps.hasPreview?.(main.repoId, main.number) ?? false),
+      });
+      if (partFaults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${partFaults.join("; ")}.`);
     }
     if (structured.for === "flight") {
       if (isOperatorCall(item, store))
@@ -2990,8 +3093,33 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const wasOperators = prior !== undefined && prior.for !== "flight";
     let briefedAt = at;
     try {
+      // each #n and PR n comes back with its title, so a number never stands alone (#1510)
+      const home = parseTicket(structured.ticket ?? item.ticket ?? "")?.repoId ?? item.repoId;
+      const titled = (t: string): string =>
+        home === null
+          ? t
+          : withTicketTitles(t, (n, kind) =>
+              kind === "pr"
+                ? (store.pullRequest(home, n)?.title ?? null)
+                : (store.board(home).find((b) => b.issueNumber === n)?.title ??
+                  store.pullRequest(home, n)?.title ??
+                  null),
+            );
+      const mainCard = (() => {
+        const m = parseTicket(structured.ticket ?? item.ticket ?? "");
+        return m ? store.board(m.repoId).find((b) => b.issueNumber === m.number) : undefined;
+      })();
+      const priority = mainCard?.priority ?? structured.priority;
       const content = {
         ...candidate,
+        recommendation: titled(recommendation),
+        options: candidate.options.map((o) => ({
+          ...o,
+          answer: titled(o.answer),
+          ...(o.consequence === undefined ? {} : { consequence: titled(o.consequence) }),
+          ...(o.description === undefined ? {} : { description: titled(o.description) }),
+        })),
+        ...(priority === undefined || priority === null ? {} : { priority }),
         by: "flight" as const,
         original: originalItemText(item),
         ask: structured.ask ?? "",
@@ -3741,12 +3869,31 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     seat: z.string().regex(SEAT_ID),
     basis: basisArg,
   });
-  const P0_TICKET_BASIS = /(?:\bP0\b.*\b[^\s#]+#[1-9]\d*\b|\b[^\s#]+#[1-9]\d*\b.*\bP0\b)/;
+
+  const ResolveWasteAlarmArgs = z.strictObject({
+    alarm: z.number().int().positive(),
+    basis: basisArg,
+  });
 
   const superTools = [
     superTool(
+      MC_TOOL_NAMES.resolveWasteAlarm,
+      "Close an open waste alarm's hold: a parked ticket may start again, a stopped review may run, a restarted agent may start. Say in the basis what you decided (fix, park, fold back). The alarm stays closed until its cause grows past the level it had.",
+      ResolveWasteAlarmArgs,
+      "status",
+      async (a) => {
+        const at = now();
+        if (!resolveWasteAlarm(store, a.alarm, at, a.basis))
+          return fail("That waste alarm is not open.");
+        return { text: `Waste alarm ${a.alarm} closed; its hold is lifted.` };
+      },
+      z.toJSONSchema(ResolveWasteAlarmArgs),
+      // a hub-side hold: no GitHub write, so it does not need the engine
+      { engine: false },
+    ),
+    superTool(
       MC_TOOL_NAMES.moveReview,
-      "Move one queued review to a named review seat. The target account must not be at its usage stop. A budget-brake pass needs a basis that names a P0 ticket; the basis is recorded. The queued review keeps its head, round and review model rule.",
+      "Move one queued review to a named review seat. The target account must not be at its usage stop. The basis is recorded. The queued review keeps its head, round and review model rule.",
       MoveReviewArgs,
       "status",
       async (a) => {
@@ -3764,10 +3911,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const at = now();
         if (accountAtStop(config, store, target.accountId, at))
           return fail(accountStoppedText(seatCallSign(a.seat), target.accountId));
-        const brakeOverride = budgetBrake(config, store, target.accountId, at) !== null;
-        if (brakeOverride && !P0_TICKET_BASIS.test(a.basis))
-          return fail("The target account's budget brake needs a basis that names a P0 ticket.");
-        if (!store.moveQueuedReview(review.id, target.id, at, brakeOverride))
+        if (!store.moveQueuedReview(review.id, target.id, at))
           return fail("Review is no longer queued.");
         return { text: `Moved queued review ${review.id} to ${seatCallSign(target.id)}.` };
       },
@@ -3824,11 +3968,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return { text };
         }
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         if (capacity.blocked)
           return fail(`the machine has insufficient headroom: ${capacity.reason}`);
         if (row.state === "stopped")
@@ -4536,6 +4676,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       call: withdrawQuestion,
     },
     {
+      name: MC_TOOL_NAMES.attachMaterials,
+      description: ATTACH_MATERIALS_DESCRIPTION,
+      inputSchema: z.toJSONSchema(AttachMaterialsArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: attachMaterials,
+    },
+    {
       name: MC_TOOL_NAMES.startSeat,
       description: START_SEAT_DESCRIPTION,
       inputSchema: objectSchema(
@@ -4588,7 +4736,17 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       name: MC_TOOL_NAMES.flightState,
       description:
         "The crew now, as JSON: each seat's state, ticket, loop phase and park; the open questions; the startable tickets; the PRs in review; your recent decisions and the runaway breaker; and your brief.",
-      inputSchema: { type: "object", properties: {}, additionalProperties: false },
+      inputSchema: {
+        type: "object",
+        properties: {
+          full: {
+            type: "boolean",
+            description:
+              "List every signal, including the expired waits that are otherwise folded into one line with a count.",
+          },
+        },
+        additionalProperties: false,
+      },
       modes: [],
       grantable: ["read-only"],
       call: readState,
@@ -4937,6 +5095,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.releaseHold,
     MC_TOOL_NAMES.returnQuestion,
     MC_TOOL_NAMES.withdrawQuestion,
+    MC_TOOL_NAMES.attachMaterials,
   ]);
   return flightTools.map((tool) => ({
     ...tool,

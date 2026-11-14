@@ -9,7 +9,9 @@ import {
   type AccountModelsView,
   type AgentStream,
   API_PREFIX,
+  type AttentionCompactItem,
   type AttentionItem,
+  type AttentionMaterialsResponse,
   type AuditRunKind,
   AWAY_SETTING,
   type AwaySettings,
@@ -28,6 +30,7 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_HIDE_NOTICES,
   COMMS_LABELS,
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
@@ -53,6 +56,7 @@ import {
   type CrewSessionFolders,
   type CrewVendor,
   capAudit,
+  compactAttentionItem,
   compareDependencyChains,
   crewProfileOf,
   crewSummary,
@@ -86,6 +90,7 @@ import {
   HUD_RENDERER_HEADER,
   ISSUE_REQUIRED,
   isOperatorItem,
+  itemOwner,
   type LimitRow,
   LOCK_WAIT_MS,
   LOOPBACK_HOST,
@@ -148,6 +153,8 @@ import {
   type TicketView,
   TOKEN_AUDIT_DAYS_DEFAULT,
   TOKEN_AUDIT_DAYS_MAX,
+  TOKEN_AUDIT_HOURS_MAX,
+  type TokenAuditView,
   type Topic,
   TYPE_LABELS,
   UAT_PARK,
@@ -157,6 +164,7 @@ import {
   type UpdateLog,
   type UsageSample,
   type VersionInfo,
+  type WasteReport,
   watchStartRefusedText,
 } from "@mc/core";
 import Fastify, {
@@ -167,16 +175,25 @@ import Fastify, {
   LogController,
 } from "fastify";
 import { z } from "zod";
-import { type AccountModels, discoverAccountModels, readAccountStatus } from "./accounts.ts";
+import {
+  type AccountModels,
+  discoverAccountModels,
+  readAccountStatus,
+} from "./accounts/accounts.ts";
 import { agentDetail } from "./agent-detail.ts";
-import { AsideAnswerChanged, AsideAnswerUnconfirmed, answerAsideQuestion } from "./aside-answer.ts";
+import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
   attentionHoldError,
   holdItem,
   nothingForOperator,
   releaseHold,
-} from "./attention-holds.ts";
+} from "./attention/holds.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "./attention-materials.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -184,14 +201,12 @@ import {
   awayDigest,
   readAwaySettings,
 } from "./away.ts";
-import { registerBriefChoiceRoutes } from "./brief-api.ts";
-import { checkBriefDispatch } from "./brief-dispatch.ts";
-import { boundBriefGuard } from "./brief-dispatch-context.ts";
-import { weeklyProjection } from "./budget-brake.ts";
+import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import { checkBriefDispatch } from "./brief/dispatch.ts";
+import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
-import { clearAttentionItem } from "./clear-attention.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -224,9 +239,9 @@ import {
   sendComms,
   threadMessages,
   validateCommsText,
-} from "./comms.ts";
-import { replyRoute } from "./comms-reply.ts";
-import { commsTicketCounts } from "./comms-ticket-counts.ts";
+} from "./comms/index.ts";
+import { replyRoute } from "./comms/reply.ts";
+import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
 import {
   agentIds,
@@ -270,7 +285,8 @@ import {
   writeCrewPause,
 } from "./crew-pause.ts";
 import { readDependencyChains } from "./dependency-chains.ts";
-import type { DesignPreviews } from "./design-previews.ts";
+import type { DesignPreviews } from "./design-preview/previews.ts";
+import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -283,7 +299,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import { branchOwned, readExternalSubject } from "./external-reviews.ts";
 import {
   changedFiles,
   committedLines,
@@ -303,6 +318,7 @@ import {
   flightLive,
   flightScheduleView,
   flightSeat,
+  flightSeatView,
   flightView,
   prFlow,
 } from "./flight/state.ts";
@@ -312,7 +328,7 @@ import {
   flightConversation,
   readFlightConversation,
 } from "./flight-conversation.ts";
-import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github-setup.ts";
+import { ensureFields, ensureLabels, missingLabels, setupStatus } from "./github/setup.ts";
 import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
@@ -329,13 +345,11 @@ import {
   pinned,
   seatQuestionTriage,
 } from "./hud.ts";
+import { registerInstructionRoutes } from "./instructions/api.ts";
+import { itemThread } from "./item-thread.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
-import { loopTries } from "./loophistory.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "./machine-capacity.ts";
+import { loopTries } from "./loop/history.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
@@ -364,11 +378,15 @@ import {
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
+import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
-import { prAcceptanceFor, prUat } from "./pr-uat.ts";
-import { PREVIEW_ACTIVITY_HEADER, PreviewHubError, type PreviewManager } from "./previews.ts";
+import {
+  PREVIEW_ACTIVITY_HEADER,
+  PreviewHubError,
+  type PreviewManager,
+} from "./preview/previews.ts";
 import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
-import { qaHistoryPage, qaNativeHistory } from "./qa-history.ts";
+import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
   QA_REPORT_BODY_LIMIT,
@@ -376,7 +394,7 @@ import {
   QaReportError,
   type QaReportService,
   qaReportMarkdown,
-} from "./qa-reports.ts";
+} from "./qa/reports.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
@@ -384,8 +402,22 @@ import {
   resolveQueueReorder,
 } from "./queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
-import { reviewCheckFor } from "./review-check.ts";
-import { publicHandoff } from "./run-handoffs.ts";
+import { reviewCheckFor } from "./review/check.ts";
+import { branchOwned, readExternalSubject } from "./review/external.ts";
+import {
+  AsideAnswerChanged,
+  AsideAnswerUnconfirmed,
+  answerAsideQuestion,
+} from "./run/aside-answer.ts";
+import { publicHandoff } from "./run/handoffs.ts";
+import {
+  type BoardTitleCache,
+  type PrCache,
+  runPrs,
+  runTicket,
+  runUsage,
+  runView,
+} from "./run/view.ts";
 import {
   adminDirOf,
   CheckoutError,
@@ -397,23 +429,10 @@ import { CrewGitError, crewGit } from "./runtime/git.ts";
 import { runSeatGrants } from "./runtime/grants.ts";
 import { runReported } from "./runtime/no-report.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import {
-  type BoardTitleCache,
-  type PrCache,
-  runPrs,
-  runTicket,
-  runUsage,
-  runView,
-} from "./runview.ts";
-import { registerInstructionRoutes } from "./standing-instructions-api.ts";
-import {
-  type CommsReadScope,
-  commsMessageNumber,
-  commsPosition,
-  crewDir,
-  crewPrBodyPath,
-  type Store,
-} from "./store.ts";
+import { weeklyProjection } from "./spend/projection.ts";
+import { wasteReport } from "./spend/waste.ts";
+import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
+import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
 import {
@@ -423,9 +442,9 @@ import {
   ticketHistory,
 } from "./ticket-history.ts";
 import { overviewTimeline } from "./timeline.ts";
-import { tokenAuditView } from "./token-audit-view.ts";
-import { transcriptFilePath } from "./transcript-file.ts";
-import { transcriptFootprint } from "./transcript-lifecycle.ts";
+import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
+import { transcriptFilePath } from "./transcript/file.ts";
+import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
@@ -494,6 +513,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
@@ -509,6 +529,8 @@ export interface AppDeps {
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
+  /** The cached disk-use reader the hub shares with its sweep; absent: the route measures itself. */
+  diskUse?: DiskUseReader;
   /** A web PR's stored screenshot pairs; absent: the evidence routes answer 404. */
   prEvidence?: PrEvidenceStore;
   /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
@@ -670,6 +692,8 @@ const MessageBody = z.strictObject({
    * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
    */
   question: z.number().int().positive().optional(),
+  /** The Needs-you item this reply is about: it shows in that item's conversation. */
+  itemKey: z.string().min(1).max(200).optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -775,6 +799,15 @@ const QA_DAYS_ERROR = `days must be an integer 1..${QA_RETENTION_DAYS}`;
 /** `GET /api/agents/:id/files/diff?path=`: one path, as the file list gives it. */
 const DiffPath = z.string().min(1).max(4096);
 
+/** `GET /api/attention` options: one owner's items, and the compact shape. */
+const AttentionListQuery = z.strictObject({
+  owner: z.string().min(1).max(100).optional(),
+  compact: z
+    .enum(["1", "true", "0", "false"])
+    .transform((v) => v === "1" || v === "true")
+    .optional(),
+});
+
 /** `GET /api/attention/answered`: the questions closed without an answer, over the last week. */
 const ANSWERED_WINDOW_MS = 7 * 24 * 60 * 60_000;
 const ANSWERED_LIMIT = 50;
@@ -853,7 +886,13 @@ function prSummary(pr: PullRequestView, check: ReviewCheckState | null): PullReq
     : {
         ...rest,
         check,
-        checks: checks.map(({ name, kind, state, attempt }) => ({ name, kind, state, attempt })),
+        checks: checks.map(({ name, kind, state, attempt, skipped }) => ({
+          name,
+          kind,
+          state,
+          attempt,
+          ...(skipped === undefined ? {} : { skipped }),
+        })),
       };
 }
 
@@ -868,6 +907,8 @@ export const ACCOUNT_STATUS_CACHE_MS = 60_000;
 
 const NOTIFICATION_RECONCILE_MS = 1000;
 const HUD_MEMO_MS = 2_000;
+/** An unchanged store, lock and login is not reconciled for notifications again before this. */
+const NOTIFICATION_REPEAT_MS = 60_000;
 /** Longest a map payload is reused: the backstop for fields that age without any input changing. */
 const MAP_CACHE_MS = 15_000;
 /** Longest a built map tree is kept without a head change: its history window ends at a fixed time. */
@@ -1089,16 +1130,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       store.pullRequests(repo.id),
       store.board(repo.id),
     );
-  /** The live part, built per request from the map ring: seats, findings and conflicts. */
-  const mapLivePayload = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-    log: FastifyBaseLogger,
-  ): Promise<MapLive> => {
-    mapRingReady();
-    const { rows, lock } = mapCrewRows(repo);
-    return await buildMapLive(checkout, repo.id, rows, lock, store.pullRequests(repo.id), log);
-  };
   /** The cached map payload, built (once, however many ask) when an input has changed. */
   const mapPayloadFor = async (
     repo: (typeof config.repos)[number],
@@ -1582,17 +1613,76 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     return attentionMemo.items;
   };
+  // retained materials follow a question that is held too: a hold is not a close
+  let heldMemo: { at: number; items: AttentionItem[] } | undefined;
+  const attentionWithHeld = (): AttentionItem[] => {
+    const at = now();
+    if (!heldMemo || at - heldMemo.at >= HUD_MEMO_MS) {
+      heldMemo = {
+        at,
+        items: attentionItems(
+          config,
+          store,
+          at,
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew(at).rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ),
+      };
+    }
+    return heldMemo.items;
+  };
+  const attentionMaterials =
+    deps.attentionMaterials ??
+    createAttentionMaterials({
+      store,
+      config,
+      item: (key) => attentionWithHeld().find((item) => item.key === key) ?? null,
+      now,
+    });
   const notifications = new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
   let reconcilingNotifications = false;
+  let reconciled: { at: number; basis: string } | undefined;
+  // A skipped look is retried when the minute is up, so an item that came due on the clock alone
+  // does not wait for an unrelated event.
+  let repeatTimer: ReturnType<typeof setTimeout> | undefined;
   const scheduleNotifications = () => {
     if (notificationTimer !== undefined || reconcilingNotifications) return;
     notificationTimer = setTimeout(() => {
       notificationTimer = undefined;
       reconcilingNotifications = true;
       try {
-        reconcileNotifications();
+        // The same store, lock and login as the last reconcile, under a minute ago, would build
+        // the same items: only the clock-only ones turn over, and they do so by the minute.
+        const basisNow = () =>
+          JSON.stringify([
+            store.readVersion(),
+            deps.lock?.state() ?? NO_LOCK,
+            deps.hubLogin?.() ?? null,
+          ]);
+        const at = now();
+        if (
+          reconciled === undefined ||
+          reconciled.basis !== basisNow() ||
+          at < reconciled.at ||
+          at - reconciled.at >= NOTIFICATION_REPEAT_MS
+        ) {
+          reconcileNotifications();
+          // after the reconcile: its own writes are not a change
+          reconciled = { at, basis: basisNow() };
+        } else if (repeatTimer === undefined) {
+          repeatTimer = setTimeout(
+            () => {
+              repeatTimer = undefined;
+              scheduleNotifications();
+            },
+            Math.max(0, reconciled.at + NOTIFICATION_REPEAT_MS - at),
+          );
+          repeatTimer.unref();
+        }
       } finally {
         reconcilingNotifications = false;
       }
@@ -1641,6 +1731,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     unsubscribeNotifications();
     stopMapRing?.();
     clearTimeout(notificationTimer);
+    clearTimeout(repeatTimer);
     for (const end of [...streams]) end();
   });
 
@@ -1696,15 +1787,29 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
           const agent = agentById(req.params.id);
           if (!agent) return reply.code(404).send({ error: "unknown agent" });
+          const withFlightUnread = async (stream: AgentStream): Promise<AgentStream> => {
+            if (agent.kind !== "crew" || agent.seat.role !== "FLIGHT") return stream;
+            const session = config.crew?.sessions.find(
+              (candidate) => candidate.id === agent.sessionId,
+            );
+            if (session === undefined) return stream;
+            const conversation = await flightConversation(
+              store,
+              agent.id,
+              session.seats.map((seat) => seat.id),
+              { limit: 1 },
+            );
+            return { ...stream, unread: conversation.unread };
+          };
           const run = store.seatRun(agent.id);
           if (!run) {
-            return {
+            return withFlightUnread({
               runId: null,
               events: [],
               truncated: false,
               lastOutputAt: null,
               reason: NO_RUNS_YET,
-            };
+            });
           }
           const lastEventAt = store.digest(run.id)?.lastEventAt ?? null;
           const missing = (): AgentStream => ({
@@ -1716,9 +1821,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             reason: TRANSCRIPT_NOT_FOUND,
           });
           const path = run.transcriptPath;
-          if (path === "") return missing();
+          if (path === "") return withFlightUnread(missing());
           const st = await stat(transcriptFilePath(path)).catch(() => null);
-          if (!st?.isFile()) return missing();
+          if (!st?.isFile()) return withFlightUnread(missing());
           const { size, mtimeMs } = st;
           let entry = streamCache.get(agent.id);
           if (
@@ -1736,12 +1841,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                   ? readTranscript(path, limit, run.vendor)
                   : readTranscript(path, limit, run.vendor, before);
             } catch {
-              return missing();
+              return withFlightUnread(missing());
             }
             entry = { path, size, mtimeMs, limit, before, result };
             streamCache.set(agent.id, entry);
           }
-          return {
+          return withFlightUnread({
             runId: run.id,
             tasks: store.digest(run.id)?.tasks ?? [],
             events: entry.result.events,
@@ -1749,7 +1854,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             hasMore: entry.result.more ?? false,
             lastOutputAt: lastOutputAt(lastEventAt, Math.floor(mtimeMs)),
             reason: null,
-          };
+          });
         },
       );
 
@@ -2094,35 +2199,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       const commsPaging = (query: {
         limit?: unknown;
         before?: unknown;
-      }): { limit: number; before: string | undefined } | null => {
+        notices?: unknown;
+      }): { limit: number; before: string | undefined; hideNotices: boolean } | null => {
         const limit = parseLimit(query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
-        const { before } = query;
+        const { before, notices } = query;
         if (limit === null) return null;
+        if (notices !== undefined && notices !== COMMS_HIDE_NOTICES) return null;
         if (
           before !== undefined &&
           (typeof before !== "string" || !/^comms:[1-9]\d*$/.test(before))
         )
           return null;
-        return { limit, before };
+        return { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES };
       };
-      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id`;
+      const COMMS_PAGING_ERROR = `limit must be an integer 1..${COMMS_PAGE_MAX}; before must be a message id; notices must be ${COMMS_HIDE_NOTICES}`;
       /** One page of a scope: the newest messages, the read cursor, unread over the whole scope. */
       const commsScopePage = (
         scope: CommsReadScope,
         cursorKey: string,
-        paging: { limit: number; before: string | undefined },
+        paging: { limit: number; before: string | undefined; hideNotices: boolean },
         countsOnly = false,
         recentSince?: number,
       ) => {
         const page = countsOnly
           ? { rows: [], hasMore: false }
-          : store.commsPage(scope, paging.limit, paging.before, recentSince);
+          : store.commsPage(scope, paging.limit, paging.before, recentSince, paging.hideNotices);
         const cursor = store.commsScopeCursor(cursorKey);
         return {
           messages: storedCommsMessages(page.rows),
           hasMore: page.hasMore,
           cursor,
-          unread: store.commsCounts(scope, cursor, recentSince).unread,
+          unread: store.commsCounts(scope, cursor, recentSince, paging.hideNotices).unread,
         };
       };
       const commsScope = (
@@ -2148,31 +2255,32 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       };
 
       // Reader: apps/web/src/App.tsx#App (crew Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown; history?: unknown } }>(
-        "/comms/crew",
-        (req, reply) => {
-          const paging = commsPaging(req.query);
-          if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
-          if (req.query.history !== undefined && req.query.history !== "1")
-            return reply.code(400).send({ error: "history must be 1 when supplied" });
-          const history = req.query.history === "1";
-          const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
-          const page = commsScopePage({ crew: true }, "crew", paging, false, since);
-          const hidden =
-            !history &&
-            store.commsCounts({ crew: true }, null).count >
-              store.commsCounts({ crew: true }, null, since).count;
-          return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
-        },
-      );
+      api.get<{
+        Querystring: { limit?: unknown; before?: unknown; history?: unknown; notices?: unknown };
+      }>("/comms/crew", (req, reply) => {
+        const paging = commsPaging(req.query);
+        if (paging === null) return reply.code(400).send({ error: COMMS_PAGING_ERROR });
+        if (req.query.history !== undefined && req.query.history !== "1")
+          return reply.code(400).send({ error: "history must be 1 when supplied" });
+        const history = req.query.history === "1";
+        const since = history ? undefined : now() - 24 * 60 * 60 * 1000;
+        const page = commsScopePage({ crew: true }, "crew", paging, false, since);
+        const hidden =
+          !history &&
+          store.commsCounts({ crew: true }, null, undefined, paging.hideNotices).count >
+            store.commsCounts({ crew: true }, null, since, paging.hideNotices).count;
+        return { ...page, ...(hidden ? { hasEarlier: true } : {}) };
+      });
       // Reader: apps/web/src/App.tsx#App (FLIGHT Comms)
-      api.get<{ Querystring: { limit?: unknown; before?: unknown } }>(
+      api.get<{ Querystring: { limit?: unknown; before?: unknown; notices?: unknown } }>(
         "/comms/flight",
         async (req, reply) => {
           const limit = parseLimit(req.query.limit, COMMS_PAGE_DEFAULT, COMMS_PAGE_MAX);
           const before = req.query.before;
+          const { notices } = req.query;
           if (
             limit === null ||
+            (notices !== undefined && notices !== COMMS_HIDE_NOTICES) ||
             (before !== undefined &&
               (typeof before !== "string" || before.length === 0 || before.length > 300))
           )
@@ -2195,15 +2303,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             runId,
           };
           try {
-            return {
-              ...(await flightConversation(
-                store,
-                flight,
-                found.session.seats.map((s) => s.id),
-                { limit, before },
-              )),
-              flight: flightStatus,
-            };
+            const page = await flightConversation(
+              store,
+              flight,
+              found.session.seats.map((s) => s.id),
+              { limit, before, hideNotices: notices === COMMS_HIDE_NOTICES },
+            );
+            return { ...page, flight: flightStatus };
           } catch (error) {
             if (error instanceof FlightConversationCursorError)
               return reply.code(400).send({ error: error.message });
@@ -2214,7 +2320,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (agent Comms)
       api.get<{
         Params: { id: string };
-        Querystring: { limit?: unknown; before?: unknown; summary?: unknown };
+        Querystring: { limit?: unknown; before?: unknown; summary?: unknown; notices?: unknown };
       }>("/comms/agents/:id", (req, reply) => {
         const id = req.params.id;
         if (!knownCommsAgent(id)) return reply.code(404).send({ error: "unknown Comms agent" });
@@ -2228,20 +2334,37 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const all = commsScopePage({ agent: id }, `agent-all:${id}`, paging, summary === "1");
         const inboxCursor = store.commsScopeCursor(`inbox:${id}`);
         const inbox =
-          summary === "1" ? none : store.commsPage({ inbox: id }, paging.limit, paging.before);
+          summary === "1"
+            ? none
+            : store.commsPage(
+                { inbox: id },
+                paging.limit,
+                paging.before,
+                undefined,
+                paging.hideNotices,
+              );
         // The conversation list: one line per contact, from counts, never their histories.
-        const contacts = commsContacts(id).map((contact) => {
-          const scope: CommsReadScope = { pair: [id, contact] };
-          const counts = store.commsCounts(scope, store.commsScopeCursor(pairScope(id, contact)));
-          const last = store.commsPage(scope, 1).rows[0];
-          return {
-            id: contact,
-            lastMessage: last === undefined ? null : storedCommsMessage(last),
-            count: counts.count,
-            hasMessages: counts.count > 0,
-            unread: counts.unread,
-          };
-        });
+        const contacts = commsContacts(id)
+          .map((contact) => {
+            const scope: CommsReadScope = { pair: [id, contact] };
+            const counts = store.commsCounts(
+              scope,
+              store.commsScopeCursor(pairScope(id, contact)),
+              undefined,
+              paging.hideNotices,
+            );
+            const last = store.commsPage(scope, 1, undefined, undefined, paging.hideNotices)
+              .rows[0];
+            return {
+              id: contact,
+              lastMessage: last === undefined ? null : storedCommsMessage(last),
+              count: counts.count,
+              hasMessages: counts.count > 0,
+              unread: counts.unread,
+            };
+          })
+          // with notices hidden, a contact that only sent notices has nothing to show
+          .filter((contact) => !paging.hideNotices || contact.count > 0);
         return {
           ...all,
           inbox: storedCommsMessages(inbox.rows),
@@ -2701,6 +2824,16 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           // a shell call the guard lets run: note the clone it starts on, for the check record
           const command = body.data.tool_input?.command;
           // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+          // the same check on the same commit with nothing changed is not run again (waste alarm);
+          // a suite the guard already sends to the lock is a check too
+          if (
+            (verdict.kind === "allow" || verdict.kind === "lock") &&
+            body.data.tool_name === "Bash" &&
+            typeof command === "string"
+          ) {
+            const rerun = await checks?.rerun?.(who.runId, command);
+            if (rerun) return answer(rerun);
+          }
           if (
             verdict.kind === "allow" &&
             body.data.tool_name === "Bash" &&
@@ -2909,6 +3042,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .header("content-disposition", `attachment; filename="qa-${report.id}.md"`)
           .send(qaReportMarkdown(report));
       });
+      // Reader: docs/runbook.md#disk-housekeeping (what the hub holds on disk, by kind; the Mac panel shows it)
+      const holdings =
+        deps.diskUse ??
+        cachedDiskUse({ dataDir: dirname(store.path), worktrees: config.crew?.worktrees });
+      api.get("/disk-use", async () => await holdings.read());
       // Reader: docs/runbook.md#durable-qa-reports (retained before/after and review-browser PNGs)
       api.get<{ Params: { id: string } }>("/qa-report-assets/:id", async (req, reply) => {
         if (
@@ -3519,13 +3657,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         };
 
-      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
+      // The map snapshot: apps/web/src/qa/useRepoGraph.ts and the Setup repo list read it through RESOURCES.repoMap.
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map",
         mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
       );
 
-      // Reader: apps/web/src/map/useGraphSnapshot.ts (lazy QA Impact and History analysis)
+      // Reader: apps/web/src/qa/useRepoGraph.ts (lazy QA Impact and History analysis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/graph",
         mapRoute(async (repo, checkout, req, reply) => {
@@ -3538,61 +3676,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (req.headers["if-none-match"] === etag) return reply.code(304).send();
           return graph;
         }),
-      );
-
-      // Reader: apps/web/src/data.ts (the Map page's tree-once read lands with its web ticket; for diagnosis until then)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/tree",
-        mapRoute(async (repo, checkout, req, reply) => {
-          const { etag, tree } = await mapTreePayload(repo, checkout);
-          reply.header("etag", etag).header("cache-control", "no-cache");
-          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
-          const { imports: _imports, hist: _hist, ...light } = tree;
-          return light;
-        }),
-      );
-
-      // Reader: apps/web/src/data.ts (the Map page's live read lands with its web ticket; for diagnosis until then)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/live",
-        mapRoute((repo, checkout, _req, reply) => mapLivePayload(repo, checkout, reply.log)),
-      );
-
-      // Reader: apps/web/src/data.ts (none in the web: the Map reads modified scope from the snapshot; for diagnosis)
-      api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
-        if (!config.repos.some((r) => r.id === req.params.repoId))
-          return reply.code(404).send({ error: "unknown repo" });
-        if (!deps.mapRing) return reply.code(503).send({ error: "map collector unavailable" });
-        return { seats: deps.mapRing.scopes(req.params.repoId) };
-      });
-
-      // Reader: apps/web/src/data.ts (none in the web: the Map reads conflicts from the snapshot; for diagnosis)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/conflicts",
-        async (req, reply) => {
-          const repo = config.repos.find((r) => r.id === req.params.repoId);
-          if (!repo) return reply.code(404).send({ error: "unknown repo" });
-          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
-          try {
-            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
-              return reply.code(503).send({ error: "map checkout unavailable" });
-            }
-            const { conflicts, unchecked, failures } = await mapConflicts.check(
-              checkout,
-              store.pullRequests(repo.id),
-            );
-            for (const failure of failures)
-              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
-            return { conflicts, unchecked };
-          } catch (e) {
-            reply.log.warn(
-              { reason: e instanceof Error ? e.message : String(e) },
-              "map conflicts unavailable",
-            );
-            return reply.code(503).send({ error: "map conflicts unavailable" });
-          }
-        },
       );
 
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
@@ -3680,25 +3763,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
           return { ...pr, ...prPreviewFor(repo)(pr), ...prAcceptanceFor(store, repo.id)(pr) };
-        },
-      );
-
-      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
-      // Reader: apps/web/src/map/CrewMap.tsx (a QA deep link selects the PR's exact changed paths)
-      api.get<{ Params: { repoId: string; number: string } }>(
-        "/repos/:repoId/prs/:number/files",
-        (req, reply) => {
-          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
-            ? store.pullRequest(req.params.repoId, Number(req.params.number))
-            : null;
-          if (!config.repos.some((r) => r.id === req.params.repoId) || !pr)
-            return reply.code(404).send({ error: "unknown pull request" });
-          return {
-            repoId: pr.repoId,
-            number: pr.number,
-            sha: pr.headSha,
-            files: store.prFilePaths(pr.repoId, pr.number),
-          };
         },
       );
 
@@ -3794,17 +3858,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const handoffs = new Map(store.latestHandoffs(repo.id).map((h) => [h.ticket, h]));
         return store.board(repo.id).map((card) => {
           const h = handoffs.get(`${repo.id}#${card.issueNumber}`);
-          return h
-            ? {
-                ...card,
-                handoff: {
-                  runId: h.runId,
-                  fromSeat: h.fromSeat,
-                  at: h.at,
-                  acceptedBy: h.acceptedBy,
-                },
-              }
-            : card;
+          const waiting = store.ticketWait(repo.id, card.issueNumber);
+          return {
+            ...card,
+            ...(waiting ? { waiting, assignees: [], owner: null } : {}),
+            ...(h
+              ? {
+                  handoff: {
+                    runId: h.runId,
+                    fromSeat: h.fromSeat,
+                    at: h.at,
+                    acceptedBy: h.acceptedBy,
+                  },
+                }
+              : {}),
+          };
         });
       });
 
@@ -4080,16 +4148,40 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         );
       });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
-      api.get<{ Querystring: { days?: string } }>("/audit/tokens", async (req, reply) => {
-        const raw = req.query.days ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
-        const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
-        if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
-          return reply
-            .code(400)
-            .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
-        }
-        return tokenAuditView(store, config, now(), days);
-      });
+      api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(
+        "/audit/tokens",
+        async (req, reply) => {
+          const { days: rawDays, hours: rawHours, shape } = req.query;
+          if (rawDays !== undefined && rawHours !== undefined) {
+            return reply.code(400).send({ error: "send days or hours, not both" });
+          }
+          if (shape !== undefined && shape !== "summary") {
+            return reply.code(400).send({ error: "shape must be summary" });
+          }
+          let view: TokenAuditView;
+          if (rawHours !== undefined) {
+            const hours = /^\d{1,2}$/.test(rawHours) ? Number(rawHours) : 0;
+            if (hours < 1 || hours > TOKEN_AUDIT_HOURS_MAX) {
+              return reply.code(400).send({
+                error: `hours must be a whole number from 1 to ${TOKEN_AUDIT_HOURS_MAX}`,
+              });
+            }
+            view = tokenAuditWindowView(store, config, now(), hours);
+          } else {
+            const raw = rawDays ?? String(TOKEN_AUDIT_DAYS_DEFAULT);
+            const days = /^\d{1,3}$/.test(raw) ? Number(raw) : 0;
+            if (days < 1 || days > TOKEN_AUDIT_DAYS_MAX) {
+              return reply
+                .code(400)
+                .send({ error: `days must be a whole number from 1 to ${TOKEN_AUDIT_DAYS_MAX}` });
+            }
+            view = tokenAuditView(store, config, now(), days);
+          }
+          return shape === "summary" ? tokenAuditSummary(view) : view;
+        },
+      );
+      // Reader: docs/runbook.md#waste-alarms (spend per merged change, the building share and the open alarms; the Audit page reads it in a later page)
+      api.get("/waste", async (): Promise<WasteReport> => wasteReport(config, store, now()));
       api.get("/machine", async (): Promise<MachineView> => {
         const cached = transcriptFootprintCache;
         const footprint =
@@ -4104,13 +4196,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const counts = sessions.map((s) => s.seats.length);
         const latest = machine();
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          latest === null
-            ? store.machineSamples(machineCapacitySince(now(), capacityConfig))
-            : [...store.machineSamples(machineCapacitySince(now(), capacityConfig)), latest],
-          now(),
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, now(), capacityConfig, latest);
         return {
           latest,
           warning: capacity.reason,
@@ -4569,11 +4655,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
         const at = now();
         const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-        const capacity = machineCapacity(
-          store.machineSamples(machineCapacitySince(at, capacityConfig)),
-          at,
-          capacityConfig,
-        );
+        const capacity = storedMachineCapacity(store, at, capacityConfig);
         if (capacity.blocked && b.force !== true)
           throw new SupervisorError(409, `Machine capacity held: ${capacity.reason}`);
         const loop = crewSeatDef(config, id).loop;
@@ -4583,7 +4665,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (b.issue !== undefined) {
             throw new SupervisorError(400, watchStartRefusedText(seatCallSign(id)));
           }
-          started = await sup.startWatch(id);
+          started = await sup.startWatch(id, { operator: true });
         } else {
           if (b.issue === undefined) throw new SupervisorError(400, ISSUE_REQUIRED);
           // FLIGHT calling this route is not the operator: the slow pace still holds its starts
@@ -4675,6 +4757,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return { ok: true };
           }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
+          // Sent from an item's conversation, it answers the seat's latest message there, so a
+          // question the seat asked in that conversation closes.
+          const answers =
+            b.itemKey === undefined
+              ? undefined
+              : store
+                  .itemThreadNow(b.itemKey)
+                  .filter((m) => m.from === id && m.to === sender.from)
+                  .at(-1)?.id;
           try {
             let delivered = false;
             let wakeFailed = false;
@@ -4707,6 +4798,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 to: id,
                 text: b.text,
                 ...(b.interrupt === true ? { label: "handoff" as const } : {}),
+                ...(b.itemKey === undefined ? {} : { itemKey: b.itemKey }),
+                ...(answers === undefined ? {} : { replyTo: answers }),
                 ref: ticket ?? undefined,
               },
             );
@@ -4788,11 +4881,18 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         },
       );
-      // Reader: apps/web/src/shell/Dock.tsx#Dock
+      // Reader: apps/web/src/data.ts#RESOURCES (the dependent web child switches seat-only readers)
       // `live` is judged from FLIGHT's session, not only its run row (#798)
-      api.get("/flight", async () =>
-        flightView(config, store, Date.now(), (id) => supervisor?.sessionAlive?.(id) ?? null),
-      );
+      api.get<{ Querystring: { shape?: unknown } }>("/flight", async (req, reply) => {
+        const { shape } = req.query;
+        if (shape !== undefined && shape !== "seat")
+          return reply.code(400).send({ error: "shape must be seat" });
+        const at = Date.now();
+        const alive = (id: string) => supervisor?.sessionAlive?.(id) ?? null;
+        return shape === "seat"
+          ? { seat: flightSeatView(config, store, alive) }
+          : flightView(config, store, at, alive);
+      });
       // Reader: apps/web/src/flight/PrFlowPanel.tsx (protected PR-flow panel)
       api.get("/prs/flow", async (req, reply) => {
         if (
@@ -4943,6 +5043,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           const { repo, window, tab } = parsed.data;
           return await codeHealthOutput(codeHealth.read(repo, window, tab));
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
+      // Reader: docs/runbook.md (the Audit page's stored first-screen summary)
+      api.get("/code-health/overview", async (req, reply) => {
+        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const parsed = z
+          .strictObject({
+            repo: z.string().trim().min(1).max(128),
+            window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
+          })
+          .safeParse(req.query);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
+        reply.header("cache-control", "no-store");
+        try {
+          const { view, changed } = codeHealth.overview(parsed.data.repo, parsed.data.window);
+          // Only a rebuild that changed what the page shows tells open pages to read again.
+          if (changed) bus.emit("health");
+          return await codeHealthOutput(view);
         } catch (error) {
           return codeHealthFailure(error, reply);
         }
@@ -6199,17 +6320,25 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             }
           : item;
       };
+      // `?owner=operator` keeps one owner's items; `?compact=1` returns each as AttentionCompactItem (#1632)
       api.get(
         "/attention",
-        async (): Promise<AttentionItem[]> =>
-          sharedAttention().map((item) =>
-            // the operator's items carry their ticket and PR with titles (#1543)
-            pinnedFor(
-              item.kind === "tag" && item.text.length > 170
-                ? { ...item, text: `${item.text.slice(0, 169)}…` }
-                : item,
-            ),
-          ),
+        async (req, reply): Promise<AttentionItem[] | AttentionCompactItem[]> => {
+          const query = AttentionListQuery.safeParse(req.query);
+          if (!query.success) return reply.code(400).send({ error: "Bad owner or compact." });
+          const { owner, compact } = query.data;
+          return sharedAttention()
+            .filter((item) => owner === undefined || itemOwner(item) === owner)
+            .map((item) =>
+              // the operator's items carry their ticket and PR with titles (#1543)
+              pinnedFor(
+                item.kind === "tag" && item.text.length > 170
+                  ? { ...item, text: `${item.text.slice(0, 169)}…` }
+                  : item,
+              ),
+            )
+            .map((item) => (compact === true ? compactAttentionItem(item) : item));
+        },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
       registerBriefChoiceRoutes(api, app, deps, flightActor);
@@ -6221,6 +6350,67 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ? pinnedFor(item) : reply.code(404).send({ error: "Item is no longer open." });
+      });
+      const materialInput = z.strictObject({
+        repoId: z.string().min(1).max(200),
+        sourceCommit: z.string().max(40),
+        sourcePath: z.string().min(1).max(1000),
+        label: z.string().min(1).max(300),
+      });
+      // Reader: docs/runbook.md#retained-needs-you-materials (operator registers an inspectable source packet)
+      api.post<{ Params: { key: string } }>("/attention/:key/materials", async (req, reply) => {
+        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const input = materialInput.safeParse(req.body);
+        if (!input.success)
+          return reply
+            .code(400)
+            .send({ error: "Give a repository, full commit, docs Markdown path and label." });
+        try {
+          return reply
+            .code(201)
+            .send(await attentionMaterials.register(req.params.key, input.data));
+        } catch (error) {
+          return reply.code(error instanceof AttentionMaterialsError ? error.status : 503).send({
+            error:
+              error instanceof AttentionMaterialsError
+                ? error.message
+                : "Materials could not be retained.",
+          });
+        }
+      });
+      // Reader: apps/web/src/pages/Needs.tsx (selected item material panel; planned #1705)
+      api.get<{ Params: { key: string } }>("/attention/:key/materials", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const packets = attentionMaterials.read(req.params.key);
+        if (packets.length === 0)
+          return reply.code(404).send({ error: "No retained materials for this item." });
+        const body: AttentionMaterialsResponse = { packets };
+        return body;
+      });
+      // Reader: apps/web/src/pages/Needs.tsx (authenticated raster image in a retained packet; planned #1705)
+      api.get<{ Params: { id: string } }>("/attention-material-assets/:id", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const asset = attentionMaterials.asset(req.params.id);
+        return asset
+          ? reply
+              .type(asset.mediaType)
+              .header("x-content-type-options", "nosniff")
+              .header("cache-control", "private, no-store")
+              .send(asset.bytes)
+          : reply.code(404).send({ error: "Material image not found." });
       });
       // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>
@@ -6354,6 +6544,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
+      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
+        const key = req.params.key;
+        if (key.length > 200) return reply.code(400).send({ error: "key too long" });
+        // A note key is raised again later: only this run of the note owns the conversation.
+        // Other item keys name one message, question or issue, so all of theirs is the item's.
+        return itemThread(store.itemThreadNow(key));
+      });
       // Reader: apps/web/src/shell/ItemPanel.tsx
       api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
         "/attention/:key/discussion",
@@ -6364,7 +6562,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return thread ?? reply.code(404).send({ error: "Unknown discussion." });
           }
           const item = currentDiscussionItem(key);
-          if (!item?.version) return reply.code(404).send({ error: "No current item." });
+          if (!item?.version) {
+            const thread = store.discussionForItem(key);
+            return thread ?? reply.code(404).send({ error: "No current item." });
+          }
           return openDiscussion({ ...item, version: item.version });
         },
       );
@@ -6755,10 +6956,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
-      api.get<{ Querystring: { map?: string } }>("/stream", (req, reply) => {
-        const repoId = req.query.map;
-        if (repoId !== undefined && !config.repos.some((r) => r.id === repoId))
-          return reply.code(404).send({ error: "repo not found" });
+      api.get("/stream", (_req, reply) => {
         reply.hijack();
         const res = reply.raw;
         res.writeHead(200, {
@@ -6782,20 +6980,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             send("machine");
           }, 10_000);
         });
-        // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
-        let unsubscribeMap: (() => void) | undefined;
-        if (repoId !== undefined) {
-          stopMapRing ??= mapRing.start();
-          unsubscribeMap = mapRing.subscribe(repoId, (delta) => {
-            res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
-          });
-        }
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
-          unsubscribeMap?.();
           streams.delete(end);
           deps.onStreamCount?.(streams.size);
         };

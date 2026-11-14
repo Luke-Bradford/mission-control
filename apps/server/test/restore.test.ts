@@ -9,7 +9,8 @@ import type { CcConfig } from "../src/config.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { restoreRuns } from "../src/runtime/restore.ts";
-import { crewTokenPath, Store } from "../src/store.ts";
+import { crewTokenPath } from "../src/store/crew-paths.ts";
+import { Store } from "../src/store.ts";
 
 let dir: string;
 let dbPath: string;

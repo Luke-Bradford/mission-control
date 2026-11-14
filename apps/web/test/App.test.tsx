@@ -56,7 +56,6 @@ describe("App", () => {
     ["/flight", "Flight"],
     ["/board", "Board"],
     ["/agent", "Agents"],
-    ["/map/sample", "Crew activity map"],
     ["/comms", "Comms"],
     ["/telemetry", "Telemetry"],
     ["/audit", "Audit"],
@@ -69,7 +68,7 @@ describe("App", () => {
     expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
   });
 
-  it("carries the waiting count in the tab title, and has no dock on the Needs you page", async () => {
+  it("carries the waiting count and page name in the tab title", async () => {
     stubFetch({
       "/api/repos": REPOS,
       "/api/config": CONFIG,
@@ -80,7 +79,7 @@ describe("App", () => {
       ],
     });
     const { container } = at("/needs-you");
-    await waitFor(() => expect(document.title).toBe("(2) Mission Control"));
+    await waitFor(() => expect(document.title).toBe("(2) Needs you · Mission Control"));
     expect(container.querySelector("#dock")).toBeNull();
   });
 
@@ -97,7 +96,6 @@ describe("App", () => {
     ["/flight", "page-flight", "Flight"],
     ["/board", "page-board", "Board"],
     ["/agent", "page-agent", "Agents"],
-    ["/map/sample", "page-map", "Map"],
     ["/comms", "page-comms", "Comms"],
     ["/telemetry", "page-telemetry", "Telemetry"],
     ["/audit", "page-audit", "Audit"],
@@ -112,10 +110,19 @@ describe("App", () => {
     expect(current.map((a) => a.textContent)).toEqual(tabName ? [tabName] : []);
   });
 
-  it("an unknown path shows Overview at /", async () => {
-    const { container } = at("/nope");
-    await vi.waitFor(() => expect(window.location.pathname).toBe("/"));
-    await waitFor(() => expect(container.querySelector("#page-overview")).not.toBeNull());
+  it("names the current page in the tab title", async () => {
+    at("/board");
+    await waitFor(() => expect(document.title).toBe("Board · Mission Control"));
+  });
+
+  it("shows a not-found page without replacing an unknown address", async () => {
+    at("/nope");
+    expect(window.location.pathname).toBe("/nope");
+    expect(await screen.findByRole("heading", { level: 1, name: "Page not found" })).toBeTruthy();
+    const pages = screen.getByRole("navigation", { name: "Main pages" });
+    expect(within(pages).getByRole("link", { name: "Overview" }).getAttribute("href")).toBe("/");
+    expect(within(pages).getByRole("link", { name: "Board" }).getAttribute("href")).toBe("/board");
+    expect(within(pages).getByRole("link", { name: "Comms" }).getAttribute("href")).toBe("/comms");
   });
 
   it.each([
@@ -173,24 +180,6 @@ describe("App", () => {
     );
   });
 
-  it("keeps Map navigation and its site-wide FLIGHT rail separate", async () => {
-    act(() => toggleDock(true));
-    const { container } = at("/");
-    act(() => {
-      fireEvent.keyDown(document.body, { key: "g" });
-      fireEvent.keyDown(document.body, { key: "m" });
-    });
-    expect(window.location.pathname).toMatch(/^\/map/);
-    await waitFor(() => expect(container.querySelector("#page-map")).not.toBeNull());
-    expect(container.querySelector(".shell.shell-full")).toBeNull();
-    expect(container.querySelector(".dock")).not.toBeNull();
-    act(() => {
-      fireEvent.keyDown(document.body, { key: "f" });
-    });
-    expect(window.location.pathname).toMatch(/^\/map/);
-    expect(container.querySelector("#dock")?.classList.contains("collapsed")).toBe(false);
-  });
-
   it("starts the dock collapsed on the Board and expands it on click", async () => {
     sessionStorage.removeItem("mc-dock-collapsed");
     act(() => toggleDock(true));
@@ -222,20 +211,22 @@ describe("App", () => {
     expect(screen.getByText("Open an agent to interrupt it.").getAttribute("role")).toBe("status");
   });
 
-  it("the footer carries the key hints, Setup included, and no sample-data chip", () => {
+  it("the footer carries only keyboard hints", () => {
     const { container } = at("/");
     const keys = container.querySelector(".keys");
-    expect(keys?.textContent).toContain("g then o f b a m c t pages");
+    expect(keys?.textContent).toContain("g then o f b a c t pages");
     expect(keys?.textContent).toContain("s Setup");
     for (const hint of ["f FLIGHT", "jk next agent", "/ message agent", "i interrupt", "? help"]) {
       expect(keys?.textContent).toContain(hint);
     }
     expect(keys?.textContent).not.toContain("Agent page");
     expect(keys?.textContent).not.toContain("Sample data");
+    expect(keys?.textContent).not.toContain("Demo");
+    expect(keys?.textContent).not.toContain("build status");
   });
 
-  it("the build-status toggle shows the legend and hides phase badges", () => {
-    const { container } = at("/flight");
+  it("keeps display controls in Setup", () => {
+    const { container } = at("/setup");
     const btn = screen.getByRole("button", { name: "Show build status" });
     expect(container.querySelector(".bslegend")?.hasAttribute("hidden")).toBe(true);
     fireEvent.click(btn);

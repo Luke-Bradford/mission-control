@@ -2,7 +2,6 @@ import type { AttentionItem, BriefOption, ChoiceReceipt, CrewRow, ItemDiscussion
 import { ApiError, apiPost, errorNote } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
-import { toggleDock } from "../shell/overlays.ts";
 
 /** Where an answer to a Needs-you item goes. */
 export type AnswerTarget =
@@ -25,7 +24,9 @@ export function answerTarget(
 
 /** The line that tells FLIGHT which item a message is about. */
 export function itemLead(key: string, about: string): string {
-  return about.trim() === "" ? `Re: ${key}` : `Re: ${key} · ${about}`;
+  // one line, so the item's conversation can drop it at the first blank line
+  const line = about.replace(/\s+/g, " ").trim();
+  return line === "" ? `Re: ${key}` : `Re: ${key} · ${line}`;
 }
 
 export function flightText(key: string, about: string, body: string): string {
@@ -48,23 +49,30 @@ export async function sendAnswer(
   item: AttentionItem,
   about: string,
   body: string,
+  /** False for a picked option: its receipt shows the pick, so the item's conversation does not. */
+  inThread = true,
 ): Promise<string | null> {
   if (target.to === "github") return null;
+  const thread = inThread ? { itemKey: item.key } : {};
   try {
     if (target.to === "seat") {
       // Name the question, so the answer reaches the run that asked it even if another run is on the seat now.
       const question = askedQuestion(item.key);
       await apiPost(
         ACTIONS.seatMessage(target.seatId),
-        question === null ? { text: body } : { text: body, question },
+        question === null ? { text: body, ...thread } : { text: body, question, ...thread },
       );
     } else {
       // FLIGHT may be stopped: the hub keeps the message and FLIGHT reads it when it starts.
       if (flight === null) return FLIGHT_NO_SEAT;
-      await apiPost(ACTIONS.seatMessage(flight.id), { text: flightText(item.key, about, body) });
-      toggleDock(true);
+      // The item names the message, so it and every reply show in the item's conversation.
+      await apiPost(ACTIONS.seatMessage(flight.id), {
+        text: flightText(item.key, about, body),
+        ...thread,
+      });
     }
     hub.refetch(RESOURCES.attention.path);
+    hub.refetch(RESOURCES.itemThread(item.key).path);
     return null;
   } catch (e) {
     return e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e);

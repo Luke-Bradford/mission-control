@@ -63,7 +63,11 @@ describeRendered("Standing instructions in the actual App", () => {
               await page.screenshot(join(OUT, `${stem}-initial.png`));
             }
             if (!BEFORE) {
-              if (view === "agent") await page.click(".instruction-disclosure > summary");
+              if (view === "agent") {
+                // The seat's standing instructions sit in the Setup tab of the right column.
+                await page.click(".side-tabs .seg button:last-child");
+                await page.click(".instruction-disclosure > summary");
+              }
               if (view === "crew") {
                 await page.click("#wifP .seg button:last-child");
                 await page.box(".instruction-index .instruction-seat > summary");
