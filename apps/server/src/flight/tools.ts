@@ -400,7 +400,7 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { resolveWasteAlarm } from "../spend/waste.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
-import { HUB_UPDATE_HELD_KEY } from "../update.ts";
+import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
 import { mergeExternalPr } from "./external-merge.ts";
@@ -3000,7 +3000,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(briefNoItemText(key));
     }
     // a protected item always reaches the operator: it is briefed, never held back
-    if (hold && protectedDecisionItem(store, item, config, at)) return fail(PROTECTED_ITEM_REFUSED);
+    // (the held Update is FLIGHT's to keep, not to hold: a hold would keep it off the operator's list past its window)
+    if (
+      hold &&
+      (protectedDecisionItem(store, item, config, at) ||
+        item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)
+    )
+      return fail(PROTECTED_ITEM_REFUSED);
     // an item FLIGHT holds a tool for is FLIGHT's to settle, never the operator's (#1510)
     if (structured.for === "operator" && !hubAlert(item, store)) {
       // a money, security, irreversible or floor decision is the operator's whatever the seat's words
@@ -3064,7 +3070,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (partFaults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${partFaults.join("; ")}.`);
     }
     if (structured.for === "flight") {
-      if (isOperatorCall(item, store))
+      if (isOperatorCall(item, store, config))
         return fail(
           "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
         );
@@ -4434,6 +4440,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           !note ||
           key.startsWith(GUARD_ACK_PREFIX) ||
           key === HUB_UPDATE_HELD_KEY ||
+          key === HUB_UPDATE_PERSON_KEY ||
           note.kind === "ratelimit"
         )
           return fail(note ? protectedItem : notFound);
@@ -4480,7 +4487,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.login,
         ).find((i) => i.key === a.key);
         if (waiting === undefined) return fail("Item is no longer waiting.");
-        if (protectedDecisionItem(store, waiting, config, now()))
+        if (
+          protectedDecisionItem(store, waiting, config, now()) ||
+          waiting.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`
+        )
           return fail(PROTECTED_ITEM_REFUSED);
         if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
           return fail(HOLD_CYCLE_REFUSED);

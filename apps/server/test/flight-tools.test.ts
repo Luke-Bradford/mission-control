@@ -9667,6 +9667,26 @@ describe("attention hold tools", () => {
       expect((await call("release_hold", { key: cc.key })).isError).toBeUndefined();
     }
   });
+  it("refuses to hold the held Update even when FLIGHT may run it: a hold would keep it from the operator (#1834)", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.raiseNote({
+      key: "hub-update-held",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW - 1,
+    });
+    expect(
+      await call("hold_item", {
+        key: "note:hub-update-held",
+        reason: "Waiting",
+        condition: { kind: "date", at: NOW + 7 * 86_400_000 },
+      }),
+    ).toEqual(refused(PROTECTED_ITEM_REFUSED));
+    expect(store.getSetting("attention-holds")).toBeNull();
+  });
   it("refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)", async () => {
     expect(await call("hold_item", { ...args, key: FLIGHT_NOT_TRIAGING_KEY })).toEqual(
       refused(HOLD_NOT_TRIAGING_REFUSED),
@@ -9871,6 +9891,29 @@ describe("brief_item with a hold (#760)", () => {
     expect(r.isError).toBe(true);
     expect(holds(store)[key]).toBeUndefined();
     expect(store.briefs().has(key)).toBe(false);
+  });
+
+  it("refuses to brief the held Update with a hold, even when FLIGHT may run it (#1834)", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.raiseNote({
+      key: "hub-update-held",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW - 1,
+    });
+    expect(
+      await call(
+        "brief_item",
+        brief({
+          key: "note:hub-update-held",
+          hold: { condition: { kind: "date", at: NOW + 7 * 86_400_000 } },
+        }),
+      ),
+    ).toEqual(refused(PROTECTED_ITEM_REFUSED));
+    expect(store.getSetting("attention-holds")).toBeNull();
   });
 
   it("refuses an item hold that closes a cycle, storing neither brief nor hold", async () => {
