@@ -3000,7 +3000,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(briefNoItemText(key));
     }
     // a protected item always reaches the operator: it is briefed, never held back
-    if (hold && protectedDecisionItem(store, item, config, at)) return fail(PROTECTED_ITEM_REFUSED);
+    // (the held Update is FLIGHT's to keep, not to hold: a hold would keep it off the operator's list past its window)
+    if (
+      hold &&
+      (protectedDecisionItem(store, item, config, at) ||
+        item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)
+    )
+      return fail(PROTECTED_ITEM_REFUSED);
     // an item FLIGHT holds a tool for is FLIGHT's to settle, never the operator's (#1510)
     if (structured.for === "operator" && !hubAlert(item, store)) {
       // a money, security, irreversible or floor decision is the operator's whatever the seat's words
@@ -4481,7 +4487,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.login,
         ).find((i) => i.key === a.key);
         if (waiting === undefined) return fail("Item is no longer waiting.");
-        if (protectedDecisionItem(store, waiting, config, now()))
+        if (
+          protectedDecisionItem(store, waiting, config, now()) ||
+          waiting.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`
+        )
           return fail(PROTECTED_ITEM_REFUSED);
         if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
           return fail(HOLD_CYCLE_REFUSED);

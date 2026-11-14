@@ -50,6 +50,7 @@ import {
   raiseUpdatePersonNote,
   realExec,
   UPDATE_EXIT_DELAY_MS,
+  UPDATE_FORCE_AFTER_MS,
   UPDATE_HOLD_MAX_MS,
   UPDATE_HOLD_OWNER,
   UPDATE_KILL_GRACE_MS,
@@ -1610,6 +1611,20 @@ describe("auto update", () => {
     expect(pulls(calls).map((c) => c.cmd)).toEqual([`git merge --ff-only ${tip}`]);
   });
 
+  it("refuseUnsafe says HEAD is off main before it pulls, instead of failing at the pull", async () => {
+    mkdirSync(join(hub, "docs"));
+    writeFileSync(join(hub, "docs/local.md"), "local");
+    git(hub, "add", "docs/local.md");
+    git(hub, "commit", "-qm", "local docs");
+    upstreamPath("apps/server/src/x.ts");
+    const { u, calls } = updater();
+    await expect(u.update({ refuseUnsafe: true })).rejects.toMatchObject({
+      status: 409,
+      message: HUB_HEAD_OFF_MAIN,
+    });
+    expect(pulls(calls)).toHaveLength(0);
+  });
+
   it("raises the operator's note when auto Update meets HEAD off main, or pnpm needing a person", async () => {
     const person = vi.fn();
     const off = restarting(async () => {
@@ -1732,6 +1747,33 @@ describe("auto update", () => {
       // a busy crew never keeps new runs out for longer than the cap
       await vi.advanceTimersByTimeAsync(UPDATE_HOLD_MAX_MS);
       expect(hold.reason).toBeNull();
+    });
+
+    it("stops waiting for a long turn: past the bound FLIGHT's next call runs Update and the hold ends with it", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      const gate = createQuietGate(hold, { waitMs: 10_000, pollMs: 1_000 });
+      const first = gate.wait(() => seats("guido-1"), "flight-1");
+      await vi.advanceTimersByTimeAsync(11_000);
+      await expect(first).resolves.toContain("still working");
+      // FLIGHT calls again as the hold nears its lapse, then again after the bound
+      await vi.advanceTimersByTimeAsync(UPDATE_FORCE_AFTER_MS);
+      await expect(gate.wait(() => seats("guido-1"), "flight-1")).resolves.toBeNull();
+      expect(hold.heldBy(UPDATE_HOLD_OWNER)).toBe(true);
+      gate.release();
+      expect(hold.reason).toBeNull();
+    });
+
+    it("keeps the bound across a lapsed hold: a seat mid-turn for an hour never keeps Update held", async () => {
+      vi.useFakeTimers();
+      const hold = new CliHold();
+      const gate = createQuietGate(hold, { waitMs: 1_000, pollMs: 500 });
+      const first = gate.wait(() => seats("guido-1"), "flight-1");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await first;
+      await vi.advanceTimersByTimeAsync(UPDATE_HOLD_MAX_MS + 1);
+      expect(hold.reason).toBeNull();
+      await expect(gate.wait(() => seats("guido-1"), "flight-1")).resolves.toBeNull();
     });
 
     it("leaves another owner's hold alone", async () => {

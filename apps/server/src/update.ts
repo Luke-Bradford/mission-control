@@ -453,6 +453,12 @@ export const UPDATE_QUIET_WAIT_MS = 2 * 60_000;
 export const UPDATE_QUIET_POLL_MS = 1_000;
 /** The hold on new runs lets go after this unless FLIGHT calls again: a missed call never stalls the crew. */
 export const UPDATE_HOLD_MAX_MS = 15 * 60_000;
+/**
+ * Once the hold has stood this long, FLIGHT's next call runs Update even with seats mid-turn: a
+ * mid-turn seat keeps working under its keeper through the restart, so only a seat that is
+ * starting still refuses (`crewRefusal`). A long turn can never keep an Update held for good.
+ */
+export const UPDATE_FORCE_AFTER_MS = 10 * 60_000;
 /** The reason shown while new runs are held for Update. */
 export const UPDATE_HOLD_TEXT =
   "Update is waiting for running turns to end; new runs start again as soon as it has run";
@@ -471,24 +477,40 @@ export interface QuietGate {
 
 export function createQuietGate(
   hold: Pick<CliHold, "hold" | "release">,
-  opts: { waitMs?: number; pollMs?: number; maxHoldMs?: number } = {},
+  opts: { waitMs?: number; pollMs?: number; maxHoldMs?: number; forceAfterMs?: number } = {},
 ): QuietGate {
   const { waitMs = UPDATE_QUIET_WAIT_MS, pollMs = UPDATE_QUIET_POLL_MS } = opts;
   const maxHoldMs = opts.maxHoldMs ?? UPDATE_HOLD_MAX_MS;
+  const forceAfterMs = opts.forceAfterMs ?? UPDATE_FORCE_AFTER_MS;
   let lapse: NodeJS.Timeout | undefined;
-  const release = () => {
+  /** When FLIGHT first had to wait, and its latest call; kept through a lapse so the bound holds. */
+  let waitingSince: number | undefined;
+  let lastCallAt = 0;
+  const endHold = () => {
     clearTimeout(lapse);
     lapse = undefined;
     hold.release(UPDATE_HOLD_OWNER);
+  };
+  const release = () => {
+    endHold();
+    waitingSince = undefined;
   };
   return {
     release,
     async wait(busy, except) {
       const others = () => busy().filter((b) => b.seatId !== except);
       if (others().length === 0) return null;
+      const at = Date.now();
+      // a call long after the last one is a new Update, not the same wait
+      if (waitingSince === undefined || at - lastCallAt > 2 * maxHoldMs) waitingSince = at;
+      lastCallAt = at;
+      if (at - waitingSince >= forceAfterMs) {
+        hold.hold(UPDATE_HOLD_TEXT, UPDATE_HOLD_OWNER);
+        return null;
+      }
       hold.hold(UPDATE_HOLD_TEXT, UPDATE_HOLD_OWNER);
       clearTimeout(lapse);
-      lapse = setTimeout(release, maxHoldMs);
+      lapse = setTimeout(endHold, maxHoldMs);
       lapse.unref();
       const deadline = Date.now() + waitMs;
       for (;;) {
@@ -992,6 +1014,15 @@ export function createUpdater(deps: UpdaterDeps): Updater {
                 unsafePaths: unsafe,
               },
             });
+          }
+          // the same guard as auto: a checkout off main's history fails the pull, so say why instead
+          const ancestor = await git(["merge-base", "--is-ancestor", "HEAD", tip]).then(
+            () => true,
+            () => false,
+          );
+          if (!ancestor) {
+            await log("failed: HEAD is not on origin/main's history\n");
+            throw new UpdateError(409, HUB_HEAD_OFF_MAIN);
           }
           checked = tip;
         }

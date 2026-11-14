@@ -446,6 +446,7 @@ import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
 import {
   createHeldUpdateNote,
+  HUB_HEAD_OFF_MAIN,
   HUB_INSTALL_NEEDS_PERSON,
   HUB_UNSAFE_NEEDS_PERSON,
   HUB_UPDATE_HELD_KEY,
@@ -6284,7 +6285,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (actor !== null && e instanceof UpdateError) {
             if (e.message === HUB_UNSAFE_NEEDS_PERSON && e.held !== undefined)
               createHeldUpdateNote(store, bus)(e.held);
-            else if (e.message === HUB_INSTALL_NEEDS_PERSON)
+            else if (e.message === HUB_INSTALL_NEEDS_PERSON || e.message === HUB_HEAD_OFF_MAIN)
               raiseUpdatePersonNote(store, bus, e.message);
           }
           // logged: update.log says why (the page opens it); false for a refusal before the log

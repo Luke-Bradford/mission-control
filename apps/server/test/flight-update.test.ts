@@ -11,6 +11,7 @@ import type { Supervisor } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import {
   createQuietGate,
+  HUB_HEAD_OFF_MAIN,
   HUB_INSTALL_NEEDS_PERSON,
   HUB_UNSAFE_NEEDS_PERSON,
   HUB_UPDATE_HELD_KEY,
@@ -231,5 +232,14 @@ it("raises a person-only note when pnpm needs a person", async () => {
   expect((await update(asFlight)).statusCode).toBe(409);
   expect(store.notes().find((n) => n.key === HUB_UPDATE_PERSON_KEY)?.text).toContain(
     "node_modules",
+  );
+});
+
+it("raises the operator's note when the checkout has drifted off main", async () => {
+  build("superuser", true);
+  updateError = new UpdateError(409, HUB_HEAD_OFF_MAIN);
+  expect((await update(asFlight)).statusCode).toBe(409);
+  expect(store.notes().find((n) => n.key === HUB_UPDATE_PERSON_KEY)?.text).toContain(
+    "drifted off main",
   );
 });
