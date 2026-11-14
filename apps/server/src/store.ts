@@ -395,6 +395,11 @@ const toTokenCall = (r: Row): TokenCall => ({
   added: JSON.parse(r.added as string) as TokenSourceAdd[],
 });
 
+/** How many of a repo's latest merged PRs feed a job's p90 run time. */
+const CI_P90_PRS = 40;
+/** A job needs this many timed runs before its p90 stands in for the fixed limit. */
+const CI_P90_MIN_SAMPLES = 5;
+
 export class Store {
   private readonly db: DatabaseSync;
   private readonly rawDb: DatabaseSync;
@@ -4041,6 +4046,33 @@ export class Store {
       "SELECT * FROM pull_requests WHERE repo_id = ? ORDER BY number DESC",
     ).all(repoId) as Row[];
     return this.pullRequestRows(rows);
+  }
+
+  /**
+   * The p90 run time (ms) of each CI check run in the repo, by name, over its last merged PRs
+   * that kept check timings; a name with fewer than CI_P90_MIN_SAMPLES runs is left out.
+   */
+  ciCheckP90Ms(repoId: RepoId): Record<string, number> {
+    const rows = this.statement(
+      "SELECT checks FROM pull_requests WHERE repo_id = ? AND state = 'merged' ORDER BY merged_at DESC LIMIT ?",
+    ).all(repoId, CI_P90_PRS) as Row[];
+    const byName = new Map<string, number[]>();
+    for (const r of rows) {
+      for (const c of JSON.parse(r.checks as string) as PrCheck[]) {
+        if (c.kind !== "check" || c.state !== "passing") continue;
+        if (c.startedAt === undefined || c.completedAt === undefined) continue;
+        const ms = c.completedAt - c.startedAt;
+        if (ms <= 0) continue;
+        byName.set(c.name, [...(byName.get(c.name) ?? []), ms]);
+      }
+    }
+    const out: Record<string, number> = {};
+    for (const [name, xs] of byName) {
+      if (xs.length < CI_P90_MIN_SAMPLES) continue;
+      xs.sort((a, b) => a - b);
+      out[name] = xs[Math.min(xs.length - 1, Math.ceil(xs.length * 0.9) - 1)] as number;
+    }
+    return out;
   }
 
   /** The newest PR of a branch, as its number and state: one narrow row, for the design previews. */

@@ -61,6 +61,7 @@ import {
   NEW_LOOP,
   NO_CI_AFTER_MS,
   originMovedText,
+  type PrCheck,
   type Profile,
   type PullRequestView,
   parkedEventText,
@@ -1401,6 +1402,54 @@ describe("CI and review", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
     expect(loopOf().phase).toBe("review");
+  });
+
+  it("a slow job is judged by its own p90 from merged PRs, and parks only past twice that", async () => {
+    const web = (over: Partial<PrCheck> = {}): PrCheck => ({
+      name: "web",
+      kind: "check",
+      state: "passing",
+      conclusion: "SUCCESS",
+      attempt: 1,
+      url: null,
+      ...over,
+    });
+    store.upsertPullRequests(
+      REPO,
+      [101, 102, 103, 104, 105, 106].map((n) =>
+        prRow({
+          number: n,
+          branch: `feature/old-${n}`,
+          ticket: null,
+          state: "merged",
+          mergedAt: START - n * MIN,
+          checks: [web({ startedAt: 1000, completedAt: 1000 + 30 * MIN })],
+        }),
+      ),
+      clock,
+    );
+    await inCi();
+    const t0 = clock;
+    const running = () =>
+      setPr({
+        ci: "pending",
+        checks: [web({ state: "pending", conclusion: "IN_PROGRESS", startedAt: t0 })],
+      });
+    for (let i = 0; i < 45; i++) {
+      clock += MIN;
+      running();
+      await h.engine.tick();
+    }
+    expect(loopOf().parked).toBeNull();
+    for (let i = 0; i < 20; i++) {
+      clock += MIN;
+      running();
+      await h.engine.tick();
+    }
+    expect(loopOf().parked?.reason).toMatch(/CI pending for 60 minutes .*pending: web/);
+    setPr({ ci: "passing", checks: [web({ startedAt: t0, completedAt: clock })] });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "review", parked: null });
   });
 
   it("a failing check is named in the CI failed event", async () => {
