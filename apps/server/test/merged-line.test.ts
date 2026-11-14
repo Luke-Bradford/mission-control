@@ -4,7 +4,13 @@ import { recordExternalMerge } from "../src/flight/merged-line.ts";
 type Recorded = { ref: string | null; decision: string; about: string; seatId: string | null };
 const recorder = () => {
   const seen: Recorded[] = [];
-  return { seen, record: (d: Recorded) => (seen.push(d), 77) };
+  return {
+    seen,
+    record: (d: Recorded) => {
+      seen.push(d);
+      return 77;
+    },
+  };
 };
 const m = { pr: 15, repoId: "mc", text: "Merged.", basis: "Read it", seatId: null };
 

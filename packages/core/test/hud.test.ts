@@ -57,7 +57,6 @@ import {
   USAGE_COLLECTOR_PREFIX,
   usageCollector,
 } from "../src/hud.ts";
-import { CHECK_BASH_TIMEOUT_MS } from "../src/mcp.ts";
 import type { SeatState } from "../src/runtime.ts";
 import type { AgentState, PullRequestView, SeatSessionRow } from "../src/types.ts";
 
@@ -547,6 +546,15 @@ describe("crewHudState", () => {
     reason: null,
     worktree: null,
     updatedAt,
+  });
+
+  it("never reads blocked for a seat, whatever its state", () => {
+    const states: SeatState[] = ["starting", "running", "idle", "parked", "stopped", "error"];
+    for (const lock of [false, true]) {
+      expect(crewHudState(null, null, now, lock)).not.toBe("blocked");
+      for (const state of states)
+        expect(crewHudState(seat(state), now - 1000, now, lock)).not.toBe("blocked");
+    }
   });
 
   it("no row is idle", () => {

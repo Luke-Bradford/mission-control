@@ -2969,6 +2969,7 @@ describe("zsh EQUALS and the - precommand modifier, launcher words as data, tmux
     // an expansion, glob or EQUALS word as the runner's first word
     "npx $X open .",
     'npx "$X" open .',
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: shell syntax under test, not a template
     "npx ${X} open .",
     "npx $(echo -y) open .",
     "npx `echo -y` open .",

@@ -21,9 +21,9 @@ import {
   externalPrControl,
   setExternalPrControl,
 } from "../external-pr-control.ts";
-import { branchOwned, isExternalReview, readExternalSubject } from "../external-reviews.ts";
 import { mergeFloorApproval, mergeFloorScope } from "../flight-approvals.ts";
 import type { GhRunner } from "../mcp/gh.ts";
+import { branchOwned, isExternalReview, readExternalSubject } from "../review/external.ts";
 import type { Store } from "../store.ts";
 
 export async function mergeExternalPr(i: {
@@ -42,7 +42,7 @@ export async function mergeExternalPr(i: {
   const { repo, store, number } = i;
   const cached = store.pullRequests(repo.id).find((pr) => pr.number === number);
   const sha = cached?.headSha;
-  if (!cached || cached.state !== "open" || !sha || repo.autonomy !== "merge")
+  if (cached?.state !== "open" || !sha || repo.autonomy !== "merge")
     return fail("No open external PR in this merge workspace.");
   if (branchOwned(i.config, store, repo.id, cached.branch, cached.ticket))
     return fail("This branch belongs to a crew run; use its normal merge path.");

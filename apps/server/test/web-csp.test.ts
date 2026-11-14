@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DESIGN_PREVIEW_PORT } from "../src/design-previews.ts";
+import { DESIGN_PREVIEW_PORT } from "../src/design-preview/previews.ts";
 import { WEB_CSP } from "../src/web.ts";
 
 const directives = WEB_CSP.split("; ");

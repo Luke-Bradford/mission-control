@@ -114,8 +114,7 @@ import { buildApp, crewGuardDeps } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
 import { type CcConfig, crewSeatMode } from "../src/config.ts";
-import { PreviewRefused } from "../src/design-previews.ts";
-import { externalReviewKey } from "../src/external-review-key.ts";
+import { PreviewRefused } from "../src/design-preview/previews.ts";
 import { createFlightTools } from "../src/flight/tools.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
@@ -132,6 +131,7 @@ import {
 } from "../src/mcp/tools.ts";
 import { setRunPathGrants } from "../src/path-grants.ts";
 import { ProfilesError } from "../src/profiles.ts";
+import { externalReviewKey } from "../src/review/external-key.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";
 import { runSeatGrants } from "../src/runtime/grants.ts";
@@ -1249,7 +1249,8 @@ describe("ask_flight", () => {
 
   it("refuses a seat's question to CAPCOM over comms_send, pointing at ask_flight (#758)", async () => {
     tools = make({ config: withFlight() });
-    const send = (ctx: McToolContext, args: unknown) => tool("comms_send").call(ctx, args);
+    const send = (ctx: McToolContext, args: object) =>
+      tool("comms_send").call(ctx, { label: "none", ...args });
     expect(await send(CTX, { to: "CAPCOM", text: "Which lane?", label: "question" })).toEqual({
       text: COMMS_QUESTION_TO_FLIGHT,
       isError: true,
@@ -1276,7 +1277,7 @@ describe("ask_flight", () => {
     tools = make({ config: withFlight() });
     liveSeat("flight-1", "flight-1:1");
     const flight = { seatId: "flight-1", runId: "flight-1:1" };
-    const line = { to: "CAPCOM", text: "Same line" };
+    const line = { to: "CAPCOM", text: "Same line", label: "none" };
     for (let i = 0; i < 5; i++)
       expect((await tool("comms_send").call(flight, line)).isError).toBeUndefined();
     expect(await tool("comms_send").call(flight, line)).toMatchObject({
@@ -1291,10 +1292,9 @@ describe("ask_flight", () => {
     tools = make({ config: withFlight() });
     liveSeat("flight-1", "flight-1:1");
     const flight = { seatId: "flight-1", runId: "flight-1:1" };
-    const id = (await tool("comms_send").call(CTX, { to: "flight-1", text: "ping" })).text.replace(
-      /^Sent (.*)\.$/,
-      "$1",
-    );
+    const id = (
+      await tool("comms_send").call(CTX, { to: "flight-1", text: "ping", label: "none" })
+    ).text.replace(/^Sent (.*)\.$/, "$1");
     const react = (c = flight) => tool("comms_react").call(c, { id, reaction: "seen" });
     // five identical reactions trip the breaker; the sixth is refused and writes nothing
     for (let i = 0; i < 5; i++) expect((await react()).isError).toBeUndefined();
@@ -1634,7 +1634,8 @@ describe("Comms seat tools", () => {
     tool("comms_read", ts).call(ctx, args);
   const inbox = (args: unknown = {}, ts = tools, ctx = CTX) =>
     tool("comms_inbox", ts).call(ctx, args);
-  const send = (args: unknown, ts = tools, ctx = CTX) => tool("comms_send", ts).call(ctx, args);
+  const send = (args: object, ts = tools, ctx = CTX) =>
+    tool("comms_send", ts).call(ctx, { label: "none", ...args });
   const react = (args: unknown, ts = tools, ctx = CTX) => tool("comms_react", ts).call(ctx, args);
 
   it("refuses a long message and directs the seat to its structured report", async () => {
@@ -1643,6 +1644,97 @@ describe("Comms seat tools", () => {
       isError: true,
     });
     expect(store.comms(0)).toEqual([]);
+  });
+
+  it("teaches exposed Comms callers to link every answer", () => {
+    expect(tool("comms_send").description).toMatch(/every answer must.*replyTo/i);
+    const schema = tool("comms_send").inputSchema as {
+      properties: { replyTo: { description?: string } };
+    };
+    expect(schema.properties.replyTo.description).toMatch(/answered message/i);
+  });
+
+  it("keeps published Comms examples valid and stores their answer links", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:examples");
+    const paths = [
+      "roles/GUIDO.md",
+      "roles/INCO.md",
+      "roles/FAO.md",
+      "roles/FLIGHT.md",
+      ".claude/skills/flight-ops/ledger.md",
+    ];
+    const exposed = tool("comms_send").inputSchema as {
+      required: string[];
+      properties: { label: { enum: string[] }; replyTo: { pattern: string } };
+    };
+    for (const path of paths) {
+      const text = readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
+      expect(text, path).not.toMatch(/`question`, `handoff` or `blocker`/);
+      expect(text, path).toMatch(/every answer must.*replyTo/i);
+      const examples = [...text.matchAll(/`mc comms_send (\{[^`]+\})`/g)];
+      expect(examples.length, path).toBeGreaterThan(0);
+      for (const [, json] of examples) {
+        const args = JSON.parse(json) as Record<string, string>;
+        for (const key of exposed.required) expect(args[key], `${path}: ${key}`).toBeDefined();
+        expect(exposed.properties.label.enum, path).toContain(args.label);
+        expect(args.replyTo, path).toMatch(new RegExp(exposed.properties.replyTo.pattern));
+        const flight = args.to === "CAPCOM";
+        const ctx = flight ? { seatId: "flight-1", runId: "flight-1:examples" } : CTX;
+        const question = store.addComms({
+          at: NOW,
+          from: args.to,
+          to: ctx.seatId,
+          text: "Is the correction ready?",
+          label: "question",
+          ticket: "mc#42",
+        });
+        if (question === null) throw new Error(`Could not store the question for ${path}`);
+        const result = await tool("comms_send").call(ctx, { ...args, replyTo: question.id });
+        expect(result, path).toMatchObject({ text: expect.stringMatching(/^Sent comms:\d+\.$/) });
+        const id = result.text.replace(/^Sent (.*)\.$/, "$1");
+        expect(store.commsMessage(id), path).toMatchObject({ replyTo: question.id, label: "none" });
+      }
+    }
+  });
+
+  it("requires a seat or FLIGHT to choose a Comms label, accepts none, and records reply links", async () => {
+    tools = make({ config: withFlight() });
+    liveSeat("flight-1", "flight-1:label");
+    expect(
+      await tool("comms_send").call(CTX, { to: "guido-2", text: "missing label" }),
+    ).toMatchObject({ isError: true, text: expect.stringContaining("Invalid arguments:") });
+    const question = await send({ to: "flight-1", text: "Can this merge?", label: "question" });
+    const id = question.text.replace(/^Sent (.*)\.$/, "$1");
+    const flightQuestion = await send(
+      { to: "guido-1", text: "What changed?", label: "question" },
+      tools,
+      { seatId: "flight-1", runId: "flight-1:label" },
+    );
+    const flightQuestionId = flightQuestion.text.replace(/^Sent (.*)\.$/, "$1");
+    expect(await send({ to: "flight-1", text: "No action needed.", label: "none" })).toMatchObject({
+      text: expect.stringMatching(/^Sent comms:\d+\.$/),
+    });
+    expect(
+      await send({
+        to: "flight-1",
+        text: "The reply link is stored.",
+        label: "none",
+        replyTo: flightQuestionId,
+      }),
+    ).toMatchObject({ text: expect.stringMatching(/^Sent comms:\d+\.$/) });
+    expect(
+      await send({ to: "guido-1", text: "It can merge.", label: "none", replyTo: id }, tools, {
+        seatId: "flight-1",
+        runId: "flight-1:label",
+      }),
+    ).toMatchObject({ text: expect.stringMatching(/^Sent comms:\d+\.$/) });
+    expect(store.commsForPair("guido-1", "flight-1")).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ replyTo: flightQuestionId }),
+        expect.objectContaining({ replyTo: id }),
+      ]),
+    );
   });
 
   it("reads its own ticket's crew, direct and mentioned context, one line each, without leaking other DMs", async () => {
@@ -1666,8 +1758,8 @@ describe("Comms seat tools", () => {
     store.addComms({ at: NOW, from: "retro", to: "crew", ticket: "mc#7", text: "other ticket" });
     const result = await read({ limit: 2 });
     const lines = result.text.split("\n");
-    expect(lines[0]).toMatch(/^comms:\d+ guido-2>guido-1: direct$/);
-    expect(lines[1]).toMatch(/^comms:\d+ retro>CAPCOM: mentioned @guido-1$/);
+    expect(lines[0]).toMatch(/^comms:\d+ guido-2>guido-1 \[none\]: direct$/);
+    expect(lines[1]).toMatch(/^comms:\d+ retro>CAPCOM \[none\]: mentioned @guido-1$/);
     expect(result.text).not.toContain("private");
     expect(result.text).not.toContain("other ticket");
     expect((await read({}, tools, { ...CTX, runId: "gone" })).isError).toBe(true);
@@ -1763,6 +1855,101 @@ describe("Comms seat tools", () => {
     ]);
   });
 
+  describe("inbox defaults to unread messages plus pins", () => {
+    type Out = {
+      messages: { id: string; text: string; pinned: boolean; unread: boolean }[];
+      hiddenRead?: number;
+    };
+    const take = async (args: unknown = {}, ctx = CTX): Promise<Out> =>
+      JSON.parse((await inbox(args, tools, ctx)).text) as Out;
+    const seed = () => {
+      const add = (at: number, text: string, to = "guido-1", from = "retro") =>
+        store.addComms({ at: NOW - at, from, to, ticket: "mc#42", text });
+      const old = add(9, "old direct");
+      const pin = add(8, "old pin");
+      add(7, "other seat", "guido-2");
+      if (old === null || pin === null) throw new Error("expected stored messages");
+      store.setCommsPinned(pin.id, true, "CAPCOM", NOW - 1);
+      store.markCommsInboxRead("guido-1", [old.id, pin.id]);
+      const fresh = add(6, "fresh direct");
+      if (fresh === null) throw new Error("expected stored message");
+      return { old, pin, fresh };
+    };
+
+    it("returns the unread message and the pin, not the read history", async () => {
+      const { pin, fresh } = seed();
+      const out = await take();
+      expect(out.messages.map((m) => [m.id, m.text, m.pinned, m.unread])).toEqual([
+        [pin.id, "old pin", true, false],
+        [fresh.id, "fresh direct", false, true],
+      ]);
+      expect(out.hiddenRead).toBe(1);
+    });
+
+    it("keeps the read receipt: a second call has no unread messages but the pin stays", async () => {
+      const { pin, fresh } = seed();
+      await take();
+      expect(store.commsInboxRead("guido-1", fresh.id)).toBe(true);
+      const again = await take();
+      expect(again.messages.map((m) => m.id)).toEqual([pin.id]);
+      expect(again.hiddenRead).toBe(2);
+    });
+
+    it("reads the whole history with all:true, in the same order and ids", async () => {
+      const { old, pin, fresh } = seed();
+      const out = await take({ all: true });
+      expect(out.messages.map((m) => m.id)).toEqual([old.id, pin.id, fresh.id]);
+      expect(out.hiddenRead).toBe(0);
+      // the default view is an ordered subset of the history: ids do not shift
+      const next = await take();
+      expect(next.messages.map((m) => m.id)).toEqual([pin.id]);
+    });
+
+    it("still takes the newest `limit` of the unread and pinned set", async () => {
+      const { fresh } = seed();
+      const out = await take({ limit: 1 });
+      expect(out.messages.map((m) => m.id)).toEqual([fresh.id]);
+    });
+
+    it("keeps the privacy filter: another seat's messages never appear, with or without all", async () => {
+      seed();
+      for (const args of [{}, { all: true }]) {
+        const out = await take(args);
+        expect(out.messages.map((m) => m.text)).not.toContain("other seat");
+      }
+    });
+
+    it("measures the saving on 49 read messages beside one new one (synthetic text, no real messages)", async () => {
+      const ids: string[] = [];
+      for (let i = 0; i < 49; i++) {
+        const m = store.addComms({
+          at: NOW - 100 + i,
+          from: "retro",
+          to: "guido-1",
+          ticket: "mc#42",
+          text: `Synthetic read message ${i}: ${"x".repeat(180)}`,
+        });
+        if (m === null) throw new Error("expected stored message");
+        ids.push(m.id);
+      }
+      store.markCommsInboxRead("guido-1", ids);
+      store.addComms({ at: NOW, from: "retro", to: "guido-1", ticket: "mc#42", text: "new one" });
+      const after = (await inbox()).text.length;
+      const before = (await inbox({ all: true })).text.length;
+      console.info(`inbox receipt: all=${before} bytes, default=${after} bytes`);
+      expect(after).toBeLessThan(before / 10);
+    });
+
+    it("rejects a non-boolean all", async () => {
+      expect((await inbox({ all: "yes" })).isError).toBe(true);
+    });
+
+    it("tells the seat in its description that history needs all:true", () => {
+      expect(tool("comms_inbox").description).toMatch(/unread/i);
+      expect(JSON.stringify(tool("comms_inbox").inputSchema)).toContain('"all"');
+    });
+  });
+
   it("keeps rework targeted at an aside run from a newer run on the same seat", async () => {
     store.addComms({
       at: NOW - 1,
@@ -1814,7 +2001,7 @@ describe("Comms seat tools", () => {
       const texts = (await read({})).text
         .split("\n")
         .filter((l) => l.startsWith("comms:"))
-        .map((l) => l.replace(/^comms:\d+ \S+: /, ""));
+        .map((l) => l.replace(/^comms:\d+ \S+(?: \[none\])?: /, ""));
       expect(texts).toEqual(["mine", "crew", "pinned private", "reply to mine"]);
       // the pins are read once per call, not once per row
       expect(pins).toHaveBeenCalledTimes(1);
@@ -1899,8 +2086,8 @@ describe("Comms seat tools", () => {
 
   it("stores an identical message sent twice within a minute once and answers already sent", async () => {
     liveSeat("guido-2", "guido-2:live");
-    const first = await send({ to: "guido-2", text: "same", label: "handoff" });
-    const again = await send({ to: "guido-2", text: "same", label: "handoff" });
+    const first = await send({ to: "guido-2", text: "same", label: "none" });
+    const again = await send({ to: "guido-2", text: "same", label: "none" });
     expect(first.text).toMatch(/^Sent comms:\d+\.$/);
     expect(again).toEqual({ text: first.text.replace("Sent", "Already sent") });
     expect(again.isError).toBeUndefined();
@@ -1912,7 +2099,7 @@ describe("Comms seat tools", () => {
     liveSeat("guido-2", "guido-2:live");
     for (const [to, label, ref] of [
       ["guido-2", "question", "#703"],
-      ["crew", "handoff", "PR 711"],
+      ["crew", "none", "PR 711"],
       ["CAPCOM", "blocker", undefined],
     ] as const)
       expect(await send({ to, text: `to ${to} @guido-2`, label, ref })).toMatchObject({
@@ -1962,7 +2149,7 @@ describe("Comms seat tools", () => {
     liveSeat("guido-2", "guido-2:live");
     const wake = vi.fn();
     const ts = make({ onComms: wake });
-    await send({ to: "guido-2", text: "@guido-2 direct", label: "handoff" }, ts);
+    await send({ to: "guido-2", text: "@guido-2 direct", label: "blocker" }, ts);
     const message = store.commsForAgent("guido-1")[0];
     if (message === undefined) throw new Error("expected Comms message");
     expect(wake).toHaveBeenCalledTimes(1);

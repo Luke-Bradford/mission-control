@@ -198,6 +198,8 @@ export function BriefOptions(p: {
   title?: string;
   variant: "panel" | "row";
   rowLabel?: string;
+  /** The pictures that show an option, rendered on it so choosing it is choosing them. */
+  pictures?: (o: BriefOption) => ReactNode;
   onPick: (o: BriefOption) => void;
 }) {
   const labelId = useId();
@@ -278,6 +280,7 @@ function OptionCard(p: {
   live: boolean;
   disabled: boolean;
   title?: string;
+  pictures?: (o: BriefOption) => ReactNode;
   onPick: (o: BriefOption) => void;
 }) {
   const label = (
@@ -304,6 +307,7 @@ function OptionCard(p: {
       <Expandable lines={BRIEF_LINES} foldAfter={BRIEF_FOLD_AFTER} of={p.of}>
         <span className="xs fg2">{p.option.description ?? p.option.answer}</span>
       </Expandable>
+      {p.pictures?.(p.option)}
       {p.recommended &&
         (p.recommendation?.trim() &&
         p.recommendation.trim() !== (p.option.description ?? p.option.answer).trim() ? (

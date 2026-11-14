@@ -4,8 +4,9 @@
  * branches. A clean worktree only: a dirty one, a live run's, or one outside the crew's worktree
  * folder is refused.
  */
-import { realpath } from "node:fs/promises";
+import { realpath, rm, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
+import type { Run } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { CheckoutError, removeCheckout } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
@@ -23,20 +24,87 @@ export interface CrewTidy {
   pruneBranches(): Promise<TidyResult>;
 }
 
+export interface CrewTidyCycle extends CrewTidy {
+  /**
+   * One cycle (#1756): removes the worktree of every recently ended run whose PR has merged or
+   * closed, and drops `node_modules` from the worktree of an ended run whose work is still open
+   * (a set-aside run); the seat reinstalls when the run resumes. Returns the run ids of each.
+   */
+  tidyFinished(now: number): Promise<{ removed: string[]; trimmed: string[] }>;
+}
+
+/** An ended run's worktree is tidied for this long after it ended. */
+export const TIDY_FINISHED_WINDOW_MS = 30 * 86_400_000;
+
 export interface CrewTidyDeps {
   config: CcConfig;
   store: Store;
   /** `BranchTidy.pruneLocal`: the dropped branches, as `repo:branch`. */
   pruneLocal: () => Promise<string[]>;
+  /** The supervisor's clone lock (`inClone`): a checkout being prepared holds it. Default: no lock. */
+  inClone?: <T>(checkout: string, fn: () => Promise<T>) => Promise<T>;
+  /** The supervisor's starting set: a worktree a run is starting in, from install until its seat points at it. */
+  isStarting?: (path: string) => boolean;
   git?: typeof crewGit;
   remove?: typeof removeCheckout;
 }
 
+type SessionRef = NonNullable<CcConfig["crew"]>["sessions"][number];
 const no = (text: string): TidyResult => ({ ok: false, text });
 
-export function createCrewTidy(deps: CrewTidyDeps): CrewTidy {
+export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
   const git = deps.git ?? crewGit;
   const remove = deps.remove ?? removeCheckout;
+
+  const inClone: NonNullable<CrewTidyDeps["inClone"]> = deps.inClone ?? ((_c, fn) => fn());
+  const sessionOf = (run: Run): SessionRef | undefined => {
+    const sessions = (deps.config.crew?.sessions ?? []).filter((s) => s.repoId === run.repoId);
+    return sessions.find((s) => s.seats.some((x) => x.id === run.agentId)) ?? sessions[0];
+  };
+  /** Set aside at review: not ended, but no seat runs it. */
+  const isAside = (r: Run): boolean => r.endedAt === null && r.loop?.aside != null;
+  /** The run's ticket (`repo#number`) is Done on the board: its work is finished, PR or not. */
+  const ticketDone = (run: Run): boolean => {
+    const m = /^(.+)#([1-9][0-9]*)$/.exec(run.ticket ?? "");
+    if (m === null) return false;
+    const item = deps.store.boardItem(m[1], Number(m[2]));
+    return item !== null && (item.state === "done" || item.closed);
+  };
+
+  /** The worktree an ended run's branch is checked out in, or why there is none to touch. */
+  async function locate(run: Run): Promise<{ session: SessionRef; path: string } | string> {
+    const branch = run.branch as string;
+    const sessions = (deps.config.crew?.sessions ?? []).filter((s) => s.repoId === run.repoId);
+    const session = sessions.find((s) => s.seats.some((x) => x.id === run.agentId)) ?? sessions[0];
+    if (session === undefined) return "The crew has no checkout for that repo.";
+    const root = deps.config.crew?.worktrees;
+    if (root === undefined) return "The crew has no worktree folder.";
+    const common = await realpath(join(session.checkout, ".git"));
+    const listed = await git(session.checkout, ["worktree", "list", "--porcelain"], common, {
+      gitDir: common,
+    });
+    const block = listed
+      .split("\n\n")
+      .find((b) => b.split("\n").includes(`branch refs/heads/${branch}`));
+    const path = block
+      ?.split("\n")
+      .find((l) => l.startsWith("worktree "))
+      ?.slice("worktree ".length);
+    if (path === undefined) return "No worktree holds that branch.";
+    const real = await realpath(path).catch(() => resolve(path));
+    const base = await realpath(root).catch(() => resolve(root));
+    if (!real.startsWith(base + sep)) return "That worktree is not in the crew's folder.";
+    // a seat that still points at the worktree is using it
+    if (
+      deps.config.crew?.sessions
+        .flatMap((s) => s.seats)
+        .some((x) => deps.store.seatSession(x.id)?.worktree === path)
+    )
+      return "A seat still holds that worktree.";
+    if (deps.store.checkoutPending(path)) return "A checkout is being prepared there.";
+    if (deps.isStarting?.(path) === true) return "A run is starting in that worktree.";
+    return { session, path };
+  }
 
   return {
     async removeWorktree(runId) {
@@ -49,35 +117,10 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidy {
         .runsActiveSince(Number.MAX_SAFE_INTEGER)
         .some((r) => r.endedAt === null && r.repoId === run.repoId && r.branch === branch);
       if (live) return no("Another run is live on that branch; its worktree is in use.");
-      const sessions = (deps.config.crew?.sessions ?? []).filter((s) => s.repoId === run.repoId);
-      const session =
-        sessions.find((s) => s.seats.some((x) => x.id === run.agentId)) ?? sessions[0];
-      if (session === undefined) return no("The crew has no checkout for that repo.");
-      const root = deps.config.crew?.worktrees;
-      if (root === undefined) return no("The crew has no worktree folder.");
       try {
-        const common = await realpath(join(session.checkout, ".git"));
-        const listed = await git(session.checkout, ["worktree", "list", "--porcelain"], common, {
-          gitDir: common,
-        });
-        const block = listed
-          .split("\n\n")
-          .find((b) => b.split("\n").includes(`branch refs/heads/${branch}`));
-        const path = block
-          ?.split("\n")
-          .find((l) => l.startsWith("worktree "))
-          ?.slice("worktree ".length);
-        if (path === undefined) return no("No worktree holds that branch.");
-        const real = await realpath(path).catch(() => resolve(path));
-        const base = await realpath(root).catch(() => resolve(root));
-        if (!real.startsWith(base + sep)) return no("That worktree is not in the crew's folder.");
-        // a seat that still points at the worktree is using it
-        if (
-          deps.config.crew?.sessions
-            .flatMap((s) => s.seats)
-            .some((x) => deps.store.seatSession(x.id)?.worktree === path)
-        )
-          return no("A seat still holds that worktree.");
+        const found = await locate(run);
+        if (typeof found === "string") return no(found);
+        const { session, path } = found;
         await remove(session.checkout, path);
         return {
           ok: true,
@@ -88,6 +131,54 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidy {
           return no("The worktree has uncommitted changes; nothing was removed.");
         return no("The worktree could not be removed.");
       }
+    },
+
+    async tidyFinished(now) {
+      const seen = new Set<string>();
+      const out = { removed: [] as string[], trimmed: [] as string[] };
+      const runs = deps.store
+        .runsActiveSince(now - TIDY_FINISHED_WINDOW_MS)
+        // an ended run, or one set aside at review (no end, its seat freed): both wait for days
+        .filter((r) => (r.endedAt !== null || isAside(r)) && r.branch !== null)
+        .sort((a, b) => (b.endedAt ?? b.startedAt) - (a.endedAt ?? a.startedAt));
+      for (const run of runs) {
+        const key = `${run.repoId}:${run.branch}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const checkout = sessionOf(run)?.checkout;
+        if (checkout === undefined) continue;
+        // Under the clone lock, as a resuming run's checkout is: the live-run check and the removal
+        // must not fall between its install and the run row that makes it live.
+        await inClone(checkout, async () => {
+          const live = deps.store
+            .runsActiveSince(Number.MAX_SAFE_INTEGER)
+            .some(
+              (r) =>
+                r.endedAt === null &&
+                r.repoId === run.repoId &&
+                r.branch === run.branch &&
+                !isAside(r),
+            );
+          if (live) return;
+          const pr = deps.store.pullRequestOfBranch(run.repoId, run.branch as string);
+          // a set-aside run is the engine's to end: its worktree is trimmed, never removed here
+          if (!isAside(run) && ((pr !== null && pr.state !== "open") || ticketDone(run))) {
+            if ((await this.removeWorktree(run.id)).ok) out.removed.push(run.id);
+            return;
+          }
+          try {
+            const found = await locate(run);
+            if (typeof found === "string") return;
+            const modules = join(found.path, "node_modules");
+            if (!(await stat(modules).catch(() => null))?.isDirectory()) return;
+            await rm(modules, { recursive: true, force: true });
+            out.trimmed.push(run.id);
+          } catch {
+            // left as it is; the next cycle looks again
+          }
+        });
+      }
+      return out;
     },
 
     async pruneBranches() {

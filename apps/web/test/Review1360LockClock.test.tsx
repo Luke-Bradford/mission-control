@@ -5,6 +5,11 @@ import { AgentsPanel } from "../src/overview/AgentsPanel.tsx";
 import { settled, stubFetch } from "./fetchStub.ts";
 import { CONFIG, NOW, seatRow } from "./fixtures.ts";
 
+function defined<T>(value: T | null | undefined): T {
+  if (value == null) throw new Error("Test expected a value to exist");
+  return value;
+}
+
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
@@ -22,7 +27,10 @@ it("updates the accessible State lock-wait duration without rebuilding the roste
     "/api/crew?shape=summary": { rows: [row], firstRunToday: null },
     "/api/config": { ...CONFIG, crew: { sessions: [{ id: "s1", seats: [] }] } },
     "/api/attention": [],
-    "/api/test-lock": { holder: null, waiting: [{ runId: row.run!.id, since: NOW - 5_000 }] },
+    "/api/test-lock": {
+      holder: null,
+      waiting: [{ runId: defined(row.run).id, since: NOW - 5_000 }],
+    },
     "/api/crew/status": { enabled: true, note: null },
     "/api/flight": { seat: null, decisions: [] },
     "/api/flight/brief": { session: null, sections: [], watch: [] },
@@ -34,8 +42,8 @@ it("updates the accessible State lock-wait duration without rebuilding the roste
   render(<AgentsPanel />);
   await screen.findByText("lock-review");
   await settled(fetch, "/api/crew?shape=summary");
-  const element = screen.getByText("lock-review").closest(".trow")!;
-  const state = element.querySelector(".state-cell")!;
+  const element = defined(screen.getByText("lock-review").closest(".trow"));
+  const state = defined(element.querySelector(".state-cell"));
   expect(state.getAttribute("title")).toContain("0:05");
   order.mockClear();
   fetch.mockClear();
@@ -93,8 +101,8 @@ it("updates set-aside lock-wait details while the current seat is idle without r
   render(<AgentsPanel />);
   await screen.findByText("aside-clock");
   await settled(fetch, "/api/crew?shape=summary");
-  const element = screen.getByText("aside-clock").closest(".trow")!;
-  const identity = element.querySelector(".agent-identity")!;
+  const element = defined(screen.getByText("aside-clock").closest(".trow"));
+  const identity = defined(element.querySelector(".agent-identity"));
   const link = identity.querySelector(".rowlink");
   expect(identity.getAttribute("title")).toContain("0:05");
   order.mockClear();

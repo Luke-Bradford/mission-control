@@ -23,6 +23,8 @@ import {
   type SeatState,
   startMissingNeedsText,
   type TicketView,
+  wasteParkText,
+  wasteStormText,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CardNow } from "../src/collectors/github.ts";
@@ -50,6 +52,7 @@ import { ProfilesError } from "../src/profiles.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const NOW = Date.parse("2026-10-21T12:00:00Z");
 const DAY = 24 * 60 * 60_000;
@@ -400,6 +403,41 @@ describe("refillQueues", () => {
     startFails = () => null;
     await take();
     expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+
+  it("a seat in a restart storm keeps the card queued: no Needs-you question, no drop", async () => {
+    store.replaceBoard(REPO, [card(1)]);
+    await refill();
+    startFails = () => new SupervisorError(422, wasteStormText("GUIDO-1", "x"));
+    await take();
+    expect(started).toEqual([]);
+    expect(store.notes().filter((n) => n.key.startsWith("question:take-failed:"))).toEqual([]);
+    expect(issues(SERVER)).toEqual([1]);
+    startFails = () => null;
+    await take();
+    expect(started.map((r) => r.issue)).toEqual([1]);
+  });
+
+  it("a ticket a waste alarm parked is not dealt, and a held start raises no question", async () => {
+    store.replaceBoard(REPO, [card(1), card(2)]);
+    store.waste.insertAlarm(
+      {
+        check: "retry-loop",
+        subject: `${REPO}#1`,
+        repoId: REPO,
+        ticket: `${REPO}#1`,
+        seatId: null,
+        runId: null,
+        level: 2,
+        evidence: "2 failed attempts.",
+      },
+      NOW,
+    );
+    await refill();
+    expect(issues(SERVER)).toEqual([2]);
+    startFails = () => new SupervisorError(422, wasteParkText(`${REPO}#2`, "x"));
+    await take();
+    expect(store.notes().filter((n) => n.key.startsWith("question:take-failed:"))).toEqual([]);
   });
 
   it("away picks mapped safe tickets only while pickUp is enabled", async () => {
@@ -1816,7 +1854,7 @@ describe("away start quota", () => {
   });
 });
 
-describe("budget brake", () => {
+describe("pace alone does not hold work", () => {
   const accountId = "claude-main";
   const HOUR = 60 * 60_000;
   /** Six hours of weekly readings; 40 -> 60 projects past 100% at the reset a day on. */
@@ -1827,23 +1865,13 @@ describe("budget brake", () => {
     ] as const)
       store.addUsage({ accountId, window: "7d", at: t, resetAt: NOW + DAY, pct, source: "test" });
   };
-  it("holds the deal while the projection passes 100% and deals again when it falls", async () => {
+  it("deals the ticket while the projection passes 100%: only the real stop holds", async () => {
     store.replaceBoard(REPO, [card(1)]);
     await refill();
     week(40, 60);
     await take();
-    expect(started).toEqual([]);
-    expect(issues(SERVER)).toEqual([1]);
-    // the projection falls back under 100%: the held ticket is dealt
-    week(10, 10, NOW + 1);
-    takeNow = NOW + 1;
-    await take();
     expect(started.map((r) => r.issue)).toEqual([1]);
-  });
-  it("lets runs in progress and resumes pass: only new deals ask the brake", () => {
-    week(40, 60);
-    expect(accountAtStop(config, store, accountId, NOW)).toBe(false);
-    expect(accountHoldsNewWork(config, store, accountId, NOW)).toBe(true);
+    expect(accountHoldsNewWork(config, store, accountId, NOW)).toBe(false);
   });
 });
 
@@ -1911,7 +1939,7 @@ it("checks the current seat focus if reload replaces the seat during a fresh rea
 it.each(["mc#2", null, undefined, "removed"])(
   "uses current focus %s if reload replaces or removes a captured queue seat during a fetch",
   async (focus) => {
-    const session = config.crew!.sessions[0];
+    const session = defined(config.crew).sessions[0];
     const index = session.seats.findIndex((s) => s.id === SERVER);
     const original = session.seats[index];
     original.focus = "mc#1";

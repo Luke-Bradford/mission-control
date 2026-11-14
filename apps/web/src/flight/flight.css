@@ -436,6 +436,7 @@ button.flight-link:hover {
 }
 
 #wifP .wif-row {
+  height: auto;
   padding: var(--sp-3) var(--sp-3);
   border-bottom: 1px solid var(--line);
   border-radius: 0;
@@ -862,6 +863,26 @@ button.flight-link:hover {
   gap: var(--sp-3);
 }
 
+.flight-records-title {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+.flight-records-title h1 {
+  font: 600 var(--fs-title) / var(--lh-title) var(--display);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.flight-records-title p {
+  color: var(--fg-2);
+}
+.flight-records-title a {
+  flex: none;
+  min-width: var(--sp-5);
+  min-height: var(--sp-5);
+  line-height: var(--lh);
+}
 .flight-notes .flight-knowledge-scroll > p.note:first-child {
   max-width: none;
   margin: 0;
@@ -1067,12 +1088,50 @@ button.flight-link:hover {
   min-width: 0;
 }
 
-/* Crew & board */
+/* Crew & board: the first screen (Seats and Blocked chains) is the tab's visible height, or what
+   they need if more; the queue and the triggers sit below it, reached by scrolling the tab. */
 .flight-crew {
-  display: grid;
-  grid-template-rows: minmax(260px, 2fr) minmax(180px, 0.8fr) minmax(130px, 0.5fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--sp-3);
   min-height: 0;
+}
+
+.flight-crew > * {
+  flex: none;
+}
+
+.flight-crew > .flight-crew-first {
+  flex: 0 0 100%;
+  min-height: 640px;
+}
+
+.flight-crew > #ledgerP {
+  min-height: 180px;
+}
+
+.flight-crew > #watchP {
+  min-height: 130px;
+}
+
+/* Seats takes the height of its rows and gives way first; Blocked chains keeps at least 360 px and
+   takes the rest. Each scrolls inside itself. */
+.flight-crew-first {
+  display: grid;
+  grid-template-rows: minmax(260px, max-content) minmax(360px, 1fr);
+  gap: var(--sp-3);
+  min-height: 0;
+}
+
+.flight-crew-first #wifP .flight-panel-scroll {
+  flex: 0 1 auto;
+}
+
+/* The queue and the triggers take their content's height up to a cap, then scroll. */
+.flight-crew > #ledgerP .flight-panel-scroll,
+.flight-crew > #watchP .flight-panel-scroll {
+  flex: none;
+  max-height: 320px;
 }
 
 .flight-tiles {
@@ -1264,6 +1323,22 @@ button.flight-link:hover {
     overflow: visible;
   }
   /* The page scrolls down; a table wider than its panel still scrolls sideways inside it. */
+  .bc-panel {
+    min-height: 0;
+  }
+  .flight-crew > .flight-crew-first {
+    flex: none;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .flight-crew-first #wifP .flight-panel-scroll,
+  .flight-crew > #ledgerP .flight-panel-scroll,
+  .flight-crew > #watchP .flight-panel-scroll {
+    flex: none;
+    max-height: none;
+  }
+  .bc-scroll,
   .flight-panel-scroll {
     flex: none;
     overflow-x: auto;

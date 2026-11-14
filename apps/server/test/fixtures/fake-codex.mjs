@@ -71,6 +71,8 @@ rl.on("line", (line) => {
     if (!requested) return;
     requests.delete(id);
     const { scenario, itemId, type } = requested;
+    // A held-item exit happens after the actual acceptance, not an arbitrary pre-approval timer.
+    if (scenario.exitAccepted && message.result?.decision === "accept") process.exit(1);
     if (scenario.resolved) notify("serverRequest/resolved", { threadId, requestId: id });
     if (scenario.endTurnWithNoItem) later(() => endTurn(), 10);
     else if (!scenario.holdItem)

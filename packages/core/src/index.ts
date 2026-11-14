@@ -1,11 +1,12 @@
 export * from "./activity.ts";
 export * from "./agent-detail.ts";
+export * from "./attention-materials.ts";
 export * from "./audit.ts";
 export * from "./away.ts";
 export * from "./board.ts";
 export * from "./briefs.ts";
-export * from "./budget-brake.ts";
 export * from "./code-health.ts";
+export * from "./code-health-overview.ts";
 export * from "./collectors.ts";
 export * from "./comms.ts";
 export * from "./crew-pause.ts";
@@ -52,3 +53,4 @@ export type * from "./types.ts";
 export * from "./usage.ts";
 export * from "./util.ts";
 export type * from "./views.ts";
+export * from "./waste.ts";

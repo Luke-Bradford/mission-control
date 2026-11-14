@@ -144,7 +144,8 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { evaluateHolds, holds } from "../src/attention-holds.ts";
+import { evaluateHolds, holds } from "../src/attention/holds.ts";
+import { AttentionMaterialsError } from "../src/attention-materials.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
@@ -158,7 +159,7 @@ import {
 import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
-import { flightWaits, observeFlightMain } from "../src/flight/signals.ts";
+import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
 import {
   flightBriefView,
   flightState,
@@ -168,15 +169,15 @@ import {
   wakeReasons,
 } from "../src/flight/state.ts";
 import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
-import { createFlightTools, cut, seatFree } from "../src/flight/tools.ts";
+import { createFlightTools, cut, type FlightToolsDeps, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import type { Move, MoveResult } from "../src/github-board.ts";
+import type { Move, MoveResult } from "../src/github/board.ts";
 import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { recordRunHandoff } from "../src/run-handoffs.ts";
+import { recordRunHandoff } from "../src/run/handoffs.ts";
 import { type SeatBusy, SupervisorError } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
@@ -244,6 +245,7 @@ let lockNow: TestLockState;
 let cfg: CcConfig;
 const stateSeen = vi.fn();
 let tools: McTool[];
+let flightDeps: () => FlightToolsDeps;
 let startCalls: unknown[][];
 let endCalls: string[];
 let interruptCalls: string[];
@@ -266,12 +268,15 @@ let fetchCalls: number[];
 let fetchRepos: string[];
 let busyNow: SeatBusy[];
 let aliveNow: string[];
+/** Tickets of repo mc with a published branch preview. */
+let previewTickets: number[];
 let engineOn: boolean;
 let lifts: boolean;
 let refuseWith: OperatorRefusal | null = null;
 let rulesNow: RepoRules;
 let startImpl: () => Promise<{ runId: string; branch: string }>;
 let messageImpl: () => Promise<void>;
+let materialsImpl: (key: string, story: { repoId: string; label: string }) => Promise<unknown>;
 let endImpl: (seatId: string) => Promise<void>;
 let asideEnds: string[];
 let rulingImpl: () => Promise<AcceptRulingResult>;
@@ -385,6 +390,11 @@ beforeEach(() => {
   reorderImpl = async () => ({ ok: true, text: "Changed Priority on the board." });
   startImpl = async () => ({ runId: "", branch: "" });
   messageImpl = async () => {};
+  materialsImpl = async (_key, story) => ({
+    label: story.label,
+    images: [{}, {}],
+    sourceCommit: "a".repeat(40),
+  });
   // what the supervisor's endRun leaves behind: the run ended, the seat stopped
   endImpl = async (seatId) => {
     const runId = store.seatSession(seatId)?.runId ?? null;
@@ -427,7 +437,10 @@ beforeEach(() => {
     pruneBranches: async () => ({ ok: true, text: "Pruned." }),
   };
   stateSeen.mockClear();
-  tools = createFlightTools({
+  previewTickets = [];
+  flightDeps = (): FlightToolsDeps => ({
+    attentionMaterials: { attachStory: (key, story) => materialsImpl(key, story) as never },
+    hasPreview: (repoId, ticket) => repoId === "mc" && previewTickets.includes(ticket),
     hubOrigin: "http://127.0.0.1:7420",
     hudShots: {
       save: (png) => shotsSaveImpl(png),
@@ -564,6 +577,7 @@ beforeEach(() => {
     },
     now: () => nowMs,
   });
+  tools = createFlightTools(flightDeps());
   const t = tools.find((candidate) => candidate.name === "log_decision");
   if (t === undefined) throw new Error("no tool");
   tool = t;
@@ -821,7 +835,31 @@ describe("move_review", () => {
     ]);
   });
 
-  it("passes a target budget brake only with a basis that names a P0 ticket", async () => {
+  it("resolve_waste_alarm lifts a hold with a recorded basis and refuses an alarm that is not open", async () => {
+    const id = store.waste.insertAlarm(
+      {
+        check: "retry-loop",
+        subject: "mc#7",
+        repoId: "mc",
+        ticket: "mc#7",
+        seatId: null,
+        runId: null,
+        level: 2,
+        evidence: "mc#7 is parked: 2 failed attempts.",
+      },
+      NOW,
+    );
+    const done = await call("resolve_waste_alarm", { alarm: id, basis: "park it; take the next" });
+    expect(done.isError).toBeUndefined();
+    expect(store.waste.alarms("WHERE id = ?", id)[0]).toMatchObject({
+      resolvedAt: expect.any(Number),
+      basis: "park it; take the next",
+    });
+    const again = await call("resolve_waste_alarm", { alarm: id, basis: "park it; take the next" });
+    expect(again.isError).toBe(true);
+  });
+
+  it("moves a queued review while the target account's pace passes 100%: pace never holds it", async () => {
     const id = queuedReview();
     for (const [at, pct] of [
       [NOW - 6 * 60 * 60_000, 40],
@@ -837,26 +875,10 @@ describe("move_review", () => {
       });
 
     expect(
-      (
-        await call("move_review", {
-          reviewId: id,
-          seat: "retro-cx",
-          basis: "priority work needs a reviewer",
-        })
-      ).isError,
-    ).toBe(true);
-    expect(store.review(id)?.seatId).toBe("retro-1");
-    expect(
-      (
-        await call("move_review", {
-          reviewId: id,
-          seat: "retro-cx",
-          basis: "mc#7 P0 must not wait for the stopped reviewer",
-        })
-      ).isError,
+      (await call("move_review", { reviewId: id, seat: "retro-cx", basis: "the reviewer is free" }))
+        .isError,
     ).toBeUndefined();
     expect(store.review(id)?.seatId).toBe("retro-cx");
-    expect(store.reviewBudgetBrakeOverride(id)).toBe(true);
   });
 
   it.each([
@@ -1423,6 +1445,7 @@ describe("tool list", () => {
       "answer_question",
       "return_question",
       "withdraw_question",
+      "attach_materials",
       "start_seat",
       "reassign_ticket",
       "message_seat",
@@ -1443,6 +1466,7 @@ describe("tool list", () => {
       "gh_read",
       "list_tickets",
       "update_brief",
+      "resolve_waste_alarm",
       "move_review",
       "resume_seat",
       "merge_pr",
@@ -2445,30 +2469,19 @@ describe("start_seat", () => {
     );
   });
 
-  it("4b: refuses a start while the weekly projection passes 100% and starts once it falls", async () => {
-    const week = (from: number, to: number, at: number) => {
-      for (const [t, pct] of [
-        [at - 6 * 3600e3, from],
-        [at, to],
-      ] as const)
-        store.addUsage({
-          accountId: "claude-main",
-          window: "7d",
-          at: t,
-          pct,
-          resetAt: nowMs + 24 * 3600e3,
-          source: "t",
-        });
-    };
-    week(40, 60, nowMs);
-    const braked = await start();
-    expect(braked.isError).toBe(true);
-    expect(braked.text).toMatch(
-      /^Not started: the budget brake is on\. GUIDO-1's account claude-main/,
-    );
-    expect(startCalls).toEqual([]);
-    week(10, 10, nowMs + 1);
-    nowMs += 1;
+  it("4b: starts while the weekly projection passes 100% (pace alone never refuses a start)", async () => {
+    for (const [t, pct] of [
+      [nowMs - 6 * 3600e3, 40],
+      [nowMs, 60],
+    ] as const)
+      store.addUsage({
+        accountId: "claude-main",
+        window: "7d",
+        at: t,
+        pct,
+        resetAt: nowMs + 24 * 3600e3,
+        source: "t",
+      });
     expect((await start()).isError).toBeUndefined();
     expect(startCalls).toHaveLength(1);
   });
@@ -3688,6 +3701,52 @@ describe("flight_state", () => {
     expect(Object.keys(seen)).toEqual([`ask:${id}`]);
   });
 
+  describe("500 expired waits (#1632)", () => {
+    const waits = async (args: Record<string, unknown>) => {
+      for (let i = 0; i < 500; i++)
+        recordFlightWait(store, `mc#${1000 + i}`, {
+          on: "a long wait",
+          until: NOW - 3 * 24 * 60 * 60_000,
+          at: NOW - 4 * 24 * 60 * 60_000,
+        });
+      const read = JSON.parse((await call("flight_state", args)).text) as {
+        signals: { kind: string; evidence: string }[];
+      };
+      return read.signals.filter((s) => s.kind === "wait_over");
+    };
+
+    it("fold into one summary line with the count", async () => {
+      const over = await waits({});
+      expect(over).toHaveLength(1);
+      expect(over[0]?.evidence).toContain("500 expired waits");
+      expect(JSON.stringify(over).length).toBeLessThan(1000);
+    });
+
+    it("keep a wait that ended an hour ago listed on every read", async () => {
+      recordFlightWait(store, "mc#77", {
+        on: "PR 77 to merge",
+        until: NOW - 3_600_000,
+        at: NOW - 7_200_000,
+      });
+      const keys = async () =>
+        (
+          JSON.parse((await call("flight_state", {})).text) as {
+            signals: { kind: string; key: string }[];
+          }
+        ).signals
+          .filter((s) => s.kind === "wait_over")
+          .map((s) => s.key);
+      await keys();
+      const second = await keys();
+      expect(second).toContain(`mc#77:${NOW - 3_600_000}`);
+      expect(second).not.toContain("expired");
+    });
+
+    it("are all listed with full: true", async () => {
+      expect(await waits({ full: true })).toHaveLength(500);
+    });
+  });
+
   it("exposes the hub's away bug decision key only for the current head", async () => {
     store.setSetting(AWAY_SETTING, JSON.stringify({ ...DEFAULT_AWAY, on: true }));
     const expected = {
@@ -4100,6 +4159,7 @@ describe("flight_state", () => {
           stale: false,
           review: null,
           failingChecks: [],
+          reviewRounds: 0,
         },
       ],
       prFlow: expect.objectContaining({
@@ -4141,6 +4201,7 @@ describe("flight_state", () => {
         seats: [{ seat: "retro-1", queued: 0, running: 0, waitMin: 0, idle: true }],
       },
       mergeQueue: [{ pr: 9, waitsOn: ["review"] }],
+      conflicts: [],
       flowHolds: [],
       recent: [
         { id: 1, time: "12:59", kind: "message", about: "Message to GUIDO-1", decision: "go on" },
@@ -4299,6 +4360,54 @@ describe("promote", () => {
       "Moved mc#7 to Refinement. Recorded in Decided without you.",
     );
     expect(moveCalls[0]?.column).toBe("Refinement");
+  });
+
+  it("flags a private prototype and refuses Ready until it is copied into docs/prototype", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\nPrototype: [working copy](https://private.example/prototype)` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it.each([
+    "https://private.example/docs/prototype/mockup.html",
+    "https://github.com/another/repo/blob/main/docs/prototype/mockup.html",
+  ])("refuses promotion when a private prototype mimics the repository path: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("refuses promotion for a private link listed under a Prototype heading", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, { body: `${GOOD}\n\n## Prototype\n\nhttps://claude.ai/public/artifacts/abc` });
+    expect(await call("promote", P())).toEqual(
+      refused("Not moved: mc#7 links a prototype outside docs/prototype/."),
+    );
+    expect(moveCalls).toEqual([]);
+  });
+
+  it("promotes a ticket that mentions the mockup beside an ordinary link in this repository", async () => {
+    fetchImpl = async (n) =>
+      ticket(n, {
+        body: `${GOOD}\nJudge the page against the mockup and [the system](https://github.com/o/mc/blob/main/docs/design/system.md).`,
+      });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
+  });
+
+  it.each([
+    "https://github.com/o/mc/blob/main/docs/prototype/mockup.html",
+    "https://github.com/o/mc/blob/feature/prototype-polish/docs/prototype/mockup.html",
+    "https://raw.githubusercontent.com/o/mc/feature/prototype-polish/docs/prototype/mockup.html",
+  ])("allows promotion when the prototype URL names this repository: %s", async (link) => {
+    fetchImpl = async (n) => ticket(n, { body: `${GOOD}\nPrototype: [working copy](${link})` });
+    expect((await call("promote", P())).isError).toBeUndefined();
+    expect(moveCalls[0]?.column).toBe("Ready");
   });
 
   it("names only what is missing, and honours the rules' needs", async () => {
@@ -5352,6 +5461,8 @@ describe("brief_item", () => {
       | undefined;
     return {
       key: KEY,
+      title: "A parked seat waits for you",
+      priority: "P1",
       context: "The seat is parked since 11:00 and waits for you.",
       ask: "Should I un-park it?",
       recommendation: "Un-park it.",
@@ -5429,6 +5540,129 @@ describe("brief_item", () => {
     expect((await call("brief_item", payload)).isError).toBe(true);
     expect(store.briefs().size).toBe(0);
     expect(seen).toEqual([]);
+  });
+  describe("rule 4's added parts (#1510)", () => {
+    const refused = async (over: Record<string, unknown>, part: RegExp) => {
+      const result = await call("brief_item", B(over));
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(part);
+      expect(store.briefs().size).toBe(0);
+    };
+    it("refuses a question missing a part, naming it", async () => {
+      await refused({ title: undefined }, /no title/);
+      await refused({ priority: undefined }, /no priority/);
+      await refused({ ask: "Un-park it? Or close the ticket?" }, /one decision/);
+    });
+    it("refuses a title over 90 characters, with a web address or a bare ticket number", async () => {
+      await refused({ title: "x".repeat(91) }, /over 90/);
+      await refused({ title: "See https://example.com" }, /web address/);
+      await refused({ title: "Un-park mc#7 now" }, /ticket number/);
+      await refused({ title: "Un-park #7 now" }, /ticket number/);
+    });
+    it("takes the priority from the main ticket's card over the one stated", async () => {
+      board(card(7, { priority: "P0" }));
+      expect(await call("brief_item", B({ priority: undefined }))).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(KEY)?.priority).toBe("P0");
+    });
+    it("takes a question with no ticket when the repo and a reason are given", async () => {
+      store.upsertRun(run("r-none", "guido-1"));
+      raise("blocked:r2:0", { runId: "r-none" });
+      const key = "note:blocked:r2:0";
+      await refused({ key }, /no ticket/);
+      const ok = await call(
+        "brief_item",
+        B({ key, noTicket: { repo: "mc", reason: "It is about the hub itself." } }),
+      );
+      expect(ok).toEqual({ text: BRIEFED_TEXT });
+    });
+    it("refuses a looks question with no picture and no preview; passes with either", async () => {
+      await refused({ looks: true }, /about how something looks/);
+      previewTickets = [7];
+      const withPreview = await call("brief_item", B({ looks: true }));
+      expect(withPreview).toEqual({ text: BRIEFED_TEXT });
+      previewTickets = [];
+      const picture = `/api/hud-screenshots/${"a".repeat(32)}`;
+      expect(
+        await call(
+          "brief_item",
+          B({
+            looks: true,
+            assessment: `The seat is parked and this is how the page looks: ![page](${picture}).`,
+          }),
+        ),
+      ).toEqual({ text: BRIEFED_TEXT });
+    });
+    it("brings each ticket and PR number back with its title", async () => {
+      board(card(7, { title: "Away mode rules" }));
+      store.upsertPullRequests(
+        "mc",
+        [
+          {
+            repoId: "mc",
+            number: 12,
+            title: "Fix away mode",
+            url: "u",
+            branch: "feature/7-away",
+            ticket: "mc#7",
+            state: "open",
+            isDraft: false,
+            review: null,
+            ci: "pending",
+            createdAt: NOW,
+            updatedAt: NOW,
+            mergedAt: null,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+      await call("brief_item", B({ recommendation: "Do as #7 says; the fix is PR 12." }));
+      expect(store.briefs().get(KEY)?.recommendation).toBe(
+        "Do as #7 (Away mode rules) says; the fix is PR 12 (Fix away mode).",
+      );
+    });
+    it("refuses to ask the operator what a FLIGHT tool settles, naming the tool", async () => {
+      store.raiseNote({
+        key: "chatter:mc#7:a:b",
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: "mc",
+        text: "a and b exceeded 3 rounds on mc#7.",
+        at: NOW,
+      });
+      await refused({ key: "note:chatter:mc#7:a:b" }, /dismiss_item/);
+    });
+    it("lets a money decision through whatever the seat's words say", async () => {
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "r-guido",
+        text: "Should I merge the PR that raises the plan price to 12 pounds, or wait for you?",
+        at: NOW,
+      });
+      const fields = B({ key: `ask:${id}`, ask: "Raise the plan price to 12 pounds now?" });
+      expect(
+        await call("brief_item", {
+          ...fields,
+          decision: {
+            ...(fields.decision as Record<string, unknown>),
+            whyOperator: { kind: "money", explanation: "It changes what customers pay." },
+          },
+        }),
+      ).toEqual({ text: BRIEFED_TEXT });
+    });
+    it("refuses a seat's question that FLIGHT's sync_main settles", async () => {
+      live("guido-1", "r-guido", { ticket: "mc#7" });
+      const id = store.addQuestion({
+        agentId: "guido-1",
+        runId: "r-guido",
+        text: "May I merge main into the branch?",
+        at: NOW,
+      });
+      await refused({ key: `ask:${id}`, ask: "Merge main into the branch?" }, /sync_main/);
+    });
   });
   it("1389 rolls back a question pass and audit if atomic brief persistence refuses its source", async () => {
     live("guido-1", "r-guido");
@@ -9502,6 +9736,8 @@ describe("brief_item with a hold (#760)", () => {
   const HOLD_RUN = "r-hold";
   const brief = (over: Record<string, unknown> = {}) => ({
     key,
+    title: "Whether to leave the parked work waiting",
+    priority: "P1",
     assessment: "Nothing to do yet.",
     ask: "Leave it parked?",
     recommendation: "Leave it until the condition is met.",
@@ -9979,10 +10215,12 @@ describe("an unrestricted FLIGHT (#1015)", () => {
       expect(await call("edit_issue", { issue: 7, body: kept })).toHaveProperty("isError", true);
       expect(ghCalls).toEqual([]);
     });
-    it("set_fields leaves Ready and Backlog to promote, and keeps one area label", async () => {
+    it("set_fields leaves Ready to promote, and keeps one area label", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog"])
-        expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
+      expect(await call("set_fields", { issue: 7, status: "Ready" })).toHaveProperty(
+        "isError",
+        true,
+      );
       liveLabels = ["lane:home", "area:server"];
       expect(
         await call("set_fields", { issue: 7, labels: ["lane:home", "area:server", "area:web"] }),
@@ -9991,6 +10229,24 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         "isError",
         true,
       );
+      expect(moveCalls).toEqual([]);
+      expect(ghCalls).toEqual([]);
+    });
+    it("set_fields takes a Blocked card back to Backlog, so promote can reach it", async () => {
+      readImpl = (n) => card(n, { labels: liveLabels, status: "Blocked" });
+      board(card(7, { status: "Blocked" }));
+      expect((await call("set_fields", { issue: 7, status: "Backlog" })).isError).toBeUndefined();
+      expect(moveCalls.at(-1)).toMatchObject({ issue: 7, column: "Backlog" });
+    });
+    it("set_fields moves no card to Backlog from outside Blocked", async () => {
+      for (const status of ["Ready", "In progress", "In review", "Done"]) {
+        readImpl = (n) => card(n, { labels: liveLabels, status });
+        // the store says Blocked: only the live card counts
+        board(card(7, { status: "Blocked" }));
+        const r = await call("set_fields", { issue: 7, status: "Backlog", size: "S" });
+        expect(r.isError).toBe(true);
+        expect(r.text).toContain("not in Blocked");
+      }
       expect(moveCalls).toEqual([]);
       expect(ghCalls).toEqual([]);
     });
@@ -10143,9 +10399,9 @@ describe("an unrestricted FLIGHT (#1015)", () => {
         labels: ["lane:home", "legacy-odd", "area:server", "bug"],
       });
     });
-    it("set_fields moves a card only to Blocked", async () => {
+    it("set_fields moves a card only to Blocked or back to Backlog", async () => {
       board(card(7));
-      for (const status of ["Ready", "Backlog", "Refinement", "In progress", "Done"])
+      for (const status of ["Ready", "Refinement", "In progress", "Done"])
         expect(await call("set_fields", { issue: 7, status })).toHaveProperty("isError", true);
       expect(moveCalls).toEqual([]);
       expect((await call("set_fields", { issue: 7, status: "Blocked" })).isError).toBeUndefined();
@@ -11427,5 +11683,189 @@ describe("start_seat and the open-ticket list leave a waiting:operator card alon
     expect(
       flightState({ config: cfg, store, busy: [], now: NOW }).tickets.map((t) => t.ref),
     ).not.toContain("mc#7");
+  });
+});
+
+describe("attach_materials", () => {
+  const story = (over: Record<string, unknown> = {}) => ({
+    sourceCommit: "a".repeat(40),
+    label: "Comms layout",
+    sections: [
+      {
+        heading: "This page",
+        images: [
+          { path: "docs/a.png", caption: "Before" },
+          { path: "docs/b.png", caption: "After" },
+        ],
+        comparison: "before-after",
+        children: [{ heading: "Also here", text: "It shrinks." }],
+      },
+    ],
+    optionImages: [{ optionId: "a", imagePaths: ["docs/a.png"] }],
+    ...over,
+  });
+  const ask = () => {
+    live("guido-1", "r-guido");
+    return store.addQuestion({ agentId: "guido-1", runId: "r-guido", text: "Which?", at: NOW });
+  };
+
+  it("attaches a nested story with a comparison and picture options to a question in one call", async () => {
+    const id = ask();
+    const seenCalls: [string, unknown][] = [];
+    materialsImpl = async (key, s) => {
+      seenCalls.push([key, s]);
+      return { label: s.label, images: [{}, {}], sourceCommit: "a".repeat(40) };
+    };
+    const result = await call("attach_materials", { key: `ask:${id}`, ...story() });
+    expect(result.isError).not.toBe(true);
+    expect(result.text).toContain("2 images");
+    expect(seenCalls).toHaveLength(1);
+    expect(seenCalls[0]?.[0]).toBe(`ask:${id}`);
+    expect(seenCalls[0]?.[1]).toMatchObject({
+      label: "Comms layout",
+      sections: [{ comparison: "before-after", children: [{ heading: "Also here" }] }],
+      optionImages: [{ optionId: "a" }],
+    });
+  });
+
+  it("refuses a question that is not open, and says why a story was not kept", async () => {
+    expect(await call("attach_materials", { key: "ask:999", ...story() })).toEqual(
+      refused("Not attached: that question is no longer open."),
+    );
+    const id = ask();
+    materialsImpl = async () => {
+      throw new AttentionMaterialsError(400, "Images must be bounded PNG, JPEG or WebP files.");
+    };
+    expect(await call("attach_materials", { key: `ask:${id}`, ...story() })).toEqual(
+      refused("Not attached: Images must be bounded PNG, JPEG or WebP files."),
+    );
+  });
+
+  it("keeps the story the real tool attaches, and the read route returns it in order with its bytes", async () => {
+    // real Git, the hub's own service (no stub), the real API over the same store
+    const repoDir = join(dir, "story-repo");
+    mkdirSync(join(repoDir, "docs/s"), { recursive: true });
+    const sig = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+    const files: Record<string, Buffer> = {};
+    for (const n of ["page", "before", "after", "a", "b"])
+      files[`docs/s/${n}.png`] = Buffer.concat([sig, Buffer.from(`image-${n}`)]);
+    for (const [path, bytes] of Object.entries(files)) writeFileSync(join(repoDir, path), bytes);
+    const git = (...a: string[]) =>
+      execFileSync(
+        "git",
+        [
+          "-c",
+          "user.name=T",
+          "-c",
+          "user.email=t@example.invalid",
+          "-c",
+          "commit.gpgsign=false",
+          "-C",
+          repoDir,
+          ...a,
+        ],
+        { encoding: "utf8" },
+      ).trim();
+    git("init", "--quiet");
+    git("add", "-A");
+    git("commit", "-qm", "images");
+    const commit = git("rev-parse", "HEAD");
+    need(cfg.crew?.sessions[0]).checkout = repoDir;
+    const id = ask();
+    const key = `ask:${id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: NOW,
+      ask: "Which layout?",
+      context: "Two layouts.",
+      recommendation: "A.",
+      basis: "Both checked.",
+      options: [
+        { id: "a", label: "A", answer: "A." },
+        { id: "b", label: "B", answer: "B." },
+      ],
+    });
+    const deps = flightDeps();
+    delete deps.attentionMaterials;
+    const real = createFlightTools(deps).find((t) => t.name === "attach_materials");
+    const result = await need(real).call(
+      ctx(),
+      story({
+        key,
+        sourceCommit: commit,
+        sections: [
+          {
+            heading: "This page",
+            images: [{ path: "docs/s/page.png", caption: "Today" }],
+            children: [
+              {
+                heading: "This part changes",
+                images: [
+                  { path: "docs/s/before.png", caption: "Before" },
+                  { path: "docs/s/after.png", caption: "After" },
+                ],
+                comparison: "before-after",
+                children: [{ heading: "Also here", text: "It shrinks." }],
+              },
+            ],
+          },
+        ],
+        optionImages: [
+          { optionId: "a", imagePaths: ["docs/s/a.png"] },
+          { optionId: "b", imagePaths: ["docs/s/b.png"] },
+        ],
+      }),
+    );
+    expect(result.isError).not.toBe(true);
+    const app = buildApp({
+      store,
+      bus: new ChangeBus(),
+      config: cfg,
+      operatorToken: "secret",
+      now: () => nowMs,
+    });
+    const headers = { "x-mc-operator": "secret" };
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/attention/${key}/materials`,
+      headers,
+    });
+    expect(res.statusCode).toBe(200);
+    const packet = res.json().packets[0];
+    expect(packet.sourcePath).toBeNull();
+    expect(packet.story[0].heading).toBe("This page");
+    expect(packet.story[0].children[0]).toMatchObject({
+      heading: "This part changes",
+      comparison: "before-after",
+    });
+    expect(packet.story[0].children[0].children[0].heading).toBe("Also here");
+    const byId = new Map(packet.images.map((i: { id: string; path: string }) => [i.id, i]));
+    expect(
+      packet.optionImages.map((o: { optionId: string; imageIds: string[] }) => [
+        o.optionId,
+        (byId.get(o.imageIds[0] ?? "") as { path: string }).path,
+      ]),
+    ).toEqual([
+      ["a", "docs/s/a.png"],
+      ["b", "docs/s/b.png"],
+    ]);
+    for (const image of packet.images) {
+      const bytes = await app.inject({ method: "GET", url: image.url, headers });
+      expect(bytes.statusCode).toBe(200);
+      expect(bytes.rawPayload).toEqual(files[image.path]);
+    }
+    await app.close();
+  });
+
+  it("refuses a story with no sections or an unknown field", async () => {
+    const id = ask();
+    expect(
+      (await call("attach_materials", { key: `ask:${id}`, ...story({ sections: [] }) })).isError,
+    ).toBe(true);
+    expect(
+      (await call("attach_materials", { key: `ask:${id}`, ...story({ extra: 1 }) })).isError,
+    ).toBe(true);
   });
 });

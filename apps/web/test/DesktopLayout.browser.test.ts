@@ -429,12 +429,11 @@ describeRendered("Approved compact desktop shell", () => {
   );
 
   it(
-    "preserves the shared shell on QA, Audit, Map, Comms, Telemetry, Board, Agent, Overview and Setup",
+    "preserves the shared shell on QA, Audit, Comms, Telemetry, Board, Agent, Overview and Setup",
     async () => {
       for (const [name, path] of [
         ["QA", "/qa"],
         ["Audit", "/audit"],
-        ["Map", "/map/shop-app"],
         ["Comms", "/comms"],
         ["Telemetry", "/telemetry"],
         ["Board", "/board"],

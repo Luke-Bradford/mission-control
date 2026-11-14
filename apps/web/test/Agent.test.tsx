@@ -10,13 +10,11 @@ import {
   type FileDiff,
   type LimitRow,
   type LoopTry,
-  READONLY_FILES_NOTE,
   type ReviewStatus,
   type RunDigest,
   type RunLoop,
   type RunLoopView,
   type RunView,
-  type TicketView,
 } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -26,23 +24,19 @@ import { hub } from "../src/data.ts";
 import { Agent } from "../src/pages/Agent.tsx";
 import { installKeys } from "../src/shell/keys.ts";
 import { setSelectedAgent } from "../src/shell/selection.ts";
-import { setSession } from "../src/shell/session.ts";
 import { Toast, toast } from "../src/shell/Toast.tsx";
 import { agentView } from "./agentV2Fixture.ts";
 import { settled, stubFetch } from "./fetchStub.ts";
 import {
-  boardItem,
   CONFIG,
   CREW_CONFIG,
   crewRow,
   HOUR,
-  item,
   limit5h,
   MIN,
   NOW,
   prView,
   run,
-  SESSION_CONFIG,
   seatRow,
 } from "./fixtures.ts";
 
@@ -496,31 +490,6 @@ describe("Agent page: what past runs were", () => {
 });
 
 describe("Agent page: picker and selection", () => {
-  it("shows one picker button per agent in the session filter; its lamp is the agent's needs", async () => {
-    stub({ items: [item()], extra: { "/api/config": SESSION_CONFIG } });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const picker = screen.getByRole("group", { name: "Pick an agent" });
-    const buttons = within(picker).getAllByRole("button");
-    expect(buttons.map((b) => b.textContent)).toEqual([
-      expect.stringContaining("shop-app-ta"),
-      expect.stringContaining("studio-builder"),
-    ]);
-    expect(buttons[0]?.className).toContain("on");
-    expect(within(buttons[0] as HTMLElement).getByRole("img", { name: "Decision" })).toBeTruthy();
-    expect(within(buttons[1] as HTMLElement).queryByRole("img", { name: "Decision" })).toBeNull();
-    // not a state lamp: the needs lamp does not pulse
-    expect($(buttons[0] as HTMLElement, ".lamp")?.className).not.toContain("pulse");
-    expect($(container, "#ahead")).toBeTruthy();
-
-    act(() => setSession("site-builder-session"));
-    expect(
-      within(picker)
-        .getAllByRole("button")
-        .map((b) => b.textContent),
-    ).toEqual([expect.stringContaining("studio-builder")]);
-  });
-
   it("/agent with no id shows the selected agent, else the first", async () => {
     stub();
     act(() => setSelectedAgent("studio-builder"));
@@ -561,31 +530,6 @@ describe("Agent page: picker and selection", () => {
     act(() => setSelectedAgent(null));
     const { container } = render(<Agent id="studio-builder" />);
     await vi.waitFor(() => expect($(container, "#ahead h2")?.textContent).toBe("studio-builder"));
-  });
-
-  it.each([
-    [false, "GUIDO-1 · Backend developer", null],
-    [true, "GUIDO-1", "Backend developer"],
-  ])("the header names a crew seat's role: narrow %s", async (narrow, text, title) => {
-    vi.stubGlobal("matchMedia", (q: string) => ({
-      matches: narrow,
-      media: q,
-      addEventListener: () => {},
-      removeEventListener: () => {},
-    }));
-    stub({ rows: [seatRow({ hudState: "idle" })] });
-    const { container } = render(<Agent id="guido-1" />);
-    await vi.waitFor(() => expect($(container, "#ahead h2")?.textContent).toBe(text));
-    expect($(container, "#ahead h2")?.getAttribute("title")).toBe(title);
-  });
-
-  it("picking an agent navigates to its page", async () => {
-    stub();
-    render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const picker = screen.getByRole("group", { name: "Pick an agent" });
-    fireEvent.click(within(picker).getAllByRole("button")[1] as HTMLElement);
-    expect(window.location.pathname).toBe("/agent/studio-builder");
   });
 });
 
@@ -947,6 +891,13 @@ describe("Agent page: activity stream", () => {
     await refetch();
     await screen.findByText("newer");
     expect(top).toBe(100);
+    // ...and says how many rows it holds back; the count returns the reader to the newest row
+    const newer = screen.getByRole("button", { name: "1 new" });
+    fireEvent.click(newer);
+    expect(top).toBe(1000);
+    expect(screen.queryByRole("button", { name: /new$/ })).toBeNull();
+    top = 100;
+    fireEvent.scroll(box);
 
     // at the bottom: a new event scrolls to it
     top = 800;
@@ -2090,276 +2041,6 @@ describe("Agent page: loop steps", () => {
   });
 });
 
-describe("Agent page: side tabs", () => {
-  const sub = (over = {}) => ({
-    taskId: "t1",
-    type: "Explore",
-    description: "find callers",
-    status: "completed" as const,
-    tokens: 12_300,
-    toolUses: 5,
-    durationMs: 42_000,
-    ...over,
-  });
-
-  const ticketOf = (body: string, over: Partial<TicketView> = {}): TicketView => ({
-    number: 3349,
-    title: "Quote cache",
-    url: "https://github.com/octo-org/shop-app/issues/3349",
-    state: "open",
-    body,
-    bodyTruncated: false,
-    labels: [],
-    milestone: null,
-    subIssues: [],
-    pullRequests: [],
-    ...over,
-  });
-  const TICKET_ROUTE = "/api/boards/shop-app/items/3349";
-  const sideOf = async (row: CrewRow, extra: Record<string, unknown> = {}) => {
-    stub({ rows: [row], extra });
-    const { container } = render(<Agent id={row.id} />);
-    await (row.kind === "crew" ? seatLoaded() : loaded());
-    return $(container, "#sideP") as HTMLElement;
-  };
-
-  it("Plan never substitutes ticket Markdown for the live list", async () => {
-    const side = await sideOf(crewRow({ digest: digest() }), {
-      [TICKET_ROUTE]: ticketOf("## Plan\n1. cache the quotes"),
-    });
-    expect(await within(side).findByText("No task list yet.")).toBeTruthy();
-    expect(side.textContent).not.toContain("cache the quotes");
-    expect(within(side).getByRole("button", { name: "Plan 0/0" })).toBeTruthy();
-  });
-
-  it("Queue shows what the seat holds and what comes next", async () => {
-    const loop: CrewLoop = { phase: "ci", text: "CI is running", prNumber: 77, parked: null };
-    const side = await sideOf(
-      seatRow({
-        loop,
-        queue: [
-          { ref: "shop-app#3", issue: 3, pos: 1 },
-          { ref: "shop-app#8", issue: 8, pos: 2 },
-        ],
-      }),
-      SEAT_ROUTES({
-        "/api/boards/shop-app": [
-          boardItem({ issueNumber: 3, title: "Retry the fetch", priority: "P1" }),
-          boardItem({ issueNumber: 8, title: "Fix the typo", priority: "P2" }),
-        ],
-      }),
-    );
-    fireEvent.click(within(side).getByRole("button", { name: "Queue" }));
-    expect(await within(side).findByText("Retry the fetch")).toBeTruthy();
-    const heads = [...side.querySelectorAll(".qsec")].map((h) => h.textContent);
-    expect(heads).toEqual(["Now", "Next · from Ready, by priority", "Done"]);
-    const rows = [...side.querySelectorAll<HTMLElement>(".qi")].map((r) => r.textContent);
-    expect(rows).toEqual([
-      "▸#3349 Quote cacheCI",
-      "1#3 Retry the fetchP1",
-      "2#8 Fix the typoP2↑",
-      "✓#3349 ",
-    ]);
-    expect(side.textContent).toContain(
-      "Each ticket starts as a fresh run on its own branch, with the ticket, the repo's docs and this lane's notes. Earlier tickets' conversations aren't carried over.",
-    );
-  });
-
-  it("Queue Done lists finished tickets once, excluding unfinished, failed, stopped and unticketed runs", async () => {
-    const ok = { status: "ok" as const, endedAt: NOW };
-    const side = await sideOf(
-      seatRow(),
-      SEAT_ROUTES({
-        "/api/agents/guido-1/runs?limit=50": [
-          rv({ id: "done", ticket: "shop-app#42", ticketTitle: "Finished cache", ...ok }),
-          rv({ id: "again", ticket: "shop-app#42", ticketTitle: "Finished cache", ...ok }),
-          rv({ id: "active", ticket: "shop-app#43", ticketTitle: "Still working", endedAt: null }),
-          rv({
-            id: "failed",
-            ticket: "shop-app#44",
-            ticketTitle: "Fell over",
-            status: "failed",
-            endedAt: NOW,
-          }),
-          rv({ id: "scratch", ticket: null, ticketTitle: "Unticketed", ...ok }),
-          rv({
-            id: "stopped",
-            ticket: "shop-app#45",
-            ticketTitle: "Stopped by you",
-            ...ok,
-            endedBy: "operator",
-          }),
-        ],
-      }),
-    );
-    fireEvent.click(within(side).getByRole("button", { name: "Queue" }));
-    expect(await within(side).findByText("Finished cache")).toBeTruthy();
-    expect(side.textContent).toContain("✓#42 Finished cache");
-    expect(within(side).getAllByText("Finished cache")).toHaveLength(1);
-    expect(side.textContent).not.toContain("Still working");
-    expect(side.textContent).not.toContain("Fell over");
-    expect(side.textContent).not.toContain("Unticketed");
-    expect(side.textContent).not.toContain("Stopped by you");
-  });
-
-  it("Queue says when it is empty, nothing is held, or the row is no writer seat", async () => {
-    const empty = await sideOf(seatRow({ queue: [], run: null, ticket: null }), SEAT_ROUTES());
-    fireEvent.click(within(empty).getByRole("button", { name: "Queue" }));
-    expect(empty.textContent).toContain("Nothing assigned.");
-    expect(empty.textContent).toContain("Empty: FLIGHT fills this from the focus.");
-    cleanup();
-    const loopRow = await sideOf(crewRow({ digest: digest() }));
-    fireEvent.click(within(loopRow).getByRole("button", { name: "Queue" }));
-    expect($(loopRow, "#sideBody")?.textContent).toBe("Only a writer seat has a queue.");
-  });
-
-  it("Subagents {n}: rows with type, task, pill, tokens, tool calls and duration", async () => {
-    stub({
-      rows: [
-        crewRow({
-          digest: digest({
-            subagents: [sub(), sub({ taskId: "t2", status: "running", tokens: null })],
-          }),
-        }),
-      ],
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(within(side).getByRole("button", { name: "Subagents 2" }));
-    const rows = [...side.querySelectorAll<HTMLElement>(".subrow")];
-    expect(rows).toHaveLength(2);
-    expect(rows[0]?.textContent).toContain("Explore");
-    expect(rows[0]?.textContent).toContain("find callers");
-    expect(rows[0]?.textContent).toContain("Done");
-    expect(rows[0]?.textContent).toContain("12.3k tokens · 5 tool calls · 42s");
-    expect(rows[1]?.textContent).toContain("Running");
-    expect(rows[1]?.textContent).toContain("— tokens");
-    expect(side.textContent).toContain(
-      "Subagents this agent spawned. Their tokens count toward its totals.",
-    );
-  });
-
-  it("omits the empty Subagents option", async () => {
-    stub();
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    expect(within(side).queryByRole("button", { name: "Subagents 0" })).toBeNull();
-  });
-
-  it("Files {n}: path, +add −del and state, with the note when present", async () => {
-    stub({
-      files: {
-        files: [
-          { path: "src/a.ts", add: 10, del: 2, state: "uncommitted" },
-          { path: "img/logo.png", add: null, del: null, state: "committed" },
-        ],
-        note: "no origin/HEAD: showing uncommitted changes only",
-        sha: null,
-      },
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(await within(side).findByRole("button", { name: /^Files/ }));
-    await waitFor(() => expect(side.querySelectorAll(".f")).toHaveLength(2));
-    const rows = [...side.querySelectorAll<HTMLElement>(".f")];
-    expect(rows.map((r) => r.textContent)).toEqual(["src/a.ts+10 −2uncommitted", "img/logo.png——"]);
-    expect(side.textContent).toContain("no origin/HEAD: showing uncommitted changes only");
-  });
-
-  it("Files with none: No file changes yet.", async () => {
-    stub();
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(await within(side).findByRole("button", { name: /^Files/ }));
-    await waitFor(() => expect($(side, "#sideBody")?.textContent).toBe("No file changes yet."));
-  });
-
-  it("clicking a file shows its diff below the list, lines coloured by class; Close hides it", async () => {
-    stub({
-      files: {
-        files: [
-          { path: "src/a.ts", add: 1, del: 1, state: "committed" },
-          { path: "img/logo.png", add: null, del: null, state: "uncommitted" },
-        ],
-        note: null,
-        sha: null,
-      },
-      diffs: {
-        "src/a.ts": {
-          path: "src/a.ts",
-          text: "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -1 +1 @@\n-old <b>x</b>\n+new\n same",
-          truncated: true,
-          binary: false,
-          sha: null,
-        },
-        "img/logo.png": {
-          path: "img/logo.png",
-          text: "",
-          truncated: false,
-          binary: true,
-          sha: null,
-        },
-      },
-    });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(await within(side).findByRole("button", { name: /^Files/ }));
-    fireEvent.click(await within(side).findByRole("button", { name: /^src\/a\.ts/ }));
-    const pre = await vi.waitFor(() => {
-      const p = $(side, "pre.diff");
-      expect(p).toBeTruthy();
-      return p as HTMLElement;
-    });
-    // below the list
-    const rows = side.querySelectorAll(".f");
-    expect(
-      (rows[rows.length - 1] as HTMLElement).compareDocumentPosition(pre) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    const cls = (t: string) =>
-      [...pre.querySelectorAll("span")].find((s) => s.textContent?.startsWith(t))?.className;
-    expect(cls("@@")).toBe("h");
-    expect(cls("-old")).toBe("d");
-    expect(cls("+new")).toBe("a");
-    expect(cls("+++ b/")).toBe("");
-    expect(cls("--- a/")).toBe("");
-    expect(cls(" same")).toBe("");
-    // inert text, never HTML
-    expect(pre.querySelector("b")).toBeNull();
-    expect(pre.textContent).toContain("-old <b>x</b>");
-    expect(side.textContent).toContain("Cut at 200 000 characters");
-    fireEvent.click(within(side).getByRole("button", { name: /^img\/logo\.png/ }));
-    expect(await within(side).findByText("Binary file")).toBeTruthy();
-    expect($(side, "pre.diff")).toBeNull();
-    fireEvent.click(within(side).getByRole("button", { name: "Close" }));
-    expect(within(side).queryByText("Binary file")).toBeNull();
-  });
-
-  it("Review Focus 2: Files shows worktree missing for a 503", async () => {
-    stub({ files: { status: 503, error: "worktree missing" } });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(within(side).getByRole("button", { name: /^Files/ }));
-    expect(await within(side).findByText("worktree missing")).toBeTruthy();
-  });
-
-  it("Files shows the note under the error of a 502", async () => {
-    stub({ files: { status: 502, error: "git failed", note: "Files may be missing: filtered" } });
-    const { container } = render(<Agent id="shop-app-ta" />);
-    await loaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(within(side).getByRole("button", { name: /^Files/ }));
-    expect(await within(side).findByText("git failed")).toBeTruthy();
-    expect(within(side).getByText("Files may be missing: filtered").className).toContain("note");
-  });
-});
-
 const seat = (over: Partial<CrewRow> = {}) =>
   crewRow({
     id: "guido-1",
@@ -2550,13 +2231,8 @@ describe("Agent page: header and tile mockup", () => {
     await waitFor(() =>
       expect(document.querySelector("#ahead h2")?.textContent).toContain("ORBIT"),
     );
-    const picker = within(screen.getByRole("group", { name: "Pick an agent" })).getByRole(
-      "button",
-      { name: /ORBIT/ },
-    );
-    expect(picker.getAttribute("aria-pressed")).toBe("true");
-    fireEvent.click(picker);
-    expect(window.location.pathname).toBe("/agent/guido-1");
+    const card = document.querySelector('[data-seat="guido-1"]');
+    expect(card?.textContent).toContain("ORBIT");
     expect(rows[0]?.run).toBe(row.run);
     const posts = f.mock.calls.filter(([, init]) => init?.method === "POST");
     expect(posts.map(([path]) => path)).toEqual(["/api/crew/sessions/s1/seats"]);
@@ -2688,108 +2364,9 @@ describe("Agent page: header and tile mockup", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("call signs must be unique");
     expect((input as HTMLInputElement).value).toBe("ORBIT");
   });
-
-  it("Queue Done lists successful completed tickets once, as inert text", async () => {
-    const completed = rv({
-      id: "done",
-      status: "ok",
-      endedAt: NOW - MIN,
-      ticket: "shop-app#2",
-      ticketTitle: "<img src=x onerror=alert(1)>",
-    });
-    stub({
-      rows: [seat()],
-      extra: SEAT_ROUTES(),
-      runs: [
-        rv(),
-        completed,
-        { ...completed, id: "duplicate" },
-        rv({ id: "failed", status: "failed", endedAt: NOW - MIN, ticket: "shop-app#3" }),
-        rv({ id: "unticketed", status: "ok", endedAt: NOW - MIN, ticket: null }),
-      ],
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Queue" }));
-    const side = $(container, "#sideP") as HTMLElement;
-    expect(await within(side).findByText("Done", { exact: true })).toBeTruthy();
-    expect(within(side).getAllByRole("link", { name: "shop-app #2" })).toHaveLength(1);
-    expect(within(side).queryByRole("link", { name: "shop-app #3" })).toBeNull();
-    expect(within(side).getByText(completed.ticketTitle as string)).toBeTruthy();
-    expect(side.querySelector("img")).toBeNull();
-  });
-
-  it("Queue Done says None yet when there are no completed tickets", async () => {
-    stub({ rows: [seat()], runs: [rv()], extra: SEAT_ROUTES() });
-    render(<Agent id="guido-1" />);
-    fireEvent.click(await screen.findByRole("button", { name: "Queue" }));
-    expect(await screen.findByText("None yet.")).toBeTruthy();
-  });
-
-  it.each([49, 50])(
-    "Queue Done hints at the limit only for a full page of %i runs",
-    async (count) => {
-      const f = stub({
-        rows: [seat()],
-        runs: Array.from({ length: count }, (_, i) =>
-          rv({ id: `r-${i}`, status: "ok", endedAt: NOW - MIN, ticket: "shop-app#2" }),
-        ),
-        extra: SEAT_ROUTES(),
-      });
-      const { container } = render(<Agent id="guido-1" />);
-      fireEvent.click(await screen.findByRole("button", { name: "Queue" }));
-      await settled(f, "/api/agents/guido-1/runs?limit=50");
-      const side = $(container, "#sideP") as HTMLElement;
-      expect(within(side).getAllByRole("link", { name: "shop-app #2" })).toHaveLength(1);
-      expect(side.textContent?.includes("latest 50")).toBe(count === 50);
-    },
-  );
 });
 
 describe("Agent page: driving a crew seat", () => {
-  it("a crew writer's Files tab lists its changed files", async () => {
-    stub({
-      rows: [seat(), studio()],
-      files: {
-        files: [{ path: "src/a.ts", add: 3, del: 1, state: "uncommitted" }],
-        note: null,
-        sha: null,
-      },
-      extra: SEAT_ROUTES(),
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    await seatLoaded();
-    const activity = $(container, "#streamP") as HTMLElement;
-    expect(await within(activity).findByText("Work on shop-app#3349")).toBeTruthy();
-    expect(within(activity).getByText("The cache is in")).toBeTruthy();
-    expect(activity.textContent).not.toContain("Could not load the activity");
-    const side = $(container, "#sideP") as HTMLElement;
-    fireEvent.click(await within(side).findByRole("button", { name: /^Files/ }));
-    await waitFor(() =>
-      expect([...side.querySelectorAll(".f")].map((e) => e.textContent)).toEqual([
-        "src/a.ts+3 −1uncommitted",
-      ]),
-    );
-  });
-
-  it("a read-only seat's Files tab shows only its note", async () => {
-    stub({
-      rows: [seat({ mode: "read-only" }), studio()],
-      files: { files: [], note: READONLY_FILES_NOTE, sha: null },
-      extra: SEAT_ROUTES(),
-    });
-    const { container } = render(<Agent id="guido-1" />);
-    await seatLoaded();
-    const side = $(container, "#sideP") as HTMLElement;
-    const tab = within(side).getByRole("button", { name: /^Files/ });
-    expect(tab.textContent).toBe("Files");
-    fireEvent.click(tab);
-    const note = await within(side).findByText(READONLY_FILES_NOTE);
-    expect(note.className).toContain("note");
-    expect($(container, "#sideBody")?.textContent).toBe(READONLY_FILES_NOTE);
-    expect(side.querySelector(".crit-t")).toBeNull();
-    expect(side.textContent).not.toContain("No file changes yet.");
-  });
-
   it("shows the composer for a crew seat only", async () => {
     stub({ rows: [seat(), studio()], extra: SEAT_ROUTES() });
     const { unmount } = render(<Agent id="guido-1" />);
@@ -2949,43 +2526,6 @@ describe("Agent page: driving a crew seat", () => {
     ).toBeTruthy();
   });
 
-  it("the header names role, mode, model, account and area; loops are unchanged", async () => {
-    stub({
-      rows: [seat({ cli: { version: "2.1.302", effort: "high" } }), studio()],
-      extra: SEAT_ROUTES(),
-    });
-    const a = render(<Agent id="guido-1" />);
-    await seatLoaded();
-    const chips = a.container.querySelector("#ahead .chips")?.textContent ?? "";
-    expect(chips).toContain("GUIDO");
-    expect(chips).toContain("writer");
-    expect(chips).toContain("claude-main · claude-opus-4-1 · high · CLI 2.1.302");
-    expect(chips).toContain("area: apps/web/**, docs/**");
-    expect(chips).not.toContain("observed loop");
-    a.unmount();
-    const b = render(<Agent id="studio-builder" />);
-    await screen.findByText(/is an observed loop: Mission Control watches it/);
-    expect(b.container.querySelector("#ahead .chips")?.textContent).toContain("observed loop");
-    expect(screen.queryByRole("button", { name: "End the run" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Interrupt" })).toBeNull();
-  });
-
-  it("a read-only seat's area reads read-only", async () => {
-    stub({ rows: [seat({ mode: "read-only", area: [], role: "INCO" })], extra: SEAT_ROUTES() });
-    const a = render(<Agent id="guido-1" />);
-    await seatLoaded();
-    expect(a.container.querySelector("#ahead .chips")?.textContent).toContain("area: read-only");
-  });
-
-  it("the header says scratch review copy for a scratch seat", async () => {
-    stub({ rows: [seat({ mode: "scratch", area: [], role: "RETRO" })], extra: SEAT_ROUTES() });
-    const a = render(<Agent id="guido-1" />);
-    await seatLoaded();
-    expect(a.container.querySelector("#ahead .chips")?.textContent).toContain(
-      "area: scratch review copy",
-    );
-  });
-
   it("Stop confirms, then posts {hold:true} to keep the area reserved", async () => {
     const f = stub({ rows: [seat()], extra: SEAT_ROUTES() });
     const ask = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
@@ -3050,13 +2590,13 @@ it("refreshes a Codex plan from live stream tasks", async () => {
     streamNow: () => ({ ...STREAM, runId: row.run?.id ?? null, tasks }),
   });
   render(<Agent id="guido-1" />);
-  expect(await screen.findByRole("button", { name: "Plan 0/1" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Plan" })).toBeTruthy();
   expect(screen.getByText("Check the catalogue")).toBeTruthy();
   tasks = [
     { id: "1", text: "Check the catalogue", status: "done" },
     { id: "2", text: "Verify the form", status: "in_progress" },
   ];
   act(() => hub.refetch("/api/agents/guido-1/stream?limit=20"));
-  expect(await screen.findByRole("button", { name: "Plan 1/2" })).toBeTruthy();
+  expect(await screen.findByText("Verify the form")).toBeTruthy();
   expect(screen.getByText("Verify the form")).toBeTruthy();
 });

@@ -24,6 +24,12 @@ import { dayMonth, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
 import { LinksSection } from "../needs/LinksSection.tsx";
+import {
+  OptionPictures,
+  PlanAndMockups,
+  useAttentionMaterials,
+  useImageViewer,
+} from "../needs/Materials.tsx";
 import { Pictures } from "../needs/Pictures.tsx";
 import { PreviewOpener } from "../needs/PreviewFrame.tsx";
 import {
@@ -84,6 +90,8 @@ export function useItemDetail(key: string | null) {
   const [busy, setBusy] = useState(false);
   const [justHandled, setJustHandled] = useState<Record<string, string>>({});
   const [err, setErr] = useState<string | null>(null);
+  // When a typed reply last went through, per item: the conversation opens to show it.
+  const [replied, setReplied] = useState<Record<string, number>>({});
   const tz = useTz();
   const now = useNow();
   const activeKey = useRef(key);
@@ -121,6 +129,7 @@ export function useItemDetail(key: string | null) {
     if (!item || !target || !body || !replyOk || busy) return;
     void act(async () => {
       const failed = await sendAnswer(target, seat, item, about, body);
+      if (failed === null) setReplied((prev) => ({ ...prev, [item.key]: Date.now() }));
       if (failed === null && getDraft("answer", item.key) === text) {
         clearDraft("answer", item.key);
         if (activeKey.current === item.key) setTextState("");
@@ -165,6 +174,7 @@ export function useItemDetail(key: string | null) {
     setText,
     busy,
     err,
+    replied,
     handledHow,
     options,
     currentItem,
@@ -205,6 +215,7 @@ export function ItemDetail({
     setText,
     busy,
     err,
+    replied,
     handledHow,
     options,
     currentItem,
@@ -212,8 +223,10 @@ export function ItemDetail({
     act,
     setJustHandled,
   } = detail;
-  if (key === null) return null;
   const page = layout === "page";
+  const materials = useAttentionMaterials(page && item && !holding ? item : null);
+  const viewer = useImageViewer();
+  if (key === null) return null;
   const p = page ? "needs" : "ds";
   const flightSeat = flight === undefined ? undefined : flight.seat;
   const previewBlock = item && !holding ? <PreviewOpener item={item} /> : null;
@@ -315,6 +328,13 @@ export function ItemDetail({
                   : `${REFRESH_NEEDED}: this brief has no bound choices. Reply below or ask FLIGHT.`
               }
               variant="panel"
+              pictures={
+                materials.packets.length > 0
+                  ? (o) => (
+                      <OptionPictures option={o} packets={materials.packets} open={viewer.open} />
+                    )
+                  : undefined
+              }
               onPick={() => {}}
             />
           )}
@@ -399,6 +419,7 @@ export function ItemDetail({
           itemKey={item.key}
           live={flight === undefined ? undefined : live}
           seat={flightSeat}
+          replied={replied[item.key]}
           focus={options.length === 0 && !item.brief?.person?.replies?.length}
           collapsed={options.length > 0 || Boolean(item.brief?.person?.replies?.length)}
         />
@@ -423,6 +444,8 @@ export function ItemDetail({
             {replyBlock}
           </div>
           {previewBlock}
+          <PlanAndMockups item={item} open={viewer.open} {...materials} />
+          {viewer.element}
           <Pictures item={item} />
           {item.brief ? (
             <details className="needs-more">

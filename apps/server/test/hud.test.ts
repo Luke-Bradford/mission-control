@@ -6,7 +6,6 @@ import { DatabaseSync } from "node:sqlite";
 import {
   ATTENTION_LABEL,
   type BoardItem,
-  BUDGET_BRAKE_KEY,
   COMMS_CAPCOM,
   COMMS_CAPCOM_ESCALATION_MS,
   COMMS_FLIGHT_ESCALATION_MS,
@@ -35,8 +34,8 @@ import {
   type TestLockState,
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CLI_AUTO_NOTE_PREFIX } from "../src/cli-auto.ts";
-import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli-update.ts";
+import { CLI_AUTO_NOTE_PREFIX } from "../src/cli/auto.ts";
+import { CLI_NOTE_KEY, CLI_UPGRADE_NOTE_KEY } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightTriageItems, operatorItems } from "../src/flight/state.ts";
 import {
@@ -51,12 +50,14 @@ import {
   NO_LOCK,
   pinned,
 } from "../src/hud.ts";
-import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instruction-notices.ts";
+import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
+import { clearLeftovers } from "../src/leftovers.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
+import { defined } from "./defined.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -1507,7 +1508,7 @@ describe("crew seats in the rows", () => {
     expect(rowOf(c, "RETRO-1")?.queuedReview?.reason).toContain("stop threshold");
     store.upsertPullRequests(
       "shop-app",
-      [{ ...store.pullRequests("shop-app")[0]!, headSha: "d".repeat(40) }],
+      [{ ...defined(store.pullRequests("shop-app")[0]), headSha: "d".repeat(40) }],
       NOW + 1,
     );
     expect(rowOf(c, "RETRO-1")?.queuedReview).toBeUndefined();
@@ -2290,6 +2291,11 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
       for: "operator",
     });
     expect(keys(NOW)).toEqual([`ask:${id}`]);
+    // the page never shows the seat as the asker: FLIGHT asks it (#1510)
+    expect(attentionItems(c, store, NOW).find((i) => i.key === `ask:${id}`)).toMatchObject({
+      asker: "FLIGHT-1",
+      agentId: "GUIDO-1",
+    });
     // FLIGHT stopped: a new question stays FLIGHT's, marked down, and the stopped item counts it
     const held = asked("GUIDO-1", "c1");
     flightRow({ runId: null, state: "stopped" });
@@ -2526,6 +2532,189 @@ describe("crew items: strays, questions, crew errors and the test lock", () => {
     expect(items(c, lock).filter((i) => i.kind === "lock")).toEqual([]);
     store.setDigest("c1", digest({ lastEventAt: NOW - 11 * MIN }));
     expect(items(c, { ...lock, waiting: [] }).filter((i) => i.kind === "lock")).toEqual([]);
+  });
+
+  describe("leftovers of finished work (#1811)", () => {
+    const DAY = 24 * HOUR;
+    const raise = (key: string, runId: string) =>
+      store.raiseNote({
+        key,
+        kind: "flag",
+        runId,
+        seatId: "GUIDO-1",
+        repoId: "shop-app",
+        text: "a note",
+        at: NOW - 20 * DAY,
+      });
+    const setup = (over: Partial<Run>) => {
+      store.replaceBoard("shop-app", [boardItem({ issueNumber: 5, closed: true })]);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          startedAt: NOW - 21 * DAY,
+          ...over,
+        }),
+      );
+      const id = store.addQuestion({
+        agentId: "GUIDO-1",
+        runId: "c1",
+        text: "Lanes?",
+        at: NOW - 20 * DAY,
+      });
+      raise("old-note", "c1");
+      return id;
+    };
+    const keys = (c: CcConfig) => items(c).map((i) => i.key);
+    const putPr = (number: number, state: PullRequestView["state"], mergedAt: number | null) =>
+      store.upsertPullRequests(
+        "shop-app",
+        [
+          {
+            repoId: "shop-app",
+            number,
+            title: "pr",
+            url: `https://github.com/o/shop-app/pull/${number}`,
+            branch: `b${number}`,
+            ticket: null,
+            state,
+            isDraft: false,
+            review: null,
+            ci: null,
+            createdAt: NOW - DAY,
+            updatedAt: NOW - DAY,
+            mergedAt,
+            headSha: null,
+            mergeable: null,
+          },
+        ],
+        NOW,
+      );
+
+    it("an ended run with a closed ticket leaves no question or note", () => {
+      const id = setup({ endedAt: NOW - 20 * DAY, status: "ok" });
+      expect(keys(withCrew())).not.toContain(`ask:${id}`);
+      expect(keys(withCrew())).not.toContain("note:old-note");
+    });
+
+    it("a live run's question and note still show", () => {
+      const id = setup({});
+      expect(keys(withCrew())).toEqual(expect.arrayContaining([`ask:${id}`, "note:old-note"]));
+    });
+
+    it("a run ended under 7 days ago on an open ticket keeps its question; past 7 days it goes", () => {
+      store.replaceBoard("shop-app", [boardItem({ issueNumber: 5 })]);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - 2 * DAY,
+          status: "ok",
+        }),
+      );
+      const id = store.addQuestion({
+        agentId: "GUIDO-1",
+        runId: "c1",
+        text: "Lanes?",
+        at: NOW - 2 * DAY,
+      });
+      expect(keys(withCrew())).toContain(`ask:${id}`);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - 8 * DAY,
+          status: "ok",
+        }),
+      );
+      expect(keys(withCrew())).not.toContain(`ask:${id}`);
+    });
+
+    it("the unfiled minor findings flag outlives its merged run", () => {
+      store.replaceBoard("shop-app", [boardItem({ issueNumber: 5 })]);
+      store.upsertRun(
+        run({
+          id: "c1",
+          agentId: "GUIDO-1",
+          ticket: "shop-app#5",
+          endedAt: NOW - MIN,
+          status: "ok",
+          loop: { ...NEW_LOOP, phase: "done", prNumber: 12 },
+        }),
+      );
+      putPr(12, "merged", NOW - MIN);
+      raise("c1:file-minor", "c1");
+      expect(keys(withCrew())).toContain("note:c1:file-minor");
+    });
+
+    it("the cleanup pass sets the question aside, and releases a hold and a park, each with a hub event", () => {
+      const id = setup({
+        endedAt: NOW - 20 * DAY,
+        status: "ok",
+        loop: {
+          ...NEW_LOOP,
+          phase: "parked",
+          parked: { kind: "ended", reason: "run ended (stopped)", ended: true },
+          mergeHold: { by: "FLIGHT", reason: "wait", at: NOW - 21 * DAY },
+        },
+      });
+      store.upsertRun(
+        run({
+          id: "live",
+          agentId: "GUIDO-2",
+          ticket: "shop-app#6",
+          loop: { ...NEW_LOOP, mergeHold: { by: "FLIGHT", reason: "wait", at: NOW } },
+        }),
+      );
+      store.replaceBoard("shop-app", [
+        boardItem({ issueNumber: 5, closed: true }),
+        boardItem({ issueNumber: 6 }),
+      ]);
+      putPr(13, "open", null);
+      const parkedEnded = {
+        kind: "ended",
+        reason: "run ended (stopped)",
+        ended: true,
+      };
+      store.upsertRun(
+        run({
+          id: "held",
+          agentId: "GUIDO-2",
+          ticket: "shop-app#6",
+          endedAt: NOW - DAY,
+          status: "ok",
+          loop: {
+            ...NEW_LOOP,
+            prNumber: 13,
+            phase: "parked",
+            parked: parkedEnded,
+            mergeHold: { by: "FLIGHT", reason: "wait", at: NOW - DAY },
+          },
+        }),
+      );
+      const cleared = clearLeftovers({ store, config: withCrew(), now: NOW });
+      expect(cleared).toHaveLength(3);
+      expect(store.run("held")?.loop?.mergeHold).not.toBeNull();
+      expect(store.run("held")?.loop?.parked).not.toBeNull();
+      expect(store.question(id)).toMatchObject({ answeredAt: null });
+      expect(store.openQuestions().map((q) => q.id)).not.toContain(id);
+      expect(store.asideQuestions().map((q) => q.id)).toContain(id);
+      const ended = store.run("c1")?.loop;
+      expect(ended?.mergeHold).toBeNull();
+      expect(ended?.parked).toBeNull();
+      expect(store.endedRunsWithHoldOrPark().map((r) => r.id)).toEqual(["held"]);
+      expect(store.run("live")?.loop?.mergeHold).not.toBeNull();
+      expect(store.hubEvents(0).map((e) => e.text)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("merge hold"),
+          expect.stringContaining("parked"),
+        ]),
+      );
+      expect(clearLeftovers({ store, config: withCrew(), now: NOW })).toEqual([]);
+    });
   });
 });
 
@@ -3088,6 +3277,142 @@ describe("messages are not Needs you", () => {
     ]);
   });
 
+  it("projects a labelled FLIGHT question to CAPCOM once after its escalation delay", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const earlier = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#4",
+      text: "@CAPCOM should the earlier work wait?",
+    });
+    if (earlier === null) throw new Error("earlier message was not stored");
+    const message = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+
+    expect(
+      attentionItems(c, store, at - 1, NO_LOCK, []).filter((item) => item.text === message.text),
+    ).toEqual([expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" })]);
+    store.markCommsInboxRead("flight-1", [message.id]);
+    const items = attentionItems(c, store, at, NO_LOCK, []);
+    expect(items.filter((item) => item.text === message.text)).toEqual([
+      expect.objectContaining({ key: `comms-open:${message.id}`, kind: "question" }),
+    ]);
+    expect(items).toContainEqual(expect.objectContaining({ key: `tag:flight-1:${earlier.id}` }));
+  });
+
+  it("keeps an existing tagged brief as the single canonical projection", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - COMMS_FLIGHT_ESCALATION_MS,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const legacyKey = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key: legacyKey,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve the dependencies design?",
+      context: "The design is ready for a decision.",
+      recommendation: "Approve it.",
+      basis: "The retained legacy brief.",
+      options: TWO_OPTIONS,
+    });
+
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).filter((item) => item.text === message.text),
+    ).toEqual([expect.objectContaining({ key: legacyKey })]);
+  });
+
+  it("closes a legacy tagged duplicate only when it has a real choice", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve?",
+      context: "Ready.",
+      recommendation: "Approve.",
+      basis: "Legacy.",
+      options: TWO_OPTIONS,
+    });
+    store.claimChoice({
+      key,
+      briefAt: message.at,
+      optionId: "yes",
+      label: "Yes",
+      answer: "Go ahead.",
+      question: "Approve?",
+      ticket: "shop-app#5",
+      target: "FLIGHT-1",
+      targetKind: "flight",
+      messageId: null,
+      chosenAt: at,
+      chosenBy: "operator",
+    });
+    store.ack([key], at);
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).find((item) => item.key === key),
+    ).toBeUndefined();
+  });
+
+  it("keeps an ack-only legacy tagged duplicate answerable", () => {
+    up("flight-1");
+    const at = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: at - MIN,
+      from: "flight-1",
+      to: COMMS_CAPCOM,
+      ticket: "shop-app#5",
+      text: "@CAPCOM approve the dependencies design?",
+      label: "question",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `tag:flight-1:${message.id}`;
+    store.addBrief({
+      key,
+      for: "operator",
+      by: "flight",
+      at: message.at,
+      ask: "Approve?",
+      context: "Ready.",
+      recommendation: "Approve.",
+      basis: "Legacy.",
+      options: TWO_OPTIONS,
+    });
+    store.ack([key], at);
+    expect(
+      attentionItems(c, store, at, NO_LOCK, []).find((item) => item.key === key),
+    ).toMatchObject({ acked: false });
+  });
+
   it("leaves a seat's @CAPCOM tag and direct-line question with FLIGHT, triaged or not", () => {
     up("flight-1");
     say(NOW - 10 * MIN, COMMS_CAPCOM, "guido-1", "How is it going?");
@@ -3376,6 +3701,36 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     expect(aggregate(late)?.notTriaging?.keys).toEqual([key]);
     store.addCommsReaction(message.id, "flight-1", "on_it", undefined, late);
     expect(all(late).find((item) => item.key === key)).toBeUndefined();
+  });
+
+  it("names FLIGHT as the asker of a seat's Comms blocker briefed for the operator (#1510)", () => {
+    flight();
+    const current = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + HOUR;
+    const message = store.addComms({
+      at: current - COMMS_FLIGHT_ESCALATION_MS,
+      from: "guido-1",
+      to: "flight-1",
+      ticket: "shop-app#706",
+      text: "May I merge main into the branch?",
+      label: "blocker",
+    });
+    if (message === null) throw new Error("message was not stored");
+    const key = `comms-open:${message.id}`;
+    store.addBrief({
+      key,
+      context: "A seat needs a product call from you.",
+      ask: "One lane per customer?",
+      recommendation: "Yes.",
+      options: TWO_OPTIONS,
+      basis: "product direction",
+      at: current,
+      for: "operator",
+    });
+    expect(all(current).find((item) => item.key === key)).toMatchObject({
+      owner: "operator",
+      asker: "flight-1",
+      agentId: "guido-1",
+    });
   });
 
   it("does not raise a Comms item that predates the rollout cutoff", () => {
@@ -3847,7 +4202,6 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     flight();
     expect(HUB_STOP_KEYS).toEqual([
       `note:${MACHINE_CAPACITY_KEY}`,
-      `note:${BUDGET_BRAKE_KEY}`,
       `note:${CLI_NOTE_KEY}`,
       `note:${CLI_AUTO_NOTE_PREFIX}`,
       `note:${INSTRUCTION_FOCUS_NOTE_PREFIX}`,

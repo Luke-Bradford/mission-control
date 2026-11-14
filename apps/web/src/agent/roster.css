@@ -1,0 +1,212 @@
+/* The Agents roster: every seat by repo, scrolling inside its own frame (docs/prototype/agents-page-revised.html). */
+.roster {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+  padding: 0;
+}
+.roster-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 44px;
+  padding: 0 var(--sp-4) 0 var(--sp-4);
+  border-bottom: 1px solid var(--line);
+}
+.roster-head b {
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+}
+.roster-count {
+  color: var(--muted);
+  font: var(--fs-s) / var(--lh-s) var(--sans);
+  white-space: nowrap;
+}
+.roster-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  padding: var(--sp-2) var(--sp-4) 0;
+  color: var(--muted);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+}
+.roster-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.roster-legend i {
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+}
+.roster-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--sp-1) var(--sp-2) var(--sp-2);
+  scrollbar-gutter: stable;
+}
+.roster-fold {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-height: 32px;
+  padding: var(--sp-1) var(--sp-2);
+  background: none;
+  border: 0;
+  color: var(--fg-2);
+  font: 500 var(--fs-s) / var(--lh-s) var(--sans);
+  letter-spacing: 0.03em;
+  text-align: left;
+  cursor: pointer;
+}
+.roster-repo {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.roster-n {
+  font-family: var(--mono);
+  color: var(--muted);
+}
+.roster-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  padding-bottom: var(--sp-2);
+}
+.seat-card {
+  display: grid;
+  grid-template-columns: 4px minmax(0, 1fr);
+  gap: 0 var(--sp-3);
+  flex: 0 0 auto;
+  padding: 0;
+  overflow: hidden;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.seat-card[aria-current="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.seat-in {
+  display: grid;
+  gap: 0;
+  min-width: 0;
+  padding: var(--sp-1) var(--sp-3) var(--sp-1) 0;
+}
+.seat-r1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.seat-id {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--sp-1);
+  min-width: 0;
+}
+.seat-name {
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--display);
+  letter-spacing: 0.04em;
+}
+.seat-role {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.seat-r1 > span:last-child {
+  flex: none;
+}
+.seat-work {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.seat-tk {
+  color: var(--accent);
+  font-family: var(--mono);
+}
+.seat-inst {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 64px) 34px 26px minmax(0, 1fr);
+  gap: var(--sp-2);
+  align-items: center;
+}
+.seat-card.free .seat-inst {
+  opacity: 0.55;
+}
+.seat-lbl {
+  color: var(--muted);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  letter-spacing: 0.04em;
+}
+.seat-v {
+  color: var(--fg-2);
+  font: var(--fs-micro) / var(--lh-micro) var(--mono);
+  text-align: right;
+  white-space: nowrap;
+}
+.seat-meter,
+.seat-strip {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg);
+  border: 1px solid var(--line);
+}
+.seat-meter {
+  height: 6px;
+  border-radius: 3px;
+}
+.seat-meter b {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--fg-2);
+}
+.seat-meter b.warn {
+  background: var(--warn);
+}
+.seat-strip {
+  height: 10px;
+  border-radius: 2px;
+}
+.seat-strip i {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  min-width: 2px;
+}
+.strip-turn {
+  background: var(--accent);
+}
+.strip-check {
+  background: var(--ok);
+}
+.strip-review {
+  background: var(--think);
+}
+.strip-wait {
+  background: var(--warn);
+}
+.roster-note {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-2);
+  color: var(--muted);
+}

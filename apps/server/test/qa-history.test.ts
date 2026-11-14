@@ -7,8 +7,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { qaHistoryPage, qaNativeHistory } from "../src/qa-history.ts";
-import { qaNativeIdentity } from "../src/qa-history-key.ts";
+import { qaHistoryPage, qaNativeHistory } from "../src/qa/history.ts";
+import { qaNativeIdentity } from "../src/qa/history-key.ts";
 import { Store } from "../src/store.ts";
 
 const config = {

@@ -53,12 +53,13 @@ describe("needsGroups", () => {
 });
 
 describe("Needs you tab", () => {
-  it("says each group is empty when nothing is in it, and Held nothing held", async () => {
+  it("says each group is empty when nothing is in it, and Watch list has nothing held", async () => {
     stubFetch({ "/api/attention": [] });
     render(<NeedsYouTab />);
     await waitFor(() => expect(panel("handlingP").textContent).toContain(NOTHING_HANDLING));
     expect(panel("waitingP").textContent).toContain(NOBODY_ELSE);
     expect(panel("heldP").textContent).toContain(NOTHING_HELD);
+    expect(panel("heldP").querySelector("h2")?.textContent).toContain("Watch list");
   });
 
   it("names what is loading in each group, rather than a bare dash", () => {
@@ -140,7 +141,7 @@ describe("Needs you tab", () => {
     expect(screen.getByTestId("open").textContent).toBe("c");
   });
 
-  it("lists Held items under their own heading, with Release", async () => {
+  it("lists Watch list items with Release", async () => {
     stubFetch({
       "/api/attention": [],
       "/api/attention/held": [

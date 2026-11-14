@@ -11,8 +11,9 @@ import type { CcConfig } from "../src/config.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
-import { createQaReports, qaReportMarkdown } from "../src/qa-reports.ts";
+import { createQaReports, qaReportMarkdown } from "../src/qa/reports.ts";
 import { Store } from "../src/store.ts";
+import { defined } from "./defined.ts";
 
 const SHA = "a".repeat(40);
 const BASE = "b".repeat(40);
@@ -872,6 +873,40 @@ describe("visual report completeness", () => {
     if (!hash) throw new Error("Retained native fixture missing");
     expect(service().asset(hash)).toEqual(PNG);
   });
+  it("lists a review's 'reviewed, not installed' note among the QA report's limitations", async () => {
+    const id = store.requestReview({
+      authorRunId: "author",
+      repoId: "sample",
+      seatId: "retro",
+      prNumber: 7,
+      sha: SHA,
+      epoch: 0,
+      attempt: 1,
+      round: 1,
+      at: NOW - 100,
+    });
+    if (!id) throw new Error("Review fixture missing");
+    store.setReviewState(id, ["queued"], "running", { at: NOW - 50, runId: "retro:plain" });
+    store.setReviewInstallNote(id, "Reviewed, not installed: the PR changes package.json");
+    const row = store.review(id);
+    if (!row) throw new Error("Review fixture missing");
+    const report = await service().prepareNative(
+      row,
+      {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "Read the diff.",
+        findings: [],
+        limitations: ["No test ran."],
+        visualReason: "no UI change",
+      },
+      NOW,
+    );
+    expect(report.limitations).toEqual([
+      "Reviewed, not installed: the PR changes package.json",
+      "No test ran.",
+    ]);
+  });
+
   it("keeps explicit nonvisual browser and design exclusions complete", async () => {
     const saved = (
       await service().importController(
@@ -984,9 +1019,9 @@ describe("QA report API", () => {
         (await app.inject("/api/qa-reports?repoId=sample&prNumber=7&headSha=short")).statusCode,
       ).toBe(400);
       expect((await app.inject("/api/qa-report-assets/../../secret")).statusCode).toBe(404);
-      config.repos[0]!.id = "removed";
+      defined(config.repos[0]).id = "removed";
       expect((await app.inject(`/api/qa-reports/${report.id}`)).statusCode).toBe(404);
-      config.repos[0]!.id = "sample";
+      defined(config.repos[0]).id = "sample";
     } finally {
       await app.close();
     }

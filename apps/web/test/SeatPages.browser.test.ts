@@ -9,7 +9,7 @@ const { renderAt } = browserSession();
 const SHOTS = join(process.env.TMPDIR ?? "/tmp", "seat-shots");
 const WIDTHS = [1366, 1600, 1920] as const;
 
-describeRendered("A seat across Overview, Agent, Comms and Map in a browser", () => {
+describeRendered("A seat across Overview, Agent and Comms in a browser", () => {
   it.each(WIDTHS)(
     "paints one colour on every surface and clips nothing, at %i in light and dark",
     async (width) => {
@@ -23,7 +23,6 @@ describeRendered("A seat across Overview, Agent, Comms and Map in a browser", ()
             colorScheme,
             search: `?index=${index}`,
           });
-          await page.box(".map-light");
           const colours = await page.evaluate(() => {
             const rgb = (el: Element | null, prop: "backgroundColor" | "fill") =>
               el ? getComputedStyle(el)[prop] : "missing";
@@ -37,12 +36,10 @@ describeRendered("A seat across Overview, Agent, Comms and Map in a browser", ()
                 document.querySelector("[data-surface=comms] .comms-nav-row i"),
                 "backgroundColor",
               ),
-              map: rgb(document.querySelector(".map-light"), "backgroundColor"),
             };
           }, null);
           expect(new Set(Object.values(colours)).size, JSON.stringify(colours)).toBe(1);
-          expect(colours.map).not.toBe("missing");
-          expect((await page.unclipped(".panel, .map-page")).every(Boolean)).toBe(true);
+          expect((await page.unclipped(".panel")).every(Boolean)).toBe(true);
           await page.screenshot(join(SHOTS, `seat-${index}-${colorScheme}-${width}.png`));
           await page.close();
         }

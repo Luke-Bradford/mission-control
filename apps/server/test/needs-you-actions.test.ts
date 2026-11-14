@@ -17,7 +17,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { Gql } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
-import type { Move } from "../src/github-board.ts";
+import type { Move } from "../src/github/board.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { closeSettledQuestions } from "../src/question-watch.ts";
 import type { Supervisor } from "../src/runtime/supervisor.ts";

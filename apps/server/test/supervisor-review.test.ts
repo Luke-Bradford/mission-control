@@ -1,3 +1,5 @@
+import { defined } from "./defined.ts";
+
 const codexProbe = vi.hoisted(() => ({
   checks: 0,
   gate: null as Promise<void> | null,
@@ -17,14 +19,13 @@ vi.mock("../src/runtime/codex-version.ts", async (importOriginal) => {
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
-  READONLY_TOOLS,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type Run,
@@ -36,17 +37,17 @@ import {
   ticketInReviewText,
 } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
-import { CliHold } from "../src/cli-update.ts";
+import { CliHold } from "../src/cli/update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
-import { externalReviewKey } from "../src/external-reviews.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
-import { createReviewPreviews } from "../src/review-preview.ts";
+import { createReviewPreviews } from "../src/preview/review.ts";
+import { externalReviewKey } from "../src/review/external.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
-import { crewTokenPath } from "../src/store.ts";
+import { crewTokenPath } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -499,7 +500,7 @@ describe("startWatch", () => {
     for (const flag of ["--tools", "--disallowedTools", "--restricted", "--permission-mode"])
       expect(argv).not.toContain(flag);
     expect(argv).toContain("mcp__mc__*");
-    const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]!);
+    const settings = JSON.parse(defined(argv[argv.indexOf("--settings") + 1]));
     expect(settings.sandbox.enabled).toBe(false);
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     await until(() =>
@@ -616,12 +617,27 @@ describe("startReview", () => {
 
   /** An author run with a pushed PR head, and a review of it in `starting`. */
   function reviewOfPush(
-    opts: { state?: "queued" | "starting"; pushSha?: string; profile?: RunProfile } = {},
+    opts: {
+      state?: "queued" | "starting";
+      pushSha?: string;
+      profile?: RunProfile;
+      /** Files committed to main before the PR forks from it. */
+      base?: Record<string, string>;
+      /** Files the PR writes (default: a.txt). */
+      files?: Record<string, string>;
+    } = {},
   ) {
     const seed = join(dir, "seed");
+    if (opts.base !== undefined) {
+      for (const [file, text] of Object.entries(opts.base)) writeFileSync(join(seed, file), text);
+      git(seed, "add", "-A");
+      git(seed, "commit", "-qm", "base files");
+      git(seed, "push", "-q", "origin", "main");
+    }
     const fork = git(seed, "rev-parse", "HEAD");
     git(seed, "checkout", "-q", "-b", "pr");
-    writeFileSync(join(seed, "a.txt"), "a\n");
+    for (const [file, text] of Object.entries(opts.files ?? { "a.txt": "a\n" }))
+      writeFileSync(join(seed, file), text);
     git(seed, "add", "-A");
     git(seed, "commit", "-qm", "pr change");
     git(seed, "push", "-q", "origin", "pr");
@@ -751,17 +767,19 @@ describe("startReview", () => {
   it("reviews a trusted controller PR without a crew author run", async () => {
     const seed = reviewOfPush();
     const identity = externalReviewKey("mc", 10);
-    const id = store.requestReview({
-      authorRunId: identity,
-      repoId: "mc",
-      seatId: "retro",
-      prNumber: 10,
-      sha: seed.sha,
-      epoch: 0,
-      attempt: 1,
-      round: 1,
-      at: 3,
-    })!;
+    const id = defined(
+      store.requestReview({
+        authorRunId: identity,
+        repoId: "mc",
+        seatId: "retro",
+        prNumber: 10,
+        sha: seed.sha,
+        epoch: 0,
+        attempt: 1,
+        round: 1,
+        at: 3,
+      }),
+    );
     store.setReviewState(id, ["queued"], "starting", { at: 4 });
     const subject = vi.fn(async () => ({ sha: seed.sha, branch: "pr", ticket: TICKET }));
     const { sup } = make({ scratchRetro: true, externalReviewSubject: subject });
@@ -801,17 +819,19 @@ describe("startReview", () => {
       sameHead = false,
     ) {
       const seeded = reviewOfPush();
-      const old = store.requestReview({
-        authorRunId: seeded.author.id,
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: sameHead ? seeded.sha : OLD_SHA,
-        epoch: 0,
-        attempt: sameHead ? 2 : 1,
-        round: 1,
-        at: 1,
-      })!;
+      const old = defined(
+        store.requestReview({
+          authorRunId: seeded.author.id,
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: sameHead ? seeded.sha : OLD_SHA,
+          epoch: 0,
+          attempt: sameHead ? 2 : 1,
+          round: 1,
+          at: 1,
+        }),
+      );
       store.setReviewState(old, ["queued"], "running", { at: 2, runId: "retro:old" });
       store.recordFindings(old, "retro:old", {
         verdict: { spec: "fail", quality: "fail" },
@@ -820,17 +840,19 @@ describe("startReview", () => {
         at: 3,
       });
       between?.(seeded.author.id);
-      const id = store.requestReview({
-        authorRunId: externalReviewKey("mc", 10),
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: seeded.sha,
-        epoch: 0,
-        attempt: 1,
-        round: 2,
-        at: 4,
-      })!;
+      const id = defined(
+        store.requestReview({
+          authorRunId: externalReviewKey("mc", 10),
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: seeded.sha,
+          epoch: 0,
+          attempt: 1,
+          round: 2,
+          at: 4,
+        }),
+      );
       store.setReviewState(id, ["queued"], "starting", { at: 5 });
       return { old, id, sha: seeded.sha, authorRunId: seeded.author.id };
     }
@@ -871,17 +893,19 @@ describe("startReview", () => {
         finding("still open", "Important", "src/c.ts"),
       ]);
       // a later review of the same PR resolved the first two
-      const middle = store.requestReview({
-        authorRunId: externalReviewKey("mc", 10),
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: "b".repeat(40),
-        epoch: 0,
-        attempt: 1,
-        round: 2,
-        at: 4,
-      })!;
+      const middle = defined(
+        store.requestReview({
+          authorRunId: externalReviewKey("mc", 10),
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: "b".repeat(40),
+          epoch: 0,
+          attempt: 1,
+          round: 2,
+          at: 4,
+        }),
+      );
       store.setReviewState(middle, ["queued"], "running", { at: 4, runId: "retro:mid" });
       store.recordFindings(middle, "retro:mid", {
         verdict: { spec: "fail", quality: "fail" },
@@ -906,17 +930,19 @@ describe("startReview", () => {
       round: number,
       findings: ReturnType<typeof finding>[],
     ) {
-      const id = store.requestReview({
-        authorRunId,
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha,
-        epoch: 0,
-        attempt: 1,
-        round,
-        at: 4,
-      })!;
+      const id = defined(
+        store.requestReview({
+          authorRunId,
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha,
+          epoch: 0,
+          attempt: 1,
+          round,
+          at: 4,
+        }),
+      );
       store.setReviewState(id, ["queued"], "running", { at: 4, runId: `retro:r${id}` });
       store.recordFindings(id, `retro:r${id}`, {
         verdict:
@@ -970,17 +996,19 @@ describe("startReview", () => {
     "removes a controller scratch copy when fresh PR metadata is %s",
     async (failure) => {
       const seed = reviewOfPush();
-      const id = store.requestReview({
-        authorRunId: externalReviewKey("mc", 10),
-        repoId: "mc",
-        seatId: "retro",
-        prNumber: 10,
-        sha: seed.sha,
-        epoch: 0,
-        attempt: 1,
-        round: 1,
-        at: 3,
-      })!;
+      const id = defined(
+        store.requestReview({
+          authorRunId: externalReviewKey("mc", 10),
+          repoId: "mc",
+          seatId: "retro",
+          prNumber: 10,
+          sha: seed.sha,
+          epoch: 0,
+          attempt: 1,
+          round: 1,
+          at: 3,
+        }),
+      );
       store.setReviewState(id, ["queued"], "starting", { at: 4 });
       const subject = vi
         .fn()
@@ -1041,6 +1069,60 @@ describe("startReview", () => {
     expect(brief).toContain("mc preview_browser");
     await sup.endRun("retro");
     await until(() => expect(closed).toContain(runId));
+  });
+
+  it("a review brief lists the files that import what the PR changed", async () => {
+    const r = reviewOfPush();
+    store.upsertPullRequests(
+      "mc",
+      [
+        {
+          repoId: "mc",
+          number: 9,
+          title: "t",
+          url: "u",
+          branch: BRANCH,
+          ticket: "mc#42",
+          state: "open",
+          isDraft: false,
+          review: null,
+          ci: null,
+          createdAt: 1,
+          updatedAt: 1,
+          mergedAt: null,
+          headSha: r.sha,
+          mergeable: null,
+          author: null,
+          assignees: [],
+          files: [{ path: "a.txt", changeType: "modified" }],
+        },
+      ],
+      1,
+    );
+    const { sup } = make({
+      scratchRetro: true,
+      importGraph: async () => [{ from: "uses-a.ts", to: "a.txt" }],
+    });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    const brief = userLines()[0] as string;
+    expect(brief).toContain("- Files changed (1): a.txt.");
+    expect(brief).toContain("- Files that import them (1): uses-a.ts.");
+  });
+
+  it("a review still starts, with no import lines, when the import graph cannot be read", async () => {
+    const r = reviewOfPush();
+    const { sup } = make({
+      scratchRetro: true,
+      importGraph: async () => {
+        throw new Error("no graph");
+      },
+    });
+    sup.start();
+    await sup.startReview("retro", r.reviewId);
+    await until(() => expect(userLines()).toHaveLength(1));
+    expect(userLines()[0]).not.toContain("Files changed");
   });
 
   it("a review still starts when its preview build never finishes", async () => {
@@ -1455,6 +1537,127 @@ describe("startReview", () => {
     expect(fs.denyRead).toContain(join(root, "mc-crew", "guido-1-42"));
   });
 
+  describe("a PR that changes package.json", () => {
+    const pkg = (extra: Record<string, unknown>) =>
+      `${JSON.stringify({ name: "x", version: "1.0.0", private: true, ...extra })}\n`;
+    const LOCK = "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n";
+    const FLIGHT_SEAT: CrewSeatConfig = {
+      id: "flight-1",
+      role: "FLIGHT",
+      accountId: "claude-main",
+      model: "opus",
+      area: [],
+    };
+    /** Starts the review, ends it with a clean report, and says what the hub did about installing. */
+    async function reviewAndReport(r: ReturnType<typeof reviewOfPush>) {
+      const installs: string[] = [];
+      prep.installRunner = async (command) => {
+        installs.push(command);
+      };
+      const { sup } = make({ scratchRetro: true, extraSeat: FLIGHT_SEAT });
+      sup.start();
+      const { runId } = await sup.startReview("retro", r.reviewId);
+      // the engine marks it running; the reviewer then reports
+      store.setReviewState(r.reviewId, ["starting"], "running", { at: 2, runId });
+      expect(
+        store.recordFindings(r.reviewId, runId, {
+          verdict: { spec: "pass", quality: "pass" },
+          summary: "done",
+          findings: [],
+          at: 3,
+        }),
+      ).toBe(true);
+      // FLIGHT is on the crew here and may get lines of its own: pick out the reviewer's brief
+      const briefLine = () => userLines().find((l) => l.includes("Reviewed, not installed"));
+      await until(() => expect(briefLine()).toBeDefined());
+      return { installs, brief: briefLine() as string, runId };
+    }
+    const flightNotes = () =>
+      store
+        .comms(0)
+        .filter((m) => m.to === "flight-1" && m.text.includes("reviewed without an install"));
+
+    it("reviews a scripts-only change read-only (PR 1520) and reports it", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({ scripts: { check: "old" } }), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ scripts: { check: "new" } }) },
+      });
+      const { installs, brief, runId } = await reviewAndReport(r);
+      expect(installs).toEqual([]);
+      expect(brief).toContain("Reviewed, not installed");
+      expect(flightNotes()).toHaveLength(1);
+      expect(store.review(r.reviewId)?.state).toBe("reported");
+      expect(store.run(runId)?.status).not.toBe("failed");
+    });
+
+    it("reviews an added dependency read-only, says so, tells FLIGHT, and still reports", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({}), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ dependencies: { "new-package": "1.0.0" } }) },
+      });
+      const { installs, brief, runId } = await reviewAndReport(r);
+      expect(installs).toEqual([]);
+      expect(brief).toContain("Reviewed, not installed");
+      expect(brief).toContain("won't install from it. No package from this PR is installed");
+      expect(brief).toContain("Do not run pnpm, npm, npx, node or any test");
+      const [note] = flightNotes();
+      expect(note?.text).toContain("PR #9 is reviewed without an install.");
+      expect(note?.ticket).toBe("mc#42");
+      expect(store.review(r.reviewId)?.installNote).toContain("Reviewed, not installed");
+      expect(store.review(r.reviewId)?.state).toBe("reported");
+      expect(store.run(runId)?.status).not.toBe("failed");
+      // the reviewer's own pnpm must not install before a script (pnpm 11 reads the pnpm_ spelling)
+      const envs = recorded()
+        .map((l) => l.env as Record<string, string> | undefined)
+        .filter((e) => e !== undefined);
+      expect(envs.some((e) => e.pnpm_config_verify_deps_before_run === "false")).toBe(true);
+      expect(envs.some((e) => e.npm_config_verify_deps_before_run === "false")).toBe(true);
+    });
+
+    it("a normal review's env leaves the install check alone", async () => {
+      const r = reviewOfPush();
+      const { sup } = make({ scratchRetro: true });
+      sup.start();
+      await sup.startReview("retro", r.reviewId);
+      await until(() => expect(userLines()).toHaveLength(1));
+      const env = recorded()[0]?.env as Record<string, string>;
+      expect(env.pnpm_config_verify_deps_before_run).toBeUndefined();
+      expect(env.npm_config_verify_deps_before_run).toBeUndefined();
+    });
+
+    it("opens no web preview, which would install the PR's packages", async () => {
+      const r = reviewOfPush({
+        base: { "package.json": pkg({}), "pnpm-lock.yaml": LOCK },
+        files: { "package.json": pkg({ dependencies: { "new-package": "1.0.0" } }) },
+      });
+      const open = vi.fn(async () => true);
+      const reviewPreviews = {
+        origin: () => null,
+        identity: () => null,
+        ready: async () => ({ origin: null, note: null, identity: null }),
+        open,
+        close: async () => {},
+      };
+      prep.installRunner = async () => {};
+      const { sup } = make({ scratchRetro: true, extraSeat: FLIGHT_SEAT, reviewPreviews });
+      sup.start();
+      const { runId } = await sup.startReview("retro", r.reviewId);
+      store.setReviewState(r.reviewId, ["starting"], "running", { at: 2, runId });
+      store.recordFindings(r.reviewId, runId, {
+        verdict: { spec: "pass", quality: "pass" },
+        summary: "done",
+        findings: [],
+        at: 3,
+      });
+      await until(() =>
+        expect(userLines().find((l) => l.includes("Reviewed, not installed"))).toBeDefined(),
+      );
+      expect(open).not.toHaveBeenCalled();
+      expect(userLines().join("\n")).not.toContain("Preview:");
+      expect(store.review(r.reviewId)?.state).toBe("reported");
+    });
+  });
+
   describe("model", () => {
     async function modelOf(
       over: Parameters<typeof make>[0],
@@ -1839,6 +2042,64 @@ describe("a run set aside in review", () => {
       worktree: wt(),
     });
     expect(userLines().filter((l) => l.startsWith("Carry on"))).toEqual([]);
+  });
+
+  it("wakeRun puts back the node_modules the crew tidy trimmed from the set-aside worktree (#1756)", async () => {
+    writeFileSync(join(clone, "package.json"), '{"name":"x","private":true}\n');
+    writeFileSync(
+      join(clone, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+    );
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "install inputs");
+    git(clone, "push", "-q", "origin", "main");
+    const { sup, runId } = await aside(false);
+    expect(existsSync(join(wt(), "node_modules"))).toBe(true);
+    rmSync(join(wt(), "node_modules"), { recursive: true, force: true });
+    await sup.wakeRun(runId);
+    expect(existsSync(join(wt(), "node_modules"))).toBe(true);
+    expect(store.seatSession("guido-1")).toMatchObject({ runId, worktree: wt() });
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+
+  it("wakeRun keeps the run and its worktree when the dependencies cannot be reinstalled (#1756)", async () => {
+    writeFileSync(join(clone, "package.json"), '{"name":"x","private":true}\n');
+    writeFileSync(
+      join(clone, "pnpm-lock.yaml"),
+      "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n",
+    );
+    git(clone, "add", "-A");
+    git(clone, "commit", "-qm", "install inputs");
+    git(clone, "push", "-q", "origin", "main");
+    const { sup, runId } = await aside(false);
+    rmSync(join(wt(), "node_modules"), { recursive: true, force: true });
+    // the network is down: origin points at nothing
+    git(clone, "remote", "set-url", "origin", join(root, "no-such-origin"));
+    await expect(sup.wakeRun(runId)).rejects.toMatchObject({ status: 502 });
+    expect(store.run(runId)?.endedAt).toBeNull();
+    expect(store.run(runId)?.loop?.aside).not.toBeNull();
+    expect(existsSync(wt())).toBe(true);
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+
+  it("wakeRun marks the set-aside worktree in use from the checkout until the seat points at it (#1756)", async () => {
+    const { sup, runId } = await aside(false);
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+    // beforeLaunch runs in the gap: the checkout is made, the seat does not hold the worktree yet
+    const inGap: { marked: boolean; seatWorktree: string | null }[] = [];
+    const real = store.setSeatTurnEnded.bind(store);
+    const spy = vi.spyOn(store, "setSeatTurnEnded").mockImplementation((...args) => {
+      inGap.push({
+        marked: sup.isStartingWorktree(wt()),
+        seatWorktree: store.seatSession("guido-1")?.worktree ?? null,
+      });
+      return real(...args);
+    });
+    await sup.wakeRun(runId);
+    spy.mockRestore();
+    expect(inGap).toEqual([{ marked: true, seatWorktree: null }]);
+    expect(store.seatSession("guido-1")?.worktree).toBe(wt());
+    expect(sup.isStartingWorktree(wt())).toBe(false);
   });
 
   it("wakeRun is refused for a run that is not aside and while the seat holds another run", async () => {

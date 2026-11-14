@@ -88,7 +88,7 @@ Retention values:
 | Operator answers | `operatorAnswers` store.ts:3669 (CAPCOM message within 5s); Telemetry `capcom` telemetry.ts:454 | median/p90 answer ms today | Computed | CAPCOM answer times |
 | FLIGHT answers | `flight_decisions` kind `answer` with question_id (store.ts:274; kinds core/flight.ts:30) | at, kind, seat, target_run, ref, about, decision, basis | 90d (639 rows) | FLIGHT answer times, reruns, rulings, merges |
 | `attention_notes` / `attention_episodes` | store.ts:207-227 (trigger-maintained episodes) | key, kind (`ATTENTION_KINDS` core/hud.ts:434), seat, at, cleared_at | Kept (832 episodes) | Waits on review/ready/blocked/question (`noteWaits` store.ts:3655) |
-| `comms` | store.ts:186 + label/ref/reply_to (store.ts:1108-1132), reactions (incl. `cant` + reason), pins | from, to, ticket, text, label (`question/handoff/blocker`), at | 90d (228) | Comms health; chatter pairs >6 rounds (`commsChatter` store.ts:3244; `GET /api/comms/chatter` api.ts:1270, fixed 24h) |
+| `comms` | store.ts:186 + label/ref/reply_to (store.ts:1108-1132), reactions (incl. `cant` + reason), pins | from, to, ticket, text, label (`question/handoff/blocker/none`), at | 90d (228) | Comms health; chatter pairs >6 rounds (`commsChatter` store.ts:3244; `GET /api/comms/chatter` api.ts:1270, fixed 24h) |
 | `agent_events` | store.ts:104 | HUD state transitions | 30d | Time blocked/waiting (telemetry utilisation) |
 
 ### 1g. Tickets, sizes, cycle time, milestones

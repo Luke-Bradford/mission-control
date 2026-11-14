@@ -4,7 +4,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { BROWSER_TEST_TIMEOUT_MS, browserSession, describeRendered } from "./browserRunner.ts";
-import { REPOS } from "./fixtures.ts";
+import { item, NOW, REPOS } from "./fixtures.ts";
 import { flightPageApi, type PageState } from "./flightPageFixtures.ts";
 
 const { renderAt } = browserSession();
@@ -17,6 +17,311 @@ const SIZES = [
 const STATES: PageState[] = ["stopped", "running", "blocked"];
 
 describeRendered("FLIGHT page in a browser", () => {
+  it(
+    "moves an older decision from the main page into Records at its deep link",
+    async () => {
+      const api = { ...flightPageApi("blocked"), "/api/repos": REPOS };
+      const main = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        search: `?dock=folded&at=${encodeURIComponent("/flight")}`,
+        api,
+      });
+      await main.box("#decisions li");
+      expect(await main.evaluate(() => document.getElementById("decision-30") !== null, null)).toBe(
+        false,
+      );
+      await main.close();
+      const records = await renderAt({
+        page: "test/agentV2Browser.html",
+        width: 1280,
+        height: 800,
+        search: `?dock=folded&at=${encodeURIComponent("/flight#decision-30")}`,
+        api,
+      });
+      await records.box("#decision-30");
+      expect(
+        await records.evaluate(() => document.getElementById("decision-30") !== null, null),
+      ).toBe(true);
+      await records.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  for (const [width, height] of [
+    [1280, 800],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      const where = `${width}x${height}, ${theme}, Records`;
+      it(
+        `opens Records with a visible return action at ${where}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/agentV2Browser.html",
+            width,
+            height,
+            search: `?dock=folded&at=${encodeURIComponent("/flight#handlingP")}`,
+            colorScheme: theme,
+            api: {
+              ...flightPageApi("blocked"),
+              "/api/repos": REPOS,
+              "/api/prs/flow": { generatedAt: 0, repos: [] },
+              "/api/notifications": { open: [], handledToday: [] },
+              "/api/attention/held": [],
+            },
+          });
+          await page.box("#handlingP");
+          expect(page.errors()).toEqual([]);
+          const record = await page.evaluate(() => {
+            const doc = document.documentElement;
+            const title = document.querySelector(".flight-records-title")?.getBoundingClientRect();
+            const back = document.querySelector<HTMLAnchorElement>(".flight-records-title a");
+            const panel = document.getElementById("handlingP")?.getBoundingClientRect();
+            return {
+              sideScroll: doc.scrollWidth - doc.clientWidth,
+              title: title ? { width: title.width, height: title.height } : null,
+              back: back ? { text: back.textContent, href: back.getAttribute("href") } : null,
+              panel: panel ? { width: panel.width, height: panel.height } : null,
+            };
+          }, null);
+          const shots = process.env.MC_FLIGHT_RECORDS_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(join(shots, `flight-records-${width}x${height}-${theme}.png`));
+          }
+          expect(record.sideScroll, `${where}: no sideways scroll`).toBeLessThanOrEqual(0);
+          expect(record.title, `${where}: Records heading is visible`).not.toBeNull();
+          expect(record.title?.height).toBeGreaterThanOrEqual(24);
+          expect(record.back).toEqual({ text: "Back to FLIGHT", href: "/flight" });
+          expect(record.panel, `${where}: selected record panel is visible`).not.toBeNull();
+          expect(record.panel?.width).toBeGreaterThan(240);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  for (const [width, height] of [
+    [1280, 900],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      it(
+        `shows the Watch list at ${width}x${height} in ${theme}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: flightPageApi("running", {
+              "/api/attention/held": [
+                item({
+                  key: "hold:watch",
+                  text: "Wait for CI to finish before the next release.",
+                  hold: {
+                    reason: "CI is still running",
+                    condition: { kind: "manual" },
+                    by: "flight-1",
+                    at: NOW,
+                  },
+                }),
+              ],
+            }),
+          });
+          await page.box("#heldWatchP [data-testid=held-row]");
+          expect(page.errors()).toEqual([]);
+          expect(await page.reachable("#heldWatchP")).toEqual([true]);
+          expect(await page.reachable("#heldWatchP [data-testid=held-row]", "#heldWatchP")).toEqual(
+            [true],
+          );
+          const text = await page.evaluate(
+            () => document.getElementById("heldWatchP")?.textContent ?? "",
+            null,
+          );
+          expect(text).toContain("Watch list");
+          expect(text).toContain("Wait for CI to finish before the next release.");
+          expect(text).toContain("Release");
+          const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(join(shots, `flight-watch-${width}x${height}-${theme}.png`));
+          }
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  for (const [width, height] of [
+    [1280, 800],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      it(
+        `shows the standing order, its end action and ages at ${width}x${height} in ${theme}`,
+        async () => {
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: flightPageApi("blocked"),
+          });
+          await page.box("#ordersP .fp-ofirst");
+          await page.box("#doing .fp-age");
+          expect(page.errors()).toEqual([]);
+          expect(await page.reachable("#ordersP .fp-end", "#ordersP")).toEqual([true]);
+          const r = await page.evaluate(() => {
+            const doc = document.documentElement;
+            const end = document
+              .querySelector<HTMLElement>("#ordersP .fp-end")
+              ?.getBoundingClientRect();
+            const panel = document.getElementById("ordersP");
+            return {
+              sideScroll: doc.scrollWidth - doc.clientWidth,
+              clipped: panel ? panel.scrollHeight > panel.clientHeight + 1 : true,
+              end: end ? { w: end.width, h: end.height } : null,
+              text: panel?.textContent ?? "",
+              decisions: document.querySelectorAll("#decisions li").length,
+            };
+          }, null);
+          const shots = process.env.MC_FLIGHT_PAGE_SHOTS;
+          if (shots) {
+            mkdirSync(shots, { recursive: true });
+            await page.screenshot(join(shots, `flight-orders-${width}x${height}-${theme}.png`));
+          }
+          expect(r.sideScroll).toBeLessThanOrEqual(0);
+          expect(r.clipped).toBe(false);
+          expect(r.end?.h).toBeGreaterThanOrEqual(24);
+          expect(r.text).toContain("Review only: no new builds");
+          expect(r.text).toContain("Ends: not set");
+          expect(r.decisions).toBeGreaterThanOrEqual(3);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
+  // Live-like load: long orders, five Doing now lines, four held items. The orders strip must be
+  // wholly on the first screen, with its setter, time and end inside it.
+  for (const [width, height] of [
+    [1280, 800],
+    [1600, 900],
+    [1600, 1000],
+  ] as const) {
+    for (const theme of ["dark", "light"] as const) {
+      it(
+        `keeps the orders strip on the first screen with long orders at ${width}x${height} in ${theme}`,
+        async () => {
+          const long = (id: number) => ({
+            id,
+            at: NOW - 2 * 24 * 60 * 60_000,
+            revokedAt: null,
+            source: "saved",
+            seatId: null,
+            by: "operator",
+            kind: "text",
+            text: "y".repeat(300),
+          });
+          const held = [1, 2, 3, 4].map((n) =>
+            item({
+              key: `hold:${n}`,
+              text: `Wait for CI ${n}.`,
+              hold: {
+                reason: "CI is running",
+                condition: { kind: "manual" },
+                by: "flight-1",
+                at: NOW,
+              },
+            }),
+          );
+          const base = flightPageApi("busy");
+          const page = await renderAt({
+            page: "test/flightBrowser.html",
+            width,
+            height,
+            search: `?view=page&theme=${theme}`,
+            colorScheme: theme,
+            api: {
+              ...base,
+              "/api/attention/held": held,
+              "/api/flight/orders?limit=1": {
+                active: [long(1), long(2)],
+                history: [],
+                nextCursor: null,
+              },
+            },
+          });
+          await page.box("#ordersP .fp-ofirst");
+          const r = await page.evaluate(() => {
+            const box = (el: Element | null) => el?.getBoundingClientRect() ?? null;
+            const strip = box(document.querySelector("#ordersP .fp-ostrip"));
+            const meta = box(document.querySelector("#ordersP .fp-meta"));
+            const end = box(document.querySelector("#ordersP .fp-end"));
+            const inside = (a: DOMRect | null, b: DOMRect | null) =>
+              a !== null &&
+              b !== null &&
+              a.top >= b.top - 1 &&
+              a.bottom <= b.bottom + 1 &&
+              a.right <= b.right + 1;
+            const edge = box(document.querySelector(".fp-brows"));
+            const rows = [...document.querySelectorAll("#blockers .fp-brow")].map((row) =>
+              row.getBoundingClientRect(),
+            );
+            const whole = rows.filter(
+              (b) => edge !== null && b.top >= edge.top - 1 && b.bottom <= edge.bottom + 1,
+            ).length;
+            const watch = box(document.getElementById("heldWatchP"));
+            const footCount = (panel: string) => {
+              const m = /^(\d+) more below/.exec(
+                document.querySelector(`${panel} .fp-more`)?.textContent ?? "",
+              );
+              return m ? Number(m[1]) : 0;
+            };
+            // Every Doing now line is clear of the Watch list, or counted in a visible foot.
+            const doingHidden = [...document.querySelectorAll("#doing li")].filter(
+              (li) => watch !== null && li.getBoundingClientRect().bottom > watch.top + 1,
+            ).length;
+            const panelBox = box(document.getElementById("heldWatchP"));
+            const watchHidden = [...document.querySelectorAll("#heldWatchP .drow")].filter(
+              (row) => {
+                const b = row.getBoundingClientRect();
+                return panelBox !== null && b.bottom > panelBox.bottom + 1;
+              },
+            ).length;
+            return {
+              whole,
+              doingLine: doingHidden <= footCount("#doingP"),
+              watchRows: watchHidden <= footCount("#heldWatchP"),
+              stripInViewport:
+                strip !== null && strip.top >= 0 && strip.bottom <= window.innerHeight,
+              metaInStrip: inside(meta, strip),
+              endInStrip: inside(end, strip),
+              height: strip?.height ?? 0,
+            };
+          }, null);
+          expect(r.whole, "blocker rows wholly in view").toBeGreaterThanOrEqual(2);
+          expect(r.doingLine, "no Doing now line sits under the Watch list uncounted").toBe(true);
+          expect(r.watchRows, "no Watch list row is cut without a count").toBe(true);
+          expect(r.stripInViewport).toBe(true);
+          expect(r.metaInStrip).toBe(true);
+          expect(r.endInStrip).toBe(true);
+          expect(r.height).toBeLessThanOrEqual(48);
+          await page.close();
+        },
+        BROWSER_TEST_TIMEOUT_MS,
+      );
+    }
+  }
+
   for (const [width, height] of SIZES) {
     for (const state of STATES) {
       for (const theme of ["dark", "light"] as const) {
@@ -171,7 +476,7 @@ describeRendered("FLIGHT page in a browser", () => {
               total: rows.length,
               whole: whole.length,
               rowHeight: whole[0]?.getBoundingClientRect().height ?? 0,
-              more: document.querySelector(".fp-more")?.textContent ?? "",
+              more: document.querySelector("#blockers .fp-more")?.textContent ?? "",
               act: (() => {
                 const a = document.querySelector<HTMLElement>("#blockers .fp-brow .fp-act");
                 return {
@@ -296,7 +601,7 @@ describeRendered("FLIGHT page in a browser", () => {
               decTop: box("#decisionsP")?.top ?? 0,
               whole: whole.length,
               total: rows.length,
-              more: document.querySelector(".fp-more")?.textContent ?? "",
+              more: document.querySelector("#blockers .fp-more")?.textContent ?? "",
               columns: ["fp-what", "fp-act"].map(
                 (c) =>
                   first?.querySelector<HTMLElement>(`.${c}`)?.getBoundingClientRect().width ?? 0,

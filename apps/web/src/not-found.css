@@ -1,0 +1,28 @@
+/* The not-found page sizes to its content; its text and links share the panel's padding. */
+#page-not-found {
+  align-self: start;
+  height: auto;
+}
+#page-not-found > p {
+  margin: 0;
+  padding: var(--sp-3) var(--sp-3) 0;
+}
+/* The not-found page's links: separate, at least 24×24 px, with a visible keyboard focus. */
+.not-found-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+}
+.not-found-links a {
+  display: inline-flex;
+  align-items: center;
+  min-width: 24px;
+  min-height: 24px;
+  padding: var(--sp-1) var(--sp-3);
+  border: 1px solid var(--line-2);
+}
+.not-found-links a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -2,10 +2,15 @@ import { describe, expect, it } from "vitest";
 import { FLIGHT_LEFT_NOTE_KEY, FLIGHT_NOT_TRIAGING_KEY } from "../src/flight.ts";
 import { guardAckKey } from "../src/guard.ts";
 import {
+  BRIEF_TITLE_MAX,
+  type BriefParts,
+  briefPartFaults,
+  flightToolFor,
   NEEDS_YOU_ASK_MAX,
   needsYouAlert,
   needsYouEntryFaults,
   QUEUE_REORDER_ITEM_PREFIX,
+  withTicketTitles,
 } from "../src/needs-you-entry.ts";
 import type { AttentionBrief, AttentionItem } from "../src/types.ts";
 
@@ -223,5 +228,103 @@ describe("needsYouEntryFaults", () => {
       "no ticket or PR: name it with ticket in brief_item",
       "no time raised",
     ]);
+  });
+});
+
+const parts = (over: Partial<BriefParts> = {}): BriefParts => ({
+  title: "Whether the away-mode rules change goes live now",
+  ask: "Merge the away-mode change now?",
+  priority: "P1",
+  hasTicket: true,
+  looks: false,
+  texts: [],
+  hasPreview: false,
+  ...over,
+});
+
+describe("briefPartFaults (the parts rule 4 adds)", () => {
+  it("passes a complete question", () => {
+    expect(briefPartFaults(parts())).toEqual([]);
+  });
+
+  it("names each missing part", () => {
+    const named = (over: Partial<BriefParts>, part: RegExp) =>
+      expect(briefPartFaults(parts(over)).join("; ")).toMatch(part);
+    named({ title: undefined }, /no title/);
+    named({ priority: null }, /no priority/);
+    named({ hasTicket: false }, /no ticket/);
+    named({ ask: "Merge it? Or hold it back until Friday?" }, /one decision/);
+  });
+
+  it("takes no ticket when the repo and a reason are given", () => {
+    expect(
+      briefPartFaults(
+        parts({ hasTicket: false, noTicket: { repo: "mission-control", reason: "x" } }),
+      ),
+    ).toEqual([]);
+    expect(
+      briefPartFaults(
+        parts({ hasTicket: false, noTicket: { repo: "mission-control", reason: " " } }),
+      ),
+    ).not.toEqual([]);
+  });
+
+  it("refuses a title that is too long, has a web address or a bare ticket number", () => {
+    expect(briefPartFaults(parts({ title: "x".repeat(BRIEF_TITLE_MAX + 1) })).join()).toMatch(/90/);
+    expect(briefPartFaults(parts({ title: "Look at https://example.com now" })).join()).toMatch(
+      /web address/,
+    );
+    expect(briefPartFaults(parts({ title: "Ship #1510" })).join()).toMatch(/ticket number/);
+    expect(briefPartFaults(parts({ title: "Ship PR 12" })).join()).toMatch(/ticket number/);
+    expect(briefPartFaults(parts({ title: "Two\nlines" })).join()).toMatch(/one line/);
+  });
+
+  it("refuses a priority that is not the board's", () => {
+    expect(briefPartFaults(parts({ priority: "P9" })).join()).toMatch(/priority/);
+  });
+
+  it("wants a picture or a preview when the question is about how something looks", () => {
+    expect(briefPartFaults(parts({ looks: true })).join()).toMatch(/picture/);
+    expect(briefPartFaults(parts({ looks: true, hasPreview: true }))).toEqual([]);
+    expect(
+      briefPartFaults(
+        parts({
+          looks: true,
+          texts: [`See ![the page](/api/hud-screenshots/${"a".repeat(32)})`],
+        }),
+      ),
+    ).toEqual([]);
+    // a picture from outside the hub is a link, not a picture
+    expect(
+      briefPartFaults(parts({ looks: true, texts: ["![x](https://example.com/a.png)"] })),
+    ).not.toEqual([]);
+  });
+});
+
+describe("withTicketTitles", () => {
+  const lookup = (n: number, kind: "ticket" | "pr") =>
+    n === 12 ? (kind === "pr" ? "Fix the thing" : "Away mode") : null;
+  it("puts the title beside each number", () => {
+    expect(withTicketTitles("See #12 and PR 12.", lookup)).toBe(
+      "See #12 (Away mode) and PR 12 (Fix the thing).",
+    );
+  });
+  it("leaves a titled, unknown or qualified number alone and is idempotent", () => {
+    const once = withTicketTitles("#12", lookup);
+    expect(withTicketTitles(once, lookup)).toBe(once);
+    expect(withTicketTitles("#99 and repo#12 and [#12](x)", lookup)).toBe(
+      "#99 and repo#12 and [#12](x)",
+    );
+  });
+});
+
+describe("flightToolFor", () => {
+  it("names the tool FLIGHT holds that settles an item", () => {
+    const tool = (key: string, kind: AttentionItem["kind"], text: string) =>
+      flightToolFor({ key, kind, text });
+    expect(tool("ask:4", "question", "May I merge main into the branch?")).toBe("sync_main");
+    expect(tool("ask:4", "question", "Can I re-run CI on the failed job?")).toBe("rerun_ci");
+    expect(tool("note:chatter:t#1:a:b", "message", "chatter")).toBe("dismiss_item");
+    expect(tool("ask:5", "question", "Should the card be red or green?")).toBeNull();
   });
 });

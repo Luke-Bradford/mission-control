@@ -2,7 +2,6 @@ import type { AttentionItem, BriefChoiceReceipt, BriefOption } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetChoiceAttempts } from "../src/comms/briefChoice.ts";
-import { Decisions } from "../src/comms/Decisions.tsx";
 import { streamStatus } from "../src/data.ts";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { closeItem, openItem } from "../src/shell/overlays.ts";
@@ -359,18 +358,6 @@ describe("disconnected and gone", () => {
     fireEvent.click(button);
     expect(posts(fn, CHOICE)).toEqual([]);
   });
-
-  it("cannot dispatch once the list no longer holds the item", async () => {
-    const fn = stubFetch({ "/api/attention": [], "/api/flight": FLIGHT });
-    render(<Decisions items={[bound({ kind: "decision" })]} rows={[]} />);
-    const button = (await screen.findByRole("button", {
-      name: /^Accept recommendation: /,
-    })) as HTMLButtonElement;
-    await waitFor(() => expect(button.disabled).toBe(true));
-    expect(screen.getByTestId("choice-blocked").textContent).toContain("no longer waiting");
-    fireEvent.click(button);
-    expect(posts(fn, CHOICE)).toEqual([]);
-  });
 });
 
 describe("pending, refusal and retry", () => {
@@ -554,23 +541,6 @@ describe("FYI timing", () => {
       vi.advanceTimersByTime(5000);
     });
     expect(fn.mock.calls.filter(([p]) => p === "/api/attention").length).toBe(before);
-  });
-});
-
-describe("the Comms decision card", () => {
-  it("shows the same complete brief with Accept and Discuss", async () => {
-    const fn = stubFetch({
-      "/api/attention": [bound({ kind: "decision" })],
-      "/api/flight": FLIGHT,
-      [`POST ${CHOICE}`]: receipt(),
-    });
-    render(<Decisions items={[bound({ kind: "decision" })]} rows={[]} />);
-    const button = (await screen.findByRole("button", {
-      name: /^Accept recommendation: /,
-    })) as HTMLButtonElement;
-    expect(screen.getByRole("button", { name: "Discuss" })).toBeTruthy();
-    fireEvent.click(button);
-    await waitFor(() => expect(posts(fn, CHOICE)).toHaveLength(1));
   });
 });
 

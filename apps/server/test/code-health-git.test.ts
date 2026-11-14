@@ -89,7 +89,7 @@ describe("read-only git file evidence", () => {
     renameSync(join(checkout, "old.ts"), join(checkout, "new.ts"));
     writeFileSync(
       join(checkout, "new.ts"),
-      readFileSync(join(checkout, "new.ts"), "utf8") + "export const extra = true;\n",
+      `${readFileSync(join(checkout, "new.ts"), "utf8")}export const extra = true;\n`,
     );
     writeFileSync(join(checkout, "binary.bin"), Buffer.from([0, 1, 2, 3]));
     mkdirSync(join(checkout, "vendor"));
@@ -245,10 +245,10 @@ describe("read-only git file evidence", () => {
       path: "new.ts",
     });
     for (const output of [
-      header + "1\t0\t\0old.ts\0",
-      header + "1\t0\t../outside.ts\0",
+      `${header}1\t0\t\0old.ts\0`,
+      `${header}1\t0\t../outside.ts\0`,
       header + header,
-      header + "-\t1\ta.ts\0",
+      `${header}-\t1\ta.ts\0`,
     ])
       expect(() => parseGitFileLog(output)).toThrow();
   });
