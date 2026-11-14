@@ -630,3 +630,26 @@ it("reading the CAPCOM pair view leaves the agent's seat-to-seat tags unread", a
     rmSync(f.dir, { recursive: true, force: true });
   }
 });
+
+it("a pair read steps over a seat's handoff that raises no item", async () => {
+  const f = regressionFixture();
+  const app = buildApp({ config: f.config, store: f.store, bus: new ChangeBus() });
+  try {
+    const say = (to: string, text: string, at: number) =>
+      f.store.addComms({ from: "guido-1", to, text, at, ticket: null })?.id ?? "";
+    say("CAPCOM", "@CAPCOM one?", 100);
+    say("flight-1", "ready for review", 150);
+    const two = say("CAPCOM", "@CAPCOM two?", 200);
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/comms/read",
+      payload: { scope: "pair:CAPCOM:guido-1", messageId: two },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(f.needs().map((i) => i.key)).toEqual([]);
+  } finally {
+    await app.close();
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});

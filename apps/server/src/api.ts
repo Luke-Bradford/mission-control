@@ -236,6 +236,7 @@ import {
   COMMS_SNAPSHOT_LIMIT,
   commsSendState,
   pinComms,
+  raisesAttention,
   reactComms,
   sendComms,
   threadMessages,
@@ -2583,13 +2584,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           let through: string | null = body.data.messageId;
           if (all === undefined) {
             // The pair view shows only the CAPCOM line: its agent's other lines stay unread, and
-            // the cursor stops before the first one the view did not show
+            // the cursor stops before the first one the view did not show that could raise an item
             const shown = new Set(scope.rows.map((row) => row.id));
             const limit = Number(body.data.messageId.slice("comms:".length));
             const after = store.threadReadCursors(direct).get("comms")?.offset ?? 0;
             through = null;
             for (const row of store.threadComms(direct, after)) {
-              if (Number(row.id.slice("comms:".length)) > limit || !shown.has(row.id)) break;
+              if (Number(row.id.slice("comms:".length)) > limit) break;
+              // an unshown line that raises no item (a seat's handoff) is stepped over
+              if (!shown.has(row.id) && raisesAttention(row)) break;
               through = row.id;
             }
           }
