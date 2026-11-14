@@ -65,7 +65,7 @@ describe("one read state for mentions", () => {
         <CommsConversation view={{ kind: "crew" }} row={null} />
       </>,
     );
-    const bell = await screen.findByRole("button", { name: "Mentions, 2 new" });
+    const bell = await screen.findByRole("button", { name: "Mentions, 2 waiting for your answer" });
     expect(screen.getByRole("button", { name: "FLIGHT chat, 2 unread to you" })).toBeTruthy();
     fireEvent.click(bell);
     const panel = screen.getByRole("region", { name: "Mentions" });
@@ -73,7 +73,9 @@ describe("one read state for mentions", () => {
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "FLIGHT chat, 1 unread to you" })).toBeTruthy(),
     );
-    expect(screen.getByRole("button", { name: "Mentions, 1 new" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Mentions, 1 waiting for your answer" }),
+    ).toBeTruthy();
     expect(screen.getByText("Waiting for your answer · 1")).toBeTruthy();
   });
 
@@ -85,11 +87,13 @@ describe("one read state for mentions", () => {
         <CommsConversation view={{ kind: "crew" }} row={null} />
       </>,
     );
-    await screen.findByRole("button", { name: "Mentions, 2 new" });
+    await screen.findByRole("button", { name: "Mentions, 2 waiting for your answer" });
     await act(async () => {
       await markMentionsSeen(["comms:1", "comms:2"]);
     });
-    expect(screen.getByRole("button", { name: "Mentions, 0 new" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Mentions, 0 waiting for your answer" }),
+    ).toBeTruthy();
     expect(screen.queryByText(/Waiting for your answer/)).toBeNull();
   });
 
@@ -132,7 +136,9 @@ describe("one read state for mentions", () => {
       </>,
     );
     await waitFor(() => expect(screen.getByRole("button", { name: "FLIGHT chat" })).toBeTruthy());
-    expect(screen.getByRole("button", { name: "Mentions, 0 new" })).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Mentions, 0 waiting for your answer" }),
+    ).toBeTruthy();
     expect(within(nav).queryByTitle("1 unread message to you")).toBeNull();
   });
 

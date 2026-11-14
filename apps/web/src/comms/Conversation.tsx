@@ -655,7 +655,7 @@ function MentionsBell({
       <button
         type="button"
         className="comms-bell"
-        aria-label={`Mentions, ${unseen.length} new`}
+        aria-label={`Mentions, ${unseen.length} waiting for your answer`}
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
@@ -668,7 +668,7 @@ function MentionsBell({
       {open && (
         <section className="comms-mentions-panel" aria-label="Mentions" ref={panel}>
           <header>
-            Mentions <span>{unseen.length} new</span>
+            Mentions <span>{unseen.length} waiting for your answer</span>
             <button
               type="button"
               onClick={() => mark(mentions.map((mention) => mention.message.id))}
@@ -677,7 +677,8 @@ function MentionsBell({
             </button>
           </header>
           {mentions.map((mention) => {
-            const isSeen = mention.seen;
+            // only a question still open on Needs you shows as new
+            const isSeen = mention.seen || !mention.needsReply;
             return (
               <button
                 className={isSeen ? "seen" : ""}

@@ -2019,10 +2019,10 @@ function crewItems(
 
   // The engine's notes: blocked, ready for review, check before merging, rate-limited. Each
   // goes when the engine clears it.
-  // these notes are about ended runs by nature: they stay until someone clears them
+  // these notes are about ended runs by nature: they stay until someone clears them (a flake
+  // note is information, skipped below)
   const outlivesRun = (n: Pick<AttentionNote, "key" | "repoId" | "runId">): boolean =>
     isCleanupNoteKey(n.key) ||
-    isFlakeNoteKey(n.key) ||
     isNoReportNoteKey(n.key) ||
     noteOwner(store, n, flightSeated, flightRuns) === OWNER_CONTROLLER;
   for (const n of store.notes()) {

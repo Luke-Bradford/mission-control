@@ -35,7 +35,6 @@ import {
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
-  COMMS_OPEN_PREFIX,
   COMMS_PAGE_DEFAULT,
   COMMS_PAGE_MAX,
   COMMS_REACTIONS,
@@ -242,7 +241,6 @@ import {
   threadMessages,
   validateCommsText,
 } from "./comms/index.ts";
-import { canonicalFlightQuestionKey } from "./comms/question.ts";
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
@@ -1424,6 +1422,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // The controller's own key. A request that carries it passes where the operator token does (it
   // grants nothing new) and is marked, so what it sends is recorded as the controller's.
   const controllerRequests = new WeakSet<FastifyRequest>();
+  /** A Needs-you key built from a Comms message: `comms-open:<id>`, `tag:<seat>:<id>`, `message:<agent>:<id>`. */
+  const COMMS_ITEM_KEY = /^(?:comms-open|tag:[^:]+|message:[^:]+):(comms:\d+)$/;
   const CONTROLLER_HOLD_REFUSED =
     "the controller does not hold or release merges; tell FLIGHT what is wrong";
   if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
@@ -2468,22 +2468,19 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
       api.get("/comms/mentions", () => {
         // A message needs the operator's reply when its question is open on their Needs you: the
-        // same rules close it in both places, so the badge and Needs you never disagree.
-        const asks = new Set(
-          sharedAttention(true)
-            .filter((item) => item.owner === OWNER_OPERATOR)
-            .map((item) => item.key),
-        );
-        const flightId = flightSeat(config)?.seat.id;
-        const askKey = (row: { id: string; from: string; to: string }): string =>
-          flightId !== undefined && row.from === flightId && row.to === COMMS_CAPCOM
-            ? canonicalFlightQuestionKey(store, row.id, flightId)
-            : `${COMMS_OPEN_PREFIX}${row.id}`;
+        // same rules close it in both places, so the badge and Needs you never disagree. Every
+        // Comms-sourced item key (an open question, a tag or a direct line) ends in its message id.
+        const asks = new Set<string>();
+        for (const item of sharedAttention()) {
+          if (item.owner !== OWNER_OPERATOR) continue;
+          const id = COMMS_ITEM_KEY.exec(item.key)?.[1];
+          if (id !== undefined) asks.add(id);
+        }
         return {
           mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
             message: storedCommsMessage(row),
             seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
-            needsReply: asks.has(askKey(row)),
+            needsReply: asks.has(row.id),
           })),
         };
       });

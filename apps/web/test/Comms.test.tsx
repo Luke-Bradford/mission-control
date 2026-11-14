@@ -699,7 +699,7 @@ describe("Comms routes", () => {
     // #crew is not addressed to the operator, so it makes no unread mark, and nor does a mention
     expect(within(nav).queryByTitle("3 unread messages")).toBeNull();
     expect(within(nav).queryByTitle("1 new mention")).toBeNull();
-    const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
+    const bell = await screen.findByRole("button", { name: "Mentions, 1 waiting for your answer" });
     expect(bell.closest(".act")).toBeTruthy();
     fireEvent.click(bell);
     const panel = screen.getByRole("region", { name: "Mentions" });
@@ -754,7 +754,7 @@ describe("Comms routes", () => {
       }),
     });
     render(<CommsConversation view={{ kind: "crew" }} row={null} />);
-    const bell = await screen.findByRole("button", { name: "Mentions, 1 new" });
+    const bell = await screen.findByRole("button", { name: "Mentions, 1 waiting for your answer" });
     fireEvent.click(bell);
     fireEvent.click(screen.getByText("@CAPCOM check this"));
     expect(screen.queryByRole("region", { name: "Mentions" })).toBeNull();

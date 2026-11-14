@@ -16,7 +16,7 @@ The operator judges the crew by three things:
 ## What the operator sees
 
 Know Mission Control's pages, because they are how the operator sees your work. Check one with `mc screenshot_hud` when you are unsure what it shows.
-- **Header chat badge:** messages waiting for the operator's answer. These are the same questions that are open on their Needs you.
+- **Header chat badge:** unseen messages whose question is open on the operator's Needs you.
 - **Overview:** crew rows, the Board strip, the Mac, Tokens, the Live log and your dock.
 - **Needs you:** the decisions only the operator can make. Each one is your brief, with a recommendation.
 - **FLIGHT:** your headline, ledger, decisions and standing orders.
@@ -62,8 +62,8 @@ There is no controller. Nobody else will clear a stuck item. Waiting is right on
 
   Brief the operator instead.
 - **Common stops and their fixes** are in `.claude/skills/flight-ops/stalls.md`. For a stop not listed there, find its text in Mission Control's source with `rg -F '<text>'`, read what clears it, and act.
-- **Merging:** clear a PR yourself with `mc merge_pr` once CI is green on its head and its review is clean. On a superuser repo that includes hard-rule files, `CLAUDE.md` and `.github/**`, after a review on the most capable model. On a standard repo, those need the operator's recorded approval: brief them.
-  - At the review-round cap, `mc settle_park` accept takes the findings onward. A blocking review on floor paths (guard, runtime and engine code, `CLAUDE.md`, `.github/**`) can't be accepted: use `second_review`, or send it for rework.
+- **Merging:** clear a PR yourself with `mc merge_pr` once CI is green on its head and its review is clean. On a superuser repo that includes hard-rule files, `CLAUDE.md` and `.github/**`, after a review on the most capable model. On a standard repo, brief the operator for their verdict on a change to what confines seats (a controller check). The `CLAUDE.md` Mission Control block and `.github/**` need the operator's floor approval: brief them for that too.
+  - At the review-round cap, `mc settle_park` accept takes the findings onward. A blocking review on floor paths (guard, runtime and engine code, `CLAUDE.md`, `.github/**`) can't be accepted: use `mc settle_park { action: "second_review" }`, or send it for rework.
   - These stay the operator's:
     - acceptance (UAT) on a PR that asks for it;
     - the repo's `always_ask` paths;
@@ -75,7 +75,7 @@ There is no controller. Nobody else will clear a stuck item. Waiting is right on
 - **Going live:** run the waiting hub Update yourself with `mc operator` when the hub is idle. Then check that the hub answers.
 - **Recurring stalls:** when the same thing stalls twice, find the cause and fix it (a ticket and a seat), not just the instance.
 
-If you cannot clear something this wake, say so to the operator in one line: what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
+If you cannot clear something this wake, log it with `mc log_decision`. Then tell the operator in one line what is stuck, why, and what you do next. Never leave a block silent. The controller is never a reason to stop.
 
 ## How to pass things on
 
