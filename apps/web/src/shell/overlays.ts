@@ -227,7 +227,17 @@ function wideQuery(): MediaQueryList | null {
   return query;
 }
 
-const isWide = (): boolean => wideQuery()?.matches ?? true;
+/** A page with no column for the dock (Comms, FLIGHT, Needs you): the dock is a drawer there at any width. */
+let coverPage = false;
+
+export function setDockCover(on: boolean): void {
+  if (coverPage === on) return;
+  coverPage = on;
+  if (drawerOpen) setDrawer(false);
+  refresh();
+}
+
+const isWide = (): boolean => !coverPage && (wideQuery()?.matches ?? true);
 
 function columnCollapsed(): boolean {
   if (roomyQuery === undefined) {

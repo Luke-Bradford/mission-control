@@ -810,6 +810,15 @@ select {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Comms and the full-width pages have no column for the dock: it is a drawer there. */
+.shell.shell-cover {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.app.dock-cover.dock-open .dock {
+  display: block;
+}
+
 @media (max-width: 1199px) {
   .shell,
   .app.dock-hidden .shell {

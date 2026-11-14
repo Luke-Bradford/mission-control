@@ -84,23 +84,26 @@ export function desktopFixture(scenario: DesktopScenario = "default") {
             : "Two decisions need your attention. The crew is checking the current work.",
       headlineAgeMin: scenario === "stale" ? 95 : 2,
     }),
-    "/api/agents/flight-1/stream?limit=20": {
-      events:
-        scenario === "many"
-          ? Array.from({ length: 20 }, (_, index) => ({
-              id: `fixture:${index}`,
-              at: NOW - (20 - index) * 10000,
-              kind: "msg",
-              text: `Recorded fixture message ${index + 1}: the next step is recorded with its evidence and owner.`,
-            }))
-          : [
-              {
-                id: "fixture:0",
-                at: NOW - 10000,
-                kind: "msg",
-                text: "The next step is recorded with the current work. Review its evidence before deciding.",
-              },
-            ],
+    "/api/comms/flight": {
+      messages: (scenario === "many" ? Array.from({ length: 20 }, (_, index) => index) : [0]).map(
+        (index) => ({
+          id: `comms:${index + 1}`,
+          at: NOW - (20 - index) * 10000,
+          from: "flight-1",
+          to: "CAPCOM",
+          text:
+            scenario === "many"
+              ? `Recorded fixture message ${index + 1}: the next step is recorded with its evidence and owner.`
+              : "The next step is recorded with the current work. Review its evidence before deciding.",
+          ticket: null,
+          label: null,
+          ref: null,
+          replyTo: null,
+          mentions: [],
+          reactions: [],
+          operator: false,
+        }),
+      ),
       hasMore: false,
     },
     "/api/activity": [],

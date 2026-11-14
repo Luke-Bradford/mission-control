@@ -2,7 +2,6 @@ import {
   COMMS_CAPCOM,
   COMMS_CREW,
   COMMS_NOTICE,
-  COMMS_TICKET,
   type CommsAgentResponse,
   type CommsMention,
   type CommsMessagesResponse,
@@ -28,12 +27,11 @@ import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { messageStateLine, sendStateLine } from "../flight/conversation.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
+import { FlightThread } from "../flight/FlightThread.tsx";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
 import { ago, dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { parseTicket } from "../hud/RepoRef.tsx";
-import { githubItemHref } from "../links.ts";
 import {
   commsAgentPath,
   commsContactPath,
@@ -49,6 +47,7 @@ import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, useTokenRenderer } from "./messages.tsx";
 import { type CommsView, noticeResource, ticketForRef, useNoticeResource } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
+import { refRepo, resolveRef } from "./refLinks.ts";
 import { SenderTag } from "./SenderTag.tsx";
 
 const NO_MESSAGES: FlightConversationMessage[] = [];
@@ -156,37 +155,6 @@ function RefChip({
       </button>
     </span>
   );
-}
-
-/** The repo a bare `#n` or `PR n` in a message means: its ticket's, else its sender's or recipient's, else the only one. */
-function refRepo(
-  ticket: string | null,
-  senderRepo: string | undefined,
-  config: ConfigView | undefined,
-): string | null {
-  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
-  if (parsed) return parsed.repoId;
-  if (senderRepo) return senderRepo;
-  return config?.repos.length === 1 ? (config.repos[0]?.id ?? null) : null;
-}
-
-function resolveRef(
-  refText: string,
-  repoId: string,
-  config: ConfigView | undefined,
-  ticket: string | null,
-): { to: string | null; github: string | null } | null {
-  const issue = /^#(\d+)$/.exec(refText)?.[1];
-  if (issue !== undefined) return { to: ticketPath(repoId, Number(issue)), github: null };
-  const pr = /^PR (\d+)$/.exec(refText)?.[1];
-  // a PR the message is about (its own ref) belongs to the message's ticket: open that ticket's
-  // page. A PR named in the text may belong to any ticket, so it keeps its GitHub link.
-  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
-  if (pr !== undefined && parsed)
-    return { to: ticketPath(parsed.repoId, parsed.number), github: null };
-  const github = config?.repos.find((r) => r.id === repoId)?.github;
-  const href = pr !== undefined && github ? githubItemHref(github, "pr", Number(pr)) : null;
-  return href ? { to: null, github: href } : null;
 }
 
 function MessageRefs({
@@ -1036,26 +1004,30 @@ function ModernConversation({
           </button>
         </div>
       )}
-      <MessagePane
-        emptyText={
-          view.kind === "crew" && !crew.data && (crew.loading || crew.error)
-            ? null
-            : hideNotices
-              ? HIDDEN_NOTICES_EMPTY
-              : undefined
-        }
-        messages={messages}
-        lookupMessages={lookupMessages}
-        jumpId={jumpId}
-        onJumped={onJumped}
-        onOpenMessage={onOpenMessage}
-        onReply={setReply}
-        flightId={flightSeat?.id}
-        rightId={peerAgent ?? COMMS_CAPCOM}
-        readOnly={peerAgent !== null}
-        sent={sent}
-        older={view.kind === "ticket" ? undefined : olderMessages}
-      />
+      {view.kind === "flight" ? (
+        <FlightThread hideNotices={hideNotices} />
+      ) : (
+        <MessagePane
+          emptyText={
+            view.kind === "crew" && !crew.data && (crew.loading || crew.error)
+              ? null
+              : hideNotices
+                ? HIDDEN_NOTICES_EMPTY
+                : undefined
+          }
+          messages={messages}
+          lookupMessages={lookupMessages}
+          jumpId={jumpId}
+          onJumped={onJumped}
+          onOpenMessage={onOpenMessage}
+          onReply={setReply}
+          flightId={flightSeat?.id}
+          rightId={peerAgent ?? COMMS_CAPCOM}
+          readOnly={peerAgent !== null}
+          sent={sent}
+          older={view.kind === "ticket" ? undefined : olderMessages}
+        />
+      )}
       {peerAgent !== null ? (
         <p className="pb note comms-peer-note">
           Read-only: this is between two agents.{" "}
@@ -1066,7 +1038,7 @@ function ModernConversation({
             Your conversation with {peerAgent}
           </a>
         </p>
-      ) : to ? (
+      ) : to && view.kind !== "flight" ? (
         <Composer
           key={conversationScope}
           to={to}
@@ -1077,22 +1049,18 @@ function ModernConversation({
               ? "Post to #crew as CAPCOM · @name pings one agent"
               : view.kind === "ticket"
                 ? `Post to #crew as CAPCOM · tagged ${view.ref}`
-                : view.kind === "flight"
-                  ? "Message FLIGHT as CAPCOM"
-                  : `Message ${to} as CAPCOM`
+                : `Message ${to} as CAPCOM`
           }
-          placeholder={
-            view.kind === "flight" ? "Ask FLIGHT, or give it direction…" : "Write a message…"
-          }
+          placeholder={"Write a message…"}
           messageRef={view.kind === "ticket" ? view.ref : undefined}
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
-          flightSeat={view.kind === "flight" && flightView ? flightView.seat : undefined}
+          flightSeat={undefined}
           onSent={() => setSent((count) => count + 1)}
         />
-      ) : (
+      ) : view.kind !== "flight" ? (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>
-      )}
+      ) : null}
     </Panel>
   );
   return "agentId" in view ? (

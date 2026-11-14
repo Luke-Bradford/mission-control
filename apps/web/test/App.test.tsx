@@ -68,7 +68,7 @@ describe("App", () => {
     expect(screen.getByRole("navigation", { name: "Pages" })).toBeTruthy();
   });
 
-  it("carries the waiting count and page name in the tab title", async () => {
+  it("carries the waiting count and page name in the tab title, and covers Needs you with the fly-out rather than a column", async () => {
     stubFetch({
       "/api/repos": REPOS,
       "/api/config": CONFIG,
@@ -80,7 +80,7 @@ describe("App", () => {
     });
     const { container } = at("/needs-you");
     await waitFor(() => expect(document.title).toBe("(2) Needs you · Mission Control"));
-    expect(container.querySelector("#dock")).toBeNull();
+    expect(container.querySelector(".shell.shell-cover #dock")).not.toBeNull();
   });
 
   it("skips from the Board link to the board content", async () => {
@@ -165,19 +165,30 @@ describe("App", () => {
     expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
       "true",
     );
-    // Comms owns the full conversation and does not alter the rail choice.
-    act(() => {
-      navigate("/comms");
+  });
+
+  it("moves to the thread's box on f where Comms already shows the FLIGHT thread", async () => {
+    stubFetch({
+      "/api/repos": REPOS,
+      "/api/config": CONFIG,
+      "/api/settings/crew-pause": null,
+      "/api/flight": {
+        seat: { id: "flight-1", live: true, state: "idle", model: "m", turns: null },
+        decisions: [],
+      },
+      "/api/comms/flight": { messages: [], hasMore: false },
     });
+    const { container } = at("/comms");
     await waitFor(() => expect(container.querySelector("#page-comms")).not.toBeNull());
+    const box = await waitFor(() => {
+      const el = container.querySelector<HTMLTextAreaElement>("main #flightThreadInput");
+      expect(el?.disabled).toBe(false);
+      return el as HTMLTextAreaElement;
+    });
     act(() => {
       fireEvent.keyDown(document.body, { key: "f" });
-      navigate("/");
     });
-    await waitFor(() => expect(container.querySelector("#page-overview")).not.toBeNull());
-    expect(screen.getByRole("button", { name: "FLIGHT chat" }).getAttribute("aria-pressed")).toBe(
-      "true",
-    );
+    expect(document.activeElement).toBe(box);
   });
 
   it("starts the dock collapsed on the Board and expands it on click", async () => {
@@ -191,16 +202,18 @@ describe("App", () => {
     sessionStorage.removeItem("mc-dock-collapsed");
   });
 
-  it("hides the dock on the FLIGHT page, which says what it would, and f opens FLIGHT in Comms", async () => {
-    act(() => toggleDock(true));
+  it("opens the fly-out as a drawer over the FLIGHT page on f, without leaving it", async () => {
     const { container } = at("/flight");
     await waitFor(() => expect(container.querySelector("#page-flight")).not.toBeNull());
-    expect(container.querySelector(".shell.shell-full")).not.toBeNull();
-    expect(container.querySelector(".dock")).toBeNull();
+    expect(container.querySelector(".shell.shell-cover")).not.toBeNull();
+    expect(container.querySelector(".app.dock-cover")).not.toBeNull();
+    expect(container.querySelector<HTMLElement>("#dock")?.hidden).toBe(true);
     act(() => {
       fireEvent.keyDown(document.body, { key: "f" });
     });
-    expect(window.location.pathname).toBe("/comms");
+    expect(window.location.pathname).toBe("/flight");
+    expect(container.querySelector<HTMLElement>("#dock")?.hidden).toBe(false);
+    expect(screen.getByTestId("dock-scrim")).toBeTruthy();
   });
 
   it("i off the agent page toasts", () => {

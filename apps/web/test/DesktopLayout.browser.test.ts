@@ -164,9 +164,9 @@ describeRendered("Approved compact desktop shell", () => {
           }, undefined),
         ).toBe("solid");
         await page.evaluate(() => {
-          const input = document.querySelector<HTMLInputElement>("#dockInput");
+          const input = document.querySelector<HTMLTextAreaElement>("#dockInput");
           if (!input) throw Error("Missing composer");
-          const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+          const set = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set;
           set?.call(input, "Keep the selected decision draft");
           input.dispatchEvent(new Event("input", { bubbles: true }));
         }, undefined);
@@ -183,7 +183,7 @@ describeRendered("Approved compact desktop shell", () => {
         await page.click(".dockrail button");
         expect(
           await page.evaluate(
-            () => (document.querySelector("#dockInput") as HTMLInputElement).value,
+            () => (document.querySelector("#dockInput") as HTMLTextAreaElement).value,
             undefined,
           ),
         ).toBe("Keep the selected decision draft");
@@ -234,7 +234,7 @@ describeRendered("Approved compact desktop shell", () => {
             if (scenario === "many") {
               expect(summary).not.toContain("waiting");
               const log = await page.evaluate(() => {
-                const element = document.querySelector<HTMLElement>(".dmsgs");
+                const element = document.querySelector<HTMLElement>(".flight-thread-log");
                 return {
                   count: element?.children.length,
                   distance: element
@@ -245,7 +245,7 @@ describeRendered("Approved compact desktop shell", () => {
               expect(log.count).toBe(20);
               expect(log.distance).toBeLessThanOrEqual(1);
               await page.evaluate(() => {
-                const messages = document.querySelector<HTMLElement>(".dmsgs");
+                const messages = document.querySelector<HTMLElement>(".flight-thread-log");
                 if (!messages) throw new Error("Missing conversation");
                 messages.scrollTop = 100;
                 messages.dispatchEvent(new Event("scroll", { bubbles: true }));
@@ -254,7 +254,7 @@ describeRendered("Approved compact desktop shell", () => {
               await page.click(".dockrail button");
               expect(
                 await page.evaluate(
-                  () => document.querySelector<HTMLElement>(".dmsgs")?.scrollTop,
+                  () => document.querySelector<HTMLElement>(".flight-thread-log")?.scrollTop,
                   undefined,
                 ),
               ).toBe(100);
