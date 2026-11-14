@@ -2,7 +2,7 @@ import type { AttentionItem, BriefChoiceReceipt, BriefOption } from "@mc/core";
 import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetChoiceAttempts } from "../src/comms/briefChoice.ts";
-import { streamStatus } from "../src/data.ts";
+import { hub, streamStatus } from "../src/data.ts";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { closeItem, openItem } from "../src/shell/overlays.ts";
 import { stubFetch } from "./fetchStub.ts";
@@ -357,6 +357,118 @@ describe("disconnected and gone", () => {
     expect(within(panel()).getByText("Which port should the preview use?")).toBeTruthy();
     fireEvent.click(button);
     expect(posts(fn, CHOICE)).toEqual([]);
+  });
+});
+
+describe("gone, labels and carry-over", () => {
+  it("cannot dispatch after the server removes the item, and says why", async () => {
+    let list: AttentionItem[] = [bound()];
+    const fn = mount([bound()], {
+      "/api/attention": () => ({ status: 200, body: list }),
+    });
+    const button = await accept();
+    expect(button.disabled).toBe(false);
+    list = [];
+    await act(async () => {
+      hub.refetchTopic("attention");
+    });
+    await waitFor(() =>
+      expect(within(panel()).getByTestId("choice-blocked").textContent).toContain(
+        "no longer waiting on you",
+      ),
+    );
+    const after = await accept();
+    expect(after.disabled).toBe(true);
+    fireEvent.click(after);
+    expect(posts(fn, CHOICE)).toEqual([]);
+    expect(within(panel()).getByText("Which port should the preview use?")).toBeTruthy();
+  });
+
+  it("shows words, not ids, for the reason and the receipt state", async () => {
+    mount([bound()], { [`POST ${CHOICE}`]: receipt() });
+    expect(await within(panel()).findByText("Product direction")).toBeTruthy();
+    expect(within(panel()).queryByText("product-direction")).toBeNull();
+    fireEvent.click(await accept());
+    const line = await within(panel()).findByTestId("choice-receipt");
+    expect(line.textContent).toContain("Done");
+    expect(line.textContent).not.toContain("applied");
+  });
+
+  it("does not carry a picked option or an open discussion to the next ask", async () => {
+    const other = bound({ key: "ask:8", brief: boundBrief({ id: 42, ask: "Second question?" }) });
+    mount([bound(), other], {
+      "/api/attention/ask%3A8/discussion": thread("ask:8"),
+    });
+    await accept();
+    fireEvent.click(within(panel()).getAllByRole("radio")[1] as HTMLElement);
+    await within(panel()).findByRole("button", { name: /^Choose: 5180/ });
+    fireEvent.click(within(panel()).getByRole("button", { name: "Discuss" }));
+    await within(panel()).findByLabelText("Ask FLIGHT about this");
+    act(() => openItem("ask:8"));
+    await within(panel()).findByText("Second question?");
+    expect(
+      await within(panel()).findByRole("button", { name: /^Accept recommendation: 5174/ }),
+    ).toBeTruthy();
+    expect(within(panel()).queryByLabelText("Ask FLIGHT about this")).toBeNull();
+  });
+});
+
+describe("a person ask with a bound brief", () => {
+  it("shows the complete fields and Accept posts the bound choice", async () => {
+    const options: BriefOption[] = [
+      {
+        id: "post-1",
+        label: "Reply politely",
+        answer: "Thanks!",
+        consequence: "Posts the reply on the issue as you.",
+        reversibility: { kind: "irreversible", detail: "A posted comment stays visible." },
+        action: { kind: "person-post", replyId: "r1" },
+      },
+      {
+        id: "handled",
+        label: "Mark handled",
+        answer: "Handled",
+        consequence: "Closes it here without replying.",
+        reversibility: { kind: "reversible", detail: "It can be reopened." },
+        action: { kind: "person-handled", how: "marked" },
+      },
+    ];
+    const base = boundBrief({ options, recommendedOptionId: "post-1" }, "Reply posted");
+    const person = item({
+      key: "person:101",
+      kind: "person",
+      agentId: null,
+      escalationId: null,
+      ticket: null,
+      text: "alice mentioned you",
+      brief: {
+        ...base,
+        person: {
+          source: { kind: "github", messageId: "1", revision: "v1" },
+          replies: [{ id: "r1", label: "Polite", text: "Thanks!" }],
+        },
+      },
+    });
+    const path = "/api/attention/person%3A101/choice";
+    const fn = stubFetch({
+      "/api/attention": [person],
+      "/api/escalations": [],
+      "/api/flight": FLIGHT,
+      "/api/notifications": { open: [], handledToday: [] },
+      [`POST ${path}`]: receipt({ optionId: "post-1", text: "Reply posted." }),
+    });
+    render(<ItemPanel />);
+    act(() => openItem(person.key));
+    const button = await accept();
+    const p = within(panel());
+    expect(p.getByText("Product direction")).toBeTruthy();
+    expect(p.getByText("The preview stays down.")).toBeTruthy();
+    expect(p.getByText("Posts the reply on the issue as you.")).toBeTruthy();
+    expect(p.getByText("Not reversible", { exact: false })).toBeTruthy();
+    expect(p.queryByText("Suggested replies")).toBeNull();
+    fireEvent.click(button);
+    await waitFor(() => expect(posts(fn, path)).toHaveLength(1));
+    expect(posts(fn, path)[0]).toMatchObject({ optionId: "post-1" });
   });
 });
 

@@ -6,6 +6,7 @@ import type {
   AttentionItem,
   BriefChoiceReceipt,
   BriefChoiceRequest,
+  BriefOperatorReason,
   PreparedBriefAction,
 } from "@mc/core";
 import { useSyncExternalStore } from "react";
@@ -216,3 +217,20 @@ export function receiptLine(r: BriefChoiceReceipt): string {
       return `Refused. ${r.text}`;
   }
 }
+
+export const OPERATOR_REASON_LABEL = {
+  money: "Money",
+  "product-direction": "Product direction",
+  "security-exception": "Security exception",
+  irreversible: "Not reversible",
+  "floor-approval": "Floor approval",
+} as const satisfies Record<BriefOperatorReason, string>;
+
+export const RECEIPT_STATE_LABEL = {
+  applied: "Done",
+  pending: "In progress",
+  dispatching: "In progress",
+  refused: "Refused",
+  stale: "Brief changed",
+  unknown: "Result unknown",
+} as const satisfies Record<BriefChoiceReceipt["state"], string>;

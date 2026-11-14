@@ -487,28 +487,49 @@ describeRendered("Needs you page", () => {
   );
 });
 
-/** The same open ask, with the server's complete bound brief and `optionCount` options. */
-function boundApi(optionCount: number, longText = false) {
+/** Fields of the stress state: 8,000 characters, and ids and labels with no break opportunity. */
+const HUGE = "w".repeat(8000);
+const LONG_ID = "option-".concat("x".repeat(120));
+
+/**
+ * The same open ask, with the server's complete bound brief and `optionCount` options. `asks` is
+ * how many asks wait (0, 3, 50…); `stress` fills the fields to their 8,000-character limit.
+ */
+function boundApi(optionCount: number, stress = false, asks = 3) {
   const base = api();
-  const asks = base["/api/attention"];
+  const all = base["/api/attention"];
   const options = Array.from({ length: optionCount }, (_, i) => ({
-    id: i === 0 ? "list" : `option-${i}`,
-    label: i === 0 ? "List and open item" : `Another layout ${i}`,
+    id: i === 0 ? "list" : stress ? `${LONG_ID}-${i}` : `option-${i}`,
+    label:
+      i === 0
+        ? "List and open item"
+        : stress
+          ? `Another-${"y".repeat(100)}`
+          : `Another layout ${i}`,
     answer: `Use layout ${i}.`,
-    consequence: `Layout ${i} is used from the next release. ${longText ? "A long consequence that keeps going. ".repeat(40) : ""}`,
+    consequence: stress ? HUGE : `Layout ${i} is used from the next release.`,
     reversibility: {
       kind: "reversible" as const,
-      detail: longText ? "x".repeat(300) : "Switch back at any time.",
+      detail: stress ? HUGE : "Switch back at any time.",
     },
     action: { kind: "answer" as const, seatId: "guido-1", runId: "r1", text: `Use layout ${i}.` },
   }));
-  const first = asks[0];
+  const first = all[0];
+  const filler = Array.from({ length: Math.max(0, asks - 1) }, (_, i) =>
+    item({ key: `question:fill${i}`, kind: "question", escalationId: null, text: `Ask ${i}` }),
+  );
   return {
     ...base,
-    "/api/attention": [
-      { ...first, brief: boundBrief({ ...first.brief, options, recommendedOptionId: "list" }) },
-      ...asks.slice(1),
-    ],
+    "/api/attention":
+      asks === 0
+        ? []
+        : [
+            {
+              ...first,
+              brief: boundBrief({ ...first.brief, options, recommendedOptionId: "list" }),
+            },
+            ...filler,
+          ],
   };
 }
 
@@ -560,6 +581,98 @@ describeRendered("Needs you page, a complete bound brief", () => {
           } finally {
             await page.close();
           }
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS * 2,
+  );
+});
+
+describeRendered("Needs you page, bound brief stress and keyboard", () => {
+  it(
+    "shows an empty page with no card when nothing waits",
+    async () => {
+      const page = await renderAt({
+        page: "test/needsBrowser.html",
+        width: 1600,
+        height: 900,
+        api: boundApi(2, false, 0),
+        assets: ASSETS,
+      });
+      try {
+        await page.boxes("#page-needs");
+        expect(await page.evaluate(() => document.querySelectorAll(".bc").length, undefined)).toBe(
+          0,
+        );
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "keeps three and fifty asks, and 8,000-character fields, inside the card with the last action reachable by keyboard",
+    async () => {
+      for (const [asks, stress, width, height] of [
+        [3, false, 1600, 900],
+        [50, false, 1280, 900],
+        [3, true, 1600, 700],
+        [3, true, 1280, 900],
+      ] as const) {
+        const label = `${asks} asks, ${stress ? "stress" : "normal"} at ${width}x${height}`;
+        const page = await renderAt({
+          page: "test/needsBrowser.html",
+          width,
+          height,
+          api: boundApi(4, stress, asks),
+          assets: ASSETS,
+        });
+        try {
+          await ready(page);
+          const card = await page.box(".bc");
+          const rows = await page.boxes(".bc-option");
+          expect(rows, `${label}: all four options`).toHaveLength(4);
+          for (const row of rows)
+            expect(
+              row.x >= card.x - 1 && row.x + row.width <= card.x + card.width + 1,
+              `${label}: an option sits inside the card`,
+            ).toBe(true);
+          expect(
+            await page.evaluate(() => document.documentElement.scrollWidth - innerWidth, undefined),
+            `${label}: no sideways page scroll`,
+          ).toBeLessThanOrEqual(0);
+          // Tab from the first radio through the rest of the card to Accept.
+          await page.evaluate(() => {
+            (document.querySelector(".bc-option input[type=radio]") as HTMLElement).focus();
+          }, undefined);
+          const seen: string[] = [];
+          for (let i = 0; i < 12; i++) {
+            await page.press("Tab");
+            seen.push(
+              await page.evaluate(() => {
+                const a = document.activeElement as HTMLElement | null;
+                return a?.closest(".bc-actions")
+                  ? `action:${a.textContent?.slice(0, 20)}`
+                  : (a?.tagName ?? "");
+              }, undefined),
+            );
+          }
+          expect(
+            seen.some((name) => name.startsWith("action:Accept")),
+            `${label}: Tab reaches Accept (${seen.join(",")})`,
+          ).toBe(true);
+          expect(await page.reachable(".bc-option:last-of-type")).toEqual([true]);
+          expect(await page.reachable(".bc-actions button.primary")).toEqual([true]);
+          const focusedInView = await page.evaluate(() => {
+            const el = document.querySelector(".bc-actions button.primary") as HTMLElement;
+            el.focus();
+            const r = el.getBoundingClientRect();
+            return r.top >= 0 && r.bottom <= innerHeight + 1;
+          }, undefined);
+          expect(focusedInView, `${label}: focused Accept is painted in the viewport`).toBe(true);
+        } finally {
+          await page.close();
         }
       }
     },

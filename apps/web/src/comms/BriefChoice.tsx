@@ -12,7 +12,9 @@ import {
   choiceAvailability,
   dismissAttempt,
   inputFormOf,
+  OPERATOR_REASON_LABEL,
   preparedFor,
+  RECEIPT_STATE_LABEL,
   REFRESH_NEEDED,
   receiptLine,
   submitChoice,
@@ -157,7 +159,8 @@ export function BriefChoice({
           <Field label="Why you">
             {decision?.whyOperator ? (
               <>
-                <b>{decision.whyOperator.kind}</b>: {decision.whyOperator.explanation}
+                <b>{OPERATOR_REASON_LABEL[decision.whyOperator.kind]}</b>:{" "}
+                {decision.whyOperator.explanation}
               </>
             ) : (
               "Not stated in this brief."
@@ -320,7 +323,9 @@ export function BriefChoice({
         )}
         {receipt && (
           <p className="bc-receipt" role="status" data-testid="choice-receipt">
-            <Pill tone={receipt.state === "applied" ? "ok" : "warn"}>{receipt.state}</Pill>{" "}
+            <Pill tone={receipt.state === "applied" ? "ok" : "warn"}>
+              {RECEIPT_STATE_LABEL[receipt.state]}
+            </Pill>{" "}
             {receiptLine(receipt)}
           </p>
         )}

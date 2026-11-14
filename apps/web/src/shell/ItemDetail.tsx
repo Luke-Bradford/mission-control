@@ -232,7 +232,12 @@ export function ItemDetail({
   const previewBlock = item && !holding ? <PreviewOpener item={item} /> : null;
   // A complete operator brief decides in one inline component; an escalation keeps its GitHub reply.
   const bound = Boolean(
-    item && !holding && !esc && !item.brief?.person && options.length > 0 && item.brief?.binding,
+    item &&
+      !holding &&
+      !esc &&
+      item.brief?.binding &&
+      item.brief.options.length > 0 &&
+      (item.brief.person ? item.kind === "person" : true),
   );
   const briefBlock = (
     <div className="pb" id={`${p}Brief`}>
@@ -308,6 +313,7 @@ export function ItemDetail({
     <>
       {item && bound && (
         <BriefChoice
+          key={item.key}
           item={item}
           pictures={
             materials.packets.length > 0
@@ -354,7 +360,9 @@ export function ItemDetail({
           )}
         </div>
       )}
-      {item?.brief?.person && <PersonChoices key={item.key} item={item} thread={thread} />}
+      {item?.brief?.person && !bound && (
+        <PersonChoices key={item.key} item={item} thread={thread} />
+      )}
       {item?.kind === "person" && !item.brief?.person && !holding && (
         <div className="composer" id={`${p}Person`}>
           {handledHow ? (
