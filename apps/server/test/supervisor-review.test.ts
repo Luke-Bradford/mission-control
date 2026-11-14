@@ -513,11 +513,7 @@ describe("startWatch", () => {
     const settings = JSON.parse(defined(argv[argv.indexOf("--settings") + 1]));
     expect(settings.sandbox.enabled).toBe(false);
     expect(settings.hooks.PreToolUse).toHaveLength(1);
-    await until(() =>
-      expect(userLines()).toEqual([
-        firstDelivery(out.runId, BRIEF),
-      ]),
-    );
+    await until(() => expect(userLines()).toEqual([firstDelivery(out.runId, BRIEF)]));
   });
 
   it("refreshes FLIGHT credentials after a hub restart without ending its run", async () => {
@@ -586,11 +582,7 @@ describe("startWatch", () => {
     const { sup } = flightMake();
     sup.start();
     const { runId } = await sup.startWatch("flight-1", { first: "X" });
-    await until(() =>
-      expect(userLines()).toEqual([
-        firstDelivery(runId, `${BRIEF}\n\nX`),
-      ]),
-    );
+    await until(() => expect(userLines()).toEqual([firstDelivery(runId, `${BRIEF}\n\nX`)]));
   });
 
   it("is refused for a retiring watch seat", async () => {
