@@ -712,7 +712,11 @@ const seenItems = (store: Store): Record<string, string> => {
   }
 };
 
-const itemHash = (store: Store, x: { key: string; text: string }): string => {
+const itemHash = (
+  store: Store,
+  x: { key: string; text: string; ownBriefAt?: number | undefined },
+): string => {
+  if (x.ownBriefAt !== undefined) return entryHash(`${x.key}:${x.ownBriefAt}`);
   if (x.key === `${NOTE_KEY}${MACHINE_CAPACITY_KEY}`) {
     const episode = store.notes().find((note) => note.key === MACHINE_CAPACITY_KEY);
     if (episode !== undefined) return entryHash(`${x.key}:${episode.at}`);
@@ -1433,6 +1437,7 @@ export function flightState(i: {
       text: cut(x.text, FLIGHT_STATE_TEXT_MAX),
       ageMin: Math.floor((now - x.at) / 60_000),
       triageRemainingMs: Math.max(0, (x.triageDueAt ?? now) - now),
+      ...(ownReply(x, found?.seat.id ?? null) ? { ownBriefAt: x.brief?.at ?? 0 } : {}),
       ...(x.holdReleased === undefined ? {} : { holdReleased: x.holdReleased }),
       ...(x.returned === undefined ? {} : { returned: x.returned }),
     }));

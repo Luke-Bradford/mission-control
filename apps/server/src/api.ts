@@ -2575,8 +2575,22 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
         store.markCommsScopeRead(scope.key, body.data.messageId);
+        // Opening an agent's direct thread also moves the cursor its attention items key on
+        const direct = scope.key.match(/^agent-all:(.+)$/)?.[1] ?? directAgent(scope.key);
+        if (direct !== undefined && store.threadOwnsMessage(direct, body.data.messageId)) {
+          store.markThreadRead(direct, [body.data.messageId]);
+          bus.emit("attention");
+        }
         return { ok: true };
       });
+
+      /** The agent on the other end of CAPCOM's direct line, for a `pair:` scope key. */
+      const directAgent = (key: string): string | undefined => {
+        const pair = key.match(/^pair:([^:]+):([^:]+)$/);
+        if (!pair) return undefined;
+        if (pair[1] === COMMS_CAPCOM) return pair[2];
+        return pair[2] === COMMS_CAPCOM ? pair[1] : undefined;
+      };
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 

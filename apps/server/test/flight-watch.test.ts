@@ -1358,6 +1358,40 @@ describe("FLIGHT's items to brief", () => {
     expect(listed.some((i) => i.key.includes("flight-1"))).toBe(false);
   });
 
+  it("wakes FLIGHT once for its own question after a brief, not once per follow-up line", async () => {
+    liveCrew();
+    const say = (at: number, text: string) =>
+      store.addComms({ at, from: "flight-1", to: COMMS_CAPCOM, ticket: null, text })?.id ?? "";
+    const first = say(T0, "briefed it, @CAPCOM OK?");
+    const key = `tag:flight-1:${first}`;
+    nowMs = T0 + MIN;
+    await watch.check();
+    store.addBrief({
+      key,
+      ask: "Ship it?",
+      ticket: "mc#7",
+      context: "FLIGHT asked whether the plan can ship and waits for your answer.",
+      recommendation: "Ship.",
+      options: [
+        { label: "Ship", answer: "Go." },
+        { label: "Hold", answer: "Wait." },
+      ],
+      basis: "b",
+      at: T0 + 2 * MIN,
+    });
+    nowMs = T0 + 3 * MIN;
+    await watch.check();
+    sendCalls.length = 0;
+    // two more lines after the brief: the item is relisted, and FLIGHT is woken for it once
+    say(T0 + 4 * MIN, "@CAPCOM one more thing, OK?");
+    nowMs = T0 + 5 * MIN;
+    await watch.check();
+    say(T0 + 6 * MIN, "@CAPCOM and another, OK?");
+    nowMs = T0 + 7 * MIN;
+    await watch.check();
+    expect(sendCalls.filter((c) => c.text.includes(key))).toHaveLength(1);
+  });
+
   it("lists nothing without a FLIGHT seat", () => {
     raiseBlocked();
     const cfg = structuredClone(config);
