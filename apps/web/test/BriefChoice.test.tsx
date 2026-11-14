@@ -1,5 +1,5 @@
 import type { AttentionItem, BriefChoiceReceipt, BriefOption } from "@mc/core";
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetChoiceAttempts } from "../src/comms/briefChoice.ts";
 import { streamStatus } from "../src/data.ts";
