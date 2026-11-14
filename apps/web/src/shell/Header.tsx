@@ -31,7 +31,6 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
   { page: "flight", label: "Flight", to: PAGE_PATHS.flight },
   { page: "board", label: "Board", to: PAGE_PATHS.board },
   { page: "agent", label: "Agents", to: PAGE_PATHS.agent },
-  { page: "map", label: "Map", to: PAGE_PATHS.map },
   { page: "comms", label: "Comms", to: PAGE_PATHS.comms },
   { page: "qa", label: "QA", to: PAGE_PATHS.qa },
   { page: "telemetry", label: "Telemetry", to: PAGE_PATHS.telemetry },
@@ -39,7 +38,7 @@ const TABS: readonly { page: Page; label: string; to: string }[] = [
 ];
 
 /** The top bar (catalogue §1.1), in the mockup's order. */
-export function Header({ page }: { page: Page }) {
+export function Header({ page }: { page: Page | null }) {
   const unread = useOperatorUnread().length;
   const demo = useDemo();
   return (
@@ -65,7 +64,7 @@ export function Header({ page }: { page: Page }) {
         <AwayButton />
         <ThemeButton />
         <SetupButton on={page === "setup"} />
-        <DockButton page={page} unread={unread} />
+        <DockButton page={page ?? "overview"} unread={unread} />
       </div>
       <span className="sr-only">
         <LiveIndicator />

@@ -1,10 +1,18 @@
-import { DISCUSSION_TEXT_MAX, type ItemDiscussion as Discussion } from "@mc/core";
+import {
+  COMMS_CAPCOM,
+  DISCUSSION_TEXT_MAX,
+  type ItemDiscussion as Discussion,
+  type ItemThread,
+  type ItemThreadMessage,
+} from "@mc/core";
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useTz } from "../clock.ts";
 import { Expandable } from "../components/Expandable.tsx";
 import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import type { FlightSeat } from "../flight/flightTypes.ts";
+import { hhmm } from "../fmt.ts";
 import { askFlight } from "./answer.ts";
 import { clearDraft, getDraft, setDraft } from "./drafts.ts";
 import { BRIEF_FOLD_AFTER, BRIEF_LINES } from "./ItemBrief.tsx";
@@ -18,6 +26,8 @@ type ItemDiscussionProps = {
   /** FLIGHT's seat: undefined while it loads, null when none is configured. */
   seat?: FlightSeat | null;
   receipt?: Receipt;
+  /** When the operator's last typed reply on this item went through: the conversation opens. */
+  replied?: number;
   focus?: boolean;
   collapsed?: boolean;
   /** `page`: the whole conversation on the Needs you page, no fold, its log scrolling itself. */
@@ -26,6 +36,41 @@ type ItemDiscussionProps = {
 
 /** A log this close to its end (px) follows new messages; further up it stays where it is read. */
 export const FOLLOW_WITHIN = 40;
+
+/** The text of an item reply without the `Re: <key> · <title>` line that tells FLIGHT the item. */
+export function threadText(itemKey: string, text: string): string {
+  const lead = `Re: ${itemKey}`;
+  if (!text.startsWith(lead)) return text;
+  const next = text.slice(lead.length);
+  if (!next.startsWith(" ·") && !next.startsWith("\n")) return text;
+  const cut = text.indexOf("\n\n");
+  return cut === -1 ? "" : text.slice(cut + 2);
+}
+
+/** A seat's name as the operator reads it: FLIGHT by its role, any other seat by its id. */
+const seatName = (id: string, flightId: string | undefined): string =>
+  id === flightId ? "FLIGHT" : id.toUpperCase();
+
+/** Who a thread message is from, in the operator's words. */
+export function threadWho(
+  m: Pick<ItemThreadMessage, "operator" | "from">,
+  flightId: string | undefined,
+): string {
+  return m.operator || m.from === COMMS_CAPCOM ? "You" : seatName(m.from, flightId);
+}
+
+/** Whether the operator's message reached its reader, and whether anyone answered. */
+export function threadState(
+  m: ItemThreadMessage,
+  tz: string | null,
+  flightId: string | undefined,
+): string | null {
+  if (!m.operator || m.state === undefined) return null;
+  const to = seatName(m.to, flightId);
+  if (m.state === "stored") return `Waiting for ${to} to pick it up`;
+  const at = m.deliveredAt !== null && tz ? ` at ${hhmm(m.deliveredAt, tz)}` : "";
+  return m.state === "answered" ? `${to} read it${at} and answered` : `${to} read it${at}`;
+}
 
 export function ItemDiscussion(p: ItemDiscussionProps) {
   if (p.layout === "page")
@@ -43,8 +88,8 @@ function Conversation(p: ItemDiscussionProps) {
   const initialFocus = useRef(p.focus);
   const details = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
-    if (p.receipt && details.current) details.current.open = true;
-  }, [p.receipt]);
+    if ((p.receipt || p.replied) && details.current) details.current.open = true;
+  }, [p.receipt, p.replied]);
   return (
     <details ref={details} className="item-conversation" open={initialOpen.current}>
       <summary>Conversation with FLIGHT</summary>
@@ -90,12 +135,16 @@ function DiscussionBody({
       active = false;
     };
   }, [live]);
+  const tz = useTz();
+  const thread = useResource<ItemThread>(RESOURCES.itemThread(itemKey));
+  const sent = thread.data?.messages ?? [];
   const current = useResource<Discussion>(RESOURCES.discussion(itemKey));
   const resource = current.data ? RESOURCES.discussion(itemKey, current.data.id) : null;
   const history = useResource<Discussion>(resource);
   const discussion = history.data ?? current.data;
   const loadError = history.error ?? (!discussion ? current.error : null);
   const refresh = () => {
+    hub.refetch(RESOURCES.itemThread(itemKey).path);
     hub.refetch(RESOURCES.discussion(itemKey).path);
     if (resource) hub.refetch(resource.path);
   };
@@ -129,7 +178,7 @@ function DiscussionBody({
       if (resource) hub.refetch(resource.path);
     }
   };
-  const count = discussion?.messages.length ?? 0;
+  const count = (discussion?.messages.length ?? 0) + sent.length;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new message is the cue to follow
   useLayoutEffect(() => {
     const el = log.current;
@@ -156,12 +205,29 @@ function DiscussionBody({
         aria-busy={history.loading || pending}
       >
         {!discussion && !loadError && <p className="note">Loading discussion…</p>}
-        {discussion?.messages.length === 0 && !receipt && <p className="note">No messages yet.</p>}
-        {discussion?.messages
-          .filter((m) => m.itemKey === itemKey && m.correlationId === discussion?.id)
+        {discussion?.messages.length === 0 && sent.length === 0 && !receipt && (
+          <p className="note">No messages yet.</p>
+        )}
+        {[
+          ...(discussion?.messages ?? [])
+            .filter((m) => m.itemKey === itemKey && m.correlationId === discussion?.id)
+            .map((m) => ({ ...m, state: null as string | null })),
+          ...sent.map((m) => ({
+            id: m.id,
+            at: m.at,
+            role: (m.operator ? "operator" : "flight") as "operator" | "flight",
+            who: threadWho(m, seat?.id),
+            text: m.choice !== undefined ? `You chose: ${m.choice}` : threadText(itemKey, m.text),
+            state: threadState(m, tz, seat?.id),
+          })),
+        ]
+          .sort((a, b) => a.at - b.at)
           .map((m, i) => (
             <div className={`dmsg ${m.role === "operator" ? "you" : "flight"}`} key={m.id}>
-              <span className="who">{m.role === "operator" ? "You" : "FLIGHT"}</span>
+              <span className="who">
+                {"who" in m ? m.who : m.role === "operator" ? "You" : "FLIGHT"}
+                {tz && <span className="when"> · {hhmm(m.at, tz)}</span>}
+              </span>
               <div className="txt">
                 {page ? (
                   m.role === "operator" ? (
@@ -175,12 +241,17 @@ function DiscussionBody({
                   <Expandable
                     lines={BRIEF_LINES}
                     foldAfter={BRIEF_FOLD_AFTER}
-                    of={`${m.role === "operator" ? "Your" : "FLIGHT’s"} message ${i + 1}`}
+                    of={`${m.role === "operator" ? "Your" : `${"who" in m ? m.who : "FLIGHT"}’s`} message ${i + 1}`}
                   >
                     {m.text}
                   </Expandable>
                 )}
               </div>
+              {m.state && (
+                <p className="note" data-state>
+                  {m.state}
+                </p>
+              )}
             </div>
           ))}
         {receipt &&
@@ -201,6 +272,11 @@ function DiscussionBody({
         {loadError && (
           <p className="note err" role="alert">
             {loadError.message}
+          </p>
+        )}
+        {thread.error && (
+          <p className="note err">
+            The messages sent from this item could not be loaded: {thread.error.message}
           </p>
         )}
         <button type="button" className="sm" onClick={refresh}>

@@ -1,0 +1,439 @@
+/* biome-ignore-all lint/style/noDescendingSpecificity: the page-scoped overrides follow the shared panel rules */
+/* The Agents control room: roster | chosen seat | right column, on one fixed screen
+   (docs/prototype/agents-page-revised.html). Only the roster, the activity list and the tab body scroll. */
+/* Rows: the disconnected banner, the removed-seat banner, then the shell, which takes exactly the
+   rest of the page: the grid bounds it, so nothing below can push the message box off screen. */
+#page-agent.control-room {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  container: agent-page / inline-size;
+}
+.control-banner {
+  margin-bottom: var(--sp-3);
+  padding: var(--sp-2) var(--sp-4);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+}
+.control-shell {
+  grid-row: 3;
+  display: grid;
+  gap: var(--sp-3);
+  height: auto;
+  overflow: hidden;
+  grid-template-columns: 348px minmax(0, 1fr) 320px;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+.control-main {
+  container: control-main / inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.control-main > .panel {
+  flex: none;
+  padding: var(--sp-3) var(--sp-4);
+}
+#page-agent.control-room #streamP {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+#page-agent.control-room #streamP > .ph {
+  min-height: 44px;
+  flex: none;
+}
+#page-agent.control-room #stream {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  position: relative;
+}
+#page-agent.control-room #streamP > .composer {
+  flex: none;
+  padding: var(--sp-3) var(--sp-4);
+  border-top: 1px solid var(--line);
+}
+.new-rows {
+  position: sticky;
+  bottom: var(--sp-2);
+  margin: 0 auto;
+  display: block;
+}
+.ev.sent .txt {
+  color: var(--fg-2);
+}
+
+/* Identity band */
+.idb {
+  display: grid;
+  gap: var(--sp-1);
+}
+.idb-name {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.idb-name h2 {
+  font: 700 var(--fs-title) / var(--lh-title) var(--display);
+}
+.idb-dot {
+  width: var(--sp-3);
+  height: var(--sp-3);
+  border-radius: var(--r);
+}
+.idb-role,
+.idb-last,
+.idb-strip {
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+.idb-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.idb-sep {
+  width: 1px;
+  height: 20px;
+  background: var(--line-2);
+  margin: 0 var(--sp-1);
+}
+.idb-outcome {
+  font-size: var(--fs-s);
+}
+.idb-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+  margin: 0;
+}
+.idb-ticket {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.idb-stopped {
+  margin: 0;
+  font-size: var(--fs-s);
+}
+.idb-words {
+  display: block;
+  text-align: left;
+  font: var(--fs-s) / var(--lh-s) var(--sans);
+  color: var(--fg-2);
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  /* Beats the shared `button { white-space: nowrap }`, which would cut the summary mid-word. */
+  white-space: normal;
+}
+.idb-words.open {
+  white-space: pre-line;
+}
+.idb-words:not(.open) {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.idb-words-h {
+  color: var(--muted);
+  margin-right: var(--sp-2);
+}
+
+/* Instrument row */
+.instruments {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1.2fr) minmax(0, 0.8fr) minmax(0, 1.6fr);
+  gap: var(--sp-4);
+  align-items: start;
+}
+.inst {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.inst.ctx {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.inst-h {
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  text-transform: uppercase;
+}
+.inst-big {
+  font: 700 var(--fs-title) / var(--lh-title) var(--display);
+  display: block;
+}
+.inst-n {
+  display: block;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+}
+.ring-bg,
+.ring-fg {
+  fill: none;
+  stroke-width: 6;
+}
+.ring-bg {
+  stroke: var(--line-2);
+}
+.ring-fg {
+  stroke: var(--ok);
+}
+.ring-fg.warn {
+  stroke: var(--warn);
+}
+.ring-mark {
+  stroke: var(--fg);
+  stroke-width: 2;
+}
+.loop-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: var(--fs-s);
+}
+.loop-steps li {
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  color: var(--muted);
+}
+.loop-steps li.done {
+  background: var(--fg-2);
+  color: var(--surface);
+  border-color: var(--fg-2);
+}
+.loop-steps li.cur {
+  border-color: var(--ok);
+  color: var(--fg);
+}
+.loop-steps li.held {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.plan-bar {
+  display: block;
+  height: 6px;
+  background: var(--line-2);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.plan-bar b {
+  display: block;
+  height: 100%;
+  background: var(--ok);
+}
+.figs-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+}
+.fig {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.fig-k {
+  border: 0;
+  background: none;
+  padding: 0;
+  text-align: left;
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  cursor: help;
+}
+.fig-v {
+  font-size: var(--fs-panel);
+  white-space: nowrap;
+}
+.fig.warn .fig-v {
+  color: var(--warn);
+}
+.fig-n {
+  color: var(--fg-2);
+  font-size: var(--fs-micro);
+}
+.fig-def {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 5;
+  width: 240px;
+  padding: var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  background: var(--surface-2);
+  font-size: var(--fs-s);
+}
+.fig:hover .fig-def,
+.fig:focus-within .fig-def {
+  display: block;
+}
+
+/* The figures switch is always one line, whatever width its column gets. */
+.inst.figs > .seg {
+  flex-wrap: nowrap;
+  align-self: flex-start;
+  width: max-content;
+}
+.inst.figs > .seg button {
+  white-space: nowrap;
+}
+
+/* A narrow middle column (1280 px wide pages, or the page stacked beside an open dock): the instruments stay a short band so the activity list
+   keeps most of the column. Context, loop and plan share one row; the figures take a row of four. */
+@container control-main (max-width: 1100px) {
+  .instruments {
+    grid-template-columns: auto minmax(0, 1fr) minmax(0, 1fr);
+    gap: var(--sp-2) var(--sp-4);
+  }
+  .inst.figs {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: var(--sp-1) var(--sp-3);
+  }
+  .inst.figs > .figs-row {
+    grid-row: 2;
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--sp-1) var(--sp-3);
+  }
+  .inst.figs > .inst-n {
+    grid-row: 1;
+    grid-column: 2;
+    justify-self: end;
+  }
+  .inst-big {
+    font-size: var(--fs-panel);
+    line-height: var(--lh-panel);
+  }
+}
+
+/* Right column */
+.side {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+}
+.side > .panel {
+  padding: var(--sp-3) var(--sp-4);
+}
+.side h3 {
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+  margin: 0 0 var(--sp-1);
+}
+.side p,
+.side ul,
+.side dl {
+  margin: 0;
+}
+.side ul {
+  padding: 0;
+  list-style: none;
+}
+/* Beats the shared `.side > .panel { flex: none }`: the tab panel takes the column's remaining height
+   so its body is the thing that scrolls. */
+.side > .panel.side-tabs {
+  flex: 1 1 0;
+}
+.side-tabs {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+#page-agent.control-room .side-tabs > .ph {
+  min-height: 44px;
+}
+.side-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.setup-list {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-3);
+}
+.setup-list dt {
+  color: var(--muted);
+}
+.setup-list dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A run trace is a long document: it takes the room beside the roster and scrolls itself. */
+.control-main.trace {
+  grid-column: 2 / -1;
+  overflow-y: auto;
+}
+
+/* Narrow: everything stacks and the shell scrolls inside its own frame (the fixed screen is for 1280 px and up). */
+@container agent-page (max-width: 1000px) {
+  .control-shell {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: none;
+    grid-auto-rows: auto;
+    overflow-y: auto;
+  }
+  /* The shell scrolls here, so the column takes the height its panels need instead of clipping them. */
+  .side {
+    overflow: visible;
+  }
+  .side > .panel.side-tabs {
+    flex: none;
+  }
+  .side-body {
+    max-height: 460px;
+  }
+  .control-shell > .roster {
+    height: auto;
+    max-height: min(calc(40 * var(--vh)), 360px);
+  }
+  .control-main,
+  .control-main.trace {
+    overflow: visible;
+  }
+  #page-agent.control-room #streamP {
+    flex: none;
+    min-height: 320px;
+  }
+  .control-main.trace {
+    grid-column: auto;
+  }
+}

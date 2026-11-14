@@ -1,15 +1,16 @@
 import type { Crew } from "@mc/core";
 import { useEffect, useState } from "react";
 import { ChartPane } from "../comms/ChartPane.tsx";
+import { SignalLists } from "../comms/CommsGraph.tsx";
 import { type ChartMode, ChartModeSwitch, CommsRails } from "../comms/CommsRails.tsx";
-import { useChartFilter } from "../comms/chartPaths.ts";
+import { commsHrefFor, useChartFilter } from "../comms/chartPaths.ts";
 import { useReducedMotion } from "../comms/chartTypes.ts";
 import { type ChartFilter, pairFilter, sameFilter } from "../comms/commsFilter.ts";
 import { useChartData } from "../comms/useChartData.ts";
 import { RESOURCES, useResource } from "../data.ts";
 import type { FlightSeat } from "../flight/flightTypes.ts";
 import { plural } from "../fmt.ts";
-import { followLink, PAGE_PATHS } from "../router.ts";
+import { followLink, navigate, PAGE_PATHS } from "../router.ts";
 import "../comms/comms.css";
 import "../comms/CommsChartPage.css";
 
@@ -68,34 +69,52 @@ export function CommsChartPage() {
         <div className="comms-chart-main">
           {crew === undefined ? (
             <p className="comms-chart-note">Loading the crew…</p>
+          ) : chart.chartLoading ? (
+            <p className="comms-chart-note">Loading comms graph…</p>
+          ) : !chart.hasData ? (
+            <p className="comms-chart-note" role="alert">
+              Couldn't load comms graph. Retrying.
+            </p>
           ) : (
-            <CommsRails
-              seats={chart.seats}
-              groups={chart.groups}
-              hubIds={chart.hubIds}
-              edges={chart.edges}
-              mode={mode}
-              filter={filter}
-              flows={chart.flows}
-              reduced={reduced}
-              label={`Comms chart, ${plural(rows.length, "seat")}, ${plural(total, "message")} in 24h`}
-              full
-              onPickSeat={(id) => {
-                const next: ChartFilter = { kind: "seat", id };
-                setFilter(sameFilter(filter, next) ? null : next);
-              }}
-              onPickLink={(a, b) => {
-                const next = pairFilter(a, b);
-                setFilter(sameFilter(filter, next) ? null : next);
-              }}
-              onClear={() => setFilter(null)}
-            />
+            <>
+              {chart.chartError && (
+                <p className="comms-chart-note" role="status">
+                  Stale · couldn't refresh. Retrying.
+                </p>
+              )}
+              <CommsRails
+                seats={chart.seats}
+                groups={chart.groups}
+                hubIds={chart.hubIds}
+                edges={chart.edges}
+                mode={mode}
+                filter={filter}
+                flows={chart.flows}
+                reduced={reduced}
+                label={`Comms chart, ${plural(rows.length, "seat")}, ${plural(total, "message")} in 24h`}
+                full
+                onPickSeat={(id) => {
+                  const next: ChartFilter = { kind: "seat", id };
+                  setFilter(sameFilter(filter, next) ? null : next);
+                }}
+                onPickLink={(a, b) => {
+                  const next = pairFilter(a, b);
+                  setFilter(sameFilter(filter, next) ? null : next);
+                }}
+                onClear={() => setFilter(null)}
+              />
+            </>
           )}
         </div>
         {filter && (
           <ChartPane filter={filter} flight={chart.flight} edges={chart.edges} nameOf={nameOf} />
         )}
       </div>
+      <SignalLists
+        chart={chart}
+        className="comms-chart-lists"
+        pick={(next) => navigate(commsHrefFor(next, chart.flight))}
+      />
     </section>
   );
 }

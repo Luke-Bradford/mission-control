@@ -33,7 +33,7 @@ describe("the wake-left alert", () => {
       "Europe/London",
     );
     expect(text).toBe(
-      "FLIGHT was woken at 14:30 about 6 things and left them undecided after two tries: 3 pull requests waiting for a next step, 1 free seat, 1 question waiting for an answer, 1 signal from the crew.",
+      "FLIGHT was woken at 14:30 about 6 things and left them undecided; it will not be woken again for them: 3 pull requests waiting for a next step, 1 free seat, 1 question waiting for an answer, 1 signal from the crew.",
     );
     expectPlain(text);
   });
@@ -57,7 +57,7 @@ describe("the wake-left alert", () => {
   it("uses the singular for one", () => {
     const text = leftWakeText([reason("t", "repo#3")], AT, "Europe/London");
     expect(text).toBe(
-      "FLIGHT was woken at 14:30 about 1 thing and left it undecided after two tries: 1 ticket ready to start.",
+      "FLIGHT was woken at 14:30 about 1 thing and left it undecided; it will not be woken again for them: 1 ticket ready to start.",
     );
   });
 });

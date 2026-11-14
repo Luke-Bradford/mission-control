@@ -2,7 +2,12 @@ import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { MAX_LINE_BYTES, MAX_READ_BYTES, offsetSince, readNewLines } from "../src/tail.ts";
+import {
+  MAX_LINE_BYTES,
+  MAX_READ_BYTES,
+  offsetSince,
+  readNewLines,
+} from "../src/transcript/tail.ts";
 
 let dir: string;
 beforeEach(() => {

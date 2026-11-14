@@ -18,7 +18,7 @@ import {
   workSummary,
 } from "@mc/core";
 import { cleanText } from "./clean.ts";
-import { codexPlan, codexTool, transcriptVendor } from "./codex-transcript.ts";
+import { codexPlan, codexTool, transcriptVendor } from "./transcript/codex-transcript.ts";
 import { str } from "./util.ts";
 
 export interface TranscriptFacts {

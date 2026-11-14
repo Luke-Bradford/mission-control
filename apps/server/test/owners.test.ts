@@ -308,4 +308,19 @@ describe("Needs-you items clear themselves", () => {
     store.replacePullRequests("shop-app", [pr({ state: "closed" })], 0);
     expect(texts()).toEqual([]);
   });
+
+  it("a chatter note is FLIGHT's, never the operator's (#1510); with no FLIGHT seat it stays theirs", () => {
+    store.raiseNote({
+      key: "chatter:shop-app#42:GUIDO-1:RETRO-1",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: "shop-app",
+      text: "GUIDO-1 and RETRO-1 exceeded 6 rounds on shop-app#42.",
+      at: NOW - MIN,
+    });
+    const key = "note:chatter:shop-app#42:GUIDO-1:RETRO-1";
+    expect(owners(crewWith(["GUIDO-1", "FLIGHT-1"]))[key]).toBe("flight");
+    expect(owners()[key]).toBe("operator");
+  });
 });

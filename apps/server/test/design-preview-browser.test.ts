@@ -13,7 +13,7 @@ import { chromium } from "playwright-core";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { DesignPreviews } from "../src/design-previews.ts";
+import { DesignPreviews } from "../src/design-preview/previews.ts";
 import { Store } from "../src/store.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 

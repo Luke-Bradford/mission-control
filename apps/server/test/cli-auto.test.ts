@@ -23,8 +23,8 @@ import {
   realCliOps,
   type SeatCheck,
   settlePending,
-} from "../src/cli-auto.ts";
-import { CLI_RETRY_MS, CliHold, type ExecFn } from "../src/cli-update.ts";
+} from "../src/cli/auto.ts";
+import { CLI_RETRY_MS, CliHold, type ExecFn } from "../src/cli/update.ts";
 import type { CcConfig } from "../src/config.ts";
 import { createScheduler } from "../src/scheduler.ts";
 import { Store } from "../src/store.ts";

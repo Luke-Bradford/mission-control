@@ -4,7 +4,7 @@ import {
   checkBriefDispatch,
   withinBriefDispatch,
   withoutBriefDispatch,
-} from "../src/brief-dispatch-context.ts";
+} from "../src/brief/dispatch-context.ts";
 
 it("does not leak a completed choice guard into a later background callback", async () => {
   let current = true,

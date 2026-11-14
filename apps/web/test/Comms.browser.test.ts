@@ -9,7 +9,7 @@ import {
   browserSession,
   describeRendered,
 } from "./browserRunner.ts";
-import { CONFIG, crewRow, NOW, seatRow } from "./fixtures.ts";
+import { boardItem, CONFIG, crewRow, NOW, REPOS, seatRow } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR ?? join(process.env.TMPDIR ?? "/tmp", "comms-shots");
@@ -138,8 +138,20 @@ const flightPage = {
   cursor: "comms:6",
   unread: 0,
 };
+// A busy Tickets list: 50 tickets with messages, some with long titles.
+const TALKED = Array.from({ length: 50 }, (_, i) => 3000 + i);
+// Every title is real-length, so the row-count checks test live-sized data, not "Ticket 3001".
+const ticketTitle = (n: number) =>
+  `Ticket ${n}: a long title like the board's real ones that runs well past the width of the left column and must clip to one line`;
 const flightApi = {
   ...api,
+  "/api/repos": REPOS,
+  "/api/boards/shop-app": TALKED.map((n) => boardItem({ issueNumber: n, title: ticketTitle(n) })),
+  "/api/boards/site-builder": [],
+  "/api/comms/ticket-counts": {
+    tickets: TALKED.map((n, i) => ({ ticket: `shop-app#${n}`, count: i + 1 })),
+    unassignedCount: 0,
+  },
   "/api/crew?shape=summary": {
     rows: [seatRow({ id: "flight-1", index: 0 }), ...seats],
     firstRunToday: null,
@@ -156,14 +168,20 @@ const flightApi = {
 };
 
 describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
-  it.each([1280, 1600, 1920])(
-    "shows no read error and keeps the agent rows apart at %i wide",
-    async (width) => {
+  it.each([
+    [1280, 1000],
+    [1600, 1000],
+    [1920, 1000],
+    [1600, 900],
+    [1600, 700],
+  ])(
+    "shows no read error and keeps the agent rows apart at %i x %i",
+    async (width, height) => {
       mkdirSync(SHOTS, { recursive: true });
       const page = await renderAt({
         page: "test/commsBrowser.html",
         width,
-        height: 1000,
+        height,
         search: "?at=/comms",
         api: flightApi,
       });
@@ -181,19 +199,97 @@ describeRendered("Comms FLIGHT ↔ CAPCOM, opened, rendered", () => {
         const next = rows[i + 1];
         if (next) expect(row.y + row.height).toBeLessThanOrEqual(next.y + 1);
       });
-      // The Decisions panel does not give up its room to the list: its empty-state line shows whole.
-      const decisions = await page.evaluate(() => {
-        const panel = document.querySelector(".comms-decisions")?.getBoundingClientRect();
-        const line = [...document.querySelectorAll(".comms-decisions *")]
-          .filter((el) => el.children.length === 0 && el.textContent?.includes("No decisions"))
-          .map((el) => el.getBoundingClientRect())[0];
-        return panel && line
-          ? { panelBottom: panel.bottom, lineTop: line.top, lineBottom: line.bottom }
+      // The Tickets panel keeps its room: its search box shows whole inside it, below the nav.
+      const tickets = await page.evaluate(() => {
+        const panel = document.querySelector(".comms-tickets")?.getBoundingClientRect();
+        const box = document.querySelector(".comms-ticket-search")?.getBoundingClientRect();
+        const nav = document.querySelector(".comms-nav")?.getBoundingClientRect();
+        return panel && box && nav
+          ? {
+              panelTop: panel.top,
+              panelBottom: panel.bottom,
+              panelLeft: panel.left,
+              panelRight: panel.right,
+              boxLeft: box.left,
+              boxRight: box.right,
+              boxTop: box.top,
+              boxBottom: box.bottom,
+              navBottom: nav.bottom,
+              boxWidth: box.width,
+            }
           : null;
       }, undefined);
-      expect(decisions).not.toBeNull();
-      expect(decisions?.lineBottom).toBeLessThanOrEqual((decisions?.panelBottom ?? 0) + 0.5);
-      await page.screenshot(join(SHOTS, `comms-flight-${width}.png`));
+      expect(tickets).not.toBeNull();
+      expect(tickets?.boxTop).toBeGreaterThanOrEqual((tickets?.panelTop ?? 0) - 0.5);
+      expect(tickets?.boxBottom).toBeLessThanOrEqual((tickets?.panelBottom ?? 0) + 0.5);
+      expect(tickets?.panelTop).toBeGreaterThanOrEqual((tickets?.navBottom ?? 0) - 0.5);
+      expect(tickets?.boxWidth).toBeGreaterThan(120);
+      // neither list spills past the column, and each keeps at least three rows whole
+      const shared = await page.evaluate(() => {
+        const left = document.querySelector(".comms-left")?.getBoundingClientRect();
+        const panel = document.querySelector(".comms-tickets")?.getBoundingClientRect();
+        const nav = document.querySelector(".comms-nav")?.getBoundingClientRect();
+        const list = document.querySelector(".comms-ticket-list")?.getBoundingClientRect();
+        const whole = (box: DOMRect | undefined, sel: string) =>
+          box
+            ? [...document.querySelectorAll(sel)].filter((e) => {
+                const r = e.getBoundingClientRect();
+                return r.top >= box.top - 0.5 && r.bottom <= box.bottom + 0.5;
+              }).length
+            : 0;
+        return {
+          ticketsInColumn: left && panel ? panel.bottom <= left.bottom + 0.5 : false,
+          ticketRows: whole(list, ".comms-ticket-list li"),
+          agentRows: whole(nav, ".comms-nav-row"),
+        };
+      }, undefined);
+      expect(shared.ticketsInColumn).toBe(true);
+      // one line per ticket, so a tall window shows at least five whole rows of real-length titles
+      expect(shared.ticketRows).toBeGreaterThanOrEqual(height >= 1000 ? 5 : 3);
+      const tallest = await page.evaluate(
+        () =>
+          Math.max(
+            ...[...document.querySelectorAll(".comms-ticket-list li")].map(
+              (li) => li.getBoundingClientRect().height,
+            ),
+          ),
+        undefined,
+      );
+      expect(tallest).toBeLessThanOrEqual(40);
+      // a title is wide enough to say which ticket it is, and on focus the whole of it shows
+      const titles = await page.evaluate(async () => {
+        const first = document.querySelector<HTMLElement>(".comms-ticket-open");
+        const title = first?.querySelector<HTMLElement>(".comms-ticket-title");
+        const width = title?.getBoundingClientRect().width ?? 0;
+        first?.focus();
+        await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+        return {
+          width,
+          clipped: title ? title.scrollWidth > title.clientWidth : true,
+        };
+      }, undefined);
+      if (width >= 1280) expect(titles.width).toBeGreaterThanOrEqual(160);
+      expect(titles.clipped).toBe(false);
+      expect(shared.agentRows).toBeGreaterThanOrEqual(3);
+      // the busy list shows rows, each with its message count, and no row runs past the panel
+      const listed = await page.evaluate(() => {
+        const panel = document.querySelector(".comms-tickets")?.getBoundingClientRect();
+        const items = [...document.querySelectorAll(".comms-ticket-list li")];
+        return {
+          rows: items.length,
+          counts: items.filter((li) => /\d+ messages?/.test(li.textContent ?? "")).length,
+          overflow: items.filter((li) =>
+            panel ? li.getBoundingClientRect().right > panel.right + 0.5 : true,
+          ).length,
+        };
+      }, undefined);
+      expect(listed.rows).toBeGreaterThan(5);
+      expect(listed.counts).toBe(listed.rows);
+      expect(listed.overflow).toBe(0);
+      // the box ends inside the panel on both sides, so its border and focus ring are not clipped
+      expect(tickets?.boxRight).toBeLessThanOrEqual((tickets?.panelRight ?? 0) - 0.5);
+      expect(tickets?.boxLeft).toBeGreaterThanOrEqual((tickets?.panelLeft ?? 0) + 0.5);
+      await page.screenshot(join(SHOTS, `comms-flight-${width}x${height}.png`));
       await page.close();
     },
     BROWSER_TEST_TIMEOUT_MS,

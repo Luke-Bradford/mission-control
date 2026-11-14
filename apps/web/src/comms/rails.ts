@@ -104,6 +104,24 @@ export function railLayout(
   return { w, h, cx, leftX, rightX, nameRoom, rowH, seats, headers, hubs: hubPoints };
 }
 
+/** Half the room a panel name gets, either side of its seat. */
+export const NAME_ROOM = 50;
+
+/** The name as drawn: cut to the panel's room, whole in the full-screen view. */
+export const shownName = (name: string, full: boolean): string =>
+  full ? name : fitName(name, NAME_ROOM * 2);
+
+/** Half the width of a seat's name drawn under its dot, never less than the dot's own ring. */
+export const nameHalf = (shown: string): number => Math.max(14, (shown.length * CHAR_PX) / 2 + 3);
+
+/** Where a seat's name sits, so wait marks keep off it. */
+export const nameRect = (p: Point, half: number): Rect => ({
+  x0: p.x - half,
+  x1: p.x + half,
+  y0: p.y + 10,
+  y1: p.y + 27,
+});
+
 /** A name cut to `px` of room, with an ellipsis; a name that fits is left whole. */
 export function fitName(name: string, px: number): string {
   const chars = Math.max(1, Math.floor((px - 14) / CHAR_PX));
@@ -162,7 +180,7 @@ export type WaitMarkInput = {
   width: number;
 };
 
-type Rect = { x0: number; y0: number; x1: number; y1: number };
+export type Rect = { x0: number; y0: number; x1: number; y1: number };
 const hit = (a: Rect, b: Rect) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
 /** How far along a link, from the asker, a mark may sit; tried in this order. */
 const SLIDE = [0.25, 0.35, 0.15, 0.45, 0.55, 0.65, 0.1, 0.75, 0.85];
@@ -176,6 +194,7 @@ export function placeWaitMarks(
   marks: readonly WaitMarkInput[],
   hubs: readonly Point[],
   dots: readonly Point[] = [],
+  blocks: readonly Rect[] = [],
 ): { placed: Map<string, Point>; dropped: string[] } {
   const taken: Rect[] = [
     ...hubs.map((h) => ({
@@ -186,6 +205,8 @@ export function placeWaitMarks(
     })),
     // A seat's dot, with its focus ring, is drawn over the links: keep marks off it.
     ...dots.map((d) => ({ x0: d.x - 10, x1: d.x + 10, y0: d.y - 10, y1: d.y + 10 })),
+    // Seat names are drawn under their dots: marks keep off those too.
+    ...blocks.map((b) => ({ x0: b.x0 - 2, x1: b.x1 + 2, y0: b.y0 - 2, y1: b.y1 + 2 })),
   ];
   const placed = new Map<string, Point>();
   const dropped: string[] = [];

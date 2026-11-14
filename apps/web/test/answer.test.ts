@@ -44,6 +44,11 @@ describe("flightText", () => {
     );
     expect(flightText("ask:7", "", "Use port 5180.")).toBe("Re: ask:7\n\nUse port 5180.");
   });
+  it("keeps the about on one line, so the item's conversation drops only the lead", () => {
+    expect(flightText("note:x", "Held.\n\nRun Update  later.", "Why?")).toBe(
+      "Re: note:x · Held. Run Update later.\n\nWhy?",
+    );
+  });
 });
 
 describe("askedQuestion", () => {

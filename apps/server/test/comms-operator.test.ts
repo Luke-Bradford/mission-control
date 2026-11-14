@@ -2,7 +2,7 @@ import type { Run } from "@mc/core";
 import { expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { commsInboxContext } from "../src/comms.ts";
+import { commsInboxContext } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../src/flight/operator-call.ts";
 import { Store } from "../src/store.ts";

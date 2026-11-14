@@ -1,7 +1,7 @@
 import { type AttentionBrief, type BriefAction, NEW_LOOP, OPERATOR_HEADER } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { type AppDeps, buildApp } from "../src/api.ts";
-import { bindCompleteBrief } from "../src/brief-prepare.ts";
+import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../src/flight/operator-call.ts";

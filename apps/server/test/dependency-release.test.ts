@@ -15,7 +15,7 @@ import type { CcConfig } from "../src/config.ts";
 import { blockedWork, observeWaits, releasedLines } from "../src/dependencies.ts";
 import { RELEASE_RETRY_MS, releaseDependents } from "../src/engine/dependencies.ts";
 import { flightState, flightView } from "../src/flight/state.ts";
-import type { Move } from "../src/github-board.ts";
+import type { Move } from "../src/github/board.ts";
 import { Store } from "../src/store.ts";
 
 const T0 = Date.parse("2026-10-30T10:00:00Z");

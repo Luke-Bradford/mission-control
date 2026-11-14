@@ -83,7 +83,7 @@ export const AWAY_UNSAFE_PATHS: readonly RegExp[] = [
   /(^|\/)(k8s|helm|charts)(\/|$)/i,
   /(^|\/)(alembic|ops)(\/|$)|(^|\/)db\/migrate\//i,
   // This repo's GitHub-write wiring is unsafe even when a repo omits hard rules.
-  /^apps\/server\/src\/(store|main|collectors\/github|github-board|claim|accounts)\.ts$/,
+  /^apps\/server\/src\/(store|main|collectors\/github|github\/board|claim|accounts\/accounts)\.ts$/,
   /^scripts\/(deploy|release|install|postinstall)[^/]*$/i,
 ];
 /** A spec document is documentation, never a test. Helpers alone are not test evidence. */

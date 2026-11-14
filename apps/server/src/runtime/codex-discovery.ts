@@ -1,4 +1,4 @@
-import { codexProfile } from "../account-bindings.ts";
+import { codexProfile } from "../accounts/bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import type { Store } from "../store.ts";

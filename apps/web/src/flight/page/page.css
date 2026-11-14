@@ -18,8 +18,9 @@
 .fp-title {
   flex: none;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--sp-4);
+  gap: var(--sp-3) var(--sp-4);
   min-height: var(--sp-5);
 }
 .fp-title h1 {
@@ -36,6 +37,13 @@
   min-height: var(--sp-5);
   min-width: var(--sp-5);
   vertical-align: middle;
+}
+.fp-records {
+  margin-left: auto;
+  min-width: var(--sp-5);
+  min-height: var(--sp-5);
+  line-height: var(--lh);
+  white-space: nowrap;
 }
 .fp-err {
   color: var(--crit);
@@ -173,11 +181,18 @@
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 4fr) minmax(0, 5fr) minmax(0, 4fr);
-  grid-template-rows: minmax(0, 1fr);
+  /* The row holding Doing now and Blockers keeps its heading, column head, two blocker rows and the
+     "more below" foot whatever the Watch list below it asks for. */
+  grid-template-rows: minmax(
+      calc(var(--fp-row) + var(--sp-6) * 4 + var(--sp-5) * 2 + var(--sp-1)),
+      1fr
+    );
   gap: var(--sp-3);
 }
 .fp-self-start {
   align-self: start;
+  /* Never taller than its grid row: past that its list scrolls, with a count of what is below. */
+  max-height: 100%;
 }
 .fp-watch .drow {
   padding: var(--sp-2) var(--sp-4);
@@ -193,6 +208,25 @@
   .fp-watch {
     grid-column: 1 / -1;
   }
+}
+/* Where the screen is short the Watch list is capped at its heading plus three rows' height and
+   scrolls inside, with a count of what is below; a tall screen shows whole rows. */
+@media (max-width: 1800px) and (max-height: 999px) {
+  .fp-watch {
+    max-height: calc(var(--fp-row) * 4);
+  }
+}
+/* A list the panel may cut short: it scrolls inside, and the foot counts what is below. */
+.fp-sl {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.fp-slbody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
 }
 @media (max-height: 800px) {
   .fp-watch .fp-note {
@@ -434,4 +468,114 @@
   flex-direction: column;
   gap: var(--sp-1);
   padding: var(--sp-4);
+}
+/* A line's age: a fixed right-hand column so the ages line up down the list. */
+.fp-age {
+  flex: none;
+  margin-left: auto;
+  font: var(--fs-s) / var(--lh-s) var(--mono);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Standing orders: one 40 px strip under the status band; the full list opens over the page. */
+.fp-orders {
+  flex: none;
+  position: relative;
+  overflow: visible;
+}
+.fp-ostrip {
+  height: var(--fp-row);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: 0 var(--sp-4);
+  min-width: 0;
+}
+.fp-ohead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--sans);
+  color: var(--fg);
+}
+.fp-ofirst {
+  flex: 1;
+  font-weight: 600;
+}
+.fp-meta {
+  flex: none;
+  color: var(--fg-2);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+  white-space: nowrap;
+}
+.fp-end {
+  flex: none;
+  display: inline-flex;
+  gap: var(--sp-2);
+}
+/* Over the page, not in its flow: opening the list moves nothing. */
+.fp-orderlist {
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: var(--sp-1);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  max-height: calc(var(--fp-row) * 5);
+  overflow: auto;
+}
+.fp-orderlist li {
+  align-items: flex-start;
+}
+.fp-ocol {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  align-items: flex-start;
+  overflow-wrap: anywhere;
+}
+.fp-ocol .fp-meta {
+  white-space: normal;
+}
+/* An order may be long: two lines show; Show all opens the rest. */
+.fp-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+/* Standing orders sit in the title block: on a row of their own, or, on a wide short screen, in the
+   title's own row so they cost the blockers no height. */
+.fp-title > .fp-orders {
+  flex: 1 0 100%;
+}
+@media (min-width: 1500px) and (max-height: 800px) {
+  .fp-title {
+    flex-wrap: nowrap;
+  }
+  .fp-title > .fp-orders {
+    flex: 1 1 0;
+    min-width: 0;
+    order: 1;
+  }
+  .fp-title > .fp-records {
+    order: 2;
+  }
+  .fp-title > .fp-q {
+    flex: 0 8 auto;
+    min-width: 0;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
 }

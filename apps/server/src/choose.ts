@@ -7,7 +7,7 @@ import {
   COMMS_OPEN_PREFIX,
   type CommsSenderKind,
 } from "@mc/core";
-import { sendComms } from "./comms.ts";
+import { sendComms } from "./comms/index.ts";
 import type { CcConfig } from "./config.ts";
 import { flightSeat } from "./flight/seat.ts";
 import { CREW_ERROR_KEY, NOTE_KEY } from "./hud.ts";

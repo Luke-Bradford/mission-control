@@ -2,6 +2,7 @@ import {
   type AttentionItem,
   type BoardItem,
   type CrewRow,
+  HUD_COLUMNS,
   type HudColumn,
   hudColumnOf,
   type PipelineCard,
@@ -122,9 +123,39 @@ export function firstBlocker(item: BoardItem): string | null {
 /** Columns for work not yet started: an open blocker moves a card out of these into Blocked. */
 const NOT_STARTED: readonly HudColumn[] = ["Backlog", "Refinement", "Ready"];
 
-/** The column a card sits in: its Status's, except that a ticket not yet started with an open blocker is Blocked. */
-export function cardColumn(item: BoardItem): HudColumn {
+/** The hub's Waiting group: tickets it holds with a reason and a condition that frees them, no seat. */
+export const WAITING_COLUMN = "Waiting";
+
+/** A Board column: a Status column, or the hub's Waiting group. */
+export type BoardColumn = HudColumn | typeof WAITING_COLUMN;
+
+/** Every Board column in order; Waiting sits right after Blocked. */
+export const BOARD_COLUMNS: readonly BoardColumn[] = HUD_COLUMNS.flatMap((c) =>
+  c === "Blocked" ? [c, WAITING_COLUMN] : [c],
+);
+
+/**
+ * `columns` with Waiting added after Blocked when some card waits, so the group shows only when
+ * the hub is holding a ticket.
+ */
+export function withWaiting(
+  columns: readonly BoardColumn[],
+  items: readonly BoardItem[],
+): readonly BoardColumn[] {
+  if (columns.includes(WAITING_COLUMN) || !items.some((i) => cardColumn(i) === WAITING_COLUMN))
+    return columns;
+  const at = columns.indexOf("Blocked");
+  const idx = at >= 0 ? at + 1 : columns.indexOf("Ready") >= 0 ? columns.indexOf("Ready") : 0;
+  return [...columns.slice(0, idx), WAITING_COLUMN, ...columns.slice(idx)];
+}
+
+/**
+ * The column a card sits in: the hub's Waiting for an open ticket it holds, else its Status's,
+ * except that a ticket not yet started with an open blocker is Blocked.
+ */
+export function cardColumn(item: BoardItem): BoardColumn {
   const col = hudColumnOf(item);
+  if (item.waiting && col !== "Done") return WAITING_COLUMN;
   return NOT_STARTED.includes(col) && firstBlocker(item) !== null ? "Blocked" : col;
 }
 

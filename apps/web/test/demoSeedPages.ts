@@ -40,6 +40,8 @@ export interface DemoTicket {
   stage: "ready" | "building" | "checks" | "review" | "merged";
   /** The seat working it, when one is. */
   seat: string | null;
+  /** The hub holds it: why, and what frees it. It has no seat. */
+  waiting?: { reason: string; freesWhen: string };
 }
 
 /** The pipeline's tickets: the seats' own work first, then what waits and what has shipped. */
@@ -55,7 +57,17 @@ export const DEMO_TICKETS: readonly DemoTicket[] = [
   { n: 109, title: "Localise the receipt email", stage: "building", seat: "dev-8" },
   { n: 110, title: "Reduce image weight on the home page", stage: "building", seat: "dev-10" },
   { n: 201, title: "Audit the coupon rules", stage: "ready", seat: null },
-  { n: 202, title: "Dark mode for the admin screens", stage: "ready", seat: null },
+  {
+    n: 202,
+    title: "Dark mode for the admin screens",
+    stage: "ready",
+    seat: null,
+    waiting: {
+      reason:
+        "The shared colour tokens are being renamed, so any screen built now would need redoing",
+      freesWhen: "shop-app#251 merges",
+    },
+  },
   { n: 251, title: "Remember the shipping choice", stage: "merged", seat: null },
   { n: 252, title: "Stop double-charging on retry", stage: "merged", seat: null },
   { n: 253, title: "Faster category filters", stage: "merged", seat: null },
@@ -118,6 +130,7 @@ export function boardItems(tickets: readonly DemoTicket[] = DEMO_TICKETS) {
               ? "in progress"
               : "review",
       closed: t.stage === "merged",
+      ...(t.waiting ? { waiting: { ...t.waiting, at: NOW - 2 * HOUR } } : {}),
       labels: [],
       priority: i % 3 === 0 ? "P0" : "P1",
       size: (["S", "M", "L"] as const)[i % 3] ?? "M",
@@ -693,7 +706,17 @@ function qaPrApi(tickets: readonly DemoTicket[]): Record<string, unknown> {
           .replaceAll('"mission-control"', `"${DEMO_REPO}"`)
           .replaceAll("mission-control/", `${DEMO_REPO}/`)
           .replaceAll("1011", String(pr.number));
-      out[own(path)] = JSON.parse(own(JSON.stringify(value)));
+      const read = JSON.parse(own(JSON.stringify(value)));
+      // QA's browser checks: the reviewer's before and after shots of the page the PR touches.
+      if (path.startsWith("/api/qa/uat/"))
+        read.screenshots = ["before", "after"].map((side) => ({
+          id: `${(pr.number % 16).toString(16)}${side === "before" ? "b" : "a"}`.padEnd(32, "e"),
+          label: `${side === "before" ? "Before" : "After"} · address form`,
+          width: 1920,
+          theme: "dark",
+          at: NOW - 30 * MIN,
+        }));
+      out[own(path)] = read;
     }
     out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}`] = { reports: [] };
     out[`/api/qa-reports?repoId=${DEMO_REPO}&prNumber=${pr.number}&headSha=${"a".repeat(40)}`] = {
@@ -908,6 +931,7 @@ export function demoPageAnswers(
     ...qaPrApi(tickets),
     ...ticketItems(tickets),
     "/api/qa/queue": qaQueue(tickets),
+    "/api/dependencies": [],
     "/api/audit?range=7d": auditView(),
     "/api/audit?range=24h": auditView(),
     "/api/audit?range=30d": auditView(),
@@ -972,6 +996,10 @@ export function prFlowView(tickets: readonly DemoTicket[] = DEMO_TICKETS): Fligh
 }
 
 /** What Mission Control knows of one ticket: the page for it, from the ticket's place in the pipeline. */
+/** A ticket's body: an outcome, a plan and a size, so its plan reads in Needs you. */
+const demoTicketBody = (title: string): string =>
+  `## Outcome\n${title}\n\n## Plan\n1. Add the change behind the existing component.\n### Detail\n- Keep the current behaviour above 720 pixels.\n- Cover both layouts in the component tests.\n\n## Size\nM\n`;
+
 export function ticketHistory(t: DemoTicket, at = NOW) {
   const merged = t.stage === "merged";
   const sha = "a".repeat(40);
@@ -988,7 +1016,7 @@ export function ticketHistory(t: DemoTicket, at = NOW) {
     labels: [],
     outcome: t.title,
     doneWhen: [],
-    body: t.title,
+    body: demoTicketBody(t.title),
     bodyTruncated: false,
     githubError: null,
     runs:

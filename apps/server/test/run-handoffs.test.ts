@@ -1,6 +1,6 @@
 import { handoffText, NEW_LOOP, type Run, wrapExternalText } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { inheritedHandoffLoop, publicHandoff, recordRunHandoff } from "../src/run-handoffs.ts";
+import { inheritedHandoffLoop, publicHandoff, recordRunHandoff } from "../src/run/handoffs.ts";
 import { Store } from "../src/store.ts";
 
 let store: Store;

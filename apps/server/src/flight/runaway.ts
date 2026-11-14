@@ -52,6 +52,7 @@ const BOOKKEEPING_TOOLS: ReadonlySet<string> = new Set([
   MC_TOOL_NAMES.updateBrief,
   MC_TOOL_NAMES.remember,
   MC_TOOL_NAMES.forget,
+  MC_TOOL_NAMES.attachMaterials,
 ]);
 
 /** Whether a call only reads: a read tool, or message_seat asked for the seat's focus. */
