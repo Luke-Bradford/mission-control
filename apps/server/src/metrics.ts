@@ -33,16 +33,16 @@ export function metricsView(store: Store, now: number, scope: MetricsScope): Met
     runs,
     prs,
     pipelineRepos: new Set(scope.pipelineRepoIds),
-    doneSince: midnight,
+    doneSince: now - MERGED_WINDOW_MS,
   });
 
   // Merged counts the crew sessions' repos; the observed loops' own repos are a separate figure.
   const crewRepos = new Set(scope.pipelineRepoIds);
-  const merged = { count: 0, loops: 0 };
+  // The crew's count is the pipeline's Done stage, so the figure and the cards cannot disagree.
+  const merged = { count: pipeline.find((p) => p.stage === "merged")?.count ?? 0, loops: 0 };
   for (const p of prs) {
     if (p.mergedAt === null || p.mergedAt <= now - MERGED_WINDOW_MS || p.mergedAt > now) continue;
-    if (crewRepos.has(p.repoId)) merged.count += 1;
-    else merged.loops += 1;
+    if (!crewRepos.has(p.repoId)) merged.loops += 1;
   }
 
   const cycles: number[] = [];

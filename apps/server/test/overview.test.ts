@@ -1,5 +1,5 @@
 import type { AttentionItem, BoardItem, PullRequestView, Run, RunDigest } from "@mc/core";
-import { CI_FAILED_EVENT_PREFIX, CI_PASSED_EVENT_PREFIX, NEW_LOOP, OWNER_OPERATOR } from "@mc/core";
+import { NEW_LOOP, OWNER_OPERATOR } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { metricsView } from "../src/metrics.ts";
 import { type OverviewScope, overviewSummary } from "../src/overview.ts";
@@ -142,10 +142,10 @@ it("returns zeros and nulls from an empty store", () => {
     tokensPerMin: { now: 0, series: Array(30).fill(0) },
     spendToday: { usd: 0, perHour: Array(14).fill(0), series: Array(30).fill(0) },
     inFlight: { count: 0, oldestAt: null, series: Array(30).fill(0) },
-    ciPassRate24h: { pct: null, runs: 0, redNow: 0, series: Array(30).fill(null) },
+    ciPassRate24h: { pct: null, runs: 0, cancelled: 0, redNow: 0, series: Array(30).fill(null) },
     needsYou: { count: 0, overHour: 0, series: Array(30).fill(0) },
   });
-  expect(result.pipeline).toHaveLength(6);
+  expect(result.pipeline).toHaveLength(7);
   expect(
     result.pipeline.every((s) => s.count === 0 && s.oldestAt === null && s.cards.length === 0),
   ).toBe(true);
@@ -187,6 +187,7 @@ it("assigns one card per stage, including set-aside review and merging precedenc
     ["review", 1, 4],
     ["merging", 1, 5],
     ["merged", 1, 6],
+    ["blocked", 0, undefined],
   ]);
   expect(result.pipeline[2]?.cards[0]).toMatchObject({ who: "seat", pr: 103, ci: ["fail"] });
   expect(result.kpis.inFlight).toEqual({
@@ -269,10 +270,10 @@ it("sums fleet token buckets and falls back to wall-time spend without attempt u
 
 it("counts CI outcomes in 24 hours, local-day merges and valid cycle times", () => {
   store.upsertRun(run(1));
-  store.addLoopEvent("pass", "run-1", `${CI_PASSED_EVENT_PREFIX}abc`, NOW - MIN);
-  store.addLoopEvent("fail", "run-1", `${CI_FAILED_EVENT_PREFIX}def`, NOW - HOUR);
-  store.addLoopEvent("old", "run-1", `${CI_FAILED_EVENT_PREFIX}ghi`, NOW - 25 * HOUR);
-  store.addLoopEvent("future", "run-1", `${CI_FAILED_EVENT_PREFIX}jkl`, NOW + MIN);
+  readHead(11, "abc", [ciCheck("SUCCESS", "passing")], NOW - MIN);
+  readHead(12, "def", [ciCheck("FAILURE", "failing")], NOW - HOUR);
+  readHead(13, "ghi", [ciCheck("FAILURE", "failing")], NOW - 25 * HOUR);
+  readHead(14, "jkl", [ciCheck("FAILURE", "failing")], NOW + MIN);
   const midnight = Date.parse("2026-10-16T23:00:00Z");
   store.replacePullRequests(
     "repo",
@@ -297,6 +298,7 @@ it("counts CI outcomes in 24 hours, local-day merges and valid cycle times", () 
   expect(summary().kpis.ciPassRate24h).toEqual({
     pct: 50,
     runs: 2,
+    cancelled: 0,
     redNow: 0,
     series: [...Array(29).fill(0), 50],
   });
@@ -363,7 +365,7 @@ it("counts the operator's whole inbox once per key, including acknowledgements, 
 it("uses the review column without a live run and excludes closed or out-of-scope cards", () => {
   store.replaceBoard("repo", [card(1, "In review"), card(2, "Ready", { closed: true })]);
   store.replaceBoard("other", [card(3, "Ready", { repoId: "other" })]);
-  expect(summary().pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0]);
+  expect(summary().pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0, 0]);
 });
 
 it("includes a live ticket before the board poll has collected its card", () => {
@@ -435,20 +437,19 @@ it("limits pipeline to crew repos while retaining other repo metrics", () => {
 it("retains parked runs in building or review according to their card", () => {
   store.replaceBoard("repo", [card(1), card(2, "In review")]);
   for (const n of [1, 2]) store.upsertRun(run(n, { loop: { ...NEW_LOOP, phase: "parked" } }));
-  expect(summary().pipeline.map((p) => p.count)).toEqual([0, 1, 0, 1, 0, 0]);
+  expect(summary().pipeline.map((p) => p.count)).toEqual([0, 1, 0, 1, 0, 0, 0]);
   expect(summary().kpis.inFlight.count).toBe(2);
 });
 
-it("counts flakes and parked CI failures but excludes unsuccessful rerun requests", () => {
-  store.upsertRun(run(1));
-  for (const [i, text] of [
-    "CI flaked on abc: passed on re-run",
-    "parked: CI failed 3 times",
-    "CI failed again on the re-run of abc",
-    "CI failed on abc; no run could be re-run",
-  ].entries())
-    store.addLoopEvent(`ci-${i}`, "run-1", text, NOW);
-  expect(summary().kpis.ciPassRate24h).toMatchObject({ pct: 0, runs: 3 });
+it("counts a head once however many of its checks failed, and a re-run that passed as passed", () => {
+  readHead(1, "abc", [ciCheck("FAILURE", "failing", "a"), ciCheck("FAILURE", "failing", "b")], NOW);
+  readHead(
+    2,
+    "def",
+    [ciCheck("FAILURE", "failing", "a", 1), ciCheck("SUCCESS", "passing", "a", 2)],
+    NOW,
+  );
+  expect(summary().kpis.ciPassRate24h).toMatchObject({ pct: 50, runs: 2 });
 });
 
 it("reads only open or recently merged PRs", () => {
@@ -481,8 +482,8 @@ it("includes an attempt at now in the current hour", () => {
 it("serves complete-minute KPI history with scoped run intervals and rolling outcomes", () => {
   store.upsertRun(run(1, { startedAt: END - 2 * MIN, endedAt: END - MIN, status: "ok" }));
   store.upsertRun(run(2, { repoId: "other", startedAt: END - 30 * MIN }));
-  store.addLoopEvent("pass", "run-1", `${CI_PASSED_EVENT_PREFIX}abc`, END - 2 * MIN);
-  store.addLoopEvent("fail", "run-1", `${CI_FAILED_EVENT_PREFIX}abc`, END - MIN);
+  readHead(11, "abc", [ciCheck("SUCCESS", "passing")], END - 2 * MIN);
+  readHead(12, "def", [ciCheck("FAILURE", "failing")], END - MIN);
   store.replaceFlow(
     "repo",
     [{ repoId: "repo", number: 1, size: null, startAt: END - 3 * MIN, doneAt: END - MIN }],
@@ -715,7 +716,7 @@ it("shows a rework card as building, with the review's round, blockers and its s
   reported("run-4", 104, SHA, 2, 3);
   store.addAgentEvent({ agentId: "seat", at: NOW - MIN, from: "idle", to: "running", text: "x" });
   const result = summary();
-  expect(result.pipeline.map((s) => s.count)).toEqual([0, 1, 0, 0, 0, 0]);
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 1, 0, 0, 0, 0, 0]);
   expect(result.pipeline[1]?.cards[0]).toMatchObject({
     ticket: 4,
     pr: 104,
@@ -735,7 +736,7 @@ it("keeps a card In review when its newest review is clean or its head has moved
   reported("run-4", 104, SHA, 1, 0);
   reported("run-5", 105, SHA, 1, 2);
   const result = summary();
-  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 2, 0, 0]);
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 2, 0, 0, 0]);
   expect(result.pipeline[3]?.cards.every((c) => c.rework === undefined)).toBe(true);
 });
 
@@ -762,7 +763,7 @@ it("a waived blocking review is not rework: the card stays In review", () => {
   store.replacePullRequests("repo", [pr(4, { headSha: SHA })], NOW);
   reported("run-4", 104, SHA, 1, 3);
   const result = summary();
-  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0]);
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0, 0]);
   expect(result.pipeline[3]?.cards[0]?.rework).toBeUndefined();
 });
 
@@ -812,7 +813,7 @@ it("a blocking review carried to a merged-in head is still rework", () => {
   store.replacePullRequests("repo", [pr(4, { headSha: NEW })], NOW);
   reported("run-4", 104, SHA, 1, 2);
   const result = summary();
-  expect(result.pipeline.map((s) => s.count)).toEqual([0, 1, 0, 0, 0, 0]);
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 1, 0, 0, 0, 0, 0]);
   expect(result.pipeline[1]?.cards[0]?.rework).toMatchObject({ blockers: 2 });
 });
 
@@ -822,7 +823,7 @@ it("a review of an earlier epoch is not rework for a resumed run", () => {
   store.replacePullRequests("repo", [pr(4, { headSha: SHA })], NOW);
   reported("run-4", 104, SHA, 1, 2);
   const result = summary();
-  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0]);
+  expect(result.pipeline.map((s) => s.count)).toEqual([0, 0, 0, 1, 0, 0, 0]);
   expect(result.pipeline[3]?.cards[0]?.rework).toBeUndefined();
 });
 
@@ -833,4 +834,124 @@ it("shows a replaced board's pipeline card on the next read", () => {
   const after = summary().pipeline.flatMap((stage) => stage.cards.map((c) => c.title));
   expect(after).not.toEqual(before);
   expect(after).toContain("Renamed");
+});
+
+const ciCheck = (
+  conclusion: string,
+  state: "passing" | "failing" | "pending",
+  name = "check",
+  attempt = 1,
+) => ({ name, kind: "check" as const, state, conclusion, attempt, url: null });
+const readHead = (n: number, sha: string, checks: ReturnType<typeof ciCheck>[], at: number) =>
+  store.upsertPullRequests("repo", [pr(n, { headSha: sha, checks })], at);
+
+it("counts the CI rate per finished head, leaves cancelled heads out and says so", () => {
+  readHead(1, "a1", [ciCheck("SUCCESS", "passing")], NOW - MIN);
+  readHead(
+    2,
+    "a2",
+    [ciCheck("SUCCESS", "passing"), ciCheck("SUCCESS", "passing", "lint")],
+    NOW - HOUR,
+  );
+  readHead(
+    3,
+    "a3",
+    [ciCheck("SUCCESS", "passing"), ciCheck("FAILURE", "failing", "lint")],
+    NOW - 2 * HOUR,
+  );
+  readHead(4, "a4", [ciCheck("CANCELLED", "failing")], NOW - 3 * HOUR);
+  // a failed first attempt that passed on re-run is a passed head
+  readHead(
+    5,
+    "a5",
+    [ciCheck("FAILURE", "failing", "check", 1), ciCheck("SUCCESS", "passing", "check", 2)],
+    NOW - 4 * HOUR,
+  );
+  // still running, and older than 24 hours: neither counts
+  readHead(6, "a6", [ciCheck("PENDING", "pending")], NOW - HOUR);
+  readHead(7, "a7", [ciCheck("FAILURE", "failing")], NOW - 25 * HOUR);
+  const ci = summary().kpis.ciPassRate24h;
+  expect(ci).toMatchObject({ runs: 4, cancelled: 1 });
+  expect(ci.pct).toBe(75);
+  expect(ci.series?.at(-1)).toBe(75);
+});
+
+it("reads the header counts from the same lists the cards come from", () => {
+  const tickets = Array.from({ length: 12 }, (_, i) => i + 1);
+  store.replaceBoard("repo", [
+    ...tickets.map((n) => card(n)),
+    ...tickets.map((n) => card(n + 100, "Done", { closed: true })),
+  ]);
+  for (const n of tickets) store.upsertRun(run(n));
+  store.replacePullRequests(
+    "repo",
+    [
+      ...tickets.map((n) => pr(n + 100, { state: "merged", mergedAt: NOW - n * MIN })),
+      // merged, linked to nothing: no card, so no count either
+      pr(900, { ticket: null, state: "merged", mergedAt: NOW - MIN }),
+      // merged before local midnight but inside 24 h
+      pr(901, { state: "merged", mergedAt: NOW - 23 * HOUR }),
+    ],
+    NOW,
+  );
+  const result = summary();
+  const stage = (name: string) => result.pipeline.find((p) => p.stage === name);
+  expect(stage("building")?.count).toBe(12);
+  expect(result.kpis.inFlight.count).toBe(12);
+  expect(stage("merged")?.count).toBe(13);
+  const metrics = metricsView(store, NOW, {
+    repoIds: ["repo"],
+    pipelineRepoIds: ["repo"],
+    timezone: "Europe/London",
+  });
+  expect(metrics.merged.count).toBe(stage("merged")?.count);
+  expect(metrics.inProgress.count).toBe(result.kpis.inFlight.count);
+});
+
+it("puts a Blocked ticket in the blocked stage with its reason, not in building", () => {
+  store.replaceBoard("repo", [
+    card(1, "Blocked"),
+    card(2, "Blocked", { blockedBy: [{ ref: "repo#9", closed: false }] }),
+    card(3, "Blocked"),
+    card(4, "In progress"),
+  ]);
+  store.upsertRun(
+    run(1, {
+      loop: {
+        ...NEW_LOOP,
+        phase: "parked",
+        parked: { kind: "ask", reason: "needs a key", ended: false },
+      },
+    }),
+  );
+  store.upsertRun(run(4));
+  const result = summary();
+  const blocked = result.pipeline.find((p) => p.stage === "blocked");
+  expect(blocked?.count).toBe(3);
+  expect(blocked?.cards.map((c) => [c.ticket, c.blockedReason])).toEqual([
+    [1, "needs a key"],
+    [3, "No reason recorded"],
+    [2, "Waiting on repo#9"],
+  ]);
+  expect(result.pipeline.find((p) => p.stage === "building")?.cards.map((c) => c.ticket)).toEqual([
+    4,
+  ]);
+  expect(result.kpis.inFlight.count).toBe(1);
+});
+
+it("marks a merged PR whose ticket is still open, and not one whose ticket closed", () => {
+  store.replaceBoard("repo", [card(1, "In progress"), card(2, "Done", { closed: true })]);
+  store.replacePullRequests(
+    "repo",
+    [
+      pr(1, { state: "merged", mergedAt: NOW - MIN }),
+      pr(2, { state: "merged", mergedAt: NOW - 2 * MIN }),
+    ],
+    NOW,
+  );
+  const merged = summary().pipeline.find((p) => p.stage === "merged");
+  expect(merged?.cards.map((c) => [c.ticket, c.ticketOpen ?? false])).toEqual([
+    [1, true],
+    [2, false],
+  ]);
 });
