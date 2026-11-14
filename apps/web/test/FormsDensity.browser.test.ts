@@ -5,13 +5,14 @@ import { join } from "node:path";
 import type { BoardItem, ConfigView, CrewChanges } from "@mc/core";
 import { expect, it } from "vitest";
 import { ACTIONS, RESOURCES } from "../src/data.ts";
+import { rosterApi } from "./agentRosterFixture.ts";
 import {
   BROWSER_TEST_TIMEOUT_MS,
   browserSession,
   describeRendered,
   type RenderedPage,
 } from "./browserRunner.ts";
-import { boardItem, CONFIG, CREW_CONFIG, METRICS_VIEW, REPOS } from "./fixtures.ts";
+import { boardItem, CONFIG, CREW_CONFIG, METRICS_VIEW, REPOS, seatRow } from "./fixtures.ts";
 import { TEMPLATES } from "./templateFixtures.ts";
 
 const { renderAt } = browserSession();
@@ -93,19 +94,6 @@ function world(kind: World) {
     [RESOURCES.crewSessions.path]: [],
     [RESOURCES.attention.path]: [],
     [RESOURCES.crew.path]: { rows: [], firstRunToday: null },
-    // the Agent page's Queue tab (F16)
-    [RESOURCES.focus("guido-1").path]: {
-      focus: "label:catalog",
-      effectiveFocus: "label:catalog",
-      focusInstructionId: null,
-    },
-    [RESOURCES.seatInstructions("guido-1").path]: {
-      active: [],
-      history: [],
-      effectiveFocus: "label:catalog",
-      focusInstructionId: null,
-    },
-    [RESOURCES.runs("guido-1").path]: [],
   };
 }
 
@@ -207,7 +195,11 @@ const FORMS = [
     id: "F16",
     form: 'form[aria-label="Focus for GUIDO-1"]',
     cap: 480,
-    steps: [["click", "Change"]],
+    // the real Agent page: the Setup tab of the side panel, where the form is narrowest
+    steps: [
+      ["css", '.seg[aria-label="Seat details"] button:last-child'],
+      ["css", ".queue-focus button"],
+    ],
   },
   {
     id: "F17",
@@ -226,7 +218,7 @@ const FORMS = [
 }[];
 type Form = (typeof FORMS)[number];
 const pageOf = (form: Form) =>
-  form.id === "F06" || form.id === "F16" || form.id === "F17"
+  form.id === "F06" || form.id === "F17"
     ? form.id
     : form.id === "F14"
       ? "loops"
@@ -324,7 +316,41 @@ interface RenderOpts {
   checkoutPasses?: boolean;
 }
 
+/** F16 is drawn in the real Agent page (shell, side panel and all), not on a page of its own. */
+const agentPage = () => {
+  const row = seatRow({ queue: [] });
+  return {
+    ...rosterApi([row]),
+    [RESOURCES.focus(row.id).path]: {
+      focus: "label:catalog",
+      effectiveFocus: "label:catalog",
+      focusInstructionId: null,
+    },
+    [RESOURCES.seatInstructions(row.id).path]: {
+      active: [],
+      history: [],
+      effectiveFocus: "label:catalog",
+      focusInstructionId: null,
+    },
+    [RESOURCES.runs(row.id).path]: [],
+  };
+};
+
 async function open(form: Form, o: RenderOpts) {
+  if (form.id === "F16") {
+    const page = await renderAt({
+      page: "test/agentV2Browser.html",
+      width: o.width,
+      height: o.height,
+      search: `?dock=folded&at=${encodeURIComponent("/agent/guido-1")}${o.state === "disconnected" ? "&state=disconnected" : ""}`,
+      colorScheme: o.colorScheme ?? "light",
+      api: agentPage(),
+    });
+    await page.box("#ahead");
+    await drive(page, form.steps);
+    await page.box(form.form);
+    return page;
+  }
   const query = new URLSearchParams({ form: pageOf(form) });
   if (o.state) query.set("state", o.state);
   const page = await renderAt({
@@ -361,6 +387,9 @@ async function expectDense(page: RenderedPage, form: Form, checkErrors = true) {
       controls: [
         ...root.querySelectorAll("input:not([type=checkbox]):not([type=radio]), select, textarea"),
       ].map((c) => c.getBoundingClientRect().height),
+      controlWidths: [
+        ...root.querySelectorAll("input:not([type=checkbox]):not([type=radio]), select, textarea"),
+      ].map((c) => c.getBoundingClientRect().width),
       formOverflow: root.scrollWidth - root.clientWidth,
       pageOverflow: doc.scrollWidth - doc.clientWidth,
     };
@@ -370,6 +399,9 @@ async function expectDense(page: RenderedPage, form: Form, checkErrors = true) {
   expect(measured.width).toBeGreaterThan(0);
   expect(measured.width).toBeLessThanOrEqual(form.cap + 1);
   for (const height of measured.controls) expect(Math.abs(height - 32)).toBeLessThan(0.5);
+  // the Focus form sits in the side panel's narrow column; it must still be a usable field
+  if (form.id === "F16")
+    for (const width of measured.controlWidths) expect(width).toBeGreaterThanOrEqual(240);
   expect(measured.formOverflow).toBeLessThanOrEqual(1);
   expect(measured.pageOverflow).toBeLessThanOrEqual(1);
   expect((await page.unclipped(`${form.form} .fgroup`)).every(Boolean)).toBe(true);
@@ -548,7 +580,7 @@ describeRendered("Setup repo and seat forms and the account switch, rendered", (
     F14: { steps: [["click", "Save template"]] },
     F15: { steps: [["click", "Add feed"]] },
     // the fixture refuses every write it does not list, so Save is answered with an explained 404
-    F16: { steps: [["click", "Save"]] },
+    F16: { steps: [["css", 'form[aria-label="Focus for GUIDO-1"] button[type=submit]']] },
     F17: { steps: [["click", "Save call sign"]] },
   };
   for (const form of FORMS) {
@@ -788,6 +820,9 @@ async function expectF13Dense(page: RenderedPage) {
       controls: [
         ...root.querySelectorAll("input:not([type=checkbox]):not([type=radio]), select, textarea"),
       ].map((c) => c.getBoundingClientRect().height),
+      controlWidths: [
+        ...root.querySelectorAll("input:not([type=checkbox]):not([type=radio]), select, textarea"),
+      ].map((c) => c.getBoundingClientRect().width),
       formOverflow: root.scrollWidth - root.clientWidth,
       pageOverflow: doc.scrollWidth - doc.clientWidth,
       options: labelsItems.length,

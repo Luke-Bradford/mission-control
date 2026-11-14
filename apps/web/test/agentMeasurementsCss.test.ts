@@ -22,3 +22,9 @@ it("holds the rename form to its row and wraps long call signs within narrow hea
   expect(rule(".rename-editor")).toContain("overflow-wrap: anywhere;");
   expect(rule(".idrow .big")).toContain("overflow-wrap: anywhere;");
 });
+
+it("gives the Setup tab's links, queue and instructions the whole list, not its narrow second column", () => {
+  expect(css).toMatch(
+    /\.setup-list \.setup-links,\s*\.setup-list \.setup-queue,\s*\.setup-list \.setup-instructions \{\s*grid-column: 1 \/ -1;/,
+  );
+});

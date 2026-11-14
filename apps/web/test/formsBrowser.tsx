@@ -11,7 +11,6 @@ import "../src/hud.css";
 import "../src/agent/Overview.css";
 import { createRoot } from "react-dom/client";
 import { AgentHeaderActions } from "../src/agent/Header.tsx";
-import { Queue } from "../src/agent/SideTabs.tsx";
 import { CrewPauseControl } from "../src/components/CrewPause.tsx";
 import { RESOURCES, streamStatus } from "../src/data.ts";
 import { Setup } from "../src/pages/Setup.tsx";
@@ -20,7 +19,7 @@ import { openAway } from "../src/shell/overlays.ts";
 import { NOW, seatRow } from "./fixtures.ts";
 
 // One harness for the repo, seat and account-switch forms: `?form=F06` and `F17` are the Agent page header
-// that holds Switch account and Rename; `F16` is the Queue tab that holds the Focus form; `loops` and `sources` are Setup's Loops and Sources tabs (the template
+// that holds Switch account and Rename; `loops` and `sources` are Setup's Loops and Sources tabs (the template
 // editor and the Teams feeds); anything else is Setup's Repos & seats tab. `?state=` is how the
 // data arrives: loading (never), error (refused), status-loading (accounts load, their login state does not) or
 // disconnected (the live stream is down). `pause` is the crew pause control and `away` the Away
@@ -39,12 +38,6 @@ const fixture = window.fetch.bind(window);
 window.fetch = (input, init) => {
   const path =
     typeof input === "string" ? input : input instanceof URL ? input.pathname : input.url;
-  // The runner answers by path alone, so a Focus save would read as the focus read and succeed:
-  // refuse that write here, with no effect.
-  if (init?.method === "POST" && path === RESOURCES.focus("guido-1").path)
-    return Promise.resolve(
-      new Response(JSON.stringify({ error: "Unknown selector: catalog." }), { status: 400 }),
-    );
   if (path === RESOURCES.accountStatus.path && state === "status-loading")
     return new Promise(() => {});
   if (path === RESOURCES.config.path) {
@@ -71,10 +64,6 @@ createRoot(root).render(
           </div>
         ) : params.get("form") === "away" ? (
           <AwayModal />
-        ) : params.get("form") === "F16" ? (
-          <section className="panel">
-            <Queue row={seatRow({ queue: [] })} />
-          </section>
         ) : params.get("form") === "F06" || params.get("form") === "F17" ? (
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <AgentHeaderActions
