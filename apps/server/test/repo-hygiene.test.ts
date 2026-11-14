@@ -5,7 +5,7 @@ import { strayFiles } from "../scripts/check-stray-files.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 
-describe("repo hygiene (PR 1752 sed backups; the 11 November proof-file policy)", () => {
+describe("repo hygiene (PRs 1752 and 1415; the 11 November proof-file policy)", () => {
   it("flags the sed backups a run/ move committed (PR 1752)", () => {
     const found = strayFiles([
       "apps/server/test/api.test.ts-E",
@@ -25,6 +25,15 @@ describe("repo hygiene (PR 1752 sed backups; the 11 November proof-file policy)"
       "docs/prototype/shot.png",
     ]);
     expect(found).toHaveLength(3);
+  });
+
+  it("flags proof logs of any extension, keeps .md (PR 1415)", () => {
+    const found = strayFiles([
+      "docs/evidence/operator-briefs-1389/logs/34d-affected.log.gz",
+      "docs/reviews/2026-11-09/x/run.log",
+      "docs/reviews/2026-11-09/x/README.md",
+    ]);
+    expect(found).toHaveLength(2);
   });
 
   it("finds none among the files tracked now", () => {

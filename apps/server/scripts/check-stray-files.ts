@@ -6,8 +6,8 @@ import { fileURLToPath } from "node:url";
 
 /** Editor and `sed -i` leftovers: `api.test.ts-E` is what macOS `sed -i -E` leaves behind. */
 const BACKUP_SUFFIX = /(?:-E|\.orig|\.bak|\.rej|~)$/;
-/** Screenshots and proof runs: the hub keeps them while a change waits, the repo does not (.gitignore). */
-const PROOF_FILE = /^docs\/(?:evidence|reviews)\/.+\.(?:png|jpe?g|webp|gif|json|ts)$/i;
+/** Screenshots and proof runs: the hub keeps them while a change waits, the repo does not. Mirrors .gitignore: everything under docs/evidence and docs/reviews except .md. */
+const PROOF_FILE = /^docs\/(?:evidence|reviews)\/.+(?<!\.md)$/i;
 const DOCS_IMAGE = /^docs\/.+\.(?:png|jpe?g|webp|gif)$/i;
 const IMAGE_HOMES = /^docs\/(?:prototype|mockups|design)\//;
 

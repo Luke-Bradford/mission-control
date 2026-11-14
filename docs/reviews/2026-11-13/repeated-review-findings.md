@@ -15,9 +15,9 @@ holds. Each commit was put in one class by its subject line (`git log` over each
 | Class | Commits | PRs | Heaviest PRs (commits of total), with ticket | Deterministic local check | Coverage today |
 |---|---|---|---|---|---|
 | Format or import order after a change | 46 | 32 | 1655 (7 of 20; ticket 1596), 1520 (4 of 8; 1503), 1486 (3 of 12; 1405) | `pnpm -s lint` (biome) | Covered by `lint`, which runs before a report. Style commits follow rework: the check was not rerun after the last edit. The push gate's exact-head rule (#1626, #1677) closes that. |
-| Reader comment, route reader or reader inventory | 13 | 8 | 1759 (5 of 12; 1667), 1415 (2 of 12; 1389) | `apps/server/test/routes.test.ts` | Covered, but runs in `test:related` only when routes change. |
+| Reader comment, route reader or reader inventory | 12 | 8 | 1759 (5 of 12; 1667), 1415 (1 of 12; 1389) | `apps/server/test/routes.test.ts` | Covered, but runs in `test:related` only when routes change. |
 | Stale link, path or line reference | 34 | 24 | 1759 (1667), 1601 (1581), 1690 (1686) | Partly: prototype link check (#1690); web token check | Partly. Doc path and line references still need a reader. |
-| Stray files committed (sed `-E` backups, screenshots, proof runs) | 1 | 1 | 1752 (1 of 3; ticket 1749) | **New:** `apps/server/scripts/check-stray-files.ts`, with `apps/server/test/repo-hygiene.test.ts` | Script and test added here. Not yet in a pre-report check: see gaps. |
+| Stray files committed (sed `-E` backups, screenshots, proof runs) | 2 | 2 | 1752 (1 of 3; ticket 1749), 1415 (1 of 12; ticket 1389) | **New:** `apps/server/scripts/check-stray-files.ts`, with `apps/server/test/repo-hygiene.test.ts` | Script and test added here. Not yet in a pre-report check: see gaps. |
 | Review fix, behaviour or contract (other) | 73 | 37 | 1655 (8 of 20; 1596), 1407 (6 of 14; 1397), 1490 (6 of 6; 1477), 1484 (6 of 8; 1419) | None. Needs judgement | Stays independent review work. |
 
 The four rows above the last are mechanical. They hold about 94 of the 630 commits. The last row
@@ -26,12 +26,15 @@ is the review's real work and is not touched.
 ## Reproduction of real findings
 
 - PR 1752 (ticket 1749), commit `6b116559`: six `*.test.ts-E` files, 23,221 lines, left by `sed -i -E`
-  in a move. The test's first case uses those names and fails on them. This class was seen once, so
-  the check is a cheap guard, not a repeated failure.
+  in a move. The test's first case uses those names and fails on them.
+- PR 1415 (ticket 1389), commit `6193c455`: 46 files of briefs proof logs (`*.log.gz`, manifest JSON) removed
+  from the branch. The test's third case uses those paths and fails on the earlier regex. Its subject also
+  names a reader, so it was first counted as a reader commit; it is now counted here only.
+  The class came up in two PRs, so the check answers a repeated failure.
 - PR 1761 (a `chore/` branch, no ticket) is the 11 November policy clean-up that removed committed
   screenshots and proof runs. It is not a review finding and is not counted in the table. The proof-file
   rule backs up `.gitignore` against `git add -f`; the second test case uses the paths that PR removed.
-- The third case runs the check over every tracked file; it passes today.
+- The last case runs the check over every tracked file; it passes today.
 - Failure output is the path plus the reason and the fix, one line per file. The script exits 1 on any.
 
 ## False positives and gaps
@@ -39,7 +42,7 @@ is the review's real work and is not touched.
 - The classes come from commit subjects, so a commit titled "format" that also changed behaviour
   counts as format. The 46 is an upper bound for that class.
 - The check flags `-E`, `.orig`, `.bak`, `.rej` and `~` suffixes and proof files under
-  `docs/evidence` and `docs/reviews` (any `.png`, `.jpg`, `.json`, `.ts`; only `.md` is kept). It
+  `docs/evidence` and `docs/reviews` (every file except `.md`, as `.gitignore` does). It
   would flag a real file whose name ends in `-E`; none is tracked.
 - **Not yet before a report.** `test:related` picks tests by import graph, so the test alone never runs
   for a stray file. The script runs over `git ls-files` and needs one change outside the server area:
