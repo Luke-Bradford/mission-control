@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 import { ItemDiscussion } from "../src/comms/ItemDiscussion.tsx";
 import { hub } from "../src/data.ts";
+import type { FlightSeat } from "../src/flight/flightTypes.ts";
 import { stubFetch as fetchRoutes } from "./fetchStub.ts";
 import { readStyles } from "./styles.ts";
 
@@ -236,7 +237,14 @@ describe("the item's conversation from Comms", () => {
         ],
       },
     });
-    render(<ItemDiscussion itemKey="note:hub-update-held" live layout="page" />);
+    render(
+      <ItemDiscussion
+        itemKey="note:hub-update-held"
+        live
+        layout="page"
+        seat={{ id: "flight-1" } as FlightSeat}
+      />,
+    );
     await screen.findByText("who is asking for this?");
     expect(screen.queryByText(/Re: note:hub-update-held/)).toBeNull();
     await screen.findByText("Nobody is asking.");

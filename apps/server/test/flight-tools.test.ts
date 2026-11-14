@@ -6038,8 +6038,8 @@ describe("brief_item", () => {
     expect(store.briefs().has(key)).toBe(false);
   });
 
-  // A held Update is FLIGHT's own to run (the operator, 13 November), so it is not on this list.
   it.each([
+    ["hub-update-held", "blocked"],
     ["flag:r1:diagnostic", "flag"],
     ["flag:r1:floor:abc", "flag"],
     ["ratelimit:r1", "ratelimit"],

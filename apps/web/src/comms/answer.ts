@@ -47,17 +47,18 @@ export async function sendAnswer(
   item: AttentionItem,
   about: string,
   body: string,
+  /** False for a picked option: its receipt shows the pick, so the item's conversation does not. */
+  inThread = true,
 ): Promise<string | null> {
   if (target.to === "github") return null;
+  const thread = inThread ? { itemKey: item.key } : {};
   try {
     if (target.to === "seat") {
       // Name the question, so the answer reaches the run that asked it even if another run is on the seat now.
       const question = askedQuestion(item.key);
       await apiPost(
         ACTIONS.seatMessage(target.seatId),
-        question === null
-          ? { text: body, itemKey: item.key }
-          : { text: body, question, itemKey: item.key },
+        question === null ? { text: body, ...thread } : { text: body, question, ...thread },
       );
     } else {
       // FLIGHT may be stopped: the hub keeps the message and FLIGHT reads it when it starts.
@@ -65,7 +66,7 @@ export async function sendAnswer(
       // The item names the message, so it and every reply show in the item's conversation.
       await apiPost(ACTIONS.seatMessage(flight.id), {
         text: flightText(item.key, about, body),
-        itemKey: item.key,
+        ...thread,
       });
     }
     hub.refetch(RESOURCES.attention.path);

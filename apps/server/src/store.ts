@@ -1050,6 +1050,8 @@ export class Store {
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
     this.addColumn("comms", "item_key", "TEXT");
+    // A Needs-you item's conversation reads by item (itemThread).
+    this.db.exec("CREATE INDEX IF NOT EXISTS comms_item_key ON comms(item_key, at, id)");
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
     // Turns in a row that ended with no new commit; the resume line reads it.
@@ -7042,23 +7044,47 @@ export class Store {
     }, 0);
   }
 
-  /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
   /**
-   * One Needs-you item's conversation, oldest first: the messages sent from it and every reply in
-   * it (a reply inherits its message's item). The hub's own context lines and notices stay out.
+   * When a note's unbroken run began: a note raised again within a minute of clearing (a held
+   * Update re-raised as main moves) is the same item to the operator, so its conversation stays.
    */
-  itemThread(itemKey: string, limit = 100): CommsRow[] {
+  noteRunStart(noteKey: string, raisedAt: number): number {
+    const before = this.db.prepare(
+      `SELECT at FROM attention_episodes WHERE key = ? AND at < ? AND cleared_at >= ?
+       ORDER BY at DESC LIMIT 1`,
+    );
+    let start = raisedAt;
+    for (let i = 0; i < 1000; i++) {
+      const row = before.get(noteKey, start, start - 60_000) as { at: number } | undefined;
+      if (row === undefined) break;
+      start = row.at;
+    }
+    return start;
+  }
+
+  /**
+   * One Needs-you item's conversation since `since` (the item's own raising: a note key is reused),
+   * oldest first: the messages sent from it and every reply in it (a reply inherits its message's
+   * item). The hub's own context lines and notices stay out; a picked option carries its label.
+   */
+  itemThread(itemKey: string, since = 0, limit = 100): (CommsRow & { choice?: string })[] {
     const rows = this.db
       .prepare(
         `SELECT * FROM (
-           SELECT * FROM comms WHERE item_key = ? AND from_id != ? AND kind IS NULL
-           ORDER BY at DESC, id DESC LIMIT ?
+           SELECT c.*, q.label AS choice_label FROM comms c
+           LEFT JOIN question_choices q ON q.message_id = c.id
+           WHERE c.item_key = ? AND c.at >= ? AND c.from_id != ? AND c.kind IS NULL
+           ORDER BY c.at DESC, c.id DESC LIMIT ?
          ) ORDER BY at ASC, id ASC`,
       )
-      .all(itemKey, COMMS_MC, limit) as Row[];
-    return rows.map((row) => this.commsRow(row));
+      .all(itemKey, since, COMMS_MC, limit) as Row[];
+    return rows.map((r) => ({
+      ...this.commsRow(r),
+      ...(typeof r.choice_label === "string" ? { choice: r.choice_label } : {}),
+    }));
   }
 
+  /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
   openCommsItems(): (CommsRow & { label: "question" | "blocker" })[] {
     const rows = this.db
       .prepare(

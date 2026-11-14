@@ -9,7 +9,7 @@ Read this when `items` holds anything, or when you pass an item up or dismiss on
 - These reach the operator as themselves anyway:
   - approvals, decisions, flags and rate limits;
   - a missed stuck run or error (stalled, blocked, parked, waiting on the test lock, or errored);
-  - a held hub Update;
+  - a held hub Update, unless you are triaging with superuser powers: then it is yours, and you run Update in the next quiet gap;
   - a run parked on budget or account.
 - While you are stopped or not running, that item counts only the seats' questions and chatter; everything else goes to the operator directly.
 - It clears as you triage the items, or come back.

@@ -26,6 +26,8 @@ type ItemDiscussionProps = {
   /** FLIGHT's seat: undefined while it loads, null when none is configured. */
   seat?: FlightSeat | null;
   receipt?: Receipt;
+  /** When the operator's last typed reply on this item went through: the conversation opens. */
+  replied?: number;
   focus?: boolean;
   collapsed?: boolean;
   /** `page`: the whole conversation on the Needs you page, no fold, its log scrolling itself. */
@@ -37,21 +39,34 @@ export const FOLLOW_WITHIN = 40;
 
 /** The text of an item reply without the `Re: <key> · <title>` line that tells FLIGHT the item. */
 export function threadText(itemKey: string, text: string): string {
-  if (!text.startsWith(`Re: ${itemKey}`)) return text;
+  const lead = `Re: ${itemKey}`;
+  if (!text.startsWith(lead)) return text;
+  const next = text.slice(lead.length);
+  if (!next.startsWith(" ·") && !next.startsWith("\n")) return text;
   const cut = text.indexOf("\n\n");
   return cut === -1 ? "" : text.slice(cut + 2);
 }
 
+/** A seat's name as the operator reads it: FLIGHT by its role, any other seat by its id. */
+const seatName = (id: string, flightId: string | undefined): string =>
+  id === flightId ? "FLIGHT" : id.toUpperCase();
+
 /** Who a thread message is from, in the operator's words. */
-export function threadWho(m: Pick<ItemThreadMessage, "operator" | "from">): string {
-  if (m.operator || m.from === COMMS_CAPCOM) return "You";
-  return /^flight/i.test(m.from) ? "FLIGHT" : m.from.toUpperCase();
+export function threadWho(
+  m: Pick<ItemThreadMessage, "operator" | "from">,
+  flightId: string | undefined,
+): string {
+  return m.operator || m.from === COMMS_CAPCOM ? "You" : seatName(m.from, flightId);
 }
 
 /** Whether the operator's message reached its reader, and whether anyone answered. */
-export function threadState(m: ItemThreadMessage, tz: string | null): string | null {
+export function threadState(
+  m: ItemThreadMessage,
+  tz: string | null,
+  flightId: string | undefined,
+): string | null {
   if (!m.operator || m.state === undefined) return null;
-  const to = /^flight/i.test(m.to) ? "FLIGHT" : m.to.toUpperCase();
+  const to = seatName(m.to, flightId);
   if (m.state === "stored") return `Waiting for ${to} to pick it up`;
   const at = m.deliveredAt !== null && tz ? ` at ${hhmm(m.deliveredAt, tz)}` : "";
   return m.state === "answered" ? `${to} read it${at} and answered` : `${to} read it${at}`;
@@ -73,8 +88,8 @@ function Conversation(p: ItemDiscussionProps) {
   const initialFocus = useRef(p.focus);
   const details = useRef<HTMLDetailsElement>(null);
   useEffect(() => {
-    if (p.receipt && details.current) details.current.open = true;
-  }, [p.receipt]);
+    if ((p.receipt || p.replied) && details.current) details.current.open = true;
+  }, [p.receipt, p.replied]);
   return (
     <details ref={details} className="item-conversation" open={initialOpen.current}>
       <summary>Conversation with FLIGHT</summary>
@@ -201,9 +216,9 @@ function DiscussionBody({
             id: m.id,
             at: m.at,
             role: (m.operator ? "operator" : "flight") as "operator" | "flight",
-            who: threadWho(m),
-            text: threadText(itemKey, m.text),
-            state: threadState(m, tz),
+            who: threadWho(m, seat?.id),
+            text: m.choice !== undefined ? `You chose: ${m.choice}` : threadText(itemKey, m.text),
+            state: threadState(m, tz, seat?.id),
           })),
         ]
           .sort((a, b) => a.at - b.at)
@@ -226,7 +241,7 @@ function DiscussionBody({
                   <Expandable
                     lines={BRIEF_LINES}
                     foldAfter={BRIEF_FOLD_AFTER}
-                    of={`${m.role === "operator" ? "Your" : "FLIGHT’s"} message ${i + 1}`}
+                    of={`${m.role === "operator" ? "Your" : `${"who" in m ? m.who : "FLIGHT"}’s`} message ${i + 1}`}
                   >
                     {m.text}
                   </Expandable>
@@ -257,6 +272,11 @@ function DiscussionBody({
         {loadError && (
           <p className="note err" role="alert">
             {loadError.message}
+          </p>
+        )}
+        {thread.error && (
+          <p className="note err">
+            The messages sent from this item could not be loaded: {thread.error.message}
           </p>
         )}
         <button type="button" className="sm" onClick={refresh}>

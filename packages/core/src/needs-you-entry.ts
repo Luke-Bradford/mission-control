@@ -16,7 +16,8 @@ import type { AttentionItem } from "./types.ts";
 /** Item keys of the hub's own alerts. Their words are fixed in hub code, not written by an agent. */
 const ALERT_KEYS = new Set([
   FLIGHT_NOT_TRIAGING_KEY,
-  // apps/server/src/update.ts HUB_UPDATE_HELD_KEY; the server test pins the two together
+  // apps/server/src/update.ts HUB_UPDATE_HELD_KEY; the server test pins the two together. It is the
+  // operator's only while FLIGHT cannot run Update (stopped, or without superuser powers).
   "note:hub-update-held",
 ]);
 

@@ -268,6 +268,8 @@ export interface ItemThreadMessage {
   deliveredAt: number | null;
   /** The operator's message only: stored, taken by its recipient, or answered in this thread. */
   state?: "stored" | "delivered" | "answered";
+  /** The label of the option the operator picked, when this message is that pick. */
+  choice?: string;
 }
 export interface ItemThread {
   messages: ItemThreadMessage[];

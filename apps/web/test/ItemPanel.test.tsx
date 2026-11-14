@@ -362,7 +362,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
+        { text: "Use port 5174.", question: 7 },
       ]),
     );
     expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
@@ -400,7 +400,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-        { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
+        { text: "Use port 5174.", question: 7 },
       ]),
     );
     const input = within(panel()).getByLabelText("Ask FLIGHT about this") as HTMLInputElement;
@@ -530,7 +530,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     expect((await within(panel()).findByRole("alert")).textContent).toBe(refusal);
     expect(posts(fn, "/api/seats/mc-dev-1/message")).toEqual([
-      { text: "Use port 5174.", question: 7, itemKey: SEAT_Q.key },
+      { text: "Use port 5174.", question: 7 },
     ]);
   });
 
@@ -578,7 +578,7 @@ describe("ItemPanel, acting on an item", () => {
     fireEvent.click(await enabled("5174"));
     await waitFor(() =>
       expect(posts(fn, "/api/seats/flight-1/message")).toEqual([
-        { text: `Re: ${current.key} · ${current.text}\n\nUse port 5174.`, itemKey: current.key },
+        { text: `Re: ${current.key} · ${current.text}\n\nUse port 5174.` },
       ]),
     );
     expect(posts(fn, discussionPath(current.key))).toEqual([]);
