@@ -7,6 +7,7 @@ import {
   cardColumn,
   cardNeeds,
   cardPr,
+  type DependencyIndex,
   daysAgo,
   doneOutcome,
   firstBlocker,
@@ -14,6 +15,7 @@ import {
   sortCards,
   ticketRef,
   WAITING_COLUMN,
+  waitsOf,
 } from "./cards.ts";
 
 export type BriefCtx = {
@@ -22,6 +24,8 @@ export type BriefCtx = {
   crew: CrewRow[];
   /** The Needs-you set (`needsYouItems`): what waits on me comes only from it. */
   needsYou: NeedsYou;
+  /** The dependency read (`dependencyIndex`), so a ticket held by `Depends on` sorts as Blocked. */
+  deps?: DependencyIndex | null;
 };
 
 /** What a card's PR waits on me to do, from its Needs-you item; null when none asks. */
@@ -62,8 +66,8 @@ function section(
   return `${title}\n${lines.join("\n")}`;
 }
 
-const column = (items: BoardItem[], name: string): BoardItem[] =>
-  sortCards(items.filter((i) => cardColumn(i) === name));
+const column = (items: BoardItem[], name: string, ctx: BriefCtx): BoardItem[] =>
+  sortCards(items.filter((i) => cardColumn(i, ctx.deps) === name));
 
 const outcome = (i: BoardItem, ctx: BriefCtx): string => doneOutcome(i, ctx.prs).toLowerCase();
 
@@ -71,10 +75,12 @@ const outcome = (i: BoardItem, ctx: BriefCtx): string => doneOutcome(i, ctx.prs)
 const waitingNote = (i: BoardItem): string =>
   i.waiting ? `waiting: ${i.waiting.reason}; frees when ${i.waiting.freesWhen}` : "";
 
-const blockedBy = (i: BoardItem): string => {
-  const b = firstBlocker(i);
-  return b ? `blocked by ${b}` : "";
-};
+const blockedBy =
+  (ctx: BriefCtx) =>
+  (i: BoardItem): string => {
+    const b = firstBlocker(i) ?? waitsOf(i, ctx.deps)[0]?.ref;
+    return b ? `blocked by ${b}` : "";
+  };
 
 const join = (parts: string[]): string => parts.filter(Boolean).join("\n\n");
 
@@ -82,7 +88,7 @@ const join = (parts: string[]): string => parts.filter(Boolean).join("\n\n");
 export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: string): string {
   const mine = (i: BoardItem) => needsMe(i, ctx.needsYou, ctx.crew);
   const today = startOfLocalDay(now, tz);
-  const done = column(items, "Done").filter((i) => daysAgo(i.updatedAt, now, tz, today) <= 1);
+  const done = column(items, "Done", ctx).filter((i) => daysAgo(i.updatedAt, now, tz, today) <= 1);
   const held = new Set(["stalled", "blocked", "parked"]);
   const step = (i: BoardItem): string => {
     const a = cardAgent(i, ctx.crew);
@@ -90,31 +96,31 @@ export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: stri
     const label = a.loop ? loopStepLabel(a.loop) : `run #${a.run.seq}`;
     return `${label}${held.has(a.hudState) ? ", held up" : ""}`;
   };
-  const blocked = column(items, "Blocked");
-  const heldBack = column(items, WAITING_COLUMN);
+  const blocked = column(items, "Blocked", ctx);
+  const heldBack = column(items, WAITING_COLUMN, ctx);
   const waiting = sortCards(
     items.filter((i) => mine(i) && !blocked.includes(i) && !heldBack.includes(i)),
   );
   return join([
     `Standup, ${longDate(now, tz)} (${ctx.laneName})`,
-    section("Since yesterday", [...done, ...column(items, "Ready for QA")], ctx, (i) =>
-      cardColumn(i) === "Done" ? outcome(i, ctx) : "merged, with QA",
+    section("Since yesterday", [...done, ...column(items, "Ready for QA", ctx)], ctx, (i) =>
+      cardColumn(i, ctx.deps) === "Done" ? outcome(i, ctx) : "merged, with QA",
     ),
     section(
       "Today",
-      [...column(items, "In progress"), ...column(items, "Ready").slice(0, 2)],
+      [...column(items, "In progress", ctx), ...column(items, "Ready", ctx).slice(0, 2)],
       ctx,
-      (i) => (cardColumn(i) === "In progress" ? step(i) : "up next"),
+      (i) => (cardColumn(i, ctx.deps) === "In progress" ? step(i) : "up next"),
     ),
     section("Blocked or waiting on me", [...blocked, ...heldBack, ...waiting], ctx, (i) => {
-      if (cardColumn(i) === "Blocked") return blockedBy(i);
-      if (cardColumn(i) === WAITING_COLUMN) return waitingNote(i);
+      if (cardColumn(i, ctx.deps) === "Blocked") return blockedBy(ctx)(i);
+      if (cardColumn(i, ctx.deps) === WAITING_COLUMN) return waitingNote(i);
       const action = prWait(i, ctx);
       return action ? `I need to ${action}` : "waiting on me";
     }),
     section(
       "In review",
-      column(items, "In review").filter((i) => !mine(i)),
+      column(items, "In review", ctx).filter((i) => !mine(i)),
       ctx,
       () => "PR open",
     ),
@@ -133,18 +139,18 @@ export function weekly(
     `Update: ${ctx.laneName}, last ${days} days`,
     section(
       "Done",
-      column(items, "Done"),
+      column(items, "Done", ctx),
       ctx,
       (i) => `${outcome(i, ctx)} ${agoWords(daysAgo(i.updatedAt, now, tz, today))}`,
     ),
-    section("Ready for QA", column(items, "Ready for QA"), ctx),
-    section("In review", column(items, "In review"), ctx, (i) => {
+    section("Ready for QA", column(items, "Ready for QA", ctx), ctx),
+    section("In review", column(items, "In review", ctx), ctx, (i) => {
       const action = prWait(i, ctx);
       return action ? `waiting for me to ${action}` : "PR open";
     }),
-    section("In progress", column(items, "In progress"), ctx),
-    section("Blocked", column(items, "Blocked"), ctx, blockedBy),
-    section("Waiting", column(items, WAITING_COLUMN), ctx, waitingNote),
-    section("Coming up next", column(items, "Ready"), ctx, (i) => i.priority ?? ""),
+    section("In progress", column(items, "In progress", ctx), ctx),
+    section("Blocked", column(items, "Blocked", ctx), ctx, blockedBy(ctx)),
+    section("Waiting", column(items, WAITING_COLUMN, ctx), ctx, waitingNote),
+    section("Coming up next", column(items, "Ready", ctx), ctx, (i) => i.priority ?? ""),
   ]);
 }

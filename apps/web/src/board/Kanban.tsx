@@ -20,13 +20,16 @@ import {
   cardQueue,
   cardReviewer,
   cardStep,
+  cardWaitChip,
   cardYou,
+  type DependencyIndex,
   daysAgo,
   doneOutcome,
   reworkLabel,
   sortCards,
   statusOutOfDateTitle,
   ticketRef,
+  unblocksCount,
   WAITING_COLUMN,
   withWaiting,
 } from "./cards.ts";
@@ -59,7 +62,15 @@ interface CardCtx {
   rework: ReadonlyMap<string, CardRework>;
   /** The PR flow's rows per `repo#pr`: the stage and owner the chip names. */
   flow: ReadonlyMap<string, FlightPrFlowRow>;
+  /** The dependency read; null until it loads. */
+  deps: DependencyIndex | null;
+  /** The repos the app tracks: a ref in any other is text, not a link. */
+  tracked: ReadonlySet<string>;
+  /** The stage a ref names on the board (a ticket's column, a PR's state); null when unknown. */
+  stageOf: (ref: string, repoId: string) => string | null;
 }
+
+const NO_TRACKED: ReadonlySet<string> = new Set();
 
 /**
  * Everything one card shows, in one place: `Card` takes only these values and is memoised on them,
@@ -81,6 +92,15 @@ function cardProps(item: BoardItem, col: BoardColumn, ctx: CardCtx): CardProps {
   const facts = ctx.rework.get(ticketRef(item));
   return {
     item,
+    column: col,
+    waitChip: col === "Done" ? null : cardWaitChip(item, ctx.deps, ctx.stageOf, ctx.tracked),
+    unblocks:
+      col === "Done"
+        ? 0
+        : unblocksCount(ctx.deps, item.repoId, [
+            ticketRef(item),
+            ...(pr ? [`PR ${pr.number}`] : []),
+          ]),
     showRepo: ctx.showRepo,
     agent,
     step: agent ? cardStep(agent) : null,
@@ -124,6 +144,8 @@ export function Kanban({
   todayStart,
   rework = NO_REWORK,
   flow = NO_FLOW,
+  deps = null,
+  tracked = NO_TRACKED,
   columns: columnsProp = HUD_COLUMNS,
   notIn,
   metrics = {},
@@ -142,6 +164,10 @@ export function Kanban({
   rework?: ReadonlyMap<string, CardRework>;
   /** The PR flow's rows per `repo#pr` (`flowByPr`). */
   flow?: ReadonlyMap<string, FlightPrFlowRow>;
+  /** The dependency read's index (`dependencyIndex`); null or absent until it loads. */
+  deps?: DependencyIndex | null;
+  /** The repos the app tracks (`Waits on` links only into these). */
+  tracked?: ReadonlySet<string>;
   /** The columns to draw, in order; default all eight. */
   columns?: readonly BoardColumn[];
   /** Per column, the repo ids that lack it (Together layout): shown as `not in {ids}`. */
@@ -160,7 +186,21 @@ export function Kanban({
     }
     return m;
   }, [prs]);
+  const stageOf = (ref: string, repoId: string): string | null => {
+    const pr = /^(?:(\S+) )?PR (\d+)$/.exec(ref);
+    if (pr) {
+      const found = prs.find((p) => p.repoId === (pr[1] ?? repoId) && p.number === Number(pr[2]));
+      if (!found) return null;
+      if (found.state !== "open") return found.state === "merged" ? "Merged" : "Closed";
+      return found.uat ? "Ready for QA" : "In review";
+    }
+    const found = items.find((i) => ticketRef(i) === ref);
+    return found ? cardColumn(found, deps) : null;
+  };
   const ctx: CardCtx = {
+    deps,
+    tracked,
+    stageOf,
     showRepo,
     prsByTicket,
     crew,
@@ -171,13 +211,13 @@ export function Kanban({
     rework,
     flow,
   };
-  const columns = withWaiting(columnsProp, items);
+  const columns = withWaiting(columnsProp, items, deps);
   const phone = usePhone();
   const uid = useId();
   const [picked, setPicked] = useState<BoardColumn | null>(null);
   const [doneExpanded, setDoneExpanded] = useState(false);
   const lists = new Map(
-    columns.map((col) => [col, sortCards(items.filter((i) => cardColumn(i) === col))]),
+    columns.map((col) => [col, sortCards(items.filter((i) => cardColumn(i, deps) === col))]),
   );
   // At phone width one column is open: the one tapped, else the first with cards.
   const filled = columns.filter((c) => (lists.get(c)?.length ?? 0) > 0);

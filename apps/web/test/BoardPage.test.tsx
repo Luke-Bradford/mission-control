@@ -1074,6 +1074,58 @@ describe("cards", () => {
     expect(within(c).getByRole("link", { name: "shop-app #2" })).toBeTruthy();
   });
 
+  it("a Ready ticket with an open Depends on sits in Blocked with its Waits on chip", async () => {
+    const chain = {
+      repoId: "shop-app",
+      root: {
+        ref: "shop-app#2",
+        title: null,
+        edge: null,
+        waitedMs: null,
+        alsoWaitsOn: [],
+        children: [
+          {
+            ref: "shop-app#8",
+            title: null,
+            edge: "depends",
+            waitedMs: 3 * 3_600_000,
+            alsoWaitsOn: ["PR 9"],
+            children: [],
+          },
+        ],
+      },
+      state: "moving",
+      reason: "",
+      owner: "retro-1",
+      seatId: null,
+      longestWaitMs: null,
+      frees: ["shop-app#8"],
+      stillWaiting: [],
+    };
+    stub({
+      shopApp: [
+        todo(8, { status: "Todo", state: "planned", after: { issues: [2], prs: [] } }),
+        todo(2, { status: "In Progress", state: "in progress" }),
+      ],
+      extra: { "/api/dependencies": [chain] },
+    });
+    const { container } = await open();
+    const c = (await waitFor(() => {
+      const found = card(container, "shop-app#8");
+      expect(found?.querySelector("[data-chip=waits]")).toBeTruthy();
+      return found;
+    })) as HTMLElement;
+    expect((c.closest(".kcol") as HTMLElement).querySelector(".kh")?.textContent).toMatch(
+      /^Blocked/,
+    );
+    expect(c.querySelector("[data-chip=waits]")?.textContent).toBe(
+      "Waits on shop-app#2 · In progress · 3h +1",
+    );
+    expect(within(c).queryByText(/^Blocked:/)).toBeNull();
+    const root = card(container, "shop-app#2") as HTMLElement;
+    expect(root.querySelector("[data-chip=unblocks]")?.textContent).toBe("Unblocks 1");
+  });
+
   it("a Ready ticket whose blockers are closed stays in Ready", async () => {
     stub({
       shopApp: [

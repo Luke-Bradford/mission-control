@@ -9,6 +9,7 @@ import {
 } from "@mc/core";
 import { type MouseEvent, memo } from "react";
 import { seatStatus } from "../crew.ts";
+import { NO_START } from "../flight/chains.ts";
 import { AgentTag } from "../hud/AgentTag.tsx";
 import { Lamp } from "../hud/Lamp.tsx";
 import { Pill, PillButton } from "../hud/Pill.tsx";
@@ -28,11 +29,14 @@ import {
   NOT_QUEUED,
   ticketRef,
   WAITING_COLUMN,
+  type WaitChip,
 } from "./cards.ts";
 
 /** Tests count card renders through this (#26 A1); null outside tests. */
 export const cardRenderProbe: { onRender: ((ref: string) => void) | null } = { onRender: null };
 
+/** FLIGHT's Blocked chains panel: where `+n` and `Unblocks n` lead. */
+const CHAINS_HREF = "/flight#chainsP";
 const MAX_LABELS = 3;
 const MILESTONE_SPLIT = " — ";
 /** Columns where a card should have a PR already. */
@@ -104,6 +108,12 @@ export interface CardProps {
   checkingSeat?: string;
   checkingSince?: number;
   checkReason?: string | null;
+  /** The column the card sits in (`cardColumn` with the dependency read); worked out from the item when absent. */
+  column?: BoardColumn;
+  /** The "Waits on" chip from the dependency read; null when none. */
+  waitChip?: WaitChip | null;
+  /** The "Unblocks n" chip's count: what merging this card's work frees; 0 for none. */
+  unblocks?: number;
   /** Something on this card waits on you. */
   mine: boolean;
   unacked: boolean;
@@ -134,6 +144,9 @@ function sameProps(a: CardProps, b: CardProps): boolean {
  */
 export const Card = memo(function Card({
   item,
+  column,
+  waitChip = null,
+  unblocks = 0,
   showRepo,
   agent,
   step,
@@ -154,9 +167,10 @@ export const Card = memo(function Card({
   rework = null,
 }: CardProps) {
   cardRenderProbe.onRender?.(ticketRef(item));
-  const col = cardColumn(item);
+  const col = column ?? cardColumn(item);
   const worked = !mine && (agent?.hudState === "running" || reviewer?.hudState === "running");
-  const blocker = col === "Done" ? null : firstBlocker(item);
+  // the chip says what the card waits on; GitHub's blocked-by line stays until the read has it
+  const blocker = col === "Done" || waitChip ? null : firstBlocker(item);
   // Always the ticket: the seat on the card may not be working it. The ticket page shows who is.
   const to = ticketPath(item.repoId, item.issueNumber);
   const trace = agent?.loop && agent.run ? tracePath(agent.id, agent.run.id) : null;
@@ -281,6 +295,42 @@ export const Card = memo(function Card({
       <span key="stale" className="xs warn-t" title={statusOutOfDate}>
         {STATUS_OUT_OF_DATE}
       </span>
+    ),
+    waitChip && (
+      <span key="waits" className="kdep waits" data-chip="waits">
+        Waits on{" "}
+        {waitChip.unread ? (
+          <span>{`${waitChip.ref} not read yet`}</span>
+        ) : waitChip.href ? (
+          <a href={waitChip.href} onClick={(e) => followLink(e, waitChip.href as string)}>
+            {waitChip.ref}
+          </a>
+        ) : (
+          <span>{waitChip.ref}</span>
+        )}
+        {waitChip.stage && ` · ${waitChip.stage}`}
+        {" · "}
+        {waitChip.wait === "—" ? <span title={NO_START}>—</span> : waitChip.wait}
+        {waitChip.more > 0 && (
+          <>
+            {" "}
+            <a
+              href={CHAINS_HREF}
+              aria-label={`${waitChip.more} more waits, in Blocked chains`}
+              onClick={(e) => followLink(e, CHAINS_HREF)}
+            >{`+${waitChip.more}`}</a>
+          </>
+        )}
+      </span>
+    ),
+    col !== "Done" && unblocks > 0 && (
+      <a
+        key="unblocks"
+        className="kdep unblocks"
+        data-chip="unblocks"
+        href={CHAINS_HREF}
+        onClick={(e) => followLink(e, CHAINS_HREF)}
+      >{`Unblocks ${unblocks}`}</a>
     ),
     blocker && (
       <span key="blocked" className="xs warn-t">

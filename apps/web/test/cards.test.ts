@@ -1,6 +1,8 @@
 import {
   type AttentionItem,
+  type ChainNode,
   type CrewRow,
+  type DependencyChain,
   OWNER_CONTROLLER,
   OWNER_FLIGHT,
   type PrCheck,
@@ -17,9 +19,11 @@ import {
   cardQueue,
   cardReviewer,
   cardStep,
+  cardWaitChip,
   cardYou,
   checksText,
   daysAgo,
+  dependencyIndex,
   doneOutcome,
   NOT_QUEUED,
   needsMe,
@@ -30,6 +34,7 @@ import {
   sortCards,
   statusOutOfDateTitle,
   ticketRef,
+  unblocksCount,
   waitingText,
 } from "../src/board/cards.ts";
 import { boardItem, crewRow, HOUR, item, itemWithoutOwner, NOW } from "./fixtures.ts";
@@ -434,5 +439,78 @@ describe("reworkLabel", () => {
     expect(reworkLabel(facts, { ready: true, onTicket: false, pr: null })).toBe(
       "Reviewed · 1 blocker",
     );
+  });
+});
+
+describe("dependency chips", () => {
+  const node = (ref: string, over: Partial<ChainNode> = {}): ChainNode => ({
+    ref,
+    title: null,
+    edge: "depends",
+    waitedMs: 3 * HOUR + 5 * 60_000,
+    alsoWaitsOn: [],
+    children: [],
+    ...over,
+  });
+  const chain = (root: ChainNode, over: Partial<DependencyChain> = {}): DependencyChain => ({
+    repoId: "shop-app",
+    root,
+    state: "moving",
+    reason: "",
+    owner: "retro-1",
+    seatId: null,
+    longestWaitMs: null,
+    frees: [],
+    stillWaiting: [],
+    ...over,
+  });
+  const ready = { status: "Todo", state: "planned" } as const;
+  const stage = (ref: string) => (ref === "PR 9" ? "In review" : null);
+  const tracked = new Set(["shop-app"]);
+  const dependent = node("shop-app#5", { alsoWaitsOn: ["PR 11", "shop-app#2"] });
+  const index = dependencyIndex([
+    chain(node("PR 9", { edge: null, children: [dependent] }), { frees: ["shop-app#5"] }),
+  ]);
+
+  it("names the first wait with its stage and how long, and counts the rest", () => {
+    const chip = cardWaitChip(boardItem({ ...ready, issueNumber: 5 }), index, stage, tracked);
+    expect(chip).toMatchObject({
+      ref: "PR 9",
+      href: "/qa?repo=shop-app&pr=9",
+      stage: "In review",
+      wait: "3h 5m",
+      more: 2,
+    });
+  });
+  it("shows no chip for a card nothing waits on, or before the read loads", () => {
+    expect(cardWaitChip(boardItem({ issueNumber: 6 }), index, stage, tracked)).toBeNull();
+    expect(cardWaitChip(boardItem({ issueNumber: 5 }), null, stage, tracked)).toBeNull();
+  });
+  it("an unwatched start time is a dash, an untracked repo's ref is text", () => {
+    const idx = dependencyIndex([
+      chain(node("other#1", { edge: null, children: [node("shop-app#5", { waitedMs: null })] })),
+    ]);
+    const chip = cardWaitChip(boardItem({ issueNumber: 5 }), idx, stage, tracked);
+    expect(chip).toMatchObject({ ref: "other#1", href: null, stage: null, wait: "—" });
+  });
+  it("an unread PR says so", () => {
+    const idx = dependencyIndex([
+      chain(node("PR 40", { edge: null, children: [node("shop-app#5")] }), { state: "unknown" }),
+    ]);
+    expect(cardWaitChip(boardItem({ issueNumber: 5 }), idx, stage, tracked)?.unread).toBe(true);
+  });
+  it("a Ready ticket with a Depends on line and an open wait is in Blocked", () => {
+    const b = boardItem({ ...ready, issueNumber: 5, after: { issues: [2], prs: [] } });
+    expect(cardColumn(b, index)).toBe("Blocked");
+    expect(cardColumn(b)).toBe("Ready");
+  });
+  it("a ticket with no Depends on line, or no open wait, stays put", () => {
+    expect(cardColumn(boardItem({ ...ready, issueNumber: 5 }), index)).toBe("Ready");
+    const closed = boardItem({ ...ready, issueNumber: 6, after: { issues: [2], prs: [] } });
+    expect(cardColumn(closed, index)).toBe("Ready");
+  });
+  it("a root's card counts what merging frees; a Done card has none", () => {
+    expect(unblocksCount(index, "shop-app", ["shop-app#9", "PR 9"])).toBe(1);
+    expect(unblocksCount(index, "shop-app", ["shop-app#3"])).toBe(0);
   });
 });

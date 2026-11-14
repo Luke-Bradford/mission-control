@@ -355,3 +355,37 @@
   gap: var(--sp-1);
   overflow-wrap: anywhere;
 }
+
+/* "Waits on" and "Unblocks n": one chip each, wrapping within the card, never clipped. */
+.kcard .overlay .kdep {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
+  min-height: 24px;
+  max-width: 100%;
+  border: 1px solid var(--line-2);
+  border-radius: 3px;
+  font: 12px / 16px var(--mono);
+  overflow-wrap: anywhere;
+}
+
+.kcard .overlay .kdep.waits {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+
+.kcard .overlay .kdep.unblocks {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.kcard .overlay .kdep a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
+}

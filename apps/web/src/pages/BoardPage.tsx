@@ -3,6 +3,7 @@ import {
   type BoardItem,
   type ConfigView,
   type Crew,
+  type DependencyChain,
   DONE_RANGES,
   type FlightPrFlowView,
   HUD_COLUMNS,
@@ -36,7 +37,9 @@ import {
   cardAgent,
   cardColumn,
   cardQueue,
+  type DependencyIndex,
   daysAgo,
+  dependencyIndex,
   needsMe,
   pipelineStage,
   priorityRank,
@@ -84,10 +87,14 @@ function prioritySource(p: RepoProfile): string {
 }
 
 /** The columns a repo's statuses reach, plus Backlog and Done (and any column its cards sit in). */
-function columnsOf(p: RepoProfile | undefined, items: BoardItem[]): BoardColumn[] {
+function columnsOf(
+  p: RepoProfile | undefined,
+  items: BoardItem[],
+  deps: DependencyIndex | null,
+): BoardColumn[] {
   if (!p) return [...HUD_COLUMNS];
   const reached = new Set<BoardColumn>(["Backlog", "Done", ...p.statuses.map((s) => s.column)]);
-  for (const i of items) reached.add(cardColumn(i));
+  for (const i of items) reached.add(cardColumn(i, deps));
   return BOARD_COLUMNS.filter((c) => reached.has(c));
 }
 
@@ -111,6 +118,10 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const boards = useResources<BoardItem[]>(repos.map((r) => RESOURCES.boards(r.id)));
   const prRes = useResources<PullRequestView[]>(repos.map((r) => RESOURCES.prs(r.id)));
   const crewRes = useResource<Crew>(RESOURCES.crew);
+  // What waits on what: chips on the cards, and a ticket with a Depends on line sits in Blocked.
+  const depsRes = useResource<DependencyChain[]>(RESOURCES.dependencies);
+  const deps = useMemo(() => dependencyIndex(depsRes.data), [depsRes.data]);
+  const tracked = useMemo(() => new Set(repos.map((r) => r.id)), [repos]);
   // Each PR chip names the stage and owner the FLIGHT page's PR flow does.
   const flowRes = useResource<FlightPrFlowView>(RESOURCES.prFlow);
   const flow = useMemo(() => flowByPr(flowRes.data), [flowRes.data]);
@@ -202,7 +213,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
   const inLane = all.filter((i) => {
     if (!lane.match(i)) return false;
     // The Overview's Done lane opens here with its own 24-hour window.
-    if (cardColumn(i) === "Done" && stage !== "merged")
+    if (cardColumn(i, deps) === "Done" && stage !== "merged")
       return daysAgo(i.updatedAt, now, tz, todayStart) <= doneDays;
     const agent = cardAgent(i, rows);
     return agent === null || inView(agent);
@@ -245,7 +256,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     document.getElementById(BOARD_VIEW_BUTTON_ID)?.focus();
   };
 
-  const ctx = { laneName: lane.name, prs, crew: rows, needsYou };
+  const ctx = { laneName: lane.name, prs, crew: rows, needsYou, deps };
   const briefText = (mode: "standup" | "weekly"): string => {
     if (tz === null) return "Loading…";
     return mode === "standup"
@@ -262,6 +273,8 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
     return m;
   }, [profiles, repos]);
   const kanbanProps = {
+    deps,
+    tracked,
     prs,
     crew: rows,
     needsYou,
@@ -386,7 +399,7 @@ export function BoardPage({ repoId, ticket }: { repoId: string | null; ticket: n
                   <Kanban
                     items={own}
                     showRepo={false}
-                    columns={columnsOf(p, own)}
+                    columns={columnsOf(p, own, deps)}
                     id={`kanban-${r.id}`}
                     {...kanbanProps}
                   />

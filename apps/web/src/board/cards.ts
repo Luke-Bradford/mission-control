@@ -1,7 +1,9 @@
 import {
   type AttentionItem,
   type BoardItem,
+  type ChainNode,
   type CrewRow,
+  type DependencyChain,
   HUD_COLUMNS,
   type HudColumn,
   hudColumnOf,
@@ -17,7 +19,9 @@ import {
 } from "@mc/core";
 import { type NeedsYou, sortNeeds, youAction } from "../attention.ts";
 import { BUILD_LOOP_TEMPLATE, LOOP_PHASE_LABEL, type SeatStatus, seatStatus } from "../crew.ts";
+import { waitText } from "../flight/chains.ts";
 import { plural } from "../fmt.ts";
+import { ticketPath } from "../router.ts";
 
 const DAY = 86_400_000;
 
@@ -141,22 +145,138 @@ export const BOARD_COLUMNS: readonly BoardColumn[] = HUD_COLUMNS.flatMap((c) =>
 export function withWaiting(
   columns: readonly BoardColumn[],
   items: readonly BoardItem[],
+  index?: DependencyIndex | null,
 ): readonly BoardColumn[] {
-  if (columns.includes(WAITING_COLUMN) || !items.some((i) => cardColumn(i) === WAITING_COLUMN))
+  if (
+    columns.includes(WAITING_COLUMN) ||
+    !items.some((i) => cardColumn(i, index) === WAITING_COLUMN)
+  )
     return columns;
   const at = columns.indexOf("Blocked");
   const idx = at >= 0 ? at + 1 : columns.indexOf("Ready") >= 0 ? columns.indexOf("Ready") : 0;
   return [...columns.slice(0, idx), WAITING_COLUMN, ...columns.slice(idx)];
 }
 
+/** One thing a ticket waits on, as the dependency read gives it. */
+export interface WaitOn {
+  ref: string;
+  repoId: string;
+  waitedMs: number | null;
+  /** A PR the hub never read: its ref is not a fact, so the chip says so. */
+  unread: boolean;
+}
+
+/** What `GET /api/dependencies` says, by work: what each waits on, and the chains' roots. */
+export interface DependencyIndex {
+  waitsOn: ReadonlyMap<string, WaitOn[]>;
+  roots: ReadonlyMap<string, DependencyChain>;
+}
+
+const depKey = (repoId: string, ref: string): string => `${repoId}|${ref}`;
+
+/** The index of a dependency read; null while it has not loaded (or failed), so no card moves. */
+export function dependencyIndex(
+  chains: readonly DependencyChain[] | null | undefined,
+): DependencyIndex | null {
+  if (!chains) return null;
+  const waitsOn = new Map<string, WaitOn[]>();
+  const roots = new Map<string, DependencyChain>();
+  for (const chain of chains) {
+    roots.set(depKey(chain.repoId, chain.root.ref), chain);
+    const add = (ref: string, w: WaitOn) => {
+      const key = depKey(chain.repoId, ref);
+      const list = waitsOn.get(key) ?? [];
+      // a dependent under two parents or two roots names each blocker once
+      if (!list.some((x) => x.ref === w.ref)) list.push(w);
+      waitsOn.set(key, list);
+    };
+    const walk = (parent: ChainNode) => {
+      for (const kid of parent.children) {
+        const unread =
+          parent === chain.root && /^PR \d+$/.test(parent.ref) && chain.state === "unknown";
+        add(kid.ref, { ref: parent.ref, repoId: chain.repoId, waitedMs: kid.waitedMs, unread });
+        for (const other of kid.alsoWaitsOn)
+          add(kid.ref, { ref: other, repoId: chain.repoId, waitedMs: kid.waitedMs, unread: false });
+        walk(kid);
+      }
+    };
+    walk(chain.root);
+  }
+  return { waitsOn, roots };
+}
+
+/** What a card's ticket waits on: its own `repo#n` in the read. */
+export const waitsOf = (item: BoardItem, index: DependencyIndex | null | undefined): WaitOn[] =>
+  index?.waitsOn.get(depKey(item.repoId, ticketRef(item))) ?? [];
+
+/** What merging the card's work frees: the root named by the ticket or by its PR (`refs`). */
+export function unblocksCount(
+  index: DependencyIndex | null | undefined,
+  repoId: string,
+  refs: readonly string[],
+): number {
+  for (const ref of refs) {
+    const chain = index?.roots.get(depKey(repoId, ref));
+    if (chain) return chain.frees.length;
+  }
+  return 0;
+}
+
+/** The "Waits on" chip: the first wait spelled out, `more` the rest. */
+export interface WaitChip {
+  ref: string;
+  /** The ticket page or QA page; null for an untracked repo (text). */
+  href: string | null;
+  unread: boolean;
+  /** The blocker's stage, where the board can tell; null when it cannot. */
+  stage: string | null;
+  wait: string;
+  more: number;
+}
+
+const enc = encodeURIComponent;
+
+/** `repo#n` or `PR n` (`repo PR n`) as the app links it; null when the repo is not tracked. */
+function refHref(ref: string, repoId: string, tracked: ReadonlySet<string>): string | null {
+  const pr = /^(?:(\S+) )?PR (\d+)$/.exec(ref);
+  if (pr) {
+    const repo = pr[1] ?? repoId;
+    return tracked.has(repo) ? `/qa?repo=${enc(repo)}&pr=${pr[2]}` : null;
+  }
+  const tk = /^(.*[^#\s])#(\d+)$/.exec(ref);
+  return tk?.[1] && tracked.has(tk[1]) ? ticketPath(tk[1], Number(tk[2])) : null;
+}
+
+/** The card's "Waits on" chip; null when nothing it waits on is recorded, or the read has not loaded. */
+export function cardWaitChip(
+  item: BoardItem,
+  index: DependencyIndex | null | undefined,
+  stageOf: (ref: string, repoId: string) => string | null,
+  tracked: ReadonlySet<string>,
+): WaitChip | null {
+  const [first, ...rest] = waitsOf(item, index);
+  if (!first) return null;
+  return {
+    ref: first.ref,
+    href: first.unread ? null : refHref(first.ref, first.repoId, tracked),
+    unread: first.unread,
+    stage: stageOf(first.ref, first.repoId),
+    wait: waitText(first.waitedMs),
+    more: rest.length,
+  };
+}
+
 /**
  * The column a card sits in: the hub's Waiting for an open ticket it holds, else its Status's,
- * except that a ticket not yet started with an open blocker is Blocked.
+ * except that a ticket not yet started with an open blocker is Blocked. With the dependency read
+ * (`index`), one with a `Depends on` line and an open wait in the read is Blocked too.
  */
-export function cardColumn(item: BoardItem): BoardColumn {
+export function cardColumn(item: BoardItem, index?: DependencyIndex | null): BoardColumn {
   const col = hudColumnOf(item);
   if (item.waiting && col !== "Done") return WAITING_COLUMN;
-  return NOT_STARTED.includes(col) && firstBlocker(item) !== null ? "Blocked" : col;
+  if (!NOT_STARTED.includes(col)) return col;
+  const dependsOn = (item.after?.issues.length ?? 0) > 0 && waitsOf(item, index).length > 0;
+  return firstBlocker(item) !== null || dependsOn ? "Blocked" : col;
 }
 
 const HOUR = 3_600_000;
