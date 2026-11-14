@@ -2602,6 +2602,7 @@ button.quota-details {
 .plot-reading {
   display: flex;
   justify-content: space-between;
+  column-gap: var(--sp-2);
   line-height: var(--lh-s);
   color: var(--fg-2);
 }

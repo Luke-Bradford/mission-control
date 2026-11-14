@@ -207,11 +207,9 @@ describe("TokensPanel accounts", () => {
     await waitFor(() => expect(container.querySelectorAll(".hourbars")).toHaveLength(2));
     const claude = accountBlock(container, "claude-main");
     const codex = accountBlock(container, "codex-main");
-    expect(claude.querySelector(".plot-reading")?.textContent).toBe(
-      "last hour 2.0k tokpeak 1.5k tok/min",
-    );
+    expect(claude.querySelector(".plot-reading")?.textContent).toBe("1h 2.0k tokpeak 1.5k tok/min");
     expect(codex.querySelector(".plot-reading")?.textContent).toBe(
-      "last hour 90.0k tokpeak 90.0k tok/min",
+      "1h 90.0k tokpeak 90.0k tok/min",
     );
     expect(claude.querySelector(".hourbars svg")?.getAttribute("aria-label")).toBe(
       "claude-main: 2.0k tokens in the last hour, peak 1.5k a minute",

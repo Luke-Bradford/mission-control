@@ -168,7 +168,7 @@ function HourBars({
     <div className="hourbars">
       <div className="plot-reading s">
         <span title="Input and output tokens in the last hour, across runs">
-          last hour {kTokens(total)} tok
+          1h {kTokens(total)} tok
         </span>
         <span title="Most tokens in one minute of the last hour">peak {kTokens(peak)} tok/min</span>
       </div>

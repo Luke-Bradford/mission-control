@@ -158,9 +158,24 @@ describeRendered("Overview composition", () => {
             return hour && week ? [Math.abs(hour.bottom - week.bottom)] : [];
           },
         );
-        return { wrapped, gaps };
+        const rows = [...document.querySelectorAll<HTMLElement>("#tokensP .plot-reading")].map(
+          (row) => {
+            const edge = row.getBoundingClientRect().right;
+            const spans = [...row.children].map((el) => el.getBoundingClientRect());
+            return {
+              gap: (spans[1]?.left ?? Number.NaN) - (spans[0]?.right ?? Number.NaN),
+              over: (spans.at(-1)?.right ?? Number.NaN) - edge,
+            };
+          },
+        );
+        return { wrapped, gaps, rows };
       }, undefined);
       expect(m.wrapped).toBe(0);
+      expect(m.rows.length).toBeGreaterThan(0);
+      for (const row of m.rows) {
+        expect(row.gap).toBeGreaterThanOrEqual(8);
+        expect(row.over).toBeLessThanOrEqual(0.5);
+      }
       for (const gap of m.gaps) expect(gap).toBeLessThanOrEqual(2);
     },
     60_000,

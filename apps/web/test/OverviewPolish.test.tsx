@@ -154,7 +154,7 @@ describe("Overview polish", () => {
       ...container.querySelectorAll("#tokensP .plot-reading span, #tokensP .plot-axis span"),
     ]
       .map((el) => el.textContent ?? "")
-      .filter((text) => /^(?:last hour|peak|now) /.test(text));
+      .filter((text) => /^(?:1h|peak|now) /.test(text));
     expect(readings.length).toBeGreaterThan(0);
     for (const reading of readings) expect(reading).toContain("tok");
   });
