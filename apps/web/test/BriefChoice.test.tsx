@@ -413,27 +413,9 @@ describe("gone, labels and carry-over", () => {
   });
 });
 
-describe("a person ask with a bound brief", () => {
-  it("shows the complete fields and Accept posts the bound choice", async () => {
-    const options: BriefOption[] = [
-      {
-        id: "post-1",
-        label: "Reply politely",
-        answer: "Thanks!",
-        consequence: "Posts the reply on the issue as you.",
-        reversibility: { kind: "irreversible", detail: "A posted comment stays visible." },
-        action: { kind: "person-post", replyId: "r1" },
-      },
-      {
-        id: "handled",
-        label: "Mark handled",
-        answer: "Handled",
-        consequence: "Closes it here without replying.",
-        reversibility: { kind: "reversible", detail: "It can be reopened." },
-        action: { kind: "person-handled", how: "marked" },
-      },
-    ];
-    const base = boundBrief({ options, recommendedOptionId: "post-1" }, "Reply posted");
+describe("a person ask", () => {
+  it("keeps the reply card that shows the drafted text, and offers no bound Accept", async () => {
+    const base = boundBrief({}, "Reply posted");
     const person = item({
       key: "person:101",
       kind: "person",
@@ -445,30 +427,22 @@ describe("a person ask with a bound brief", () => {
         ...base,
         person: {
           source: { kind: "github", messageId: "1", revision: "v1" },
-          replies: [{ id: "r1", label: "Polite", text: "Thanks!" }],
+          replies: [{ id: "r1", label: "Polite", text: "Thanks for the report!" }],
         },
       },
     });
-    const path = "/api/attention/person%3A101/choice";
     const fn = stubFetch({
       "/api/attention": [person],
       "/api/escalations": [],
       "/api/flight": FLIGHT,
       "/api/notifications": { open: [], handledToday: [] },
-      [`POST ${path}`]: receipt({ optionId: "post-1", text: "Reply posted." }),
     });
     render(<ItemPanel />);
     act(() => openItem(person.key));
-    const button = await accept();
-    const p = within(panel());
-    expect(p.getByText("Product direction")).toBeTruthy();
-    expect(p.getByText("The preview stays down.")).toBeTruthy();
-    expect(p.getByText("Posts the reply on the issue as you.")).toBeTruthy();
-    expect(p.getByText("Not reversible", { exact: false })).toBeTruthy();
-    expect(p.queryByText("Suggested replies")).toBeNull();
-    fireEvent.click(button);
-    await waitFor(() => expect(posts(fn, path)).toHaveLength(1));
-    expect(posts(fn, path)[0]).toMatchObject({ optionId: "post-1" });
+    expect(await within(panel()).findByText("Thanks for the report!")).toBeTruthy();
+    expect(within(panel()).queryByRole("button", { name: /^Accept recommendation/ })).toBeNull();
+    expect(within(panel()).getByRole("button", { name: "Post on GitHub" })).toBeTruthy();
+    expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
   });
 });
 

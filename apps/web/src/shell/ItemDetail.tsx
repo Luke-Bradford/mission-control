@@ -236,8 +236,8 @@ export function ItemDetail({
       !holding &&
       !esc &&
       item.brief?.binding &&
-      item.brief.options.length > 0 &&
-      (item.brief.person ? item.kind === "person" : true),
+      !item.brief.person &&
+      item.brief.options.length > 0,
   );
   const briefBlock = (
     <div className="pb" id={`${p}Brief`}>
