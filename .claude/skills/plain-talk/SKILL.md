@@ -41,11 +41,9 @@ Write so the message makes sense by itself.
   - **title (the item's heading):** what the decision is about, in words: "Approve the new dependencies view on the
     Board", not "PR · You: review";
   - **context:** two or three sentences: what this is, why it comes up now, and what happens if
-    nothing is decided. When the question exists only because of a rule the operator set, say
-    that first: the rule in his words, when he set it, and what it is stopping now ("On 11
-    November you said parked tickets wait until the working list is done. The list's work is all
-    in CI, so two developers have been idle since 21:36."). Say what the waiting work is in
-    plain words. Say something waits on the operator only when it does;
+    nothing is decided. When the question exists only because of a rule the operator set, the
+    first sentence names that rule and its date. Name only a rule you can trace to the operator's
+    own words. Say work waits for the operator only when the operator's answer lets it continue;
   - **the question (`ask`):** one sentence ending in "?", at most 300 characters;
   - **options:** two to four, each a plain action and its consequence: "Approve: the crew builds
     it next; you can change it later.";
@@ -154,6 +152,20 @@ it and file the build tickets? Renders: /Users/.../previews/pr-1423-b21e1d6/."
 - Options: "Approve: the crew builds it next; you can change it later." "Change it: tell FLIGHT
   what to change, and it comes back to you."
 - Recommendation: "Approve. Review found no problems and the pictures match the design."
+
+**Before (a question that exists only because of the operator's own rule):** "May the idle
+server developers start the working list's Parked tickets now, highest priority first, Size S or
+M only?" The operator read it as a request to spend tokens: it never named the rule behind it.
+
+**After:**
+- Title: "Let idle developers start set-aside work while the current list waits"
+- Context: "On Wednesday 11 November you said set-aside work waits until the current list is
+  finished. That list now waits only on checks and reviews, so two developers sit idle since
+  Friday 21:36 UK. With no answer they stay idle until that work lands."
+- Question: "Should idle developers start the next set-aside work, a cheaper FLIGHT start-up?"
+- Options: "Yes: they start it now; you can stop it at any time." "No: they wait for the
+  current list."
+- Recommendation: "Yes. The start-up change lowers the cost of every FLIGHT wake."
 
 ## Sources
 
