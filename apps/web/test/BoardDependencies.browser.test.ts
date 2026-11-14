@@ -41,7 +41,7 @@ const items: BoardItem[] = [
     issueNumber: 10,
     title: "Fictional root ticket that holds up two others",
     status: "In review",
-    state: "in review",
+    state: "review",
   }),
   boardItem({
     issueNumber: 11,
