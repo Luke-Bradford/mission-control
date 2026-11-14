@@ -115,6 +115,51 @@ describe("Store", () => {
     expect(rows.get("empty")).toEqual([]);
   });
 
+  it("reads each CI job's p90 run time from the repo's merged PRs", () => {
+    const min = 60_000;
+    const run = (name: string, mins: number, over: object = {}) => ({
+      name,
+      kind: "check" as const,
+      state: "passing" as const,
+      conclusion: "SUCCESS",
+      attempt: 1,
+      url: null,
+      startedAt: 1_000,
+      completedAt: 1_000 + mins * min,
+      ...over,
+    });
+    const pr = (number: number, mins: number) => ({
+      repoId: "r",
+      number,
+      title: `PR ${number}`,
+      url: "u",
+      branch: `b${number}`,
+      ticket: null,
+      state: "merged" as const,
+      isDraft: false,
+      review: null,
+      ci: "passing" as const,
+      createdAt: 1,
+      updatedAt: 1,
+      mergedAt: number,
+      headSha: `sha${number}`,
+      mergeCommitSha: null,
+      mergeable: null,
+      author: "a",
+      assignees: [],
+      checks: [run("web", mins), run("lint", 2, { startedAt: undefined })],
+      closingIssues: [],
+    });
+    const minutes = [20, 22, 24, 25, 26, 27, 28, 29, 30, 40];
+    store.upsertPullRequests(
+      "r",
+      minutes.map((m, i) => pr(i + 1, m)),
+      1,
+    );
+    expect(store.ciCheckP90Ms("r")).toEqual({ web: 30 * min });
+    expect(store.ciCheckP90Ms("other")).toEqual({});
+  });
+
   it("reads a branch's newest PR as a number and a state only", () => {
     const pr = (number: number, branch: string, state: "open" | "closed" | "merged") => ({
       repoId: "r",
