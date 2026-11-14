@@ -55,6 +55,25 @@ describe("TokensPanel verdict", () => {
     expect(verdict(container, "claude-main")?.classList.contains("ok-t")).toBe(true);
   });
 
+  it("says Under-used, in neutral, when the week ends well under its alert line close to the reset", async () => {
+    const { container } = show([
+      week({ used: 40, projected: 59, stopForecast: null, resetAt: NOW + 30 * HOUR }),
+    ]);
+    await waitFor(() =>
+      expect(verdict(container, "claude-main")?.textContent).toBe(
+        "Under-used: about 41% will go unused",
+      ),
+    );
+    expect(verdict(container, "claude-main")?.classList.contains("ok-t")).toBe(false);
+  });
+
+  it("keeps On pace for the same projection while the reset is more than two days off", async () => {
+    const { container } = show([
+      week({ used: 20, projected: 59, stopForecast: null, resetAt: NOW + 4 * 24 * HOUR }),
+    ]);
+    await waitFor(() => expect(verdict(container, "claude-main")?.textContent).toBe("On pace"));
+  });
+
   it("says On pace when the forecast stop falls after the reset", async () => {
     const { container } = show([
       week({ used: 40, projected: 70, stopForecast: NOW + 40 * HOUR, resetAt: NOW + 30 * HOUR }),
@@ -261,7 +280,7 @@ describe("TokensPanel verdict: the hub's own rules", () => {
       lastOkAt: NOW,
     };
     const text = await verdict(
-      [week({ used: 10, projected: 20, stopForecast: null, sampledAt: NOW })],
+      [week({ used: 10, projected: 80, stopForecast: null, sampledAt: NOW })],
       { "/api/health": [healthy] },
     );
     expect(text).toBe("On pace");
