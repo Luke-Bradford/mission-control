@@ -45,7 +45,11 @@ import { createReviewPreviews } from "../src/preview/review.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
-import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
+import {
+  deliveredKey,
+  instructionEnvelope,
+  NO_DELIVERY,
+} from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { crewTokenPath } from "../src/store/crew-paths.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
@@ -73,6 +77,12 @@ import {
 } from "./supervisor-harness.ts";
 
 skipTestsIf(await blockedHere("crew-run"));
+
+/** The complete first message: delivery has stored its marker, so clear it before rebuilding. */
+const firstDelivery = (runId: string, text: string): string => {
+  store.setSetting(deliveredKey(runId), NO_DELIVERY);
+  return instructionEnvelope(store, FLIGHT, runId, true, text).text;
+};
 
 describe("questions and strays", () => {
   const stray = (path: string, agentId = "guido-1") => ({
@@ -505,7 +515,7 @@ describe("startWatch", () => {
     expect(settings.hooks.PreToolUse).toHaveLength(1);
     await until(() =>
       expect(userLines()).toEqual([
-        instructionEnvelope(store, FLIGHT, out.runId, true, BRIEF).text,
+        firstDelivery(out.runId, BRIEF),
       ]),
     );
   });
@@ -578,7 +588,7 @@ describe("startWatch", () => {
     const { runId } = await sup.startWatch("flight-1", { first: "X" });
     await until(() =>
       expect(userLines()).toEqual([
-        instructionEnvelope(store, FLIGHT, runId, true, `${BRIEF}\n\nX`).text,
+        firstDelivery(runId, `${BRIEF}\n\nX`),
       ]),
     );
   });
