@@ -328,12 +328,32 @@ describe("flightShellBreakerWrite", () => {
       false,
     );
   });
-  it.each(["wget https://example.test", "wget -O /outside/file https://example.test"])(
-    "still counts a wget that writes a file: %s",
-    (command) => {
-      expect(flightShellWrite(command)).toBe(true);
-    },
-  );
+  it.each([
+    "wget https://example.test",
+    "wget -O /outside/file https://example.test",
+    "wget --spider -O /outside/file https://example.test",
+    "wget --spider -o /outside/log https://example.test",
+    "wget -qO- -a /outside/log https://example.test",
+    "wget -qO- --save-cookies /outside/c https://example.test",
+    "wget -qO- --warc-file=/outside/w https://example.test",
+    "wget --spider -r https://example.test",
+  ])("still counts a wget that writes a file: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(true);
+    expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(
+      true,
+    );
+  });
+  it.each([
+    "wget -qO- --post-data=x https://api.github.com/repos/o/r/issues/1",
+    "wget -O - --method=DELETE https://api.github.com/x",
+    "wget --spider --method=DELETE https://api.github.com/x",
+    "wget -O - --body-file=b.json --method=PATCH https://api.github.com/x",
+  ])("counts a wget that sends: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(true);
+    expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(
+      true,
+    );
+  });
   it("counts a write through a symlink to an outside destination", () => {
     expect(
       flightShellBreakerWrite("touch linked/file", {

@@ -3459,6 +3459,9 @@ const SHELL_READERS = new Set([
 ]);
 const SHELL_GH_READS = new Set(["view", "list", "status", "diff", "checks", "search", "watch"]);
 
+/** The wget options that send a request body or set a method: a network write, as curl's -X and -d. */
+const WGET_SEND = /^--(?:post-data|post-file|method|body-data|body-file)(?:=|$)/;
+
 /** Explicit file destinations. Null is a read; an empty list is a write with unknown targets. */
 function shellWriteTargets(program: string, args: readonly string[]): string[] | null {
   const output = (short: string, long: string): string[] => {
@@ -3488,12 +3491,23 @@ function shellWriteTargets(program: string, args: readonly string[]): string[] |
     return files.length ? files : null;
   }
   if (program === "wget") {
-    // --spider fetches nothing to disk, and -O - sends the body to stdout: both are reads.
-    if (args.includes("--spider")) return null;
-    const paths = output("-O", "--output-document");
-    if (paths.length === 0) return [];
+    const paths = [
+      ...output("-O", "--output-document"),
+      ...output("-o", "--output-file"),
+      ...output("-a", "--append-output"),
+    ];
+    for (let n = 0; n < args.length; n++) {
+      const arg = args[n] ?? "";
+      const [flag, ...value] = arg.split("=");
+      if (flag === "--save-cookies" || flag === "--warc-file")
+        paths.push(value.length ? value.join("=") : (args[++n] ?? ""));
+    }
+    // A recursive fetch saves pages to disk to follow their links, even with --spider.
+    if (args.some((a) => /^--(?:recursive|mirror)$|^-[a-zA-Z]*[rm][a-zA-Z]*$/.test(a))) return [];
     const files = paths.filter((path) => path !== "-");
-    return files.length ? files : null;
+    if (files.length) return files;
+    // --spider fetches nothing to disk, and -O - sends the body to stdout: both are reads.
+    return args.includes("--spider") || paths.includes("-") ? null : [];
   }
   if (program === "sed" || program === "perl") {
     if (!args.some((arg) => /^-[a-zA-Z]*i|^--in-place(?:=|$)/.test(arg))) return null;
@@ -3593,8 +3607,11 @@ export function flightShellWrite(command: string): boolean {
       if (ghReadVerb(args)) continue;
       return true;
     }
-    // wget reaches here only when its targets are null: --spider or -O -, both reads.
-    if (program === "wget") continue;
+    // wget reaches here only when its targets are null: --spider or -O -, both reads unless it sends.
+    if (program === "wget") {
+      if (args.some((a) => WGET_SEND.test(a))) return true;
+      continue;
+    }
     if (program === "curl") {
       if (args.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
         return true;
@@ -3754,6 +3771,8 @@ export function flightShellBreakerWrite(
     } else if (program === "curl") {
       if (raw.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
         return true;
+    } else if (program === "wget") {
+      if (raw.some((a) => WGET_SEND.test(a))) return true;
     }
   }
   return false;
