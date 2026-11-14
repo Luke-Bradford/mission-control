@@ -26,6 +26,10 @@ const digest = (minuteTokens: [number, number][]): RunDigest => ({
   background: [],
   compactions: 0,
 });
+/** These tests name seats as their ids; the unnamed spelling is covered in OverviewPolish.test.tsx. */
+const named = (row: CrewRow): CrewRow =>
+  /^(flight|free-)/.test(row.id) ? row : { ...row, displayCallSign: row.displayCallSign ?? row.id };
+
 function stub(
   rows: CrewRow[],
   enabled = true,
@@ -35,7 +39,7 @@ function stub(
   overrides: Record<string, unknown> = {},
 ) {
   return stubFetch({
-    "/api/crew?shape=summary": { rows, firstRunToday: null },
+    "/api/crew?shape=summary": { rows: rows.map(named), firstRunToday: null },
     "/api/config": {
       ...CONFIG,
       crew: { sessions: [{ id: "s1", seats: [{ id: "flight", loop: "watch" }] }] },
@@ -720,7 +724,7 @@ it("uses the live FLIGHT seat while config is unavailable, without a duplicate o
   await screen.findByText("guido-1");
   await waitFor(() => expect(rowsIn(container)).toHaveLength(2));
   const flight = rowsIn(container)[0] as HTMLElement;
-  expect(flight.querySelector(".rowlink")?.textContent).toBe("FLIGHT");
+  expect(flight.querySelector(".rowlink")?.textContent).toBe("FLIGHT-1");
   expect(flight.querySelector(".agent-identity")?.getAttribute("title")).toContain("opus");
   expect(flight.querySelector(".state-cell .num")?.getAttribute("title")).toBe(
     "Turns this session: 23",

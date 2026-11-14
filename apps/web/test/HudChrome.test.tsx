@@ -92,22 +92,22 @@ describe("HUD chrome", () => {
       });
       const { container } = render(page());
       await waitFor(() =>
-        expect(container.querySelector(selector)?.textContent).toContain("inco-1"),
+        expect(container.querySelector(selector)?.textContent).toContain("INCO-1"),
       );
       act(() => setSession("alpha"));
-      expect(container.querySelector(selector)?.textContent).toContain("guido-1");
-      expect(container.querySelector(selector)?.textContent).not.toContain("inco-1");
+      expect(container.querySelector(selector)?.textContent).toContain("GUIDO-1");
+      expect(container.querySelector(selector)?.textContent).not.toContain("INCO-1");
       expect(container.querySelector(selector)?.textContent).toContain("shop-loop");
       act(() => setSession("beta"));
-      expect(container.querySelector(selector)?.textContent).not.toContain("guido-1");
-      expect(container.querySelector(selector)?.textContent).toContain("inco-1");
+      expect(container.querySelector(selector)?.textContent).not.toContain("GUIDO-1");
+      expect(container.querySelector(selector)?.textContent).toContain("INCO-1");
       expect(container.querySelector(selector)?.textContent).toContain("shop-loop");
       act(() => setSession("gamma"));
-      expect(container.querySelector(selector)?.textContent).toContain("other-repo");
+      expect(container.querySelector(selector)?.textContent).toContain("OTHER-REPO");
       expect(container.querySelector(selector)?.textContent).not.toContain("shop-loop");
       for (const removed of ["removed", "shop-app"]) {
         act(() => setSession(removed));
-        for (const id of ["guido-1", "inco-1", "retro-1", "shop-loop", "other-repo"])
+        for (const id of ["GUIDO-1", "INCO-1", "RETRO-1", "shop-loop", "OTHER-REPO"])
           expect(container.querySelector(selector)?.textContent).not.toContain(id);
       }
     },
@@ -220,9 +220,9 @@ describe("HUD chrome", () => {
     ] as const) {
       fireEvent.change(select, { target: { value: session } });
       const agents = container.querySelector("#agentsP") as HTMLElement;
-      expect(within(agents).getByRole("link", { name: agent })).toBeTruthy();
+      expect(within(agents).getByRole("link", { name: agent.toUpperCase() })).toBeTruthy();
       expect(
-        within(agents).queryByRole("link", { name: session === "alpha" ? "inco-1" : "guido-1" }),
+        within(agents).queryByRole("link", { name: session === "alpha" ? "INCO-1" : "GUIDO-1" }),
       ).toBeNull();
       expect(screen.getByText(`Ticket ${visible}`)).toBeTruthy();
       expect(screen.queryByText(`Ticket ${hidden}`)).toBeNull();

@@ -24,6 +24,11 @@ type WeekRow = Extract<LimitRow, { window: "7d" }>;
 const isStale = (row: LimitRow, now: number, failed: boolean) =>
   row.stale || now - row.sampledAt > 60 * 60_000 || failed;
 
+/** Within this long of the reset, a projection well under the alert line is capacity going to waste. */
+const UNDER_USED_WITHIN_MS = 2 * DAY_MS;
+/** "Well under": the projection is below this share of the alert line. */
+const UNDER_USED_SHARE = 0.8;
+
 /** The plain-words verdict on the week, by the same rule the hub uses to refuse new runs. */
 function paceVerdict(
   row: WeekRow,
@@ -48,6 +53,12 @@ function paceVerdict(
   if (row.projected === null) return { text: `${last}Too few readings to project`, tone: "muted" };
   if (row.projected >= row.alertAt)
     return { text: `${last}Will pass its alert line`, tone: "warn-t" };
+  // Near the reset a big unused reserve is waste, not good news, so it is not green.
+  if (row.resetAt - now <= UNDER_USED_WITHIN_MS && row.projected < row.alertAt * UNDER_USED_SHARE)
+    return {
+      text: `${last}Under-used: about ${percent(Math.max(0, 100 - row.projected))} will go unused`,
+      tone: "muted",
+    };
   return { text: `${last}On pace`, tone: stale ? "muted" : "ok-t" };
 }
 
@@ -156,8 +167,10 @@ function HourBars({
   return (
     <div className="hourbars">
       <div className="plot-reading s">
-        <span title="Input and output tokens, across runs">last hour {kTokens(total)}</span>
-        <span>peak {kTokens(peak)}/min</span>
+        <span title="Input and output tokens in the last hour, across runs">
+          last hour {kTokens(total)} tok
+        </span>
+        <span title="Most tokens in one minute of the last hour">peak {kTokens(peak)} tok/min</span>
       </div>
       <svg
         viewBox={`0 0 ${LANE_MINUTES} 100`}
@@ -183,7 +196,7 @@ function HourBars({
       <div className="plot-axis num" aria-hidden="true">
         <span>−60m</span>
         <span>−30m</span>
-        <span title="Tokens in the last whole minute">now {kTokens(latest)}/min</span>
+        <span title="Tokens in the last whole minute">now {kTokens(latest)} tok/min</span>
       </div>
     </div>
   );

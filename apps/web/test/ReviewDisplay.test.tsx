@@ -90,7 +90,7 @@ it("keeps a paused review's assignment visible without describing it as active c
     "/api/repos/shop-app/prs?linked=1&shape=summary": [],
   });
   render(<AgentsPanel />);
-  const row = (await screen.findByText("retro-cx")).closest('[role="row"]');
+  const row = (await screen.findByText("RETRO-CX")).closest('[role="row"]');
   expect(row?.textContent).toContain("Paused review PR #1039");
   expect(row?.textContent).toContain("Paused: Wait for CI");
   expect(row?.querySelector(".ticket-cell")?.textContent).not.toContain("Checking");

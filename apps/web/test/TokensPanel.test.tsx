@@ -55,6 +55,25 @@ describe("TokensPanel verdict", () => {
     expect(verdict(container, "claude-main")?.classList.contains("ok-t")).toBe(true);
   });
 
+  it("says Under-used, in neutral, when the week ends well under its alert line close to the reset", async () => {
+    const { container } = show([
+      week({ used: 40, projected: 59, stopForecast: null, resetAt: NOW + 30 * HOUR }),
+    ]);
+    await waitFor(() =>
+      expect(verdict(container, "claude-main")?.textContent).toBe(
+        "Under-used: about 41% will go unused",
+      ),
+    );
+    expect(verdict(container, "claude-main")?.classList.contains("ok-t")).toBe(false);
+  });
+
+  it("keeps On pace for the same projection while the reset is more than two days off", async () => {
+    const { container } = show([
+      week({ used: 20, projected: 59, stopForecast: null, resetAt: NOW + 4 * 24 * HOUR }),
+    ]);
+    await waitFor(() => expect(verdict(container, "claude-main")?.textContent).toBe("On pace"));
+  });
+
   it("says On pace when the forecast stop falls after the reset", async () => {
     const { container } = show([
       week({ used: 40, projected: 70, stopForecast: NOW + 40 * HOUR, resetAt: NOW + 30 * HOUR }),
@@ -188,8 +207,12 @@ describe("TokensPanel accounts", () => {
     await waitFor(() => expect(container.querySelectorAll(".hourbars")).toHaveLength(2));
     const claude = accountBlock(container, "claude-main");
     const codex = accountBlock(container, "codex-main");
-    expect(claude.querySelector(".plot-reading")?.textContent).toBe("last hour 2.0kpeak 1.5k/min");
-    expect(codex.querySelector(".plot-reading")?.textContent).toBe("last hour 90.0kpeak 90.0k/min");
+    expect(claude.querySelector(".plot-reading")?.textContent).toBe(
+      "last hour 2.0k tokpeak 1.5k tok/min",
+    );
+    expect(codex.querySelector(".plot-reading")?.textContent).toBe(
+      "last hour 90.0k tokpeak 90.0k tok/min",
+    );
     expect(claude.querySelector(".hourbars svg")?.getAttribute("aria-label")).toBe(
       "claude-main: 2.0k tokens in the last hour, peak 1.5k a minute",
     );
@@ -205,7 +228,7 @@ describe("TokensPanel accounts", () => {
         Number(rect.getAttribute("height")),
       ),
     ).toEqual([100]);
-    expect(claude.querySelector(".hourbars .plot-axis")?.textContent).toBe("−60m−30mnow 0/min");
+    expect(claude.querySelector(".hourbars .plot-axis")?.textContent).toBe("−60m−30mnow 0 tok/min");
   });
 
   it("says there is no weekly reading yet for an account without one", async () => {
@@ -255,7 +278,7 @@ describe("TokensPanel verdict: the hub's own rules", () => {
       lastOkAt: NOW,
     };
     const text = await verdict(
-      [week({ used: 10, projected: 20, stopForecast: null, sampledAt: NOW })],
+      [week({ used: 10, projected: 80, stopForecast: null, sampledAt: NOW })],
       { "/api/health": [healthy] },
     );
     expect(text).toBe("On pace");

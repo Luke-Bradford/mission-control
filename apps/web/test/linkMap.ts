@@ -89,7 +89,7 @@ export const LINK_MAP: Record<
         "Setup sessions, with the add-agent form open.",
       ),
       rule(/^head agent/, /^\/flight$/, "FLIGHT's seat opens the FLIGHT page, its own view."),
-      rule(/^(dev|[a-z]+)-\d+$/, /^\/agent\/[\w-]+$/, "A seat's name opens its Agent page."),
+      rule(/^(dev|[a-z]+)-\d+$/i, /^\/agent\/[\w-]+$/, "A seat's name opens its Agent page."),
       rule(
         /^(Ready|Building|In review|Merging|Done)/,
         /^\/board\?stage=\w+$/,
