@@ -1798,11 +1798,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         ? await deps.flightEnvironment?.()
         : undefined;
     if (stopping) throw new Error(SHUTTING_DOWN);
-    // A resumed session may have lost its history: its next delivery carries the complete guidance.
+    // Any relaunch is a new session or may have lost its history: the next delivery carries the complete guidance.
     const watching = seatDef(info.seat).loop === "watch";
     const rebuild = watching && needsDirectionContext(store, run.id);
     // A rebuilt direction means the delivered text can no longer be vouched for: send it all once more.
-    if ((resume || rebuild) && watching && store.getSetting(deliveredKey(run.id)))
+    if (watching && store.getSetting(deliveredKey(run.id)))
       store.setSetting(deliveredKey(run.id), NO_DELIVERY);
     if (rebuild) {
       const sha = (

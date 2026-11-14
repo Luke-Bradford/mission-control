@@ -12,7 +12,7 @@ export interface DirectionContext {
   text: string | null;
   restored: boolean;
 }
-/** The revision of the guidance the run's session was last sent in full. */
+/** Marker (revision, direction sha, compactions) of the guidance the run's session was last sent in full. */
 export const deliveredKey = (runId: string): string => `instruction.delivered:${runId}`;
 /** Stored when a session may have lost its history: the next delivery sends everything. */
 export const NO_DELIVERY = "";
@@ -106,13 +106,15 @@ export function instructionEnvelope(
       revision,
     };
   const direction = directionContext(store, runId);
-  if (store.getSetting(deliveredKey(runId)) === revision) {
+  // A compaction drops earlier text from the session, so it counts as a change too.
+  const marker = `${revision}@${direction.sha}#${store.digest(runId)?.compactions ?? 0}`;
+  if (store.getSetting(deliveredKey(runId)) === marker) {
     // The session already holds this revision in full; say so rather than repeat it.
     const stub = `[Mission Control] Saved guidance unchanged (revision ${revision}, direction ${direction.sha}); the complete text was delivered earlier in this session.\n\n# Original message and working context\n`;
     return {
       text: stub + text,
       pieces: [{ section: "orders", bytes: Buffer.byteLength(stub) }],
-      revision,
+      revision: marker,
     };
   }
   const directionBlock = `# Verified repository direction (${direction.sha}${direction.restored ? "; rebuilt on resume" : ""})\n${direction.text ?? "No docs/direction.md exists at this verified base."}`;
@@ -127,6 +129,6 @@ export function instructionEnvelope(
         bytes: Buffer.byteLength(guidance) - Buffer.byteLength(`${directionBlock}\n\n`),
       },
     ],
-    revision,
+    revision: marker,
   };
 }

@@ -299,6 +299,25 @@ describe("guidance is appended when it changes", () => {
       '"text":"Operator order"',
     );
   });
+  it("sends the complete guidance again after the session compacts", () => {
+    const store = prime();
+    store.instructions.create(null, note("Operator order"), "operator", 1);
+    deliver(store, "run", "wake 1");
+    const digest = { background: [], compactions: 0, lastText: null } as never;
+    store.setDigest("run", { ...(digest as object), compactions: 1 } as never);
+    expect(instructionEnvelope(store, seat, "run", true, "wake 2").text).toContain(
+      "Operator order",
+    );
+  });
+  it("sends a changed direction at once", () => {
+    const store = prime();
+    deliver(store, "run", "wake 1");
+    store.setSetting(
+      directionKey("run"),
+      JSON.stringify({ sha: "b".repeat(40), text: "New direction", restored: false }),
+    );
+    expect(deliver(store, "run", "wake 2").text).toContain("New direction");
+  });
   it("sends everything again once after a resume clears the marker", () => {
     const store = prime();
     deliver(store, "run", "wake 1");

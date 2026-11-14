@@ -1890,6 +1890,17 @@ export class Store {
       .slice(0, limit);
   }
 
+  /** Every recorded start (wake 0) of an agent's runs, newest first, with no wake limit. */
+  agentPromptStarts(agentId: string): PromptWakeCost[] {
+    const rows = this.db
+      .prepare(
+        `SELECT p.* FROM prompt_sections p JOIN runs r ON r.id = p.run_id
+         WHERE r.agent_id = ? AND p.wake = 0`,
+      )
+      .all(agentId) as never;
+    return this.wakesOf(rows).sort((a, b) => b.at - a.at);
+  }
+
   /** Records a running Codex CLI's version without allowing a stale launch to revive its run. */
   setRunCliVersionIfLive(runId: string, cliVersion: string): boolean {
     return (
