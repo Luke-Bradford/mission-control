@@ -43,6 +43,7 @@ import {
   ticketPath,
 } from "../router.ts";
 import { recordMentionsSeen, useMentions } from "../shell/operatorMessages.ts";
+import { setFlightPageThread } from "../shell/overlays.ts";
 import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, useTokenRenderer } from "./messages.tsx";
 import { type CommsView, noticeResource, ticketForRef, useNoticeResource } from "./model.ts";
@@ -856,6 +857,13 @@ function ModernConversation({
   const lookupMessages = [...(agent.data?.messages ?? []), ...messages];
   const [reply, setReply] = useState<FlightConversationMessage | null>(null);
   const [sent, setSent] = useState(0);
+  // The FLIGHT replies shown here are read: the dock's unread count leaves them out.
+  const onFlightView = view.kind === "flight";
+  useEffect(() => {
+    if (!onFlightView) return;
+    setFlightPageThread(true);
+    return () => setFlightPageThread(false);
+  }, [onFlightView]);
   const replyInView = reply && messages.some((message) => message.id === reply.id) ? reply : null;
   const mentions = useMentions();
   // The read key the hub has accepted; its mentions are marked once both it and the list are here.
@@ -1005,7 +1013,12 @@ function ModernConversation({
         </div>
       )}
       {view.kind === "flight" ? (
-        <FlightThread hideNotices={hideNotices} />
+        <FlightThread
+          hideNotices={hideNotices}
+          older={olderMessages}
+          jumpId={jumpId}
+          onJumped={onJumped}
+        />
       ) : (
         <MessagePane
           emptyText={

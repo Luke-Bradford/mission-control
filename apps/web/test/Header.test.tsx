@@ -474,7 +474,7 @@ describe("Header", () => {
     unmount();
     render(<Header page="comms" />);
     const open = screen.getByRole("button", { name: "FLIGHT chat" });
-    expect(open.title).toBe("FLIGHT chat is open in Comms");
-    expect(open.getAttribute("aria-pressed")).toBe("true");
+    expect(open.title).toBe("Show or hide FLIGHT's chat (f)");
+    expect(open.getAttribute("aria-pressed")).toBe("false");
   });
 });

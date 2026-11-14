@@ -216,6 +216,21 @@ describe("App", () => {
     expect(screen.getByTestId("dock-scrim")).toBeTruthy();
   });
 
+  it("has no dock on a page that was not found", async () => {
+    const { container } = at("/no/such/page");
+    await waitFor(() => expect(document.title).toMatch(/not found/i));
+    expect(container.querySelector("#dock")).toBeNull();
+  });
+
+  it("opens the fly-out from the header chat button on the FLIGHT page without leaving it", async () => {
+    const { container } = at("/flight");
+    await waitFor(() => expect(container.querySelector("#page-flight")).not.toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "FLIGHT chat" }));
+    expect(window.location.pathname).toBe("/flight");
+    expect(container.querySelector(".app.dock-open")).not.toBeNull();
+    expect(container.querySelector<HTMLElement>("#dock")?.hidden).toBe(false);
+  });
+
   it("i off the agent page toasts", () => {
     at("/");
     act(() => {

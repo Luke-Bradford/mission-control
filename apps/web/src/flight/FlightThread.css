@@ -44,3 +44,10 @@
   resize: vertical;
   font: inherit;
 }
+.flight-thread-older {
+  justify-self: center;
+  margin-bottom: var(--sp-2);
+}
+.flight-thread-message.highlighted > div {
+  outline: 2px solid var(--accent);
+}

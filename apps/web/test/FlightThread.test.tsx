@@ -141,3 +141,47 @@ describe("FlightThread on two surfaces", () => {
     await waitFor(() => expect(screen.getAllByText("from the fly-out")).toHaveLength(2));
   });
 });
+
+describe("FlightThread senders, jumps and older pages", () => {
+  it("signs a hub notice as Mission Control, not FLIGHT", async () => {
+    stub([{ ...msg("comms:5", "CI failed."), from: "MC", kind: "notice" }]);
+    render(<FlightThread />);
+    await screen.findByText("CI failed.");
+    expect(screen.getByText(/Mission Control/)).toBeTruthy();
+    expect(screen.queryByText(/^FLIGHT/)).toBeNull();
+  });
+
+  it("scrolls to a jumped-to message, highlights it and says the jump is spent", async () => {
+    stub([msg("comms:1", "one"), msg("comms:2", "two")]);
+    const onJumped = vi.fn();
+    const { container } = render(<FlightThread jumpId="comms:1" onJumped={onJumped} />);
+    await waitFor(() => expect(onJumped).toHaveBeenCalled());
+    expect(container.querySelector("#comms-message-comms\\:1")?.className).toContain("highlighted");
+  });
+
+  it("spends a jump to a message that is not in the thread", async () => {
+    stub([msg("comms:1", "one")]);
+    const onJumped = vi.fn();
+    render(<FlightThread jumpId="comms:404" onJumped={onJumped} />);
+    await waitFor(() => expect(onJumped).toHaveBeenCalled());
+  });
+
+  it("offers Load older when the route has more, and loads the next page", async () => {
+    stub([msg("comms:2", "two")]);
+    const load = vi.fn();
+    render(
+      <FlightThread
+        older={{
+          messages: [msg("comms:1", "one"), msg("comms:2", "two")] as never,
+          hasMore: true,
+          loading: false,
+          error: null,
+          load,
+        }}
+      />,
+    );
+    await screen.findByText("one");
+    fireEvent.click(screen.getByRole("button", { name: "Load older" }));
+    expect(load).toHaveBeenCalled();
+  });
+});

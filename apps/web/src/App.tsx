@@ -249,7 +249,7 @@ function Shell({
             </Suspense>
           </AwayDigest>
         </main>
-        <Dock coversPage={overviewOverlay} />
+        {showDock && <Dock coversPage={overviewOverlay} />}
       </div>
       <Footer />
       <Toast />

@@ -322,6 +322,11 @@ const flightUnread = store(0);
 export const setFlightUnread = (n: number): void => flightUnread.set(n);
 export const useFlightUnread = (): number => useStore(flightUnread);
 
+/** A FLIGHT thread is on screen in a page (Comms): its replies are being read there. */
+const flightPageThread = store(false);
+export const setFlightPageThread = (on: boolean): void => flightPageThread.set(on);
+export const useFlightPageThread = (): boolean => useStore(flightPageThread);
+
 /** Show the dock (the Needs-you "FLIGHT replied" row). */
 export function openDockChat(): void {
   setDockCollapsed(false);
@@ -331,6 +336,7 @@ export function openDockChat(): void {
 /** Forget every overlay (the tests' reset: these are module singletons). */
 export function resetOverlays(): void {
   flightUnread.set(0);
+  flightPageThread.set(false);
   stack.length = 0;
   help.set(false);
   palette.set(false);

@@ -1,7 +1,8 @@
-import { COMMS_NOTICE, type ConfigView, type FlightConversationMessage } from "@mc/core";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { COMMS_MC, COMMS_NOTICE, type ConfigView, type FlightConversationMessage } from "@mc/core";
+import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
 import { useNoticeResource } from "../comms/model.ts";
+import type { OlderMessages } from "../comms/older.ts";
 import { linkRefs } from "../comms/refLinks.ts";
 import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
@@ -22,6 +23,14 @@ export const FLIGHT_THREAD_INPUT = "flightThreadInput";
 const STICK_PX = 40;
 const LONDON = "Europe/London";
 
+/** Who a line is from: the operator, the hub's own notices, or FLIGHT. */
+const senderWord = (m: FlightConversationMessage): string =>
+  m.operator
+    ? "You"
+    : m.from === COMMS_MC || m.kind === COMMS_NOTICE
+      ? "Mission Control"
+      : "FLIGHT";
+
 const failNote = (e: unknown): string => {
   const error = e instanceof Error ? e : new Error(String(e));
   return errorNote(error) ?? error.message;
@@ -36,10 +45,18 @@ const failNote = (e: unknown): string => {
 export function FlightThread({
   id = FLIGHT_THREAD_INPUT,
   hideNotices = false,
+  older,
+  jumpId = null,
+  onJumped,
 }: {
   id?: string;
   /** Comms' "Hide hub notices" switch: the page is read without them and they are filtered out. */
   hideNotices?: boolean;
+  /** Older pages the route has not sent: Comms passes them in, with a "Load older" control. */
+  older?: OlderMessages;
+  /** A message to scroll to and highlight (from the mentions bell), cleared through `onJumped`. */
+  jumpId?: string | null;
+  onJumped?: () => void;
 } = {}) {
   const res = useNoticeResource<Page>(RESOURCES.commsFlight, hideNotices);
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat;
@@ -50,13 +67,38 @@ export function FlightThread({
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const all = res.data?.messages ?? [];
+  const all = older?.messages ?? res.data?.messages ?? [];
   const messages = hideNotices ? all.filter((m) => m.kind !== COMMS_NOTICE) : all;
   // biome-ignore lint/correctness/useExhaustiveDependencies: follow new messages while the reader is at the bottom
   useEffect(() => {
     const el = log.current;
     if (stick.current && el) el.scrollTop = el.scrollHeight;
   }, [messages.length]);
+  const [highlightId, setHighlightId] = useState(jumpId);
+  const onJumpedRef = useRef(onJumped);
+  onJumpedRef.current = onJumped;
+  const loaded = res.data !== undefined;
+  useLayoutEffect(() => {
+    if (!jumpId || !loaded) return;
+    const target = document.getElementById(`comms-message-${jumpId}`);
+    if (target) {
+      setHighlightId(jumpId);
+      target.scrollIntoView?.({ block: "center" });
+      stick.current = jumpId === messages.at(-1)?.id;
+    }
+    // Found or not, the jump is spent: a stale one must not reach another view.
+    onJumpedRef.current?.();
+  }, [jumpId, loaded, messages]);
+  // Older messages arrive above the reader: keep the message they were reading where it was.
+  const firstId = messages[0]?.id;
+  const before = useRef<{ firstId: string | undefined; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const el = log.current;
+    const prev = before.current;
+    before.current = { firstId, height: el?.scrollHeight ?? 0 };
+    if (el && prev && prev.firstId !== undefined && prev.firstId !== firstId && !stick.current)
+      el.scrollTop += el.scrollHeight - prev.height;
+  }, [firstId]);
   // A thread that was hidden (a folded fly-out) opens at the newest message, as one that is open does.
   useEffect(() => {
     const el = log.current;
@@ -103,6 +145,21 @@ export function FlightThread({
           if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight <= STICK_PX;
         }}
       >
+        {older?.hasMore && (
+          <button
+            type="button"
+            className="sm flight-thread-older"
+            disabled={older.loading}
+            onClick={older.load}
+          >
+            {older.loading ? "Loading older…" : "Load older"}
+          </button>
+        )}
+        {older?.error && (
+          <p className="crit-t s" role="alert">
+            {older.error}
+          </p>
+        )}
         {res.loading && !res.data && <p role="status">Loading messages…</p>}
         {res.error && !res.data && <p role="alert">Could not load messages.</p>}
         {!res.loading && res.data && messages.length === 0 && (
@@ -110,13 +167,12 @@ export function FlightThread({
         )}
         {messages.map((message) => (
           <article
-            className={
-              message.operator ? "flight-thread-message operator" : "flight-thread-message"
-            }
+            className={`flight-thread-message${message.operator ? " operator" : ""}${highlightId === message.id ? " highlighted" : ""}`}
+            id={`comms-message-${message.id}`}
             key={message.id}
           >
             <b>
-              {message.operator ? "You" : "FLIGHT"}
+              {senderWord(message)}
               <span className="at">
                 {" "}
                 · <time>{message.at === null ? "—" : hhmm(message.at, LONDON)}</time>

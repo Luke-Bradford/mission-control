@@ -14,6 +14,7 @@ import {
   toggleDock,
   trapTab,
   useDock,
+  useFlightPageThread,
   useOverlay,
   useReturnFocus,
 } from "./overlays.ts";
@@ -113,7 +114,8 @@ export function Dock({ coversPage = false }: { coversPage?: boolean } = {}) {
   const lastReply = replyIds.at(-1) ?? null;
   const [seenReply, setSeenReply] = useState<string | null | undefined>(undefined);
   // A folded dock hides its replies, so they stay unread until it is expanded.
-  const looking = visible && !collapsed;
+  const onPage = useFlightPageThread();
+  const looking = (visible && !collapsed) || onPage;
   const wasLooking = useRef(looking);
   useLayoutEffect(() => {
     if (wide && looking && !wasLooking.current) heading.current?.focus();

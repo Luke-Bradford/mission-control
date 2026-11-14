@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { hub, streamStatus } from "../src/data.ts";
+import { FlightThread } from "../src/flight/FlightThread.tsx";
 import {
   FLIGHT_NO_SEAT,
   FLIGHT_STOPPED_NOTICE,
@@ -12,6 +13,7 @@ import { installKeys } from "../src/shell/keys.ts";
 import {
   openItem,
   resetOverlays,
+  setFlightPageThread,
   toggleDock,
   useBuildStatus,
   useFlightUnread,
@@ -668,6 +670,41 @@ describe("stopped FLIGHT", () => {
       expect(bodyOf(fn, "/api/comms")).toEqual({ to: "flight-1", text: "start when you can" }),
     );
     await waitFor(() => expect(input.value).toBe(""));
+  });
+});
+
+describe("unread on Comms", () => {
+  it("does not count a FLIGHT reply the Comms FLIGHT pane is showing", async () => {
+    let comms = COMMS;
+    stubFlight(
+      { seat: flightSeat(), decisions: [] },
+      { "/api/comms/flight": () => ({ status: 200, body: { messages: comms, hasMore: false } }) },
+    );
+    function Unread() {
+      return <span data-testid="unread">{useFlightUnread()}</span>;
+    }
+    act(() => setFlightPageThread(true));
+    render(
+      <>
+        <Unread />
+        <Dock />
+        <FlightThread />
+      </>,
+    );
+    await waitFor(() => expect(screen.getAllByText(/Done/).length).toBeGreaterThan(0));
+    comms = [...COMMS, cm("comms:9", "A new answer", false)];
+    await act(async () => {
+      hub.refetch("/api/comms/flight");
+    });
+    await waitFor(() => expect(screen.getAllByText("A new answer").length).toBeGreaterThan(0));
+    expect(screen.getByTestId("unread").textContent).toBe("0");
+    // Off Comms the same reply counts again.
+    comms = [...comms, cm("comms:10", "Another answer", false)];
+    act(() => setFlightPageThread(false));
+    await act(async () => {
+      hub.refetch("/api/comms/flight");
+    });
+    await waitFor(() => expect(screen.getByTestId("unread").textContent).toBe("1"));
   });
 });
 
