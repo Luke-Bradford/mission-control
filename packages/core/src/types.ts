@@ -466,6 +466,10 @@ export interface PrCheck {
   conclusion: string; // a check run's conclusion (its status until done); a status's state
   attempt: number | null; // the Actions run attempt; null for a status or a non-Actions run
   url: string | null;
+  /** When a check run began running (ms); absent for a status, a queued run, or a read before this was kept. */
+  startedAt?: number;
+  /** When a check run finished (ms); absent until it has. */
+  completedAt?: number;
 }
 
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */

@@ -716,6 +716,67 @@ describe("state step", () => {
     expect(r2.loop.phase).toBe("ci");
   });
 
+  describe("13: the pending limit follows each job's normal time", () => {
+    const min = 60_000;
+    const runningFor = (m: number, startedMin: number) => ({
+      pushed: { sha: SHA, at: NOW - m * min },
+      ciP90Ms: { web: 30 * min },
+      pr: pr({
+        checks: {
+          failing: [],
+          pending: ["web"],
+          missing: [],
+          startedAt: { web: NOW - startedMin * min },
+        },
+      }),
+    });
+
+    it("a job within twice its p90 does not park", () => {
+      const r = reconcile(inCi(runningFor(45, 40)));
+      expect(r.loop.phase).toBe("ci");
+      expect(r.loop.parked).toBeNull();
+    });
+
+    it("a job past twice its p90 parks, naming the job", () => {
+      const r = reconcile(inCi(runningFor(75, 62)));
+      expect(r.loop.parked).toEqual({
+        kind: "ci-pending",
+        reason: "CI pending for 60 minutes on aaaaaaa (pending: web)",
+        ended: false,
+      });
+    });
+
+    it("a queued job with no start is judged from the push", () => {
+      const queued = runningFor(75, 0);
+      const r = reconcile(
+        inCi({
+          ...queued,
+          pr: pr({ checks: { failing: [], pending: ["web"], missing: [] } }),
+        }),
+      );
+      expect(r.loop.parked?.reason).toBe("CI pending for 60 minutes on aaaaaaa (pending: web)");
+    });
+
+    it("a job with no history keeps the fixed limit", () => {
+      const r = reconcile(inCi({ ...runningFor(31, 31), ciP90Ms: {} }));
+      expect(r.loop.parked?.kind).toBe("ci-pending");
+    });
+
+    it("a ci-pending park lifts itself when every check is green", () => {
+      const parked = reconcile(inCi(runningFor(75, 62))).loop;
+      const r = reconcile(
+        inCi({ pr: pr({ ci: "passing" }) }, { phase: "parked", parked: parked.parked }),
+      );
+      expect(r.loop.phase).toBe("review");
+      expect(r.loop.parked).toBeNull();
+      expect(events(r.actions)).toEqual(["CI passed on aaaaaaa"]);
+      const still = reconcile(
+        inCi({ pr: pr({ ci: "pending" }) }, { phase: "parked", parked: parked.parked }),
+      );
+      expect(still.loop.phase).toBe("parked");
+    });
+  });
+
   it("14: no CI reported within ten minutes of the push parks", () => {
     const at = NOW - NO_CI_AFTER_MS - 1;
     const r = reconcile(inCi({ pushed: { sha: SHA, at }, pr: pr({ ci: null, polledAt: NOW }) }));

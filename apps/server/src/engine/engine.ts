@@ -992,6 +992,13 @@ export function createEngine(deps: EngineDeps): Engine {
                 failing: verdict.failing,
                 pending: verdict.pending,
                 missing: verdict.missing,
+                startedAt: Object.fromEntries(
+                  (pr.checks ?? []).flatMap((c) =>
+                    c.state === "pending" && c.startedAt !== undefined
+                      ? [[c.name, c.startedAt]]
+                      : [],
+                  ),
+                ),
               },
               reviewStatus:
                 flightPowersOf(config, run.repoId) === "superuser" &&
@@ -1000,6 +1007,10 @@ export function createEngine(deps: EngineDeps): Engine {
                   ? "pending"
                   : checkState(pr.checks ?? [], REVIEW_STATUS_CONTEXT),
             },
+      ciP90Ms:
+        pr?.ci === "pending" && verdict.pending.length + verdict.missing.length > 0
+          ? store.ciCheckP90Ms(run.repoId)
+          : {},
       autoMerge:
         repo?.autonomy === "merge" && activeAway(store, at, config.operator.timezone) === null,
       hardRulesSet: mergeAllowed,
