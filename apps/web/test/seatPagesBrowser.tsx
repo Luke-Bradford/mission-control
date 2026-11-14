@@ -46,7 +46,7 @@ createRoot(root).render(
           </section>
           <section className="panel" data-surface="comms">
             <h2>Comms</h2>
-            <AgentNavRow row={row} view={{ kind: "crew" }} mentions={0} onNavigate={() => {}} />
+            <AgentNavRow row={row} view={{ kind: "crew" }} onNavigate={() => {}} />
           </section>
         </div>
       </main>

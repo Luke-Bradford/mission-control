@@ -7,6 +7,7 @@ import { createHash } from "node:crypto";
 import {
   ANSWER_OWN_QUESTION,
   AREA_LABEL_PREFIX,
+  ATTACH_MATERIALS_DESCRIPTION,
   type AttentionBrief,
   type AttentionItem,
   AWAY_BUG_VERIFIED,
@@ -331,6 +332,12 @@ import {
   questionAskAt,
   releaseHold,
 } from "../attention/holds.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "../attention-materials.ts";
+import { MaterialsOptionImages, MaterialsStoryShape } from "../attention-materials-schema.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
@@ -393,7 +400,7 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { resolveWasteAlarm } from "../spend/waste.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
-import { HUB_UPDATE_HELD_KEY } from "../update.ts";
+import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
 import { mergeExternalPr } from "./external-merge.ts";
@@ -423,6 +430,8 @@ import { cardProblem as cardProblemOf, closeBlocker } from "./ticket-close.ts";
 import type { CrewTidy } from "./tidy.ts";
 
 export interface FlightToolsDeps {
+  /** Keeps the pictures of an attached story; absent: the hub's own, over its stored copies. */
+  attentionMaterials?: Pick<AttentionMaterialsService, "attachStory">;
   /** Read-only HUD renderer. It must apply hudRenderRequest to every browser request. */
   screenshotHud?: (url: string, guard: ReturnType<typeof hudRenderRequest>) => Promise<Buffer>;
   hubOrigin?: string;
@@ -437,6 +446,8 @@ export interface FlightToolsDeps {
   prepareQueueReorder?: BriefPreparationDeps["prepareQueue"];
   /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
   areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
+  /** Files whose merge conflicts between the repo's open PRs; absent or undefined: none known. */
+  conflicts?: (repoId: string) => Promise<{ file: string; prs: number[] }[] | undefined>;
   /** Refresh the wake baseline when FLIGHT receives a full state mid-turn. */
   seen?: (runId: string, state: ReturnType<typeof flightState>) => void;
   config: CcConfig;
@@ -807,6 +818,11 @@ const WithdrawQuestionArgs = z.strictObject({
   key: z.string().min(1).max(BRIEF_KEY_MAX),
   reason: text(QUESTION_REASON_MAX),
   basis: basisArg,
+});
+const AttachMaterialsArgs = z.strictObject({
+  key: z.string().min(1).max(BRIEF_KEY_MAX),
+  ...MaterialsStoryShape,
+  optionImages: MaterialsOptionImages.optional(),
 });
 const PassArgs = z.looseObject({
   question_id: z.number().int().min(1),
@@ -1402,6 +1418,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
   }
 
   /** The attention item with this key, held or not; undefined when it has left Needs you. */
+  const materials =
+    deps.attentionMaterials ??
+    createAttentionMaterials({ store, config, item: (key) => itemByKey(key) ?? null });
   const itemByKey = (key: string): AttentionItem | undefined => {
     const lock = deps.lockState?.() ?? NO_LOCK;
     const rows = crew(config, store, now(), lock, NO_CLI_VERSION).rows;
@@ -1517,6 +1536,30 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     });
     bus.emit("flight");
     return { text: returnedText(call) };
+  }
+
+  /** Retains a nested picture story, from committed images, with a question's Needs-you item. */
+  async function attachMaterials(ctx: McToolContext, args: unknown): Promise<Result> {
+    const c = flightCall(deps, ctx, AttachMaterialsArgs, args);
+    if (!c.ok) return c.result;
+    const { key, ...story } = c.args;
+    const item = itemByKey(key);
+    if (item === undefined || item.repoId === null)
+      return fail("Not attached: that question is no longer open.");
+    try {
+      const packet = await materials.attachStory(key, { ...story, repoId: item.repoId });
+      bus.emit("attention");
+      const pictures = packet.images.length;
+      return {
+        text: `Attached "${packet.label}" to ${key}: ${pictures} image${pictures === 1 ? "" : "s"}, kept from commit ${packet.sourceCommit.slice(0, 7)}. The operator reads it with the question.`,
+      };
+    } catch (error) {
+      return fail(
+        error instanceof AttentionMaterialsError
+          ? `Not attached: ${error.message}`
+          : "Not attached: the materials could not be retained.",
+      );
+    }
   }
 
   /** Takes a question FLIGHT wrote for the operator off Needs you, with a one-line reason. */
@@ -2845,6 +2888,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       hubLogin: deps.login,
       lock: deps.lockState?.(),
       areas: repo ? await deps.areas?.(repo.id) : undefined,
+      conflicts: repo ? await deps.conflicts?.(repo.id) : undefined,
     });
     markFlightSignalsShown(store, state, now());
     markPrsShown(store, state);
@@ -2956,7 +3000,13 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       return fail(briefNoItemText(key));
     }
     // a protected item always reaches the operator: it is briefed, never held back
-    if (hold && protectedDecisionItem(store, item, config, at)) return fail(PROTECTED_ITEM_REFUSED);
+    // (the held Update is FLIGHT's to keep, not to hold: a hold would keep it off the operator's list past its window)
+    if (
+      hold &&
+      (protectedDecisionItem(store, item, config, at) ||
+        item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)
+    )
+      return fail(PROTECTED_ITEM_REFUSED);
     // an item FLIGHT holds a tool for is FLIGHT's to settle, never the operator's (#1510)
     if (structured.for === "operator" && !hubAlert(item, store)) {
       // a money, security, irreversible or floor decision is the operator's whatever the seat's words
@@ -3020,7 +3070,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (partFaults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${partFaults.join("; ")}.`);
     }
     if (structured.for === "flight") {
-      if (isOperatorCall(item, store))
+      if (isOperatorCall(item, store, config))
         return fail(
           "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
         );
@@ -4390,6 +4440,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           !note ||
           key.startsWith(GUARD_ACK_PREFIX) ||
           key === HUB_UPDATE_HELD_KEY ||
+          key === HUB_UPDATE_PERSON_KEY ||
           note.kind === "ratelimit"
         )
           return fail(note ? protectedItem : notFound);
@@ -4436,7 +4487,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.login,
         ).find((i) => i.key === a.key);
         if (waiting === undefined) return fail("Item is no longer waiting.");
-        if (protectedDecisionItem(store, waiting, config, now()))
+        if (
+          protectedDecisionItem(store, waiting, config, now()) ||
+          waiting.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`
+        )
           return fail(PROTECTED_ITEM_REFUSED);
         if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
           return fail(HOLD_CYCLE_REFUSED);
@@ -4630,6 +4684,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       modes: [],
       grantable: ["read-only"],
       call: withdrawQuestion,
+    },
+    {
+      name: MC_TOOL_NAMES.attachMaterials,
+      description: ATTACH_MATERIALS_DESCRIPTION,
+      inputSchema: z.toJSONSchema(AttachMaterialsArgs),
+      modes: [],
+      grantable: ["read-only"],
+      call: attachMaterials,
     },
     {
       name: MC_TOOL_NAMES.startSeat,
@@ -5043,6 +5105,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     MC_TOOL_NAMES.releaseHold,
     MC_TOOL_NAMES.returnQuestion,
     MC_TOOL_NAMES.withdrawQuestion,
+    MC_TOOL_NAMES.attachMaterials,
   ]);
   return flightTools.map((tool) => ({
     ...tool,

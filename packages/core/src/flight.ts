@@ -253,6 +253,10 @@ export const notInSessionText = (seat: string): string =>
 export const BRIEF_OPTIONS_MIN = 2;
 export const BRIEF_OPTIONS_MAX = 4;
 export const BRIEF_LABEL_MAX = 80;
+/** What attach_materials does, for FLIGHT's tool list. */
+export const ATTACH_MATERIALS_DESCRIPTION =
+  "Attach a story told in pictures to a question's Needs-you item (an ask:<id> item for a seat's question), from images committed to its repository: sections in order, each with a heading, a short text and images that each carry a caption; a section may hold child sections (up to four deep); a section marked comparison (before-after or options) shows its two or more images side by side. optionImages names the images that show a brief option, by the option's id, so a choice can be made by picking a picture. Give the full 40-character sourceCommit the images are committed at; paths are repo-relative PNG, JPEG or WebP files of at most 2 MB. The hub keeps its own copy, up to 24 MB per question. Attaching changes no option, approval or hold.";
+
 /** The longest text `brief_item` takes; stored whole; labels are limited separately to BRIEF_LABEL_MAX. */
 export const BRIEF_INPUT_MAX = 8000;
 export const BRIEF_KEY_MAX = 500;
@@ -274,6 +278,8 @@ export const FLIGHT_LEDGER_OUTCOME_MAX = 300;
 export const FLIGHT_LEDGER_REFS_MAX = 10;
 export const FLIGHT_LEDGER_OPEN_MAX = 200;
 export const FLIGHT_LEDGER_INDEX_MAX = 60;
+/** Conflicting files FLIGHT's state lists; the rest are counted in `conflictsMore`. */
+export const FLIGHT_CONFLICTS_MAX = 20;
 export const FLIGHT_LEDGER_KEEP_MS = 7 * 24 * 60 * 60_000;
 export const FLIGHT_SUMMARY_LISTED = 5;
 export const FLIGHT_METRICS_DAY_MS = 24 * 60 * 60_000;
@@ -1064,6 +1070,11 @@ export const FLIGHT_OLD_PARK_MS = 15 * 60_000;
 export const FLIGHT_PUSH_UNSEEN_MS = 30 * 60_000;
 /** A PR green and reviewed that has not merged for this long is a wake reason. */
 export const FLIGHT_MERGE_STALL_MS = 10 * 60_000;
+/**
+ * An open crew PR that conflicts with main or has red CI, with no run on it, is stuck after this
+ * long: the hub offers it to a free seat, and wakes FLIGHT only when no seat can take it.
+ */
+export const FLIGHT_STUCK_PR_MS = 30 * 60_000;
 /** A Needs-you item for FLIGHT untriaged for this long is a wake reason. */
 export const FLIGHT_ITEM_STALE_MS = 10 * 60_000;
 /** An item not seen stale for this long, and then stale again, is told as a new reason. */
@@ -1106,6 +1117,7 @@ export const FLIGHT_SIGNAL_KINDS = [
   "seat_call",
   "question_changed",
   "waste_alarm",
+  "stuck_pr",
   "budget_unused",
 ] as const;
 /** A seat idle while its account is under this share of its week raises `budget_unused`. */
@@ -1249,6 +1261,10 @@ export interface FlightState {
       idle: boolean;
     }[];
   };
+  /** Files whose merge conflicts between open PRs (a git merge check), with those PRs. */
+  conflicts?: { file: string; prs: number[] }[];
+  /** Conflicting files left off `conflicts` once it reaches FLIGHT_CONFLICTS_MAX. */
+  conflictsMore?: number;
   /** Open PRs that cannot merge yet, with the concrete condition to clear. */
   mergeQueue?: { pr: number; waitsOn: string[] }[];
   /** Machine, crew, quota and stopped-seat holds that currently prevent queued work. */

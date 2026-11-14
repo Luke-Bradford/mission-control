@@ -23,12 +23,13 @@ import { ApiError, apiDelete, apiPost, apiPut } from "../api.ts";
 import { useTz } from "../clock.ts";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
+import { useSeatName } from "../crew.ts";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { DEMO_REFUSED, isDemo, writeFailure } from "../demo/mode.ts";
 import { messageStateLine, sendStateLine } from "../flight/conversation.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
-import { ago, dayMonth, hhmm } from "../fmt.ts";
+import { ago, dayMonth, hhmm, plural } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
 import { parseTicket } from "../hud/RepoRef.tsx";
@@ -43,10 +44,12 @@ import {
   navigate,
   ticketPath,
 } from "../router.ts";
+import { recordMentionsSeen, useMentions } from "../shell/operatorMessages.ts";
 import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, useTokenRenderer } from "./messages.tsx";
 import { type CommsView, noticeResource, ticketForRef, useNoticeResource } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
+import { SenderTag } from "./SenderTag.tsx";
 
 const NO_MESSAGES: FlightConversationMessage[] = [];
 
@@ -105,9 +108,12 @@ function RefChip({
   ticket,
   from,
   to,
+  about = false,
 }: {
   refText: string;
   ticket: string | null;
+  /** The message is structurally about this ref (its `ref` field), not a number in its text. */
+  about?: boolean;
   from: string;
   to: string;
 }) {
@@ -115,7 +121,8 @@ function RefChip({
   const crew = useResource<Crew>(RESOURCES.crew).data;
   const repoOf = (id: string) => crew?.rows.find((r) => r.id === id)?.repoId;
   const repoId = refRepo(ticket, repoOf(from) ?? repoOf(to), config);
-  const target = repoId === null ? null : resolveRef(refText, repoId, config);
+  const target =
+    repoId === null ? null : resolveRef(refText, repoId, config, about ? ticket : null);
   const filter = () => navigate(commsTicketPath(refText, ticketForRef(refText, ticket)));
   return (
     <span className="comms-ref-pair">
@@ -167,10 +174,16 @@ function resolveRef(
   refText: string,
   repoId: string,
   config: ConfigView | undefined,
+  ticket: string | null,
 ): { to: string | null; github: string | null } | null {
   const issue = /^#(\d+)$/.exec(refText)?.[1];
   if (issue !== undefined) return { to: ticketPath(repoId, Number(issue)), github: null };
   const pr = /^PR (\d+)$/.exec(refText)?.[1];
+  // a PR the message is about (its own ref) belongs to the message's ticket: open that ticket's
+  // page. A PR named in the text may belong to any ticket, so it keeps its GitHub link.
+  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
+  if (pr !== undefined && parsed)
+    return { to: ticketPath(parsed.repoId, parsed.number), github: null };
   const github = config?.repos.find((r) => r.id === repoId)?.github;
   const href = pr !== undefined && github ? githubItemHref(github, "pr", Number(pr)) : null;
   return href ? { to: null, github: href } : null;
@@ -248,7 +261,8 @@ function MessageActions({
   onReply,
 }: {
   message: FlightConversationMessage;
-  onReply: () => void;
+  /** Absent in a thread the operator cannot answer in. */
+  onReply?: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   const react = (reaction: CommsReactionKind) => {
@@ -266,9 +280,11 @@ function MessageActions({
   };
   return (
     <span className="comms-actions">
-      <button type="button" onClick={onReply} aria-label={`Reply to ${message.from}`}>
-        Reply
-      </button>
+      {onReply && (
+        <button type="button" onClick={onReply} aria-label={`Reply to ${message.from}`}>
+          Reply
+        </button>
+      )}
       <button type="button" onClick={() => react("seen")} aria-label={`Ack ${message.from}`}>
         Ack
       </button>
@@ -296,6 +312,8 @@ function MessagePane({
   onOpenMessage,
   onReply,
   flightId,
+  rightId = COMMS_CAPCOM,
+  readOnly = false,
   sent = 0,
   older,
   emptyText,
@@ -310,6 +328,10 @@ function MessagePane({
   onOpenMessage: OpenMessage;
   onReply: (message: FlightConversationMessage) => void;
   flightId: string | undefined;
+  /** Whose messages sit on the right: the operator's, unless the thread is between two agents. */
+  rightId?: string;
+  /** No Reply: the operator cannot answer in this thread. */
+  readOnly?: boolean;
   /** Counts CAPCOM's sends: each one brings the pane back to the latest, wherever the reader was. */
   sent?: number;
 }) {
@@ -384,12 +406,13 @@ function MessagePane({
           const quote = message.replyTo ? byId.get(message.replyTo) : undefined;
           return (
             <article
-              className={`comms-bubble${message.from === COMMS_CAPCOM ? " capcom" : ""}${highlightId === message.id ? " highlighted" : ""}`}
+              className={`comms-bubble${message.from === rightId ? " right" : ""}${highlightId === message.id ? " highlighted" : ""}`}
               id={`comms-message-${message.id}`}
               key={message.id}
             >
               <div className="comms-message-meta">
                 <span>{time(message.at)}</span>
+                <SenderTag from={message.from} senderKind={message.senderKind} />
                 <CommsEnd id={message.from} />
                 {message.label && (
                   <Pill tone={message.label === "blocker" ? "crit" : "neutral"}>
@@ -402,10 +425,14 @@ function MessagePane({
                     ticket={message.ticket}
                     from={message.from}
                     to={message.to}
+                    about
                   />
                 )}
                 {message.id.startsWith("comms:") && (
-                  <MessageActions message={message} onReply={() => onReply(message)} />
+                  <MessageActions
+                    message={message}
+                    onReply={readOnly ? undefined : () => onReply(message)}
+                  />
                 )}
               </div>
               {quote && (
@@ -584,9 +611,8 @@ function MentionsBell({
   flightId: string | undefined;
 }) {
   const time = useMessageTime();
-  const resource = useResource<{ mentions: CommsMention[] }>(RESOURCES.commsMentions);
+  const mentions = useMentions();
   const [open, setOpen] = useState(false);
-  const [seen, setSeen] = useState<Set<string>>(() => new Set());
   const [markError, setMarkError] = useState<string[] | null>(null);
   const panel = useRef<HTMLElement>(null);
   // The conversation panel clips what overflows it: fit the list into the room below the bell.
@@ -605,14 +631,12 @@ function MentionsBell({
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, [open]);
-  const mentions = resource.data?.mentions ?? [];
-  const unseen = mentions.filter((mention) => !mention.seen && !seen.has(mention.message.id));
+  const unseen = mentions.filter((mention) => !mention.seen);
   const mark = (ids: string[]) => {
     void apiPost("/api/comms/mentions/seen", { ids })
       .then(() => {
-        setSeen((current) => new Set([...current, ...ids]));
         setMarkError(null);
-        hub.refetch(RESOURCES.commsMentions.path);
+        recordMentionsSeen(ids);
       })
       .catch((e: unknown) => {
         if (writeFailure(e, "") === DEMO_REFUSED) toast(DEMO_REFUSED);
@@ -652,7 +676,7 @@ function MentionsBell({
             </button>
           </header>
           {mentions.map((mention) => {
-            const isSeen = mention.seen || seen.has(mention.message.id);
+            const isSeen = mention.seen;
             return (
               <button
                 className={isSeen ? "seen" : ""}
@@ -696,6 +720,7 @@ function StoredContacts({
   view: CommsView;
 }) {
   const active = view.kind === "contact" ? view.contactId : null;
+  const seatName = useSeatName();
   return (
     <aside className="comms-contacts" aria-label={`${agentId}'s contacts`}>
       <button
@@ -703,7 +728,7 @@ function StoredContacts({
         className={view.kind === "inbox" ? "on" : ""}
         onClick={() => navigate(commsInboxPath(agentId))}
       >
-        Inbox · what it reads <small>{data?.inboxUnread ?? 0} unread</small>
+        Inbox · what it reads
       </button>
       <button
         type="button"
@@ -719,9 +744,11 @@ function StoredContacts({
           key={contact.id}
           onClick={() => navigate(commsContactPath(agentId, contact.id))}
         >
-          {contact.id} · {contact.count}
+          {contact.id === COMMS_CAPCOM ? "You" : seatName(contact.id)} ·{" "}
+          {plural(contact.count, "message")}
           <small>
-            {contact.unread > 0 ? `${contact.unread} unread · ` : ""}
+            {/* only what is addressed to the operator is "unread"; other counts are messages */}
+            {contact.id === COMMS_CAPCOM && contact.unread > 0 ? `${contact.unread} unread · ` : ""}
             {contact.lastMessage?.text ?? "No messages yet."}
           </small>
         </button>
@@ -860,6 +887,10 @@ function ModernConversation({
   const [reply, setReply] = useState<FlightConversationMessage | null>(null);
   const [sent, setSent] = useState(0);
   const replyInView = reply && messages.some((message) => message.id === reply.id) ? reply : null;
+  const mentions = useMentions();
+  // The read key the hub has accepted; its mentions are marked once both it and the list are here.
+  const [readKey, setReadKey] = useState<string | null>(null);
+  const markingMentions = useRef(new Set<string>());
   const read = useRef(new Set<string>());
   const pendingRead = useRef(new Set<string>());
   const [readError, setReadError] = useState<string | null>(null);
@@ -880,6 +911,7 @@ function ModernConversation({
         read.current.add(key);
         setReadError(null);
         hub.refetchTopic("agents");
+        setReadKey(key);
       })
       .catch((error: unknown) => {
         // Only an answer from the server is a failure to report. A request that got none (a
@@ -889,12 +921,36 @@ function ModernConversation({
       })
       .finally(() => pendingRead.current.delete(key));
   }, [scope, messages, readRetry]);
+  // Opening a conversation reads the messages to the operator in it, so the bell, header and nav
+  // counts drop with the read cursor instead of keeping a second tally. It waits on the mention
+  // list as well as the cursor: whichever answers last, the mark follows.
+  useEffect(() => {
+    const latest = messages.at(-1);
+    if (!scope || !latest || readKey !== `${scope}:${latest.id}`) return;
+    const shown = new Set(messages.map((m) => m.id));
+    const ids = mentions
+      .filter(
+        (m) => !m.seen && shown.has(m.message.id) && !markingMentions.current.has(m.message.id),
+      )
+      .map((m) => m.message.id);
+    if (ids.length === 0) return;
+    for (const id of ids) markingMentions.current.add(id);
+    void apiPost("/api/comms/mentions/seen", { ids })
+      .then(() => recordMentionsSeen(ids))
+      .catch(() => {})
+      .finally(() => {
+        for (const id of ids) markingMentions.current.delete(id);
+      });
+  }, [readKey, mentions, messages, scope]);
   const to =
     view.kind === "crew" || view.kind === "ticket"
       ? COMMS_CREW
       : view.kind === "flight"
         ? flightSeat?.id
         : view.agentId;
+  // Two agents talking: the operator reads it, and writes in their own conversation with the agent.
+  const peerAgent =
+    view.kind === "contact" && view.contactId !== COMMS_CAPCOM ? view.agentId : null;
   const showPins = view.kind === "crew" || view.kind === "inbox";
   const ticketContext = ticket.data?.ticket;
   const ticketBoardPath =
@@ -993,10 +1049,22 @@ function ModernConversation({
         onOpenMessage={onOpenMessage}
         onReply={setReply}
         flightId={flightSeat?.id}
+        rightId={peerAgent ?? COMMS_CAPCOM}
+        readOnly={peerAgent !== null}
         sent={sent}
         older={view.kind === "ticket" ? undefined : olderMessages}
       />
-      {to ? (
+      {peerAgent !== null ? (
+        <p className="pb note comms-peer-note">
+          Read-only: this is between two agents.{" "}
+          <a
+            href={commsContactPath(peerAgent, COMMS_CAPCOM)}
+            onClick={(event) => followLink(event, commsContactPath(peerAgent, COMMS_CAPCOM))}
+          >
+            Your conversation with {peerAgent}
+          </a>
+        </p>
+      ) : to ? (
         <Composer
           key={conversationScope}
           to={to}
@@ -1018,11 +1086,7 @@ function ModernConversation({
           prefill={prefill}
           onPrefillConsumed={onPrefillConsumed}
           flightSeat={view.kind === "flight" && flightView ? flightView.seat : undefined}
-          onSent={() => {
-            setSent((count) => count + 1);
-            if (view.kind === "contact" && view.contactId !== COMMS_CAPCOM)
-              navigate(commsContactPath(view.agentId, COMMS_CAPCOM));
-          }}
+          onSent={() => setSent((count) => count + 1)}
         />
       ) : (
         <p className="pb note">{FLIGHT_NO_SEAT}</p>

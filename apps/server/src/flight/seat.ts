@@ -3,6 +3,7 @@ import {
   type CcConfig,
   type CrewSeatConfig,
   type CrewSessionConfig,
+  flightPowersOf,
   seatUnavailable,
 } from "../config.ts";
 
@@ -26,3 +27,12 @@ export function flightSeat(
   }
   return null;
 }
+
+/**
+ * Whether FLIGHT can run a held hub Update: a FLIGHT seat on a `superuser` repo. With it, the held
+ * Update is FLIGHT's item (hud.ts routes it); without, it is the operator's.
+ */
+export const flightRunsUpdate = (config: CcConfig): boolean => {
+  const found = flightSeat(config);
+  return found !== null && flightPowersOf(config, found.session.repoId) === "superuser";
+};

@@ -11,6 +11,7 @@ import {
   API_PREFIX,
   type AttentionCompactItem,
   type AttentionItem,
+  type AttentionMaterialsResponse,
   type AuditRunKind,
   AWAY_SETTING,
   type AwaySettings,
@@ -189,6 +190,11 @@ import {
   releaseHold,
 } from "./attention/holds.ts";
 import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "./attention-materials.ts";
+import {
   AWAY_STARTED_SETTING,
   AwayBody,
   activeAway,
@@ -280,6 +286,7 @@ import {
 } from "./crew-pause.ts";
 import { readDependencyChains } from "./dependency-chains.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
+import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
@@ -339,6 +346,7 @@ import {
   seatQuestionTriage,
 } from "./hud.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
+import { itemThread } from "./item-thread.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
@@ -437,7 +445,18 @@ import { overviewTimeline } from "./timeline.ts";
 import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
-import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
+import {
+  createHeldUpdateNote,
+  HUB_HEAD_OFF_MAIN,
+  HUB_INSTALL_NEEDS_PERSON,
+  HUB_UNSAFE_NEEDS_PERSON,
+  HUB_UPDATE_HELD_KEY,
+  type QuietGate,
+  raiseUpdatePersonNote,
+  UPDATE_FAILED,
+  UpdateError,
+  type Updater,
+} from "./update.ts";
 import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
 
@@ -505,6 +524,7 @@ const VIEWER_QUERY = "query { viewer { login } }";
 const GITHUB_LOGIN_RETRY_MS = 5 * 60_000;
 
 export interface AppDeps {
+  attentionMaterials?: AttentionMaterialsService;
   qaReports?: QaReportService;
   /** The repo's rules, as the engine reads them: the guard holds FLIGHT's shell to `always_ask`. */
   repoRules?: (repoId: string) => Promise<RepoRules | RepoRulesError>;
@@ -520,6 +540,8 @@ export interface AppDeps {
   previewActivity?: () => void;
   /** FLIGHT's stored HUD screenshots; absent: the retrieval route answers 404. */
   hudShots?: HudShotStore;
+  /** The cached disk-use reader the hub shares with its sweep; absent: the route measures itself. */
+  diskUse?: DiskUseReader;
   /** A web PR's stored screenshot pairs; absent: the evidence routes answer 404. */
   prEvidence?: PrEvidenceStore;
   /** The screenshots RETRO took on review previews; absent: the retrieval route answers 404. */
@@ -537,6 +559,8 @@ export interface AppDeps {
   operatorToken?: string;
   /** The per-boot controller token: the controller's own key, which labels its messages. */
   controllerToken?: string;
+  /** Holds new runs while FLIGHT's Update waits for running turns; without it FLIGHT's Update refuses a busy crew. */
+  updateGate?: QuietGate;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
@@ -681,6 +705,8 @@ const MessageBody = z.strictObject({
    * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
    */
   question: z.number().int().positive().optional(),
+  /** The Needs-you item this reply is about: it shows in that item's conversation. */
+  itemKey: z.string().min(1).max(200).optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -1117,16 +1143,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       store.pullRequests(repo.id),
       store.board(repo.id),
     );
-  /** The live part, built per request from the map ring: seats, findings and conflicts. */
-  const mapLivePayload = async (
-    repo: (typeof config.repos)[number],
-    checkout: string,
-    log: FastifyBaseLogger,
-  ): Promise<MapLive> => {
-    mapRingReady();
-    const { rows, lock } = mapCrewRows(repo);
-    return await buildMapLive(checkout, repo.id, rows, lock, store.pullRequests(repo.id), log);
-  };
   /** The cached map payload, built (once, however many ask) when an input has changed. */
   const mapPayloadFor = async (
     repo: (typeof config.repos)[number],
@@ -1610,6 +1626,34 @@ export function buildApp(deps: AppDeps): FastifyInstance {
     }
     return attentionMemo.items;
   };
+  // retained materials follow a question that is held too: a hold is not a close
+  let heldMemo: { at: number; items: AttentionItem[] } | undefined;
+  const attentionWithHeld = (): AttentionItem[] => {
+    const at = now();
+    if (!heldMemo || at - heldMemo.at >= HUD_MEMO_MS) {
+      heldMemo = {
+        at,
+        items: attentionItems(
+          config,
+          store,
+          at,
+          deps.lock?.state() ?? NO_LOCK,
+          sharedCrew(at).rows,
+          deps.hubLogin?.() ?? null,
+          true,
+        ),
+      };
+    }
+    return heldMemo.items;
+  };
+  const attentionMaterials =
+    deps.attentionMaterials ??
+    createAttentionMaterials({
+      store,
+      config,
+      item: (key) => attentionWithHeld().find((item) => item.key === key) ?? null,
+      now,
+    });
   const notifications = new LocalNotifications(store, config, bus, now);
   const reconcileNotifications = () => notifications.reconcile(sharedAttention(true));
   let notificationTimer: ReturnType<typeof setTimeout> | undefined;
@@ -3011,6 +3055,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           .header("content-disposition", `attachment; filename="qa-${report.id}.md"`)
           .send(qaReportMarkdown(report));
       });
+      // Reader: docs/runbook.md#disk-housekeeping (what the hub holds on disk, by kind; the Mac panel shows it)
+      const holdings =
+        deps.diskUse ??
+        cachedDiskUse({ dataDir: dirname(store.path), worktrees: config.crew?.worktrees });
+      api.get("/disk-use", async () => await holdings.read());
       // Reader: docs/runbook.md#durable-qa-reports (retained before/after and review-browser PNGs)
       api.get<{ Params: { id: string } }>("/qa-report-assets/:id", async (req, reply) => {
         if (
@@ -3621,13 +3670,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           }
         };
 
-      // The Map page's snapshot: apps/web/src/map/CrewMap.tsx reads it through RESOURCES.repoMap.
+      // The map snapshot: apps/web/src/qa/useRepoGraph.ts and the Setup repo list read it through RESOURCES.repoMap.
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map",
         mapRoute((repo, checkout, _req, reply) => mapPayloadFor(repo, checkout, reply.log)),
       );
 
-      // Reader: apps/web/src/map/useGraphSnapshot.ts (lazy QA Impact and History analysis)
+      // Reader: apps/web/src/qa/useRepoGraph.ts (lazy QA Impact and History analysis)
       api.get<{ Params: { repoId: string } }>(
         "/repos/:repoId/map/graph",
         mapRoute(async (repo, checkout, req, reply) => {
@@ -3640,61 +3689,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (req.headers["if-none-match"] === etag) return reply.code(304).send();
           return graph;
         }),
-      );
-
-      // Reader: apps/web/src/data.ts (the Map page's tree-once read lands with its web ticket; for diagnosis until then)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/tree",
-        mapRoute(async (repo, checkout, req, reply) => {
-          const { etag, tree } = await mapTreePayload(repo, checkout);
-          reply.header("etag", etag).header("cache-control", "no-cache");
-          if (req.headers["if-none-match"] === etag) return reply.code(304).send();
-          const { imports: _imports, hist: _hist, ...light } = tree;
-          return light;
-        }),
-      );
-
-      // Reader: apps/web/src/data.ts (the Map page's live read lands with its web ticket; for diagnosis until then)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/live",
-        mapRoute((repo, checkout, _req, reply) => mapLivePayload(repo, checkout, reply.log)),
-      );
-
-      // Reader: apps/web/src/data.ts (none in the web: the Map reads modified scope from the snapshot; for diagnosis)
-      api.get<{ Params: { repoId: string } }>("/repos/:repoId/map/diff", async (req, reply) => {
-        if (!config.repos.some((r) => r.id === req.params.repoId))
-          return reply.code(404).send({ error: "unknown repo" });
-        if (!deps.mapRing) return reply.code(503).send({ error: "map collector unavailable" });
-        return { seats: deps.mapRing.scopes(req.params.repoId) };
-      });
-
-      // Reader: apps/web/src/data.ts (none in the web: the Map reads conflicts from the snapshot; for diagnosis)
-      api.get<{ Params: { repoId: string } }>(
-        "/repos/:repoId/map/conflicts",
-        async (req, reply) => {
-          const repo = config.repos.find((r) => r.id === req.params.repoId);
-          if (!repo) return reply.code(404).send({ error: "unknown repo" });
-          const checkout = config.crew?.sessions.find((s) => s.repoId === repo.id)?.checkout;
-          if (!checkout) return reply.code(503).send({ error: "map checkout unavailable" });
-          try {
-            if (!(await stat(checkout).catch(() => null))?.isDirectory()) {
-              return reply.code(503).send({ error: "map checkout unavailable" });
-            }
-            const { conflicts, unchecked, failures } = await mapConflicts.check(
-              checkout,
-              store.pullRequests(repo.id),
-            );
-            for (const failure of failures)
-              reply.log.warn(failure, "map conflict check failed for a pair; reported unchecked");
-            return { conflicts, unchecked };
-          } catch (e) {
-            reply.log.warn(
-              { reason: e instanceof Error ? e.message : String(e) },
-              "map conflicts unavailable",
-            );
-            return reply.code(503).send({ error: "map conflicts unavailable" });
-          }
-        },
       );
 
       // `?linked=1`: only the PRs linked to a ticket, the ones the Board can show (#26 A1).
@@ -3782,25 +3776,6 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             : null;
           if (!pr) return reply.code(404).send({ error: "unknown pull request" });
           return { ...pr, ...prPreviewFor(repo)(pr), ...prAcceptanceFor(store, repo.id)(pr) };
-        },
-      );
-
-      // Reader: apps/web/src/data.ts (the Board and Agent PR chips)
-      // Reader: apps/web/src/map/CrewMap.tsx (a QA deep link selects the PR's exact changed paths)
-      api.get<{ Params: { repoId: string; number: string } }>(
-        "/repos/:repoId/prs/:number/files",
-        (req, reply) => {
-          const pr = /^[1-9]\d{0,9}$/.test(req.params.number)
-            ? store.pullRequest(req.params.repoId, Number(req.params.number))
-            : null;
-          if (!config.repos.some((r) => r.id === req.params.repoId) || !pr)
-            return reply.code(404).send({ error: "unknown pull request" });
-          return {
-            repoId: pr.repoId,
-            number: pr.number,
-            sha: pr.headSha,
-            files: store.prFilePaths(pr.repoId, pr.number),
-          };
         },
       );
 
@@ -3896,17 +3871,21 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         const handoffs = new Map(store.latestHandoffs(repo.id).map((h) => [h.ticket, h]));
         return store.board(repo.id).map((card) => {
           const h = handoffs.get(`${repo.id}#${card.issueNumber}`);
-          return h
-            ? {
-                ...card,
-                handoff: {
-                  runId: h.runId,
-                  fromSeat: h.fromSeat,
-                  at: h.at,
-                  acceptedBy: h.acceptedBy,
-                },
-              }
-            : card;
+          const waiting = store.ticketWait(repo.id, card.issueNumber);
+          return {
+            ...card,
+            ...(waiting ? { waiting, assignees: [], owner: null } : {}),
+            ...(h
+              ? {
+                  handoff: {
+                    runId: h.runId,
+                    fromSeat: h.fromSeat,
+                    at: h.at,
+                    acceptedBy: h.acceptedBy,
+                  },
+                }
+              : {}),
+          };
         });
       });
 
@@ -4791,6 +4770,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return { ok: true };
           }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
+          // Sent from an item's conversation, it answers the seat's latest message there, so a
+          // question the seat asked in that conversation closes.
+          const answers =
+            b.itemKey === undefined
+              ? undefined
+              : store
+                  .itemThreadNow(b.itemKey)
+                  .filter((m) => m.from === id && m.to === sender.from)
+                  .at(-1)?.id;
           try {
             let delivered = false;
             let wakeFailed = false;
@@ -4823,6 +4811,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 to: id,
                 text: b.text,
                 ...(b.interrupt === true ? { label: "handoff" as const } : {}),
+                ...(b.itemKey === undefined ? {} : { itemKey: b.itemKey }),
+                ...(answers === undefined ? {} : { replyTo: answers }),
                 ref: ticket ?? undefined,
               },
             );
@@ -5066,6 +5056,27 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           const { repo, window, tab } = parsed.data;
           return await codeHealthOutput(codeHealth.read(repo, window, tab));
+        } catch (error) {
+          return codeHealthFailure(error, reply);
+        }
+      });
+      // Reader: docs/runbook.md (the Audit page's stored first-screen summary)
+      api.get("/code-health/overview", async (req, reply) => {
+        if (!operatorToken || !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER]))
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const parsed = z
+          .strictObject({
+            repo: z.string().trim().min(1).max(128),
+            window: z.enum(CODE_HEALTH_WINDOWS).default("30d"),
+          })
+          .safeParse(req.query);
+        if (!parsed.success) return reply.code(400).send({ error: "Invalid code-health query" });
+        reply.header("cache-control", "no-store");
+        try {
+          const { view, changed } = codeHealth.overview(parsed.data.repo, parsed.data.window);
+          // Only a rebuild that changed what the page shows tells open pages to read again.
+          if (changed) bus.emit("health");
+          return await codeHealthOutput(view);
         } catch (error) {
           return codeHealthFailure(error, reply);
         }
@@ -6257,26 +6268,48 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(409)
               .send({ error: "No Update is held for a person.", logged: false });
-          const working = (supervisor?.busy() ?? []).find((b) => b.seatId !== actor.seatId);
-          if (working !== undefined)
-            return reply.code(409).send({
-              error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
-              logged: false,
-            });
+          // a busy crew: hold new runs and wait for the running turns to end (a quiet gap)
+          const busy = () => supervisor?.busy() ?? [];
+          if (deps.updateGate === undefined) {
+            const working = busy().find((b) => b.seatId !== actor.seatId);
+            if (working !== undefined)
+              return reply.code(409).send({
+                error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
+                logged: false,
+              });
+          } else {
+            const wait = await deps.updateGate.wait(busy, actor.seatId);
+            if (wait !== null) return reply.code(409).send({ error: wait, logged: false });
+          }
         }
+        let restarting = false;
         try {
-          const out = await updater.update();
-          if ("restarting" in out) updater.restart();
+          // FLIGHT's run never applies a shortcut: only a person does
+          const out = await updater.update(actor === null ? undefined : { refuseUnsafe: true });
+          if ("restarting" in out) {
+            restarting = true;
+            updater.restart();
+          }
           if (!("upToDate" in out))
             store.addHubEvent(actor === null ? "Updated manually" : "Updated by FLIGHT", now());
           return "restarting" in out ? reply.code(202).send(out) : out;
         } catch (e) {
           captureError(reply, e);
+          // a person-only refusal is the operator's at once, with its reason in the note
+          if (actor !== null && e instanceof UpdateError) {
+            if (e.message === HUB_UNSAFE_NEEDS_PERSON && e.held !== undefined)
+              createHeldUpdateNote(store, bus)(e.held);
+            else if (e.message === HUB_INSTALL_NEEDS_PERSON || e.message === HUB_HEAD_OFF_MAIN)
+              raiseUpdatePersonNote(store, bus, e.message);
+          }
           // logged: update.log says why (the page opens it); false for a refusal before the log
           if (e instanceof UpdateError)
             return reply.code(e.status).send({ error: e.message, logged: e.logged });
           reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
           return reply.code(500).send({ error: UPDATE_FAILED, logged: false });
+        } finally {
+          // the hub exits after a restart; otherwise new runs start again
+          if (!restarting) deps.updateGate?.release();
         }
       });
       // Reader: apps/web/src/setup/UpdateLog.tsx (why the last update failed)
@@ -6352,6 +6385,67 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       api.get<{ Params: { key: string } }>("/attention/:key", async (req, reply) => {
         const item = sharedAttention().find((item) => item.key === req.params.key);
         return item ? pinnedFor(item) : reply.code(404).send({ error: "Item is no longer open." });
+      });
+      const materialInput = z.strictObject({
+        repoId: z.string().min(1).max(200),
+        sourceCommit: z.string().max(40),
+        sourcePath: z.string().min(1).max(1000),
+        label: z.string().min(1).max(300),
+      });
+      // Reader: docs/runbook.md#retained-needs-you-materials (operator registers an inspectable source packet)
+      api.post<{ Params: { key: string } }>("/attention/:key/materials", async (req, reply) => {
+        if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const input = materialInput.safeParse(req.body);
+        if (!input.success)
+          return reply
+            .code(400)
+            .send({ error: "Give a repository, full commit, docs Markdown path and label." });
+        try {
+          return reply
+            .code(201)
+            .send(await attentionMaterials.register(req.params.key, input.data));
+        } catch (error) {
+          return reply.code(error instanceof AttentionMaterialsError ? error.status : 503).send({
+            error:
+              error instanceof AttentionMaterialsError
+                ? error.message
+                : "Materials could not be retained.",
+          });
+        }
+      });
+      // Reader: apps/web/src/pages/Needs.tsx (selected item material panel; planned #1705)
+      api.get<{ Params: { key: string } }>("/attention/:key/materials", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const packets = attentionMaterials.read(req.params.key);
+        if (packets.length === 0)
+          return reply.code(404).send({ error: "No retained materials for this item." });
+        const body: AttentionMaterialsResponse = { packets };
+        return body;
+      });
+      // Reader: apps/web/src/pages/Needs.tsx (authenticated raster image in a retained packet; planned #1705)
+      api.get<{ Params: { id: string } }>("/attention-material-assets/:id", async (req, reply) => {
+        if (
+          operatorToken !== undefined &&
+          !operatorTokenMatches(operatorToken, req.headers[OPERATOR_HEADER])
+        )
+          return reply.code(401).send({ error: OPERATOR_TOKEN_REQUIRED });
+        const asset = attentionMaterials.asset(req.params.id);
+        return asset
+          ? reply
+              .type(asset.mediaType)
+              .header("x-content-type-options", "nosniff")
+              .header("cache-control", "private, no-store")
+              .send(asset.bytes)
+          : reply.code(404).send({ error: "Material image not found." });
       });
       // Reader: apps/web/src/pages/Needs.tsx (the Held group)
       api.get("/attention/held", async () =>
@@ -6485,6 +6579,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
+      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
+        const key = req.params.key;
+        if (key.length > 200) return reply.code(400).send({ error: "key too long" });
+        // A note key is raised again later: only this run of the note owns the conversation.
+        // Other item keys name one message, question or issue, so all of theirs is the item's.
+        return itemThread(store.itemThreadNow(key));
+      });
       // Reader: apps/web/src/shell/ItemPanel.tsx
       api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
         "/attention/:key/discussion",
@@ -6889,10 +6991,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: apps/web/src/data.ts#startStream (EventSource topic invalidations and reconnects)
-      api.get<{ Querystring: { map?: string } }>("/stream", (req, reply) => {
-        const repoId = req.query.map;
-        if (repoId !== undefined && !config.repos.some((r) => r.id === repoId))
-          return reply.code(404).send({ error: "repo not found" });
+      api.get("/stream", (_req, reply) => {
         reply.hijack();
         const res = reply.raw;
         res.writeHead(200, {
@@ -6916,20 +7015,11 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             send("machine");
           }, 10_000);
         });
-        // Map clients refetch the snapshot on reconnect or a gap; deltas are not replayed.
-        let unsubscribeMap: (() => void) | undefined;
-        if (repoId !== undefined) {
-          stopMapRing ??= mapRing.start();
-          unsubscribeMap = mapRing.subscribe(repoId, (delta) => {
-            res.write(`event: map\ndata: ${JSON.stringify(delta)}\n\n`);
-          });
-        }
         const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), heartbeatMs);
         const cleanup = () => {
           clearTimeout(machineTimer);
           clearInterval(heartbeat);
           unsubscribe();
-          unsubscribeMap?.();
           streams.delete(end);
           deps.onStreamCount?.(streams.size);
         };

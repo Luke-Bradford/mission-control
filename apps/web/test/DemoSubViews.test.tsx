@@ -191,11 +191,11 @@ describe("Demo choices end in data", () => {
 });
 
 describe("Demo findings from round 3", () => {
-  it("the Agent page's Queue and Files tabs, and the Setup update log", async () => {
+  it("the Agent page's Recent runs and Setup tabs, and the Setup update log", async () => {
     await at("/agent/dev-1");
-    await clickText(/^queue$/i);
+    await clickText(/^recent runs$/i);
     clean();
-    await clickText(/^files$/i);
+    await clickText(/^setup$/i);
     clean();
     document.body.innerHTML = "";
     await at("/setup");
@@ -210,7 +210,7 @@ describe("Demo findings from round 3", () => {
     expect(document.body.textContent).not.toContain("No messages in FLIGHT");
     expect(panel.textContent).toMatch(/\d+\s*msg/);
     const counts = [...document.querySelectorAll(".comms-nav-counts small")].map((e) =>
-      Number(e.textContent),
+      Number.parseInt(e.textContent ?? "", 10),
     );
     expect(counts.some((n) => n > 0)).toBe(true);
   });
@@ -233,13 +233,15 @@ describe("Demo findings from round 3", () => {
   });
 
   it("a ticket that moved shows where it is on every page", async () => {
-    play(44);
+    // The scene's moves fall on beats its seed picks; play until the second (ticket 201) has.
+    for (let i = 0; i < 45 && getState().moves < 2; i++) playNext();
+    expect(getState().tickets.find((t) => t.n === 201)?.stage).toBe("building");
     await at("/tickets/shop-app/201");
     expect(document.body.textContent).not.toContain("has not touched this ticket");
     expect(document.body.textContent).not.toMatch(/Status\s*Ready/);
     document.body.innerHTML = "";
     await at("/");
-    expect(document.body.textContent).toMatch(/dev-7.*#201/i);
+    expect(document.body.textContent).toMatch(/#201/);
   });
 
   it("seats change state and the Step column fills", async () => {

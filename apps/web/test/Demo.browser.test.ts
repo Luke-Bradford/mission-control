@@ -111,6 +111,39 @@ describeRendered("Demo, rendered", () => {
     BROWSER_TEST_TIMEOUT_MS,
   );
 
+  it.each([
+    ["needs-you", "/needs-you/demo-design-signoff", 2000],
+    ["agents", "/agent", 800],
+    ["comms-chart", "/comms/chart", 100],
+  ] as const)(
+    "%s fills a 1920x940 window with demo data",
+    async (name, at, minText) => {
+      const page = await open(at, { width: 1920, height: 940 });
+      await page.box(".demo-marker");
+      await eventually(
+        page,
+        async () => (await text(page, "main")).length >= minText,
+        `${at} to fill`,
+      );
+      if (name === "needs-you")
+        await eventually(
+          page,
+          async () => (await count(page, "[data-comparison='before-after'] img")) >= 2,
+          "the before/after pictures",
+        );
+      await page.evaluate(() => new Promise((r) => setTimeout(r, 800)), undefined);
+      expect(page.errors()).toEqual([]);
+      expect(await count(page, "[role=alert]")).toBe(0);
+      expect(await page.evaluate(() => window.__demoMisses(), undefined)).toEqual([]);
+      if (evidence) {
+        mkdirSync(evidence, { recursive: true });
+        await page.screenshot(join(evidence, `demo-${name}-1920x940.png`));
+      }
+      await page.close();
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
   it(
     "marks a popout",
     async () => {

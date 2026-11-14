@@ -111,6 +111,8 @@ export interface FlightWatchDeps {
   lockState?: () => TestLockState;
   /** The repo's area labels and globs, for the seats a Ready ticket fits; absent or undefined: any seat. */
   areas?: (repoId: string) => Promise<Record<string, string[]> | undefined>;
+  /** Files whose merge conflicts between the repo's open PRs; absent or undefined: none known. */
+  conflicts?: (repoId: string) => Promise<{ file: string; prs: number[] }[] | undefined>;
   /** True while the seat has a pending change; FLIGHT is not started until it settles. */
   blocked?: (seatId: string) => boolean;
   now?: () => number;
@@ -394,6 +396,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         hubLogin: deps.login ?? null,
         lock: deps.lockState?.(),
         areas: await deps.areas?.(found.session.repoId),
+        conflicts: await deps.conflicts?.(found.session.repoId),
       });
       trackIdleSeat(store, state, t);
       logIdleSeats(state);
@@ -552,6 +555,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
         hubLogin: deps.login ?? null,
         lock: deps.lockState?.(),
         areas: await deps.areas?.(found.session.repoId),
+        conflicts: await deps.conflicts?.(found.session.repoId),
       });
       if (!rotating) starts.push(t);
       else rotations.push(t);
@@ -688,6 +692,7 @@ export function createFlightWatch(deps: FlightWatchDeps): FlightWatch {
       hubLogin: deps.login ?? null,
       lock: deps.lockState?.(),
       areas: await deps.areas?.(found.session.repoId),
+      conflicts: await deps.conflicts?.(found.session.repoId),
     });
     const wake = wakeFacts(state);
     const listed = hasFacts(wake);

@@ -74,6 +74,7 @@ import {
   REFUSAL_TRIES,
   REVIEW_STATUS_BLOCKED,
   REVIEW_STATUS_PASSED,
+  REVIEW_STATUS_PASSED_NOT_INSTALLED,
   REVIEW_STATUS_QUEUED,
   REVIEW_STATUS_RUNNING,
   REVIEW_STATUS_WAIVED,
@@ -2346,6 +2347,54 @@ describe("taking by rule", () => {
     seatIdle(null);
     await h.engine.tick();
     expect(h.refills).toEqual([0]);
+    expect(h.taken).toEqual([SEAT]);
+  });
+
+  it("offers a freed seat a stuck PR before it takes its next queued ticket", async () => {
+    const order: string[] = [];
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async (seatId) => void order.push(`stuck ${seatId}`),
+      takeNext: async (seatId) => void order.push(`take ${seatId}`),
+    });
+    h.engine.start();
+    order.length = 0;
+    report();
+    await h.engine.reconcileRun(RUN);
+    setPr({ ci: "passing" });
+    await h.engine.reconcileRun(RUN);
+    setPr({ state: "merged", ci: "passing", mergedAt: clock });
+    await h.engine.reconcileRun(RUN);
+    expect(order.slice(0, 2)).toEqual([`stuck ${SEAT}`, `take ${SEAT}`]);
+  });
+
+  it("hands out stuck PRs on the tick, before the queues are refilled and any ticket is taken", async () => {
+    seatIdle(null);
+    const order: string[] = [];
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async () => void order.push("stuck"),
+      refillQueues: async () => void order.push("refill"),
+      takeNext: async (seatId) => void order.push(`take ${seatId}`),
+    });
+    h.engine.start();
+    order.length = 0;
+    await h.engine.tick();
+    expect(order).toEqual(["stuck", "refill", `take ${SEAT}`]);
+  });
+
+  it("logs a failing stuck-PR step and still deals the tickets", async () => {
+    seatIdle(null);
+    h.engine.stop();
+    h.engine = h.make({
+      takeStuckPrs: async () => {
+        throw new Error("no git");
+      },
+    });
+    h.engine.start();
+    h.taken.length = 0;
+    await h.engine.tick();
+    expect(h.logs.some((l) => l.includes("stuck PRs: no git"))).toBe(true);
     expect(h.taken).toEqual([SEAT]);
   });
 
@@ -7004,6 +7053,16 @@ describe("the engine runs reviews", () => {
         expect(h.statusCalls.at(-1)).toEqual(status("success", REVIEW_STATUS_PASSED)),
       );
       expect(h.statusCalls).toContainEqual(status("pending", REVIEW_STATUS_RUNNING));
+    });
+
+    it("a clean review of a PR that was not installed: mc/review is success, saying so", async () => {
+      await toReview();
+      store.setReviewInstallNote(first().id, "Reviewed, not installed: package.json changed");
+      reported(first().id, []);
+      await vi.waitFor(() =>
+        expect(h.statusCalls.at(-1)).toEqual(status("success", REVIEW_STATUS_PASSED_NOT_INSTALLED)),
+      );
+      expect(h.statusCalls.some((c) => c.state === "failure")).toBe(false);
     });
 
     it("blocking findings: mc/review is failure", async () => {

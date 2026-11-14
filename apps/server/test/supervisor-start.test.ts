@@ -3633,3 +3633,42 @@ it("preserves an aside run when pause refuses its rework launch", async () => {
   expect(store.run(run.id)?.loop?.aside?.wake).toBe(true);
   expect(recorded()).toEqual([]);
 });
+
+describe("a worktree a start is using (#1756)", () => {
+  const wt = () => join(root, "mc-crew", "guido-1-42");
+
+  it("is marked from the checkout until the seat's session points at it", async () => {
+    let open: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      open = r;
+    });
+    const claim = vi.fn(async () => {
+      await gate;
+    });
+    const { sup } = make({ claim });
+    sup.start();
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+    const started = sup.startRun("guido-1", 42);
+    await until(() => expect(claim).toHaveBeenCalled());
+    expect(existsSync(wt())).toBe(true);
+    // the checkout is made and nothing yet points at it: the tidy must leave it alone
+    expect(sup.isStartingWorktree(wt())).toBe(true);
+    expect(store.seatSession("guido-1")?.worktree ?? null).toBeNull();
+    open();
+    await started;
+    expect(store.seatSession("guido-1")?.worktree).toBe(wt());
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+
+  it("is cleared when the start fails after the checkout", async () => {
+    const claim = vi.fn(async () => {
+      expect(sup.isStartingWorktree(wt())).toBe(true);
+      throw new Error("no");
+    });
+    const { sup } = make({ claim });
+    sup.start();
+    await refusal(sup.startRun("guido-1", 42));
+    expect(claim).toHaveBeenCalled();
+    expect(sup.isStartingWorktree(wt())).toBe(false);
+  });
+});

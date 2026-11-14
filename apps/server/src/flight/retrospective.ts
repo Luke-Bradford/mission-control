@@ -11,9 +11,9 @@ import {
   parkedEventText,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
-import { originHeads } from "../mcp/tools.ts";
 import { CREW_GIT_SLOW_MS } from "../runtime/checkouts.ts";
 import { crewGit, crewGitBytes } from "../runtime/git.ts";
+import { originHeads } from "../runtime/origin-heads.ts";
 import { wasteCounts } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { flightMetrics } from "./ledger.ts";

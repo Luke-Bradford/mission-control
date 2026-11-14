@@ -1626,6 +1626,45 @@ describe("scheduler", () => {
       expect(store.machineSamples(0).map((m) => m.at)).toEqual([minute + 1000, minute + 61_000]);
     });
 
+    it("names what the hub holds on disk when the disk is what is tight", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      const gb = 1024 ** 3;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => minute + 1000,
+        hubDiskUse: () => ({
+          worktrees: 12.1 * gb,
+          pictures: 0.8 * gb,
+          evidence: 1.2 * gb,
+          scratch: 4 * gb,
+          database: 0.4 * gb,
+          total: 18.5 * gb,
+        }),
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              diskFreeBytes: 10 * gb,
+              diskTotalBytes: 100 * gb,
+              memTotalBytes: 24 * gb,
+              swapUsedBytes: gb,
+              swapTotalBytes: 20 * gb,
+              memoryPressureFreePct: 20,
+              load1: 1,
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "machine-capacity")?.text).toContain(
+        "The hub holds: worktrees 12.1 GB, scratch 4.0 GB, evidence 1.2 GB, pictures 0.8 GB, database 0.4 GB.",
+      );
+    });
+
     it("raises one machine-capacity item and closes it after five minutes of headroom", async () => {
       const minute = Math.floor(NOW / 60_000) * 60_000;
       let t = minute + 1000;
@@ -1659,6 +1698,50 @@ describe("scheduler", () => {
         "Disk: 14.0 GB free (14.0%). Swap used: 18.0 GB. RAM: 24.0 GB. Memory pressure free: 8.0%. Load: 15.0 on 8 cores. Top consumers: Docker (pid 42, 4.0 GB, 90.0% CPU)",
       );
       tight = false;
+      t += 5 * 60_000 + 1;
+      await s.tick("machine");
+      expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();
+    });
+
+    it("tells the operator to restart the file-change service, and drops the item when it recovers", async () => {
+      const minute = Math.floor(NOW / 60_000) * 60_000;
+      let t = minute + 1000;
+      let swollen = true;
+      const s = createScheduler({
+        config,
+        store,
+        bus,
+        now: () => t,
+        collectors: stubs({
+          machine: vi.fn(async (_p, _prev, at) => ({
+            sample: machineSample({
+              at,
+              memTotalBytes: 24 * 1024 ** 3,
+              swapUsedBytes: 1024 ** 3,
+              swapTotalBytes: 20 * 1024 ** 3,
+              memoryPressureFreePct: 44,
+              load1: 1,
+              topConsumers: [
+                {
+                  pid: 7,
+                  command: "fseventsd",
+                  rssBytes: (swollen ? 28 : 0.1) * 1024 ** 3,
+                  cpuPct: 1,
+                },
+              ],
+            }),
+            cpus: [],
+            errors: [],
+          })),
+        }),
+      });
+      await s.tick("machine");
+      const note = store.notes().filter((n) => n.key === "machine-capacity");
+      expect(note).toHaveLength(1);
+      expect(note[0]?.text).toContain("file-change service (fseventsd) holds 28.0 GB");
+      expect(note[0]?.text).toContain("sudo killall fseventsd");
+      expect(note[0]?.text).toContain("about 15 seconds");
+      swollen = false;
       t += 5 * 60_000 + 1;
       await s.tick("machine");
       expect(store.notes().find((n) => n.key === "machine-capacity")).toBeUndefined();

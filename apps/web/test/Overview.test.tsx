@@ -1257,7 +1257,7 @@ describe("Agents panel", () => {
     expect(await need()).toBe("Stalled 2:08 in Bash");
   });
 
-  it("a parked item shows its reason on a Blocked row; Answer opens the Item panel", async () => {
+  it("a parked item shows its reason on a Waiting row; Answer opens the Item panel", async () => {
     stub({
       rows: [crewRow({ hudState: "blocked" })],
       items: [
@@ -1273,8 +1273,9 @@ describe("Agents panel", () => {
     );
     await screen.findByText("Parked: Needs a rebase decision");
     const state = agentRows(container)[0]?.querySelector(".state-cell") as HTMLElement;
-    expect(within(state).getByText("Blocked")).toBeTruthy();
-    // a blocked seat's reason shows on its row: the parked item
+    expect(within(state).getByText("Waiting")).toBeTruthy();
+    expect(within(state).queryByText("Blocked")).toBeNull();
+    // a stuck seat's reason shows on its row: the parked item
     expect(agentRows(container)[0]?.querySelector(".need")?.textContent).toContain(
       "Needs a rebase decision",
     );

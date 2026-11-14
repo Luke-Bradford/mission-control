@@ -143,7 +143,7 @@ run. It wakes FLIGHT only when one of them changes.
   tool: no open PR and no open dependants. The ticket closes as not planned, with one comment.
 - **Alerts** show only when the operator alone can fix something:
   - FLIGHT will not start;
-  - an Update only a person can run;
+  - an Update only a person can run, or one FLIGHT has not run in time;
   - an account at its limit.
 
   A single late wake goes to FLIGHT's watch list, because the hub restarts and wakes FLIGHT itself.
@@ -189,7 +189,12 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
 
 1. **A hub alert the operator alone can act on.** Hub code writes its words. The alerts:
    - FLIGHT is not triaging;
-   - an Update only a person can run (the alert says how much changed, not which commits or paths);
+   - an Update only a person can run (the alert says how much changed, not which commits or paths).
+     A held Update FLIGHT can run is not this alert: while FLIGHT is live on a `superuser` repo it
+     is FLIGHT's item with the usual triage window, and FLIGHT runs it in a quiet gap. It becomes
+     the alert only when FLIGHT is stopped, the repo is standard, or the window has passed. A
+     change that adds a shortcut, pnpm needing a person, or a checkout off main is the alert from
+     the start, with the reason (#1834);
    - the runaway breaker tripped;
    - a run stopped on a budget or account limit;
    - an account at its rate limit;

@@ -79,3 +79,35 @@ export function schemeOf(url: string): string {
   const m = /^([a-z][a-z0-9+.-]*):/i.exec(url.trim());
   return m?.[1]?.toLowerCase() ?? "these";
 }
+
+/** Words, in a ticket, that point at something only the author can open. */
+const PRIVATE_CANDIDATE =
+  /(?:\b[a-z][a-z0-9+.-]*:\/\/[^\s<>()[\]`"']+|\b[A-Za-z]:\\[^\s<>()[\]`"']+|(?<![\w/.:~-])\/(?:Users|home|private|var|tmp|mnt|opt)\/[^\s<>()[\]`"']+)/g;
+const TRAILING_PUNCTUATION = /[.,;:!?]+$/;
+const LOCAL_PATH = /^(?:[A-Za-z]:\\|\/(?:Users|home|private|var|tmp|mnt|opt)\/)/;
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]"]);
+
+/**
+ * Whether a link or path from a ticket can only be opened on the author's own machine: a `file:`
+ * link, a localhost address, or an absolute path on a disk. Whether a web link is private is the
+ * hub's call (`TicketView.prototypeProblem`), not this function's.
+ */
+export function isLocalOnlyLink(text: string): boolean {
+  if (LOCAL_PATH.test(text)) return true;
+  try {
+    const u = new URL(text);
+    return u.protocol === "file:" || LOCAL_HOSTS.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** The distinct local-only links and paths written in `text`, in order of first appearance. */
+export function localOnlyLinksIn(text: string): string[] {
+  const found = new Set<string>();
+  for (const m of text.matchAll(PRIVATE_CANDIDATE)) {
+    const link = m[0].replace(TRAILING_PUNCTUATION, "");
+    if (isLocalOnlyLink(link)) found.add(link);
+  }
+  return [...found];
+}
