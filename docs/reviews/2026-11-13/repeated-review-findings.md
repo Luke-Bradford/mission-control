@@ -44,7 +44,7 @@ is the review's real work and is not touched.
 - **Not yet before a report.** `test:related` picks tests by import graph, so the test alone never runs
   for a stray file. The script runs over `git ls-files` and needs one change outside the server area:
   append `&& node --experimental-strip-types apps/server/scripts/check-stray-files.ts` to the root
-  `lint` script in `package.json`. Asked of FLIGHT; no PR or ticket exists yet.
+  `lint` script in `package.json`. FLIGHT will make this change on its own after this PR merges; its number is not yet known.
 
 ## Missing evidence
 
