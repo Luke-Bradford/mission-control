@@ -43,7 +43,7 @@ export interface PrEvidenceDeps {
   store: PrEvidenceStore;
   /** The one repo whose HUD this hub serves; other repos are never captured or held. */
   repoId: string;
-  /** Where the database snapshot and its copies are made; removed after each capture. */
+  /** Where the database snapshot and its copies are made; removed after each capture, except a failed capture's kept snapshot, which stays until the head is captured or replaced. */
   workDir: string;
   /** The hub's own address, for the links in the PR body. */
   baseUrl: string;
@@ -108,6 +108,8 @@ interface Kept {
   sha: string;
   /** The main commit the "main" renders show. */
   mainSha: string;
+  /** The database snapshot every kept render and every render still to come is taken from. */
+  snapshot: string;
   shots: Map<string, Buffer>;
 }
 
@@ -286,6 +288,14 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     }
   }
 
+  /** Where a PR's kept snapshot lives: outside a capture's own folder, which is removed after it. */
+  const keptDir = (pr: number): string => join(deps.workDir, `kept-${pr}`);
+
+  async function dropKept(pr: number): Promise<void> {
+    kept.delete(pr);
+    await rm(keptDir(pr), { recursive: true, force: true });
+  }
+
   async function capture(
     t: EvidenceTarget,
     pages: EvidencePage[],
@@ -296,17 +306,31 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     try {
       signal.throwIfAborted();
       const mainSha = await abortable(deps.mainSha(signal), signal);
-      const snapshot = join(dir, "snapshot.sqlite");
-      await abortable(deps.snapshot(snapshot), signal);
-      // Renders kept from a failed attempt stay; main's are stale once main has moved.
+      // Renders kept from a failed attempt stay, with the snapshot they were taken from, so a
+      // retried page is paired with renders of the same data. Main's are stale once main moves.
       let keep = kept.get(t.pr);
-      if (keep === undefined || keep.sha !== t.sha) {
-        keep = { sha: t.sha, mainSha, shots: new Map() };
+      if (keep !== undefined && keep.sha !== t.sha) {
+        await dropKept(t.pr);
+        keep = undefined;
+      }
+      if (keep === undefined) {
+        const keepDir = keptDir(t.pr);
+        await rm(keepDir, { recursive: true, force: true });
+        await mkdir(keepDir, { recursive: true, mode: 0o700 });
+        const snapshot = join(keepDir, "snapshot.sqlite");
+        try {
+          await abortable(deps.snapshot(snapshot), signal);
+        } catch (e) {
+          await rm(keepDir, { recursive: true, force: true });
+          throw e;
+        }
+        keep = { sha: t.sha, mainSha, snapshot, shots: new Map() };
         kept.set(t.pr, keep);
       } else if (keep.mainSha !== mainSha) {
         for (const k of [...keep.shots.keys()]) if (k.startsWith("main:")) keep.shots.delete(k);
         keep.mainSha = mainSha;
       }
+      const snapshot = keep.snapshot;
       const shots = keep.shots;
       await photograph(mainSha, snapshot, dir, "main", pages, signal, shots);
       await photograph(t.sha, snapshot, dir, "head", pages, signal, shots, true);
@@ -351,7 +375,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
         },
         images,
       );
-      kept.delete(t.pr);
+      await dropKept(t.pr);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

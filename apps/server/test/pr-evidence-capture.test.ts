@@ -462,6 +462,130 @@ describe("PrEvidence capture", () => {
     expect(t.evidence.gate(target)).toBeNull();
   });
 
+  it("pairs a retried page with renders of the same snapshot, taken once", async () => {
+    let now = 5000;
+    let broken = true;
+    let n = 0;
+    const t = setup({
+      now: () => now,
+      snapshot: async (to) => {
+        writeFileSync(to, `data-${++n}`);
+      },
+      startSide: async ({ sha, db }) => ({
+        origin: `http://side/${readFileSync(db, "utf8")}/${sha}`,
+        stop: async () => {},
+      }),
+      render: async (origin, _path, scheme) => {
+        const [, , , data, sha] = origin.split("/");
+        if (broken && sha === HEAD && scheme === "dark") throw new Error("timed out");
+        // the same code on both sides: only the data moves the box
+        return encodePng(
+          fixtureRaster(
+            320,
+            200,
+            [{ x: data === "data-1" ? 16 : 176, y: 40, w: 96, h: 48, rgb: [20, 20, 20] }],
+            scheme === "dark" ? [12, 12, 20] : [250, 250, 250],
+          ),
+        );
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    await t.evidence.ensure(target);
+    broken = false;
+    now += 1001;
+    await t.evidence.ensure(target);
+    expect(n).toBe(1);
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.pairs.map((p) => p.changedPixels)).toEqual([0, 0]);
+  });
+
+  it("retries a Demo render once, and skips the Demo renders it already kept", async () => {
+    let now = 5000;
+    let broken = true;
+    const asked: string[] = [];
+    let flaked = false;
+    const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));
+    const t = setup({
+      now: () => now,
+      render: async (origin, _path, scheme) => {
+        if (broken && origin.endsWith(HEAD) && scheme === "dark") throw new Error("timed out");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+      renderDemo: async (_origin, _path, viewport) => {
+        asked.push(String(viewport.width));
+        if (viewport.width === 2560 && !flaked) {
+          flaked = true;
+          throw new Error("Demo timed out");
+        }
+        return demoShot;
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    await t.evidence.ensure(target); // live head render fails before any Demo render
+    expect(asked).toEqual([]);
+    broken = false;
+    now += 1001;
+    await t.evidence.ensure(target);
+    expect(asked).toEqual(["1920", "2560", "2560"]); // 2560 retried once, at once
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).demos).toHaveLength(2);
+  });
+
+  it("does not re-ask for Demo renders an earlier attempt kept", async () => {
+    let now = 5000;
+    let broken = true;
+    const asked: string[] = [];
+    const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));
+    const paths = ["apps/web/src/board/Card.tsx", "apps/web/src/comms/ItemBrief.tsx"];
+    const t = setup({
+      now: () => now,
+      webGraph: async () => ({ "apps/web/src/comms/ItemBrief.tsx": ["comms"] }),
+      renderDemo: async (_origin, path, viewport) => {
+        asked.push(`${path}:${viewport.width}`);
+        if (broken && path === "/comms") throw new Error("Demo timed out");
+        return demoShot;
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths };
+    await t.evidence.ensure(target);
+    // board's Demo renders worked; comms' failed twice
+    expect(asked).toEqual(["/board:1920", "/board:2560", "/comms:1920", "/comms:1920"]);
+    asked.length = 0;
+    broken = false;
+    now += 1001;
+    await t.evidence.ensure(target);
+    expect(asked).toEqual(["/comms:1920", "/comms:2560"]);
+  });
+
+  it("renders main again on the new main when main moves between attempts", async () => {
+    let now = 5000;
+    let broken = true;
+    let main = MAIN;
+    const NEWMAIN = "8".repeat(40);
+    const seen: string[] = [];
+    const t = setup({
+      now: () => now,
+      mainSha: async () => main,
+      render: async (origin, _path, scheme) => {
+        const sha = origin.split("/").pop() ?? "";
+        seen.push(`${sha}:${scheme}`);
+        if (broken && sha === HEAD && scheme === "dark") throw new Error("timed out");
+        return encodePng(pageBox(sha === NEWMAIN ? MAIN : sha, scheme));
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    await t.evidence.ensure(target);
+    broken = false;
+    main = NEWMAIN;
+    now += 1001;
+    seen.length = 0;
+    await t.evidence.ensure(target);
+    expect(seen.filter((x) => x.startsWith(NEWMAIN))).toEqual([
+      `${NEWMAIN}:light`,
+      `${NEWMAIN}:dark`,
+    ]);
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).mainSha).toBe(NEWMAIN);
+  });
+
   it("throws the kept renders away when the PR gets a new head", async () => {
     let now = 5000;
     let broken = true;
