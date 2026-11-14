@@ -7122,6 +7122,9 @@ describe("crew routes", () => {
         seat: null,
         decisions: [],
         controllerDecisions: [],
+        costLastHour: null,
+        sessionsLastHour: null,
+        runStartedAt: null,
         promptWakes: [],
       });
     });
@@ -7300,6 +7303,114 @@ describe("crew routes", () => {
       expect(body.wakeCost?.totalUsd).toBeCloseTo(7);
       expect(body.wakeCost?.weekShare).toBeCloseTo(1);
       expect(body.wakeWaits?.blockerMedianMs).toBe(60_000);
+    });
+
+    it("GET /api/flight serves FLIGHT's hourly status figures", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      const startedAt = now - 20 * 60_000;
+      store.upsertRun(run({ id: "live-flight", agentId: "flight-1", costUsd: 7, startedAt }));
+      store.setDigest(
+        "live-flight",
+        digest({ attemptUsage: [{ id: "hour", at: now - 1000, tokens: 1 }] }),
+      );
+      store.upsertRun(
+        run({ id: "earlier-flight", agentId: "flight-1", startedAt: now - 40 * 60_000 }),
+      );
+      store.upsertRun(run({ id: "old-flight", agentId: "flight-1", startedAt: now - 61 * 60_000 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "live-flight",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: now,
+      });
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.costLastHour).toBeCloseTo(7);
+      expect(body.sessionsLastHour).toBe(2);
+      expect(body.runStartedAt).toBe(startedAt);
+    });
+
+    it("GET /api/flight returns null hourly status figures with no data", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.costLastHour).toBeNull();
+      expect(body.sessionsLastHour).toBeNull();
+      expect(body.runStartedAt).toBeNull();
+    });
+
+    describe("hourly status figures edge cases", () => {
+      const seat = () =>
+        config.crew?.sessions[0]?.seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "claude-main",
+          model: "opus",
+          area: [],
+        });
+      const session = (runId: string, state: "running" | "error", now: number) =>
+        store.setSeatSession({
+          seatId: "flight-1",
+          runId,
+          cliSessionId: null,
+          state,
+          reason: null,
+          worktree: null,
+          updatedAt: now,
+        });
+
+      it("serves no run start when the seat's run has ended", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({
+            id: "dead-flight",
+            agentId: "flight-1",
+            startedAt: now - 30 * 60_000,
+            endedAt: now - 10 * 60_000,
+            status: "failed",
+          }),
+        );
+        session("dead-flight", "error", now);
+        expect((await get("/api/flight")).json<FlightView>().runStartedAt).toBeNull();
+      });
+
+      it("serves 0 sessions, not null, when a steady run started before the hour", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "steady", agentId: "flight-1", costUsd: 1, startedAt: now - 90 * 60_000 }),
+        );
+        session("steady", "running", now);
+        const body = (await get("/api/flight")).json<FlightView>();
+        expect(body.sessionsLastHour).toBe(0);
+      });
+
+      it("serves no cost while the only run in the hour has none recorded", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "fresh", agentId: "flight-1", costUsd: null, startedAt: now - 60_000 }),
+        );
+        session("fresh", "running", now);
+        expect((await get("/api/flight")).json<FlightView>().costLastHour).toBeNull();
+      });
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
