@@ -1,7 +1,8 @@
-import type { FlightConversationMessage } from "@mc/core";
+import type { ConfigView, FlightConversationMessage } from "@mc/core";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
-import { Markdown } from "../components/Markdown.tsx";
+import { linkRefs } from "../comms/refLinks.ts";
+import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { hhmm } from "../fmt.ts";
 import { FlightStoppedNote } from "./FlightStoppedNote.tsx";
@@ -34,6 +35,8 @@ const failNote = (e: unknown): string => {
 export function FlightThread({ id = FLIGHT_THREAD_INPUT }: { id?: string } = {}) {
   const res = useResource<Page>(RESOURCES.commsFlight);
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat;
+  const config = useResource<ConfigView>(RESOURCES.config).data;
+  const repo = config?.repos.length === 1 ? config.repos[0]?.id : undefined;
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   const [text, setText] = useState("");
@@ -95,13 +98,18 @@ export function FlightThread({ id = FLIGHT_THREAD_INPUT }: { id?: string } = {})
           >
             <b>
               {message.operator ? "You" : "FLIGHT"}
-              {message.at !== null && <span className="at"> · {hhmm(message.at, LONDON)}</span>}
+              <span className="at">
+                {" "}
+                · <time>{message.at === null ? "—" : hhmm(message.at, LONDON)}</time>
+              </span>
             </b>
             <div>
               {message.choice ? (
                 `You chose: ${message.choice.label}`
               ) : (
-                <Markdown text={message.text} />
+                <OpenLinks>
+                  <Markdown text={linkRefs(message.text, message.ticket, repo, config)} />
+                </OpenLinks>
               )}
             </div>
           </article>

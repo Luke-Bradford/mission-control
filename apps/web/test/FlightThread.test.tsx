@@ -4,7 +4,7 @@ import { hub, streamStatus } from "../src/data.ts";
 import { FlightThread } from "../src/flight/FlightThread.tsx";
 import { FLIGHT_STOPPED_NOTICE } from "../src/flight/flightTypes.ts";
 import { stubFetch } from "./fetchStub.ts";
-import { NOW, seatRow } from "./fixtures.ts";
+import { CONFIG, NOW, seatRow } from "./fixtures.ts";
 
 const seat = (live: boolean) => ({
   seat: { id: "flight-1", live, state: live ? "idle" : "stopped", model: "m", turns: null },
@@ -23,6 +23,7 @@ function stub(messages: unknown[], live = true, post?: () => { status: number; b
   return stubFetch({
     "/api/comms/flight": { messages, hasMore: false },
     "/api/flight": seat(live),
+    "/api/config": CONFIG,
     "/api/crew?shape=summary": { rows: [seatRow()] },
     "POST /api/comms": post ?? (() => ({ status: 200, body: { state: "stored" } })),
   });
@@ -44,11 +45,12 @@ describe("FlightThread", () => {
   });
 
   it("shows FLIGHT's Markdown as formatted text with ticket links", async () => {
-    stub([msg("comms:1", "**Done** - see #12\n\n- one\n- two")]);
+    stub([msg("comms:1", "**Done** - see shop-app#12 and `#5`\n\n- one\n- two")]);
     const { container } = render(<FlightThread />);
     await screen.findByText("Done");
     expect(container.textContent).not.toContain("**");
     expect(container.querySelectorAll("li")).toHaveLength(2);
+    await waitFor(() => expect(screen.getByRole("link", { name: "shop-app#12" })).toBeTruthy());
   });
 
   it("takes text while FLIGHT is stopped and says it reads it when it starts", async () => {

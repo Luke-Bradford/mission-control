@@ -1,7 +1,6 @@
 import {
   COMMS_CAPCOM,
   COMMS_CREW,
-  COMMS_TICKET,
   type CommsAgentResponse,
   type CommsMention,
   type CommsMessagesResponse,
@@ -30,8 +29,6 @@ import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
 import { ago, dayMonth, hhmm } from "../fmt.ts";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { parseTicket } from "../hud/RepoRef.tsx";
-import { githubItemHref } from "../links.ts";
 import {
   commsAgentPath,
   commsContactPath,
@@ -46,6 +43,7 @@ import { toast } from "../shell/Toast.tsx";
 import { CommsEnd, MentionText } from "./messages.tsx";
 import { type CommsView, ticketForRef } from "./model.ts";
 import { type CommsPage, type OlderMessages, useOlderMessages } from "./older.ts";
+import { refRepo, resolveRef } from "./refLinks.ts";
 
 const NO_MESSAGES: FlightConversationMessage[] = [];
 
@@ -148,31 +146,6 @@ function RefChip({
       </button>
     </span>
   );
-}
-
-/** The repo a bare `#n` or `PR n` in a message means: its ticket's, else its sender's or recipient's, else the only one. */
-function refRepo(
-  ticket: string | null,
-  senderRepo: string | undefined,
-  config: ConfigView | undefined,
-): string | null {
-  const parsed = ticket !== null && COMMS_TICKET.test(ticket) ? parseTicket(ticket) : null;
-  if (parsed) return parsed.repoId;
-  if (senderRepo) return senderRepo;
-  return config?.repos.length === 1 ? (config.repos[0]?.id ?? null) : null;
-}
-
-function resolveRef(
-  refText: string,
-  repoId: string,
-  config: ConfigView | undefined,
-): { to: string | null; github: string | null } | null {
-  const issue = /^#(\d+)$/.exec(refText)?.[1];
-  if (issue !== undefined) return { to: ticketPath(repoId, Number(issue)), github: null };
-  const pr = /^PR (\d+)$/.exec(refText)?.[1];
-  const github = config?.repos.find((r) => r.id === repoId)?.github;
-  const href = pr !== undefined && github ? githubItemHref(github, "pr", Number(pr)) : null;
-  return href ? { to: null, github: href } : null;
 }
 
 function MessageRefs({
