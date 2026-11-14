@@ -7043,6 +7043,22 @@ export class Store {
   }
 
   /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
+  /**
+   * One Needs-you item's conversation, oldest first: the messages sent from it and every reply in
+   * it (a reply inherits its message's item). The hub's own context lines and notices stay out.
+   */
+  itemThread(itemKey: string, limit = 100): CommsRow[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM (
+           SELECT * FROM comms WHERE item_key = ? AND from_id != ? AND kind IS NULL
+           ORDER BY at DESC, id DESC LIMIT ?
+         ) ORDER BY at ASC, id ASC`,
+      )
+      .all(itemKey, COMMS_MC, limit) as Row[];
+    return rows.map((row) => this.commsRow(row));
+  }
+
   openCommsItems(): (CommsRow & { label: "question" | "blocker" })[] {
     const rows = this.db
       .prepare(

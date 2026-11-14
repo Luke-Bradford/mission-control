@@ -346,6 +346,7 @@ import {
   seatQuestionTriage,
 } from "./hud.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
+import { itemThread } from "./item-thread.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
@@ -691,6 +692,8 @@ const MessageBody = z.strictObject({
    * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
    */
   question: z.number().int().positive().optional(),
+  /** The Needs-you item this reply is about: it shows in that item's conversation. */
+  itemKey: z.string().min(1).max(200).optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -4786,6 +4789,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 to: id,
                 text: b.text,
                 ...(b.interrupt === true ? { label: "handoff" as const } : {}),
+                ...(b.itemKey === undefined ? {} : { itemKey: b.itemKey }),
                 ref: ticket ?? undefined,
               },
             );
@@ -6530,6 +6534,12 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
+      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
+        const key = req.params.key;
+        if (key.length > 200) return reply.code(400).send({ error: "key too long" });
+        return itemThread(store.itemThread(key));
+      });
       // Reader: apps/web/src/shell/ItemPanel.tsx
       api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
         "/attention/:key/discussion",

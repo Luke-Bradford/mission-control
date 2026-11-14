@@ -2,7 +2,6 @@ import type { AttentionItem, BriefOption, ChoiceReceipt, CrewRow, ItemDiscussion
 import { ApiError, apiPost, errorNote } from "../api.ts";
 import { ACTIONS, hub, RESOURCES } from "../data.ts";
 import { FLIGHT_NO_SEAT, type FlightSeat } from "../flight/flightTypes.ts";
-import { toggleDock } from "../shell/overlays.ts";
 
 /** Where an answer to a Needs-you item goes. */
 export type AnswerTarget =
@@ -56,15 +55,21 @@ export async function sendAnswer(
       const question = askedQuestion(item.key);
       await apiPost(
         ACTIONS.seatMessage(target.seatId),
-        question === null ? { text: body } : { text: body, question },
+        question === null
+          ? { text: body, itemKey: item.key }
+          : { text: body, question, itemKey: item.key },
       );
     } else {
       // FLIGHT may be stopped: the hub keeps the message and FLIGHT reads it when it starts.
       if (flight === null) return FLIGHT_NO_SEAT;
-      await apiPost(ACTIONS.seatMessage(flight.id), { text: flightText(item.key, about, body) });
-      toggleDock(true);
+      // The item names the message, so it and every reply show in the item's conversation.
+      await apiPost(ACTIONS.seatMessage(flight.id), {
+        text: flightText(item.key, about, body),
+        itemKey: item.key,
+      });
     }
     hub.refetch(RESOURCES.attention.path);
+    hub.refetch(RESOURCES.itemThread(item.key).path);
     return null;
   } catch (e) {
     return e instanceof ApiError ? (errorNote(e) ?? e.message) : failure(e);

@@ -4181,7 +4181,9 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     // core's alert list names the server's key
     expect(needsYouAlert({ key: `note:${HUB_UPDATE_HELD_KEY}`, kind: "blocked" })).toBe(true);
     const shown = needsYouItems(all()).map((i) => i.key);
-    expect(shown).toContain(`note:${HUB_UPDATE_HELD_KEY}`);
+    // a held Update is FLIGHT's while FLIGHT is seated, so it never reaches the operator's list
+    expect(shown).not.toContain(`note:${HUB_UPDATE_HELD_KEY}`);
+    expect(all().find((i) => i.key === `note:${HUB_UPDATE_HELD_KEY}`)?.owner).toBe("flight");
     for (const key of ["esc:shop-app#9", "note:blocked:parked", "note:flag-x"])
       expect(shown).not.toContain(key);
     expect(all().find((i) => i.key === "note:flag-x")).toMatchObject({
@@ -4414,13 +4416,14 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
     raise("hub-update-held", "question");
     raise("plain", "question");
     const items = all();
-    for (const key of ["note:blocked:r-budget:0", "note:hub-update-held"])
-      expect(items.find((i) => i.key === key)).toMatchObject({
-        owner: "operator",
-        flightTriage: "missed",
-      });
+    expect(items.find((i) => i.key === "note:blocked:r-budget:0")).toMatchObject({
+      owner: "operator",
+      flightTriage: "missed",
+    });
+    // a held Update is FLIGHT's to run while FLIGHT is seated (the operator, 13 November)
+    expect(items.find((i) => i.key === "note:hub-update-held")).toMatchObject({ owner: "flight" });
     expect(isOperatorCall({ key: "note:blocked:r-budget:0", kind: "blocked" }, store)).toBe(true);
-    expect(isOperatorCall({ key: "note:hub-update-held", kind: "question" }, store)).toBe(true);
+    expect(isOperatorCall({ key: "note:hub-update-held", kind: "question" }, store)).toBe(false);
     expect(isOperatorCall({ key: "note:plain", kind: "question" }, store)).toBe(false);
     // a controller check is FLIGHT's to do, so it is not the operator's call
     store.upsertRun(

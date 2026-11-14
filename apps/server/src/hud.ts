@@ -892,12 +892,12 @@ interface FlightTriage {
 
 /**
  * The operator's call (#758): FLIGHT may brief it for the operator but never keep it. Unless it is
- * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, the
- * held hub Update, and a run parked on its budget or account, or on the operator's acceptance.
+ * a hub alert, it reaches Needs you only through FLIGHT's brief (#1543). The decision kinds, and a
+ * run parked on its budget or account, or on the operator's acceptance. A held hub Update is
+ * FLIGHT's to run when a FLIGHT seat exists (the operator, 13 November: nobody asked him for it).
  */
 export function isOperatorCall(item: Pick<AttentionItem, "key" | "kind">, store: Store): boolean {
   if (OPERATOR_CALL_KINDS.includes(item.kind)) return true;
-  if (item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) return true;
   if (item.key === `${NOTE_KEY}${FLIGHT_RUNAWAY_NOTE_KEY}`) return true;
   if (item.kind !== "blocked") return false;
   const park = noteParkOf(item, store);
@@ -1274,6 +1274,8 @@ function buildAttentionItems(
     }
   }
 
+  // A question asked inside a Needs-you item's conversation, by the item it belongs to (below).
+  const threadOf = new Map<string, string>();
   // A labelled direct question or blocker stays in its conversation while its addressee has the
   // first fifteen minutes to react. After that it is a durable FLIGHT triage item, rather than an
   // unbounded stream of unread-chatter items.
@@ -1313,12 +1315,14 @@ function buildAttentionItems(
     // FLIGHT's message for the controller is the controller's, never a stuck run the operator keeps
     const forController = message.from === flight?.seat.id && isForTheController(message.text);
     if (flightQuestion && flightQuestionChoice(store, message.id, message.from)) continue;
+    const openKey =
+      message.from === flight?.seat.id && message.to === COMMS_CAPCOM
+        ? canonicalFlightQuestionKey(store, message.id, flight.seat.id)
+        : `${COMMS_OPEN_PREFIX}${message.id}`;
+    if (message.itemKey !== undefined) threadOf.set(openKey, message.itemKey);
     items.push({
       owner: forController ? OWNER_CONTROLLER : OWNER_OPERATOR,
-      key:
-        message.from === flight?.seat.id && message.to === COMMS_CAPCOM
-          ? canonicalFlightQuestionKey(store, message.id, flight.seat.id)
-          : `${COMMS_OPEN_PREFIX}${message.id}`,
+      key: openKey,
       kind: message.label === "blocker" && !forController ? "blocked" : "question",
       agentId: message.from,
       repoId: repoId ?? null,
@@ -1742,7 +1746,15 @@ function buildAttentionItems(
     triage === null
       ? checked
       : withNotTriaging(checked, triage, acks, now, config.operator.timezone);
-  return includeHeld ? [...shown, ...partition.held] : shown;
+  // A question asked in an open item's conversation shows in that conversation, not as a second
+  // item, while that item is on the same list or the operator's.
+  const owners = new Map(shown.map((i) => [i.key, i.owner]));
+  const listed = shown.filter((i) => {
+    const parent = threadOf.get(i.key);
+    const parentOwner = parent === undefined ? undefined : owners.get(parent);
+    return parentOwner === undefined || (parentOwner !== i.owner && parentOwner !== OWNER_OPERATOR);
+  });
+  return includeHeld ? [...listed, ...partition.held] : listed;
 }
 
 /**
@@ -1904,6 +1916,8 @@ function noteOwner(
     return OWNER_CONTROLLER;
   }
   if (flightSeated && (isChatterNoteKey(n.key) || isHardRulesFlagKey(n.key))) return OWNER_FLIGHT;
+  // FLIGHT runs a held Update in a quiet gap; it is never the operator's while FLIGHT is seated.
+  if (flightSeated && n.key === HUB_UPDATE_HELD_KEY) return OWNER_FLIGHT;
   return OWNER_OPERATOR;
 }
 
