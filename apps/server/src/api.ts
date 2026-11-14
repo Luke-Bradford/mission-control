@@ -346,6 +346,7 @@ import {
   seatQuestionTriage,
 } from "./hud.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
+import { itemThread } from "./item-thread.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
@@ -691,6 +692,8 @@ const MessageBody = z.strictObject({
    * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
    */
   question: z.number().int().positive().optional(),
+  /** The Needs-you item this reply is about: it shows in that item's conversation. */
+  itemKey: z.string().min(1).max(200).optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -4754,6 +4757,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return { ok: true };
           }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
+          // Sent from an item's conversation, it answers the seat's latest message there, so a
+          // question the seat asked in that conversation closes.
+          const answers =
+            b.itemKey === undefined
+              ? undefined
+              : store
+                  .itemThreadNow(b.itemKey)
+                  .filter((m) => m.from === id && m.to === sender.from)
+                  .at(-1)?.id;
           try {
             let delivered = false;
             let wakeFailed = false;
@@ -4786,6 +4798,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 to: id,
                 text: b.text,
                 ...(b.interrupt === true ? { label: "handoff" as const } : {}),
+                ...(b.itemKey === undefined ? {} : { itemKey: b.itemKey }),
+                ...(answers === undefined ? {} : { replyTo: answers }),
                 ref: ticket ?? undefined,
               },
             );
@@ -6530,6 +6544,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
+      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
+        const key = req.params.key;
+        if (key.length > 200) return reply.code(400).send({ error: "key too long" });
+        // A note key is raised again later: only this run of the note owns the conversation.
+        // Other item keys name one message, question or issue, so all of theirs is the item's.
+        return itemThread(store.itemThreadNow(key));
+      });
       // Reader: apps/web/src/shell/ItemPanel.tsx
       api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
         "/attention/:key/discussion",

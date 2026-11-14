@@ -1615,6 +1615,7 @@ const API_ROUTES: [string, string, object?][] = [
     },
   ],
   ["GET", "/api/attention/unknown/materials"],
+  ["GET", "/api/attention/unknown/thread"],
   ["POST", "/api/attention/unknown/clear", {}],
   ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],

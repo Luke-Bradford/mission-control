@@ -1050,6 +1050,12 @@ export class Store {
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
     this.addColumn("comms", "item_key", "TEXT");
+    // A Needs-you item's conversation reads by item (itemThread).
+    this.db.exec("CREATE INDEX IF NOT EXISTS comms_item_key ON comms(item_key, at, id)");
+    // A note's unbroken run walks its episodes by key (noteRunStart).
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS attention_episodes_key ON attention_episodes(key, at)",
+    );
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
     // Turns in a row that ended with no new commit; the resume line reads it.
@@ -7040,6 +7046,63 @@ export class Store {
       const tokens = JSON.parse(row.tokens as string) as TokenUsage;
       return total + tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
     }, 0);
+  }
+
+  /**
+   * When a note's unbroken run began (its open run, or its last one once cleared): a note raised
+   * again within a minute of clearing (a held Update re-raised as main moves) is the same item to
+   * the operator, so its conversation stays; an earlier run's does not carry over. Read from the
+   * episodes, since a refresh moves the note's own time forward. 0 for a key never raised.
+   */
+  noteRunStart(noteKey: string): number {
+    const latest = this.db
+      .prepare(
+        `SELECT at FROM attention_episodes WHERE key = ?
+         ORDER BY (cleared_at IS NULL) DESC, at DESC LIMIT 1`,
+      )
+      .get(noteKey) as { at: number } | undefined;
+    if (latest === undefined) return 0;
+    const before = this.db.prepare(
+      `SELECT at FROM attention_episodes WHERE key = ? AND at < ? AND cleared_at >= ?
+       ORDER BY at DESC LIMIT 1`,
+    );
+    let start = latest.at;
+    for (let i = 0; i < 1000; i++) {
+      const row = before.get(noteKey, start, start - 60_000) as { at: number } | undefined;
+      if (row === undefined) break;
+      start = row.at;
+    }
+    return start;
+  }
+
+  /** An item's conversation since its current run (`noteRunStart` for a note key, else all). */
+  itemThreadNow(itemKey: string): (CommsRow & { choice?: string })[] {
+    return this.itemThread(
+      itemKey,
+      itemKey.startsWith("note:") ? this.noteRunStart(itemKey.slice("note:".length)) : 0,
+    );
+  }
+
+  /**
+   * One Needs-you item's conversation since `since` (the item's own raising: a note key is reused),
+   * oldest first: the messages sent from it and every reply in it (a reply inherits its message's
+   * item). The hub's own context lines and notices stay out; a picked option carries its label.
+   */
+  itemThread(itemKey: string, since = 0, limit = 100): (CommsRow & { choice?: string })[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM (
+           SELECT c.*, q.label AS choice_label FROM comms c
+           LEFT JOIN question_choices q ON q.message_id = c.id
+           WHERE c.item_key = ? AND c.at >= ? AND c.from_id != ? AND c.kind IS NULL
+           ORDER BY c.at DESC, c.id DESC LIMIT ?
+         ) ORDER BY at ASC, id ASC`,
+      )
+      .all(itemKey, since, COMMS_MC, limit) as Row[];
+    return rows.map((r) => ({
+      ...this.commsRow(r),
+      ...(typeof r.choice_label === "string" ? { choice: r.choice_label } : {}),
+    }));
   }
 
   /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */

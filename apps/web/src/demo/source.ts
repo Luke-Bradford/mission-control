@@ -198,6 +198,8 @@ export function answer(path: string): Response {
   if (thread !== undefined) return json(thread);
   const delta = activitySince(path);
   if (delta !== undefined) return json(delta);
+  // Demo's questions have no Comms conversation behind them yet.
+  if (/^\/api\/attention\/[^/]+\/thread$/.test(path)) return json({ messages: [] });
   if (/^\/api\/runs\/[^/]+\/handoff$/.test(path)) return json(null);
   if (/^\/api\/runs\/([^/]+)\/loop$/.test(path))
     return json({ runId: path.split("/")[3], loop: null, events: [], tries: [] });

@@ -111,6 +111,7 @@ export async function sendComms(
   await validateCommsText(deps.knownSecrets, input.text);
   let replyFrom: string | undefined;
   let replyTicket: string | null | undefined;
+  let replyItemKey: string | undefined;
   if (input.replyTo !== undefined) {
     const original = deps.store.commsMessage(input.replyTo);
     if (original === null) throw new Error("Unknown reply message.");
@@ -121,6 +122,8 @@ export async function sendComms(
     )
       throw new Error("You cannot reply to that Comms message.");
     replyFrom = original.from;
+    // A reply stays in the Needs-you item's conversation its message belongs to.
+    replyItemKey = original.itemKey;
     if (input.ref === undefined || input.ref === original.ref) replyTicket = original.ticket;
   }
   crew = deps.crew();
@@ -155,7 +158,7 @@ export async function sendComms(
           deps.senderTicket,
         ),
         text: input.text,
-        itemKey: input.itemKey,
+        itemKey: input.itemKey ?? replyItemKey,
         label: input.label,
         ref: input.ref,
         replyTo: input.replyTo,
