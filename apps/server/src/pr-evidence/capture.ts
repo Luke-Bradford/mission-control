@@ -480,7 +480,9 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
           EVIDENCE_SCHEMES.every((scheme) => keep.shots.has(shotKey(side, page, scheme))),
         ) &&
         (!deps.renderDemo ||
-          EVIDENCE_DEMO_VIEWPORTS.every((v) => keep.shots.has(evidenceDemoImageName(page, v.width))));
+          EVIDENCE_DEMO_VIEWPORTS.every((v) =>
+            keep.shots.has(evidenceDemoImageName(page, v.width)),
+          ));
       const gaps = [
         ...missing,
         ...demoGaps.map(({ page }) => ({ page, scheme: "light" as const })),
