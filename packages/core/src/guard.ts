@@ -3459,62 +3459,6 @@ const SHELL_READERS = new Set([
 ]);
 const SHELL_GH_READS = new Set(["view", "list", "status", "diff", "checks", "search", "watch"]);
 
-const WGET_READ_FLAGS = new Set([
-  "--quiet",
-  "--no-verbose",
-  "--server-response",
-  "--no-check-certificate",
-  "--spider",
-]);
-const WGET_READ_VALUE_FLAGS = new Set([
-  "--header",
-  "--user-agent",
-  "--timeout",
-  "--tries",
-  "--max-redirect",
-  "--output-document",
-]);
-
-/**
- * wget is a read only when every option is a known read option and it writes no file: --spider
- * or `-O -`. Any other option (a method or body, -e, --config, a log, cookie or WARC file,
- * recursion, ...) is a write with unknown targets, so a new wget option counts until listed here.
- */
-function wgetWriteTargets(args: readonly string[]): string[] | null {
-  const files: string[] = [];
-  let spider = false;
-  let stdout = false;
-  const document = (value: string): void => {
-    if (value === "-") stdout = true;
-    else files.push(value);
-  };
-  for (let n = 0; n < args.length; n++) {
-    const arg = args[n] ?? "";
-    if (!arg.startsWith("-") || arg === "-") continue;
-    if (arg.startsWith("--")) {
-      const [flag = "", ...rest] = arg.split("=");
-      const value = rest.join("=");
-      if (WGET_READ_FLAGS.has(flag) && rest.length === 0) spider ||= flag === "--spider";
-      else if (WGET_READ_VALUE_FLAGS.has(flag)) {
-        const given = rest.length ? value : (args[++n] ?? "");
-        if (flag === "--output-document") document(given);
-      } else return [];
-      continue;
-    }
-    const cluster = /^-([qSnv]*)([OUTt])?(.*)$/.exec(arg);
-    if (cluster === null) return [];
-    const [, , option, attached = ""] = cluster;
-    if (option === undefined) {
-      if (attached !== "") return [];
-      continue;
-    }
-    const given = attached !== "" ? attached : (args[++n] ?? "");
-    if (option === "O") document(given);
-  }
-  if (files.length) return files;
-  return spider || stdout ? null : [];
-}
-
 /** Explicit file destinations. Null is a read; an empty list is a write with unknown targets. */
 function shellWriteTargets(program: string, args: readonly string[]): string[] | null {
   const output = (short: string, long: string): string[] => {
@@ -3543,7 +3487,7 @@ function shellWriteTargets(program: string, args: readonly string[]): string[] |
     const files = paths.filter((path) => path !== "-");
     return files.length ? files : null;
   }
-  if (program === "wget") return wgetWriteTargets(args);
+  if (program === "wget") return output("-O", "--output-document");
   if (program === "sed" || program === "perl") {
     if (!args.some((arg) => /^-[a-zA-Z]*i|^--in-place(?:=|$)/.test(arg))) return null;
     const files: string[] = [];
@@ -3642,8 +3586,6 @@ export function flightShellWrite(command: string): boolean {
       if (ghReadVerb(args)) continue;
       return true;
     }
-    // wget reaches here only when its targets are null (--spider or -O - and nothing else): a read.
-    if (program === "wget") continue;
     if (program === "curl") {
       if (args.some((a) => /^(?:-X|--request|-d|--data|-F|--form|-T|--upload-file|--json)/.test(a)))
         return true;
