@@ -1,6 +1,7 @@
-import type { ConfigView, FlightConversationMessage } from "@mc/core";
+import { COMMS_NOTICE, type ConfigView, type FlightConversationMessage } from "@mc/core";
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
+import { useNoticeResource } from "../comms/model.ts";
 import { linkRefs } from "../comms/refLinks.ts";
 import { Markdown, OpenLinks } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
@@ -32,8 +33,15 @@ const failNote = (e: unknown): string => {
  * in the other as soon as the thread is fetched again. The seat is read only to address the
  * message and to offer Start FLIGHT.
  */
-export function FlightThread({ id = FLIGHT_THREAD_INPUT }: { id?: string } = {}) {
-  const res = useResource<Page>(RESOURCES.commsFlight);
+export function FlightThread({
+  id = FLIGHT_THREAD_INPUT,
+  hideNotices = false,
+}: {
+  id?: string;
+  /** Comms' "Hide hub notices" switch: the page is read without them and they are filtered out. */
+  hideNotices?: boolean;
+} = {}) {
+  const res = useNoticeResource<Page>(RESOURCES.commsFlight, hideNotices);
   const seat = useResource<FlightView>(RESOURCES.flight).data?.seat;
   const config = useResource<ConfigView>(RESOURCES.config).data;
   const repo = config?.repos.length === 1 ? config.repos[0]?.id : undefined;
@@ -42,7 +50,8 @@ export function FlightThread({ id = FLIGHT_THREAD_INPUT }: { id?: string } = {})
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const messages = res.data?.messages ?? [];
+  const all = res.data?.messages ?? [];
+  const messages = hideNotices ? all.filter((m) => m.kind !== COMMS_NOTICE) : all;
   // biome-ignore lint/correctness/useExhaustiveDependencies: follow new messages while the reader is at the bottom
   useEffect(() => {
     const el = log.current;

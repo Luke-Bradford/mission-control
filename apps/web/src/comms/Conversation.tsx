@@ -1005,7 +1005,7 @@ function ModernConversation({
         </div>
       )}
       {view.kind === "flight" ? (
-        <FlightThread />
+        <FlightThread hideNotices={hideNotices} />
       ) : (
         <MessagePane
           emptyText={
