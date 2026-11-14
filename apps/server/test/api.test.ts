@@ -7355,6 +7355,64 @@ describe("crew routes", () => {
       expect(body.runStartedAt).toBeNull();
     });
 
+    describe("hourly status figures edge cases", () => {
+      const seat = () =>
+        config.crew?.sessions[0]?.seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "claude-main",
+          model: "opus",
+          area: [],
+        });
+      const session = (runId: string, state: "running" | "error", now: number) =>
+        store.setSeatSession({
+          seatId: "flight-1",
+          runId,
+          cliSessionId: null,
+          state,
+          reason: null,
+          worktree: null,
+          updatedAt: now,
+        });
+
+      it("serves no run start when the seat's run has ended", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({
+            id: "dead-flight",
+            agentId: "flight-1",
+            startedAt: now - 30 * 60_000,
+            endedAt: now - 10 * 60_000,
+            status: "failed",
+          }),
+        );
+        session("dead-flight", "error", now);
+        expect((await get("/api/flight")).json<FlightView>().runStartedAt).toBeNull();
+      });
+
+      it("serves 0 sessions, not null, when a steady run started before the hour", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "steady", agentId: "flight-1", costUsd: 1, startedAt: now - 90 * 60_000 }),
+        );
+        session("steady", "running", now);
+        const body = (await get("/api/flight")).json<FlightView>();
+        expect(body.sessionsLastHour).toBe(0);
+      });
+
+      it("serves no cost while the only run in the hour has none recorded", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "fresh", agentId: "flight-1", costUsd: null, startedAt: now - 60_000 }),
+        );
+        session("fresh", "running", now);
+        expect((await get("/api/flight")).json<FlightView>().costLastHour).toBeNull();
+      });
+    });
+
     it("lists every recent controller decision beyond the main decision limit", async () => {
       config.crew?.sessions[0]?.seats.push({
         id: "flight-1",

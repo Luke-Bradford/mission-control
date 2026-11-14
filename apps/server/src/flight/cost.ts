@@ -67,7 +67,7 @@ function factsFor(
 /**
  * API-equivalent cost for FLIGHT's runs that overlap [since, now], from the shared facts (same
  * timestamped attempt usage and wall-time fallback as the daily wake-cost figure). null when no
- * FLIGHT run overlaps the window: no data is not zero.
+ * FLIGHT run with a recorded cost overlaps the window: no data is not zero.
  */
 export function flightCostInWindow(
   facts: FlightFinancialFacts,
@@ -78,6 +78,7 @@ export function flightCostInWindow(
   const runs = facts.runs.filter(
     (run) =>
       run.agentId === flightId &&
+      run.costUsd !== null &&
       run.startedAt < now + 1 &&
       Math.max(endOf(run, now), run.startedAt + 1) > since,
   );

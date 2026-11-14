@@ -137,7 +137,7 @@ export interface FlightView {
   wakeCost?: FlightWakeCost;
   /** API-equivalent cost of FLIGHT's sessions in the last 60 minutes; null without session data. */
   costLastHour?: number | null;
-  /** FLIGHT sessions started in the last 60 minutes; null when none started. */
+  /** FLIGHT sessions started in the last 60 minutes; 0 when FLIGHT has run data but none started; null when it has no run data. */
   sessionsLastHour?: number | null;
   /** Start time of FLIGHT's current session run; null when there is no current run. */
   runStartedAt?: number | null;

@@ -451,14 +451,14 @@ function financialFigures(
   );
   const facts = flightFinancialFacts(store, now, new Set([...crewIds, found.seat.id]));
   const hourSince = now - FLIGHT_HOUR_MS;
-  const started = facts.runs.filter(
-    (run) => run.agentId === found.seat.id && run.startedAt >= hourSince && run.startedAt <= now,
-  ).length;
+  const own = facts.runs.filter((run) => run.agentId === found.seat.id);
+  const started = own.filter((run) => run.startedAt >= hourSince && run.startedAt <= now).length;
   const runId = store.seatSession(found.seat.id)?.runId ?? null;
+  const live = runId === null ? null : store.run(runId);
   return {
     costLastHour: flightCostInWindow(facts, hourSince, now, found.seat.id),
-    sessionsLastHour: started === 0 ? null : started,
-    runStartedAt: runId === null ? null : (store.run(runId)?.startedAt ?? null),
+    sessionsLastHour: own.length === 0 ? null : started,
+    runStartedAt: live !== null && live.endedAt === null ? live.startedAt : null,
     wakeCost: flightWakeCost(store, now, found.seat.id, crewIds, undefined, facts),
     wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId, undefined, facts),
   };
