@@ -316,6 +316,24 @@ describe("flightShellBreakerWrite", () => {
       false,
     );
   });
+  it.each([
+    "wget --spider https://example.test",
+    "wget -q --spider https://example.test",
+    "wget -O - https://example.test",
+    "wget -qO- https://example.test",
+    "wget --output-document=- https://example.test",
+  ])("neither audits nor counts a read-only wget: %s", (command) => {
+    expect(flightShellWrite(command)).toBe(false);
+    expect(flightShellBreakerWrite(command, { cwd: "/worktree", worktree: "/worktree" })).toBe(
+      false,
+    );
+  });
+  it.each(["wget https://example.test", "wget -O /outside/file https://example.test"])(
+    "still counts a wget that writes a file: %s",
+    (command) => {
+      expect(flightShellWrite(command)).toBe(true);
+    },
+  );
   it("counts a write through a symlink to an outside destination", () => {
     expect(
       flightShellBreakerWrite("touch linked/file", {

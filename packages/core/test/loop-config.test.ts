@@ -194,6 +194,34 @@ describe("validateLoop refuses", () => {
       },
       "loop feature: step merge takes no report tool",
     ],
+    [
+      "plan sizes left empty",
+      (d) => {
+        step(d, "plan").sizes = [];
+      },
+      "loop feature: step plan sizes must be a nonempty list",
+    ],
+    [
+      "plan sizes with a repeat",
+      (d) => {
+        step(d, "plan").sizes = ["M", "M"];
+      },
+      "loop feature: step plan sizes must not repeat M",
+    ],
+    [
+      "plan sizes that are not board sizes",
+      (d) => {
+        step(d, "plan").sizes = ["M", "HUGE"];
+      },
+      "loop feature: step plan sizes must be board sizes (XS, S, M, L, XL), not HUGE",
+    ],
+    [
+      "sizes on a step other than plan",
+      (d) => {
+        step(d, "build").sizes = ["M"];
+      },
+      "loop feature: step build takes no sizes",
+    ],
   ])("%s", (_name, mutate, text) => {
     const d = feature();
     mutate(d);
