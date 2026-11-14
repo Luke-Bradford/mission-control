@@ -631,7 +631,8 @@ function MentionsBell({
     window.addEventListener("resize", fit);
     return () => window.removeEventListener("resize", fit);
   }, [open]);
-  const unseen = mentions.filter((mention) => !mention.seen);
+  // the bell counts what waits for the operator's answer, as the header does
+  const unseen = mentions.filter((mention) => !mention.seen && mention.needsReply);
   const mark = (ids: string[]) => {
     void apiPost("/api/comms/mentions/seen", { ids })
       .then(() => {

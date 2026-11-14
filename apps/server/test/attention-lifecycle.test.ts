@@ -52,7 +52,7 @@ beforeEach(() => {
   store = new Store(":memory:");
 });
 afterEach(() => store.close());
-it("retires ordinary ended-run blockers while preserving a failed cleanup task for the controller", () => {
+it("retires ordinary ended-run blockers while preserving a failed cleanup task for FLIGHT", () => {
   store.upsertRun(run());
   for (const key of ["blocked:run:0", "cleanup:run"])
     store.raiseNote({
@@ -66,7 +66,7 @@ it("retires ordinary ended-run blockers while preserving a failed cleanup task f
     });
   const notes = attentionItems(config, store, NOW).filter((i) => i.key.startsWith("note:"));
   expect(notes.map((i) => i.key)).toEqual(["note:cleanup:run"]);
-  expect(notes[0]?.owner).toBe("controller");
+  expect(notes[0]?.owner).toBe("flight");
 });
 it("keeps a pending controller approval and retires its old blocker after an exact-head pass", () => {
   store.upsertRun(run({ loop: { ...NEW_LOOP, prNumber: 7, controllerCheckRequired: true } }));
@@ -156,7 +156,7 @@ it("routes FLIGHT's own current for:flight brief away from the operator", () => 
   expect(needsYouItems(items).some((i) => i.key === key)).toBe(false);
 });
 
-it("routes a controller-owned cleanup to the operator only after an explicit recommended brief", () => {
+it("a failed cleanup is FLIGHT's to triage, not the operator's", () => {
   store.upsertRun(run());
   store.raiseNote({
     key: "cleanup:run",
@@ -168,21 +168,11 @@ it("routes a controller-owned cleanup to the operator only after an explicit rec
     at: NOW - 60_000,
   });
   const key = "note:cleanup:run";
-  expect(attentionItems(config, store, NOW).find((i) => i.key === key)?.owner).toBe("controller");
-  store.addBrief({
-    key,
-    for: "operator",
-    ask: "Keep the run's worktree for inspection, or remove it?",
-    context: "No controller is available, so you decide.",
-    recommendation: "Keep the worktree and ask the operator to inspect the lock",
-    options: [
-      { label: "Keep", answer: "Keep the worktree" },
-      { label: "Remove", answer: "Remove the worktree" },
-    ],
-    basis: "Cleanup failure",
-    at: NOW,
+  // FLIGHT triages it like its other items; its own bound brief is what reaches the operator
+  expect(attentionItems(config, store, NOW).find((i) => i.key === key)).toMatchObject({
+    owner: "flight",
   });
-  expect(needsYouItems(attentionItems(config, store, NOW)).some((i) => i.key === key)).toBe(true);
+  expect(needsYouItems(attentionItems(config, store, NOW)).some((i) => i.key === key)).toBe(false);
 });
 
 it.each(["closed", "merged"] as const)(

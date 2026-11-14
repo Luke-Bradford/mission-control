@@ -35,6 +35,7 @@ import {
   COMMS_MC,
   COMMS_MESSAGE_BODY_LIMIT,
   COMMS_MESSAGE_MAX,
+  COMMS_OPEN_PREFIX,
   COMMS_PAGE_DEFAULT,
   COMMS_PAGE_MAX,
   COMMS_REACTIONS,
@@ -110,6 +111,7 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
   PR_LIST_DAYS,
@@ -240,6 +242,7 @@ import {
   threadMessages,
   validateCommsText,
 } from "./comms/index.ts";
+import { canonicalFlightQuestionKey } from "./comms/question.ts";
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import { compressResponse } from "./compress.ts";
@@ -1421,7 +1424,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // The controller's own key. A request that carries it passes where the operator token does (it
   // grants nothing new) and is marked, so what it sends is recorded as the controller's.
   const controllerRequests = new WeakSet<FastifyRequest>();
-  const CONTROLLER_HOLD_REFUSED = "the controller does not hold merges; tell FLIGHT what is wrong";
+  const CONTROLLER_HOLD_REFUSED =
+    "the controller does not hold or release merges; tell FLIGHT what is wrong";
   if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
     const { controllerToken, operatorToken: held } = deps;
     app.addHook("onRequest", async (req) => {
@@ -2463,17 +2467,23 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       );
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
       api.get("/comms/mentions", () => {
-        const open = new Set(
-          store
-            .openCommsItems()
-            .filter((row) => row.to === COMMS_CAPCOM)
-            .map((row) => row.id),
+        // A message needs the operator's reply when its question is open on their Needs you: the
+        // same rules close it in both places, so the badge and Needs you never disagree.
+        const asks = new Set(
+          sharedAttention(true)
+            .filter((item) => item.owner === OWNER_OPERATOR)
+            .map((item) => item.key),
         );
+        const flightId = flightSeat(config)?.seat.id;
+        const askKey = (row: { id: string; from: string; to: string }): string =>
+          flightId !== undefined && row.from === flightId && row.to === COMMS_CAPCOM
+            ? canonicalFlightQuestionKey(store, row.id, flightId)
+            : `${COMMS_OPEN_PREFIX}${row.id}`;
         return {
           mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
             message: storedCommsMessage(row),
             seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
-            needsReply: open.has(row.id),
+            needsReply: asks.has(askKey(row)),
           })),
         };
       });
@@ -5865,8 +5875,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             (body.data.action === "hold" && !body.data.reason)
           )
             return reply.code(400).send({ error: "invalid merge-hold request" });
-          // The controller is not a gate in the crew's path: it may release a hold, never set one.
-          if (body.data.action === "hold" && controllerRequests.has(req))
+          // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+          if (controllerRequests.has(req))
             return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
           const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
           if (!target) return reply;
@@ -5875,7 +5885,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (actor && previous !== null && !previous.startsWith("FLIGHT: "))
             return reply
               .code(403)
-              .send({ error: "Only the controller may change this operator merge hold." });
+              .send({ error: "Only the operator may change this operator merge hold." });
           if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
           checkBriefDispatch();
           setExternalMergeHold(
@@ -5970,7 +5980,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // The operator holds a run's PR from merging, or releases a hold (FLIGHT's or their own).
-      // FLIGHT's hold_pr tool cannot release one set here. The controller may only release.
+      // FLIGHT's hold_pr tool cannot release one set here. The controller's key is refused.
       // Reader: docs/runbook.md#hold-a-run-from-merging
       api.post<{ Params: { id: string } }>("/runs/:id/merge-hold", async (req, reply) => {
         const run = store.run(req.params.id);
@@ -5979,8 +5989,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!crewGate(run.agentId, reply)) return reply;
         const body = MergeHoldBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
-        // The controller is not a gate in the crew's path: it may release a hold, never set one.
-        if (body.data.action === "hold" && controllerRequests.has(req))
+        // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+        if (controllerRequests.has(req))
           return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
         if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
         const engine = deps.engine;
@@ -6392,7 +6402,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
-      registerBriefChoiceRoutes(api, app, deps, flightActor);
+      registerBriefChoiceRoutes(api, app, deps, flightActor, (req) => controllerRequests.has(req));
       // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-flight-s-side-flight-is-the-gate (the Answered group; the web side is a follow-up ticket)
       api.get("/attention/answered", async () =>
         store.questionClosures(now() - ANSWERED_WINDOW_MS, ANSWERED_LIMIT),

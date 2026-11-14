@@ -4234,7 +4234,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.holdPr,
-      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release your own hold. The engine parks the run instead of merging it until the hold is released.",
+      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release your own hold. The engine parks the run instead of merging it until the hold is released. A hold the operator set is theirs to release: ask them in one brief.",
       HoldArgs,
       "hold",
       async (a) => {

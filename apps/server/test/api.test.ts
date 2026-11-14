@@ -1316,13 +1316,21 @@ describe("Comms API", () => {
         ticket: null,
         text: "Which layout?",
         label: "question",
+        mentions: ["CAPCOM"],
       });
       if (ask === null) throw new Error("question not stored");
       const needsReply = async (id: string) =>
         (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
           .json()
           .mentions.find((m: { message: { id: string } }) => m.message.id === id)?.needsReply;
-      expect(await needsReply(ask.id)).toBe(true);
+      // the badge counts exactly what is open on the operator's Needs you
+      const onNeedsYou = (
+        (await comms.inject({ method: "GET", url: "/api/attention" })).json() as {
+          key: string;
+          owner: string;
+        }[]
+      ).some((i) => i.key === `comms-open:${ask.id}` && i.owner === "operator");
+      expect(await needsReply(ask.id)).toBe(onNeedsYou);
       store.addComms({
         at: clock++,
         from: "CAPCOM",
@@ -1343,7 +1351,9 @@ describe("Comms API", () => {
         ).statusCode,
       ).toBe(200);
       expect(
-        (await comms.inject({ method: "GET", url: "/api/comms/mentions" })).json().mentions[0].seen,
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
+          .json()
+          .mentions.find((m: { message: { id: string } }) => m.message.id === mention.id).seen,
       ).toBe(true);
       expect(
         (await comms.inject({ method: "GET", url: "/api/comms/pins" })).json().messages[0].id,
@@ -10065,13 +10075,13 @@ describe("operator token", () => {
       expect(calls).toEqual([]);
     });
 
-    it("refuses a hold from the controller's key but lets it release", async () => {
+    it("refuses the controller's key: it neither holds nor releases a merge", async () => {
       const ctl = { "x-mc-controller": "ctl-1" };
       const held = await post(ctl, { action: "hold", reason: "my check" });
       expect(held.statusCode).toBe(403);
       expect(held.json().error).toContain("tell FLIGHT");
-      expect((await post(ctl, { action: "release" })).statusCode).toBe(409);
-      expect(calls).toEqual([["release", "mh", "CAPCOM"]]);
+      expect((await post(ctl, { action: "release" })).statusCode).toBe(403);
+      expect(calls).toEqual([]);
     });
 
     it("holds and releases as the operator, and names a refusal", async () => {

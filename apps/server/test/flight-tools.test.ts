@@ -3404,15 +3404,21 @@ describe("end_run", () => {
     ]);
   });
 
-  it("refuses a set-aside run that is not parked, and a set-aside run with uncommitted work", async () => {
+  it("refuses a set-aside run with uncommitted work, in any phase", async () => {
     setAside();
     const r = store.run("r-g");
     if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
-    expect((await call("end_run", E())).isError).toBe(true);
-    if (r?.loop) store.setRunLoop("r-g", r.loop);
     dirty = ["apps/a.ts"];
     expect((await call("end_run", E())).isError).toBe(true);
     expect(asideEnds).toEqual([]);
+  });
+
+  it("ends a set-aside run that never parked (an evidence hold keeps it in review)", async () => {
+    setAside();
+    const r = store.run("r-g");
+    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    expect((await call("end_run", E())).isError).toBeFalsy();
+    expect(asideEnds.length).toBe(1);
   });
 
   it("reports a failed end and records nothing", async () => {
@@ -6181,8 +6187,6 @@ describe("brief_item", () => {
     expect(await call("brief_item", B({ key: "note:nope" }))).toEqual(
       refused("Not briefed: note:nope is not an item in the operator's Needs-you list."),
     );
-    raise("cleanup-branch:x");
-    expect((await call("brief_item", B({ key: "note:cleanup-branch:x" }))).isError).toBe(true);
     expect(store.briefs().size).toBe(0);
   });
 
@@ -7955,7 +7959,7 @@ describe("superuser housekeeping", () => {
       basis: "I think it is fine now.",
     });
     expect(refusal).toHaveProperty("isError", true);
-    expect(JSON.stringify(refusal)).toContain("controller");
+    expect(JSON.stringify(refusal)).toContain("operator");
     expect(holdCalls).toEqual([]);
     expect(need(store.run("r-pr")?.loop).mergeHold).toMatchObject({ by, reason: "veto" });
   });

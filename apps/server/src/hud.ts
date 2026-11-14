@@ -46,6 +46,7 @@ import {
   isChatterNoteKey,
   isCleanupNoteKey,
   isFlakeNoteKey,
+  isForTheController,
   isHardRulesFlagKey,
   isNoReportNoteKey,
   LOCK_WAITING_TEXT,
@@ -1321,6 +1322,9 @@ function buildAttentionItems(
     )
       continue;
     if (flightQuestion && flightQuestionChoice(store, message.id, message.from)) continue;
+    // FLIGHT's old "For the controller:" notes: there is no controller to read them, and they
+    // were never questions for the operator
+    if (message.from === flight?.seat.id && isForTheController(message.text)) continue;
     items.push({
       owner: OWNER_OPERATOR,
       key:
@@ -2015,6 +2019,12 @@ function crewItems(
 
   // The engine's notes: blocked, ready for review, check before merging, rate-limited. Each
   // goes when the engine clears it.
+  // these notes are about ended runs by nature: they stay until someone clears them
+  const outlivesRun = (n: Pick<AttentionNote, "key" | "repoId" | "runId">): boolean =>
+    isCleanupNoteKey(n.key) ||
+    isFlakeNoteKey(n.key) ||
+    isNoReportNoteKey(n.key) ||
+    noteOwner(store, n, flightSeated, flightRuns) === OWNER_CONTROLLER;
   for (const n of store.notes()) {
     if (n.dismissedAt !== null) continue;
     if (isHardRulesFlagKey(n.key) || isFlakeNoteKey(n.key)) continue;
@@ -2022,14 +2032,14 @@ function crewItems(
     // the unfiled-minor-findings flag is raised after the merge and waits for a fix: it outlives its run
     if (
       !n.key.endsWith(":file-minor") &&
-      noteOwner(store, n, flightSeated, flightRuns) !== OWNER_CONTROLLER &&
+      !outlivesRun(n) &&
       run !== null &&
       endedWorkOver(config, store, run, boardOf, now)
     )
       continue;
     if (
       n.kind === "blocked" &&
-      noteOwner(store, n, flightSeated, flightRuns) !== OWNER_CONTROLLER &&
+      !outlivesRun(n) &&
       run !== null &&
       endedParkGone(config, store, run, boardOf)
     )
@@ -2073,7 +2083,7 @@ function crewItems(
       (run === null || store.seatSession(run.agentId)?.state !== "stopped");
     if (
       (n.kind === "blocked" || n.kind === "review") &&
-      noteItem.owner !== OWNER_CONTROLLER &&
+      !outlivesRun(n) &&
       resolved &&
       !approvalPending &&
       (subjectClosed || !protectedDecisionItem(store, { ...noteItem, acked: false }, config, now))

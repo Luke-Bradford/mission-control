@@ -1439,9 +1439,10 @@ parks as `merge-hold` ("merge held by CAPCOM: ..."), and shows in Needs you; it 
 message does not lift this park. A new push keeps the hold.
 
 FLIGHT has the same power with `mc hold_pr { runId, action, reason, basis }`, logged
-as a decision. FLIGHT may release only its own hold: one set here is released only here. The controller
-may replace or release any hold. The route answers 409 when the engine is off, the run has no open work
-to hold, or the hold is the controller's and the caller is FLIGHT.
+as a decision. FLIGHT may release only its own hold: one set here is released only here. The operator
+may replace or release any hold. The controller's key is refused (403): it neither holds nor releases a
+merge, and it cannot choose an option on the operator's brief. The route answers 409 when the engine is
+off, the run has no open work to hold, or the hold is the operator's and the caller is FLIGHT.
 
 ### FLIGHT's wakes: reasons, calls, accountability and pace
 
@@ -3029,8 +3030,8 @@ keep their permission checks.
   `hub` (column `sender_kind`; a Comms read returns it as `senderKind`). The hub sets it from how
   the request was made, never from the text. `operator` is a person using the app (sender
   `CAPCOM`). The controller sends with its own token (`<data dir>/controller-token`, header
-  `x-mc-controller`, new each boot), as `CONTROLLER`; it passes where the operator token does and
-  grants nothing more, and a `CONTROLLER` line wakes FLIGHT as `CAPCOM` does. FLIGHT's `mc operator`
+  `x-mc-controller`, new each boot), as `CONTROLLER`; it passes where the operator token does, except
+  merge holds and brief choices, which refuse it, and a `CONTROLLER` line wakes FLIGHT as `CAPCOM` does. FLIGHT's `mc operator`
   sends are FLIGHT's. The hub's own messages are `hub`, sent as `MC`, never `CAPCOM`. Rows stored
   before this have no kind (`senderKind` is null) and keep their old sender.
 - **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,

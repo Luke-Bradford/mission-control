@@ -215,7 +215,7 @@ function pathList(paths: readonly string[]): string {
 const isAre = (paths: readonly string[]) => (paths.length === 1 ? "is" : "are");
 
 export const clashText = (paths: readonly string[], call: string, ticket: string): string =>
-  `Note: ${pathList(paths)} ${isAre(paths)} also changed by ${call} on ${ticket}, which is still open; the two PRs may conflict when the second one is merged, and the operator or the controller will resolve it.`;
+  `Note: ${pathList(paths)} ${isAre(paths)} also changed by ${call} on ${ticket}, which is still open; the two PRs may conflict when the second one is merged, and FLIGHT will sort out the order.`;
 
 /** The most paths one commit may remove, and the longest path. */
 export const MC_REMOVE_MAX = 50;

@@ -407,6 +407,22 @@ describe("needLine", () => {
       { text: "Decision for studio", action: "open", key: "owned" },
     ]);
   });
+  it("shows a seat's question for FLIGHT, but never FLIGHT's own ask on FLIGHT's row", () => {
+    const seat = crewRow({ id: "guido-1", role: "GUIDO" });
+    const ask = fixtureItem({
+      key: "ask:1",
+      kind: "question",
+      agentId: seat.id,
+      ticket: seat.ticket,
+      owner: "flight",
+    });
+    expect(needLine(seat, [ask], NOW)).toEqual([
+      { text: "Question for FLIGHT", action: "open", key: "ask:1" },
+    ]);
+    const flight = crewRow({ id: "flight-1", role: "FLIGHT" });
+    const own = { ...ask, key: "comms-open:comms:1", agentId: flight.id, ticket: flight.ticket };
+    expect(needLine(flight, [own], NOW)).toEqual([]);
+  });
   const row = crewRow({ id: "a" });
   // Items here are about the row's current run unless a test says otherwise.
   const item = (over: Partial<AttentionItem> = {}) => fixtureItem({ ticket: row.ticket, ...over });

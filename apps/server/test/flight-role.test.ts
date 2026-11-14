@@ -27,7 +27,9 @@ describe("roles/FLIGHT.md", () => {
     expect(role).toContain("## What the operator sees");
     expect(role).toContain("## How to unblock");
     expect(role).toContain("## How to pass things on");
-    expect(role).toContain("Clear a PR yourself with `mc merge_pr`".replace("Clear", "clear"));
+    expect(role).toContain("clear a PR yourself with `mc merge_pr`");
     expect(role).toContain("Never leave a block silent");
+    // the operator's own protections are never routed around
+    expect(role).toContain("you never route around them");
   });
 });

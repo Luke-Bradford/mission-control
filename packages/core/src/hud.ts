@@ -205,6 +205,8 @@ export function stateChangeText(
  * can wake a seat, so the text names no sender.
  */
 export const SEAT_TURN_START_TEXT = "Idle → Running";
+/** The text stored before 14 November 2026: still filtered with the turn starts it labels. */
+export const LEGACY_SEAT_TURN_START_TEXT = "Idle → Running (your message)";
 /** Activity text for a crew seat's turn ending. */
 export const SEAT_TURN_END_TEXT = "Running → Idle (turn ended)";
 

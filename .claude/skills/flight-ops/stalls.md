@@ -20,7 +20,7 @@ A stall is a parked run, a seat waiting on something, or a PR that conflicts wit
 - **A seat in `error` with no run:** its crashed ticket may still be In progress with no run.
   - Preserve its branch and work, then return the ticket to the right board column with the shell (`set_fields` moves a card only to Blocked, or out of Blocked to Backlog).
   - Then start the seat on its next Ready ticket with `mc start_seat`; the hub never deals to a seat in `error`.
-- **A seat with `seats[].runId` set and no live session** after an error or a hub restart: `mc resume_seat`. A stopped or paused seat follows the role's step 4.
+- **A seat with `seats[].runId` set and no live session** after an error or a hub restart: `mc resume_seat`. A stopped or paused seat follows the role's step 3 ("Stopped and paused seats").
 - **A repeat failure** of the same seat or ticket: read why (the error, signals, `mc read_ci_log`) before acting.
 
 ## CI ruling parks
@@ -49,7 +49,7 @@ Use `mc settle_park { runId, action, basis }`:
 
 ## Controller-check parks
 
-- A ticket's `## Controller check` names evidence to produce. You produce it (`mc screenshot_hud`, a CI rerun, a live check) and record the verdict for that exact head with `mc operator` POST `/api/runs/:id/controller-check`. A later push needs new head-bound evidence.
+- A ticket's `## Controller check` names evidence to produce. You produce evidence for that exact head: a preview of the PR's head on a spare port (`MC_PORT`, a copy of the DB in `MC_DB`, `MC_NO_LOOP_WRITES=1`), the PR's own evidence capture, or a CI rerun. `mc screenshot_hud` shows the live hub, which runs main, so it is never head evidence. Then record the verdict for that exact head with `mc operator` POST `/api/runs/:id/controller-check`. A later push needs new head-bound evidence.
 - An open check is not a rework reason: a `fail` verdict sends the rework itself.
 
 ## Ending a run
