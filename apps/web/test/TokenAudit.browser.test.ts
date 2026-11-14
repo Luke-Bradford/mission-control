@@ -39,7 +39,7 @@ describeRendered("Audit Tokens tab in a browser", () => {
           api,
         });
         try {
-          await page.click("#ch-tab-tokens");
+          await page.click('.ao-views button:has-text("Tokens")');
           await page.boxes(".ta-fig");
           const m = await page.evaluate(
             () => ({
@@ -90,7 +90,7 @@ describeRendered("Audit Tokens tab in a browser", () => {
         api,
       });
       try {
-        await page.click("#ch-tab-tokens");
+        await page.click('.ao-views button:has-text("Tokens")');
         await page.boxes(".ta-table");
         const hrefs = await page.evaluate(
           () => [...document.querySelectorAll(".ta a[href]")].map((a) => a.getAttribute("href")),

@@ -295,6 +295,7 @@ export const NAVIGATING_FILES: Record<string, string> = {
   "src/board/Card.tsx":
     "page: the ticket (card, title), Needs you item (You chip), seat (agent tag), trace",
   "src/browserNotifications.ts": "page: the notification's target",
+  "src/code-health/AuditOverview.tsx": "page: Telemetry, QA",
   "src/code-health/CodeHealth.tsx": "page: Audit, QA, Telemetry",
   "src/code-health/CodeRisk.tsx": "page: Audit risk",
   "src/code-health/TokenAudit.tsx": "page: seat, ticket",

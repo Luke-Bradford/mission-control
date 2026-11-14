@@ -22,20 +22,35 @@ const Legacy = lazy(() =>
 );
 const TABS = ["overview", "review", "risk", "test", "tokens"] as const;
 type Tab = (typeof TABS)[number];
-/** The shared operator question, with one bounded read for the selected repo/window/tab. */
-export function CodeHealth() {
+/**
+ * The shared operator question, with one bounded read for the selected repo/window/tab. Opened from
+ * the Audit overview (`onBack` set) it starts on `initialTab` and leaves out the Overview tab, which
+ * the page's own first screen replaces.
+ */
+export function CodeHealth({
+  initialTab,
+  initialScope,
+  onBack,
+}: {
+  initialTab?: Tab;
+  initialScope?: { repo: string; window: CodeHealthWindow };
+  onBack?: (scope: { repo: string; window: CodeHealthWindow }) => void;
+} = {}) {
   const config = useResource<ConfigView>(RESOURCES.config),
     connected = useSyncExternalStore(streamStatus.subscribe, () => streamStatus.get().connected),
     reconnecting = useSyncExternalStore(
       streamStatus.subscribe,
       () => streamStatus.get().reconnecting,
     );
-  const [repo, setRepo] = useState(""),
-    [window, setWindow] = useState<CodeHealthWindow>("30d"),
-    [tab, setTab] = useState<Tab>(() =>
-      new URLSearchParams(globalThis.window.location.search).get("tab") === "risk"
-        ? "risk"
-        : "overview",
+  const tabs = onBack ? TABS.filter((t) => t !== "overview") : TABS;
+  const [repo, setRepo] = useState(initialScope?.repo ?? ""),
+    [window, setWindow] = useState<CodeHealthWindow>(initialScope?.window ?? "30d"),
+    [tab, setTab] = useState<Tab>(
+      () =>
+        initialTab ??
+        (new URLSearchParams(globalThis.window.location.search).get("tab") === "risk"
+          ? "risk"
+          : "overview"),
     );
   const [last, setLast] = useState<{ path: string; view: CodeHealthView }>(),
     [expired, setExpired] = useState(false);
@@ -165,6 +180,11 @@ export function CodeHealth() {
             Audit
           </h1>
           <p>Where should we invest in code health next?</p>
+          {onBack && (
+            <button type="button" onClick={() => onBack({ repo, window })}>
+              Back to overview
+            </button>
+          )}
         </div>
         <div className="ch-filters" hidden={tab === "tokens"}>
           <label>
@@ -238,7 +258,7 @@ export function CodeHealth() {
         </button>
       </div>
       <div role="tablist" aria-label="Code-health view" className="ch-tabs">
-        {TABS.map((t, i) => (
+        {tabs.map((t, i) => (
           <button
             type="button"
             key={t}
@@ -253,10 +273,10 @@ export function CodeHealth() {
             onClick={() => changeScope(() => setTab(t))}
             onKeyDown={(e) => {
               let next: number | undefined;
-              if (e.key === "ArrowRight") next = (i + 1) % TABS.length;
-              if (e.key === "ArrowLeft") next = (i + TABS.length - 1) % TABS.length;
+              if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
+              if (e.key === "ArrowLeft") next = (i + tabs.length - 1) % tabs.length;
               if (e.key === "Home") next = 0;
-              if (e.key === "End") next = TABS.length - 1;
+              if (e.key === "End") next = tabs.length - 1;
               if (next !== undefined) {
                 e.preventDefault();
                 tabRefs.current[next]?.click();
@@ -319,6 +339,7 @@ export function CodeHealth() {
             evidence={view.evidence}
             onInspect={inspect}
             onRecommendations={() => {
+              if (onBack) return onBack({ repo, window });
               changeScope(() => setTab("overview"));
               tabRefs.current[0]?.focus();
             }}
