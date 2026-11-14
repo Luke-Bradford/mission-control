@@ -218,6 +218,46 @@ describe("the FLIGHT page", () => {
     expect(text).toContain("37%");
   });
 
+  it("shows the served cost per hour, sessions per hour and run start", async () => {
+    const view = flightPageApi("running")["/api/flight"];
+    show("running", {
+      "/api/flight": {
+        ...view,
+        costLastHour: 4.5,
+        sessionsLastHour: 3,
+        runStartedAt: NOW - 90 * MIN,
+      },
+    });
+    const band = await screen.findByLabelText("FLIGHT status");
+    await waitFor(() => expect(band.textContent).toContain("~$4.50"));
+    const text = band.textContent ?? "";
+    expect(text).not.toContain(NOT_RECORDED);
+    expect(text).not.toContain("Run start not recorded");
+    expect(text).toContain("Run started");
+    expect(text).toContain("90 min ago");
+    const sessions = [...band.querySelectorAll(".fp-stat")].find((e) =>
+      e.textContent?.startsWith("Sessions per hour"),
+    );
+    expect(sessions?.querySelector(".fp-v")?.textContent).toBe("3");
+  });
+
+  it("shows zero sessions as 0 and null figures as the empty state, never a made-up 0", async () => {
+    const view = flightPageApi("running")["/api/flight"];
+    show("running", {
+      "/api/flight": { ...view, costLastHour: null, sessionsLastHour: 0, runStartedAt: null },
+    });
+    const band = await screen.findByLabelText("FLIGHT status");
+    await waitFor(() => expect(band.textContent).toContain("Running"));
+    const text = band.textContent ?? "";
+    expect(text.split(NOT_RECORDED)).toHaveLength(2);
+    expect(text).toContain("Run start not recorded yet");
+    expect(text).not.toContain("$0");
+    const sessions = [...band.querySelectorAll(".fp-stat")].find((e) =>
+      e.textContent?.startsWith("Sessions per hour"),
+    );
+    expect(sessions?.querySelector(".fp-v")?.textContent).toBe("0");
+  });
+
   it("shows a punctuated stopped sentence on the read-only page", async () => {
     show("stopped");
     const band = await screen.findByLabelText("FLIGHT status");
