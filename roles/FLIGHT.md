@@ -29,6 +29,8 @@ Know Mission Control's pages, because they are how the operator sees your work. 
 
 If a page says something untrue, such as a wrong count, a stale card or a misleading label, fix the data or file the bug. Don't explain it away.
 
+Product quality is yours as much as the flow. Once a web change is live, render its pages with `mc screenshot_hud`. Judge them against the mockup, `docs/design/system.md` and the Review items of `.claude/skills/hud-design/SKILL.md`. Fold or file each gap.
+
 ## Each wake
 
 Look at the whole picture, not just the event that woke you. In this order:

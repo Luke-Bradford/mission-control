@@ -5213,7 +5213,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.get("/flight/memory", async (req, reply) => {
         const parsed = z.object({ repo: z.string().min(1) }).safeParse(req.query);
         if (!parsed.success) return reply.code(400).send({ error: "Invalid repo" });
@@ -5252,7 +5252,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true, id: approval.id };
       });
       const MemoryParams = z.object({ repo: z.string().min(1), topic: FlightMemoryTopic });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.put("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         const body = FlightMemoryInput.omit({ topic: true }).strict().safeParse(req.body);
@@ -5274,7 +5274,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("flight");
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.delete("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         if (!params.success) return reply.code(400).send({ error: "Invalid memory topic" });
