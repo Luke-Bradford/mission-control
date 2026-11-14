@@ -76,7 +76,7 @@
 
 .bc-id {
   display: grid;
-  gap: 2px;
+  gap: var(--sp-1);
   align-content: start;
 }
 
@@ -100,7 +100,7 @@
 
 .bc-input {
   display: grid;
-  gap: 2px;
+  gap: var(--sp-1);
 }
 
 .bc-input textarea {

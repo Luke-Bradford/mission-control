@@ -68,7 +68,7 @@ async function ready(page: RenderedPage) {
 
 describeRendered("Needs you with FLIGHT stopped", () => {
   it(
-    "keeps the box, options and Ask FLIGHT open, with the notice and Start FLIGHT beside them",
+    "keeps the box and Ask FLIGHT open, shows the options as text, with the notice and Start FLIGHT beside them",
     async () => {
       for (const scheme of ["light", "dark"] as const) {
         for (const [width, height] of [
@@ -106,9 +106,8 @@ describeRendered("Needs you with FLIGHT stopped", () => {
               };
               return {
                 inputDisabled: input.disabled,
-                optionsDisabled: [
-                  ...document.querySelectorAll<HTMLButtonElement>(".option-pick"),
-                ].map((b) => b.disabled),
+                optionCards: document.querySelectorAll(".needs-answer .opt").length,
+                optionButtons: document.querySelectorAll(".option-pick").length,
                 askDisabled: document.querySelector<HTMLInputElement>(
                   "#needsDiscussionForm textarea, #needsDiscussionForm input",
                 )?.disabled,
@@ -148,11 +147,9 @@ describeRendered("Needs you with FLIGHT stopped", () => {
               expect(notice.button?.h, `${label}: Start height`).toBeGreaterThanOrEqual(24);
             }
             expect(state.inputDisabled, `${label}: reply box enabled`).toBe(false);
-            expect(state.optionsDisabled.length, `${label}: options shown`).toBeGreaterThan(0);
-            expect(
-              state.optionsDisabled.every((d) => !d),
-              `${label}: options enabled`,
-            ).toBe(true);
+            // an unbound (legacy) brief shows its options as text; none can send anything
+            expect(state.optionCards, `${label}: options shown`).toBeGreaterThan(0);
+            expect(state.optionButtons, `${label}: no option sends`).toBe(0);
             expect(state.askDisabled, `${label}: Ask FLIGHT box enabled`).toBe(false);
             for (const [name, box] of [
               ["Ask FLIGHT", state.ask],
