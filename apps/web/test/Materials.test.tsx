@@ -264,13 +264,13 @@ describe("Plan and mockups in the question", () => {
       [matPath("q1")]: { packets: [packet()] },
     });
     render(<Needs item="q1" />);
-    const option = (await screen.findByRole("button", { name: "Rows taller" })).closest(".opt");
+    const option = (await screen.findByText("Rows taller")).closest(".opt");
     expect(option).toBeTruthy();
     const pic = await within(option as HTMLElement).findByRole("button", {
       name: "Open 3.png full size",
     });
     expect(pic).toBeTruthy();
-    const other = screen.getByRole("button", { name: "Keep rows" }).closest(".opt");
+    const other = screen.getByText("Keep rows").closest(".opt");
     expect(within(other as HTMLElement).queryByRole("button", { name: /full size/ })).toBeNull();
   });
 
@@ -428,7 +428,7 @@ describe("waiting", () => {
     });
     render(<Needs item="q1" />);
     expect(await screen.findByText("Loading the attached materials…")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Rows taller" })).toBeTruthy();
+    expect(screen.getByText("Rows taller")).toBeTruthy();
     await waitFor(() =>
       expect(screen.getByRole("region", { name: "Plan of shop-app#4001" })).toBeTruthy(),
     );

@@ -53,7 +53,16 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
  * One complete operator decision: every required field, the option comparison, the bound Accept
  * and an inline Discuss. Used on Needs you, in Comms and in the item panel.
  */
-export function BriefChoice({ item, heading }: { item: AttentionItem; heading?: ReactNode }) {
+export function BriefChoice({
+  item,
+  heading,
+  pictures,
+}: {
+  item: AttentionItem;
+  heading?: ReactNode;
+  /** Pictures attached to an option, when the page has loaded its materials. */
+  pictures?: (option: BriefOption) => ReactNode;
+}) {
   const brief = item.brief;
   const stream = useStore(streamStatus);
   const attention = useResource<AttentionItem[]>(RESOURCES.attention);
@@ -220,6 +229,7 @@ export function BriefChoice({ item, heading }: { item: AttentionItem; heading?: 
                   </div>
                   <div className="bc-cons" data-label="Consequence">
                     {o.consequence ?? o.description ?? o.answer}
+                    {pictures?.(o)}
                   </div>
                   <div className="bc-rev" data-label="Reversibility">
                     {o.reversibility ? (

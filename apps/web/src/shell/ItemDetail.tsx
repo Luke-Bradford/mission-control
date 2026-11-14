@@ -306,7 +306,16 @@ export function ItemDetail({
   );
   const answerBlock = (
     <>
-      {item && bound && <BriefChoice item={item} />}
+      {item && bound && (
+        <BriefChoice
+          item={item}
+          pictures={
+            materials.packets.length > 0
+              ? (o) => <OptionPictures option={o} packets={materials.packets} open={viewer.open} />
+              : undefined
+          }
+        />
+      )}
       {item?.brief && !holding && !bound && <h3 className="bsec answer-heading">Your answer</h3>}
       {item?.brief && options.length === 0 && !holding && (
         <div className="composer">
