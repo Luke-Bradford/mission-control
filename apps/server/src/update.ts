@@ -454,7 +454,7 @@ export const UPDATE_QUIET_POLL_MS = 1_000;
 /** The hold on new runs lets go after this unless FLIGHT calls again: a missed call never stalls the crew. */
 export const UPDATE_HOLD_MAX_MS = 15 * 60_000;
 /**
- * Once the hold has stood this long, FLIGHT's next call runs Update even with seats mid-turn: a
+ * Once FLIGHT has waited this long, its next call runs Update even with seats mid-turn: a
  * mid-turn seat keeps working under its keeper through the restart, so only a seat that is
  * starting still refuses (`crewRefusal`). A long turn can never keep an Update held for good.
  */
