@@ -927,7 +927,7 @@ th {
 .iconbtn .dock-unread {
   position: absolute;
   top: -4px;
-  right: -4px;
+  right: 0;
 }
 
 table {

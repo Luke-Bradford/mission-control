@@ -17,7 +17,7 @@ const CLASS = {
   open: "sm",
   read: "sm",
   interrupt: "sm",
-  stop: "sm warn",
+  stop: "sm",
 } as const;
 
 /**

@@ -555,6 +555,7 @@ td.wrap {
 }
 
 .keys {
+  padding-inline: var(--sp-4);
   color: var(--muted);
   font-size: var(--fs-s);
   display: flex;
