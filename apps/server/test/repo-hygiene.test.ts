@@ -1,31 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { strayFiles } from "../scripts/check-stray-files.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 
-/** Editor and `sed -i` leftovers: `api.test.ts-E` is what macOS `sed -i -E` leaves behind. */
-const BACKUP_SUFFIX = /(?:-E|\.orig|\.bak|\.rej|~)$/;
-/** Screenshots and proof runs: the hub keeps them while a change waits, the repo does not (.gitignore). */
-const PROOF_FILE = /^docs\/(?:evidence|reviews)\/.+\.(?:png|jpe?g|webp|gif|json|ts)$/i;
-const DOCS_IMAGE = /^docs\/.+\.(?:png|jpe?g|webp|gif)$/i;
-const IMAGE_HOMES = /^docs\/(?:prototype|mockups|design)\//;
-
-/** Each tracked path that should not be committed, with why, so the failure names the fix. */
-export function strayFiles(paths: string[]): string[] {
-  const found: string[] = [];
-  for (const p of paths) {
-    if (BACKUP_SUFFIX.test(p))
-      found.push(`${p}: backup file left by an editor or sed -i; delete it`);
-    else if (PROOF_FILE.test(p) || (DOCS_IMAGE.test(p) && !IMAGE_HOMES.test(p)))
-      found.push(
-        `${p}: screenshot or proof run; the hub keeps these, the repo does not (.gitignore)`,
-      );
-  }
-  return found;
-}
-
-describe("repo hygiene (review findings 1752, 1761)", () => {
+describe("repo hygiene (PR 1752 sed backups; the 11 November proof-file policy)", () => {
   it("flags the sed backups a run/ move committed (PR 1752)", () => {
     const found = strayFiles([
       "apps/server/test/api.test.ts-E",
@@ -36,7 +16,7 @@ describe("repo hygiene (review findings 1752, 1761)", () => {
     expect(found[0]).toContain("api.test.ts-E");
   });
 
-  it("flags proof screenshots and artifact files under docs (PR 1761)", () => {
+  it("flags proof screenshots and artifact files under docs (the 11 November policy, PR 1761)", () => {
     const found = strayFiles([
       "docs/evidence/agent-density-1361/capture.ts",
       "docs/evidence/1378-standing-instructions/artifacts.json",
