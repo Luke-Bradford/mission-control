@@ -32,6 +32,7 @@ import {
 import { useCallback } from "react";
 import { RESOURCES, useResource } from "./data.ts";
 import { cost, cutText, hhmm, mss, percent, prLabel, wkdTime } from "./fmt.ts";
+import { mcpToolPart, toolLabel } from "./toolLabel.ts";
 
 /** The seat palette size: `--seat-1…--seat-7` (hud.css), wrapping by config index. */
 const SEAT_PALETTE = 7;
@@ -161,8 +162,11 @@ const sessionOpen = (row: CrewRow): boolean =>
 function toolLine(row: CrewRow, now: number): string | null {
   const live = row.digest?.liveTool;
   if (!live?.detail || !sessionOpen(row)) return null;
+  const head = `${toolLabel(live.name)} ${mss(now - live.since)}`;
+  // An mcp tool's detail is its own name, already said by the label.
+  if (live.detail === mcpToolPart(live.name)) return head;
   // The time comes before the detail: a line cut short on a narrow row still shows how long.
-  return `${live.name} ${mss(now - live.since)}${DOING_SEP}${cutText(live.detail, LIVE_DETAIL_MAX)}`;
+  return `${head}${DOING_SEP}${cutText(live.detail, LIVE_DETAIL_MAX)}`;
 }
 
 /** A running seat waiting on its own background task (ruling R21): the newest one. */
@@ -209,7 +213,7 @@ export function doingLine(
       const tool = toolLine(row, now);
       if (tool) return tool;
       const live = row.digest?.liveTool;
-      if (live) return `${seq}${DOING_SEP}${live.name} ${mss(now - live.since)}`;
+      if (live) return `${seq}${DOING_SEP}${toolLabel(live.name)} ${mss(now - live.since)}`;
       // Waiting on its own background task: the newest one, ahead of the last text.
       const task = backgroundLine(row);
       if (task) return `${seq}${DOING_SEP}${task}`;
