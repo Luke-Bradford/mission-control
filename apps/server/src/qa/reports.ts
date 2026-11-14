@@ -548,7 +548,10 @@ export function createQaReports(i: {
           resolutions: details.resolutions ?? [],
           tests,
           ci: await githubCi(repo.github, review.prNumber, review.sha, false),
-          limitations: details.limitations ?? [],
+          limitations: [
+            ...(review.installNote ? [review.installNote] : []),
+            ...(details.limitations ?? []),
+          ],
           followUps: details.followUps ?? [],
           visual: nativeVisual(review, details.visualReason, known),
         },

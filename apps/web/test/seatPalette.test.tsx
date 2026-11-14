@@ -51,9 +51,7 @@ describe("a seat is one colour on every page", () => {
     const tag = (agent.container.firstElementChild as HTMLElement).style.getPropertyValue("--c");
     agent.unmount();
     // Comms: the seat's row in the navigator
-    const comms = render(
-      <AgentNavRow row={row} view={{ kind: "crew" }} mentions={0} onNavigate={() => {}} />,
-    );
+    const comms = render(<AgentNavRow row={row} view={{ kind: "crew" }} onNavigate={() => {}} />);
     const nav = comms.container.querySelector<HTMLElement>("i")?.style.background;
     comms.unmount();
     const hexes = [trace, tag, nav].map(resolve);

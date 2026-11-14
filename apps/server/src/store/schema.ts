@@ -80,7 +80,8 @@ CREATE TABLE IF NOT EXISTS run_token_audit (
   run_id TEXT PRIMARY KEY, at INTEGER NOT NULL, calls INTEGER NOT NULL, peak_context INTEGER NOT NULL,
   median_context INTEGER NOT NULL, cache_read INTEGER NOT NULL, cache_write INTEGER NOT NULL,
   output INTEGER NOT NULL, rewrites INTEGER NOT NULL, rewrite_tokens INTEGER NOT NULL,
-  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL
+  read_after_report INTEGER, by_source TEXT NOT NULL, by_command TEXT NOT NULL,
+  timestamps_checked INTEGER NOT NULL DEFAULT 0
 );
 -- Each finished mc tool call: when, which, and the characters sent and returned (Audit's tool rows).
 CREATE TABLE IF NOT EXISTS mcp_tool_calls (
@@ -90,7 +91,7 @@ CREATE TABLE IF NOT EXISTS mcp_tool_calls (
 CREATE INDEX IF NOT EXISTS mcp_tool_calls_at ON mcp_tool_calls(at);
 CREATE TABLE IF NOT EXISTS run_token_calls (
   run_id TEXT NOT NULL, idx INTEGER NOT NULL, context INTEGER NOT NULL, cache_read INTEGER NOT NULL,
-  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL,
+  cache_write INTEGER NOT NULL, output INTEGER NOT NULL, added TEXT NOT NULL, at INTEGER,
   PRIMARY KEY (run_id, idx)
 );
 CREATE TABLE IF NOT EXISTS controller_messages (
@@ -137,6 +138,7 @@ CREATE TABLE IF NOT EXISTS board_moves (
   board_column TEXT NOT NULL, state TEXT NOT NULL, detail TEXT, at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS board_moves_at ON board_moves(at);
+CREATE INDEX IF NOT EXISTS board_moves_card ON board_moves(repo_id, issue, state, at);
 -- What a run's seat reported (append-only); the loop's reconciler reads the latest.
 CREATE TABLE IF NOT EXISTS run_evidence (
   id INTEGER PRIMARY KEY, run_id TEXT NOT NULL, note TEXT NOT NULL, at INTEGER NOT NULL,
@@ -159,8 +161,7 @@ CREATE TABLE IF NOT EXISTS reviews (
 CREATE INDEX IF NOT EXISTS reviews_state ON reviews(state, created_at);
 -- A FLIGHT-directed queued-review move overrides the engine's ordinary reviewer selection.
 CREATE TABLE IF NOT EXISTS review_moves (
-  review_id INTEGER PRIMARY KEY, seat_id TEXT NOT NULL, at INTEGER NOT NULL,
-  budget_brake_override INTEGER NOT NULL DEFAULT 0
+  review_id INTEGER PRIMARY KEY, seat_id TEXT NOT NULL, at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS review_findings (
   id INTEGER PRIMARY KEY, review_id INTEGER NOT NULL, author_run_id TEXT NOT NULL, pos INTEGER NOT NULL,
@@ -435,8 +436,25 @@ CREATE TABLE IF NOT EXISTS notifications (
   updated_at INTEGER NOT NULL, last_read_at INTEGER, unread INTEGER NOT NULL,
   first_seen_at INTEGER NOT NULL, handled_at INTEGER, handled_how TEXT, handled_through INTEGER
 );
+-- Waste alarms: spend that bought no progress, one per check and subject while it stands. Open until
+-- the cause ends (closed_at) or FLIGHT or the operator resolves the hold with a basis (resolved_at).
+CREATE TABLE IF NOT EXISTS waste_alarms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, check_id TEXT NOT NULL, subject TEXT NOT NULL, repo_id TEXT,
+  ticket TEXT, seat_id TEXT, run_id TEXT, level INTEGER NOT NULL, evidence TEXT NOT NULL,
+  opened_at INTEGER NOT NULL, closed_at INTEGER, resolved_at INTEGER, basis TEXT
+);
+CREATE INDEX IF NOT EXISTS waste_alarms_subject ON waste_alarms(check_id, subject, opened_at);
 -- Worktree paths a crew start is making (worktree add, then the install); one still here at the
 -- next start was left half-made, and is removed and made again.
 CREATE TABLE IF NOT EXISTS checkouts_pending (path TEXT PRIMARY KEY, at INTEGER NOT NULL);
-
+-- Hub-owned ticket waits do not change the GitHub Project Status field. They make the ticket
+-- unowned while it waits, so a free seat can take other Ready work.
+CREATE TABLE IF NOT EXISTS ticket_waits (
+  repo_id TEXT NOT NULL, issue INTEGER NOT NULL, reason TEXT NOT NULL, frees_when TEXT NOT NULL,
+  at INTEGER NOT NULL, PRIMARY KEY (repo_id, issue)
+);
+CREATE TABLE IF NOT EXISTS attention_materials (
+  id TEXT PRIMARY KEY, item_key TEXT NOT NULL, packet TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS attention_materials_item ON attention_materials(item_key, id DESC);
 `;

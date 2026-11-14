@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import type {
+  AttentionMaterials,
   BriefChoiceReceipt,
   ChoiceTargetKind,
   ItemChatMessage,
@@ -42,6 +43,7 @@ import {
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
+  CHATTER_NOTE_PREFIX,
   type CiRunView,
   CODE_HEALTH_FLIGHT_REVIEW_DAYS,
   CODE_HEALTH_FLIGHT_TIER_RULES,
@@ -51,8 +53,11 @@ import {
   COMMS_CONTROLLER,
   COMMS_CREW,
   COMMS_MC,
+  COMMS_NOTICE,
   COMMS_OPEN_PREFIX,
   COMMS_TEXT_MAX,
+  type CodeHealthWindow,
+  type CommsKind,
   type CommsLabel,
   type CommsReaction,
   type CommsReactionKind,
@@ -151,6 +156,7 @@ import {
   type TestLockRun,
   TICKET_SIZES,
   TITLE_MARKERS,
+  type TicketWait,
   type TokenUsage,
   testsTouched,
   tokenBaselines,
@@ -174,16 +180,29 @@ import {
   recordMergedReviews,
 } from "./code-health/merged-reviews.ts";
 import {
+  costAggregate,
+  installOverview,
+  landingAggregate,
+  mergedAggregate,
+  mergedObserved,
+  readOverviewRow,
+  type StoredOverview,
+  writeOverviewRow,
+} from "./code-health/overview-store.ts";
+import {
+  decidedRecommendationRows,
   installRecommendations,
   linkRecommendation,
   type Mutation,
   mutateRecommendation,
   openRepeatedRoundsRows,
   RecommendationMutation,
+  recommendationFunnel,
   recommendationProposals,
   recommendationRow,
   recommendationRows,
   recommendationRowsForFiles,
+  remeasureCounts,
   upsertRecommendation,
 } from "./code-health/recommendations.ts";
 import { remeasureDue } from "./code-health/remeasure.ts";
@@ -239,6 +258,7 @@ import {
   toRun,
   toSample,
 } from "./store/rows.ts";
+import { SCHEMA } from "./store/schema.ts";
 import {
   ACK_ABSENT_MS,
   ACTIVE_SEAT_STATES,
@@ -283,6 +303,7 @@ import {
   type Stray,
   THREAD_COMMS_LIMIT,
 } from "./store/types.ts";
+import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
 
 export * from "./store/types.ts";
 
@@ -290,8 +311,6 @@ export * from "./store/types.ts";
 const COMMS_QUESTION_THREAD_SQL =
   "COALESCE(label, '') = 'question' OR COALESCE(reply_to, -1) IN (SELECT q.id FROM comms q WHERE q.label = 'question')";
 const DECISION_KINDS_KEPT_SQL = "'answer', 'pass'";
-
-import { SCHEMA } from "./store/schema.ts";
 
 type Row = Record<string, SQLInputValue>;
 
@@ -367,6 +386,15 @@ const DIGEST_BATCH = 500;
 const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
+const toTokenCall = (r: Row): TokenCall => ({
+  at: (r.at as number | null) ?? null,
+  context: r.context as number,
+  cacheRead: r.cache_read as number,
+  cacheWrite: r.cache_write as number,
+  output: r.output as number,
+  added: JSON.parse(r.added as string) as TokenSourceAdd[],
+});
+
 export class Store {
   private readonly db: DatabaseSync;
   private readonly rawDb: DatabaseSync;
@@ -419,6 +447,7 @@ export class Store {
     installMergedReviews(this.db);
     installTestReports(this.db);
     installTestQa(this.db);
+    installOverview(this.db);
     installCodeHealthRevisions(this.db);
   }
 
@@ -478,8 +507,7 @@ export class Store {
   refreshCodeHealthRecommendations(repoId: string, at: number, checkout?: string) {
     this.transaction(() => {
       const proposals = recommendationProposals(this, repoId, at, checkout);
-      for (const proposal of proposals) upsertRecommendation(this.db, proposal, at);
-      const ids = proposals.map((row) => row.id);
+      const ids = proposals.map((proposal) => upsertRecommendation(this.db, proposal, at));
       this.db
         .prepare(
           `UPDATE code_health_recommendations SET active=0,updated_at=MAX(?,updated_at+1) WHERE repo_id=? AND active=1 AND id NOT IN (${ids.map(() => "?").join(",")})`,
@@ -654,6 +682,33 @@ export class Store {
   recordCodeHealthMembership(input: Parameters<typeof recordRiskMembership>[1]) {
     recordRiskMembership(this.db, input);
   }
+  codeHealthOverviewRow(repoId: string, window: CodeHealthWindow) {
+    return readOverviewRow(this.db, repoId, window);
+  }
+  saveCodeHealthOverview(repoId: string, window: CodeHealthWindow, row: StoredOverview) {
+    writeOverviewRow(this.db, repoId, window, row);
+  }
+  codeHealthMergedAggregate(repoId: string, from: number, until: number) {
+    return mergedAggregate(this.db, repoId, from, until);
+  }
+  codeHealthMergedObserved(repoId: string) {
+    return mergedObserved(this.db, repoId);
+  }
+  codeHealthCostAggregate(repoId: string, from: number, until: number) {
+    return costAggregate(this.db, repoId, from, until);
+  }
+  codeHealthLandingAggregate(repoId: string, from: number, until: number, limit: number) {
+    return landingAggregate(this.db, repoId, from, until, limit);
+  }
+  codeHealthDecidedRecommendations(repoId: string, limit: number) {
+    return decidedRecommendationRows(this.db, repoId, limit);
+  }
+  codeHealthFunnel(repoId: string) {
+    return recommendationFunnel(this.db, repoId);
+  }
+  codeHealthRemeasureCounts(repoId: string) {
+    return remeasureCounts(this.db, repoId);
+  }
   codeHealthRevision(repoId: string): string {
     return codeHealthSourceRevision(this.db, repoId);
   }
@@ -766,9 +821,12 @@ export class Store {
     this.db.prepare("DELETE FROM checkouts_pending WHERE path = ?").run(path);
   }
 
+  /** Status rewrites that changed only a time, which `readVersion` does not count. */
+  private timestampOnlyWrites = 0;
+
   /** Cache token for local writes and commits made by another SQLite connection. */
   readVersion(): string {
-    return `${this.db.prepare("SELECT total_changes() AS n").get()?.n}:${this.db.prepare("PRAGMA data_version").get()?.data_version}`;
+    return `${Number(this.db.prepare("SELECT total_changes() AS n").get()?.n) - this.timestampOnlyWrites}:${this.db.prepare("PRAGMA data_version").get()?.data_version}`;
   }
 
   private closed = false;
@@ -807,7 +865,16 @@ export class Store {
 
   /** Columns added after the first release; each runs once, on a database that lacks it. */
   private migrate(): void {
-    this.addColumn("review_moves", "budget_brake_override", "INTEGER NOT NULL DEFAULT 0");
+    // the forecast brake's Needs-you note is gone with the brake
+    if (
+      this.db.prepare("SELECT 1 FROM attention_notes WHERE key = 'budget-brake'").get() !==
+      undefined
+    )
+      this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
+    // Token audit call times (#1646): audits stored before this have none until re-read.
+    this.addColumn("run_token_calls", "at", "INTEGER");
+    this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
+    this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
     this.addColumn("flight_wakes", "wake_id", "TEXT");
@@ -983,6 +1050,12 @@ export class Store {
     // When the seat's last turn ended; the engine's quiet-seat check reads it.
     this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
     this.addColumn("comms", "item_key", "TEXT");
+    // A Needs-you item's conversation reads by item (itemThread).
+    this.db.exec("CREATE INDEX IF NOT EXISTS comms_item_key ON comms(item_key, at, id)");
+    // A note's unbroken run walks its episodes by key (noteRunStart).
+    this.db.exec(
+      "CREATE INDEX IF NOT EXISTS attention_episodes_key ON attention_episodes(key, at)",
+    );
     this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
     this.addColumn("seat_sessions", "error_since", "INTEGER");
     // Turns in a row that ended with no new commit; the resume line reads it.
@@ -1019,6 +1092,7 @@ export class Store {
     this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("run_evidence", "done_when", "TEXT NOT NULL DEFAULT '[]'");
     this.addColumn("reviews", "changed_since", "TEXT");
+    this.addColumn("reviews", "install_note", "TEXT");
     this.addColumn("review_findings", "late", "INTEGER NOT NULL DEFAULT 0");
     this.addColumn("review_findings", "category", "TEXT");
     this.addColumn("review_findings", "resolution", "TEXT");
@@ -1089,6 +1163,17 @@ export class Store {
     this.addColumn("question_choices", "chosen_by", "TEXT");
     // Who sent it, set by the hub; NULL on rows stored before this column.
     this.addColumn("comms", "sender_kind", "TEXT");
+    // `notice` on a line the hub wrote; NULL on any other message.
+    this.addColumn("comms", "kind", "TEXT");
+    // An up-to-date reader must not take a write lock merely to open the store.
+    if (
+      this.db
+        .prepare("SELECT 1 FROM comms WHERE sender_kind = ? AND kind IS NULL LIMIT 1")
+        .get("hub")
+    )
+      this.db
+        .prepare("UPDATE comms SET kind = ? WHERE sender_kind = ? AND kind IS NULL")
+        .run(COMMS_NOTICE, "hub");
     this.migrateCommsLabels();
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
@@ -1234,6 +1319,21 @@ export class Store {
       at: r.at as number,
       data: JSON.parse(r.data as string) as Record<string, unknown>,
     }));
+  }
+
+  /** The waste checks' queries and the alarms table (spend/waste.ts). */
+  get waste(): ReturnType<typeof wasteQueries> {
+    return wasteQueries(this.db);
+  }
+
+  /** A check call the hook refused as an unchanged rerun (same run, command and commit). */
+  addRerunRefusal(runId: string, command: string, sha: string, at: number): void {
+    this.appendAttempt(runId, RERUN_REFUSED_ATTEMPT, at, { command, sha, at });
+  }
+
+  /** A run resumed with the hub's "carry on" line (kind `resume`), counted by the retry-loop check. */
+  addResumeAttempt(runId: string, at: number): void {
+    this.appendAttempt(runId, RESUME_ATTEMPT, at, { at });
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
@@ -1416,7 +1516,7 @@ export class Store {
         .prepare(
           `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
              cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             by_source, by_command, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .run(
           runId,
@@ -1434,8 +1534,8 @@ export class Store {
           JSON.stringify(audit.byCommand),
         );
       const insert = this.db.prepare(
-        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const [i, c] of calls.entries()) {
         insert.run(
@@ -1446,6 +1546,7 @@ export class Store {
           c.cacheWrite,
           c.output,
           JSON.stringify(c.added),
+          c.at ?? null,
         );
       }
     });
@@ -1457,13 +1558,83 @@ export class Store {
       this.db
         .prepare("SELECT * FROM run_token_calls WHERE run_id = ? ORDER BY idx")
         .all(runId) as Row[]
-    ).map((r) => ({
-      context: r.context as number,
-      cacheRead: r.cache_read as number,
-      cacheWrite: r.cache_write as number,
-      output: r.output as number,
-      added: JSON.parse(r.added as string) as TokenSourceAdd[],
-    }));
+    ).map(toTokenCall);
+  }
+
+  /** Audited runs with calls whose call times were never looked for, oldest first (the back-fill). */
+  runsToRetimeTokens(limit: number): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT r.* FROM run_token_audit a JOIN runs r ON r.id = a.run_id
+           WHERE a.timestamps_checked = 0 AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC LIMIT ?`,
+        )
+        .all(limit) as Row[]
+    ).map(toRun);
+  }
+
+  /** Records that a run's transcript could not give call times, so it is not tried again. */
+  markTokenTimesChecked(runId: string): void {
+    this.db
+      .prepare("UPDATE run_token_audit SET timestamps_checked = 1 WHERE run_id = ?")
+      .run(runId);
+  }
+
+  /**
+   * Every stored call of each run that made a call in `(from, to]`, in order, so a window can read
+   * the calls before it (the context a call grew from) and after it (what re-read an addition).
+   */
+  tokenCallsOfRunsActiveIn(from: number, to: number): { run: Run; calls: TokenCall[] }[] {
+    const rows = this.db
+      .prepare(
+        `SELECT r.*, c.context AS c_context, c.cache_read AS c_cache_read, c.cache_write AS c_cache_write,
+           c.output AS c_output, c.added AS c_added, c.at AS c_at
+         FROM run_token_calls c JOIN runs r ON r.id = c.run_id
+         WHERE c.run_id IN (SELECT run_id FROM run_token_calls WHERE at > ? AND at <= ?)
+         ORDER BY r.started_at DESC, r.seq DESC, c.run_id, c.idx`,
+      )
+      .all(from, to) as Row[];
+    const out: { run: Run; calls: TokenCall[] }[] = [];
+    for (const r of rows) {
+      let last = out.at(-1);
+      if (last === undefined || last.run.id !== (r.id as string)) {
+        last = { run: toRun(r), calls: [] };
+        out.push(last);
+      }
+      last.calls.push({
+        at: (r.c_at as number | null) ?? null,
+        context: r.c_context as number,
+        cacheRead: r.c_cache_read as number,
+        cacheWrite: r.c_cache_write as number,
+        output: r.c_output as number,
+        added: JSON.parse(r.c_added as string) as TokenSourceAdd[],
+      });
+    }
+    return out;
+  }
+
+  /**
+   * For each run overlapping `[from, to]`: whether its token audit is stored, whether it has calls,
+   * and whether any call has no time. What an event window can and cannot say.
+   */
+  tokenAuditStates(
+    from: number,
+    to: number,
+  ): { runId: string; stored: boolean; calls: number; untimed: boolean }[] {
+    const ids = this.overlappingRuns("id", from, to + 1).map((r) => r.id as string);
+    const state = this.db.prepare(
+      `SELECT a.calls AS calls, (SELECT COUNT(*) FROM run_token_calls c WHERE c.run_id = ? AND c.at IS NULL) AS untimed
+       FROM run_token_audit a WHERE a.run_id = ?`,
+    );
+    return ids.map((runId) => {
+      const row = state.get(runId, runId) as { calls: number; untimed: number } | undefined;
+      return {
+        runId,
+        stored: row !== undefined,
+        calls: row?.calls ?? 0,
+        untimed: (row?.untimed ?? 0) > 0,
+      };
+    });
   }
 
   /** Ended runs started since `since` with no token audit yet, newest first. */
@@ -1937,6 +2108,18 @@ export class Store {
     return rows.map(toRun);
   }
 
+  /** Ended runs still carrying a merge hold or a parked state, oldest first. */
+  endedRunsWithHoldOrPark(): Run[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM runs WHERE ended_at IS NOT NULL AND loop IS NOT NULL
+           AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.parked') IS NOT NULL)
+         ORDER BY started_at, seq`,
+      )
+      .all() as Row[];
+    return rows.map(toRun);
+  }
+
   /** Live acceptance metadata never needs to decode ended loop history. */
   activeLoopRuns(repoId: RepoId): Run[] {
     const rows = this.statement(
@@ -1984,6 +2167,22 @@ export class Store {
   }
 
   /** True while a run has not ended and is not set aside (waiting on a review, CI or a merge). */
+  /**
+   * True when one of these agents has an open run that is not set aside and started at or after
+   * `since`: a run left open for longer is a dead row, not work in progress.
+   */
+  hasActiveRunOf(agentIds: readonly string[], since: number): boolean {
+    if (agentIds.length === 0) return false;
+    return (
+      this.db
+        .prepare(
+          `SELECT 1 FROM runs WHERE ended_at IS NULL AND started_at >= ? AND agent_id IN (${agentIds.map(() => "?").join(",")})
+             AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1`,
+        )
+        .get(since, ...agentIds) !== undefined
+    );
+  }
+
   hasActiveRun(): boolean {
     return (
       this.db
@@ -2457,6 +2656,28 @@ export class Store {
   }
 
   /**
+   * Settled-done moves at or after `since`, plus each card's latest done move before it (what a
+   * card's column was at `since`), oldest first.
+   */
+  doneBoardMovesFrom(since: number): BoardMove[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.id, m.run_id, m.repo_id, m.issue, m.board_column, m.state, m.detail, m.at
+           FROM board_moves m
+           JOIN (SELECT repo_id, issue, MAX(at) AS at FROM board_moves
+                  WHERE state = 'done' AND at < ? GROUP BY repo_id, issue) last
+             ON m.repo_id = last.repo_id AND m.issue = last.issue AND m.at = last.at
+          WHERE m.state = 'done'
+         UNION ALL
+         SELECT id, run_id, repo_id, issue, board_column, state, detail, at
+           FROM board_moves WHERE state = 'done' AND at >= ?
+         ORDER BY at, id`,
+      )
+      .all(since, since) as Row[];
+    return rows.map((r) => this.boardMoveOf(r));
+  }
+
+  /**
    * Whether a real run in this store moved the issue's card to a column (done). Rows under
    * `pr:` and `dep:` ids have no run, so another hub's moves never count.
    */
@@ -2809,6 +3030,7 @@ export class Store {
   /** True when any stored row changed. */
   replaceBoard(repoId: RepoId, items: BoardItem[]): boolean {
     return this.changed("board_items", repoId, () => {
+      this.boardViews.delete(repoId);
       const before = new Map(
         (
           this.db
@@ -2886,12 +3108,78 @@ export class Store {
     return rows.map(toBoardItem);
   }
 
+  /**
+   * The board for a caller that only reads it: the same cards as `board`, read once and kept
+   * (frozen) until the board is replaced or another connection commits, so a page that reads the
+   * board every few seconds does not rebuild every card each time.
+   */
+  boardView(repoId: RepoId): readonly Readonly<BoardItem>[] {
+    const version = String(this.db.prepare("PRAGMA data_version").get()?.data_version);
+    const kept = this.boardViews.get(repoId);
+    if (kept && kept.version === version) return kept.cards;
+    const cards = this.board(repoId).map((card) => Object.freeze(card));
+    Object.freeze(cards);
+    this.boardViews.set(repoId, { version, cards });
+    return cards;
+  }
+  private boardViews = new Map<
+    RepoId,
+    { version: string; cards: readonly Readonly<BoardItem>[] }
+  >();
+
   /** One board card from the last read, else null. */
   boardItem(repoId: RepoId, issueNumber: number): BoardItem | null {
     const row = this.db
       .prepare("SELECT * FROM board_items WHERE repo_id = ? AND issue_number = ?")
       .get(repoId, issueNumber) as Row | undefined;
     return row === undefined ? null : toBoardItem(row);
+  }
+
+  /** The hub-owned wait for a ticket. GitHub's board state remains the source for every other field. */
+  ticketWait(repoId: RepoId, issue: number): TicketWait | null {
+    const row = this.db
+      .prepare("SELECT reason, frees_when, at FROM ticket_waits WHERE repo_id = ? AND issue = ?")
+      .get(repoId, issue) as Row | undefined;
+    return row === undefined
+      ? null
+      : { reason: row.reason as string, freesWhen: row.frees_when as string, at: row.at as number };
+  }
+
+  /** Every ticket of the repo that is waiting, oldest first. */
+  ticketWaits(repoId: RepoId): ({ issue: number } & TicketWait)[] {
+    const rows = this.db
+      .prepare(
+        "SELECT issue, reason, frees_when, at FROM ticket_waits WHERE repo_id = ? ORDER BY at, issue",
+      )
+      .all(repoId) as Row[];
+    return rows.map((row) => ({
+      issue: row.issue as number,
+      reason: row.reason as string,
+      freesWhen: row.frees_when as string,
+      at: row.at as number,
+    }));
+  }
+
+  /** Records that a ticket, rather than its former seat, waits for a known condition. */
+  setTicketWait({ repoId, issue, ...wait }: { repoId: RepoId; issue: number } & TicketWait): void {
+    this.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO ticket_waits (repo_id, issue, reason, frees_when, at) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(repo_id, issue) DO UPDATE SET reason = excluded.reason,
+             frees_when = excluded.frees_when, at = excluded.at`,
+        )
+        .run(repoId, issue, wait.reason, wait.freesWhen, wait.at);
+    });
+  }
+
+  /** Clears a condition the hub has observed to be resolved. */
+  clearTicketWait(repoId: RepoId, issue: number): void {
+    this.transaction(() => {
+      this.db
+        .prepare("DELETE FROM ticket_waits WHERE repo_id = ? AND issue = ?")
+        .run(repoId, issue);
+    });
   }
 
   /**
@@ -4590,7 +4878,7 @@ export class Store {
   setOffset(path: string, offset: number): void {
     this.db
       .prepare(
-        "INSERT INTO file_offsets (path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = excluded.offset",
+        "INSERT INTO file_offsets (path, offset) VALUES (?, ?) ON CONFLICT(path) DO UPDATE SET offset = excluded.offset WHERE file_offsets.offset != excluded.offset",
       )
       .run(path, offset);
   }
@@ -4598,6 +4886,13 @@ export class Store {
   /** Records a collector's status; `last_ok_at` moves on success and is kept through failures. */
   setStatus(collector: string, ok: boolean, error: string | null): void {
     const at = Date.now();
+    // The same result again moves only its time. That is no news to a view built from the store:
+    // `readVersion` leaves it out, so a tick that found nothing new does not drop every view.
+    const kept = this.db
+      .prepare("SELECT ok, error FROM collector_status WHERE collector = ?")
+      .get(collector) as { ok: number; error: string | null } | undefined;
+    if (kept !== undefined && kept.ok === (ok ? 1 : 0) && kept.error === error)
+      this.timestampOnlyWrites++;
     this.db
       .prepare(
         `INSERT INTO collector_status (collector, ok, error, at, last_ok_at, failing_since)
@@ -4886,7 +5181,7 @@ export class Store {
   }
 
   /** Moves a queued review to another review seat; true only when it was still queued. */
-  moveQueuedReview(id: number, seatId: string, at: number, budgetBrakeOverride = false): boolean {
+  moveQueuedReview(id: number, seatId: string, at: number): boolean {
     let moved = false;
     this.transaction(() => {
       moved =
@@ -4895,10 +5190,8 @@ export class Store {
           .run(seatId, id).changes === 1;
       if (moved)
         this.db
-          .prepare(
-            "INSERT OR REPLACE INTO review_moves (review_id, seat_id, at, budget_brake_override) VALUES (?, ?, ?, ?)",
-          )
-          .run(id, seatId, at, Number(budgetBrakeOverride));
+          .prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)")
+          .run(id, seatId, at);
     });
     return moved;
   }
@@ -4906,14 +5199,6 @@ export class Store {
   /** Whether FLIGHT assigned the queued review to its current seat. */
   reviewMoved(id: number): boolean {
     return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
-  }
-
-  /** Whether FLIGHT explicitly passed the target account's budget brake for this review. */
-  reviewBudgetBrakeOverride(id: number): boolean {
-    const row = this.db
-      .prepare("SELECT budget_brake_override FROM review_moves WHERE review_id = ?")
-      .get(id) as { budget_brake_override?: number } | undefined;
-    return row?.budget_brake_override === 1;
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */
@@ -4944,6 +5229,35 @@ export class Store {
     } catch {
       return null;
     }
+  }
+
+  /** Immutable display material for a Needs-you item; packets never alter its brief or choice. */
+  putAttentionMaterials(packet: AttentionMaterials): boolean {
+    return (
+      this.db
+        .prepare(
+          "INSERT OR IGNORE INTO attention_materials (id, item_key, packet) VALUES (?, ?, ?)",
+        )
+        .run(packet.id, packet.itemKey, JSON.stringify(packet)).changes > 0
+    );
+  }
+
+  attentionMaterials(id: string): AttentionMaterials | null {
+    const row = this.db.prepare("SELECT packet FROM attention_materials WHERE id = ?").get(id) as
+      | { packet: string }
+      | undefined;
+    return row ? (JSON.parse(row.packet) as AttentionMaterials) : null;
+  }
+
+  /** Every packet saved for one item, oldest first; the per-question image cap sums over them. */
+  attentionMaterialsAllForItem(itemKey: string): AttentionMaterials[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT packet FROM attention_materials WHERE item_key = ? ORDER BY json_extract(packet, '$.registeredAt') ASC, rowid ASC",
+        )
+        .all(itemKey) as { packet: string }[]
+    ).map((row) => JSON.parse(row.packet) as AttentionMaterials);
   }
 
   qaReports(repoId: string, pr: number, headSha?: string): QaReport[] {
@@ -5078,6 +5392,60 @@ export class Store {
         .prepare(`SELECT 1 FROM qa_reports WHERE repo_id IN (${repoIds.map(() => "?").join(",")})
       AND instr(report, ?) > 0 LIMIT 1`)
         .get(...repoIds, `/api/qa-report-assets/${id}`) !== undefined
+    );
+  }
+
+  /** Open PRs as `repoId#number`: the work whose evidence and pictures the disk sweep keeps. */
+  openPrKeys(): Set<string> {
+    return new Set(
+      (
+        this.db
+          .prepare("SELECT repo_id, number FROM pull_requests WHERE state = 'open'")
+          .all() as Row[]
+      ).map((r) => `${r.repo_id as string}#${r.number as number}`),
+    );
+  }
+
+  /** The QA image ids (sha256) that a report of an open PR cites. */
+  qaAssetIdsOfOpenPrs(): Set<string> {
+    const ids = new Set<string>();
+    const rows = this.db
+      .prepare(
+        `SELECT q.report FROM qa_reports q JOIN pull_requests p
+           ON p.repo_id = q.repo_id AND p.number = q.pr_number AND p.state = 'open'`,
+      )
+      .all() as Row[];
+    for (const r of rows)
+      for (const m of (r.report as string).matchAll(/\/api\/qa-report-assets\/([0-9a-f]{64})/g))
+        ids.add(m[1]);
+    return ids;
+  }
+
+  /** The picture ids that packets of the given still-waiting questions cite. */
+  attentionMaterialAssetIds(openItemKeys: ReadonlySet<string>): Set<string> {
+    const ids = new Set<string>();
+    const rows = this.db.prepare("SELECT item_key, packet FROM attention_materials").all() as Row[];
+    for (const r of rows) {
+      if (!openItemKeys.has(r.item_key as string)) continue;
+      for (const m of (r.packet as string).matchAll(
+        /\/api\/attention-material-assets\/([0-9a-f]{64})/g,
+      ))
+        ids.add(m[1]);
+    }
+    return ids;
+  }
+
+  /** The review screenshot ids of reviews of open PRs. */
+  reviewShotIdsOfOpenPrs(): Set<string> {
+    return new Set(
+      (
+        this.db
+          .prepare(
+            `SELECT s.shot_id FROM review_shots s JOIN reviews v ON v.id = s.review_id
+               JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'`,
+          )
+          .all() as Row[]
+      ).map((r) => r.shot_id as string),
     );
   }
 
@@ -5342,6 +5710,11 @@ export class Store {
     this.db
       .prepare("UPDATE reviews SET changed_since = ? WHERE id = ?")
       .run(JSON.stringify(files), reviewId);
+  }
+
+  /** Why this review ran without an install ("reviewed, not installed"), kept with the review. */
+  setReviewInstallNote(reviewId: number, note: string): void {
+    this.db.prepare("UPDATE reviews SET install_note = ? WHERE id = ?").run(note, reviewId);
   }
 
   findingsOf(reviewId: number): StoredFinding[] {
@@ -5731,7 +6104,7 @@ export class Store {
     );
     if (!crossed) return;
     this.raiseNote({
-      key: `chatter:${row.ticket}:${pair[0]}:${pair[1]}`,
+      key: `${CHATTER_NOTE_PREFIX}${row.ticket}:${pair[0]}:${pair[1]}`,
       kind: "blocked",
       runId: null,
       seatId: null,
@@ -5749,7 +6122,7 @@ export class Store {
       throw new Error("A hub message is sent as MC.");
     const inserted = this.db
       .prepare(
-        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, item_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO comms (at, from_id, to_id, ticket, text, label, ref, reply_to, target_run_id, from_run_id, pr, sender_kind, kind, item_key) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       )
       .run(
         row.at,
@@ -5764,6 +6137,7 @@ export class Store {
         row.fromRunId ?? null,
         row.pr ?? null,
         row.senderKind ?? null,
+        row.kind ?? (row.senderKind === "hub" ? COMMS_NOTICE : null),
         row.itemKey ?? null,
       );
     const id = Number(inserted.lastInsertRowid);
@@ -5797,6 +6171,7 @@ export class Store {
       mentions,
       deliveredAt: (r.delivered_at as number | null | undefined) ?? null,
       senderKind: (r.sender_kind as CommsSenderKind | null) ?? null,
+      kind: (r.kind as CommsKind | null) ?? null,
       ...(typeof r.item_key === "string" ? { itemKey: r.item_key } : {}),
     };
   }
@@ -6180,14 +6555,31 @@ export class Store {
   private flightConversationScope(
     flightId: string,
     seats: readonly string[],
+    hideNotices = false,
   ): { sql: string; args: SQLInputValue[] } {
     const targets = [...new Set([flightId, ...seats])];
+    // The hub's notices to FLIGHT belong to its conversation; its internal context rows do not.
     return {
       sql: `(((c.from_id = ? AND c.to_id = ?) OR (c.from_id = ? AND c.to_id = ?))
-      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")})))
-      AND c.sender_kind IS NOT 'hub'
-      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'`,
-      args: [COMMS_CAPCOM, flightId, flightId, COMMS_CAPCOM, COMMS_CAPCOM, ...targets],
+      OR (c.from_id = ? AND q.target IN (${targets.map(() => "?").join(",")}))
+      OR (c.from_id = ? AND c.to_id = ? AND c.kind = ?))
+      AND (c.sender_kind IS NOT 'hub' OR c.kind = ?)
+      AND LTRIM(c.text, char(9) || char(10) || char(13) || ' ') NOT LIKE '[Mission Control]%'${
+        hideNotices ? " AND c.kind IS NOT ?" : ""
+      }`,
+      args: [
+        COMMS_CAPCOM,
+        flightId,
+        flightId,
+        COMMS_CAPCOM,
+        COMMS_CAPCOM,
+        ...targets,
+        COMMS_MC,
+        flightId,
+        COMMS_NOTICE,
+        COMMS_NOTICE,
+        ...(hideNotices ? [COMMS_NOTICE] : []),
+      ],
     };
   }
 
@@ -6198,8 +6590,9 @@ export class Store {
     limit: number,
     before?: { at: number; id: number },
     exactId?: string,
+    hideNotices = false,
   ): (CommsRow & { choice?: { label: string } })[] {
-    const scope = this.flightConversationScope(flightId, seats);
+    const scope = this.flightConversationScope(flightId, seats, hideNotices);
     const id = exactId === undefined ? null : commsMessageNumber(exactId);
     if (exactId !== undefined && id === null) return [];
     const rows = this.db
@@ -6249,8 +6642,8 @@ export class Store {
     const row = this.db
       .prepare(`SELECT COUNT(*) AS n FROM comms c
       LEFT JOIN question_choices q ON q.rowid = (SELECT rowid FROM question_choices x WHERE x.message_id = c.id ORDER BY x.chosen_at DESC, x.key, x.brief_at DESC LIMIT 1)
-      WHERE ${scope.sql} AND ${after}`)
-      .get(...scope.args, ...args) as Row;
+      WHERE ${scope.sql} AND c.kind IS NOT ? AND ${after}`)
+      .get(...scope.args, COMMS_NOTICE, ...args) as Row;
     return row.n as number;
   }
 
@@ -6302,8 +6695,9 @@ export class Store {
     limit: number,
     before?: string,
     recentSince?: number,
+    hideNotices = false,
   ): { rows: CommsRow[]; hasMore: boolean } {
-    const { where, args } = this.commsRecentScopeWhere(scope, recentSince);
+    const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
     const beforeId = before === undefined ? null : commsMessageNumber(before);
     const rows = (
       this.db
@@ -6322,18 +6716,24 @@ export class Store {
     scope: CommsReadScope,
     cursor: string | null,
     recentSince?: number,
+    hideNotices = false,
   ): { count: number; unread: number } {
-    const { where, args } = this.commsRecentScopeWhere(scope, recentSince);
+    const { where, args } = this.commsRecentScopeWhere(scope, recentSince, hideNotices);
     const offset = cursor === null ? 0 : (commsMessageNumber(cursor) ?? 0);
+    // a notice is never unread, shown or not
     const r = this.db
       .prepare(
-        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ?), 0) AS unread FROM comms WHERE ${where}`,
+        `SELECT COUNT(*) AS count, COALESCE(SUM(id > ? AND kind IS NOT ?), 0) AS unread
+         FROM comms WHERE ${where}`,
       )
-      .get(offset, ...args) as { count: number; unread: number };
+      .get(offset, COMMS_NOTICE, ...args) as { count: number; unread: number };
     return { count: r.count, unread: r.unread };
   }
-  private commsRecentScopeWhere(scope: CommsReadScope, since?: number) {
-    const base = this.commsScopeWhere(scope);
+  private commsRecentScopeWhere(scope: CommsReadScope, since?: number, hideNotices = false) {
+    const scoped = this.commsScopeWhere(scope);
+    const base = hideNotices
+      ? { where: `(${scoped.where}) AND kind IS NOT ?`, args: [...scoped.args, COMMS_NOTICE] }
+      : scoped;
     if (since === undefined) return base;
     return {
       where: `(${base.where}) AND at >= ? AND (
@@ -6646,6 +7046,63 @@ export class Store {
       const tokens = JSON.parse(row.tokens as string) as TokenUsage;
       return total + tokens.input + tokens.output + tokens.cacheRead + tokens.cacheCreate;
     }, 0);
+  }
+
+  /**
+   * When a note's unbroken run began (its open run, or its last one once cleared): a note raised
+   * again within a minute of clearing (a held Update re-raised as main moves) is the same item to
+   * the operator, so its conversation stays; an earlier run's does not carry over. Read from the
+   * episodes, since a refresh moves the note's own time forward. 0 for a key never raised.
+   */
+  noteRunStart(noteKey: string): number {
+    const latest = this.db
+      .prepare(
+        `SELECT at FROM attention_episodes WHERE key = ?
+         ORDER BY (cleared_at IS NULL) DESC, at DESC LIMIT 1`,
+      )
+      .get(noteKey) as { at: number } | undefined;
+    if (latest === undefined) return 0;
+    const before = this.db.prepare(
+      `SELECT at FROM attention_episodes WHERE key = ? AND at < ? AND cleared_at >= ?
+       ORDER BY at DESC LIMIT 1`,
+    );
+    let start = latest.at;
+    for (let i = 0; i < 1000; i++) {
+      const row = before.get(noteKey, start, start - 60_000) as { at: number } | undefined;
+      if (row === undefined) break;
+      start = row.at;
+    }
+    return start;
+  }
+
+  /** An item's conversation since its current run (`noteRunStart` for a note key, else all). */
+  itemThreadNow(itemKey: string): (CommsRow & { choice?: string })[] {
+    return this.itemThread(
+      itemKey,
+      itemKey.startsWith("note:") ? this.noteRunStart(itemKey.slice("note:".length)) : 0,
+    );
+  }
+
+  /**
+   * One Needs-you item's conversation since `since` (the item's own raising: a note key is reused),
+   * oldest first: the messages sent from it and every reply in it (a reply inherits its message's
+   * item). The hub's own context lines and notices stay out; a picked option carries its label.
+   */
+  itemThread(itemKey: string, since = 0, limit = 100): (CommsRow & { choice?: string })[] {
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM (
+           SELECT c.*, q.label AS choice_label FROM comms c
+           LEFT JOIN question_choices q ON q.message_id = c.id
+           WHERE c.item_key = ? AND c.at >= ? AND c.from_id != ? AND c.kind IS NULL
+           ORDER BY c.at DESC, c.id DESC LIMIT ?
+         ) ORDER BY at ASC, id ASC`,
+      )
+      .all(itemKey, since, COMMS_MC, limit) as Row[];
+    return rows.map((r) => ({
+      ...this.commsRow(r),
+      ...(typeof r.choice_label === "string" ? { choice: r.choice_label } : {}),
+    }));
   }
 
   /** Labelled direct questions and blockers still awaiting their addressee's reply or reaction. */
@@ -7049,6 +7506,21 @@ export class Store {
       .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
   }
 
+  /** Refresh measured details without restarting or unacknowledging an open episode. */
+  refreshNoteInEpisode(n: NoteInput): void {
+    this.db
+      .prepare(
+        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
+           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
+           at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.at ELSE excluded.at END,
+           dismissed_at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.dismissed_at ELSE NULL END,
+           cleared_at = NULL`,
+      )
+      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+  }
+
   clearNote(key: string, at: number): void {
     this.db
       .prepare("UPDATE attention_notes SET cleared_at = ? WHERE key = ? AND cleared_at IS NULL")
@@ -7345,6 +7817,24 @@ export class Store {
           exitCode: (r.exit_code as number | null) ?? null,
           at: r.at as number,
         };
+  }
+
+  /** The newest results (a pass, or a failure with an exit code) of `command` by this run on `headSha`. */
+  latestCheckResults(
+    runId: string,
+    command: string,
+    headSha: string,
+    limit: number,
+  ): { ok: boolean; exitCode: number | null }[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT ok, exit_code FROM check_runs
+           WHERE run_id = ? AND command = ? AND head_sha = ? AND (ok = 1 OR exit_code IS NOT NULL)
+           ORDER BY at DESC, id DESC LIMIT ?`,
+        )
+        .all(runId, command, headSha, limit) as Row[]
+    ).map((r) => ({ ok: r.ok === 1, exitCode: (r.exit_code as number | null) ?? null }));
   }
 
   /** The newest result this run recorded for `command`, regardless of commit. */
@@ -8476,6 +8966,15 @@ export class Store {
       .prepare("SELECT * FROM flight_decisions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?")
       .all(since, limit) as Row[];
     return rows.map(toFlightDecision);
+  }
+
+  /** When FLIGHT decided to wait, at or after `since`, oldest first. */
+  flightWaitTimes(since: number): number[] {
+    return (
+      this.db
+        .prepare("SELECT at FROM flight_decisions WHERE kind = 'wait' AND at >= ? ORDER BY at")
+        .all(since) as { at: number }[]
+    ).map((r) => r.at);
   }
 
   /** The decisions of one kind about one ticket, newest first. */

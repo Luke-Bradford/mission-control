@@ -13,6 +13,7 @@ import {
   needsMe,
   sortCards,
   ticketRef,
+  WAITING_COLUMN,
 } from "./cards.ts";
 
 export type BriefCtx = {
@@ -66,6 +67,10 @@ const column = (items: BoardItem[], name: string): BoardItem[] =>
 
 const outcome = (i: BoardItem, ctx: BriefCtx): string => doneOutcome(i, ctx.prs).toLowerCase();
 
+/** What a held ticket says in a brief: why the hub holds it and what frees it. */
+const waitingNote = (i: BoardItem): string =>
+  i.waiting ? `waiting: ${i.waiting.reason}; frees when ${i.waiting.freesWhen}` : "";
+
 const blockedBy = (i: BoardItem): string => {
   const b = firstBlocker(i);
   return b ? `blocked by ${b}` : "";
@@ -86,7 +91,10 @@ export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: stri
     return `${label}${held.has(a.hudState) ? ", held up" : ""}`;
   };
   const blocked = column(items, "Blocked");
-  const waiting = sortCards(items.filter((i) => mine(i) && !blocked.includes(i)));
+  const heldBack = column(items, WAITING_COLUMN);
+  const waiting = sortCards(
+    items.filter((i) => mine(i) && !blocked.includes(i) && !heldBack.includes(i)),
+  );
   return join([
     `Standup, ${longDate(now, tz)} (${ctx.laneName})`,
     section("Since yesterday", [...done, ...column(items, "Ready for QA")], ctx, (i) =>
@@ -98,8 +106,9 @@ export function standup(items: BoardItem[], ctx: BriefCtx, now: number, tz: stri
       ctx,
       (i) => (cardColumn(i) === "In progress" ? step(i) : "up next"),
     ),
-    section("Blocked or waiting on me", [...blocked, ...waiting], ctx, (i) => {
+    section("Blocked or waiting on me", [...blocked, ...heldBack, ...waiting], ctx, (i) => {
       if (cardColumn(i) === "Blocked") return blockedBy(i);
+      if (cardColumn(i) === WAITING_COLUMN) return waitingNote(i);
       const action = prWait(i, ctx);
       return action ? `I need to ${action}` : "waiting on me";
     }),
@@ -135,6 +144,7 @@ export function weekly(
     }),
     section("In progress", column(items, "In progress"), ctx),
     section("Blocked", column(items, "Blocked"), ctx, blockedBy),
+    section("Waiting", column(items, WAITING_COLUMN), ctx, waitingNote),
     section("Coming up next", column(items, "Ready"), ctx, (i) => i.priority ?? ""),
   ]);
 }

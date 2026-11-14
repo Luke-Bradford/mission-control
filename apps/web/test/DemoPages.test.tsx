@@ -25,35 +25,43 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-const PAGES: [string, string, RegExp][] = [
-  ["Overview", "/", /Recorded|Cache the quote/],
-  ["Flight", "/flight", /FLIGHT|Flight/],
-  ["Board", "/board", /Cache the quote total/],
-  ["a ticket", "/tickets/shop-app/101", /Cache the quote total at checkout/],
-  ["an agent", "/agent/dev-1", /DEV-1/],
-  ["Comms", "/comms/crew", /Starting on the checkout cache/],
-  ["QA", "/qa", /Export orders as CSV/],
-  ["Telemetry", "/telemetry", /Cycle time/i],
-  ["Audit", "/audit", /Recommended next actions/],
-  ...SETUP_TABS.map((tab): [string, string, RegExp] => [`Setup ${tab}`, `/setup/${tab}`, /./]),
+const PAGES: [string, string, RegExp, string][] = [
+  ["Overview", "/", /Recorded|Cache the quote/, "Overview"],
+  ["Flight", "/flight", /FLIGHT|Flight/, "Flight"],
+  ["Board", "/board", /Cache the quote total/, "Board"],
+  ["a ticket", "/tickets/shop-app/101", /Cache the quote total at checkout/, "Board"],
+  ["an agent", "/agent/dev-1", /DEV-1/, "Agents"],
+  ["Comms", "/comms/crew", /Starting on the checkout cache/, "Comms"],
+  ["QA", "/qa", /Export orders as CSV/, "QA"],
+  ["Telemetry", "/telemetry", /Cycle time/i, "Telemetry"],
+  ["Audit", "/audit", /Recommended next actions/, "Audit"],
+  ...SETUP_TABS.map((tab): [string, string, RegExp, string] => [
+    `Setup ${tab}`,
+    `/setup/${tab}`,
+    /./,
+    "Setup",
+  ]),
 ];
 
 describe("Demo renders every page busy", () => {
-  it.each(PAGES)("%s shows the marker, no error and no real request", async (_name, path, text) => {
-    window.history.replaceState(null, "", path);
-    render(<App />);
-    await waitFor(() => expect(document.body.textContent).toMatch(text), { timeout: 4000 });
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 300));
-    });
-    expect(document.querySelector(".demo-marker")?.textContent).toBe("DEMO");
-    expect(document.querySelector(".demo-frame")).not.toBeNull();
-    expect(document.querySelectorAll("[role=alert]")).toHaveLength(0);
-    expect(demoMisses()).toEqual([]);
-    expect(fetchSpy).not.toHaveBeenCalled();
-    expect(sources).toHaveLength(0);
-    expect(document.title).toBe("DEMO · Mission Control");
-  });
+  it.each(PAGES)(
+    "%s shows the marker, no error and no real request",
+    async (_name, path, text, title) => {
+      window.history.replaceState(null, "", path);
+      render(<App />);
+      await waitFor(() => expect(document.body.textContent).toMatch(text), { timeout: 4000 });
+      await act(async () => {
+        await new Promise((r) => setTimeout(r, 300));
+      });
+      expect(document.querySelector(".demo-marker")?.textContent).toBe("DEMO");
+      expect(document.querySelector(".demo-frame")).not.toBeNull();
+      expect(document.querySelectorAll("[role=alert]")).toHaveLength(0);
+      expect(demoMisses()).toEqual([]);
+      expect(fetchSpy).not.toHaveBeenCalled();
+      expect(sources).toHaveLength(0);
+      expect(document.title).toBe(`${title} · DEMO · Mission Control`);
+    },
+  );
 
   it("fills the Overview's crew table", async () => {
     window.history.replaceState(null, "", "/");
@@ -125,7 +133,7 @@ describe("Demo renders every page busy", () => {
 describe("the header switch", () => {
   it("goes to Demo and back without a reload, with the words the plan names", async () => {
     setDemo(false);
-    window.history.replaceState(null, "", "/board");
+    window.history.replaceState(null, "", "/setup");
     render(<App />);
     const toDemo = await screen.findByRole("button", {
       name: "Switch to Demo: a simulated crew. Nothing is sent to the hub.",
@@ -139,7 +147,7 @@ describe("the header switch", () => {
     expect(document.getElementById("toast")?.textContent).toBe(
       "Demo on: this is a simulated crew.",
     );
-    expect(window.location.pathname).toBe("/board");
+    expect(window.location.pathname).toBe("/setup");
     const back = screen.getByRole("button", {
       name: "Switch back to Live: real data from the hub.",
     });
@@ -148,18 +156,18 @@ describe("the header switch", () => {
       fireEvent.click(back);
     });
     expect(document.querySelector(".demo-marker")).toBeNull();
-    expect(document.title).toMatch(/^(\(\d+\) )?Mission Control$/);
+    expect(document.title).toMatch(/^(\(\d+\) )?Setup · Mission Control$/);
     expect(document.getElementById("toast")?.textContent).toBe("Back to Live.");
   });
 
   it("leaves the item, the selection and the session behind on a switch", async () => {
     setDemo(false);
-    navigate("/agent/dev-1");
+    navigate("/setup");
     render(<App />);
     const toDemo = await screen.findByRole("button", { name: /Switch to Demo/ });
     await act(async () => {
       fireEvent.click(toDemo);
     });
-    expect(window.location.pathname).toBe("/agent");
+    expect(window.location.pathname).toBe("/setup");
   });
 });

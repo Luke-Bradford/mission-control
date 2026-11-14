@@ -73,12 +73,17 @@ import {
   DESIGN_PREVIEW_SWEEP_MS,
   DesignPreviews,
 } from "./design-preview/previews.ts";
+import { DISK_SWEEP_EVERY_MS, diskBudgetBytes, sweepDataFolder } from "./disk/sweep.ts";
+import { cachedDiskUse } from "./disk/use.ts";
+import { releaseAtAccountStop } from "./engine/account-release.ts";
 import { createEngine, type Engine, reviewerOf } from "./engine/engine.ts";
 import { createPublisher } from "./engine/publish.ts";
 import { refillQueues, takeNext } from "./engine/queue.ts";
 import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { takeStuckPrs } from "./engine/stuck-prs.ts";
 import { seedExternalReviewAsks } from "./external-pr-control.ts";
 import { refreshAuthors } from "./flight/collaborators.ts";
+import { flightConflicts } from "./flight/conflicts.ts";
 import { hudRenderRequest, renderHudInHelper } from "./flight/hud-render.ts";
 import { hudShotStore } from "./flight/hud-store.ts";
 import { operatorCall } from "./flight/operator-call.ts";
@@ -93,12 +98,10 @@ import {
   seatWorktree,
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
-import { markHubStarted } from "./hud.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  machineCapacity,
-  machineCapacitySince,
-} from "./machine-capacity.ts";
+import { attentionItems, markHubStarted, NO_LOCK } from "./hud.ts";
+import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./leftovers.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
+import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
 import { McpCalls } from "./mcp/server.ts";
@@ -111,6 +114,7 @@ import {
   readKnown,
 } from "./mcp/tools.ts";
 import { releaseWaitingOperator } from "./needs-you-actions.ts";
+import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./no-index.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import {
@@ -207,11 +211,7 @@ export async function main(): Promise<void> {
         capacity: () => {
           const capacityConfig = config.crew?.machineCapacity;
           const c = capacityConfig ?? MACHINE_CAPACITY_DEFAULTS;
-          return machineCapacity(
-            store.machineSamples(machineCapacitySince(Date.now(), c)),
-            Date.now(),
-            c,
-          );
+          return storedMachineCapacity(store, Date.now(), c);
         },
         exists: async (candidate) =>
           await new Promise<boolean>((resolve) => {
@@ -332,8 +332,17 @@ export async function main(): Promise<void> {
   // set by the CLI update check while the CLI fails its smoke test: no run starts or resumes
   const cliHold = new CliHold();
   let browserStreamCount = 0;
+  // One measurement of the hub's disk use (a walk of many gigabytes) serves the panel, the sweep and the disk flag.
+  const hubDiskUse = cachedDiskUse({
+    dataDir: dirname(dbPath),
+    worktrees: config.crew?.worktrees,
+  });
   const scheduler = createScheduler({
     config,
+    hubDiskUse: () => {
+      void hubDiskUse.read().catch(() => {});
+      return hubDiskUse.last();
+    },
     teamsEnabled: !isPreview(port, process.env),
     boardWrites: !preview,
     store,
@@ -477,6 +486,10 @@ export async function main(): Promise<void> {
             const guard = hudRenderRequest(origin);
             return renderHudInHelper(guard.page(path), guard, { colorScheme, signal });
           },
+          renderDemo: (origin, path, viewport, signal) => {
+            const guard = hudRenderRequest(origin);
+            return renderHudInHelper(guard.page(path), guard, { demo: true, viewport, signal });
+          },
           log: (line) => log(line),
         })
       : undefined;
@@ -498,6 +511,17 @@ export async function main(): Promise<void> {
     const rules = await engineRules(repoId);
     return rules instanceof RepoRulesError ? undefined : rules.areas;
   };
+  const flightMergeChecks = new MapConflicts(undefined, {
+    get: (kind, scope, key) => store.mapCacheGet(kind, scope, key),
+    put: (kind, scope, key, value, exclusive) =>
+      store.mapCachePut(kind, scope, key, value, exclusive),
+  });
+  const flightConflictFiles = async (repoId: RepoId) => {
+    const checkout = config.crew?.sessions.find((x) => x.repoId === repoId)?.checkout;
+    return checkout === undefined
+      ? undefined
+      : await flightConflicts(flightMergeChecks, checkout, store.pullRequests(repoId));
+  };
   // The checks a repo configures (`mc.checks`): seats' shell calls are recorded against the commit
   // they ran on, and `mc push` asks for the record.
   const runChecks = configuredChecks(store, engineRules);
@@ -512,6 +536,15 @@ export async function main(): Promise<void> {
   // crew config, and only where the guard hook can be found.
   const crewEnabled =
     crewAllowed(preview, process.env) && config.crew !== undefined && hubRoot !== null;
+  // Crew checkouts and evidence images churn constantly; keep Spotlight (and its file-change
+  // service) out of them.
+  keepOutOfSpotlight(
+    [
+      ...EVIDENCE_FOLDERS.map((name) => join(dirname(dbPath), name)),
+      ...(crewEnabled && config.crew !== undefined ? [config.crew.worktrees] : []),
+    ],
+    (line) => log(line),
+  );
   // The template profiles sit beside config.yaml; read afresh for each start, never cached.
   const profilesPath = join(dirname(configPath), PROFILES_FILE);
   const profiles = () => loadProfiles(profilesPath);
@@ -807,6 +840,31 @@ export async function main(): Promise<void> {
         now: Date.now,
         onNotes: () => bus.emit("attention"),
       }),
+    releaseAtAccountStop: () =>
+      releaseAtAccountStop({
+        config,
+        store,
+        supervisor,
+        rules: engineRules,
+        enabled: engineOn,
+        now: Date.now,
+        log: (line) => log(`engine: ${line}`),
+      }),
+    takeStuckPrs: (onlySeat) =>
+      takeStuckPrs(
+        {
+          config,
+          store,
+          supervisor,
+          login: hubLogin,
+          rules: engineRules,
+          inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+          enabled: engineOn,
+          now: Date.now,
+          log: (line) => log(`engine: ${line}`),
+        },
+        onlySeat,
+      ),
     takeNext: (seatId) =>
       takeNext(
         {
@@ -872,13 +930,26 @@ export async function main(): Promise<void> {
     inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
     log: (line) => log(line),
   });
+  const crewTidy = createCrewTidy({
+    config,
+    store,
+    pruneLocal: () => branchTidy.pruneLocal(),
+    inClone: (checkout, fn) => supervisor.inClone(checkout, fn),
+    isStarting: (path) => supervisor.isStartingWorktree(path),
+  });
   // set once the app exists: `mc operator` calls its routes in process
   let hubApp: ReturnType<typeof buildApp> | null = null;
 
   // FLIGHT's mc tools: after the engine, which later tools wake.
   const flightTools = createFlightTools({
+    ...(designPreviews === undefined
+      ? {}
+      : {
+          hasPreview: (repoId: string, ticket: number) =>
+            repoId === previewRepoId && designPreviews.list().some((v) => v.ticket === ticket),
+        }),
     operator: operatorCall(() => hubApp, operatorToken),
-    tidy: createCrewTidy({ config, store, pruneLocal: () => branchTidy.pruneLocal() }),
+    tidy: crewTidy,
     hudShots,
     hubOrigin: `http://${HOST}:${port}`,
     screenshotHud: renderHudInHelper,
@@ -887,6 +958,7 @@ export async function main(): Promise<void> {
       prepareQueueReorderSnapshot(queueReorder, seatId, move, above),
     seen: (runId, state) => flightWatch.seen(runId, state),
     areas: flightAreas,
+    conflicts: flightConflictFiles,
     config,
     store,
     bus,
@@ -922,6 +994,7 @@ export async function main(): Promise<void> {
     login: hubLogin,
     lockState: () => lock.state(),
     areas: flightAreas,
+    conflicts: flightConflictFiles,
     // a seat with a pending change is not started until it settles; the reloader exists below
     blocked: (seatId) =>
       pausedSeat(store, seatId) !== null ||
@@ -1014,6 +1087,7 @@ export async function main(): Promise<void> {
     });
   });
   const app = buildApp({
+    diskUse: hubDiskUse,
     qaReports,
     previews,
     previewRepoId,
@@ -1180,6 +1254,58 @@ export async function main(): Promise<void> {
     setInterval(quietly("sweep", tidy.sweep), SWEEP_EVERY_MS).unref();
     setTimeout(quietly("sweep", tidy.sweep), TIDY_EVERY_MS).unref();
   }
+  // Local only: pictures, evidence and scratch of finished work are removed from the data folder.
+  if (!preview) {
+    const dataDir = dirname(dbPath);
+    let sweeping = false;
+    const diskSweep = () => {
+      if (sweeping) return;
+      sweeping = true;
+      sweepDataFolder({
+        dataDir,
+        now: Date.now,
+        openPrs: store.openPrKeys(),
+        citedAssets: store.qaAssetIdsOfOpenPrs(),
+        keptShots: store.reviewShotIdsOfOpenPrs(),
+        keptMaterials: store.attentionMaterialAssetIds(
+          new Set(
+            attentionItems(config, store, Date.now(), NO_LOCK, undefined, null, true).map(
+              (item) => item.key,
+            ),
+          ),
+        ),
+        budgetBytes: diskBudgetBytes(process.env),
+        holdings: () => hubDiskUse.read(),
+        log,
+      })
+        .catch((e: unknown) => {
+          log(`disk sweep failed: ${e instanceof Error ? e.message : String(e)}`);
+        })
+        .finally(() => {
+          sweeping = false;
+        });
+    };
+    setInterval(diskSweep, DISK_SWEEP_EVERY_MS).unref();
+    setTimeout(diskSweep, 2 * 60_000).unref();
+    // Crew worktrees: a finished PR's go, a set-aside run's lose node_modules. Where the engine runs.
+    if (engineOn) {
+      const worktreeTidy = () => {
+        crewTidy
+          .tidyFinished(Date.now())
+          .then((r) => {
+            if (r.removed.length + r.trimmed.length > 0)
+              log(
+                `worktree tidy: removed ${r.removed.length} worktree(s), trimmed ${r.trimmed.length} node_modules`,
+              );
+          })
+          .catch((e: unknown) => {
+            log(`worktree tidy failed: ${e instanceof Error ? e.message : String(e)}`);
+          });
+      };
+      setInterval(worktreeTidy, TIDY_EVERY_MS).unref();
+      setTimeout(worktreeTidy, TIDY_EVERY_MS).unref();
+    }
+  }
   // Local only (no GitHub write): merged PRs' reviews are recorded and due proposals re-measured.
   const audit = () => {
     try {
@@ -1190,6 +1316,17 @@ export async function main(): Promise<void> {
   };
   setInterval(audit, CODE_HEALTH_AUDIT_EVERY_MS).unref();
   setTimeout(audit, 60_000).unref();
+  // Local only: what finished work left behind (old questions, holds, parks) is cleared at boot and hourly.
+  const leftovers = () => {
+    try {
+      for (const text of clearLeftovers({ store, config, now: Date.now() }))
+        log(`leftovers: ${text}`);
+    } catch (e) {
+      log(`leftovers: pass failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  setInterval(leftovers, LEFTOVERS_EVERY_MS).unref();
+  setTimeout(leftovers, 5_000).unref();
   crewReloader.start();
   flightWatch.start();
   stopDiscovery = startCodexDiscovery({

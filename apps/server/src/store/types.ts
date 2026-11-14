@@ -2,6 +2,7 @@ import type {
   AgentId,
   AttentionKind,
   ChoiceTargetKind,
+  CommsKind,
   CommsLabel,
   CommsSenderKind,
   DoneWhenEntry,
@@ -186,6 +187,8 @@ export interface CommsRow {
   replyTo: string | null;
   mentions: string[];
   senderKind: CommsSenderKind | null;
+  /** `notice` for a line the hub wrote; null otherwise. */
+  kind: CommsKind | null;
   /** When the recipient seat took the message; null while it is only stored. */
   deliveredAt: number | null;
   itemKey?: string;
@@ -237,6 +240,8 @@ export interface NewCommsRow {
    * apps/server/src names it (comms-sender-kind.test.ts scans for that); only fixtures omit it.
    */
   senderKind?: CommsSenderKind;
+  /** Defaults to `notice` for a hub message, so everything the hub writes is one. */
+  kind?: CommsKind | null;
 }
 
 /** A FLIGHT settlement of a stale Comms question or blocker. */

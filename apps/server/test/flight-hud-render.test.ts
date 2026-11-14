@@ -1,4 +1,6 @@
 import {
+  DEMO_MARKER_LABEL,
+  DEMO_SESSION_KEY,
   HUD_PAGE_PATHS,
   HUD_RENDERER_HEADER,
   OPERATOR_BOOTSTRAP_PATH,
@@ -122,6 +124,7 @@ function fakePlaywright(
       order.push("websocket");
       websocketHandler = handler;
     }),
+    addInitScript: vi.fn(async () => {}),
     newPage: vi.fn(async () => {
       order.push("page");
       return page;
@@ -341,6 +344,26 @@ describe("renderHudWithPlaywright", () => {
     await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(plain.playwright));
     const opened = (plain.browser.newContext.mock.calls as unknown as [object][])[0]?.[0];
     expect(opened).not.toHaveProperty("colorScheme");
+  });
+
+  it("renders in Demo at the size it is asked for: the flag is set before the page boots", async () => {
+    const fake = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), {
+      ...options(fake.playwright),
+      demo: true,
+      viewport: { width: 2560, height: 1145 },
+    });
+    expect(fake.browser.newContext).toHaveBeenCalledWith(
+      expect.objectContaining({ viewport: { width: 2560, height: 1145 } }),
+    );
+    expect(fake.context.addInitScript).toHaveBeenCalledWith(
+      expect.stringContaining(`sessionStorage.setItem("${DEMO_SESSION_KEY}", "true")`),
+    );
+    const waited = (fake.page.waitForSelector.mock.calls as unknown as [string][]).map((c) => c[0]);
+    expect(waited.some((s) => s.includes(DEMO_MARKER_LABEL))).toBe(true);
+    const live = fakePlaywright();
+    await renderHudWithPlaywright(URL, hudRenderRequest(URL), options(live.playwright));
+    expect(live.context.addInitScript).not.toHaveBeenCalled();
   });
 
   it("sandboxes Chrome and installs context routes before creating the main page", async () => {

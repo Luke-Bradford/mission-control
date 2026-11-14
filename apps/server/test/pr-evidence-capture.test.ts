@@ -94,6 +94,68 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
 
 const WEB = ["apps/web/src/board/Card.tsx"];
 
+describe("Demo renders of the head", () => {
+  const demoShot = encodePng(fixtureRaster(64, 40, [], [30, 60, 90]));
+  const asked: { sha: string; path: string; width: number; height: number }[] = [];
+  const withDemo = (over: Partial<PrEvidenceDeps> = {}) => {
+    asked.length = 0;
+    return setup({
+      renderDemo: async (origin, path, viewport) => {
+        asked.push({ sha: origin.split("/").pop() ?? "", path, ...viewport });
+        return demoShot;
+      },
+      ...over,
+    });
+  };
+
+  it("asks for each page in Demo at both sizes on the head, and stores them", async () => {
+    const t = withDemo();
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(asked).toEqual([
+      { sha: HEAD, path: "/board", width: 1920, height: 940 },
+      { sha: HEAD, path: "/board", width: 2560, height: 1145 },
+    ]);
+    const m = t.store.manifest("mc", 7, HEAD) as EvidenceManifest;
+    expect(m.demos).toEqual([
+      { page: "board", width: 1920, height: 940 },
+      { page: "board", width: 2560, height: 1145 },
+    ]);
+    expect(t.store.image("mc", 7, HEAD, "board-demo-1920.png")).toEqual(demoShot);
+    expect(t.store.image("mc", 7, HEAD, "board-demo-2560.png")).toEqual(demoShot);
+    // the live pairs are unchanged: 1600x1000 comes from `render`, both sides, light and dark
+    expect(m.pairs).toHaveLength(2);
+    expect(t.rendered).toHaveLength(4);
+    expect(t.posted[0]?.demos).toHaveLength(2);
+    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toBeNull();
+  });
+
+  it("shows a failed Demo render as missing evidence, naming the page and size", async () => {
+    const t = withDemo({
+      renderDemo: async (_origin, _path, viewport) => {
+        if (viewport.width === 2560) throw new Error("Demo marker never came");
+        return demoShot;
+      },
+    });
+    const target = { repoId: "mc", pr: 7, sha: HEAD, paths: WEB };
+    await t.evidence.ensure(target);
+    expect(t.store.manifest("mc", 7, HEAD)).toBeNull();
+    const why = t.evidence.gate(target) ?? "";
+    expect(why).toContain("missing pages: board");
+    expect(why).toContain("board page, Demo at 2560x1145, head side: Demo marker never came");
+  });
+
+  it("recaptures a head stored without Demo renders", async () => {
+    const t = withDemo();
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    t.store.save({ ...(t.store.manifest("mc", 7, HEAD) as EvidenceManifest), demos: [] }, []);
+    expect(t.evidence.gate({ repoId: "mc", pr: 7, sha: HEAD, paths: WEB })).toContain("Demo");
+    asked.length = 0;
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(asked).toHaveLength(2);
+    expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).demos).toHaveLength(2);
+  });
+});
+
 it("keeps draft when a graph-only page failed and only folder-page pairs were saved", async () => {
   const t = setup({
     webGraph: async () => ({ "apps/web/src/comms/ItemBrief.tsx": ["needs", "comms"] }),

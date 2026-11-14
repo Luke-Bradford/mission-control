@@ -189,7 +189,7 @@ export async function flightConversation(
   store: Store,
   flightId: string,
   seats: readonly string[],
-  paging: { limit: number; before?: string },
+  paging: { limit: number; before?: string; hideNotices?: boolean },
 ): Promise<FlightConversationPage> {
   const streams = await sources(store, flightId);
   const cut = paging.before ? cursorRank(store, flightId, seats, streams, paging.before) : null;
@@ -200,6 +200,8 @@ export async function flightConversation(
     cut
       ? { at: cut.at, id: cut.source === "comms" ? cut.offset : Number.MAX_SAFE_INTEGER }
       : undefined,
+    undefined,
+    paging.hideNotices,
   );
   const latestReply = streams.reduce(
     (latest, line) => Math.max(latest, line.message.at ?? -Infinity),

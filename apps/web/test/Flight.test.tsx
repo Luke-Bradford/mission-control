@@ -576,7 +576,7 @@ describe("FLIGHT page", () => {
     expect(rows[1]?.querySelector("a[href$='/issues/5']")).toBeNull();
   });
 
-  it("Seats shows a looped run without a PR, and a blocked one as Blocked with why and since when", async () => {
+  it("Seats shows a looped run without a PR, and a stuck one as Waiting with why and since when", async () => {
     const parked = {
       phase: "parked" as const,
       text: "Blocked: needs you",
@@ -601,7 +601,8 @@ describe("FLIGHT page", () => {
     render(<FlightTabs />);
     const list = await findSeats();
     expect(list.querySelectorAll("tbody tr")).toHaveLength(1);
-    expect(list.textContent).toContain("Blocked");
+    expect(list.textContent).toContain("Waiting");
+    expect(list.textContent).not.toContain("Blocked");
     expect(list.textContent).not.toContain("PR #");
     expect(list.querySelector(".wsteps .w")).not.toBeNull();
     const stuck = list.querySelector(".wif-stuck") as HTMLElement;
@@ -609,7 +610,7 @@ describe("FLIGHT page", () => {
     expect(stuck.textContent).toContain("since 1h 30m");
   });
 
-  it("Seats says a blocked seat with no recorded reason is blocked, since when, and a dash for its stage", async () => {
+  it("Seats says a stuck seat with no recorded reason is waiting, since when, and a dash for its stage", async () => {
     stubFetch({
       "/api/crew?shape=summary": {
         rows: [seatRow({ hudState: "blocked", stateSince: NOW - 5 * MIN, loop: null })],
@@ -620,7 +621,7 @@ describe("FLIGHT page", () => {
     render(<FlightTabs />);
     const list = await findSeats();
     expect((list.querySelector(".wif-stuck") as HTMLElement).textContent).toContain(
-      "blocked · since 5m 00s ago",
+      "waiting · since 5m 00s ago",
     );
     expect((list.querySelector(".wif-stage") as HTMLElement).textContent).toBe("—");
   });

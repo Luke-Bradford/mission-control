@@ -1,15 +1,25 @@
 import {
   FLIGHT_WAKE_IDLE_MS,
   type Run,
+  type RunTokenAudit,
+  TOKEN_AUDIT_OTHER,
   TOKEN_AUDIT_OVER_BUDGET_RUNS,
+  TOKEN_AUDIT_SUMMARY_ROWS,
+  TOKEN_AUDIT_SUMMARY_RUNS,
   TOKEN_AUDIT_TOP_RUNS,
   TOKEN_CONTEXT_BUDGET,
+  TOKEN_REWRITE_MIN_WRITE,
+  TOKEN_REWRITE_READ_RATIO,
+  type TokenAuditCoverage,
   type TokenAuditFigure,
   type TokenAuditFigures,
   type TokenAuditNamed,
   type TokenAuditRole,
   type TokenAuditRunRef,
+  type TokenAuditSummary,
+  type TokenAuditSummaryRow,
   type TokenAuditView,
+  type TokenCall,
   type TokenCounts,
 } from "@mc/core";
 import { type CcConfig, configuredAgents } from "../config.ts";
@@ -18,6 +28,7 @@ import { flightSeat } from "../flight/seat.ts";
 import type { Store } from "../store.ts";
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 /** The role name shown for an observed loop, which has none. */
 export const LOOP_ROLE = "loop";
 
@@ -73,6 +84,18 @@ const missing = (reason: string): { recorded: false; reason: string } => ({
   reason,
 });
 
+/** One view's inputs: the per-run audits it sums, and what says how they were chosen. */
+interface Basis {
+  days: number;
+  hours: number | null;
+  since: number;
+  kind: "runs" | "events";
+  rows: { run: Run; audit: RunTokenAudit }[];
+  coverage: TokenAuditCoverage | null;
+  /** Context size of each model call in the window, by run. */
+  contexts: { runId: string; context: number }[];
+}
+
 /** The stored token audits of runs started in the last `days` days, summed for `GET /api/audit/tokens`. */
 export function tokenAuditView(
   store: Store,
@@ -81,10 +104,210 @@ export function tokenAuditView(
   days: number,
 ): TokenAuditView {
   const since = now - days * DAY_MS;
+  return aggregate(store, config, now, {
+    days,
+    hours: null,
+    since,
+    kind: "runs",
+    rows: store.runTokenAudits(since),
+    coverage: null,
+    contexts: store.runCallContexts(since),
+  });
+}
+
+/**
+ * What one run's calls in `(from, to]` did. Each call counts where it was made, not where its run
+ * started. An addition is re-read by the run's later calls that are also in the window, so a
+ * run's whole-run total is never spread over time. A call with no time is left out (the coverage
+ * says so).
+ */
+function windowAudit(calls: readonly TokenCall[], from: number, to: number): RunTokenAudit | null {
+  const inWin = calls.map((c) => c.at != null && c.at > from && c.at <= to);
+  const total = inWin.filter(Boolean).length;
+  if (total === 0) return null;
+  const bySource: Record<string, TokenCounts> = {};
+  const byCommand: Record<string, TokenCounts> = {};
+  const contexts: number[] = [];
+  let seen = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let output = 0;
+  let rewrites = 0;
+  let rewriteTokens = 0;
+  calls.forEach((c, i) => {
+    if (!inWin[i]) return;
+    seen += 1;
+    const left = total - seen + 1;
+    contexts.push(c.context);
+    cacheRead += c.cacheRead;
+    cacheWrite += c.cacheWrite;
+    output += c.output;
+    const prev = calls[i - 1];
+    if (
+      prev !== undefined &&
+      c.cacheWrite > TOKEN_REWRITE_MIN_WRITE &&
+      c.cacheRead < TOKEN_REWRITE_READ_RATIO * prev.context
+    ) {
+      rewrites += 1;
+      rewriteTokens += c.cacheWrite;
+    }
+    for (const a of c.added) {
+      const into = (m: Record<string, TokenCounts>, name: string) => {
+        const t = m[name] ?? { added: 0, reread: 0, events: 0 };
+        m[name] = t;
+        t.added += a.tokens;
+        t.reread += a.tokens * left;
+        t.events += 1;
+      };
+      into(bySource, a.source);
+      if (a.command !== null) into(byCommand, a.command);
+    }
+  });
+  const sorted = [...contexts].sort((x, y) => x - y);
+  return {
+    calls: total,
+    peakContext: sorted.at(-1) ?? 0,
+    medianContext: sorted[total >> 1] ?? 0,
+    cacheRead,
+    cacheWrite,
+    output,
+    rewrites,
+    rewriteTokens,
+    readAfterReport: null,
+    bySource,
+    byCommand,
+  };
+}
+
+const plural = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * The model calls made in the last `hours` hours, by role and source, for `?hours=N`. Calls are
+ * placed by the time their first frame was written, so a run that began days ago still counts for
+ * what it did in the window. `coverage` says what the stored times cannot cover.
+ */
+export function tokenAuditWindowView(
+  store: Store,
+  config: CcConfig,
+  now: number,
+  hours: number,
+): TokenAuditView {
+  const from = now - hours * HOUR_MS;
+  const rows: { run: Run; audit: RunTokenAudit }[] = [];
+  const contexts: { runId: string; context: number }[] = [];
+  for (const { run, calls } of store.tokenCallsOfRunsActiveIn(from, now)) {
+    const audit = windowAudit(calls, from, now);
+    if (audit === null) continue;
+    rows.push({ run, audit });
+    for (const c of calls) {
+      if (c.at != null && c.at > from && c.at <= now)
+        contexts.push({ runId: run.id, context: c.context });
+    }
+  }
+  const states = store.tokenAuditStates(from, now);
+  const pendingRuns = states.filter((s) => !s.stored).length;
+  const untimedRuns = states.filter((s) => s.stored && s.calls > 0 && s.untimed).length;
+  const unreadRuns = states.filter((s) => s.stored && s.calls === 0).length;
+  const gaps: string[] = [];
+  if (pendingRuns > 0)
+    gaps.push(
+      `${plural(pendingRuns, "run", "runs")} in the window ${pendingRuns === 1 ? "has" : "have"} no token audit stored yet (still running, or not read yet)`,
+    );
+  if (untimedRuns > 0)
+    gaps.push(
+      `${plural(untimedRuns, "run", "runs")} in the window ${untimedRuns === 1 ? "has" : "have"} calls stored without a time (made before call times were kept, and the transcript could not give them)`,
+    );
+  if (unreadRuns > 0)
+    gaps.push(
+      `${plural(unreadRuns, "run", "runs")} in the window ${unreadRuns === 1 ? "has" : "have"} no readable transcript (Codex, observed loop or missing file)`,
+    );
+  const gapped = pendingRuns + untimedRuns + unreadRuns > 0;
+  const coverage: TokenAuditCoverage = {
+    status: !gapped ? "complete" : rows.length > 0 ? "partial" : "unavailable",
+    pendingRuns,
+    untimedRuns,
+    unreadRuns,
+    reason: gapped
+      ? `${gaps.join("; ")}. Their calls are not in these totals, so a zero here is not proof of none.`
+      : null,
+  };
+  return aggregate(store, config, now, {
+    days: hours / 24,
+    hours,
+    since: from,
+    kind: "events",
+    rows,
+    coverage,
+    contexts,
+  });
+}
+
+/** The two lists and totals the summary read shares with the full one; rows past the top fold into `other`. */
+function summaryRows(all: TokenAuditNamed[]): { rows: TokenAuditSummaryRow[]; other: number } {
+  const top = all.slice(0, TOKEN_AUDIT_SUMMARY_ROWS);
+  const rest = all.slice(TOKEN_AUDIT_SUMMARY_ROWS);
+  const rows: TokenAuditSummaryRow[] = top.map((r) => ({
+    name: r.name,
+    added: r.added,
+    reread: r.reread,
+    events: r.events,
+    share: r.share,
+  }));
+  if (rest.length > 0) {
+    const sum = rest.reduce(
+      (t, r) => ({
+        added: t.added + r.added,
+        reread: t.reread + r.reread,
+        events: t.events + r.events,
+        share: t.share + r.share,
+      }),
+      { added: 0, reread: 0, events: 0, share: 0 },
+    );
+    rows.push({ name: TOKEN_AUDIT_OTHER, ...sum });
+  }
+  return { rows, other: rest.length };
+}
+
+/**
+ * The bounded read for an agent: totals, every role, the top sources and commands with one
+ * `other` row each, and a few runs. Each list plus its `other` row adds up to the full read.
+ */
+export function tokenAuditSummary(view: TokenAuditView): TokenAuditSummary {
+  const q = view.hours != null ? `hours=${view.hours}` : `days=${view.days}`;
+  const sources = summaryRows(view.bySource);
+  const commands = summaryRows(view.byCommand);
+  const runs = view.topRuns.slice(0, TOKEN_AUDIT_SUMMARY_RUNS);
+  return {
+    days: view.days,
+    hours: view.hours ?? null,
+    since: view.since,
+    basis: view.basis ?? "runs",
+    coverage: view.coverage ?? null,
+    runs: view.runs,
+    calls: view.calls,
+    output: view.output,
+    cacheRead: view.cacheRead,
+    cacheWrite: view.cacheWrite,
+    reread: view.reread,
+    rewrites: view.rewrites,
+    byRole: view.byRole,
+    bySource: sources.rows,
+    byCommand: commands.rows,
+    otherSources: sources.other,
+    otherCommands: commands.other,
+    topRuns: runs,
+    links: {
+      full: `/api/audit/tokens?${q}`,
+      runs: [...new Set(runs.map((r) => `/api/agents/${r.agentId}/runs`))],
+    },
+  };
+}
+
+function aggregate(store: Store, config: CcConfig, now: number, basis: Basis): TokenAuditView {
+  const { days, since, rows } = basis;
   const roles = new Map<string, string>(
     configuredAgents(config).map((a) => [a.id, a.kind === "loop" ? LOOP_ROLE : a.seat.role]),
   );
-  const rows = store.runTokenAudits(since);
   const bySource = new Map<string, TokenCounts>();
   const byCommand = new Map<string, TokenCounts>();
   const sourceTop: Top = new Map();
@@ -169,6 +392,9 @@ export function tokenAuditView(
   const start = cost?.byReason.find((r) => r.reason === "start");
   return {
     days,
+    hours: basis.hours,
+    basis: basis.kind,
+    coverage: basis.coverage,
     since,
     ...view,
     readAfterReportShare: readWithReport > 0 ? readAfter / readWithReport : null,
@@ -206,7 +432,7 @@ export function tokenAuditView(
           },
     controller:
       config.audit?.controllerSessions === true ? store.controllerUsageSince(since) : null,
-    figures: figures(store, now, days, since, roles, rows, flight, cost),
+    figures: figures(store, now, days, since, roles, rows, basis.contexts, flight, cost),
   };
 }
 
@@ -224,6 +450,7 @@ function figures(
   since: number,
   roles: Map<string, string>,
   rows: { run: Run; audit: { peakContext: number } }[],
+  contexts: { runId: string; context: number }[],
   flight: ReturnType<typeof flightSeat>,
   cost: ReturnType<typeof flightWakeCost> | null,
 ): TokenAuditFigures {
@@ -231,7 +458,7 @@ function figures(
   const runById = new Map(rows.map(({ run }) => [run.id, run]));
 
   const perRole = new Map<string, number[]>();
-  for (const c of store.runCallContexts(since)) {
+  for (const c of contexts) {
     const run = runById.get(c.runId);
     if (run === undefined) continue;
     const list = perRole.get(roleOf(run)) ?? [];
@@ -357,7 +584,7 @@ function figures(
       "The hub keeps each prompt section's size, not its text. It would need to store a hash of each section per wake to tell what was sent again.",
     ),
     rewriteWait: missing(
-      "Stored model calls carry no time. The hub would need to store each call's timestamp to know the pause before a cache rewrite.",
+      "Call times are stored from this release on, but the pause before a cache rewrite is not worked out from them yet.",
     ),
     reviewRunsPerTicket,
     flight: flightFigure,

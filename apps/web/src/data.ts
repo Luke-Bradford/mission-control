@@ -89,6 +89,9 @@ type PageDocument = {
 const pageDocument = (): PageDocument | undefined =>
   (globalThis as { document?: PageDocument }).document;
 
+/** One array, so a resource's subscription keeps its identity between renders. */
+const ITEM_THREAD_TOPICS = ["attention", "agents"] as const;
+
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
   agentDetail: (id: string): ResourceRef => ({
@@ -127,6 +130,16 @@ export const RESOURCES = {
   crewChanges: { path: "/api/crew/changes", topic: "config" },
   discussion: (key: string, id = ""): ResourceRef => ({
     path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
+    topic: "attention",
+  }),
+  /** One item's conversation: the messages sent from it and their replies, from Comms. */
+  itemThread: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/thread`,
+    topic: ITEM_THREAD_TOPICS,
+  }),
+  /** Retained plans and picture stories of one open item; 404 when it has none. */
+  attentionMaterials: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/materials`,
     topic: "attention",
   }),
   heldAttention: { path: "/api/attention/held", topic: "attention" },
@@ -223,6 +236,8 @@ export const RESOURCES = {
   }),
   commsCrew: { path: "/api/comms/crew", topic: "agents" },
   commsFlight: { path: "/api/comms/flight", topic: "agents" },
+  /** All-time stored messages per ticket (not a recent window). */
+  commsTicketCounts: { path: "/api/comms/ticket-counts", topic: "agents" },
   /** A nav row's read: the conversation list and counts, no messages. */
   commsNav: (agentId: string): ResourceRef => ({
     path: commsNavPath(agentId),
@@ -311,9 +326,20 @@ export const RESOURCES = {
     topic: null,
   }),
   // What Mission Control knows of one ticket: its form and the crew's timeline. `before` pages older.
-  ticketHistory: (repoId: string, issueNumber: number, before = ""): ResourceRef => ({
-    path: `/api/tickets/${enc(repoId)}/${issueNumber}${before ? `?before=${enc(before)}` : ""}`,
-    topic: before ? null : TICKET_TOPICS,
+  ticketHistory: (
+    repoId: string,
+    issueNumber: number,
+    before = "",
+    questionsBefore = "",
+  ): ResourceRef => ({
+    path: `/api/tickets/${enc(repoId)}/${issueNumber}${
+      before
+        ? `?before=${enc(before)}`
+        : questionsBefore
+          ? `?questionsBefore=${enc(questionsBefore)}`
+          : ""
+    }`,
+    topic: before || questionsBefore ? null : TICKET_TOPICS,
   }),
   // Read live from the CLI on each fetch, so not tied to agents events: the Context tile
   // refetches it every SEAT_CONTEXT_REFRESH_MS while the seat runs, and when its turn ends.
@@ -506,6 +532,7 @@ const readResource = async <T>(path: string): Promise<T> => {
   return path === RESOURCES.prFlow.path ||
     path === RESOURCES.dependencies.path ||
     path === RESOURCES.designPreviews.path ||
+    /^\/api\/attention\/[^/]+\/materials$/.test(path) ||
     path.startsWith("/api/code-health")
     ? apiOperatorGet<T>(path)
     : apiGet<T>(path);

@@ -781,6 +781,7 @@ ${seats.join("\n")}
       expect(s?.model).toBe("opus");
       expect(s?.def).toMatchObject({ mode: "read-only", loop: "watch", mcTools: FLIGHT_TOOLS });
       expect(crewSeatGrants(cfg, "flight-1")).toEqual(FLIGHT_TOOLS);
+      expect(crewSeatGrants(cfg, "flight-1")).toContain("resolve_waste_alarm");
     });
 
     it("only one seat may watch, in any session", () => {

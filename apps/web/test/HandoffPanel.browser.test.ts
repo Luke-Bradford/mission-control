@@ -13,7 +13,7 @@ describeRendered("Saved ticket handoff", () => {
       ["light", "dark"].map((theme) => ({ width, theme: theme as "light" | "dark" })),
     ),
   )(
-    "fits $width in $theme with a reachable complete note",
+    "fits $width in $theme with a reachable complete note and summary target",
     async ({ width, theme }) => {
       const page = await renderAt({
         page: "test/handoffBrowser.html",
@@ -33,9 +33,9 @@ describeRendered("Saved ticket handoff", () => {
       });
       await page.boxes(".agent-handoff summary");
       await page.click(".agent-handoff summary");
-      expect(await page.unclipped(".agent-handoff, .handoff-body, .handoff-link")).not.toContain(
-        false,
-      );
+      expect(
+        await page.unclipped(".agent-handoff, .handoff-body, .agent-handoff summary"),
+      ).not.toContain(false);
       expect(
         await page.evaluate(() => {
           const note = document.querySelector<HTMLElement>(".handoff-body");
@@ -49,8 +49,8 @@ describeRendered("Saved ticket handoff", () => {
           );
         }, null),
       ).toBe(true);
-      for (const link of await page.boxes(".handoff-link"))
-        expect(link.height).toBeGreaterThanOrEqual(24);
+      for (const summary of await page.boxes(".agent-handoff summary"))
+        expect(summary.height).toBeGreaterThanOrEqual(24);
       if (shots) {
         await page.evaluate(() => {
           const note = document.querySelector<HTMLElement>(".handoff-body");

@@ -207,6 +207,7 @@ export const toReview = (r: Row): ReviewRow => ({
   createdAt: r.created_at as number,
   startedAt: r.started_at as number | null,
   endedAt: r.ended_at as number | null,
+  ...(typeof r.install_note === "string" ? { installNote: r.install_note } : {}),
 });
 
 export const toGuardHit = (r: Row): GuardHit => ({

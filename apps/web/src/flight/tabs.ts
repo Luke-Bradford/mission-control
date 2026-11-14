@@ -24,6 +24,7 @@ const HASH_TAB: Readonly<Record<string, FlightTab>> = {
   incP: "did",
   logP: "did",
   wifP: "crew",
+  chainsP: "crew",
   ledgerP: "crew",
   watchP: "crew",
   ordersP: "knows",

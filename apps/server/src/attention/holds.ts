@@ -20,11 +20,9 @@ import { NOTE_KEY } from "../hud.ts";
 import type { Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../update.ts";
 
-const SETTING = "attention-holds";
-export function holds(store: Store): Record<string, AttentionHold> {
-  // null prototype, so a key such as `__proto__` is an ordinary entry
-  return Object.assign(Object.create(null), JSON.parse(store.getSetting(SETTING) ?? "{}"));
-}
+import { holds, ATTENTION_HOLDS_SETTING as SETTING } from "./holds-read.ts";
+
+export { holds };
 /** Whether holding `key` on `condition` would close a chain of active item holds that never releases. */
 export function holdCycle(
   store: Store,

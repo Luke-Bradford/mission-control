@@ -1,4 +1,4 @@
-import type { TicketEvent, TicketHistory } from "@mc/core";
+import type { CommsSenderKind, TicketEvent, TicketHistory, TicketQuestion } from "@mc/core";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hub, RESOURCES } from "../src/data.ts";
@@ -349,4 +349,208 @@ it("a closed ticket exposes QA for a live closing PR before it reaches the local
   expect(
     (await screen.findByRole("link", { name: "Open QA report · aaaaaaaa" })).getAttribute("href"),
   ).toBe(r.permalink);
+});
+
+describe("what was said about the ticket", () => {
+  const said = (id: string, from: string, label: string | null): TicketEvent => ({
+    key: `c-${id}`,
+    at: 9_000,
+    kind: "comms",
+    id,
+    from,
+    to: "flight-1",
+    label,
+    text: `text ${id}`,
+  });
+  it.each([
+    ["question", "inco-1", "question", "Question"],
+    ["handoff", "inco-1", "handoff", "Handoff"],
+    ["notice", "MC", null, "Notice"],
+    ["plain", "flight-1", null, "Message"],
+  ])("names a %s in the timeline", async (id, from, label, word) => {
+    stubFetch({
+      "/api/config": CONFIG,
+      [PATH]: { ...history(), timeline: [said(id, from, label)], prs: [], nextBefore: null },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const tl = await screen.findByRole("region", { name: "Timeline" });
+    expect(within(tl).getByText(word, { selector: ".pill" })).toBeTruthy();
+  });
+});
+
+describe("questions on the ticket", () => {
+  const question = (id: number, over: Partial<TicketQuestion> = {}): TicketQuestion => ({
+    id,
+    runId: "r1",
+    seat: "inco-1",
+    text: `Question ${id}: which cache?`,
+    discussionKey: null,
+    at: 8_000,
+    passedAt: null,
+    asideAt: null,
+    closedAt: null,
+    answer: null,
+    answerAt: null,
+    answerBasis: null,
+    ...over,
+  });
+  const withQuestions = (questions: TicketQuestion[], next: string | null = null) => ({
+    ...history(),
+    timeline: [],
+    prs: [],
+    nextBefore: null,
+    questions,
+    questionsNextBefore: next,
+  });
+  const panel = async () => screen.findByRole("region", { name: "Questions" });
+
+  it("shows an open question with its asker and says it is waiting", async () => {
+    show(withQuestions([question(1)]));
+    const p = await panel();
+    expect(within(p).getByText("Question 1: which cache?")).toBeTruthy();
+    expect(within(p).getByText("Open")).toBeTruthy();
+    expect(within(p).getByText("INCO-1")).toBeTruthy();
+    expect(within(p).queryByText("inco-1")).toBeNull();
+  });
+
+  it("shows an answered question with the answer and its basis", async () => {
+    show(
+      withQuestions([
+        question(2, {
+          answer: "Use the LRU cache.",
+          answerAt: 9_000,
+          answerBasis: "Matches the spec.",
+        }),
+      ]),
+    );
+    const p = await panel();
+    expect(within(p).getByText("Answered")).toBeTruthy();
+    expect(within(p).getByText("Use the LRU cache.")).toBeTruthy();
+    expect(within(p).getByText("Matches the spec.")).toBeTruthy();
+  });
+
+  it("shows a question closed without an answer", async () => {
+    show(withQuestions([question(3, { closedAt: 9_500 })]));
+    expect(within(await panel()).getByText("Closed without an answer")).toBeTruthy();
+  });
+
+  it("shows a question set aside with Not now", async () => {
+    show(withQuestions([question(4, { asideAt: 9_100 })]));
+    expect(within(await panel()).getByText("Set aside (Not now)")).toBeTruthy();
+  });
+
+  it("pages older questions with their own cursor and keeps the ones it had", async () => {
+    const fn = stubFetch({
+      "/api/config": CONFIG,
+      [PATH]: withQuestions([question(10)], "QCUR"),
+      [`${PATH}?questionsBefore=QCUR`]: withQuestions([question(5)], null),
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Load older questions" }));
+    await waitFor(() => expect(screen.getByText("Question 5: which cache?")).toBeTruthy());
+    expect(fn).toHaveBeenCalledWith(`${PATH}?questionsBefore=QCUR`, expect.anything());
+    expect(screen.getByText("Question 10: which cache?")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Load older questions" })).toBeNull();
+  });
+
+  it("shows the conversation on a question, read-only, when it has messages", async () => {
+    const key = "question:shop-app#3349:1";
+    stubFetch({
+      "/api/config": CONFIG,
+      [PATH]: withQuestions([question(1, { discussionKey: key })]),
+      [`/api/attention/${encodeURIComponent(key)}/discussion`]: {
+        id: "d1",
+        itemKey: key,
+        version: "v1",
+        messages: [
+          {
+            id: "m1",
+            itemKey: key,
+            correlationId: "c1",
+            role: "operator",
+            text: "Which one?",
+            at: 8_100,
+          },
+          {
+            id: "m2",
+            itemKey: key,
+            correlationId: "c1",
+            role: "flight",
+            text: "The LRU one.",
+            at: 8_200,
+          },
+        ],
+      },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const p = await panel();
+    fireEvent.click(within(p).getByText("Conversation"));
+    expect(await within(p).findByText("Which one?")).toBeTruthy();
+    expect(within(p).getByText("The LRU one.")).toBeTruthy();
+    expect(within(p).queryByRole("textbox")).toBeNull();
+  });
+
+  it("says a question's conversation has no messages when it has none", async () => {
+    const key = "question:shop-app#3349:2";
+    stubFetch({
+      "/api/config": CONFIG,
+      [PATH]: withQuestions([question(2, { discussionKey: key })]),
+      [`/api/attention/${encodeURIComponent(key)}/discussion`]: {
+        id: "d2",
+        itemKey: key,
+        version: "v0",
+        messages: [],
+      },
+    });
+    render(<TicketPage repoId="shop-app" number={3349} />);
+    const p = await panel();
+    fireEvent.click(within(p).getByText("Conversation"));
+    expect(await within(p).findByText("No messages yet.")).toBeTruthy();
+  });
+
+  it("offers no conversation for a question without a discussion key", async () => {
+    show(withQuestions([question(3)]));
+    const p = await panel();
+    expect(within(p).queryByText("Conversation")).toBeNull();
+  });
+
+  it("leaves the Questions panel out when the server sends none", async () => {
+    show({ ...history(), questions: [] });
+    await screen.findByRole("region", { name: "Timeline" });
+    expect(screen.queryByRole("region", { name: "Questions" })).toBeNull();
+  });
+});
+
+describe("sender kind on a ticket's messages", () => {
+  const msg = (id: string, from: string, senderKind: CommsSenderKind | null): TicketEvent => ({
+    key: `c-${id}`,
+    at: 9_000,
+    kind: "comms",
+    id,
+    from,
+    to: "flight-1",
+    label: null,
+    text: `text ${id}`,
+    senderKind,
+  });
+  it.each([
+    ["operator", "CAPCOM", "YOU"],
+    ["controller", "CONTROLLER", "CONTROLLER"],
+    ["flight", "flight-1", "FLIGHT"],
+    ["hub", "MC", "HUB"],
+  ] as const)("tags a %s message", async (kind, from, tag) => {
+    show({ ...history(), timeline: [msg(kind, from, kind)], prs: [], nextBefore: null });
+    const tl = await screen.findByRole("region", { name: "Timeline" });
+    expect(within(tl).getByTestId("sender-tag").textContent).toBe(tag);
+  });
+  it("tags a seat message with the seat's name", async () => {
+    show({ ...history(), timeline: [msg("s", "inco-1", "seat")], prs: [], nextBefore: null });
+    const tl = await screen.findByRole("region", { name: "Timeline" });
+    expect(within(tl).getByTestId("sender-tag").getAttribute("data-kind")).toBe("seat");
+  });
+  it("shows no tag on a legacy message with no stored kind", async () => {
+    show({ ...history(), timeline: [msg("old", "CAPCOM", null)], prs: [], nextBefore: null });
+    const tl = await screen.findByRole("region", { name: "Timeline" });
+    expect(within(tl).queryByTestId("sender-tag")).toBeNull();
+  });
 });

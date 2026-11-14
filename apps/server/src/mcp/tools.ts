@@ -234,6 +234,7 @@ import {
   readBaseEntry,
 } from "../runtime/checkouts.ts";
 import { crewGit, overflowed, timedOut } from "../runtime/git.ts";
+import { originHeads } from "../runtime/origin-heads.ts";
 import { crewDir, crewPrBodyPath } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
 import type { GhRunner } from "./gh.ts";
@@ -384,7 +385,11 @@ const PreviewBrowserArgs = z.strictObject({
     .default([]),
 });
 const COMMS_TICKET_ARG = /^(?:[^#\s]+)?#[1-9]\d*$/;
-const CommsInboxArgs = z.strictObject({ limit: z.number().int().min(1).max(100).default(50) });
+const CommsInboxArgs = z.strictObject({
+  limit: z.number().int().min(1).max(100).default(50),
+  /** History: the messages already read too. */
+  all: z.boolean().default(false),
+});
 const CommsReadArgs = z.strictObject({
   limit: z.number().int().min(1).max(100).default(50),
   /** One message in full. */
@@ -754,36 +759,6 @@ export async function readKnown(
   } finally {
     clearTimeout(timer);
   }
-}
-
-/** origin's default branch (name and tip) and the run's branch tip, from one `ls-remote`. */
-interface OriginHeads {
-  defaultBranch: string;
-  defaultSha: string;
-  branchSha: string | null;
-}
-
-export function originHeads(out: string, branch: string | null): OriginHeads {
-  let defaultRef: string | null = null;
-  let defaultSha: string | null = null;
-  let branchSha: string | null = null;
-  for (const line of out.split("\n")) {
-    const [left = "", name = ""] = line.split("\t");
-    if (name !== "HEAD" && name !== `refs/heads/${branch}`) continue;
-    if (left.startsWith("ref: ")) {
-      if (name === "HEAD") defaultRef = left.slice("ref: ".length);
-    } else if (SHA.test(left)) {
-      if (name === "HEAD") defaultSha = left;
-      else branchSha = left;
-    }
-  }
-  const defaultBranch = defaultRef?.startsWith("refs/heads/")
-    ? defaultRef.slice("refs/heads/".length)
-    : null;
-  if (defaultBranch === null || defaultSha === null || !/^[A-Za-z0-9._/-]+$/.test(defaultBranch)) {
-    throw new Error("origin has no default branch");
-  }
-  return { defaultBranch, defaultSha, branchSha };
 }
 
 /**
@@ -1681,9 +1656,15 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     if (!parsed.success) return badArgs(parsed.error);
     if (liveRun(ctx) === null) return ENDED;
     const pinned = new Set(store.commsPins().map((row) => row.id));
-    const rows = store
+    const readable = store
       .commsInboxRun(ctx.seatId, ctx.runId)
-      .filter((row) => canReadComms(store, ctx.seatId, row, pinned))
+      .filter((row) => canReadComms(store, ctx.seatId, row, pinned));
+    // By default only what is unread or pinned; `all` brings back the read history.
+    const shown = parsed.data.all
+      ? readable
+      : readable.filter((row) => pinned.has(row.id) || !store.commsInboxRead(ctx.seatId, row.id));
+    const hiddenRead = readable.length - shown.length;
+    const rows = shown
       .sort((a, b) => a.at - b.at || Number(a.id.slice(6)) - Number(b.id.slice(6)))
       .slice(-parsed.data.limit)
       .map((row) => {
@@ -1704,7 +1685,7 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
       ctx.seatId,
       rows.map((row) => row.id),
     );
-    return { text: JSON.stringify({ messages: rows }) };
+    return { text: JSON.stringify({ messages: rows, hiddenRead }) };
   }
 
   async function commsSend(ctx: McToolContext, args: unknown): Promise<Result> {
@@ -3095,10 +3076,17 @@ export function createMcTools(deps: McToolsDeps): McTool[] {
     {
       name: MC_TOOL_NAMES.commsInbox,
       description:
-        "Read this seat's inbox: messages addressed to it, messages that tag it, replies to its messages and current pins. It never includes the whole crew channel.",
+        "Read this seat's inbox: unread messages addressed to it, messages that tag it, replies to its messages, plus current pins. Messages already read are left out (hiddenRead counts them); pass all: true for the history. It never includes the whole crew channel.",
       inputSchema: {
         type: "object",
-        properties: { limit: { type: "number", minimum: 1, maximum: 100, default: 50 } },
+        properties: {
+          limit: { type: "number", minimum: 1, maximum: 100, default: 50 },
+          all: {
+            type: "boolean",
+            default: false,
+            description: "Include messages already read, not only unread ones and pins.",
+          },
+        },
         additionalProperties: false,
       },
       modes: ["writer", "read-only", "scratch"],

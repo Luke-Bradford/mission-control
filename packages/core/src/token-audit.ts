@@ -13,6 +13,14 @@ export const TOKEN_SOURCE_UNATTRIBUTED = "unattributed";
 export const TOKEN_AUDIT_DAYS_MAX = 365;
 export const TOKEN_AUDIT_DAYS_DEFAULT = 7;
 export const TOKEN_AUDIT_TOP_RUNS = 10;
+/** `?hours=` reaches back this many hours at most; events, not runs, fall in the window. */
+export const TOKEN_AUDIT_HOURS_MAX = 24;
+/** The compact (`?shape=summary`) read lists this many sources and commands, then one `other` row. */
+export const TOKEN_AUDIT_SUMMARY_ROWS = 15;
+/** The compact read lists this many runs. */
+export const TOKEN_AUDIT_SUMMARY_RUNS = 5;
+/** The name of the compact read's row that sums every source or command past the top ones. */
+export const TOKEN_AUDIT_OTHER = "other";
 
 /** What was added to the context since the previous call, from one source. */
 export interface TokenSourceAdd {
@@ -25,6 +33,8 @@ export interface TokenSourceAdd {
 
 /** One model call of a run. */
 export interface TokenCall {
+  /** When the call's first frame was written (ms); null when the transcript carried no time. */
+  at?: number | null;
   /** Context size: input + cache read + cache write. */
   context: number;
   cacheRead: number;
@@ -160,9 +170,63 @@ export interface TokenAuditController {
   output: number;
 }
 
-/** `GET /api/audit/tokens?days=N` */
+/**
+ * How far an event window is covered. `complete`: every run that overlaps the window is read and has timed
+ * calls stored, so zero calls is a true zero. `partial`: some run's calls are missing or untimed.
+ * `unavailable`: gaps exist and no timed call is in the window, so the totals say nothing.
+ */
+export interface TokenAuditCoverage {
+  status: "complete" | "partial" | "unavailable";
+  /** Runs overlapping the window with no audit stored yet (still running, or not read yet). */
+  pendingRuns: number;
+  /** Audited runs overlapping the window whose calls carry no time (older than call times). */
+  untimedRuns: number;
+  /** Runs overlapping the window with no readable transcript (Codex, observed loops, gone files): their calls are unknown. */
+  unreadRuns: number;
+  /** What is missing, in words; null when `complete`. */
+  reason: string | null;
+}
+
+/** One row of the compact read. */
+export interface TokenAuditSummaryRow extends TokenCounts {
+  name: string;
+  share: number;
+}
+
+/** `GET /api/audit/tokens?shape=summary`: bounded, with `other` rows that make each list add up. */
+export interface TokenAuditSummary {
+  days: number;
+  hours: number | null;
+  since: number;
+  basis: "runs" | "events";
+  coverage: TokenAuditCoverage | null;
+  runs: number;
+  calls: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  reread: number;
+  rewrites: number;
+  byRole: TokenAuditRole[];
+  bySource: TokenAuditSummaryRow[];
+  byCommand: TokenAuditSummaryRow[];
+  /** Rows past the listed ones, so the list totals what the full read's list totals. */
+  otherSources: number;
+  otherCommands: number;
+  topRuns: TokenAuditRun[];
+  /** Where the full read lives, and each listed run's agent run list (`GET /api/agents/:id/runs`). */
+  links: { full: string; runs: string[] };
+}
+
+/** `GET /api/audit/tokens?days=N` or `?hours=N` */
 export interface TokenAuditView {
   days: number;
+  /** Set for an event window (`?hours=N`); the totals count calls made in it. */
+  hours?: number | null;
+  /** `runs`: whole runs that started in the window (days). `events`: calls made in it (hours). */
+  basis?: "runs" | "events";
+  /** Event windows only: what the stored call times cover. */
+  coverage?: TokenAuditCoverage | null;
   since: number;
   /** Runs read and stored in the window. */
   runs: number;

@@ -9,6 +9,8 @@ const COMMAND_TIMEOUT_MS = 2000;
 /** Command basenames counted as Claude/Codex processes. */
 const AGENT_COMMANDS: ReadonlySet<string> = new Set(["claude", "codex"]);
 const TOP_CONSUMERS = 5;
+/** macOS's file-change service, the process whose swollen memory slows the Mac (#1812). */
+export const FILE_SERVICE = "fseventsd";
 
 export interface MachineDeps {
   cpus: () => CpuInfo[];
@@ -22,6 +24,11 @@ export interface MachineDeps {
   ps: () => Promise<string>;
   /** `ps -axww -o pid=,ppid=,rss=,%cpu=,args=`: the whole process table, for the test run's tree. */
   psTree: () => Promise<string>;
+  /**
+   * `top -l 1 -pid <fseventsd> -stats pid,mem,cmprs`: its memory with compressed pages counted,
+   * which `ps` RSS leaves out. Empty when there is no such process. Optional: older callers lack it.
+   */
+  fileService?: () => Promise<string>;
   /** The test-lock holder's command; null when the lock is free. */
   testCommand: string | null;
   /**
@@ -63,6 +70,12 @@ export function realMachineDeps(): Omit<
       return { bavail: Number(s.bavail), blocks: Number(s.blocks), bsize: Number(s.bsize) };
     },
     ps: () => run("ps", ["-axo", "pid=,rss=,%cpu=,comm="]),
+    fileService: async () => {
+      const pids = (await run("pgrep", ["-x", FILE_SERVICE])).trim().split("\n");
+      const pid = Number(pids[0]);
+      if (!Number.isInteger(pid) || pid <= 0) return "";
+      return run("top", ["-l", "1", "-pid", String(pid), "-stats", "pid,mem,cmprs"]);
+    },
     // full command lines can pass the default 1 MB buffer on a busy machine
     psTree: () => run("ps", ["-axww", "-o", "pid=,ppid=,rss=,%cpu=,args="], 8 * 1024 * 1024),
   };
@@ -162,6 +175,28 @@ export function parseTopConsumers(
     })
     .sort((a, b) => b.rssBytes - a.rssBytes || b.cpuPct - a.cpuPct)
     .slice(0, TOP_CONSUMERS);
+}
+
+/**
+ * The file-change service's memory from `top -stats pid,mem,cmprs`: the larger of its MEM and
+ * CMPRS columns (K/M/G/T, an optional trailing +/-), so compressed pages count. null if unparseable.
+ */
+export function parseFileServiceBytes(text: string): number | null {
+  const size = (v: string): number | null => {
+    const m = /^([\d.]+)([KMGT]?)[+-]?$/i.exec(v);
+    if (!m) return null;
+    const unit = (m[2] as string).toUpperCase() as "K";
+    return Number(m[1]) * 1024 ** ({ K: 1, M: 2, G: 3, T: 4 }[unit] ?? 0);
+  };
+  for (const line of text.split("\n").reverse()) {
+    const m = /^\s*\d+\s+(\S+)\s+(\S+)\s*$/.exec(line);
+    if (!m) continue;
+    const mem = size(m[1] as string);
+    const cmprs = size(m[2] as string);
+    if (mem === null && cmprs === null) return null;
+    return Math.max(mem ?? 0, cmprs ?? 0);
+  }
+  return null;
 }
 
 export interface PsProc {
@@ -311,6 +346,22 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
     }
   }
 
+  let fileServiceBytes = prev?.fileServiceBytes ?? null;
+  if (spawn && deps.fileService !== undefined) {
+    try {
+      const text = await deps.fileService();
+      // no process: nothing held; an unreadable answer keeps the last figure
+      if (text.trim() === "") fileServiceBytes = 0;
+      else {
+        const bytes = parseFileServiceBytes(text);
+        if (bytes === null) throw new Error("unrecognised top output");
+        fileServiceBytes = bytes;
+      }
+    } catch (e) {
+      errors.push(`${FILE_SERVICE}: ${msg(e)}`);
+    }
+  }
+
   let testRun: MachineSample["testRun"] = null;
   if (spawn && deps.testCommand !== null) {
     try {
@@ -335,6 +386,7 @@ export async function sampleMachine(deps: MachineDeps): Promise<MachineResult> {
       memoryPressureFreePct,
       load1,
       topConsumers,
+      fileServiceBytes,
       agents,
       testRun,
     },

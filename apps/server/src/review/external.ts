@@ -7,6 +7,7 @@ import {
   NEGATED_CLOSING_REFS_NOTE,
   type PullRequestView,
   REVIEW_STATUS_CONTEXT,
+  REVIEW_STATUS_INCOMPLETE,
   type ReviewRow,
   type Run,
   type TicketView,
@@ -211,7 +212,7 @@ export function createExternalReviews(deps: {
           ? "QA review passed"
           : "QA review found blocking issues"
         : row.state === "failed"
-          ? "QA review did not complete"
+          ? REVIEW_STATUS_INCOMPLETE
           : row.state === "queued"
             ? "QA review queued"
             : "QA review running";
