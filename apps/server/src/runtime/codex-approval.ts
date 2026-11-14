@@ -1,5 +1,6 @@
 /** The same Codex approval path for supervisor runs and the controller's live check. */
 import { realpathSync } from "node:fs";
+import { isAbsolute, relative } from "node:path";
 import {
   type CrewMode,
   codexCommand,
@@ -18,7 +19,7 @@ import {
   seatCallSign,
 } from "@mc/core";
 import { type CcConfig, crewSeatGrants } from "../config.ts";
-import type { CheckRecorder } from "../guard/check-runs.ts";
+import { type CheckRecorder, testCommand } from "../guard/check-runs.ts";
 import { crewGuardDecision } from "../guard/decision.ts";
 import type { TestLock } from "../guard/lock.ts";
 import { codexApproval, codexEditAllowed } from "./codex-floor.ts";
@@ -31,6 +32,19 @@ function sameDir(a: unknown, b: string): boolean {
   if (typeof a !== "string") return false;
   try {
     return realpathSync.native(a) === realpathSync.native(b);
+  } catch {
+    return false;
+  }
+}
+
+/** Whether `path` is the checkout itself or a directory below it once symlinks are resolved. */
+function withinDir(path: unknown, root: string): boolean {
+  if (typeof path !== "string") return false;
+  try {
+    const child = realpathSync.native(path);
+    const parent = realpathSync.native(root);
+    const fromRoot = relative(parent, child);
+    return fromRoot === "" || (!fromRoot.startsWith("..") && !isAbsolute(fromRoot));
   } catch {
     return false;
   }
@@ -160,6 +174,7 @@ export function createCodexApprover(i: {
           : null
       : codexApproval(req, paths, { cwd: i.cwd });
     if (!repo || events === null) return refuse("codex-allowlist");
+    let admitted: { runId: string; toolUseId: string } | undefined;
     for (const event of events) {
       if (
         !i.fullAccess &&
@@ -193,15 +208,48 @@ export function createCodexApprover(i: {
           typeof params.cwd === "string" ? params.cwd : undefined,
         );
       // a configured check (lint, typecheck) is as heavy as the suite: it takes the lock too
+      if (
+        (verdict.kind === "allow" || verdict.kind === "lock") &&
+        event.tool === "Bash" &&
+        event.input.command !== undefined
+      ) {
+        const inCheckout = withinDir(params.cwd, i.cwd);
+        const tracked =
+          inCheckout &&
+          i.checks !== undefined &&
+          (testCommand(event.input.command) ||
+            (await i.checks.lockedBy(i.runId, event.input.command)) !== null);
+        if (tracked) {
+          const id = params.approvalId ?? params.itemId;
+          if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
+          const key = { runId: i.runId, toolUseId: String(id) };
+          const running = i.checks?.admit
+            ? await i.checks.admit(key, event.input.command)
+            : await i.checks?.running?.(i.runId, event.input.command);
+          admitted = i.checks?.admit !== undefined && running === null ? key : undefined;
+          if (running !== null && running !== undefined)
+            verdict = {
+              kind: "deny",
+              rule: "full-suite",
+              text: `A check is already running in this checkout: ${running}. Wait for it to finish.`,
+            };
+        }
+      }
       if (verdict.kind === "allow" && event.tool === "Bash" && event.input.command !== undefined) {
         const check = await i.checks?.lockedBy(i.runId, event.input.command);
         if (check) verdict = { kind: "lock", command: check };
       }
-      if (verdict.kind === "deny") return refuse(verdict.rule, verdict.text);
+      if (verdict.kind === "deny") {
+        if (admitted !== undefined) i.checks?.cancel?.(admitted);
+        return refuse(verdict.rule, verdict.text);
+      }
       // the same check on the same commit with nothing changed is not run again (waste alarm)
       if (verdict.kind === "lock" && event.tool === "Bash" && event.input.command !== undefined) {
         const rerun = await i.checks?.rerun?.(i.runId, event.input.command);
-        if (rerun) return refuse("full-suite", rerun);
+        if (rerun) {
+          if (admitted !== undefined) i.checks?.cancel?.(admitted);
+          return refuse("full-suite", rerun);
+        }
       }
       if (verdict.kind === "lock") {
         const id = params.approvalId ?? params.itemId;
@@ -210,6 +258,7 @@ export function createCodexApprover(i: {
         const granted = await i.lock.acquire(key, i.seatId, verdict.command, LOCK_WAIT_MS, signal);
         if (!granted || signal.aborted) {
           if (granted) i.lock.release(key);
+          if (admitted !== undefined) i.checks?.cancel?.(admitted);
           const h = i.lock.state().holder;
           return refuse(
             "full-suite",
@@ -221,14 +270,17 @@ export function createCodexApprover(i: {
         }
       }
     }
-    if (signal.aborted) return refuse("codex-allowlist");
+    if (signal.aborted) {
+      if (admitted !== undefined) i.checks?.cancel?.(admitted);
+      return refuse("codex-allowlist");
+    }
     // the lock's key: the completion event names the same one (see codex-session's tool-result)
     const id = params.approvalId ?? params.itemId;
-    // only a command run at the worktree root is a check: from a subfolder it checks something else
+    // Commands below the worktree root still reserve this checkout, but cannot create a root receipt.
     if (
       i.checks !== undefined &&
       (typeof id === "string" || typeof id === "number") &&
-      sameDir(params.cwd, i.cwd)
+      withinDir(params.cwd, i.cwd)
     ) {
       for (const event of events) {
         if (event.tool === "Bash" && event.input.command !== undefined) {
@@ -237,10 +289,20 @@ export function createCodexApprover(i: {
             { runId: i.runId, toolUseId: String(id) },
             event.input.command,
             itemId === null || itemId === String(id) ? [] : [{ runId: i.runId, toolUseId: itemId }],
+            { receiptEligible: sameDir(params.cwd, i.cwd) },
           );
         }
       }
     }
-    return signal.aborted ? refuse("codex-allowlist") : "accept";
+    if (signal.aborted) {
+      // declined after the call was noted: nothing will run, so nothing may keep waiting for it
+      if (typeof id === "string" || typeof id === "number") {
+        const key = { runId: i.runId, toolUseId: String(id) };
+        i.checks?.abandon?.(key);
+        i.lock.release(key);
+      }
+      return refuse("codex-allowlist");
+    }
+    return "accept";
   };
 }

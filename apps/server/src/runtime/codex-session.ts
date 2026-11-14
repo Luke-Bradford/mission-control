@@ -514,7 +514,8 @@ function codexSession(
       cancelApprovals();
       paths.clear();
       mcpCalls.clear();
-      itemKeys.clear();
+      // a command still running keeps its approval keys: its later completion must free them
+      if (params.turn.status === "interrupted") itemKeys.clear();
       const completedId = str(params.turn.id);
       turnId = null;
       if (completedId !== null) {
@@ -582,7 +583,12 @@ function codexSession(
             emit({
               kind: "tool-result",
               toolUseId: key,
-              ok: item.status === "completed" && item.exitCode === 0,
+              // no exit code and not failed: the hand-back came before the command's end, so no verdict
+              ...(typeof item.exitCode !== "number" &&
+              item.status !== "failed" &&
+              item.status !== "declined"
+                ? {}
+                : { ok: item.status === "completed" && item.exitCode === 0 }),
               ...(typeof item.exitCode === "number" ? { exitCode: item.exitCode } : {}),
               // a call that pipes or chains past the check ends with the last step's status (#1411)
               ...(typeof item.command === "string" ? { wrapped: !plainCall(item.command) } : {}),

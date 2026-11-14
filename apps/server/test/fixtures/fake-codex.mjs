@@ -74,8 +74,15 @@ rl.on("line", (line) => {
     // A held-item exit happens after the actual acceptance, not an arbitrary pre-approval timer.
     if (scenario.exitAccepted && message.result?.decision === "accept") process.exit(1);
     if (scenario.resolved) notify("serverRequest/resolved", { threadId, requestId: id });
-    if (scenario.endTurnWithNoItem) later(() => endTurn(), 10);
-    else if (!scenario.holdItem)
+    if (scenario.endTurnWithNoItem) {
+      later(() => endTurn(), 10);
+      // a command that outlives its turn: its item completes after the turn has ended
+      if (scenario.lateItemMs)
+        later(
+          () => completeItem({ ...scenario, holdTurn: true }, itemId, type),
+          scenario.lateItemMs,
+        );
+    } else if (!scenario.holdItem)
       later(() => completeItem(scenario, itemId, type), scenario.itemDelayMs ?? 10);
     return;
   }

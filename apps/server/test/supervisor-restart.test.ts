@@ -1940,6 +1940,18 @@ describe("a seat keeps running through a restart", () => {
 });
 
 describe("Codex restart", () => {
+  it("keeps a check hold when Codex ends its turn before the command exits", async () => {
+    const lock = new TestLock();
+    const { sup } = codexSupervisor({ command: "pnpm -s test", endTurnWithNoItem: true }, { lock });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect(lock.state().holder?.runId).toBe(runId);
+    // Ending the session is cleanup; a normal early turn result must not free this command.
+    await sup.endRunByEngine(runId);
+    expect(lock.state().holder).toBeNull();
+  });
+
   it("keeps the process across stopAll and rechecks only unresolved replayed approvals", async () => {
     const signal = join(dir, "replay");
     const first = codexSupervisor({ replayApprovals: true, replaySignal: signal, holdTurn: true });

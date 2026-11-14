@@ -108,9 +108,9 @@ export class TestLock {
       return Promise.resolve(true);
     }
     if (this.holder.runId === key.runId) {
-      this.holder.calls.add(key.toolUseId);
-      this.storeAdd(this.holder, key.toolUseId, this.now());
-      return Promise.resolve(true);
+      // A seat has one checkout. A second test in that checkout can race the first one's files
+      // and receipt, so it must wait for the running call to finish.
+      return Promise.resolve(false);
     }
     return new Promise((resolve) => {
       const drop = () => {

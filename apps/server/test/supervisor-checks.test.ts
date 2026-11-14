@@ -1,8 +1,9 @@
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
+import { CHECK_BASH_TIMEOUT_MS } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import type { CheckRecorder } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, createCheckRecorder } from "../src/guard/check-runs.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
@@ -47,6 +48,56 @@ describe("a Codex seat's check records", () => {
       await sup.endRunByEngine(runId);
     },
   );
+
+  it("releases a check record after an interrupted Codex turn", async () => {
+    const checks = createCheckRecorder({
+      store: { addCheckRun: () => {} },
+      checks: async () => [],
+      state: async () => ({ head: "a".repeat(40), clean: true }),
+    });
+    const { sup } = codexSupervisor({ command: "pnpm -s test", holdItem: true }, { checks });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() =>
+      expect(checks.running?.(runId, "pnpm -s test another.test.ts")).resolves.toBe("pnpm -s test"),
+    );
+    await sup.interrupt("guido-1");
+    await until(() =>
+      expect(
+        checks.admit?.({ runId, toolUseId: "next" }, "pnpm -s test another.test.ts"),
+      ).resolves.toBeNull(),
+    );
+    await sup.endRunByEngine(runId);
+  });
+});
+
+describe("a Codex command handed back before it exits", () => {
+  it("keeps its lock and its record, and counts no result for it", async () => {
+    const command = "pnpm -s lint";
+    const rows: unknown[] = [];
+    let clock = Date.now();
+    const lock = new TestLock({ holds: store });
+    const checks = createCheckRecorder({
+      store: { addCheckRun: (row) => void rows.push(row) },
+      checks: async () => [command],
+      state: async () => ({ head: "a".repeat(40), clean: true }),
+      now: () => clock,
+      release: (key) => lock.release(key),
+    });
+    const { sup } = codexSupervisor({ command, holdTurn: true }, { checks, lock });
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    // the item completes (no exit code) shortly after its approval
+    await new Promise((done) => setTimeout(done, 300));
+    expect(lock.state().holder?.runId).toBe(runId);
+    expect(await checks.running?.(runId, command)).toBe(command);
+    expect(rows).toEqual([]);
+    // nothing can report its exit: past its own timeout the hub stops holding the lock for it
+    clock += CHECK_BASH_TIMEOUT_MS + 1;
+    expect(await checks.running?.(runId, command)).toBeNull();
+    expect(lock.state().holder).toBeNull();
+    await sup.endRunByEngine(runId);
+  });
 });
 
 describe("a Codex seat's test-lock outcome (#1411)", () => {

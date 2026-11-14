@@ -37,7 +37,7 @@ import { ChangeBus, type Topic } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { runawayTrip } from "../src/flight/runaway.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
-import type { CheckRecorder } from "../src/guard/check-runs.ts";
+import { type CheckRecorder, createCheckRecorder } from "../src/guard/check-runs.ts";
 import { HOOK_ENTRY, hookMain } from "../src/guard/hook.ts";
 import { lockChanged, TestLock } from "../src/guard/lock.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -113,10 +113,9 @@ describe("TestLock", () => {
       await lock.acquire({ runId: "A", toolUseId: "a2" }, "guido-1", "pnpm -s test", 1000, live());
       expect(store.lockHolds()).toEqual([
         { runId: "A", toolUseId: "a1", seatId: "guido-1", command: "pnpm -s test", since: 1000 },
-        { runId: "A", toolUseId: "a2", seatId: "guido-1", command: "pnpm -s test", since: 1000 },
       ]);
       lock.release({ runId: "A", toolUseId: "a1" });
-      expect(store.lockHolds()).toHaveLength(1);
+      expect(store.lockHolds()).toHaveLength(0);
       const b = lock.acquire(
         { runId: "B", toolUseId: "b1" },
         "guido-2",
@@ -236,18 +235,16 @@ describe("TestLock", () => {
     expect(lock.state().holder).toBeNull();
   });
 
-  it("lets the holder's run re-enter, ahead of waiters; only the matching tool_use_id releases", async () => {
+  it("refuses the holder's second call, so one checkout cannot run tests in parallel", async () => {
     await lock.acquire({ runId: "A", toolUseId: "a1" }, "s-a", "pnpm -s test", 1000, live());
     const b = lock.acquire({ runId: "B", toolUseId: "b1" }, "s-b", "pnpm -s test", 60_000, live());
     expect(
       await lock.acquire({ runId: "A", toolUseId: "a2" }, "s-a", "pnpm -s test", 1000, live()),
-    ).toBe(true);
+    ).toBe(false);
     lock.release({ runId: "A", toolUseId: "a-other" }); // a parallel Bash call that held nothing
     lock.release({ runId: "B", toolUseId: "a1" }); // the right id, another run
     expect(lock.state().holder).toMatchObject({ runId: "A" });
     lock.release({ runId: "A", toolUseId: "a1" });
-    expect(lock.state().holder).toMatchObject({ runId: "A" }); // a2 still runs
-    lock.release({ runId: "A", toolUseId: "a2" });
     expect(await b).toBe(true);
     expect(lock.state().holder).toMatchObject({ runId: "B" });
   });
@@ -1088,7 +1085,7 @@ describe("POST /api/guard/check", () => {
     expect(r.statusCode).toBe(200);
     expect(reason(r.body)).toBe(lockBusyText("GUIDO-1", "pnpm -s test"));
     expect(reason(r.body)).toBe(
-      "The test lock is busy: GUIDO-1 is running pnpm -s test. Run the same command with a test file path, or the full suite later. A repo check must run again exactly as written: a changed command is not counted.",
+      "The test lock is busy: GUIDO-1 is running pnpm -s test. Wait for it to finish. Run the same command with a test file path, or the full suite later. A repo check must run again exactly as written: a changed command is not counted.",
     );
     expect(lock.state()).toMatchObject({ holder: { runId: "run-a" }, waiting: [] });
     expect(store.guardHits(0)).toEqual([]);
@@ -1106,12 +1103,12 @@ describe("POST /api/guard/check", () => {
     expect(lock.state().holder).toMatchObject({ runId: "run-b" });
   });
 
-  it("parallel Bash calls in one run: each holds until its own Post", async () => {
+  it("refuses a second check in one checkout while the first is running", async () => {
     await check(tokA, bash("a1", "pnpm -s test"));
-    expect((await check(tokA, bash("a2", "pnpm -s test"))).body).toBe("{}"); // re-entry
-    await check(tokA, post("a1"));
     expect(lock.state().holder).toMatchObject({ runId: "run-a" });
-    await check(tokA, post("a2", "PostToolUseFailure"));
+    const second = await check(tokA, bash("a2", "pnpm -s test"));
+    expect(reason(second.body)).toBe(lockBusyText("GUIDO-1", "pnpm -s test"));
+    await check(tokA, post("a1"));
     expect(lock.state().holder).toBeNull();
   });
 
@@ -1141,6 +1138,38 @@ describe("POST /api/guard/check", () => {
       };
       return { calls, checks, options };
     };
+
+    it("refuses a second test in the same checkout while the first runs, naming it, and allows one once it ends", async () => {
+      const checks = createCheckRecorder({
+        store: { addCheckRun: () => {} },
+        checks: async () => CONFIGURED,
+        state: async () => ({ head: "a".repeat(40), clean: true }),
+        worktree: async () => "/work/trees/guido-1-9",
+      });
+      await app.close();
+      app = await build({ checks });
+      expect((await check(tokA, bash("a1", "pnpm -s test a.test.ts"))).body).toBe("{}");
+      expect(reason((await check(tokA, bash("a2", "pnpm -s test b.test.ts"))).body)).toBe(
+        "A check is already running in this checkout: pnpm -s test a.test.ts. Wait for it to finish.",
+      );
+      await check(tokA, post("a1"));
+      expect((await check(tokA, bash("a3", "pnpm -s test b.test.ts"))).body).toBe("{}");
+    });
+
+    it("refuses a full suite while a file test runs in the same checkout, though the guard sends the suite to the lock", async () => {
+      const checks = createCheckRecorder({
+        store: { addCheckRun: () => {} },
+        checks: async () => CONFIGURED,
+        state: async () => ({ head: "a".repeat(40), clean: true }),
+        worktree: async () => "/work/trees/guido-1-9",
+      });
+      await app.close();
+      app = await build({ checks });
+      expect((await check(tokA, bash("a1", "pnpm -s test a.test.ts"))).body).toBe("{}");
+      expect(reason((await check(tokA, bash("a2", "pnpm -s test"))).body)).toBe(
+        "A check is already running in this checkout: pnpm -s test a.test.ts. Wait for it to finish.",
+      );
+    });
 
     it("takes the test lock for a configured check: the second seat's typecheck waits for the first's", async () => {
       const { checks } = spy();

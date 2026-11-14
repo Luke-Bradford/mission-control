@@ -1322,12 +1322,17 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             bus.emit("flight");
           }
         }
-        // the call has ended, however it ended: its hold goes (a Post hook may never come)
-        deps.lock.release(
-          { runId: l.run.id, toolUseId: e.toolUseId },
-          // a wrapped call that succeeded says nothing of the check: done, never pass (#1411)
-          e.ok === undefined ? undefined : !e.ok ? true : e.wrapped ? undefined : false,
-        );
+        // A Codex command without an exit code may still be running after an early hand-back.
+        // Claude tool results retain their existing release path; their check receipt uses Post.
+        if (l.run.vendor !== "codex" || e.ok !== undefined)
+          deps.lock.release(
+            { runId: l.run.id, toolUseId: e.toolUseId },
+            // a wrapped call that succeeded says nothing of the check: done, never pass (#1411)
+            e.ok === undefined ? undefined : !e.ok ? true : e.wrapped ? undefined : false,
+          );
+        // a Codex completion with no exit code is the last word on this call: bound its wait
+        if (l.run.vendor === "codex" && e.ok === undefined)
+          deps.checks?.keep?.({ runId: l.run.id, toolUseId: e.toolUseId });
         // a Codex command says how it exited; a Claude call's end comes by its Post hook instead
         if (e.ok !== undefined) {
           void deps.checks?.end({ runId: l.run.id, toolUseId: e.toolUseId }, e.ok, e.exitCode);
@@ -1346,11 +1351,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         }
         break;
       case "result": {
-        // No call is in flight once the turn has ended: whatever the run held is freed. Not for a
-        // result replayed at an attach while a later turn is open: its hold is that turn's.
+        // A normal Codex turn can end before its command exits. Preserve that hold, while
+        // Claude turn results and confirmed Codex interruptions retain their cleanup behavior.
+        // An old result replayed during attach must never free a later turn's hold.
         if (!(l.awaitingAtAttach && l.session.lines <= l.replayedBelow)) {
-          deps.lock.releaseRun(l.run.id);
-          deps.checks?.dropRun(l.run.id);
+          if (l.run.vendor !== "codex" || e.stopReason === "interrupted")
+            deps.lock.releaseRun(l.run.id);
+          deps.checks?.dropRun(l.run.id, {
+            keepWatching: l.run.vendor === "codex" && e.stopReason !== "interrupted",
+          });
         }
         const interrupted = l.interrupted;
         l.inTurn = false;
@@ -2359,6 +2368,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       spawns.delete(run.id);
       deps.tokens.revoke(run.id);
       deps.lock.releaseRun(run.id);
+      deps.checks?.dropRun(run.id);
       for (const p of [crewTokenPath(deps.dbPath, run.id), crewMcpPath(deps.dbPath, run.id)]) {
         try {
           rmSync(p, { force: true });
@@ -2611,6 +2621,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     try {
       deps.tokens.revoke(runId);
       deps.lock.releaseRun(runId);
+      deps.checks?.dropRun(runId);
       for (const p of [crewTokenPath(deps.dbPath, runId), crewMcpPath(deps.dbPath, runId)]) {
         rmSync(p, { force: true });
       }
