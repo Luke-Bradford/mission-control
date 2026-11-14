@@ -147,7 +147,13 @@ describe("Store", () => {
       mergeable: null,
       author: "a",
       assignees: [],
-      checks: [run("web", mins), run("lint", 2, { startedAt: undefined })],
+      checks: [
+        run("web", mins),
+        run("lint", 2, { startedAt: undefined }),
+        // four timed runs are too few for a p90; a failed run is not a normal one
+        ...(number <= 4 ? [run("e2e", 5)] : []),
+        run("flaky", 120, { state: "failing", conclusion: "FAILURE" }),
+      ],
       closingIssues: [],
     });
     const minutes = [20, 22, 24, 25, 26, 27, 28, 29, 30, 40];
