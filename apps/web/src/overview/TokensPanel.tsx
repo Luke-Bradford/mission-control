@@ -156,8 +156,8 @@ function HourBars({
   return (
     <div className="hourbars">
       <div className="plot-reading s">
-        <span title="Input and output tokens, across runs">last hour {kTokens(total)}</span>
-        <span>peak {kTokens(peak)}/min</span>
+        <span title="Input and output tokens, across runs">last hour {kTokens(total)} tokens</span>
+        <span>peak {kTokens(peak)} tokens/min</span>
       </div>
       <svg
         viewBox={`0 0 ${LANE_MINUTES} 100`}
@@ -183,7 +183,7 @@ function HourBars({
       <div className="plot-axis num" aria-hidden="true">
         <span>−60m</span>
         <span>−30m</span>
-        <span title="Tokens in the last whole minute">now {kTokens(latest)}/min</span>
+        <span title="Tokens in the last whole minute">now {kTokens(latest)} tokens/min</span>
       </div>
     </div>
   );

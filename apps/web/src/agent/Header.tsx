@@ -91,7 +91,8 @@ export function SeatControls({
       {turn !== "none" && (
         <button
           type="button"
-          className="sm warn"
+          // On a roster row the stop button stays plain: amber marks the safe action beside it.
+          className={compact ? "sm" : "sm warn"}
           disabled={busy}
           title={compact && !hold ? "End the run" : undefined}
           aria-label={compact && !hold ? "End the run" : undefined}

@@ -188,8 +188,12 @@ describe("TokensPanel accounts", () => {
     await waitFor(() => expect(container.querySelectorAll(".hourbars")).toHaveLength(2));
     const claude = accountBlock(container, "claude-main");
     const codex = accountBlock(container, "codex-main");
-    expect(claude.querySelector(".plot-reading")?.textContent).toBe("last hour 2.0kpeak 1.5k/min");
-    expect(codex.querySelector(".plot-reading")?.textContent).toBe("last hour 90.0kpeak 90.0k/min");
+    expect(claude.querySelector(".plot-reading")?.textContent).toBe(
+      "last hour 2.0k tokenspeak 1.5k tokens/min",
+    );
+    expect(codex.querySelector(".plot-reading")?.textContent).toBe(
+      "last hour 90.0k tokenspeak 90.0k tokens/min",
+    );
     expect(claude.querySelector(".hourbars svg")?.getAttribute("aria-label")).toBe(
       "claude-main: 2.0k tokens in the last hour, peak 1.5k a minute",
     );
@@ -205,7 +209,9 @@ describe("TokensPanel accounts", () => {
         Number(rect.getAttribute("height")),
       ),
     ).toEqual([100]);
-    expect(claude.querySelector(".hourbars .plot-axis")?.textContent).toBe("−60m−30mnow 0/min");
+    expect(claude.querySelector(".hourbars .plot-axis")?.textContent).toBe(
+      "−60m−30mnow 0 tokens/min",
+    );
   });
 
   it("says there is no weekly reading yet for an account without one", async () => {
