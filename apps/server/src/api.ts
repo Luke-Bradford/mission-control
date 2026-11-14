@@ -2575,8 +2575,39 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
         store.markCommsScopeRead(scope.key, body.data.messageId);
+        // Opening an agent's direct thread also moves the cursor its attention items key on (the
+        // web reads through this route, not the per-thread one)
+        const all = scope.key.match(/^agent-all:(.+)$/)?.[1];
+        const direct = all ?? directAgent(scope.key);
+        if (direct !== undefined && store.threadOwnsMessage(direct, body.data.messageId)) {
+          let through: string | null = body.data.messageId;
+          if (all === undefined) {
+            // The pair view shows only the CAPCOM line: its agent's other lines stay unread, and
+            // the cursor stops before the first one the view did not show
+            const shown = new Set(scope.rows.map((row) => row.id));
+            const limit = Number(body.data.messageId.slice("comms:".length));
+            const after = store.threadReadCursors(direct).get("comms")?.offset ?? 0;
+            through = null;
+            for (const row of store.threadComms(direct, after)) {
+              if (Number(row.id.slice("comms:".length)) > limit || !shown.has(row.id)) break;
+              through = row.id;
+            }
+          }
+          if (through !== null) {
+            store.markThreadRead(direct, [through]);
+            bus.emit("attention");
+          }
+        }
         return { ok: true };
       });
+
+      /** The agent on the other end of CAPCOM's direct line, for a `pair:` scope key. */
+      const directAgent = (key: string): string | undefined => {
+        const pair = key.match(/^pair:([^:]+):([^:]+)$/);
+        if (!pair) return undefined;
+        if (pair[1] === COMMS_CAPCOM) return pair[2];
+        return pair[2] === COMMS_CAPCOM ? pair[1] : undefined;
+      };
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 

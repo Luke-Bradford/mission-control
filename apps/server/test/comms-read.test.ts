@@ -546,3 +546,87 @@ it("attention selects only unread stored bodies and retains a read prompt's repl
     rmSync(f.dir, { recursive: true, force: true });
   }
 });
+
+it("reading an agent's Comms thread by scope moves the cursor attention keys on", async () => {
+  const f = regressionFixture();
+  const app = buildApp({ config: f.config, store: f.store, bus: new ChangeBus() });
+  try {
+    const tag = (text: string, at: number) =>
+      f.store.addComms({ from: "guido-1", to: "CAPCOM", text, at, ticket: null })?.id ?? "";
+    const first = tag("@CAPCOM one?", 100);
+    const second = tag("@CAPCOM two?", 200);
+    const keys = () => f.needs().map((i) => i.key);
+    expect(keys()).toEqual([`tag:guido-1:${first}`]);
+    // the page reads an agent's thread with the scope route, not the per-thread one
+    const read = (messageId: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/comms/read",
+        payload: { scope: "pair:CAPCOM:guido-1", messageId },
+      });
+    expect((await read(first)).statusCode).toBe(200);
+    expect(keys()).toEqual([`tag:guido-1:${second}`]);
+    expect((await read(second)).statusCode).toBe(200);
+    expect(keys()).toEqual([]);
+  } finally {
+    await app.close();
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+it("reading the agent-all scope moves the attention cursor", async () => {
+  const f = regressionFixture();
+  const app = buildApp({ config: f.config, store: f.store, bus: new ChangeBus() });
+  try {
+    const tag = (text: string, at: number) =>
+      f.store.addComms({ from: "guido-1", to: "CAPCOM", text, at, ticket: null })?.id ?? "";
+    const first = tag("@CAPCOM one?", 100);
+    const second = tag("@CAPCOM two?", 200);
+    const keys = () => f.needs().map((i) => i.key);
+    const read = (messageId: string) =>
+      app.inject({
+        method: "POST",
+        url: "/api/comms/read",
+        payload: { scope: "agent-all:guido-1", messageId },
+      });
+    expect(keys()).toEqual([`tag:guido-1:${first}`]);
+    expect((await read(first)).statusCode).toBe(200);
+    expect(keys()).toEqual([`tag:guido-1:${second}`]);
+    expect((await read(second)).statusCode).toBe(200);
+    expect(keys()).toEqual([]);
+  } finally {
+    await app.close();
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+it("reading the CAPCOM pair view leaves the agent's seat-to-seat tags unread", async () => {
+  const f = regressionFixture();
+  const app = buildApp({ config: f.config, store: f.store, bus: new ChangeBus() });
+  try {
+    const tagged =
+      f.store.addComms({
+        from: "guido-1",
+        to: "retro-1",
+        text: "@CAPCOM blocked on the key?",
+        at: 100,
+        ticket: null,
+      })?.id ?? "";
+    const hello =
+      f.store.addComms({ from: "guido-1", to: "CAPCOM", text: "hello", at: 200, ticket: null })
+        ?.id ?? "";
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/comms/read",
+      payload: { scope: "pair:CAPCOM:guido-1", messageId: hello },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(f.needs().map((i) => i.key)).toEqual([`tag:guido-1:${tagged}`]);
+  } finally {
+    await app.close();
+    f.store.close();
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});

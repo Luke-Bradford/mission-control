@@ -1229,6 +1229,11 @@ export interface FlightState {
     text: string;
     ageMin: number;
     triageRemainingMs: number;
+    /**
+     * Set on FLIGHT's own question: when it was last briefed (0 if never). Its lines grow the text,
+     * so the wake keys on this, and FLIGHT is woken once per brief, not once per line.
+     */
+    ownBriefAt?: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
     /**
