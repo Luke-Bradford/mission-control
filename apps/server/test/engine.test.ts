@@ -6041,6 +6041,28 @@ describe("the engine runs reviews", () => {
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
     });
 
+    it("a CI rerun goes through while the rollup is pending but one check has failed", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      const check = (name: string, state: PrCheck["state"]): PrCheck => ({
+        name,
+        kind: "check",
+        conclusion: state === "failing" ? "FAILURE" : "IN_PROGRESS",
+        state,
+        attempt: 1,
+        url: null,
+      });
+      setPr({ ci: "pending", checks: [check("web-core", "failing"), check("review", "pending")] });
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
+    });
+    it("a CI rerun refusal names the condition that stopped it", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      setPr({ ci: "pending", checks: [] });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(/no failed check/i);
+      setPr({ state: "closed" });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(/not open/i);
+    });
     it("an accepted head waits until the waived status has been written", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();
