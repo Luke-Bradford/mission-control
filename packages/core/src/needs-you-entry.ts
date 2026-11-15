@@ -17,7 +17,7 @@ import type { AttentionItem } from "./types.ts";
 const ALERT_KEYS = new Set([
   FLIGHT_NOT_TRIAGING_KEY,
   // apps/server/src/update.ts HUB_UPDATE_HELD_KEY and HUB_UPDATE_PERSON_KEY; the server test pins
-  // them together. The held note is FLIGHT's to run while it can (hud.ts) and an alert only once it
+  // them together. The held note is FLIGHT's to run while it can (hud/hud.ts) and an alert only once it
   // reaches the operator (FLIGHT stopped or not on a superuser repo, or its window passed); the
   // person-only note (a shortcut in the change, pnpm, a checkout off main) is one from the start.
   "note:hub-update-held",

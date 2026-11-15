@@ -117,7 +117,8 @@ import {
   forgetViews,
   NO_LOCK,
   stateInputs,
-} from "./hud.ts";
+} from "./hud/hud.ts";
+import { healthContent, TopicGate } from "./hud/topic-gate.ts";
 import {
   FILE_SERVICE_RESTART_ADVICE,
   fileServiceFault,
@@ -134,7 +135,6 @@ import {
   TOKEN_AUDIT_FIRST_DELAY_MS,
   TOKEN_AUDIT_INTERVAL_MS,
 } from "./token-audit/audit.ts";
-import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,

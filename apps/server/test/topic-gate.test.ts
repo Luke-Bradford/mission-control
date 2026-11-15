@@ -1,6 +1,6 @@
 import type { HealthRow } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { HEALTH_FRESHNESS_MS, healthContent, TopicGate } from "../src/topic-gate.ts";
+import { HEALTH_FRESHNESS_MS, healthContent, TopicGate } from "../src/hud/topic-gate.ts";
 
 describe("TopicGate", () => {
   it("passes a topic the first time, then only when its content changed", () => {

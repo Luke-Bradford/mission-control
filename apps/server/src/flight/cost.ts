@@ -6,9 +6,9 @@ import {
   type FlightWakeRecord,
   type FlightWakeWaits,
 } from "@mc/core";
+import { endOf } from "../hud/views.ts";
 import { runSpend } from "../spend/spend.ts";
 import type { FinancialRun, Store } from "../store.ts";
-import { endOf } from "../views.ts";
 import { flightSignalHistory } from "./signals.ts";
 
 const DAY_MS = 24 * 60 * 60_000;

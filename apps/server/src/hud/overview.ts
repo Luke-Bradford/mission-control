@@ -15,10 +15,10 @@ import {
   type Run,
   startOfLocalDay,
 } from "@mc/core";
-import { reworkReview } from "./rework.ts";
-import { parseTicket } from "./run/view.ts";
-import { runSpend } from "./spend/spend.ts";
-import type { BoardMove, Store } from "./store.ts";
+import { reworkReview } from "../rework.ts";
+import { parseTicket } from "../run/view.ts";
+import { runSpend } from "../spend/spend.ts";
+import type { BoardMove, Store } from "../store.ts";
 import { endOf } from "./views.ts";
 
 const MINUTE_MS = 60_000;

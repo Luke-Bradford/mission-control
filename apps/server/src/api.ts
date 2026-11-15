@@ -181,7 +181,6 @@ import {
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
-import { agentDetail } from "./agent-detail.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
@@ -335,6 +334,7 @@ import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { rereadDenial } from "./guard/rereads.ts";
+import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -346,7 +346,16 @@ import {
   NOTE_KEY,
   pinned,
   seatQuestionTriage,
-} from "./hud.ts";
+} from "./hud/hud.ts";
+import { overviewSummary } from "./hud/overview.ts";
+import {
+  decodeCursor,
+  TICKET_PAGE_DEFAULT,
+  TICKET_PAGE_MAX,
+  ticketHistory,
+} from "./hud/ticket-history.ts";
+import { overviewTimeline } from "./hud/timeline.ts";
+import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
 import { itemThread } from "./item-thread.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
@@ -378,7 +387,6 @@ import {
   setAsideQuestions,
 } from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
-import { overviewSummary } from "./overview.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
@@ -437,13 +445,6 @@ import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
-import {
-  decodeCursor,
-  TICKET_PAGE_DEFAULT,
-  TICKET_PAGE_MAX,
-  ticketHistory,
-} from "./ticket-history.ts";
-import { overviewTimeline } from "./timeline.ts";
 import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
@@ -459,7 +460,6 @@ import {
   UpdateError,
   type Updater,
 } from "./update.ts";
-import { activity, configView } from "./views.ts";
 import { webHandler } from "./web.ts";
 
 export const TELEMETRY_COMMIT_READ_LIMIT = 32;

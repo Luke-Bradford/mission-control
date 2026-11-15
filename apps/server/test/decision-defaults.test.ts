@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decisionDefault } from "../src/attention/holds.ts";
 import type { CcConfig } from "../src/config.ts";
 import { applyDecisionDefaults } from "../src/decision-defaults.ts";
-import { attentionItems, NOTE_KEY } from "../src/hud.ts";
+import { attentionItems, NOTE_KEY } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 import { HUB_UPDATE_HELD_KEY } from "../src/update.ts";
 

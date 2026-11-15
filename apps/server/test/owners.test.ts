@@ -11,7 +11,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, NO_LOCK } from "../src/hud.ts";
+import { attentionItems, NO_LOCK } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-22T12:00:00Z");

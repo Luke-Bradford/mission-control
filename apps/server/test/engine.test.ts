@@ -146,7 +146,8 @@ import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import type { Move } from "../src/github/board.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
+import { activity } from "../src/hud/views.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import {
   type SeatBusy,
@@ -156,7 +157,6 @@ import {
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
-import { activity } from "../src/views.ts";
 import { defined } from "./defined.ts";
 
 const START = Date.parse("2026-10-21T10:00:00Z");

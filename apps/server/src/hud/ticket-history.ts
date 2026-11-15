@@ -9,7 +9,7 @@ import {
   type TicketView,
   ticketOutcome,
 } from "@mc/core";
-import type { Store } from "./store.ts";
+import type { Store } from "../store.ts";
 
 /** Events on one page: the default and the most a caller may ask for. */
 export const TICKET_PAGE_DEFAULT = 50;

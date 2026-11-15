@@ -1,7 +1,7 @@
 import { NEW_LOOP, needsYouItems, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-01T12:00:00Z");

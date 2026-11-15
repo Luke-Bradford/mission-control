@@ -17,7 +17,7 @@ import { runAccountId } from "../accounts/bindings.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
-import { NOTE_KEY } from "../hud.ts";
+import { NOTE_KEY } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
 import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 

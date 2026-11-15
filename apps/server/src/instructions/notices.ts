@@ -6,7 +6,7 @@ import { messageUnpausedSeat } from "../crew-pause.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 
-/** The note key prefix of a seat's failed focus import; hud.ts lists it as a hub stop. */
+/** The note key prefix of a seat's failed focus import; hud/hud.ts lists it as a hub stop. */
 export const INSTRUCTION_FOCUS_NOTE_PREFIX = "instruction-focus";
 
 interface NoticeDeps {
