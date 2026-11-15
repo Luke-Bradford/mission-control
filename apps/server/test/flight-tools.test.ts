@@ -144,11 +144,12 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
+import { AttentionMaterialsError } from "../src/attention/attention-materials.ts";
 import { evaluateHolds, holds } from "../src/attention/holds.ts";
-import { AttentionMaterialsError } from "../src/attention-materials.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";
+import { pausedSeat, readCrewPause, writeCrewPause } from "../src/config/crew-pause.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -156,8 +157,8 @@ import {
   crewSeatMode,
   SEAT_ID,
 } from "../src/config.ts";
-import { pausedSeat, readCrewPause, writeCrewPause } from "../src/crew-pause.ts";
 import type { AcceptRulingResult, OperatorRefusal, SyncMainResult } from "../src/engine/engine.ts";
+import { setReviewHold } from "../src/engine/review-hold.ts";
 import { canonicalArgs, isReadCall, liftRunaway, recordWrite } from "../src/flight/runaway.ts";
 import { flightWaits, observeFlightMain, recordFlightWait } from "../src/flight/signals.ts";
 import {
@@ -3918,7 +3919,16 @@ describe("flight_state", () => {
         }
       ).reviewQueue.seats.find((seat) => seat.seat === "retro-1");
 
-    expect(queuedReview()).not.toBeNull();
+    const id = queuedReview();
+    expect(id).not.toBeNull();
+    setReviewHold(store, id ?? 0, { reason: "Waiting for older PR #3.", prNumber: 3 });
+    expect(
+      (
+        (await state()) as {
+          reviewQueue: { seats: { seat: string; holds: unknown[] }[] };
+        }
+      ).reviewQueue.seats.find((seat) => seat.seat === "retro-1")?.holds,
+    ).toEqual([{ prNumber: 7, reason: "Waiting for older PR #3.", waitsOn: 3 }]);
     writeCrewPause(
       store,
       { seats: ["retro-1"], reason: "hold reviews", at: NOW, by: "operator" },
@@ -8417,6 +8427,21 @@ describe("superuser housekeeping", () => {
       "isError",
       true,
     );
+  });
+  it("answers a repo-less held Update note as protected, not missing (#1886)", async () => {
+    elevated();
+    store.raiseNote({
+      key: HUB_UPDATE_HELD_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW,
+    });
+    const r = await call("dismiss_item", { key: `note:${HUB_UPDATE_HELD_KEY}` });
+    expect(r).toHaveProperty("isError", true);
+    expect(JSON.stringify(r)).not.toContain("No open item with that key");
   });
   it.each(["stopped", "account", "approval"])(
     "dismiss_item respects real %s records even for ended runs",

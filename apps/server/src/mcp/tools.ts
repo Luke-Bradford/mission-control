@@ -203,13 +203,13 @@ import { CodeHealthReader } from "../code-health/read.ts";
 import { codeHealthToolSummary } from "../code-health/tool-summary.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { canReadComms, commsTicketForm, reactComms, sendComms } from "../comms/index.ts";
+import type { ProfilesError } from "../config/profiles.ts";
 import type { CcConfig, CrewSeatConfig, CrewSessionConfig } from "../config.ts";
 import { PreviewRefused } from "../design-preview/previews.ts";
 import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
-import { runPathGrants } from "../path-grants.ts";
 import {
   PREVIEW_READY_WAIT_MS,
   PREVIEW_SHOTS_MAX,
@@ -222,8 +222,8 @@ import {
   type PreviewResult,
   previewRequest,
 } from "../preview/browser.ts";
-import type { ProfilesError } from "../profiles.ts";
 import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
+import { runPathGrants } from "../repo/path-grants.ts";
 import { isExternalReview } from "../review/external-key.ts";
 import { openOlderFindings } from "../review/older-findings.ts";
 import {

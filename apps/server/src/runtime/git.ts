@@ -13,7 +13,7 @@ import { type ChildProcess, execFile } from "node:child_process";
 import { lstat, readlink, realpath } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
 import { realPathOrParent } from "./codex-floor.ts";
 
 const execFileP = promisify(execFile);

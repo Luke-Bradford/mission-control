@@ -91,7 +91,7 @@ Proposed implementation bounds: 4,000 UTF-16 code units per plain text entry, 64
 and 64 KiB of fully rendered active instruction content per target. These are new bounds for this feature,
 not existing standing-order limits. The 4,000 value follows existing memory/decision text bounds
 (`packages/core/src/flight.ts:199,366`); the active-count and aggregate-byte bounds are new proposals.
-Existing focus retains its 500-character validator (`apps/server/src/focus.ts:11`).
+Existing focus retains its 500-character validator (`apps/server/src/instructions/focus.ts:11`).
 Validate trimmed nonempty plain text and check capacity inside the write transaction;
 reject an oversized change before saving, with a useful error. Never silently trim, omit or evict an accepted entry.
 Retain revoked history outside ordinary memory/decision pruning.

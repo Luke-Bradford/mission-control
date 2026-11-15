@@ -17,7 +17,6 @@ describe("store row mappers", () => {
       "toQuestion",
       "toReview",
       "toRun",
-      "toSample",
     ]);
   });
 });

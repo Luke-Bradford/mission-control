@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { MapSnapshot, MapUnchecked, PullRequestView } from "@mc/core";
-import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
 import type { MapPersist } from "./snapshot.ts";
 
 const execFileP = promisify(execFile);

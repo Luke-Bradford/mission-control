@@ -7,10 +7,10 @@ import {
   type NotificationPreferences,
 } from "@mc/core";
 import { z } from "zod";
-import { activeAway } from "./away.ts";
-import type { ChangeBus } from "./bus.ts";
-import type { CcConfig } from "./config.ts";
-import type { Store } from "./store.ts";
+import { activeAway } from "../away.ts";
+import type { ChangeBus } from "../bus.ts";
+import type { CcConfig } from "../config.ts";
+import type { Store } from "../store.ts";
 
 const clockTime = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const NotificationPreferencesBody = z.strictObject({

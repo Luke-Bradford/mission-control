@@ -3,8 +3,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import type { AppDeps } from "../api.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../flight/operator-call.ts";
-import { seatFocus } from "../focus.ts";
 import { operatorTokenMatches } from "../operator.ts";
+import { seatFocus } from "./focus.ts";
 import { announceInstruction } from "./notices.ts";
 import { InstructionError, InstructionInput, OrderInput } from "./standing.ts";
 

@@ -12,12 +12,12 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { chooseBrief, retainedBriefChoice } from "../src/brief/choices.ts";
+import { applyDecisionDefaults } from "../src/brief/decision-defaults.ts";
 import { bindCompleteBrief } from "../src/brief/prepare.ts";
 import { routineBriefChoices } from "../src/brief/routine.ts";
 import { briefReadState, briefSourceRevision } from "../src/brief/source.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { recordWrite, runawayTrip } from "../src/flight/runaway.ts";
 import { attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
