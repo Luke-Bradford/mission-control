@@ -3,7 +3,7 @@ import type { FastifyInstance, FastifyRequest } from "fastify";
 import type { AppDeps } from "../api.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER } from "../flight/operator-call.ts";
 import { attentionItems, NO_LOCK } from "../hud/hud.ts";
-import { prepareQueueReorderSnapshot } from "../queue-reorder.ts";
+import { prepareQueueReorderSnapshot } from "../queue/queue-reorder.ts";
 import { type BriefChoiceDeps, chooseBrief } from "./choices.ts";
 import { briefActionRoute, withinBriefDispatch } from "./dispatch.ts";
 import { BriefActionRefused, BriefError } from "./prepare.ts";

@@ -13,9 +13,9 @@ import {
   type TicketView,
 } from "@mc/core";
 import type { CcConfig } from "../config.ts";
-import { observeWaits, patchReleased, type ReleasedWait } from "../dependencies.ts";
 import type { Move, MoveResult } from "../github/board.ts";
-import { ownsCard } from "../ownership.ts";
+import { observeWaits, patchReleased, type ReleasedWait } from "../queue/dependencies.ts";
+import { ownsCard } from "../queue/ownership.ts";
 import type { Store } from "../store.ts";
 import type { RepoRulesError } from "./rules.ts";
 

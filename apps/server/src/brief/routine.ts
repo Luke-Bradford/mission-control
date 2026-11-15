@@ -7,7 +7,7 @@ import {
   prepareQueueReorderSnapshot,
   type QueueReorderDeps,
   reorderQueue,
-} from "../queue-reorder.ts";
+} from "../queue/queue-reorder.ts";
 import { AsideAnswerChanged, answerAsideQuestion } from "../run/aside-answer.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { BriefChoiceDeps } from "./choices.ts";
