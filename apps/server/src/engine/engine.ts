@@ -186,6 +186,7 @@ import {
   maxOpenRunsOf,
   seatMayTake,
 } from "./queue.ts";
+import { type ReviewHold, setReviewHold } from "./review-hold.ts";
 import { hardRulesBy, type RepoRulesError } from "./rules.ts";
 import { overrunText, tickLogOf } from "./ticks.ts";
 
@@ -440,6 +441,12 @@ export type SyncMainResult =
 
 /** onChain key for superviseReviews (never a run id). */
 const REVIEWS_CHAIN = "\0reviews";
+
+/** The hold when the older open PRs cannot be read or compared yet. */
+const UNREAD_OLDER_PRS: ReviewHold = {
+  reason: "Waiting while the hub checks the older open PRs for shared hard-rule files.",
+  prNumber: null,
+};
 
 /**
  * The review seat for a seat's runs: the first review-loop seat (config order) of its crew session
@@ -2427,10 +2434,11 @@ export function createEngine(deps: EngineDeps): Engine {
     return pr !== null && pr.state === "open" && (pr.headSha === row.sha || pr.headSha === head);
   }
 
-  async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
-    if (isExternalReview(row)) return false;
+  /** The hold an older open PR puts on this review (it shares hard-rule files), or null. */
+  async function reviewWaitsForOlderPr(row: ReviewRow): Promise<ReviewHold | null> {
+    if (isExternalReview(row)) return null;
     const author = store.run(row.authorRunId);
-    if (author === null) return true;
+    if (author === null) return UNREAD_OLDER_PRS;
     const prs = prsFor(author.repoId);
     const ownAuthor = prs.find((pr) => pr.number === row.prNumber)?.author;
     const older = prs.filter(
@@ -2439,10 +2447,10 @@ export function createEngine(deps: EngineDeps): Engine {
         pr.number < row.prNumber &&
         !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
     );
-    if (older.length === 0) return false;
+    if (older.length === 0) return null;
     try {
       const rules = await rulesFor(author.repoId);
-      if (rules === null) return true;
+      if (rules === null) return UNREAD_OLDER_PRS;
       const hardRules = effectiveHardRules(rules, flightPowersOf(config, author.repoId));
       const own = await publisher.reviewPr(author, row.prNumber);
       if (
@@ -2450,7 +2458,7 @@ export function createEngine(deps: EngineDeps): Engine {
         own.state !== "open" ||
         (own.headSha !== row.sha && own.headSha !== store.runPush(author.id)?.sha)
       )
-        return true;
+        return UNREAD_OLDER_PRS;
       const baseFor = (number: number, head: string, base: string): string => {
         const key = `review-base:${author.repoId}:${number}:${head}`;
         const saved = store.getSetting(key);
@@ -2466,7 +2474,7 @@ export function createEngine(deps: EngineDeps): Engine {
         baseFor(row.prNumber, own.headSha, own.baseSha),
       );
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
-        return true;
+        return UNREAD_OLDER_PRS;
       const snapshots = new Map<number, string>();
       const candidates = older.flatMap((pr) => {
         const run = store.runsOnBranch(author.repoId, pr.branch).find((r) => r.id !== author.id);
@@ -2486,9 +2494,9 @@ export function createEngine(deps: EngineDeps): Engine {
           return { pr: { ...pr, ...snapshot }, run, snapshot };
         }),
       );
-      let waiting = false;
+      let waiting: ReviewHold | null = null;
       for (const { pr, run, snapshot } of reads) {
-        if (snapshot === null) return true;
+        if (snapshot === null) return UNREAD_OLDER_PRS;
         if (pr.state === "closed") continue;
         if (
           pr.state === "merged" &&
@@ -2510,7 +2518,7 @@ export function createEngine(deps: EngineDeps): Engine {
           // A known run whose seat disappeared cannot establish disjointness.
           touched = paths;
         } else {
-          if (pr.state === "merged" && !pr.mergeCommitSha) return true;
+          if (pr.state === "merged" && !pr.mergeCommitSha) return UNREAD_OLDER_PRS;
           touched = await publisher.hardRuleTouches(
             run,
             pr.headSha,
@@ -2553,10 +2561,16 @@ export function createEngine(deps: EngineDeps): Engine {
               branchUpdated(current, { ...loop }, mainSha, result, now());
             }
           });
-          waiting = true;
+          waiting ??= {
+            reason: `Waiting for #${pr.number}'s merge to reach this branch (shared: ${shared.join(", ")}).`,
+            prNumber: pr.number,
+          };
           continue;
         }
-        waiting = true;
+        waiting ??= {
+          reason: `Waiting for older PR #${pr.number}, which shares hard-rule files (${shared.join(", ")}).`,
+          prNumber: pr.number,
+        };
         store.addLoopEvent(
           reviewEventKey(author.id, row.id, `waits:${pr.number}:${pr.headSha}`),
           author.id,
@@ -2570,15 +2584,15 @@ export function createEngine(deps: EngineDeps): Engine {
             JSON.stringify(await publisher.reviewPr(author, number)) === snapshot,
         ),
       );
-      if (revalidated.some((unchanged) => !unchanged)) return true;
+      if (revalidated.some((unchanged) => !unchanged)) return UNREAD_OLDER_PRS;
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
-        return true;
+        return UNREAD_OLDER_PRS;
       return waiting;
     } catch (e) {
       log(
         `${author.id}: could not read review overlaps: ${e instanceof Error ? e.message : String(e)}`,
       );
-      return true;
+      return UNREAD_OLDER_PRS;
     }
   }
 
@@ -2704,15 +2718,34 @@ export function createEngine(deps: EngineDeps): Engine {
       const at = now();
       if (accountAtStop(config, store, seat.accountId, at)) continue;
       // a reviewer in a restart storm keeps its queued reviews; they wait, they do not fail
-      if (restartHold(store, seat.id) !== null) continue;
-      for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
+      const storm = restartHold(store, seat.id);
+      const queuedHere = store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id);
+      if (storm !== null) {
+        for (const row of queuedHere)
+          setReviewHold(store, row.id, {
+            reason: `The reviewer is held after repeated restarts: ${storm}`,
+            prNumber: null,
+          });
+        continue;
+      }
+      for (const row of queuedHere) {
         // a change past its review rounds waits for FLIGHT's decision (waste alarm)
-        if (reviewsHeld(store, row.authorRunId)) continue;
+        if (reviewsHeld(store, row.authorRunId)) {
+          setReviewHold(store, row.id, {
+            reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
+            prNumber: null,
+          });
+          continue;
+        }
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;
         }
-        if (await reviewWaitsForOlderPr(row)) continue;
+        const olderWait = await reviewWaitsForOlderPr(row);
+        if (olderWait !== null) {
+          setReviewHold(store, row.id, olderWait);
+          continue;
+        }
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;
@@ -2729,6 +2762,7 @@ export function createEngine(deps: EngineDeps): Engine {
         )
           break;
         if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
+        setReviewHold(store, row.id, null);
         let runId: string | null = null;
         try {
           ({ runId } = await supervisor.startReview(seat.id, row.id));
@@ -2741,6 +2775,10 @@ export function createEngine(deps: EngineDeps): Engine {
             // it stays queued and starts once it can (its screenshots may not be ready); the
             // seat's next queued review is tried in this pass
             store.setReviewState(row.id, ["starting"], "queued", { at: now() });
+            setReviewHold(store, row.id, {
+              reason: `The review could not start yet: ${message}`,
+              prNumber: null,
+            });
             void reconcileRun(row.authorRunId);
             continue;
           } else {

@@ -142,6 +142,7 @@ import {
   UPDATE_UP_TO_DATE,
 } from "../src/engine/publish.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
+import { reviewHoldOf } from "../src/engine/review-hold.ts";
 import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
@@ -3624,6 +3625,11 @@ describe("the engine runs reviews", () => {
         .filter((e) => e.runId === RUN2)
         .map((e) => e.text),
     ).toContain("waits for #12 (shared: packages/core/src/guard.ts)");
+    expect(reviewHoldOf(store, need(store.reviewsOfRun(RUN2)[0]).id)).toEqual({
+      reason:
+        "Waiting for older PR #12, which shares hard-rule files (packages/core/src/guard.ts).",
+      prNumber: 12,
+    });
   });
 
   it("does not make a newer PR wait for the same author's older PR", async () => {
@@ -4021,6 +4027,10 @@ describe("the engine runs reviews", () => {
     h.startErrorFor = (id) => (id === need(reviewRows()[0]).id ? notReady : null);
     await toReview();
     expect(first().state).toBe("queued");
+    expect(reviewHoldOf(store, first().id)).toEqual({
+      reason: `The review could not start yet: ${notReady.message}`,
+      prNumber: null,
+    });
     await secondAuthor();
     const older = first();
     const newer = need(store.reviewsOfRun(RUN2)[0]);
@@ -4032,6 +4042,7 @@ describe("the engine runs reviews", () => {
     store.setReviewState(newer.id, ["running"], "reported", { at: clock });
     await h.engine.tick();
     expect(first().state).toBe("running");
+    expect(reviewHoldOf(store, first().id)).toBeNull();
   });
 
   it("queues and starts one review", async () => {
@@ -4205,6 +4216,11 @@ describe("the engine runs reviews", () => {
       await h.engine.tick();
       expect(first()).toMatchObject({ state: "queued", seatId: RETRO });
       expect(h.starts).toEqual([]);
+      expect(reviewHoldOf(store, first().id)).toEqual({
+        reason:
+          "The reviewer is held after repeated restarts: RETRO started 7 times in the last hour.",
+        prNumber: null,
+      });
     });
 
     it("a queued review of a change past two review rounds stays queued", async () => {
@@ -4231,6 +4247,10 @@ describe("the engine runs reviews", () => {
       await h.engine.tick();
       expect(store.review(third ?? 0)?.state).toBe("queued");
       expect(h.starts).toHaveLength(startsBefore);
+      expect(reviewHoldOf(store, third ?? 0)).toEqual({
+        reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
+        prNumber: null,
+      });
     });
 
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
