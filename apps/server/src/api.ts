@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { Run } from "@mc/core";
@@ -175,6 +175,7 @@ import Fastify, {
   type FastifyRequest,
   LogController,
 } from "fastify";
+import { isMap, isSeq, parseDocument, type YAMLMap } from "yaml";
 import { z } from "zod";
 import {
   type AccountModels,
@@ -282,10 +283,12 @@ import {
   onboardRepo,
   RepoLocation,
   RepoOnboardBody,
+  RepoRolesBody,
   RepoSetupBody,
   removeAccount,
   SeatsBody,
   setAccount,
+  setRepoRoles,
   setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
@@ -3482,6 +3485,115 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             };
             const code = status[e.kind];
             if (code !== undefined) return reply.code(code).send({ error: e.message });
+          }
+          return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+        }
+      });
+
+      const rolesRulesView = async (repo: (typeof config.repos)[number], configPath: string) => {
+        const bytes = readFileSync(configPath);
+        const document = parseDocument(bytes.toString("utf8"));
+        const repos = document.get("repos", true);
+        const repoItem = isSeq(repos)
+          ? repos.items.find((item) => isMap(item) && item.get("id") === repo.id)
+          : undefined;
+        const rawRepo = isMap(repoItem) ? (repoItem as YAMLMap) : null;
+        const configured = repo.rules ?? DEFAULT_REPO_RULES;
+        const configuredKeys = configured.userSet ?? [];
+        const checkout = config.crew?.sessions.find(
+          (session) => session.repoId === repo.id,
+        )?.checkout;
+        const read =
+          checkout === undefined
+            ? configured
+            : await readRepoRules(repo.github, checkout, configured);
+        const effective = read instanceof RepoRulesError ? configured : read;
+        const repoFile = (
+          sourceKey: string,
+          configuredKey: keyof typeof configured,
+          value: unknown,
+        ) =>
+          JSON.stringify(value) === JSON.stringify(configured[configuredKey])
+            ? source(sourceKey)
+            : "Repo file";
+        const source = (key: string) => (configuredKeys.includes(key) ? "Set here" : "Default");
+        const repoSource = (key: string) => (rawRepo?.has(key) ? "Set here" : "Default");
+        return {
+          base: createHash("sha256").update(bytes).digest("hex"),
+          rules: {
+            pick_from: {
+              value: effective.pickFrom,
+              source: repoFile("pick_from", "pickFrom", effective.pickFrom),
+            },
+            needs: { value: effective.needs, source: repoFile("needs", "needs", effective.needs) },
+            areas: { value: effective.areas, source: repoFile("areas", "areas", effective.areas) },
+            promote_backlog: {
+              value: effective.promoteBacklog,
+              source: repoFile("promote_backlog", "promoteBacklog", effective.promoteBacklog),
+            },
+            protected: { value: repo.protectedFiles, source: repoSource("protected") },
+            hard_rules: {
+              value: effective.hardRules,
+              source: repoFile("hard_rules", "hardRules", effective.hardRules),
+            },
+            hard_rules_by: {
+              value: effective.hardRulesBy,
+              source: repoFile("hard_rules_by", "hardRulesBy", effective.hardRulesBy),
+            },
+            commands: { value: repo.commands, source: repoSource("commands") },
+            full_suite: { value: repo.fullSuite, source: repoSource("full_suite") },
+            required_checks: { value: repo.requiredChecks, source: repoSource("required_checks") },
+            checks: {
+              value: effective.checks,
+              source: repoFile("checks", "checks", effective.checks),
+            },
+            uat: { value: effective.uat, source: repoFile("uat", "uat", effective.uat) },
+            always_ask: {
+              value: effective.alwaysAsk,
+              source: repoFile("always_ask", "alwaysAsk", effective.alwaysAsk),
+            },
+            autonomy: { value: repo.autonomy, source: "Config file" },
+            flight_powers: { value: repo.flightPowers, source: "Config file" },
+          },
+        };
+      };
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/roles-rules", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const repo = config.repos.find((item) => item.id === req.params.repoId);
+        if (!repo) return reply.code(404).send({ error: "unknown repo" });
+        return await rolesRulesView(repo, configPath);
+      });
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/roles-rules", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoRolesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setRepoRoles(
+            configPath,
+            req.params.repoId,
+            body.data.base,
+            body.data.rules,
+            now(),
+          );
+          const index = config.repos.findIndex((repo) => repo.id === req.params.repoId);
+          const updated = result.config.repos[index];
+          if (index < 0 || !updated) return reply.code(404).send({ error: "unknown repo" });
+          config.repos[index] = updated;
+          bus.emit("config");
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          captureError(reply, e);
+          if (e instanceof ConfigWriteError) {
+            const status = { missing: 404, invalid: 400, current: 409, conflict: 409 }[
+              e.kind as string
+            ];
+            if (status !== undefined) return reply.code(status).send({ error: e.message });
           }
           return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
         }

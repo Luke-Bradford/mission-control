@@ -2145,6 +2145,74 @@ describe("add a repo (POST /api/repos)", () => {
   });
 });
 
+describe("Setup Roles & guards", () => {
+  const rolesBody = {
+    pick_from: ["Ready"],
+    needs: ["done_when", "size"],
+    areas: { server: ["apps/server/**"] },
+    promote_backlog: true,
+    protected: [".github/**"],
+    hard_rules: ["roles/**"],
+    hard_rules_by: "operator",
+    commands: { writer: ["pnpm -s test"], review: ["pnpm -s test"] },
+    full_suite: ["pnpm -s test"],
+    required_checks: ["ci / test"],
+    checks: ["pnpm -s lint"],
+    uat: { labels: ["needs-uat"], paths: ["apps/web/**"] },
+    always_ask: ["deploy"],
+  };
+
+  it("reads sources and saves every editable rule with a backup, without GitHub", async () => {
+    const read = await get("/api/repos/shop-app/roles-rules");
+    expect(read.statusCode).toBe(200);
+    const body = read.json<{ base: string; rules: Record<string, { source: string }> }>();
+    expect(Object.keys(body.rules)).toEqual([
+      ...Object.keys(rolesBody),
+      "autonomy",
+      "flight_powers",
+    ]);
+    expect(body.rules.autonomy).toMatchObject({ source: "Config file" });
+    const saved = await postBody("/api/repos/shop-app/roles-rules", {
+      base: body.base,
+      rules: rolesBody,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toEqual({ backup: "config.yaml.bak-20261017T120000Z" });
+    expect(readFileSync(configPath, "utf8")).toContain("pick_from:");
+    expect(readdirSync(dir)).toContain("config.yaml.bak-20261017T120000Z");
+    expect(refreshed).toBe(0);
+  });
+
+  it.each([
+    ["a schema error", { ...rolesBody, checks: ["pnpm -s lint && pnpm -s test"] }],
+    ["autonomy", { ...rolesBody, autonomy: "merge" }],
+    ["flight_powers", { ...rolesBody, flight_powers: "superuser" }],
+  ])("refuses %s without writing", async (_name, rules) => {
+    const read = await get("/api/repos/shop-app/roles-rules");
+    const before = readFileSync(configPath, "utf8");
+    const response = await postBody("/api/repos/shop-app/roles-rules", {
+      base: read.json<{ base: string }>().base,
+      rules,
+    });
+    expect(response.statusCode).toBe(400);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
+  it("refuses a stale page without a backup", async () => {
+    const read = await get("/api/repos/shop-app/roles-rules");
+    writeFileSync(configPath, `${readFileSync(configPath, "utf8")}# changed\n`);
+    const response = await postBody("/api/repos/shop-app/roles-rules", {
+      base: read.json<{ base: string }>().base,
+      rules: rolesBody,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: "config.yaml changed since this page loaded it; reload and try again",
+    });
+    expect(readdirSync(dir).some((name) => name.startsWith("config.yaml.bak-"))).toBe(false);
+  });
+});
+
 describe("repo onboarding (POST /api/repos/onboard)", () => {
   const checkout = () => {
     const path = join(dir, "studio-clone");

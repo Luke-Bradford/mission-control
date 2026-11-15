@@ -1877,6 +1877,12 @@ Commands and protected files already live alongside `rules`, at `repos[].command
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
 from a repo block. Changes to these repo settings, including `rules`, require a hub restart.
 
+**Roles & guards API.** `GET /api/repos/:repoId/roles-rules` returns the editable values and a
+config file version. `POST` to the same route saves the approved rules only. Send the version from
+the read as `base`; a changed file answers `config.yaml changed since this page loaded it; reload
+and try again` and writes nothing. Each save keeps the normal adjacent config backup. The route
+never accepts `autonomy` or `flight_powers`, and it makes no GitHub call.
+
 A repo block optionally tightens the rules in the first fenced `yaml` block under
 `## Mission Control` in its `CLAUDE.md`, key `mc:`. The hub reads it at `origin/HEAD`, not a seat's
 worktree; a change takes effect once merged and fetched. `hard_rules` is unioned with an explicit
