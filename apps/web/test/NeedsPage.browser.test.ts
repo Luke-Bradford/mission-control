@@ -187,7 +187,7 @@ describeRendered("Needs you page", () => {
                   ),
                 undefined,
               ),
-            ).toEqual(["Hold", "Not now", "Drop", "Clear"]);
+            ).toEqual(["Not now", "Drop", "Clear"]);
             if (SHOTS) {
               mkdirSync(SHOTS, { recursive: true });
               await page.screenshot(join(SHOTS, `needs-${width}x${height}-${colorScheme}.png`));
