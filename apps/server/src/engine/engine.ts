@@ -154,8 +154,8 @@ import {
 import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
+import { pausedSeat, reviewPausedMs } from "../config/crew-pause.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
-import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";

@@ -79,8 +79,9 @@ import {
   wrongAreaText,
 } from "@mc/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { pausedSeat, writeCrewPause } from "../src/config/crew-pause.ts";
+import { loadProfiles, profileHash } from "../src/config/profiles.ts";
 import { type CrewSeatConfig, isInside, realish } from "../src/config.ts";
-import { pausedSeat, writeCrewPause } from "../src/crew-pause.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
 import { RepoRulesError } from "../src/engine/rules.ts";
 import { flightState, flightWake } from "../src/flight/state.ts";
@@ -90,7 +91,6 @@ import { TRIM_ENTRY } from "../src/guard/trim.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { runPathGrants } from "../src/path-grants.ts";
-import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";

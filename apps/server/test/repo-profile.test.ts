@@ -4,8 +4,8 @@ import { join } from "node:path";
 import type { BoardItem } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
+import { PreviewError, repoPreview, repoProfiles } from "../src/config/repo-profile.ts";
 import type { CcConfig } from "../src/config.ts";
-import { PreviewError, repoPreview, repoProfiles } from "../src/repo-profile.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;

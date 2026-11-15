@@ -142,6 +142,8 @@ import { cleanText } from "../clean.ts";
 import type { CliHold } from "../cli/update.ts";
 import { probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
+import { pausedSeat } from "../config/crew-pause.ts";
+import { chooseRunProfile, type ProfilesError, profileHash } from "../config/profiles.ts";
 import {
   applySeatAccount,
   type CcConfig,
@@ -153,7 +155,6 @@ import {
   realish,
   seatUnavailable,
 } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
@@ -171,7 +172,6 @@ import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.t
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import type { ReviewPreviews } from "../preview/review.ts";
-import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
 import { openOlderFindings } from "../review/older-findings.ts";

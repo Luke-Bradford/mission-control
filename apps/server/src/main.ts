@@ -53,6 +53,13 @@ import {
 } from "./collectors/github.ts";
 import { commsInboxContext } from "./comms/index.ts";
 import {
+  messageUnpausedSeat,
+  pauseAwareSupervisor,
+  pausedSeat,
+  startUnpausedRun,
+} from "./config/crew-pause.ts";
+import { loadProfiles, PROFILES_FILE } from "./config/profiles.ts";
+import {
   ConfigError,
   configuredAgents,
   crewAllowed,
@@ -62,12 +69,6 @@ import {
   portFromEnv,
 } from "./config.ts";
 import { createCrewReloader } from "./crew-apply.ts";
-import {
-  messageUnpausedSeat,
-  pauseAwareSupervisor,
-  pausedSeat,
-  startUnpausedRun,
-} from "./crew-pause.ts";
 import {
   DESIGN_PREVIEW_PORT,
   DESIGN_PREVIEW_SWEEP_MS,
@@ -127,7 +128,6 @@ import { previewBrowserInHelper } from "./preview/browser.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "./preview/previews.ts";
 import { resolvePreviewRepo } from "./preview/repo.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
-import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createQaReports } from "./qa/reports.ts";
 import { claimAs, readLogin } from "./queue/claim.ts";
 import {

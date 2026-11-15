@@ -259,16 +259,6 @@ import {
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import {
-  agentIds,
-  type CcConfig,
-  configuredAgents,
-  crewSeatDef,
-  crewSeatMode,
-  DEFAULT_MAX_SEATS,
-  flightPowersOf,
-  TeamsSelection,
-} from "./config.ts";
-import {
   AccountBody,
   accountDuplicateReason,
   addAccount,
@@ -290,15 +280,27 @@ import {
   setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
-} from "./config-write.ts";
-import type { CrewReloader } from "./crew-apply.ts";
+} from "./config/config-write.ts";
 import {
   CrewPauseBody,
   pausedSeat,
   readCrewPause,
   startUnpausedRun,
   writeCrewPause,
-} from "./crew-pause.ts";
+} from "./config/crew-pause.ts";
+import { createProfile, NewProfileBody, profilesView } from "./config/profiles.ts";
+import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
+import {
+  agentIds,
+  type CcConfig,
+  configuredAgents,
+  crewSeatDef,
+  crewSeatMode,
+  DEFAULT_MAX_SEATS,
+  flightPowersOf,
+  TeamsSelection,
+} from "./config.ts";
+import type { CrewReloader } from "./crew-apply.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
@@ -393,7 +395,6 @@ import {
   PreviewHubError,
   type PreviewManager,
 } from "./preview/previews.ts";
-import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
@@ -410,7 +411,6 @@ import {
   QueueReorderError,
   resolveQueueReorder,
 } from "./queue/queue-reorder.ts";
-import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
 import {
