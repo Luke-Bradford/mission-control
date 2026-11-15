@@ -40,3 +40,27 @@ Existing approved/reference mockups remain in `docs/mockups/` and `apps/web/mock
 ### Density proposal register — 2 November
 
 The operator approved the #1193 plan in PR #1351. Its first three density mockups are now [Overview](../../mockups/2026-10/overview-density.html), [Agent](../../mockups/2026-10/agent-density.html), and [Setup — Repos & seats](../../mockups/2026-10/setup-sessions-density.html). [Screenshots and interaction checks](../../evidence/desktop-density-mockups/index.md) cover both themes and six viewports. These proposals await separate operator approval before build tickets. Other page mockups required by #677 remain outstanding.
+
+## Page register: where each page's design lives
+
+Approval and build owners come from the reconciliation section of #677 and the mockup READMEs.
+
+| Page | Design | Approval | Build |
+| --- | --- | --- | --- |
+| Overview | [overview-density](../../mockups/2026-10/overview-density.html) | Approved 2 Nov | #1359–#1362 |
+| FLIGHT | [flight-page](../../../apps/web/mockups/flight-page/index.html), [6 Nov spec](2026-11-06-comms-needs-you-flight-design.md) | Spec approved 6 Nov | Built (four tabs) |
+| Needs you | [6 Nov spec](2026-11-06-comms-needs-you-flight-design.md), [comms README](../../mockups/comms/README.md) | Spec approved 6 Nov | Built |
+| Board | [dependencies](../../../apps/web/mockups/dependencies/index.html) | Waits for the operator | #1196 |
+| Agent | [agent-density](../../mockups/2026-10/agent-density.html) | Approved 2 Nov | #1359–#1362 |
+| Trace | [run-trace](../../mockups/loops/run-trace.html) | Approved 26 Oct | See the loops README |
+| Map | [map-crew](../../../apps/web/mockups/map-crew/index.html) | Built | Built |
+| Comms | [comms README](../../mockups/comms/README.md), [6 Nov spec](2026-11-06-comms-needs-you-flight-design.md) | Approved 26 Oct, spec 6 Nov | Built |
+| QA | [pr-readiness](../../../apps/web/mockups/qa-pr-readiness/index.html), [uat](../../../apps/web/mockups/qa-uat/index.html), [dependencies](../../../apps/web/mockups/dependencies/index.html) | Waits for the operator | #1196 |
+| Telemetry | [telemetry](../../../apps/web/mockups/telemetry/index.html) | Waits for the operator | #1178 |
+| Audit | [code-health](../../../apps/web/mockups/code-health/index.html) | Approved | Builds filed |
+| Setup — Accounts | [setup.dc.html](../../mockups/setup/setup.dc.html) | Approved 26 Oct | See the setup README |
+| Setup — Repos & seats | [setup-sessions-density](../../mockups/2026-10/setup-sessions-density.html) | Approved 2 Nov | #1359–#1362 |
+| Setup — Roles & guards | [setup-roles-guards](../../../apps/web/mockups/setup-roles-guards/index.html) | Waits for the operator | Server and web tickets, filed after approval |
+| Setup — Loops | [loop-chain](../../mockups/loops/loop-chain.html) | Approved 26 Oct | See the loops README |
+| Setup — Sources | [setup README](../../mockups/setup/README.md): no redesign | No redesign | The forms build covers its forms |
+| Setup — Safety | [setup README](../../mockups/setup/README.md): no redesign | Final shape is the operator's call | The forms build covers its forms |
