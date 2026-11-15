@@ -68,7 +68,7 @@ FLIGHT files these after the operator approves the mockup.
 
 ### Server: write repo rules
 
-A protected route that writes these keys through `apps/server/src/config-write.ts`. It keeps a backup of config.yaml, checks the base for conflicts and makes no GitHub writes. It cannot set `autonomy` or `flight_powers`.
+A protected route that writes these keys through `apps/server/src/config/config-write.ts`. It keeps a backup of config.yaml, checks the base for conflicts and makes no GitHub writes. It cannot set `autonomy` or `flight_powers`.
 
 - Done when: each key above except Authority saves through the route with the schema's messages; a changed config.yaml answers with the conflict text; a backup is kept; a test shows no GitHub call.
 - Size: M
