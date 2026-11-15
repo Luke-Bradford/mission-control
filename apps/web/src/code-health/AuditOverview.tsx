@@ -6,6 +6,7 @@ import {
   type CodeHealthView,
   type CodeHealthWindow,
   type ConfigView,
+  QA_DISCLOSURE_LABEL,
 } from "@mc/core";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
@@ -29,7 +30,7 @@ export const AUDIT_VIEWS = [
   { value: "risk", label: "Code risk" },
   { value: "test", label: "Test health" },
   { value: "tokens", label: "Tokens" },
-  { value: "history", label: "Workflow history" },
+  { value: "history", label: QA_DISCLOSURE_LABEL },
 ] as const;
 export type AuditViewName = "overview" | (typeof AUDIT_VIEWS)[number]["value"];
 export interface AuditScope {

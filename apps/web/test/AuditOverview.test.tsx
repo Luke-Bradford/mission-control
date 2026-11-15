@@ -1,4 +1,4 @@
-import { CODE_HEALTH_OVERVIEW_TTL_MS, OPERATOR_HEADER } from "@mc/core";
+import { CODE_HEALTH_OVERVIEW_TTL_MS, OPERATOR_HEADER, QA_DISCLOSURE_LABEL } from "@mc/core";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { forgetOperatorToken } from "../src/api.ts";
@@ -374,8 +374,8 @@ it("reaches every earlier Audit view in one click and returns with the same repo
       "true",
     );
   }
-  fireEvent.click(screen.getByRole("button", { name: "Workflow history" }));
-  await screen.findByText("Workflow history and earlier proposals");
+  fireEvent.click(screen.getByRole("button", { name: QA_DISCLOSURE_LABEL }));
+  await screen.findByText(QA_DISCLOSURE_LABEL);
   fireEvent.click(screen.getByRole("button", { name: "Back to overview" }));
   await ready();
   expect(screen.getByRole("link", { name: "Cost and flow context" }).getAttribute("href")).toBe(
