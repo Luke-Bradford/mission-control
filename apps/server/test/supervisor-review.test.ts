@@ -761,8 +761,10 @@ describe("startReview", () => {
       });
       sup.start();
       const go = sup.startReview("retro", r.reviewId);
-      if (starts) await expect(go).resolves.toBeDefined();
-      else await expect(go).rejects.toThrow("screenshot evidence is not ready");
+      if (starts) {
+        await expect(go).resolves.toBeDefined();
+        await until(() => expect(seatState("retro")).toBe("idle"));
+      } else await expect(go).rejects.toThrow("screenshot evidence is not ready");
       expect(seen).toEqual([
         {
           repoId: "mc",
