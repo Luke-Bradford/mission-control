@@ -15,6 +15,7 @@ import type {
   RunHandoff,
   RunTokenAudit,
   TicketQuestion,
+  TokenAuditSession,
   TokenCall,
   TokenCounts,
   TokenSourceAdd,
@@ -367,6 +368,12 @@ type RepoTable = keyof typeof REPO_TABLES;
 const DIGEST_BATCH = 500;
 const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
+
+/** The `sessions` of a stored audit: set only when the run had a fresh session. */
+const sessionsOf = (raw: unknown): { sessions?: TokenAuditSession[] } => {
+  const list = JSON.parse(typeof raw === "string" ? raw : "[]") as TokenAuditSession[];
+  return list.length > 0 ? { sessions: list } : {};
+};
 
 const toTokenCall = (r: Row): TokenCall => ({
   at: (r.at as number | null) ?? null,
@@ -861,6 +868,7 @@ export class Store {
     // Token audit call times (#1646): audits stored before this have none until re-read.
     this.addColumn("run_token_calls", "at", "INTEGER");
     this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
+    this.addColumn("run_token_audit", "sessions", "TEXT NOT NULL DEFAULT '[]'");
     this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
@@ -1437,7 +1445,7 @@ export class Store {
         .prepare(
           `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
              cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+             by_source, by_command, sessions, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .run(
           runId,
@@ -1453,6 +1461,7 @@ export class Store {
           audit.readAfterReport,
           JSON.stringify(audit.bySource),
           JSON.stringify(audit.byCommand),
+          JSON.stringify(audit.sessions ?? []),
         );
       const insert = this.db.prepare(
         `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added, at)
@@ -1578,7 +1587,8 @@ export class Store {
         `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
            a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
            a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
-           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command
+           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command,
+           a.sessions AS a_sessions
          FROM run_token_audit a JOIN runs r ON r.id = a.run_id
          WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
       )
@@ -1597,8 +1607,21 @@ export class Store {
         readAfterReport: r.a_after as number | null,
         bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
         byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
+        ...sessionsOf(r.a_sessions),
       },
     }));
+  }
+
+  /** Runs in the fix-session trial (`loop.fixArm` set), oldest first. */
+  fixTrialRuns(): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM runs WHERE json_extract(loop, '$.fixArm') IS NOT NULL
+           ORDER BY started_at, seq`,
+        )
+        .all() as Row[]
+    ).map(toRun);
   }
 
   /** Context size of every stored model call of runs that started since `since`. */
