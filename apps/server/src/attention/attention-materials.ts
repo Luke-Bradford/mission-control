@@ -19,10 +19,10 @@ import {
   type AttentionStoryRegistration,
   type AttentionStorySection,
 } from "@mc/core";
-import type { CcConfig } from "./config.ts";
-import { GIT_TIMEOUT_MS, gitEnv } from "./repo/files.ts";
-import { SAFE_CONFIG } from "./runtime/git.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import { GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
+import { SAFE_CONFIG } from "../runtime/git.ts";
+import type { Store } from "../store.ts";
 
 const execFileP = promisify(execFile);
 const SHA = /^[a-f0-9]{40}$/;

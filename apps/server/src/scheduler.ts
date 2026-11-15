@@ -30,6 +30,7 @@ import {
 } from "@mc/core";
 import { codexProfile } from "./accounts/bindings.ts";
 import { evaluateHolds, holds } from "./attention/holds.ts";
+import { closeSettledQuestions } from "./attention/question-watch.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
@@ -118,7 +119,6 @@ import {
   stateInputs,
 } from "./hud/hud.ts";
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
-import { closeSettledQuestions } from "./question-watch.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { syncWasteAlarms } from "./spend/waste.ts";

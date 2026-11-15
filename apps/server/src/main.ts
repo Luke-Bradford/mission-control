@@ -35,6 +35,7 @@ import {
   type Run,
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
+import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
 import { ChangeBus } from "./bus.ts";
 import { CliHold } from "./cli/update.ts";
@@ -109,7 +110,6 @@ import {
   prTextProblem,
   readKnown,
 } from "./mcp/tools.ts";
-import { releaseWaitingOperator } from "./needs-you-actions.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import {
