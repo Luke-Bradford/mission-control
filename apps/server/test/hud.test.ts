@@ -4639,11 +4639,7 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       held(HUB_UPDATE_HELD_KEY);
       const cfg = superuser();
       const item = heldItem(cfg);
-      expect(item).toMatchObject({
-        owner: "flight",
-        flightTriage: "waiting",
-        triageDueAt: NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS,
-      });
+      expect(item).toMatchObject({ owner: "flight", flightTriage: "handling" });
       expect(
         needsYouItems(attentionItems(cfg, store, NOW, NO_LOCK, [])).map((i) => i.key),
       ).not.toContain(`note:${HUB_UPDATE_HELD_KEY}`);
@@ -4654,18 +4650,24 @@ describe('the one "FLIGHT is not triaging" item (#758)', () => {
       expect(item && protectedDecisionItem(store, item, cfg, NOW)).toBe(false);
     });
 
-    it("goes to the operator once FLIGHT's window has passed", () => {
+    it("stays FLIGHT's, off Needs you, after FLIGHT's window has passed", () => {
       flight();
       held(HUB_UPDATE_HELD_KEY);
-      const late = heldItem(superuser(), NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS);
-      expect(late).toMatchObject({ owner: "operator", flightTriage: "missed" });
+      const cfg = superuser();
+      const at = NOW - 5 * MIN + FLIGHT_TRIAGE_WAIT_MS + HOUR;
+      const late = heldItem(cfg, at);
+      expect(late).toMatchObject({ owner: "flight", flightTriage: "handling" });
+      expect(late?.triageDueAt).toBeUndefined();
+      expect(
+        needsYouItems(attentionItems(cfg, store, at, NO_LOCK, [])).map((i) => i.key),
+      ).not.toContain(`note:${HUB_UPDATE_HELD_KEY}`);
     });
 
-    it("counts the window from when the Update was first held, not from the latest rewrite", () => {
+    it("stays FLIGHT's however long ago the Update was first held", () => {
       flight();
       held(HUB_UPDATE_HELD_KEY, NOW - MIN);
       store.setSetting(HUB_UPDATE_HELD_SINCE, String(NOW - 25 * MIN));
-      expect(heldItem(superuser())).toMatchObject({ owner: "operator", flightTriage: "missed" });
+      expect(heldItem(superuser())).toMatchObject({ owner: "flight", flightTriage: "handling" });
     });
 
     it("is the operator's at once when FLIGHT is stopped", () => {
