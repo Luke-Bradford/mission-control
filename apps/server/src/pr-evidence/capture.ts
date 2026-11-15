@@ -527,3 +527,23 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
     },
   };
 }
+
+/**
+ * What the supervisor needs to hold a web review for screenshot evidence: the store, the one repo,
+ * and the pages the capture itself reads for a head, so both agree on what a PR touches.
+ */
+export function evidenceReviewDeps(
+  evidence: PrEvidence,
+  store: PrEvidenceStore,
+  repoId: string,
+): {
+  prEvidence: PrEvidenceStore;
+  prEvidenceRepo: string;
+  prEvidencePages: (target: EvidenceTarget) => Promise<readonly EvidencePage[]>;
+} {
+  return {
+    prEvidence: store,
+    prEvidenceRepo: repoId,
+    prEvidencePages: (target) => evidence.pages(target),
+  };
+}

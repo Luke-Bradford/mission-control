@@ -23,6 +23,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { join } from "node:path";
 import {
   DEFAULT_PROFILES,
+  type EvidencePage,
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
@@ -40,6 +41,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli/update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
+import { createPrEvidence, evidenceReviewDeps } from "../src/pr-evidence/capture.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/preview/review.ts";
 import { externalReviewKey } from "../src/review/external.ts";
@@ -742,22 +744,32 @@ describe("startReview", () => {
   });
 
   it.each([
-    { pages: [] as string[], starts: true },
-    { pages: ["board"], starts: false },
+    { reach: [] as string[], starts: true },
+    { reach: ["board"], starts: false },
   ])(
-    "a web review with no stored evidence starts only when the capture's pages are empty (pages: $pages)",
-    async ({ pages, starts }) => {
+    "a web review with no stored evidence starts only when the capture's import graph reaches a photographed page (reach: $reach)",
+    async ({ reach, starts }) => {
       const r = reviewOfPush();
-      vi.spyOn(store, "prFilePaths").mockReturnValue(["apps/web/src/ticket/ticketTimeline.ts"]);
-      const seen: unknown[] = [];
+      const file = "apps/web/src/ticket/ticketTimeline.ts";
+      vi.spyOn(store, "prFilePaths").mockReturnValue([file]);
+      const evidenceStore = prEvidenceStore(join(dir, "evidence"));
+      // The production composition: the capture's own page reading feeds the supervisor.
+      const capture = createPrEvidence({
+        store: evidenceStore,
+        repoId: "mc",
+        workDir: join(dir, "evidence-work"),
+        baseUrl: "http://localhost",
+        mainSha: async () => r.fork,
+        snapshot: async () => {},
+        startSide: async () => {
+          throw new Error("no capture in this test");
+        },
+        render: async () => Buffer.alloc(0),
+        webGraph: async () => ({ [file]: reach as EvidencePage[] }),
+      });
       const { sup } = make({
         scratchRetro: true,
-        prEvidence: prEvidenceStore(join(dir, "evidence")),
-        prEvidenceRepo: "mc",
-        prEvidencePages: async (t) => {
-          seen.push(t);
-          return pages;
-        },
+        ...evidenceReviewDeps(capture, evidenceStore, "mc"),
       });
       sup.start();
       const go = sup.startReview("retro", r.reviewId);
@@ -765,14 +777,7 @@ describe("startReview", () => {
         await expect(go).resolves.toBeDefined();
         await until(() => expect(seatState("retro")).toBe("idle"));
       } else await expect(go).rejects.toThrow("screenshot evidence is not ready");
-      expect(seen).toEqual([
-        {
-          repoId: "mc",
-          pr: 9,
-          sha: r.sha,
-          paths: ["apps/web/src/ticket/ticketTimeline.ts"],
-        },
-      ]);
+      await capture.stop();
     },
   );
 

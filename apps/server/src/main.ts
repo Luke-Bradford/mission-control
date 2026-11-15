@@ -114,7 +114,7 @@ import {
 } from "./mcp/tools.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./no-index.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
-import { createPrEvidence } from "./pr-evidence/capture.ts";
+import { createPrEvidence, evidenceReviewDeps } from "./pr-evidence/capture.ts";
 import {
   evidenceSideStarter,
   removeStaleEvidenceWork,
@@ -636,11 +636,7 @@ export async function main(): Promise<void> {
     hubRoot: hubRoot ?? "",
     ...(prEvidence === undefined
       ? {}
-      : {
-          prEvidence: evidenceStore,
-          prEvidenceRepo: previewRepoId as RepoId,
-          prEvidencePages: (t) => prEvidence.pages(t),
-        }),
+      : evidenceReviewDeps(prEvidence, evidenceStore, previewRepoId as RepoId)),
     inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
     ...(reviewPreviews === undefined ? {} : { reviewPreviews }),
   });
