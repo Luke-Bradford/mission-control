@@ -5570,6 +5570,30 @@ describe("brief_item", () => {
       expect(await call("brief_item", B({ priority: undefined }))).toEqual({ text: BRIEFED_TEXT });
       expect(store.briefs().get(KEY)?.priority).toBe("P0");
     });
+    it("uses the stated priority when the main card's is not P0 to P2 (#1869)", async () => {
+      board(card(7, { priority: "P3" }));
+      expect(await call("brief_item", B({ priority: "P2" }))).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(KEY)?.priority).toBe("P2");
+    });
+    it("briefs an item whose own ticket is in a repo the hub no longer watches (#1869)", async () => {
+      store.upsertRun(run("r-old", "guido-1", { ticket: "autonomy-engine#410" }));
+      store.replaceBoard("autonomy-engine", [
+        { ...card(410, { priority: "P3" }), repoId: "autonomy-engine" },
+      ]);
+      raise("blocked:r-old:0", { runId: "r-old", repoId: "autonomy-engine" });
+      const key = "note:blocked:r-old:0";
+      const ok = await call(
+        "brief_item",
+        B({
+          key,
+          ticket: undefined,
+          priority: "P2",
+          noTicket: { repo: "mc", reason: "The repo is no longer watched." },
+        }),
+      );
+      expect(ok).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(key)?.priority).toBe("P2");
+    });
     it("takes a question with no ticket when the repo and a reason are given", async () => {
       store.upsertRun(run("r-none", "guido-1"));
       raise("blocked:r2:0", { runId: "r-none" });
