@@ -1,3 +1,4 @@
+// Review and finding queries: the review tables only. Store delegates here.
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type {
   FindingResolution,
