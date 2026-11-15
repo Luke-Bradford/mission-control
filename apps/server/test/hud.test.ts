@@ -55,8 +55,8 @@ import {
 import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
 import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue/queue-reorder.ts";
 import { clearLeftovers } from "../src/repo/leftovers.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 import { Store } from "../src/store.ts";
-import { foldTranscript } from "../src/streamjson.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
 import {
   HUB_UPDATE_HELD_KEY,

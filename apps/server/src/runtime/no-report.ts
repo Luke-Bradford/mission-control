@@ -6,8 +6,8 @@ import {
   noReportReason,
   type Run,
 } from "@mc/core";
+import type { TranscriptFacts } from "../run/streamjson.ts";
 import type { Store } from "../store.ts";
-import type { TranscriptFacts } from "../streamjson.ts";
 
 const REPORT_TOOLS = {
   build: MC_TOOL_NAMES.reportEvidence,

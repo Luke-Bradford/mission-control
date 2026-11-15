@@ -15,7 +15,7 @@ import {
   readStreamPage,
   STREAM_CHUNK_BYTES,
   STREAM_SCAN_BYTES,
-} from "../src/stream.ts";
+} from "../src/run/stream.ts";
 
 const FIXTURE = resolve(import.meta.dirname, "fixtures/stream/agent.jsonl");
 const T = (iso: string) => Date.parse(iso);
@@ -91,7 +91,7 @@ describe("readStream", () => {
       },
     });
     expect(read?.tool).toMatchObject({ result: "File does not exist.", ms: 1000, error: true });
-    expect(agent?.tool?.result).toBe("The fold is in apps/server/src/streamjson.ts.");
+    expect(agent?.tool?.result).toBe("The fold is in apps/server/src/run/streamjson.ts.");
     // The live call has no result yet.
     expect(events.at(-1)?.tool).toMatchObject({ name: "Bash", result: null, ms: null });
   });

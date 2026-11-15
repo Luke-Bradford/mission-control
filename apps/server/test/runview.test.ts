@@ -174,7 +174,7 @@ it("serves full recorded usage with model, turns and duration", async () => {
     model: "model-a",
   });
   // A transcript result provides a persisted digest with a completed turn.
-  const { foldTranscript } = await import("../src/streamjson.ts");
+  const { foldTranscript } = await import("../src/run/streamjson.ts");
   const f = foldTranscript(
     null,
     [

@@ -136,7 +136,7 @@ import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./repo/branch-t
 import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
-import { rotatingLog } from "./rotating-log.ts";
+import { rotatingLog } from "./run/rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";

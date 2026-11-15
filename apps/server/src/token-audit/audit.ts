@@ -16,9 +16,9 @@ import {
   type TokenCounts,
 } from "@mc/core";
 import { type CcConfig, findHubRoot } from "../config.ts";
+import { isObj, STREAM_EVENT_PREFIX, timeOf } from "../run/streamjson.ts";
 import { crewDirPath } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
-import { isObj, STREAM_EVENT_PREFIX, timeOf } from "../streamjson.ts";
 import { GZ_MAX_INFLATED_BYTES } from "../transcript/file.ts";
 
 /** The tool whose first call marks the end of a run's real work. */

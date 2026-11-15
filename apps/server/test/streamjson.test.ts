@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { LAST_TEXT_MAX, LIVE_DETAIL_MAX, NO_REPORT_REASON_MAX, NO_REPORT_TEXT_MAX } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
-import { foldTranscript } from "../src/streamjson.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 
 const lines = readFileSync(resolve(import.meta.dirname, "fixtures/iteration.sample.log"), "utf8")
   .split("\n")
