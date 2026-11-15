@@ -2023,7 +2023,8 @@ describe("a run set aside in review", () => {
     const config = (argv: string[]): string[] => {
       const skip = new Set<number>();
       argv.forEach((a, k) => {
-        if (a === "--session-id" || a === "--resume" || a === "--model") skip.add(k).add(k + 1);
+        if (["--session-id", "--resume", "--model", "--max-budget-usd"].includes(a))
+          skip.add(k).add(k + 1);
       });
       return argv.filter((_, k) => !skip.has(k));
     };
@@ -2047,7 +2048,7 @@ describe("a run set aside in review", () => {
       expect(argv[argv.indexOf("--session-id") + 1]).toBe(fresh);
       expect(argv).not.toContain("--resume");
       expect(starts()[1].cwd).toBe(wt());
-      // the same prompt file, budget and tools as the run's first start, and the model a resume uses
+      // the same prompt file and tools as the run's first start, and the model a resume uses
       expect(argv[argv.indexOf("--model") + 1]).toBe(store.run(runId)?.model);
       expect(config(argv)).toEqual(config(starts()[0].argv as string[]));
       expect(store.getSetting(fixBriefKey(runId))).toContain("Fresh session for GUIDO-1");
@@ -2062,6 +2063,46 @@ describe("a run set aside in review", () => {
       await sup.message("guido-1", "again", { interrupt: false });
       await until(() => expect(userLines()).toHaveLength(3));
       expect(userLines()[2]).not.toContain("Fresh session");
+    });
+
+    it("gives the fresh CLI the budget the run has left", async () => {
+      const base = DEFAULT_PROFILES[0] as Profile;
+      const { sup, runId } = await aside(true);
+      const run = store.run(runId) as Run;
+      store.upsertRun({
+        ...run,
+        costUsd: 4,
+        profile: {
+          profile: { ...base, budgetUsd: 10 },
+          route: { by: "size", size: "S" },
+          hash: "h",
+        },
+      });
+      await sup.wakeRun(runId, { fresh: "ci" });
+      await until(() => {
+        const argv = starts().at(-1)?.argv as string[];
+        expect(argv).toContain("--session-id");
+        expect(argv[argv.indexOf("--max-budget-usd") + 1]).toBe("6");
+      });
+    });
+
+    it("resumes instead when the run has no budget left", async () => {
+      const base = DEFAULT_PROFILES[0] as Profile;
+      const { sup, runId } = await aside(true);
+      store.upsertRun({
+        ...(store.run(runId) as Run),
+        costUsd: 10,
+        profile: {
+          profile: { ...base, budgetUsd: 10 },
+          route: { by: "size", size: "S" },
+          hash: "h",
+        },
+      });
+      const woke = await sup.wakeRun(runId, { fresh: "ci" });
+      expect(woke.freshSessionId).toBeNull();
+      expect(woke.fallback).toBeNull();
+      await sup.message("guido-1", "fix", { interrupt: false });
+      await until(() => expect(starts().at(-1)?.argv).toContain("--resume"));
     });
 
     it("resumes the old session when the fresh one cannot start, and says why", async () => {

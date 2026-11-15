@@ -1775,6 +1775,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     beforeLaunch?: () => Run | undefined,
     beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
     stage?: { cli: boolean },
+    /** A cap for this CLI session: the budget a fresh fix session has left (#1643). */
+    maxBudgetUsd?: number,
   ): Promise<Live> {
     const binding = transferState(run.id);
     const info =
@@ -2171,7 +2173,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           granted: runPathGrants(store, run.id),
           model,
           effort: info.seat.effort,
-          maxBudgetUsd: run.profile?.profile.budgetUsd,
+          maxBudgetUsd: maxBudgetUsd ?? run.profile?.profile.budgetUsd,
           mode: def.mode,
           profile: crewProfileOf(info.seat.role, def.loop),
           mcTools: def.mcTools,
@@ -5012,7 +5014,16 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       const oldSessionId = run.sessionId;
       // The fix-session trial (#1643): a new CLI session, with a bounded handoff, in this run's own
       // worktree, branch and prompt file. It falls back to the resume below if it cannot start.
-      if (options.fresh !== undefined && run.vendor !== "codex" && !options.reviewResume) {
+      // The new CLI's own spend counts from zero: it gets the budget the run has left, and a run
+      // with none left resumes, so the dollar cap parks it as before.
+      const budget = run.profile?.profile.budgetUsd;
+      const budgetLeft = budget == null ? undefined : budget - (run.costUsd ?? 0);
+      if (
+        options.fresh !== undefined &&
+        run.vendor !== "codex" &&
+        !options.reviewResume &&
+        (budgetLeft === undefined || budgetLeft > 0)
+      ) {
         const freshId = randomUUID();
         let started: Live | undefined;
         freshStarting.add(runId);
@@ -5046,12 +5057,25 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               notes: store.evidenceNotes(runId).map((n) => n.note),
             }),
           );
-          started = await checkedLaunch(info, run, freshId, checkout, false, null, "", true, () => {
-            beforeLaunch();
-            const next = { ...(store.run(runId) ?? run), sessionId: freshId };
-            store.upsertRun(next);
-            return next;
-          });
+          started = await checkedLaunch(
+            info,
+            run,
+            freshId,
+            checkout,
+            false,
+            null,
+            "",
+            true,
+            () => {
+              beforeLaunch();
+              const next = { ...(store.run(runId) ?? run), sessionId: freshId };
+              store.upsertRun(next);
+              return next;
+            },
+            undefined,
+            undefined,
+            budgetLeft,
+          );
           await started.session.ready;
           // a CLI that dies at start says so within moments: wait that long before trusting it
           let off = (): void => {};

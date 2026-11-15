@@ -181,6 +181,19 @@ describe("foldTranscript", () => {
     expect(f.isError).toBe(true);
   });
 
+  it("sums the cost across CLI sessions, counting each session's latest figure once", () => {
+    const init = (id: string) =>
+      JSON.stringify({ type: "system", subtype: "init", session_id: id });
+    const result = (id: string, cost: number) =>
+      JSON.stringify({ type: "result", session_id: id, total_cost_usd: cost });
+    const first = foldTranscript(null, [init("old"), result("old", 4.5)], 1);
+    expect(first.costUsd).toBe(4.5);
+    const next = foldTranscript(first, [init("new"), result("new", 0.75)], 2);
+    expect(next.costUsd).toBe(5.25);
+    // the old session resumes: its cumulative figure replaces its earlier one
+    expect(foldTranscript(next, [init("old"), result("old", 5)], 3).costUsd).toBe(5.75);
+  });
+
   it("retains the latest top-level stop reason and full cleaned assistant text across folds", () => {
     const assistant = (text: string, stop: string | null, extra = {}) =>
       JSON.stringify({
