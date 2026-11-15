@@ -182,6 +182,14 @@ describe("Setup Roles & guards mockup", () => {
     expect(window.fetch).toBeUndefined();
   });
 
+  it("keeps the repo file's added checks after a save", () => {
+    const document = render("?repo=demo-app");
+    const row = document.querySelector('[data-key="checks"]');
+    row?.querySelector<HTMLElement>("[data-edit]")?.click();
+    row?.querySelector<HTMLElement>("[data-save]")?.click();
+    expect(document.querySelectorAll('[data-key="checks"] > .chips .chip.repo')).toHaveLength(2);
+  });
+
   it("fails the next save under conflict and keeps the draft", () => {
     const document = render("?state=conflict");
     const row = document.querySelector('[data-key="uat.labels"]');

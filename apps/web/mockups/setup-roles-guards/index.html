@@ -219,8 +219,8 @@ function openEditor(key){
  ed.querySelector('[data-cancel]').onclick=()=>{ed.remove();row.querySelector('[data-edit]').focus()};
  ed.querySelector('[data-save]').onclick=()=>{const e=ed.querySelector('.field-error');
   if(state==='conflict'){e.textContent='config.yaml changed since this page loaded. Reload and try again.';return}
-  if(kind==='list'){if(key==='pick_from'&&!draft.length){e.textContent='must hold at least one status';return}data[key]={source:'here',value:draft}}
-  else data[key]={source:'here',value:[ed.querySelector('select').value]};
+  if(kind==='list'){if(key==='pick_from'&&!draft.length){e.textContent='must hold at least one status';return}data[key]={...data[key],source:'here',value:draft}}
+  else data[key]={...data[key],source:'here',value:[ed.querySelector('select').value]};
   renderRules();notify('Saved. Mission Control kept a backup of config.yaml.');
   const b=$(`[data-edit="${key}"]`);if(b)b.focus()};
 }
