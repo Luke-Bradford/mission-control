@@ -215,7 +215,6 @@ import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
-import { runPathGrants } from "../path-grants.ts";
 import {
   PREVIEW_READY_WAIT_MS,
   PREVIEW_SHOTS_MAX,
@@ -230,6 +229,7 @@ import {
 } from "../preview/browser.ts";
 import type { ProfilesError } from "../profiles.ts";
 import { createQaReports, QaReportError, type QaReportService } from "../qa/reports.ts";
+import { runPathGrants } from "../repo/path-grants.ts";
 import { isExternalReview } from "../review/external-key.ts";
 import { openOlderFindings } from "../review/older-findings.ts";
 import {

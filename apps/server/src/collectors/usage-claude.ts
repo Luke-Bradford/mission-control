@@ -1,5 +1,5 @@
 import type { AccountId, UsageSample } from "@mc/core";
-import type { TranscriptFacts } from "../streamjson.ts";
+import type { TranscriptFacts } from "../run/streamjson.ts";
 import {
   collect,
   DEFAULT_MAX_AGE_MS,

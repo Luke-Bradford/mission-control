@@ -42,10 +42,10 @@ import {
   WASTE_CHECK_TITLES,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
-import { blockedWork, endedVerb, observeWaits, releasedLines } from "../dependencies.ts";
 import { dueStuckPrs, prFitsSeat, type StuckPr, waitTargetNumber } from "../engine/stuck-prs.ts";
 import { overrunText, tickLogOf } from "../engine/ticks.ts";
-import { ownsCard } from "../ownership.ts";
+import { blockedWork, endedVerb, observeWaits, releasedLines } from "../queue/dependencies.ts";
+import { ownsCard } from "../queue/ownership.ts";
 import { openWasteAlarms } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 

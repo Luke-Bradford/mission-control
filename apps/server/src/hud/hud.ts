@@ -95,7 +95,6 @@ import {
 import { confirmedResumeAfter, pendingRunApproval } from "../attention/subjects.ts";
 import { briefReadState, briefSourceRevision } from "../brief/source.ts";
 import { claudeVersion } from "../cli/version.ts";
-import { cloneData } from "../clone.ts";
 import { collectorName, noteCollectorName } from "../collectors/common.ts";
 import { notificationOpen, personKey, personText } from "../collectors/notifications.ts";
 import { attentionChatter, resolvedCommsReason } from "../comms/index.ts";
@@ -116,13 +115,16 @@ import { pausedSeat } from "../crew-pause.ts";
 import { asideWakeDue } from "../engine/aside.ts";
 import { reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "../file-deps.ts";
+import { reviewHoldOf } from "../engine/review-hold.ts";
 import { runawayLiftedAt, runawayTrip } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.ts";
 import { loopTries } from "../loop/history.ts";
 import { loopPause } from "../loop/pause.ts";
+import { cloneData } from "../repo/clone.ts";
+import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "../repo/file-deps.ts";
 import { reviewCheckFor } from "../review/check.ts";
+import { lastOutputAt } from "../run/stream.ts";
 import {
   type PrCache,
   parseTicket,
@@ -132,7 +134,6 @@ import {
   runTicketTitle,
 } from "../run/view.ts";
 import type { AttentionNote, Store } from "../store.ts";
-import { lastOutputAt } from "../stream.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_HELD_SINCE, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
@@ -777,7 +778,8 @@ function buildCrew(
                     view.stop?.reason ??
                     (accountAtStop(config, store, agent.accountId, now)
                       ? "The reviewer's account is at its stop threshold."
-                      : "Waiting for the reviewer to become available."),
+                      : (reviewHoldOf(store, queued.id)?.reason ??
+                        "Waiting for the reviewer to become available.")),
                 },
               };
             })()),
@@ -999,7 +1001,7 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 
 /**
  * Hub stops that only the operator clears, by note key or key prefix: machine capacity
- * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
+ * (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
  * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
  * them to those modules' keys.
  */

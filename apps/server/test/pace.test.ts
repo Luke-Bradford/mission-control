@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { DEFAULT_PACE, eligibleToStart, PACE_SETTING, type PaceSettings, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { activePace, paceStartCheck, paceView, readPaceSettings } from "../src/pace.ts";
 import { Store } from "../src/store.ts";
+import { activePace, paceStartCheck, paceView, readPaceSettings } from "../src/telemetry/pace.ts";
 
 const CONFIG = {
   crew: { sessions: [{ seats: [{ id: "guido-1" }, { id: "guido-2" }] }] },

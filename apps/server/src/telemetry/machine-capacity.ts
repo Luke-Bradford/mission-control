@@ -1,6 +1,6 @@
 import type { MachineSample } from "@mc/core";
-import { FILE_SERVICE } from "./collectors/machine.ts";
-import type { Store } from "./store.ts";
+import { FILE_SERVICE } from "../collectors/machine.ts";
+import type { Store } from "../store.ts";
 
 export const MACHINE_CAPACITY_KEY = "machine-capacity";
 export const DISK_PERCENTAGE_CLEAR_HEADROOM = 1;

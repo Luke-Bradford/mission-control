@@ -13,9 +13,9 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { observeWaits } from "../src/dependencies.ts";
-import { readDependencyChains } from "../src/dependency-chains.ts";
 import { setExternalMergeHold } from "../src/external-pr-control.ts";
+import { observeWaits } from "../src/queue/dependencies.ts";
+import { readDependencyChains } from "../src/queue/dependency-chains.ts";
 import { Store } from "../src/store.ts";
 
 const T = Date.parse("2026-11-01T12:00:00Z");

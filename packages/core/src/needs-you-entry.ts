@@ -31,7 +31,7 @@ export function needsYouAlert(item: Pick<AttentionItem, "key" | "kind">): boolea
     item.key.startsWith(`note:${GUARD_ACK_PREFIX}`) ||
     item.kind === "ratelimit" ||
     // the operator's own queue reorder, with its choices written by the hub
-    // (apps/server/src/queue-reorder.ts; its test pins the prefix)
+    // (apps/server/src/queue/queue-reorder.ts; its test pins the prefix)
     (item.kind === "approval" && item.key.startsWith(QUEUE_REORDER_ITEM_PREFIX))
   );
 }

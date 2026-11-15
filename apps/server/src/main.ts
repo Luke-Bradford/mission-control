@@ -35,10 +35,9 @@ import {
   type Run,
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
-import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
+import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
 import { ChangeBus } from "./bus.ts";
-import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli/update.ts";
 import { CODE_HEALTH_AUDIT_EVERY_MS, runCodeHealthAudit } from "./code-health/audit.ts";
 import { createFileContext } from "./code-health/file-context.ts";
@@ -99,8 +98,6 @@ import {
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { attentionItems, markHubStarted, NO_LOCK } from "./hud/hud.ts";
-import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./leftovers.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
@@ -113,8 +110,6 @@ import {
   prTextProblem,
   readKnown,
 } from "./mcp/tools.ts";
-import { releaseWaitingOperator } from "./needs-you-actions.ts";
-import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./no-index.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import {
@@ -131,13 +126,17 @@ import { resolvePreviewRepo } from "./preview/repo.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createQaReports } from "./qa/reports.ts";
+import { claimAs, readLogin } from "./queue/claim.ts";
 import {
   prepareQueueReorderSnapshot,
   type QueueReorderDeps,
   reorderQueue,
-} from "./queue-reorder.ts";
+} from "./queue/queue-reorder.ts";
+import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./repo/branch-tidy.ts";
+import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
+import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
-import { rotatingLog } from "./rotating-log.ts";
+import { rotatingLog } from "./run/rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
@@ -145,6 +144,7 @@ import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import {
   createAutoUpdate,
   createHeldUpdateNote,

@@ -97,12 +97,19 @@ import {
   wakeKeyPrefix,
 } from "@mc/core";
 import { runAccountId } from "../accounts/bindings.ts";
+import {
+  closingFact,
+  factsText,
+  openQuestionSubjects,
+  questionFacts,
+  subjectId,
+} from "../attention/question-watch.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms/index.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
-import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { reviewHoldOf } from "../engine/review-hold.ts";
 import { stuckPrs } from "../engine/stuck-prs.ts";
 import {
   attentionItems,
@@ -112,23 +119,17 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud/hud.ts";
+import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
+import { blockedWork, waitReader } from "../queue/dependencies.ts";
+import { parseTicket } from "../run/view.ts";
+import type { SeatBusy } from "../runtime/supervisor.ts";
+import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
   storedMachineCapacity,
-} from "../machine-capacity.ts";
-import { paceStartCheck, paceView } from "../pace.ts";
-import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
-import {
-  closingFact,
-  factsText,
-  openQuestionSubjects,
-  questionFacts,
-  subjectId,
-} from "../question-watch.ts";
-import { parseTicket } from "../run/view.ts";
-import type { SeatBusy } from "../runtime/supervisor.ts";
-import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
+} from "../telemetry/machine-capacity.ts";
+import { paceStartCheck, paceView } from "../telemetry/pace.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
 import {
@@ -1075,6 +1076,12 @@ export function flightState(i: {
     seats: reviewSeats.map((seat) => {
       const reviews = reviewRows.filter((row) => row.seatId === seat.id);
       const held = unended(seat.id);
+      const holds = reviews.flatMap((row) => {
+        const hold = row.state === "queued" ? reviewHoldOf(store, row.id) : null;
+        return hold === null
+          ? []
+          : [{ prNumber: row.prNumber, reason: hold.reason, waitsOn: hold.prNumber }];
+      });
       return {
         seat: seat.id,
         queued: reviews.filter((row) => row.state === "queued").length,
@@ -1087,6 +1094,7 @@ export function flightState(i: {
             .filter((row) => row.state === "queued")
             .map((row) => Math.floor((now - row.createdAt) / 60_000)),
         ),
+        ...(holds.length > 0 ? { holds } : {}),
         idle:
           !seatUnavailable(seat) &&
           !accountAtStop(

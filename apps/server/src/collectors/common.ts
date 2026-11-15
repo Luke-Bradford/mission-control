@@ -1,8 +1,8 @@
 import { statSync } from "node:fs";
 import { type CrewVendor, inferTicket, type Run, type RunDigest } from "@mc/core";
 import type { AdoptedLoop } from "../config.ts";
+import { foldTranscript, type TranscriptFacts } from "../run/streamjson.ts";
 import type { Store } from "../store.ts";
-import { foldTranscript, type TranscriptFacts } from "../streamjson.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
 import { readNewLines } from "../transcript/tail.ts";
 

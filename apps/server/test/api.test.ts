@@ -98,6 +98,7 @@ import {
   LOOP_WRITES_DISABLED,
   NO_OPEN_NOTE,
 } from "../src/api.ts";
+import { LocalNotifications } from "../src/attention/local-notifications.ts";
 import { AWAY_STARTED_SETTING } from "../src/away.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { collectGithub, type Gql, GqlError } from "../src/collectors/github.ts";
@@ -112,24 +113,23 @@ import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
 import { DesignPreviews } from "../src/design-preview/previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
-import * as files from "../src/files.ts";
-import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operator-call.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import * as views from "../src/hud/views.ts";
-import { LocalNotifications } from "../src/local-notifications.ts";
-import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
 import { qaNativeIdentity } from "../src/qa/history-key.ts";
+import * as files from "../src/repo/files.ts";
+import { GitFailed, NO_WORKTREE_NOTE } from "../src/repo/files.ts";
 import { recordRunHandoff } from "../src/run/handoffs.ts";
+import { readStreamPage } from "../src/run/stream.ts";
 import { CheckoutError } from "../src/runtime/checkouts.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
-import { readStreamPage } from "../src/stream.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/telemetry/machine-capacity.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 import { mapCheckout } from "./map-checkout.ts";
 
@@ -7898,6 +7898,24 @@ describe("update routes", () => {
     expect(r.json()).toEqual({ upToDate: true });
     expect(updaterCalls).toEqual(["update"]);
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
+  });
+
+  it("drops the held-Update notes once an Update has run (#1886)", async () => {
+    for (const key of ["hub-update-held", "hub-update-person"])
+      store.raiseNote({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "A new version of Mission Control is waiting.",
+        at: NOW - 1,
+      });
+    store.setSetting("hub-update-held-since", String(NOW - 1));
+    updaterResult = async () => ({ restarting: true });
+    await post("/api/update");
+    expect(store.notes()).toEqual([]);
+    expect(store.getSetting("hub-update-held-since")).toBeNull();
   });
 
   it("restarts a successful Update when the client disconnects before its response", async () => {

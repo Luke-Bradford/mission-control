@@ -19,9 +19,9 @@ import {
   scanSecrets,
 } from "@mc/core";
 import { confirmedResumeAfter, pendingRunApproval } from "../attention/subjects.ts";
-import { statNoted } from "../file-deps.ts";
+import { statNoted } from "../repo/file-deps.ts";
+import { readStream } from "../run/stream.ts";
 import { commsPosition, type Store } from "../store.ts";
-import { readStream } from "../stream.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
 
 export const COMMS_INBOX_PROMPT_MAX = 8_000;

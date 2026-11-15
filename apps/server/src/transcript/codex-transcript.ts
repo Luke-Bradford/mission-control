@@ -1,5 +1,5 @@
 import { type CrewVendor, isObj, MC_MCP_SERVER } from "@mc/core";
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 import { originalBytes, str } from "../util.ts";
 
 export { CODEX_APPROVAL_DECISION } from "../runtime/codex-wire.ts";

@@ -17,9 +17,9 @@ import {
   type TokenUsage,
   workSummary,
 } from "@mc/core";
-import { cleanText } from "./clean.ts";
-import { codexPlan, codexTool, transcriptVendor } from "./transcript/codex-transcript.ts";
-import { str } from "./util.ts";
+import { cleanText } from "../repo/clean.ts";
+import { codexPlan, codexTool, transcriptVendor } from "../transcript/codex-transcript.ts";
+import { str } from "../util.ts";
 
 export interface TranscriptFacts {
   latestPlan?: string;
@@ -975,4 +975,4 @@ export function foldTranscript(
 
 export { isObj } from "@mc/core";
 
-export { str } from "./util.ts";
+export { str } from "../util.ts";

@@ -1,6 +1,6 @@
 import { STREAM_TEXT_MAX } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { cleanText, redactJwts } from "../src/clean.ts";
+import { cleanText, redactJwts } from "../src/repo/clean.ts";
 
 const ESC = "\u001b";
 
