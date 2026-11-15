@@ -8,7 +8,7 @@ import {
   type Run,
   type TestLockState,
 } from "@mc/core";
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 import type { Store } from "../store.ts";
 import type { CallRing, RingCall } from "./ring.ts";
 

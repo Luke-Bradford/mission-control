@@ -3,8 +3,8 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
-import { mapChanges } from "../src/files.ts";
 import { CallRing } from "../src/map/ring.ts";
+import { mapChanges } from "../src/repo/files.ts";
 
 const dirs: string[] = [];
 afterEach(() => {

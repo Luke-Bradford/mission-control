@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { PRIVATE_PROTOTYPE_TEXT, prototypeLinkProblem } from "../src/prototype-links.ts";
+import { PRIVATE_PROTOTYPE_TEXT, prototypeLinkProblem } from "../src/repo/prototype-links.ts";
 
 describe("repository prototype links", () => {
   it.each([

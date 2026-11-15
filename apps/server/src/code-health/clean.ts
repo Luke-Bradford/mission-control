@@ -1,4 +1,4 @@
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 
 /** Inert, bounded evidence text for both HTTP and the read-only tool response. */
 export function cleanCodeHealth(value: unknown, knownSecrets: readonly string[]): unknown {
