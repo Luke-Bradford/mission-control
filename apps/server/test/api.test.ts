@@ -1630,6 +1630,7 @@ const NEW_REPO = {
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
   ["GET", "/api/audit/tokens?days=7"],
+  ["GET", "/api/audit/fix-sessions"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
