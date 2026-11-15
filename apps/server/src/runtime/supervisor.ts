@@ -4446,7 +4446,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 : prEvidenceAffectedPages(paths);
               if (pages.length > 0)
                 throw new SupervisorError(
-                409,
+                  409,
                   "screenshot evidence is not ready for this review head",
                 );
             }

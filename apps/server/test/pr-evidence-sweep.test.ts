@@ -48,7 +48,13 @@ describe("open PR evidence sweep", () => {
     const sweep = createEvidenceSweep({
       store,
       repoId: "mc",
-      evidence: { baseUrl: "http://localhost", ensure,pages: async () => [], gate: () => null, stop: async () => {} },
+      evidence: {
+        baseUrl: "http://localhost",
+        ensure,
+        pages: async () => [],
+        gate: () => null,
+        stop: async () => {},
+      },
       trusted: async (p) => p.number === 7,
       post: async () => {},
       log: () => {},
@@ -73,7 +79,13 @@ describe("open PR evidence sweep", () => {
     const sweep = createEvidenceSweep({
       store,
       repoId: "mc",
-      evidence: { baseUrl: "http://localhost", ensure,pages: async () => [], gate: () => null, stop: async () => {} },
+      evidence: {
+        baseUrl: "http://localhost",
+        ensure,
+        pages: async () => [],
+        gate: () => null,
+        stop: async () => {},
+      },
       trusted,
       post: async () => {},
       log: () => {},
@@ -91,7 +103,13 @@ describe("open PR evidence sweep", () => {
     const sweep = createEvidenceSweep({
       store,
       repoId: "mc",
-      evidence: { baseUrl: "http://localhost", ensure,pages: async () => [], gate: () => null, stop: async () => {} },
+      evidence: {
+        baseUrl: "http://localhost",
+        ensure,
+        pages: async () => [],
+        gate: () => null,
+        stop: async () => {},
+      },
       trusted: async () => true,
       post: async () => {},
       log: () => {},
