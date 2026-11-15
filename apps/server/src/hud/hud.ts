@@ -95,7 +95,7 @@ import {
 import { confirmedResumeAfter, pendingRunApproval } from "../attention/subjects.ts";
 import { briefReadState, briefSourceRevision } from "../brief/source.ts";
 import { claudeVersion } from "../cli/version.ts";
-import { cloneData } from "../clone.ts";
+import { cloneData } from "../repo/clone.ts";
 import { collectorName, noteCollectorName } from "../collectors/common.ts";
 import { notificationOpen, personKey, personText } from "../collectors/notifications.ts";
 import { attentionChatter, resolvedCommsReason } from "../comms/index.ts";
@@ -116,7 +116,7 @@ import { pausedSeat } from "../crew-pause.ts";
 import { asideWakeDue } from "../engine/aside.ts";
 import { reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "../file-deps.ts";
+import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "../repo/file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.ts";

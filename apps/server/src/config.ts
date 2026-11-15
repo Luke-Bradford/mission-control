@@ -55,9 +55,9 @@ import { z } from "zod";
 import { accountBindingProblem, type CliBinding } from "./accounts/bindings.ts";
 import { CLI_UPDATES, type CliUpdates } from "./cli/update.ts";
 import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
-import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
+import { GIT_TIMEOUT_MS, gitEnv } from "./repo/files.ts";
 import { seatFocus } from "./focus.ts";
-import { areaGlob, protectedGlob } from "./globs.ts";
+import { areaGlob, protectedGlob } from "./repo/globs.ts";
 import { type CodexModels, codexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 import {
@@ -65,7 +65,7 @@ import {
   type MachineCapacityConfig,
 } from "./telemetry/machine-capacity.ts";
 
-export { areaGlob } from "./globs.ts";
+export { areaGlob } from "./repo/globs.ts";
 
 export const REPO_AUTONOMIES = ["draft", "merge"] as const;
 export type RepoAutonomy = (typeof REPO_AUTONOMIES)[number];

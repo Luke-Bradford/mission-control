@@ -89,7 +89,7 @@ import { TestLock } from "../src/guard/lock.ts";
 import { TRIM_ENTRY } from "../src/guard/trim.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
-import { runPathGrants } from "../src/path-grants.ts";
+import { runPathGrants } from "../src/repo/path-grants.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";

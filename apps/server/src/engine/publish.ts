@@ -55,7 +55,7 @@ import {
   seatWroteBody,
   withEngineSection,
 } from "../mcp/tools.ts";
-import { runPathGrants } from "../path-grants.ts";
+import { runPathGrants } from "../repo/path-grants.ts";
 import { qaReportGitSummary } from "../qa/reports.ts";
 import {
   adminDirOf,

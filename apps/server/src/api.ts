@@ -206,7 +206,7 @@ import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
-import { cleanText } from "./clean.ts";
+import { cleanText } from "./repo/clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -306,7 +306,7 @@ import {
   type GitExec,
   GitFailed,
   NO_WORKTREE_NOTE,
-} from "./files.ts";
+} from "./repo/files.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";

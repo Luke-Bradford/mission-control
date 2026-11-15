@@ -11,7 +11,7 @@ import {
   type RepoRules,
 } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 import { findApproval, useApproval } from "../flight-approvals.ts";
 import { realPathOrParent } from "../runtime/codex-floor.ts";
 import type { Store } from "../store.ts";

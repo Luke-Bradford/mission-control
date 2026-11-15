@@ -17,7 +17,7 @@ import {
   type TokenUsage,
   workSummary,
 } from "@mc/core";
-import { cleanText } from "./clean.ts";
+import { cleanText } from "./repo/clean.ts";
 import { codexPlan, codexTool, transcriptVendor } from "./transcript/codex-transcript.ts";
 import { str } from "./util.ts";
 

@@ -5,7 +5,7 @@ import {
   type FlightConversationPage,
   type StreamEvent,
 } from "@mc/core";
-import { statNoted } from "./file-deps.ts";
+import { statNoted } from "./repo/file-deps.ts";
 import { commsPosition, type Store } from "./store.ts";
 import { readStreamPage } from "./stream.ts";
 import { transcriptFilePath } from "./transcript/file.ts";

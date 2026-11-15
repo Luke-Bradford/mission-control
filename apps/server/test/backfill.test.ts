@@ -18,7 +18,7 @@ import {
   rewriteCrewSummaries,
   SUMMARY_REWRITE_DONE,
   TITLES_FILLED_DONE,
-} from "../src/backfill.ts";
+} from "../src/repo/backfill.ts";
 import { FOLD_WINDOW_MS, foldPath } from "../src/collectors/common.ts";
 import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";

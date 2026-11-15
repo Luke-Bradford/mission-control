@@ -10,7 +10,7 @@ import {
   type MapTests,
   namesOnly,
 } from "@mc/core";
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 import { isObj, type Json, timeOf } from "../streamjson.ts";
 import { codexTool, transcriptVendor } from "../transcript/codex-transcript.ts";
 import { offsetSince, readNewLines } from "../transcript/tail.ts";

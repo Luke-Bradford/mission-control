@@ -1,5 +1,5 @@
 import { NEW_LOOP, type Run, type RunHandoff, type RunLoop } from "@mc/core";
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 import { handoffCheckoutStatus } from "../runtime/checkouts.ts";
 import type { Store } from "../store.ts";
 

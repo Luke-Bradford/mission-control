@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { keepOutOfSpotlight, NO_INDEX_MARKER } from "../src/no-index.ts";
+import { keepOutOfSpotlight, NO_INDEX_MARKER } from "../src/repo/no-index.ts";
 
 describe("keepOutOfSpotlight", () => {
   it("writes the marker at each folder's root, making a missing folder, and keeps existing files", () => {

@@ -27,7 +27,7 @@ import {
   STDERR_TEXT_MAX,
   STOP_GRACE_MS,
 } from "@mc/core";
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 import { CLAUDE_COMMAND } from "../cli/version.ts";
 import { STREAM_EVENT_PREFIX } from "../streamjson.ts";
 import { toolResultBytes } from "../telemetry/prompt-cost.ts";

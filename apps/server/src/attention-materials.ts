@@ -20,7 +20,7 @@ import {
   type AttentionStorySection,
 } from "@mc/core";
 import type { CcConfig } from "./config.ts";
-import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
+import { GIT_TIMEOUT_MS, gitEnv } from "./repo/files.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
 import type { Store } from "./store.ts";
 

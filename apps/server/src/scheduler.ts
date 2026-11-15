@@ -30,7 +30,7 @@ import {
 } from "@mc/core";
 import { codexProfile } from "./accounts/bindings.ts";
 import { evaluateHolds, holds } from "./attention/holds.ts";
-import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
+import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./repo/backfill.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {

@@ -209,7 +209,7 @@ import { onlyHubMerges } from "../engine/hub-merges.ts";
 import { noteFlightWrite, runawayTrip } from "../flight/runaway.ts";
 import { flightSeat } from "../flight/seat.ts";
 import { recordSeatCall } from "../flight/signals.ts";
-import { runPathGrants } from "../path-grants.ts";
+import { runPathGrants } from "../repo/path-grants.ts";
 import {
   PREVIEW_READY_WAIT_MS,
   PREVIEW_SHOTS_MAX,

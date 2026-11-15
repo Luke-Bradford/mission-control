@@ -36,7 +36,7 @@ import {
   realish,
   SEAT_ID,
 } from "../config.ts";
-import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import { GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
 import {
   assertSeatGitConfig,
   crewGit,

@@ -8,15 +8,15 @@ import {
   FOLD_WINDOW_MS,
   type FoldState,
   foldPath,
-} from "./collectors/common.ts";
-import { GqlError } from "./collectors/github.ts";
-import { isRateLimitedError } from "./collectors/rate-limit.ts";
-import { agentIds, type CcConfig } from "./config.ts";
-import { parseTicket } from "./run/view.ts";
-import { crewDirPath } from "./store/crew-paths.ts";
-import type { Store } from "./store.ts";
-import type { TranscriptFacts } from "./streamjson.ts";
-import { transcriptFilePath } from "./transcript/file.ts";
+} from "../collectors/common.ts";
+import { GqlError } from "../collectors/github.ts";
+import { isRateLimitedError } from "../collectors/rate-limit.ts";
+import { agentIds, type CcConfig } from "../config.ts";
+import { parseTicket } from "../run/view.ts";
+import { crewDirPath } from "../store/crew-paths.ts";
+import type { Store } from "../store.ts";
+import type { TranscriptFacts } from "../streamjson.ts";
+import { transcriptFilePath } from "../transcript/file.ts";
 
 /** Runs taken from the store per query. */
 export const BACKFILL_BATCH = 20;

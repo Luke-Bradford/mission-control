@@ -10,7 +10,7 @@ import {
 import { basename, join } from "node:path";
 import type { Run, RunDigest } from "@mc/core";
 import type { AdoptedLoop } from "../config.ts";
-import { existsNoted } from "../file-deps.ts";
+import { existsNoted } from "../repo/file-deps.ts";
 import type { Store } from "../store.ts";
 import {
   applyFacts,

@@ -16,7 +16,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { createBranchTidy } from "../src/branch-tidy.ts";
+import { createBranchTidy } from "../src/repo/branch-tidy.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { Gql } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
