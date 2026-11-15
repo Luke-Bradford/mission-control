@@ -957,7 +957,7 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(seatState("guido-1")).toBe("running"));
     process.kill(readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number, "SIGKILL");
     await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
-    expect(starts()).toHaveLength(2);
+    await until(() => expect(starts()).toHaveLength(2)); // the resumed CLI records its start once up
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(store.run(runId)?.noReport).toBeUndefined();
     expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
