@@ -9,7 +9,7 @@ import {
   withSection,
 } from "@mc/core";
 import type { GhRunner } from "../mcp/gh.ts";
-import { ownsPr } from "../ownership.ts";
+import { ownsPr } from "../queue/ownership.ts";
 import type { Store } from "../store.ts";
 import type { PrEvidence } from "./capture.ts";
 

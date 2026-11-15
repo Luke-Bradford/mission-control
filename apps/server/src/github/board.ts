@@ -11,8 +11,8 @@ import {
 } from "@mc/core";
 import { type Gql, GqlError, isObj, isTransient } from "../collectors/github.ts";
 import type { CcConfig } from "../config.ts";
-import { ownsPr } from "../ownership.ts";
-import { reworkReview } from "../rework.ts";
+import { ownsPr } from "../queue/ownership.ts";
+import { reworkReview } from "../queue/rework.ts";
 import type { Store } from "../store.ts";
 import { singleSelectField } from "./fields.ts";
 import { readStatusField } from "./setup.ts";

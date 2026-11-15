@@ -12,7 +12,7 @@ import {
   ticketWaits,
   waitChains,
 } from "@mc/core";
-import type { Store } from "./store.ts";
+import type { Store } from "../store.ts";
 
 type WaitCard = Pick<BoardItem, "issueNumber" | "blockedBy" | "after">;
 

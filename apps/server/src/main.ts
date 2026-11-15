@@ -38,7 +38,6 @@ import { buildApp, crewGuardDeps } from "./api.ts";
 import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./branch-tidy.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
 import { ChangeBus } from "./bus.ts";
-import { claimAs, readLogin } from "./claim.ts";
 import { CliHold } from "./cli/update.ts";
 import { CODE_HEALTH_AUDIT_EVERY_MS, runCodeHealthAudit } from "./code-health/audit.ts";
 import { createFileContext } from "./code-health/file-context.ts";
@@ -130,11 +129,12 @@ import { resolvePreviewRepo } from "./preview/repo.ts";
 import { createReviewPreviews, WEB_AREA_LABEL } from "./preview/review.ts";
 import { loadProfiles, PROFILES_FILE } from "./profiles.ts";
 import { createQaReports } from "./qa/reports.ts";
+import { claimAs, readLogin } from "./queue/claim.ts";
 import {
   prepareQueueReorderSnapshot,
   type QueueReorderDeps,
   reorderQueue,
-} from "./queue-reorder.ts";
+} from "./queue/queue-reorder.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";

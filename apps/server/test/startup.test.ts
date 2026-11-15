@@ -116,8 +116,8 @@ vi.mock("../src/preview/repo.ts", async (original) => {
   };
 });
 
-vi.mock("../src/claim.ts", async (original) => ({
-  ...(await original<typeof import("../src/claim.ts")>()),
+vi.mock("../src/queue/claim.ts", async (original) => ({
+  ...(await original<typeof import("../src/queue/claim.ts")>()),
   readLogin: async () => "operator",
 }));
 vi.mock("../src/runtime/supervisor.ts", async (original) => {

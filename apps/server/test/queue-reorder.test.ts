@@ -25,7 +25,7 @@ import {
   type QueueReorderDeps,
   reorderQueue,
   resolveQueueReorder,
-} from "../src/queue-reorder.ts";
+} from "../src/queue/queue-reorder.ts";
 import { Store } from "../src/store.ts";
 import { liveBriefSeat } from "./brief-fixture.ts";
 
