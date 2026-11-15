@@ -6444,7 +6444,10 @@ describe("the engine runs reviews", () => {
 
     describe("a review held at the review-round limit", () => {
       // round 1 reported blocking; round 3 is queued and held by the waste check
-      const heldAtLimit = async (checks: Parameters<typeof reported>[2] = []) => {
+      const heldAtLimit = async (
+        checks: Parameters<typeof reported>[2] = [],
+        reviewerBusy = false,
+      ) => {
         need(config.repos[0]).flightPowers = "superuser";
         await toReview();
         await h.engine.reconcileRun(RUN);
@@ -6462,6 +6465,7 @@ describe("the engine runs reviews", () => {
           at: clock,
         });
         setLoop({ reviewReplyTo: one.id });
+        if (reviewerBusy) h.busyList = [{ seatId: RETRO, state: "running" }];
         await h.engine.tick();
         return need(third);
       };
@@ -6471,6 +6475,13 @@ describe("the engine runs reviews", () => {
         expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "review" } });
         await h.engine.reconcileRun(RUN);
         expect(store.review(third)?.state).toBe("superseded");
+      });
+
+      it("parks the run although the reviewer is busy on another run", async () => {
+        await heldAtLimit([], true);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(loopOf()).toMatchObject({ phase: "working", flightReworks: { [SHA]: 1 } });
       });
 
       it("accept moves the run on, with no review on the same head", async () => {

@@ -2824,9 +2824,22 @@ export function createEngine(deps: EngineDeps): Engine {
       recorded.add(id);
       setReviewHold(store, id, h);
     };
+    // a change past its review rounds waits for FLIGHT's decision whatever the reviewer or machine
+    // is doing: park its run (as a failed review at the cap does) so FLIGHT can settle it. The
+    // parked run's pass supersedes the held review; it is not awaited, as that pass reads this one.
+    const heldRows = new Set<number>();
+    for (const row of store.reviewsIn(["queued"])) {
+      if (!reviewsHeld(store, row.authorRunId)) continue;
+      heldRows.add(row.id);
+      hold(row.id, {
+        reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
+        prNumber: null,
+      });
+      void parkForHeldReview(row);
+    }
     const machine = storedMachineCapacity(store, now(), capacityConfig);
     if (machine.blocked) {
-      for (const row of store.reviewsIn(["queued"]))
+      for (const row of store.reviewsIn(["queued"]).filter((r) => !heldRows.has(r.id)))
         hold(row.id, {
           reason: `The machine is held: ${machine.reason ?? "its capacity is low"}.`,
           prNumber: null,
@@ -2848,7 +2861,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const storm = restartHold(store, seat.id);
       const queuedHere = store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id);
       if (storm !== null) {
-        for (const row of queuedHere)
+        for (const row of queuedHere.filter((r) => !heldRows.has(r.id)))
           hold(row.id, {
             reason: `The reviewer is held after repeated restarts: ${storm}`,
             prNumber: null,
@@ -2856,16 +2869,8 @@ export function createEngine(deps: EngineDeps): Engine {
         continue;
       }
       for (const row of queuedHere) {
-        // a change past its review rounds waits for FLIGHT's decision (waste alarm)
-        if (reviewsHeld(store, row.authorRunId)) {
-          hold(row.id, {
-            reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
-            prNumber: null,
-          });
-          // park the run (as a failed review at the cap does) so FLIGHT can settle it
-          void parkForHeldReview(row);
-          continue;
-        }
+        // held and parked above
+        if (heldRows.has(row.id)) continue;
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;
