@@ -26,6 +26,7 @@ import {
   asideForAnswerEventText,
   asideForReworkEventText,
   asideInCiEventText,
+  assignFixArm,
   awayBugDecisionAbout,
   awayDiffSafe,
   awayTicketType,
@@ -66,10 +67,14 @@ import {
   FLIGHT_CONTROLLER_CHECK_PATHS,
   FLIGHT_FLOOR_PATHS,
   fillLoopText,
+  fixArmEventText,
   fixCommsText,
   fixKey,
   fixSentText,
   fixText,
+  fixTrialStratum,
+  freshFallbackEventText,
+  freshWokenEventText,
   gateView,
   hardRulesBySettingKey,
   hardRulesUnsetNoteKey,
@@ -156,6 +161,7 @@ import { activeAway } from "../away.ts";
 import type { ChangeBus } from "../bus.ts";
 import { pausedSeat, reviewPausedMs } from "../config/crew-pause.ts";
 import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } from "../config.ts";
+import { fixTrialMerged, fixTrialSize } from "../fix-session-trial.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import { issueOf } from "../mcp/tools.ts";
@@ -165,7 +171,7 @@ import type { Supervisor } from "../runtime/supervisor.ts";
 import { restartHold, reviewsHeld } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
-import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
+import { fixWakeReason, reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
 import {
   CI_LOG_UNREADABLE,
@@ -1709,8 +1715,10 @@ export function createEngine(deps: EngineDeps): Engine {
           return;
         const oldest = wakeDueAsideRun(store, run.agentId);
         if (oldest !== undefined && oldest.id !== run.id) return;
+        const fresh = freshFixReason(run, cur, at);
+        let woke: { freshSessionId: string | null; fallback: string | null } | undefined;
         try {
-          await supervisor.wakeRun(run.id);
+          woke = await supervisor.wakeRun(run.id, fresh === undefined ? undefined : { fresh });
         } catch (e) {
           // the seat is busy or the hub is stopping: the next pass tries again; the run holding the
           // seat is looked at now, to give way to this rework if its turn has ended
@@ -1745,10 +1753,26 @@ export function createEngine(deps: EngineDeps): Engine {
           };
         }
         cur.aside = null;
+        const call = seatCallSign(run.agentId);
+        if (fresh !== undefined && woke?.freshSessionId) {
+          cur.fixSessions = [
+            ...(cur.fixSessions ?? []),
+            { sessionId: woke.freshSessionId, at, reason: fresh },
+          ];
+        }
+        if (fresh !== undefined && woke?.fallback) {
+          cur.fixFallbacks = [...(cur.fixFallbacks ?? []), { at, reason: woke.fallback }];
+          store.addLoopEvent(
+            `${run.id}:fix-fallback:${at}`,
+            run.id,
+            freshFallbackEventText(call, woke.fallback),
+            at,
+          );
+        }
         store.addLoopEvent(
           `${run.id}:woken:${at}`,
           run.id,
-          wokenEventText(seatCallSign(run.agentId)),
+          woke?.freshSessionId ? freshWokenEventText(call) : wokenEventText(call),
           at,
         );
         // the fix line goes now
@@ -2299,6 +2323,60 @@ export function createEngine(deps: EngineDeps): Engine {
       item !== undefined &&
       hudColumnOf(item) !== "Blocked"
     );
+  }
+
+  /**
+   * The fix-session trial (#1643): the reason to start the run's wake in a fresh session, or
+   * undefined to resume it. With the switch on, an eligible run with a fix due is put in an arm
+   * once (kept for its later fixes); only the fresh arm gets a new session.
+   */
+  function freshFixReason(run: Run, cur: RunLoop, at: number): "ci" | "review" | undefined {
+    if (config.crew?.fixSessionTrial !== true) return undefined;
+    const reason = fixWakeReason(store, run);
+    if (reason === null) return undefined;
+    if (cur.fixArm === undefined) {
+      const seat = seatConfig(run.agentId);
+      const issue = issueOf(run);
+      if (
+        seat === undefined ||
+        seatDef(seat).loop !== "build" ||
+        seatDef(seat).mode !== "writer" ||
+        run.vendor === "codex" ||
+        run.reviewId != null ||
+        issue === null ||
+        run.ticket === null
+      )
+        return undefined;
+      const stratum = fixTrialStratum(fixTrialSize(store, run));
+      if (stratum === null) return undefined;
+      const others = store.fixTrialRuns().filter((r) => r.id !== run.id);
+      if (others.some((r) => r.ticket === run.ticket)) return undefined;
+      const entries = others.flatMap((r) => {
+        const s = fixTrialStratum(fixTrialSize(store, r));
+        return r.loop?.fixArm === undefined || s === null || r.ticket === null
+          ? []
+          : [
+              {
+                ticket: r.ticket,
+                stratum: s,
+                arm: r.loop.fixArm,
+                merged: fixTrialMerged(store, r),
+              },
+            ];
+      });
+      const arm = assignFixArm(entries, stratum, issue);
+      if (arm === null) return undefined;
+      cur.fixArm = arm;
+      // stored before the wake: a transient refusal keeps the arm
+      store.setRunLoop(run.id, cur);
+      store.addLoopEvent(
+        `${run.id}:fix-arm`,
+        run.id,
+        fixArmEventText(run.ticket, arm, stratum),
+        at,
+      );
+    }
+    return cur.fixArm === "fresh" ? reason : undefined;
   }
 
   /** Whether the run's PR is merged (found on GitHub, or by the merge step). */
