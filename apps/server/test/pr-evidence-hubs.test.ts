@@ -133,6 +133,9 @@ describe("removeStaleEvidenceWork", () => {
     mkdirSync(side, { recursive: true });
     git(checkout, "worktree", "add", "-q", "--detach", join(side, "worktree"));
     const capture = join(workDir, "capture-xyz");
+    const keptSnapshot = join(workDir, "kept-7");
+    mkdirSync(keptSnapshot);
+    writeFileSync(join(keptSnapshot, "snapshot.sqlite"), "db");
     mkdirSync(capture);
     writeFileSync(join(capture, "snapshot.sqlite"), "db");
     writeFileSync(join(workDir, "keep.txt"), "not ours");
@@ -140,7 +143,8 @@ describe("removeStaleEvidenceWork", () => {
 
     const removed = await removeStaleEvidenceWork({ workDir, checkout, run });
 
-    expect(removed.sort()).toEqual(["capture-xyz", join("sides", "abc-1234")]);
+    expect(removed.sort()).toEqual(["capture-xyz", "kept-7", join("sides", "abc-1234")]);
+    expect(existsSync(keptSnapshot)).toBe(false);
     expect(existsSync(capture)).toBe(false);
     expect(existsSync(side)).toBe(false);
     expect(readFileSync(join(workDir, "keep.txt"), "utf8")).toBe("not ours");

@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EVIDENCE_KINDS, EVIDENCE_SCHEMES, type EvidenceManifest } from "@mc/core";
@@ -82,6 +82,7 @@ function setup(over: Partial<PrEvidenceDeps> = {}) {
       ...t,
     });
   return {
+    workDir: deps.workDir,
     evidence: { ...evidence, ensure },
     store,
     started,
@@ -584,6 +585,43 @@ describe("PrEvidence capture", () => {
       `${NEWMAIN}:dark`,
     ]);
     expect((t.store.manifest("mc", 7, HEAD) as EvidenceManifest).mainSha).toBe(NEWMAIN);
+  });
+
+  it("keeps the snapshot folder only while a failed head waits for its retry", async () => {
+    let now = 5000;
+    let broken = true;
+    const t = setup({
+      now: () => now,
+      render: async (origin, _path, scheme) => {
+        if (broken && origin.endsWith(HEAD) && scheme === "dark") throw new Error("timed out");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    const kept = join(t.workDir, "kept-7");
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(existsSync(kept)).toBe(true);
+    broken = false;
+    now += 1001;
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(existsSync(kept)).toBe(false);
+  });
+
+  it("removes the snapshot folder when the PR gets a new head", async () => {
+    let now = 5000;
+    const t = setup({
+      now: () => now,
+      render: async (origin, _path, scheme) => {
+        if (origin.endsWith(HEAD) && scheme === "dark") throw new Error("timed out");
+        return encodePng(pageBox(origin.split("/").pop() ?? "", scheme));
+      },
+    });
+    const kept = join(t.workDir, "kept-7");
+    await t.evidence.ensure({ pr: 7, sha: HEAD, paths: WEB });
+    expect(existsSync(kept)).toBe(true);
+    now += 1001;
+    await t.evidence.ensure({ pr: 7, sha: NEXT, paths: WEB });
+    // NEXT succeeded, so nothing of the old head or the new one is left
+    expect(existsSync(kept)).toBe(false);
   });
 
   it("throws the kept renders away when the PR gets a new head", async () => {
