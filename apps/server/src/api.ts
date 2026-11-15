@@ -258,16 +258,6 @@ import {
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
 import {
-  agentIds,
-  type CcConfig,
-  configuredAgents,
-  crewSeatDef,
-  crewSeatMode,
-  DEFAULT_MAX_SEATS,
-  flightPowersOf,
-  TeamsSelection,
-} from "./config.ts";
-import {
   AccountBody,
   accountDuplicateReason,
   addAccount,
@@ -289,15 +279,27 @@ import {
   setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
-} from "./config-write.ts";
-import type { CrewReloader } from "./crew-apply.ts";
+} from "./config/config-write.ts";
 import {
   CrewPauseBody,
   pausedSeat,
   readCrewPause,
   startUnpausedRun,
   writeCrewPause,
-} from "./crew-pause.ts";
+} from "./config/crew-pause.ts";
+import { createProfile, NewProfileBody, profilesView } from "./config/profiles.ts";
+import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
+import {
+  agentIds,
+  type CcConfig,
+  configuredAgents,
+  crewSeatDef,
+  crewSeatMode,
+  DEFAULT_MAX_SEATS,
+  flightPowersOf,
+  TeamsSelection,
+} from "./config.ts";
+import type { CrewReloader } from "./crew-apply.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
@@ -312,6 +314,7 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
+import { fixSessionTrialView } from "./fix-session-trial.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
@@ -384,7 +387,6 @@ import {
   PreviewHubError,
   type PreviewManager,
 } from "./preview/previews.ts";
-import { createProfile, NewProfileBody, profilesView } from "./profiles.ts";
 import { qaHistoryPage, qaNativeHistory } from "./qa/history.ts";
 import {
   createQaReports,
@@ -410,7 +412,6 @@ import {
   GitFailed,
   NO_WORKTREE_NOTE,
 } from "./repo/files.ts";
-import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
 import {
@@ -4213,6 +4214,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             config.audit?.thresholds,
           ),
         );
+      });
+      // Reader: docs/runbook.md#audit-api (the fix-session trial's receipts; the operator and FLIGHT read it)
+      api.get("/audit/fix-sessions", async (req, reply) => {
+        if (Object.keys(req.query as Record<string, unknown>).length > 0) {
+          return reply.code(400).send({ error: "send no query" });
+        }
+        return fixSessionTrialView(store, config);
       });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
       api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(

@@ -15,6 +15,7 @@ import type {
   RunHandoff,
   RunTokenAudit,
   TicketQuestion,
+  TokenAuditSession,
   TokenCall,
   TokenCounts,
   TokenSourceAdd,
@@ -63,16 +64,10 @@ import {
   estimateTokens,
   type FindingResolution,
   FLIGHT_INCOMING_LIMIT,
-  FLIGHT_LEDGER_OPEN,
-  FLIGHT_MEMORY_FULL,
-  FLIGHT_MEMORY_TOPICS_MAX,
-  FLIGHT_PLAN_LIMIT,
-  FLIGHT_POINTER_CHANGE_MAX,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_SIGNALS_SETTING,
   FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
-  FLIGHT_WATCH_LIMIT,
   type FlightArrivalDisposition,
   type FlightDecision,
   type FlightDecisionKind,
@@ -82,7 +77,6 @@ import {
   type FlightMovedPointer,
   type FlightPlanInput,
   type FlightPlanOperation,
-  type FlightPointer,
   type FlightPointerKind,
   type FlightWakeRecord,
   type FlightWatchEntry,
@@ -105,7 +99,6 @@ import {
   type MachineSample,
   type MergedPrFacts,
   type ModelAdvice,
-  memoryTopicKey,
   OLDER_FINDINGS_MAX,
   overusePrevention,
   PROMPT_BYTES_PER_TOKEN,
@@ -153,7 +146,6 @@ import {
   testsTouched,
   tokenBaselines,
   type UsageSample,
-  validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
 import { CodeHealthReadError } from "./code-health/error.ts";
@@ -235,6 +227,7 @@ import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
+import { flightQueries } from "./store/flight.ts";
 import {
   compactFlightWake,
   evidenceOf,
@@ -243,12 +236,10 @@ import {
   toBoardItem,
   toCiRun,
   toEscalation,
-  toFlightDecision,
   toGuardHit,
   toQuestion,
   toReview,
   toRun,
-  toSample,
 } from "./store/rows.ts";
 import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
@@ -292,6 +283,11 @@ import {
   type SeatQuestion,
   type Stray,
 } from "./store/types.ts";
+import {
+  type ControllerMessageUsage,
+  type ControllerUsageTotals,
+  usageQueries,
+} from "./store/usage.ts";
 import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
 import {
   auditThresholds,
@@ -369,6 +365,12 @@ type RepoTable = keyof typeof REPO_TABLES;
 const DIGEST_BATCH = 500;
 const DIGEST_CONTEXT_WINDOW_SQL =
   "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
+
+/** The `sessions` of a stored audit: set only when the run had a fresh session. */
+const sessionsOf = (raw: unknown): { sessions?: TokenAuditSession[] } => {
+  const list = JSON.parse(typeof raw === "string" ? raw : "[]") as TokenAuditSession[];
+  return list.length > 0 ? { sessions: list } : {};
+};
 
 const toTokenCall = (r: Row): TokenCall => ({
   at: (r.at as number | null) ?? null,
@@ -863,6 +865,7 @@ export class Store {
     // Token audit call times (#1646): audits stored before this have none until re-read.
     this.addColumn("run_token_calls", "at", "INTEGER");
     this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
+    this.addColumn("run_token_audit", "sessions", "TEXT NOT NULL DEFAULT '[]'");
     this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
     this.addColumn("flight_decisions", "order_id", "INTEGER");
     this.addColumn("flight_decisions", "wake_id", "TEXT");
@@ -1300,6 +1303,14 @@ export class Store {
     return this.runQ.runAttempts(runId);
   }
 
+  private usageQueriesCache: ReturnType<typeof usageQueries> | undefined;
+
+  /** The usage sample and controller usage queries (store/usage.ts). */
+  private get usageQ(): ReturnType<typeof usageQueries> {
+    this.usageQueriesCache ??= usageQueries(this.db, (fn) => this.transaction(fn));
+    return this.usageQueriesCache;
+  }
+
   private runQueriesCache: ReturnType<typeof runQueries> | undefined;
 
   /** The run and attempt queries (store/runs.ts), over the same connection and statement cache. */
@@ -1320,6 +1331,18 @@ export class Store {
 
   private insertComms(row: NewCommsRow, text: string, replyTo: number | null): number {
     return this.commsStore.insertComms(row, text, replyTo);
+  }
+
+  private flightQueriesCache: ReturnType<typeof flightQueries> | undefined;
+
+  /** The queries over FLIGHT's own tables (store/flight.ts); the FLIGHT methods below delegate to it. */
+  private get flightQ(): ReturnType<typeof flightQueries> {
+    this.flightQueriesCache ??= flightQueries(
+      this.db,
+      (fn) => this.transaction(fn),
+      (sql) => this.statement(sql),
+    );
+    return this.flightQueriesCache;
   }
 
   /** The waste checks' queries and the alarms table (spend/waste.ts). */
@@ -1441,7 +1464,7 @@ export class Store {
         .prepare(
           `INSERT OR REPLACE INTO run_token_audit (run_id, at, calls, peak_context, median_context,
              cache_read, cache_write, output, rewrites, rewrite_tokens, read_after_report,
-             by_source, by_command, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+             by_source, by_command, sessions, timestamps_checked) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
         )
         .run(
           runId,
@@ -1457,6 +1480,7 @@ export class Store {
           audit.readAfterReport,
           JSON.stringify(audit.bySource),
           JSON.stringify(audit.byCommand),
+          JSON.stringify(audit.sessions ?? []),
         );
       const insert = this.db.prepare(
         `INSERT INTO run_token_calls (run_id, idx, context, cache_read, cache_write, output, added, at)
@@ -1582,7 +1606,8 @@ export class Store {
         `SELECT r.*, a.calls AS a_calls, a.peak_context AS a_peak, a.median_context AS a_median,
            a.cache_read AS a_cache_read, a.cache_write AS a_cache_write, a.output AS a_output,
            a.rewrites AS a_rewrites, a.rewrite_tokens AS a_rewrite_tokens,
-           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command
+           a.read_after_report AS a_after, a.by_source AS a_by_source, a.by_command AS a_by_command,
+           a.sessions AS a_sessions
          FROM run_token_audit a JOIN runs r ON r.id = a.run_id
          WHERE r.started_at >= ? AND a.calls > 0 ORDER BY r.started_at DESC, r.seq DESC`,
       )
@@ -1601,8 +1626,21 @@ export class Store {
         readAfterReport: r.a_after as number | null,
         bySource: JSON.parse(r.a_by_source as string) as Record<string, TokenCounts>,
         byCommand: JSON.parse(r.a_by_command as string) as Record<string, TokenCounts>,
+        ...sessionsOf(r.a_sessions),
       },
     }));
+  }
+
+  /** Runs in the fix-session trial (`loop.fixArm` set), oldest first. */
+  fixTrialRuns(): Run[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM runs WHERE json_extract(loop, '$.fixArm') IS NOT NULL
+           ORDER BY started_at, seq`,
+        )
+        .all() as Row[]
+    ).map(toRun);
   }
 
   /** Context size of every stored model call of runs that started since `since`. */
@@ -1680,60 +1718,22 @@ export class Store {
    * Stores controller messages' usage numbers (never text). A message id seen again, in a resumed
    * session's copy of its history or a subagent file, counts once; the larger output is kept.
    */
-  saveControllerMessages(
-    sessionId: string,
-    messages: readonly {
-      id: string;
-      at: number;
-      input: number;
-      cacheRead: number;
-      cacheWrite: number;
-      output: number;
-    }[],
-  ): void {
-    const insert = this.db.prepare(
-      `INSERT INTO controller_messages (message_id, session_id, at, input, cache_read, cache_write, output)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(message_id) DO UPDATE SET output = MAX(output, excluded.output)`,
-    );
-    this.transaction(() => {
-      for (const m of messages) {
-        insert.run(m.id, sessionId, m.at, m.input, m.cacheRead, m.cacheWrite, m.output);
-      }
-    });
+  saveControllerMessages(sessionId: string, messages: readonly ControllerMessageUsage[]): void {
+    this.usageQ.saveControllerMessages(sessionId, messages);
   }
 
   /** Controller usage by message time since `since`: distinct sessions, distinct messages and token sums. */
-  controllerUsageSince(since: number): {
-    sessions: number;
-    calls: number;
-    input: number;
-    cacheRead: number;
-    cacheWrite: number;
-    output: number;
-  } {
-    return this.db
-      .prepare(
-        `SELECT COUNT(DISTINCT session_id) AS sessions, COUNT(*) AS calls,
-           COALESCE(SUM(input), 0) AS input, COALESCE(SUM(cache_read), 0) AS cacheRead,
-           COALESCE(SUM(cache_write), 0) AS cacheWrite, COALESCE(SUM(output), 0) AS output
-         FROM controller_messages WHERE at >= ?`,
-      )
-      .get(since) as never;
+  controllerUsageSince(since: number): ControllerUsageTotals {
+    return this.usageQ.controllerUsageSince(since);
   }
 
   /** The mtime a controller file was last read at, or null when it has not been read. */
   controllerFileMtime(path: string): number | null {
-    const r = this.db.prepare("SELECT mtime FROM controller_files WHERE path = ?").get(path) as
-      | { mtime: number }
-      | undefined;
-    return r?.mtime ?? null;
+    return this.usageQ.controllerFileMtime(path);
   }
 
   markControllerFile(path: string, mtime: number): void {
-    this.db
-      .prepare("INSERT OR REPLACE INTO controller_files (path, mtime) VALUES (?, ?)")
-      .run(path, mtime);
+    this.usageQ.markControllerFile(path, mtime);
   }
 
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */
@@ -2682,30 +2682,16 @@ export class Store {
   }
 
   addUsage(s: UsageSample): void {
-    this.db
-      .prepare(
-        "INSERT OR IGNORE INTO usage_samples (account_id, window, at, pct, reset_at, source) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(s.accountId, s.window, s.at, s.pct, s.resetAt, s.source);
+    this.usageQ.addUsage(s);
   }
 
   usage(accountId: AccountId, window: "5h" | "7d", sinceMs: number): UsageSample[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM usage_samples WHERE account_id = ? AND window = ? AND at >= ? ORDER BY at ASC",
-      )
-      .all(accountId, window, sinceMs) as Row[];
-    return rows.map(toSample);
+    return this.usageQ.usage(accountId, window, sinceMs);
   }
 
   /** The newest sample for an account and window, or null when there is none. */
   latestUsage(accountId: AccountId, window: "5h" | "7d"): UsageSample | null {
-    const row = this.db
-      .prepare(
-        "SELECT * FROM usage_samples WHERE account_id = ? AND window = ? ORDER BY at DESC LIMIT 1",
-      )
-      .get(accountId, window) as Row | undefined;
-    return row ? toSample(row) : null;
+    return this.usageQ.latestUsage(accountId, window);
   }
 
   /** True when any stored row changed. */
@@ -3970,20 +3956,7 @@ export class Store {
 
   /** The newest `limit` FLIGHT decisions that name the ticket by ref or target one of its runs. */
   flightDecisionsOnTicket(ref: string, runIds: readonly string[], limit: number): FlightDecision[] {
-    const byRef = this.db
-      .prepare("SELECT * FROM flight_decisions WHERE ref = ? ORDER BY at DESC, id DESC LIMIT ?")
-      .all(ref, limit) as Row[];
-    const byRun = this.statement(
-      "SELECT * FROM flight_decisions WHERE target_run_id = ? ORDER BY at DESC, id DESC LIMIT ?",
-    );
-    const seen = new Set<number>();
-    const out: FlightDecision[] = [];
-    for (const r of [...byRef, ...runIds.flatMap((id) => byRun.all(id, limit) as Row[])]) {
-      if (seen.has(r.id as number)) continue;
-      seen.add(r.id as number);
-      out.push(toFlightDecision(r));
-    }
-    return out.sort((a, b) => b.at - a.at || b.id - a.id).slice(0, limit);
+    return this.flightQ.flightDecisionsOnTicket(ref, runIds, limit);
   }
 
   /** The stored PRs among `numbers`, as number and title, lowest number first; never parses a row's checks. */
@@ -7487,8 +7460,7 @@ export class Store {
   }
 
   setFlightPlans(session: string, operation: FlightPlanOperation, at: number): void {
-    const write = this.prepareFlightPlans(session, operation, at);
-    this.transaction(write);
+    this.flightQ.setFlightPlans(session, operation, at);
   }
 
   private prepareFlightPlans(
@@ -7496,71 +7468,30 @@ export class Store {
     operation: FlightPlanOperation,
     at: number,
   ): () => void {
-    const plans = new Map(this.flightPlans(session).map((p) => [p.id, p]));
-    for (const entry of operation.upsert ?? []) {
-      if (entry.status === "completed" && !entry.detail?.trim())
-        throw new Error("Completion needs an observed outcome.");
-      plans.set(entry.id, { ...entry, createdAt: plans.get(entry.id)?.createdAt ?? at });
-    }
-    if ([...plans.values()].filter((p) => p.status === "pending").length > FLIGHT_PLAN_LIMIT)
-      throw new Error("Too many planned entries.");
-    const finished = [...plans.values()]
-      .filter((p) => p.status !== "pending")
-      .sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
-    for (const entry of finished.slice(0, Math.max(0, plans.size - FLIGHT_PLAN_LIMIT)))
-      plans.delete(entry.id);
-    return () => {
-      this.db.prepare("DELETE FROM flight_plans WHERE session_id = ?").run(session);
-      for (const entry of plans.values())
-        this.db
-          .prepare("INSERT INTO flight_plans (session_id, id, entry) VALUES (?, ?, ?)")
-          .run(session, entry.id, JSON.stringify(entry));
-    };
+    return this.flightQ.prepareFlightPlans(session, operation, at);
   }
 
   /** Stores a FLIGHT wake on the run it woke, with the fact categories that caused it. */
   addFlightWake(runId: string, at: number, reasons: string[], wakeId?: string): void {
-    this.db
-      .prepare(
-        "INSERT OR REPLACE INTO flight_wakes (run_id, at, reasons, wake_id) VALUES (?, ?, ?, ?)",
-      )
-      .run(runId, at, JSON.stringify(reasons), wakeId ?? null);
+    this.flightQ.addFlightWake(runId, at, reasons, wakeId);
   }
 
   /** The id of the run's latest wake; null when it has none or none was given an id. */
   latestFlightWakeId(runId: string): string | null {
-    const row = this.db
-      .prepare("SELECT wake_id FROM flight_wakes WHERE run_id = ? ORDER BY at DESC LIMIT 1")
-      .get(runId) as { wake_id: string | null } | undefined;
-    return row?.wake_id ?? null;
+    return this.flightQ.latestFlightWakeId(runId);
   }
 
   /** FLIGHT's wakes at or after `since`, oldest first. */
   flightWakes(since: number): FlightWakeRecord[] {
-    const rows = this.db
-      .prepare(
-        "SELECT run_id, at, reasons, wake_id FROM flight_wakes WHERE at >= ? ORDER BY at, run_id",
-      )
-      .all(since) as { run_id: string; at: number; reasons: string; wake_id: string | null }[];
-    return rows.map((r) => ({
-      runId: r.run_id,
-      at: r.at,
-      reasons: JSON.parse(r.reasons) as string[],
-      ...(r.wake_id === null ? {} : { wakeId: r.wake_id }),
-    }));
+    return this.flightQ.flightWakes(since);
   }
 
   flightPlans(session: string): (FlightPlanInput & { createdAt: number })[] {
-    return (
-      this.db
-        .prepare("SELECT entry FROM flight_plans WHERE session_id = ? ORDER BY id")
-        .all(session) as Row[]
-    ).map((r) => JSON.parse(r.entry as string) as FlightPlanInput & { createdAt: number });
+    return this.flightQ.flightPlans(session);
   }
 
   setFlightWatch(session: string, operation: FlightWatchOperation, at: number): void {
-    const write = this.prepareFlightWatch(session, operation, at);
-    this.transaction(write);
+    this.flightQ.setFlightWatch(session, operation, at);
   }
 
   private prepareFlightWatch(
@@ -7568,17 +7499,7 @@ export class Store {
     operation: FlightWatchOperation,
     at: number,
   ): () => void {
-    const watch = new Map(this.flightWatch(session).map((entry) => [entry.id, entry]));
-    for (const id of operation.remove ?? []) watch.delete(id);
-    for (const entry of operation.upsert ?? []) watch.set(entry.id, { ...entry, updatedAt: at });
-    if (watch.size > FLIGHT_WATCH_LIMIT) throw new Error("Too many watch entries.");
-    return () => {
-      this.db.prepare("DELETE FROM flight_watch WHERE session_id = ?").run(session);
-      for (const entry of watch.values())
-        this.db
-          .prepare("INSERT INTO flight_watch (session_id, id, entry) VALUES (?, ?, ?)")
-          .run(session, entry.id, JSON.stringify(entry));
-    };
+    return this.flightQ.prepareFlightWatch(session, operation, at);
   }
 
   /** Validate the whole update before writing any part of it. */
@@ -7605,11 +7526,7 @@ export class Store {
   }
 
   flightWatch(session: string): FlightWatchEntry[] {
-    return (
-      this.db
-        .prepare("SELECT entry FROM flight_watch WHERE session_id = ? ORDER BY id")
-        .all(session) as Row[]
-    ).map((r) => JSON.parse(r.entry as string) as FlightWatchEntry);
+    return this.flightQ.flightWatch(session);
   }
 
   recordFlightArrival(entry: Omit<FlightArrivalDisposition, "id" | "repoId" | "sourceRef">): void {
@@ -7682,14 +7599,7 @@ export class Store {
   }
 
   flightIncoming(): FlightArrivalDisposition[] {
-    return (
-      this.db
-        .prepare("SELECT entry FROM flight_incoming ORDER BY at DESC, id DESC LIMIT ?")
-        .all(FLIGHT_INCOMING_LIMIT) as Row[]
-    ).map((r) => {
-      const entry = JSON.parse(r.entry as string) as FlightArrivalDisposition;
-      return { ...entry, repoId: entry.repoId ?? null, sourceRef: entry.sourceRef ?? null };
-    });
+    return this.flightQ.flightIncoming();
   }
 
   /**
@@ -7704,218 +7614,65 @@ export class Store {
     about: string;
     decision: string;
   }): void {
-    this.transaction(() => {
-      this.db
-        .prepare("DELETE FROM flight_decisions WHERE question_id = ? AND kind = 'answer'")
-        .run(d.questionId);
-      this.addFlightDecision({
-        at: d.at,
-        kind: "answer",
-        seatId: d.seatId,
-        targetRunId: null,
-        ref: d.ref,
-        questionId: d.questionId,
-        about: d.about,
-        decision: d.decision,
-        basis: "Operator answered the set-aside question from its ticket.",
-      });
-    });
+    this.flightQ.recordSetAsideAnswer(d);
   }
 
   /** Records one of FLIGHT's decisions; returns its id. */
   addFlightDecision(d: Omit<FlightDecision, "id">): number {
-    const r = this.db
-      .prepare(
-        `INSERT INTO flight_decisions
-           (at, kind, seat_id, target_run_id, ref, question_id, about, decision, basis, order_id,
-            wake_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        d.at,
-        d.kind,
-        d.seatId,
-        d.targetRunId,
-        d.ref,
-        d.questionId,
-        d.about,
-        d.decision,
-        d.basis,
-        d.orderId ?? null,
-        d.wakeId ?? null,
-      );
-    return Number(r.lastInsertRowid);
+    return this.flightQ.addFlightDecision(d);
   }
 
   /** FLIGHT's decisions at or after `since`, newest first. */
   flightDecisions(since: number, limit: number): FlightDecision[] {
-    const rows = this.db
-      .prepare("SELECT * FROM flight_decisions WHERE at >= ? ORDER BY at DESC, id DESC LIMIT ?")
-      .all(since, limit) as Row[];
-    return rows.map(toFlightDecision);
+    return this.flightQ.flightDecisions(since, limit);
   }
 
   /** When FLIGHT decided to wait, at or after `since`, oldest first. */
   flightWaitTimes(since: number): number[] {
-    return (
-      this.db
-        .prepare("SELECT at FROM flight_decisions WHERE kind = 'wait' AND at >= ? ORDER BY at")
-        .all(since) as { at: number }[]
-    ).map((r) => r.at);
+    return this.flightQ.flightWaitTimes(since);
   }
 
   /** The decisions of one kind about one ticket, newest first. */
   flightDecisionsAbout(kind: FlightDecisionKind, ref: string): FlightDecision[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM flight_decisions WHERE kind = ? AND ref = ? ORDER BY at DESC, id DESC",
-      )
-      .all(kind, ref) as Row[];
-    return rows.map(toFlightDecision);
+    return this.flightQ.flightDecisionsAbout(kind, ref);
   }
 
   /** Replaces one section of a session's brief. */
   setFlightBriefSection(r: FlightBriefRow): void {
-    this.db
-      .prepare(
-        `INSERT INTO flight_brief (session_id, section, text, updated_at, updated_by)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(session_id, section) DO UPDATE SET
-           text = excluded.text, updated_at = excluded.updated_at, updated_by = excluded.updated_by`,
-      )
-      .run(r.sessionId, r.section, r.text, r.updatedAt, r.updatedBy);
+    this.flightQ.setFlightBriefSection(r);
   }
 
   /** Lasting notes for one repo, in topic order. */
   flightMemory(repo: string): FlightMemoryNote[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM flight_memory WHERE repo_id = ? ORDER BY topic")
-        .all(repo) as Row[]
-    ).map((r) => ({
-      repoId: r.repo_id as string,
-      topic: r.topic as string,
-      kind: r.kind as FlightMemoryNote["kind"],
-      body: r.body as string,
-      source: r.source as string,
-      author: r.author as FlightMemoryNote["author"],
-      updatedAt: r.updated_at as number,
-    }));
+    return this.flightQ.flightMemory(repo);
   }
 
   /** The state index never reads note bodies. */
   flightMemoryTitles(repo: string): FlightMemoryTitle[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT topic, kind, updated_at, author FROM flight_memory WHERE repo_id = ? ORDER BY topic",
-        )
-        .all(repo) as Row[]
-    ).map((r) => ({
-      topic: r.topic as string,
-      kind: r.kind as FlightMemoryTitle["kind"],
-      updatedAt: r.updated_at as number,
-      author: r.author as FlightMemoryTitle["author"],
-    }));
+    return this.flightQ.flightMemoryTitles(repo);
   }
 
   putFlightMemory(note: FlightMemoryNote): void {
-    const parsed = validateMemoryNote(note);
-    const key = memoryTopicKey(parsed.topic);
-    this.transaction(() => {
-      const exists = this.db
-        .prepare("SELECT 1 FROM flight_memory WHERE repo_id = ? AND topic_key = ?")
-        .get(note.repoId, key);
-      const count = this.db
-        .prepare("SELECT COUNT(*) AS n FROM flight_memory WHERE repo_id = ?")
-        .get(note.repoId) as { n: number };
-      if (!exists && count.n >= FLIGHT_MEMORY_TOPICS_MAX) throw new Error(FLIGHT_MEMORY_FULL);
-      this.db
-        .prepare(`INSERT INTO flight_memory (repo_id, topic, topic_key, kind, body, source, author, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(repo_id, topic_key) DO UPDATE SET
-        topic = excluded.topic, kind = excluded.kind, body = excluded.body, source = excluded.source,
-        author = excluded.author, updated_at = excluded.updated_at`)
-        .run(
-          note.repoId,
-          parsed.topic,
-          key,
-          parsed.kind,
-          parsed.body,
-          parsed.source,
-          parsed.author,
-          note.updatedAt,
-        );
-    });
+    this.flightQ.putFlightMemory(note);
   }
 
   deleteFlightMemory(repo: string, topic: string): boolean {
-    return (
-      this.db
-        .prepare("DELETE FROM flight_memory WHERE repo_id = ? AND topic_key = ?")
-        .run(repo, memoryTopicKey(topic)).changes > 0
-    );
+    return this.flightQ.deleteFlightMemory(repo, topic);
   }
 
   /** The full ledger for one crew session, including retained closed entries. */
   flightLedger(session: string): FlightLedgerEntry[] {
-    const pointers = new Map<string, FlightPointer[]>();
-    for (const r of this.db
-      .prepare(
-        `SELECT entry_key, kind, target, changed_at, change, read_at FROM flight_pointers
-         WHERE session_id = ? ORDER BY rowid`,
-      )
-      .all(session) as Row[]) {
-      const list = pointers.get(r.entry_key as string) ?? [];
-      list.push({
-        kind: r.kind as FlightPointerKind,
-        target: r.target as string,
-        changedAt: r.changed_at as number | null,
-        change: r.change as string | null,
-        readAt: r.read_at as number | null,
-      });
-      pointers.set(r.entry_key as string, list);
-    }
-    return (
-      this.db
-        .prepare("SELECT entry FROM flight_ledger WHERE session_id = ? ORDER BY key")
-        .all(session) as { entry: string }[]
-    ).map((r) => {
-      const entry = JSON.parse(r.entry) as FlightLedgerEntry;
-      const held = pointers.get(entry.key);
-      return held === undefined ? entry : { ...entry, pointers: held };
-    });
+    return this.flightQ.flightLedger(session);
   }
 
   /** Marks every pointer at `kind` and `target`, in any entry, as changed at `at`. */
   markFlightPointers(kind: FlightPointerKind, target: string, change: string, at: number): void {
-    this.db
-      .prepare(
-        `UPDATE flight_pointers SET changed_at = ?, change = ?, changed_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
-         WHERE kind = ? AND target = ?`,
-      )
-      .run(at, change.slice(0, FLIGHT_POINTER_CHANGE_MAX), kind, target);
+    this.flightQ.markFlightPointers(kind, target, change, at);
   }
 
   /** The pointers of open entries whose target changed after FLIGHT last read them. */
   movedFlightPointers(session: string): FlightMovedPointer[] {
-    const open = FLIGHT_LEDGER_OPEN.map(() => "?").join(", ");
-    return (
-      this.db
-        .prepare(
-          `SELECT p.entry_key, p.kind, p.target, p.changed_at, p.change FROM flight_pointers p
-           JOIN flight_ledger l ON l.session_id = p.session_id AND l.key = p.entry_key
-           WHERE p.session_id = ? AND l.status IN (${open}) AND p.changed_at IS NOT NULL
-             AND p.changed_seq > COALESCE(p.read_seq, 0)
-           ORDER BY p.changed_at, p.entry_key, p.kind, p.target`,
-        )
-        .all(session, ...FLIGHT_LEDGER_OPEN) as Row[]
-    ).map((r) => ({
-      entry: r.entry_key as string,
-      kind: r.kind as FlightPointerKind,
-      target: r.target as string,
-      change: (r.change as string | null) ?? "",
-      at: r.changed_at as number,
-    }));
+    return this.flightQ.movedFlightPointers(session);
   }
 
   /**
@@ -7923,79 +7680,17 @@ export class Store {
    * text) stays unread; changes are ordered by a counter, not by `at`, whose clock is the poll's.
    */
   markFlightPointersRead(session: string, moved: readonly FlightMovedPointer[], at: number): void {
-    const stamp = this.db.prepare(
-      `UPDATE flight_pointers SET read_at = ?, read_seq = (SELECT COALESCE(MAX(MAX(COALESCE(changed_seq, 0), COALESCE(read_seq, 0))), 0) + 1 FROM flight_pointers)
-       WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?
-         AND changed_at = ? AND change = ?`,
-    );
-    this.transaction(() => {
-      for (const m of moved) stamp.run(at, session, m.entry, m.kind, m.target, m.at, m.change);
-    });
+    this.flightQ.markFlightPointersRead(session, moved, at);
   }
 
   /** Save an entry and prune old closed entries across all sessions, in one transaction. */
   putFlightLedgerEntry(session: string, entry: FlightLedgerEntry, pruneBefore: number): void {
-    this.transaction(() => {
-      this.db
-        .prepare(`INSERT INTO flight_ledger (session_id, key, kind, status, updated_at, entry)
-        VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(session_id, key) DO UPDATE SET
-        kind = excluded.kind, status = excluded.status, updated_at = excluded.updated_at, entry = excluded.entry`)
-        .run(
-          session,
-          entry.key,
-          entry.kind,
-          entry.status,
-          entry.updatedAt,
-          JSON.stringify({ ...entry, pointers: undefined }),
-        );
-      if (entry.pointers !== undefined) this.syncFlightPointers(session, entry);
-      this.db
-        .prepare(`DELETE FROM flight_ledger WHERE updated_at < ?
-        AND status NOT IN (${FLIGHT_LEDGER_OPEN.map(() => "?").join(", ")})`)
-        .run(pruneBefore, ...FLIGHT_LEDGER_OPEN);
-      this.db
-        .prepare(
-          `DELETE FROM flight_pointers WHERE NOT EXISTS (
-             SELECT 1 FROM flight_ledger l
-             WHERE l.session_id = flight_pointers.session_id AND l.key = flight_pointers.entry_key)`,
-        )
-        .run();
-    });
-  }
-
-  /** Makes the entry's pointers exactly `entry.pointers`; one that stays keeps its marks. */
-  private syncFlightPointers(session: string, entry: FlightLedgerEntry): void {
-    const pointers = entry.pointers ?? [];
-    const kept = new Set(pointers.map((p) => `${p.kind}\0${p.target}`));
-    const drop = this.db.prepare(
-      "DELETE FROM flight_pointers WHERE session_id = ? AND entry_key = ? AND kind = ? AND target = ?",
-    );
-    for (const old of this.db
-      .prepare("SELECT kind, target FROM flight_pointers WHERE session_id = ? AND entry_key = ?")
-      .all(session, entry.key) as { kind: string; target: string }[]) {
-      if (!kept.has(`${old.kind}\0${old.target}`))
-        drop.run(session, entry.key, old.kind, old.target);
-    }
-    const add = this.db.prepare(
-      `INSERT OR IGNORE INTO flight_pointers (session_id, entry_key, kind, target, changed_at, change, read_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    );
-    for (const p of pointers)
-      add.run(session, entry.key, p.kind, p.target, p.changedAt, p.change, p.readAt);
+    this.flightQ.putFlightLedgerEntry(session, entry, pruneBefore);
   }
 
   /** The stored sections of a session's brief. */
   flightBrief(sessionId: string): FlightBriefRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM flight_brief WHERE session_id = ? ORDER BY section")
-      .all(sessionId) as Row[];
-    return rows.map((r) => ({
-      sessionId: r.session_id as string,
-      section: r.section as FlightBriefRow["section"],
-      text: r.text as string,
-      updatedAt: r.updated_at as number,
-      updatedBy: r.updated_by as string,
-    }));
+    return this.flightQ.flightBrief(sessionId);
   }
 
   /** A stable, bounded thread for one exact version of an item. */
@@ -8398,24 +8093,6 @@ export class Store {
     ref?: string;
     targetRunId?: string;
   }): number {
-    if (q.kinds.length === 0) return 0;
-    const where = [`kind IN (${q.kinds.map(() => "?").join(", ")})`, "at >= ?"];
-    const args: SQLInputValue[] = [...q.kinds, q.since];
-    if (q.seatId !== undefined) {
-      where.push("seat_id = ?");
-      args.push(q.seatId);
-    }
-    if (q.ref !== undefined) {
-      where.push("ref = ?");
-      args.push(q.ref);
-    }
-    if (q.targetRunId !== undefined) {
-      where.push("target_run_id = ?");
-      args.push(q.targetRunId);
-    }
-    const row = this.db
-      .prepare(`SELECT COUNT(*) AS n FROM flight_decisions WHERE ${where.join(" AND ")}`)
-      .get(...args) as { n: number };
-    return row.n;
+    return this.flightQ.countFlightDecisions(q);
   }
 }

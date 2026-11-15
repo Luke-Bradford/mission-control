@@ -134,6 +134,53 @@ describe("auditTranscript", () => {
   });
 });
 
+describe("a fresh session id starts a new session", () => {
+  /** The line, from session `id`. */
+  const from = (id: string, line: string): string =>
+    JSON.stringify({ ...JSON.parse(line), session_id: id });
+  const TWO = [
+    from("old", assistant("m1", { input: 10, cw: 990 }, [toolUse("t1", "Bash", BASH_INPUT)])),
+    from("old", toolResult("t1", "x".repeat(400))),
+    from("old", assistant("m2", { input: 5, cr: 1000, cw: 195 })),
+    from("old", assistant("m3", { input: 5, cr: 1195, cw: 300 })),
+    // the fresh session writes its whole context to a cold cache: not a rewrite
+    from("new", hubLine("brief and fix")),
+    from("new", assistant("m4", { input: 5, cw: 25_000 }, [toolUse("t2", "Read", READ_INPUT)])),
+    from("new", toolResult("t2", "y".repeat(400))),
+    from("new", assistant("m5", { input: 5, cr: 25_000, cw: 100 })),
+  ];
+
+  it("splits the run into sessions, counts the fresh start whole, and re-reads per session", () => {
+    const { audit, calls } = auditTranscript(TWO, new Set(["new"]));
+    expect(calls).toHaveLength(5);
+    expect(audit.sessions).toEqual([
+      { fresh: false, calls: 3, startContext: 1000, peakContext: 1500, cacheRead: 2195 },
+      { fresh: true, calls: 2, startContext: 25_005, peakContext: 25_105, cacheRead: 25_000 },
+    ]);
+    expect(audit.bySource["fix session start"]).toEqual({
+      added: 25_005,
+      reread: 25_005 * 2,
+      events: 1,
+    });
+    // the first session's start is re-read by its own three calls only
+    expect(audit.bySource["start of run"]).toEqual({ added: 1000, reread: 3000, events: 1 });
+    expect(audit.rewrites).toBe(0);
+    expect(calls[3]?.added).toEqual([
+      { source: "fix session start", command: null, tokens: 25_005 },
+    ]);
+  });
+
+  it("leaves the audit unchanged with no fresh ids", () => {
+    const plain = auditTranscript(TWO);
+    expect(plain.audit.sessions).toBeUndefined();
+    expect(plain.audit.bySource["start of run"]?.reread).toBe(5000);
+    expect(plain.audit.bySource["fix session start"]).toBeUndefined();
+    expect(plain.audit.rewrites).toBe(1);
+    // an id the hub did not start fresh is not a boundary either
+    expect(auditTranscript(TWO, new Set(["other"])).audit).toEqual(plain.audit);
+  });
+});
+
 describe("commandClass", () => {
   it("is the first word, or pnpm and its script", () => {
     expect(commandClass("cd /x && git status")).toBe("git");
@@ -267,6 +314,32 @@ describe("auditEndedRuns", () => {
     const again = recording();
     await auditEndedRuns({ store, config: config(false), now: NOW, files: again.files, home });
     expect(again.paths).toEqual([]);
+  });
+
+  it("splits a run's audit at the fresh sessions its loop recorded, and stores them", async () => {
+    const lines = [
+      JSON.stringify({ ...JSON.parse(assistant("m1", { input: 10, cw: 990 })), session_id: "old" }),
+      JSON.stringify({
+        ...JSON.parse(assistant("m2", { input: 5, cr: 990, cw: 10 })),
+        session_id: "old",
+      }),
+      JSON.stringify({ ...JSON.parse(assistant("m3", { input: 5, cw: 400 })), session_id: "new" }),
+    ];
+    writeFileSync(join(dir, "crew", "r1.jsonl"), `${lines.join("\n")}\n`);
+    store.upsertRun(
+      run({
+        id: "r1",
+        transcriptPath: join(dir, "crew", "r1.jsonl"),
+        loop: { fixSessions: [{ sessionId: "new", at: 1, reason: "ci" }] } as Run["loop"],
+      }),
+    );
+    await auditEndedRuns({ store, config: config(false), now: NOW });
+    const audit = store.runTokenAudits(0)[0]?.audit;
+    expect(audit?.sessions?.map((x) => [x.fresh, x.calls])).toEqual([
+      [false, 2],
+      [true, 1],
+    ]);
+    expect(audit?.bySource["fix session start"]?.added).toBe(405);
   });
 
   it("with the controller switch on, reads the hub checkout's sessions and subagents, each message once, numbers only", async () => {

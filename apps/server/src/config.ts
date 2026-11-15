@@ -181,6 +181,8 @@ export interface CrewConfig {
   lane?: CrewLane;
   /** Also start cards with no lane label. Loaded: always set (default false). */
   laneDefault?: boolean;
+  /** Run the fix-session trial (#1643): developer runs woken for a fix split into two arms. Loaded: always set (default false). */
+  fixSessionTrial?: boolean;
   /** The built-in roles plus `crew.roles`. Loaded: always set. */
   roles?: Record<string, RoleDef>;
   sessions: CrewSessionConfig[];
@@ -684,6 +686,7 @@ const fileSchema = z
         max_open_runs_per_seat: z.number().int().positive().default(DEFAULT_MAX_OPEN_RUNS_PER_SEAT),
         lane: z.enum(CREW_LANES).optional(),
         lane_default: z.boolean().default(false),
+        fix_session_trial: z.boolean().default(false),
         roles: z.record(z.string(), roleSchema).default({}),
         sessions: z.array(
           z.strictObject({
@@ -830,6 +833,7 @@ const fileSchema = z
               maxOpenRunsPerSeat: f.crew.max_open_runs_per_seat,
               ...(f.crew.lane === undefined ? {} : { lane: f.crew.lane }),
               laneDefault: f.crew.lane_default,
+              fixSessionTrial: f.crew.fix_session_trial,
               roles: {
                 ...BUILTIN_ROLES,
                 ...Object.fromEntries(
@@ -1396,7 +1400,7 @@ function isValidationCommand(writer: readonly string[], cmd: string): boolean {
 
 /**
  * Validates config.yaml text: the one loader for the file the server starts with and for any text
- * it would write (`config-write.ts`). `source` names the text in errors (a path, or a description).
+ * it would write (`config/config-write.ts`). `source` names the text in errors (a path, or a description).
  * `guard.hubRoot` is the hub's own checkout, which crew paths must stay clear of; with no guard it is
  * found from this module's location. A crew section with no hub root is an error (fails closed).
  * `deferModels` is for loading existing files: Codex model errors become seat unavailability.

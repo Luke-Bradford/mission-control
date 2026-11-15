@@ -53,6 +53,11 @@ export interface TranscriptFacts {
 const seenUsage = new WeakMap<TranscriptFacts, Map<string, TokenUsage>>();
 /** The sum of the `result` events' `usage.output_tokens` so far; absent until one carries a number. */
 const resultOutput = new WeakMap<TranscriptFacts, number>();
+/**
+ * The latest `total_cost_usd` of each CLI session. A session's figure is cumulative, and a fresh
+ * fix session (#1643) starts its own count, so the run's cost is the sum across sessions.
+ */
+const sessionCosts = new WeakMap<TranscriptFacts, Map<string, number>>();
 
 // Where the current branch came from. `vcs_state_changed` is preferred; `code_change_published`
 // is the fallback (studio fires never emit the former with a branch). Travels with the facts.
@@ -811,6 +816,7 @@ export function foldTranscript(
   };
   let anon = seen.size;
   let resultOut = prev ? resultOutput.get(prev) : undefined;
+  const costs = new Map((prev && sessionCosts.get(prev)) ?? []);
   const prevDigest = prev && digestStates.get(prev);
   const d = prevDigest ? copyDigestState(prevDigest) : emptyDigestState();
 
@@ -916,7 +922,8 @@ export function foldTranscript(
       const resultTokens = isObj(ev.usage) ? numOrNull(ev.usage.output_tokens) : null;
       if (resultTokens !== null) resultOut = (resultOut ?? 0) + resultTokens;
       if (typeof ev.total_cost_usd === "number") {
-        facts.costUsd = ev.total_cost_usd;
+        costs.set(str(ev.session_id) ?? facts.sessionId ?? "", ev.total_cost_usd);
+        facts.costUsd = [...costs.values()].reduce((a, b) => a + b, 0);
         const t = sumTokens(seen);
         d.costTokens = t.input + t.output + t.cacheRead + t.cacheCreate;
       }
@@ -961,6 +968,7 @@ export function foldTranscript(
     resultOutput.set(facts, resultOut);
   }
   seenUsage.set(facts, seen);
+  sessionCosts.set(facts, costs);
   const toolFrom = Math.max(fileMtime, d.lastEventAt ?? fileMtime) - TIMELINE_WINDOW_MS;
   d.toolStarts = new Map(
     [...d.toolStarts]

@@ -248,7 +248,7 @@ it("executes argv without a shell, caps token output and hides command failures"
 
 it("atomically changes selection without changing token configuration and refuses symlinks", async () => {
   const { readFileSync, writeFileSync, symlinkSync } = await import("node:fs");
-  const { setTeamsSelection } = await import("../src/config-write.ts");
+  const { setTeamsSelection } = await import("../src/config/config-write.ts");
   const { config, store } = setup();
   const dir = dirs[dirs.length - 1] as string;
   const path = join(dir, "config.yaml");

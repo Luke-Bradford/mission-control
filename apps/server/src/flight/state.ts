@@ -106,8 +106,8 @@ import {
 } from "../attention/question-watch.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms/index.ts";
+import { pausedSeat, readCrewPause } from "../config/crew-pause.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
-import { pausedSeat, readCrewPause } from "../crew-pause.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { reviewHoldOf } from "../engine/review-hold.ts";
 import { stuckPrs } from "../engine/stuck-prs.ts";

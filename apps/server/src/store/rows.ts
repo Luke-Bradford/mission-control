@@ -23,7 +23,6 @@ import type {
   SeatSessionRow,
   SeatState,
   TokenUsage,
-  UsageSample,
 } from "@mc/core";
 import { FLIGHT_WAKE_STORED_BYTES } from "@mc/core";
 import type { Evidence, QueueRow, SeatQuestion } from "../store.ts";
@@ -38,15 +37,6 @@ export const evidenceOf = (r: Row): Evidence => ({
   tests: JSON.parse(r.tests as string) as ReportedTest[],
   testsAdded: JSON.parse(r.tests_added as string) as Evidence["testsAdded"],
   doneWhen: JSON.parse(r.done_when as string) as DoneWhenEntry[],
-});
-
-export const toSample = (r: Row): UsageSample => ({
-  accountId: r.account_id as string,
-  window: r.window as "5h" | "7d",
-  at: r.at as number,
-  pct: r.pct as number,
-  resetAt: r.reset_at as number,
-  source: r.source as string,
 });
 
 /** A run's stored plan fact; a value that won't parse is dropped rather than failing every run read. */

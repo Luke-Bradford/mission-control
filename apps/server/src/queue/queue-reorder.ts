@@ -19,12 +19,12 @@ import {
 import { activeAway } from "../away.ts";
 import { bindPreparedBrief } from "../brief/prepare.ts";
 import { briefHash } from "../brief/source.ts";
+import { chooseRunProfile, type ProfilesError } from "../config/profiles.ts";
 import { type CcConfig, type CrewSeatConfig, seatInput, seatUnavailable } from "../config.ts";
 import { refillQueues } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
 import type { MoveResult } from "../github/board.ts";
 import { matchesConfiguredFocus } from "../instructions/focus.ts";
-import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import type { Store } from "../store.ts";
 import { waitReader } from "./dependencies.ts";
 
