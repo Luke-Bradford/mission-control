@@ -2,11 +2,11 @@ import { protectedGlobShapeProblem } from "@mc/core";
 import { z } from "zod";
 
 const nonEmpty = z.string().min(1);
-/** A repo-relative glob: no `/`, `..` or `~` start, no `..` segment, none of `{ [ ? ! , ( ) \\` or whitespace. */
+/** A repo-relative glob: no `/`, `./` or `~` start, no `..` segment, none of `{ [ ? ! , ( ) \\` or whitespace. */
 export const areaGlob = nonEmpty.refine(
   (g) =>
     !g.startsWith("/") &&
-    !g.startsWith("..") &&
+    !g.startsWith("./") &&
     !g.startsWith("~") &&
     !g.split("/").includes("..") &&
     !/[{[?!,()\\\s]/.test(g),
