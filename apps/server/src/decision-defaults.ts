@@ -3,7 +3,7 @@ import { decisionDefault } from "./attention/holds.ts";
 import { type BriefChoiceDeps, chooseBrief, retainedBriefChoice } from "./brief/choices.ts";
 import { BriefDeferred, checkBriefRun, currentBriefFlight } from "./brief/prepare.ts";
 import type { CcConfig } from "./config.ts";
-import { attentionItems, NO_LOCK } from "./hud.ts";
+import { attentionItems, NO_LOCK } from "./hud/hud.ts";
 import type { Store } from "./store.ts";
 
 export interface DecisionDefaultsDeps {

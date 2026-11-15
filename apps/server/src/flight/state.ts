@@ -111,13 +111,7 @@ import {
   NO_LOCK,
   NOTE_KEY,
   questionWithOperator,
-} from "../hud.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  MACHINE_CAPACITY_KEY,
-  storedMachineCapacity,
-} from "../machine-capacity.ts";
-import { paceStartCheck, paceView } from "../pace.ts";
+} from "../hud/hud.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
 import {
   closingFact,
@@ -129,9 +123,20 @@ import {
 import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  MACHINE_CAPACITY_KEY,
+  storedMachineCapacity,
+} from "../telemetry/machine-capacity.ts";
+import { paceStartCheck, paceView } from "../telemetry/pace.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
-import { flightFinancialFacts, flightWakeCost, flightWakeWaits } from "./cost.ts";
+import {
+  flightCostInWindow,
+  flightFinancialFacts,
+  flightWakeCost,
+  flightWakeWaits,
+} from "./cost.ts";
 import { linkedMemory } from "./memory.ts";
 import { pendingRetrospective } from "./retrospective.ts";
 import { runawayTrip } from "./runaway.ts";
@@ -437,12 +442,23 @@ function financialFigures(
   store: Store,
   now: number,
   found: NonNullable<ReturnType<typeof flightSeat>>,
-): Pick<FlightView, "wakeCost" | "wakeWaits"> {
+): Pick<
+  FlightView,
+  "wakeCost" | "wakeWaits" | "costLastHour" | "sessionsLastHour" | "runStartedAt"
+> {
   const crewIds = new Set(
     configuredAgents(config).flatMap((a) => (a.kind === "crew" ? [a.id] : [])),
   );
   const facts = flightFinancialFacts(store, now, new Set([...crewIds, found.seat.id]));
+  const hourSince = now - FLIGHT_HOUR_MS;
+  const own = facts.runs.filter((run) => run.agentId === found.seat.id);
+  const started = own.filter((run) => run.startedAt >= hourSince && run.startedAt <= now).length;
+  const runId = store.seatSession(found.seat.id)?.runId ?? null;
+  const live = runId === null ? null : store.run(runId);
   return {
+    costLastHour: flightCostInWindow(facts, hourSince, now, found.seat.id),
+    sessionsLastHour: own.length === 0 ? null : started,
+    runStartedAt: live !== null && live.endedAt === null ? live.startedAt : null,
     wakeCost: flightWakeCost(store, now, found.seat.id, crewIds, undefined, facts),
     wakeWaits: flightWakeWaits(store, now, found.seat.id, found.session.repoId, undefined, facts),
   };
@@ -465,7 +481,9 @@ export function flightView(
     controllerDecisions: controller,
     ...(found === null ? {} : { wake: flightWakeStatus(store, found.session.repoId, live) }),
     ...(found === null ? {} : { wakeHistory: flightWakeHistory(store, now, decisions) }),
-    ...(found === null ? {} : financialFigures(config, store, now, found)),
+    ...(found === null
+      ? { costLastHour: null, sessionsLastHour: null, runStartedAt: null }
+      : financialFigures(config, store, now, found)),
     promptWakes:
       found === null
         ? []
@@ -694,7 +712,12 @@ const seenItems = (store: Store): Record<string, string> => {
   }
 };
 
-const itemHash = (store: Store, x: { key: string; text: string }): string => {
+const itemHash = (
+  store: Store,
+  x: { key: string; text: string; ownBriefAt?: number | undefined },
+): string => {
+  // FLIGHT's own question grows with each line it writes: wake once per brief, not per line
+  if (x.ownBriefAt !== undefined) return entryHash(`${x.key}:${x.ownBriefAt}`);
   if (x.key === `${NOTE_KEY}${MACHINE_CAPACITY_KEY}`) {
     const episode = store.notes().find((note) => note.key === MACHINE_CAPACITY_KEY);
     if (episode !== undefined) return entryHash(`${x.key}:${episode.at}`);
@@ -1415,6 +1438,7 @@ export function flightState(i: {
       text: cut(x.text, FLIGHT_STATE_TEXT_MAX),
       ageMin: Math.floor((now - x.at) / 60_000),
       triageRemainingMs: Math.max(0, (x.triageDueAt ?? now) - now),
+      ...(ownReply(x, found?.seat.id ?? null) ? { ownBriefAt: x.brief?.at ?? 0 } : {}),
       ...(x.holdReleased === undefined ? {} : { holdReleased: x.holdReleased }),
       ...(x.returned === undefined ? {} : { returned: x.returned }),
     }));

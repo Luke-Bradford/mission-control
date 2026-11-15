@@ -1,4 +1,11 @@
-import { AUDIT_MEASURED_TOOLS, FLIGHT_TRIAGE_WAIT_MS, joinMapGraph, unpackMap } from "@mc/core";
+import {
+  AUDIT_MEASURED_TOOLS,
+  COMMS_FLIGHT_ESCALATION_MS,
+  COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
+  FLIGHT_TRIAGE_WAIT_MS,
+  joinMapGraph,
+  unpackMap,
+} from "@mc/core";
 import "./temp-home.ts";
 import { execFileSync } from "node:child_process";
 import {
@@ -110,8 +117,8 @@ import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operator-call.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import * as views from "../src/hud/views.ts";
 import { LocalNotifications } from "../src/local-notifications.ts";
-import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
@@ -122,8 +129,8 @@ import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { readStreamPage } from "../src/stream.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/telemetry/machine-capacity.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
-import * as views from "../src/views.ts";
 import { mapCheckout } from "./map-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
@@ -1218,6 +1225,64 @@ describe("Comms API", () => {
     });
   });
 
+  it("marks a mention as needing a reply exactly while its question is open on Needs you", async () => {
+    await withCommsApp(async (comms) => {
+      // Needs you lists Comms questions sent after the rollout
+      clock = Math.max(clock, COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 1);
+      const ask = store.addComms({
+        at: clock++,
+        from: "alpha",
+        to: "CAPCOM",
+        ticket: null,
+        text: "Which layout?",
+        label: "question",
+        mentions: ["CAPCOM"],
+      });
+      if (ask === null) throw new Error("question not stored");
+      const needsReply = async (id: string) =>
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
+          .json()
+          .mentions.find((m: { message: { id: string } }) => m.message.id === id)?.needsReply;
+      // the badge counts exactly what is open on the operator's Needs you
+      const onNeedsYou = async () =>
+        (
+          (await comms.inject({ method: "GET", url: "/api/attention" })).json() as {
+            key: string;
+            owner: string;
+          }[]
+        ).some((i) => i.key.endsWith(`:${ask.id}`) && i.owner === "operator");
+      expect(await needsReply(ask.id)).toBe(await onNeedsYou());
+      // FLIGHT passes it to the operator: on their Needs you, so on the badge
+      store.addBrief({
+        key: `comms-open:${ask.id}`,
+        for: "operator",
+        ask: "Which layout should the page use?",
+        ticket: "shop-app#703",
+        context: "The developer has two layouts ready and needs one.",
+        recommendation: "The first one: it matches the mockup.",
+        options: [
+          { label: "First", answer: "Use the first layout." },
+          { label: "Second", answer: "Use the second layout." },
+        ],
+        basis: "the developer's question",
+        at: clock,
+      });
+      clock += COMMS_FLIGHT_ESCALATION_MS + 60_000;
+      expect(await onNeedsYou()).toBe(true);
+      expect(await needsReply(ask.id)).toBe(true);
+      store.addComms({
+        at: clock++,
+        from: "CAPCOM",
+        to: "alpha",
+        ticket: null,
+        text: "The first one.",
+        replyTo: ask.id,
+      });
+      clock += 10_000; // past the attention memo
+      expect(await needsReply(ask.id)).toBe(false);
+    });
+  });
+
   it("serves boundary-safe linked tickets, ordered mentions, pins and link counts", async () => {
     const mention = commsRow("alpha", "crew", "@CAPCOM ticket #703", clock, "shop-app#703", "#703");
     commsRow("beta", "crew", "not #7030");
@@ -1306,6 +1371,8 @@ describe("Comms API", () => {
       ).toMatchObject({
         message: { id: mention.id },
         seen: false,
+        // a plain mention is read in the conversation; the bell counts only open asks
+        needsReply: false,
       });
       expect(
         (
@@ -1318,7 +1385,9 @@ describe("Comms API", () => {
         ).statusCode,
       ).toBe(200);
       expect(
-        (await comms.inject({ method: "GET", url: "/api/comms/mentions" })).json().mentions[0].seen,
+        (await comms.inject({ method: "GET", url: "/api/comms/mentions" }))
+          .json()
+          .mentions.find((m: { message: { id: string } }) => m.message.id === mention.id).seen,
       ).toBe(true);
       expect(
         (await comms.inject({ method: "GET", url: "/api/comms/pins" })).json().messages[0].id,
@@ -1615,6 +1684,7 @@ const API_ROUTES: [string, string, object?][] = [
     },
   ],
   ["GET", "/api/attention/unknown/materials"],
+  ["GET", "/api/attention/unknown/thread"],
   ["POST", "/api/attention/unknown/clear", {}],
   ["GET", "/api/attention/unknown/choice"],
   ["PUT", "/api/comms/comms:1/pin", {}],
@@ -7121,6 +7191,9 @@ describe("crew routes", () => {
         seat: null,
         decisions: [],
         controllerDecisions: [],
+        costLastHour: null,
+        sessionsLastHour: null,
+        runStartedAt: null,
         promptWakes: [],
       });
     });
@@ -7299,6 +7372,114 @@ describe("crew routes", () => {
       expect(body.wakeCost?.totalUsd).toBeCloseTo(7);
       expect(body.wakeCost?.weekShare).toBeCloseTo(1);
       expect(body.wakeWaits?.blockerMedianMs).toBe(60_000);
+    });
+
+    it("GET /api/flight serves FLIGHT's hourly status figures", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+      const now = Date.now();
+      const startedAt = now - 20 * 60_000;
+      store.upsertRun(run({ id: "live-flight", agentId: "flight-1", costUsd: 7, startedAt }));
+      store.setDigest(
+        "live-flight",
+        digest({ attemptUsage: [{ id: "hour", at: now - 1000, tokens: 1 }] }),
+      );
+      store.upsertRun(
+        run({ id: "earlier-flight", agentId: "flight-1", startedAt: now - 40 * 60_000 }),
+      );
+      store.upsertRun(run({ id: "old-flight", agentId: "flight-1", startedAt: now - 61 * 60_000 }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "live-flight",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: now,
+      });
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.costLastHour).toBeCloseTo(7);
+      expect(body.sessionsLastHour).toBe(2);
+      expect(body.runStartedAt).toBe(startedAt);
+    });
+
+    it("GET /api/flight returns null hourly status figures with no data", async () => {
+      config.crew?.sessions[0]?.seats.push({
+        id: "flight-1",
+        role: "FLIGHT",
+        accountId: "claude-main",
+        model: "opus",
+        area: [],
+      });
+
+      const body = (await get("/api/flight")).json<FlightView>();
+      expect(body.costLastHour).toBeNull();
+      expect(body.sessionsLastHour).toBeNull();
+      expect(body.runStartedAt).toBeNull();
+    });
+
+    describe("hourly status figures edge cases", () => {
+      const seat = () =>
+        config.crew?.sessions[0]?.seats.push({
+          id: "flight-1",
+          role: "FLIGHT",
+          accountId: "claude-main",
+          model: "opus",
+          area: [],
+        });
+      const session = (runId: string, state: "running" | "error", now: number) =>
+        store.setSeatSession({
+          seatId: "flight-1",
+          runId,
+          cliSessionId: null,
+          state,
+          reason: null,
+          worktree: null,
+          updatedAt: now,
+        });
+
+      it("serves no run start when the seat's run has ended", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({
+            id: "dead-flight",
+            agentId: "flight-1",
+            startedAt: now - 30 * 60_000,
+            endedAt: now - 10 * 60_000,
+            status: "failed",
+          }),
+        );
+        session("dead-flight", "error", now);
+        expect((await get("/api/flight")).json<FlightView>().runStartedAt).toBeNull();
+      });
+
+      it("serves 0 sessions, not null, when a steady run started before the hour", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "steady", agentId: "flight-1", costUsd: 1, startedAt: now - 90 * 60_000 }),
+        );
+        session("steady", "running", now);
+        const body = (await get("/api/flight")).json<FlightView>();
+        expect(body.sessionsLastHour).toBe(0);
+      });
+
+      it("serves no cost while the only run in the hour has none recorded", async () => {
+        seat();
+        const now = Date.now();
+        store.upsertRun(
+          run({ id: "fresh", agentId: "flight-1", costUsd: null, startedAt: now - 60_000 }),
+        );
+        session("fresh", "running", now);
+        expect((await get("/api/flight")).json<FlightView>().costLastHour).toBeNull();
+      });
     });
 
     it("lists every recent controller decision beyond the main decision limit", async () => {
@@ -9887,6 +10068,7 @@ describe("operator token", () => {
         configPath,
         supervisor: stubSupervisor(),
         operatorToken: "tok-1",
+        controllerToken: "ctl-1",
         get noLoopWrites() {
           return noWrites;
         },
@@ -9927,7 +10109,42 @@ describe("operator token", () => {
       expect(calls).toEqual([]);
     });
 
-    it("holds and releases as the controller, and names a refusal", async () => {
+    it("refuses the controller's key on the PR hold route and on the operator's brief", async () => {
+      const ctl = { ...json, "x-mc-controller": "ctl-1" };
+      const held = await app.inject({
+        method: "POST",
+        url: "/api/prs/shop-app/12/merge-hold",
+        headers: ctl,
+        payload: { action: "hold", sha: "a".repeat(40), reason: "my check" },
+      });
+      expect(held.statusCode).toBe(403);
+      expect(held.json().error).toContain("tell FLIGHT");
+      const chose = await app.inject({
+        method: "POST",
+        url: "/api/attention/example/choice",
+        headers: ctl,
+        payload: {
+          briefId: 1,
+          sourceRevision: "a".repeat(64),
+          optionId: "apply",
+          requestId: "controller",
+        },
+      });
+      expect(chose.statusCode).toBe(403);
+      expect(chose.json().error).toContain("controller");
+      expect(calls).toEqual([]);
+    });
+
+    it("refuses the controller's key: it neither holds nor releases a merge", async () => {
+      const ctl = { "x-mc-controller": "ctl-1" };
+      const held = await post(ctl, { action: "hold", reason: "my check" });
+      expect(held.statusCode).toBe(403);
+      expect(held.json().error).toContain("tell FLIGHT");
+      expect((await post(ctl, { action: "release" })).statusCode).toBe(403);
+      expect(calls).toEqual([]);
+    });
+
+    it("holds and releases as the operator, and names a refusal", async () => {
       expect((await post(key, { action: "hold", reason: "design vetoed" })).statusCode).toBe(200);
       const refused = await post(key, { action: "release" });
       expect(refused.statusCode).toBe(409);

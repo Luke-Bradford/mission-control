@@ -2254,7 +2254,15 @@ describe("Agent page: header and tile mockup", () => {
     for (const value of ["   ", "x".repeat(65)]) {
       fireEvent.change(input, { target: { value } });
       fireEvent.submit(input.closest("form") as HTMLFormElement);
-      expect((await screen.findByRole("alert")).textContent).toContain("1–64");
+      const link = await screen.findByRole("link", { name: /1–64 characters, with no control/ });
+      await waitFor(() =>
+        expect(document.activeElement).toBe(
+          screen.getByRole("region", { name: "Fix before saving" }),
+        ),
+      );
+      fireEvent.click(link);
+      expect(document.activeElement).toBe(input);
+      expect(input.getAttribute("aria-invalid")).toBe("true");
     }
     expect(f.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
   });
@@ -2363,6 +2371,84 @@ describe("Agent page: header and tile mockup", () => {
     fireEvent.submit(input.closest("form") as HTMLFormElement);
     expect((await screen.findByRole("alert")).textContent).toContain("call signs must be unique");
     expect((input as HTMLInputElement).value).toBe("ORBIT");
+  });
+
+  it("moves focus to a named summary on a refused rename and keeps the draft", async () => {
+    stub({
+      rows: [seat()],
+      extra: SEAT_ROUTES({
+        ...removalRoutes,
+        "POST /api/crew/sessions/s1/seats": () => ({
+          status: 409,
+          body: { error: "config.yaml changed; reload" },
+        }),
+      }),
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await moreButton("Rename"));
+    const input = (await screen.findByRole("textbox", { name: "Call sign" })) as HTMLInputElement;
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.change(input, { target: { value: "ORBIT" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    const box = await screen.findByRole("region", { name: "Call sign not saved" });
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    expect(box.textContent).toContain("config.yaml changed; reload");
+    expect(box.textContent).not.toContain("result is unknown");
+    expect(input.value).toBe("ORBIT");
+  });
+
+  it("keeps the rename draft and says the result is unknown after a network loss", async () => {
+    const f = stub({ rows: [seat()], extra: SEAT_ROUTES(removalRoutes) });
+    const original = f.getMockImplementation();
+    f.mockImplementation(async (path, init) => {
+      if (init?.method === "POST") throw new TypeError("Failed to fetch");
+      return (original as NonNullable<typeof original>)(path, init);
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await moreButton("Rename"));
+    const input = (await screen.findByRole("textbox", { name: "Call sign" })) as HTMLInputElement;
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.change(input, { target: { value: "ORBIT" } });
+    fireEvent.submit(input.closest("form") as HTMLFormElement);
+    const box = await screen.findByRole("region", { name: "Result unknown" });
+    await waitFor(() => expect(document.activeElement).toBe(box));
+    expect(box.textContent).toContain("Your entries are kept");
+    expect(input.value).toBe("ORBIT");
+  });
+
+  it("posts a rename once when it is submitted twice", async () => {
+    const f = stub({ rows: [seat()], extra: SEAT_ROUTES(removalRoutes) });
+    const original = f.getMockImplementation();
+    let finish: (value: Response) => void = () => {};
+    f.mockImplementation(async (path, init) => {
+      if (init?.method === "POST")
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+        });
+      return (original as NonNullable<typeof original>)(path, init);
+    });
+    render(<Agent id="guido-1" />);
+    fireEvent.click(await moreButton("Rename"));
+    const input = await screen.findByRole("textbox", { name: "Call sign" });
+    await waitFor(() =>
+      expect(
+        (screen.getByRole("button", { name: "Save call sign" }) as HTMLButtonElement).disabled,
+      ).toBe(false),
+    );
+    fireEvent.change(input, { target: { value: "ORBIT" } });
+    const form = input.closest("form") as HTMLFormElement;
+    fireEvent.submit(form);
+    fireEvent.submit(form);
+    await act(async () => finish(new Response(JSON.stringify({ changes }), { status: 200 })));
+    expect(f.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
   });
 });
 

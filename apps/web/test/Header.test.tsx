@@ -69,6 +69,7 @@ describe("Header chat button", () => {
   it("badges only the unread messages to the operator, not the Needs-you items", async () => {
     const mention = (id: string, seen: boolean) => ({
       seen,
+      needsReply: true,
       message: { id, from: "inco-1", to: "CAPCOM", text: "hello", at: NOW },
     });
     routes({

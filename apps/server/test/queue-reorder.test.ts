@@ -18,7 +18,7 @@ import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { refillQueues } from "../src/engine/queue.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import {
   prepareQueueReorderSnapshot,
   proposeQueueReorder,

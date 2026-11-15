@@ -4,7 +4,7 @@ import {
   fileServiceFault,
   MACHINE_CAPACITY_DEFAULTS,
   machineCapacity,
-} from "../src/machine-capacity.ts";
+} from "../src/telemetry/machine-capacity.ts";
 
 const NOW = 1_000_000;
 const sample = (over: Partial<MachineSample> = {}): MachineSample => ({

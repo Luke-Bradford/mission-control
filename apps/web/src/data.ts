@@ -89,6 +89,9 @@ type PageDocument = {
 const pageDocument = (): PageDocument | undefined =>
   (globalThis as { document?: PageDocument }).document;
 
+/** One array, so a resource's subscription keeps its identity between renders. */
+const ITEM_THREAD_TOPICS = ["attention", "agents"] as const;
+
 /** The one place the web app names API paths and their topics. */
 export const RESOURCES = {
   agentDetail: (id: string): ResourceRef => ({
@@ -128,6 +131,11 @@ export const RESOURCES = {
   discussion: (key: string, id = ""): ResourceRef => ({
     path: `/api/attention/${enc(key)}/discussion${id ? `?id=${enc(id)}` : ""}`,
     topic: "attention",
+  }),
+  /** One item's conversation: the messages sent from it and their replies, from Comms. */
+  itemThread: (key: string): ResourceRef => ({
+    path: `/api/attention/${enc(key)}/thread`,
+    topic: ITEM_THREAD_TOPICS,
   }),
   /** Retained plans and picture stories of one open item; 404 when it has none. */
   attentionMaterials: (key: string): ResourceRef => ({
@@ -249,7 +257,8 @@ export const RESOURCES = {
     path: `/api/comms/agents/${enc(agentId)}/contacts/${enc(contactId)}`,
     topic: "agents",
   }),
-  commsMentions: { path: "/api/comms/mentions", topic: "agents" },
+  // a mention's needsReply follows its Needs-you item, so attention changes refresh it too
+  commsMentions: { path: "/api/comms/mentions", topic: ITEM_THREAD_TOPICS },
   commsPins: { path: "/api/comms/pins", topic: "agents" },
   commsLinks: { path: "/api/comms/links", topic: "agents" },
   commsTraffic: { path: "/api/comms/traffic", topic: "agents" },

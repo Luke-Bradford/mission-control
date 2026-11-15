@@ -33,8 +33,8 @@ import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
 import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
 import { flightState, markItemsShown } from "../src/flight/state.ts";
-import * as hud from "../src/hud.ts";
-import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
+import * as hud from "../src/hud/hud.ts";
+import * as views from "../src/hud/views.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
   BACKFILL_BUDGET_MS,
@@ -58,9 +58,9 @@ import {
 } from "../src/scheduler.ts";
 import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
 import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
-import * as views from "../src/views.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 
@@ -818,7 +818,7 @@ describe("scheduler", () => {
         at = NOW + 30_000;
         await s.tick("ta");
         expect(store.agentEvents(0).map((e) => [e.agentId, e.at, e.text])).toEqual([
-          ["seat-guido", NOW + 15_000, "Idle → Running (your message)"],
+          ["seat-guido", NOW + 15_000, "Idle → Running"],
           ["seat-guido", NOW + 30_000, "Running → Idle (turn ended)"],
         ]);
       });
@@ -847,9 +847,7 @@ describe("scheduler", () => {
           expect(store.agentEvents(0)).toEqual([]);
           await vi.advanceTimersByTimeAsync(1000);
           expect(crewCalls()).toBe(before + 1);
-          expect(store.agentEvents(0).map((e) => e.text)).toEqual([
-            "Idle → Running (your message)",
-          ]);
+          expect(store.agentEvents(0).map((e) => e.text)).toEqual(["Idle → Running"]);
           await s.stop();
         });
 
@@ -1175,9 +1173,7 @@ describe("scheduler", () => {
           expect(store.agentEvents(0)).toEqual([]);
           bus.emit("agents");
           await vi.advanceTimersByTimeAsync(1000);
-          expect(store.agentEvents(0).map((e) => e.text)).toEqual([
-            "Idle → Running (your message)",
-          ]);
+          expect(store.agentEvents(0).map((e) => e.text)).toEqual(["Idle → Running"]);
           expect(row("scheduler:crew")).toMatchObject({ ok: true, error: null });
           await s.stop();
         });

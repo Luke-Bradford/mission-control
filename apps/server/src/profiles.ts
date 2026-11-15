@@ -137,6 +137,7 @@ function loopMismatch(f: z.infer<typeof fileProfile>, loop: LoopDef): string | n
   const limits = loopLimits(loop);
   const same = (a: readonly string[], b: readonly string[]) =>
     a.length === b.length && a.every((x, i) => x === b[i]);
+  if (f.name !== loop.name) return "name does not match the loop's name";
   if (f.labels !== undefined && !same(f.labels, loop.trigger.labels))
     return "labels do not match the loop's trigger labels";
   if (f.plan_required !== undefined && f.plan_required !== (loop.steps[0]?.id === "plan"))

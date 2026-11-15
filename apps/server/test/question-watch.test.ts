@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, NOTE_KEY } from "../src/hud.ts";
+import { attentionItems, NOTE_KEY } from "../src/hud/hud.ts";
 import {
   closeSettledQuestions,
   closingFact,
@@ -303,7 +303,13 @@ describe("the hub closes a question on a recorded fact", () => {
     });
     store.passQuestion(second, NOW + 6);
     store.endRunQuestions("r-guido", NOW + 10);
-    const app = buildApp({ config: config(), store, bus: new ChangeBus(), operatorToken: "t" });
+    const app = buildApp({
+      config: config(),
+      store,
+      bus: new ChangeBus(),
+      operatorToken: "t",
+      now: () => NOW + 10,
+    });
     try {
       const res = await app.inject({
         method: "GET",

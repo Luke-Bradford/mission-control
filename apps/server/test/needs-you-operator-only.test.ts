@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { evaluateHolds, holdItem, nothingForOperator } from "../src/attention/holds.ts";
 import type { CcConfig } from "../src/config.ts";
 import { wakeReasonWords } from "../src/flight/state.ts";
-import { agentViews, attentionItems } from "../src/hud.ts";
+import { agentViews, attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const SENT = COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT + 60 * 60_000;
@@ -72,7 +72,7 @@ afterEach(() => {
 });
 
 describe("Needs you counts only what the operator must answer", () => {
-  it("a FLIGHT message starting 'For the controller:' is never the operator's", () => {
+  it("a FLIGHT message starting 'For the controller:' makes no item: no controller reads it", () => {
     for (const label of ["question", "blocker"] as const) {
       store.addComms({
         at: SENT,
@@ -97,12 +97,8 @@ describe("Needs you counts only what the operator must answer", () => {
     );
     const mine = items.filter((i) => i.owner === "operator");
     expect(mine.map((i) => i.text)).not.toContain("For the controller: tooling question blocker");
-    expect(items.some((i) => i.text.startsWith("For the controller:"))).toBe(true);
-    expect(
-      items
-        .filter((i) => i.text.startsWith("For the controller:"))
-        .every((i) => i.owner === "controller"),
-    ).toBe(true);
+    expect(items.some((i) => i.text.startsWith("For the controller:"))).toBe(false);
+    expect(items.some((i) => i.text === "A real question for you")).toBe(true);
   });
 
   it("a loop paused by its configured issue keeps its issues on its card", () => {

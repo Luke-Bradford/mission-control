@@ -370,10 +370,9 @@ import {
   NO_LOCK,
   NOTE_KEY,
   questionWithOperator,
-} from "../hud.ts";
+} from "../hud/hud.ts";
 import { announceInstruction } from "../instructions/notices.ts";
 import { InstructionInput } from "../instructions/standing.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
@@ -388,7 +387,6 @@ import {
   seatPlace,
   text,
 } from "../mcp/tools.ts";
-import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { prototypeLinkProblem } from "../prototype-links.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
@@ -400,7 +398,9 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { resolveWasteAlarm } from "../spend/waste.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
-import { HUB_UPDATE_HELD_KEY } from "../update.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
+import { paceStartCheck } from "../telemetry/pace.ts";
+import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";
 import { mergeExternalPr } from "./external-merge.ts";
@@ -2146,10 +2146,11 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const { run, seat, call } = found;
     const { basis } = c.args;
     const at = now();
-    // on its seat: any unended run, working included; set aside: parked
+    // on its seat: any unended run, working included; set aside: in any phase, so a run held
+    // where it never parks (an evidence hold) can still be ended
     const onSeat = store.seatSession(seat)?.runId === run.id;
     const parked = run.loop?.phase === "parked";
-    if (!(onSeat || parked) || (!onSeat && !run.loop?.aside)) return fail(notEndableRunText(call));
+    if (!onSeat && !run.loop?.aside) return fail(notEndableRunText(call));
     // a parked or stalled run keeps the old rule; ending one that is working is a controller power
     const stalled = onSeat && stalledSeats(config, store, at).has(seat);
     const working = onSeat && !parked && !stalled;
@@ -2999,8 +3000,24 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ) {
       return fail(briefNoItemText(key));
     }
+    // noTicket means FLIGHT found the item's own ticket is not the main one: do not look it up
+    const main = parseTicket(
+      structured.ticket ?? (structured.noTicket === undefined ? (item.ticket ?? "") : ""),
+    );
+    const card = main ? store.board(main.repoId).find((b) => b.issueNumber === main.number) : null;
+    // an old card's label that is not P0 to P2 gives way to the priority FLIGHT states (#1869)
+    const cardPriority =
+      card?.priority && (PRIORITIES as readonly string[]).includes(card.priority)
+        ? card.priority
+        : null;
     // a protected item always reaches the operator: it is briefed, never held back
-    if (hold && protectedDecisionItem(store, item, config, at)) return fail(PROTECTED_ITEM_REFUSED);
+    // (the held Update is FLIGHT's to keep, not to hold: a hold would keep it off the operator's list past its window)
+    if (
+      hold &&
+      (protectedDecisionItem(store, item, config, at) ||
+        item.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`)
+    )
+      return fail(PROTECTED_ITEM_REFUSED);
     // an item FLIGHT holds a tool for is FLIGHT's to settle, never the operator's (#1510)
     if (structured.for === "operator" && !hubAlert(item, store)) {
       // a money, security, irreversible or floor decision is the operator's whatever the seat's words
@@ -3042,14 +3059,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       );
       if (faults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${faults.join("; ")}.`);
       // rule 4's added parts (#1510)
-      const main = parseTicket(structured.ticket ?? item.ticket ?? "");
-      const card = main
-        ? store.board(main.repoId).find((b) => b.issueNumber === main.number)
-        : null;
       const partFaults = briefPartFaults({
         title: structured.title,
         ask: structured.ask ?? "",
-        priority: card?.priority ?? structured.priority ?? null,
+        priority: cardPriority ?? structured.priority ?? null,
         hasTicket: main !== null || item.url !== null,
         noTicket: structured.noTicket,
         looks: structured.looks === true,
@@ -3064,7 +3077,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       if (partFaults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${partFaults.join("; ")}.`);
     }
     if (structured.for === "flight") {
-      if (isOperatorCall(item, store))
+      if (isOperatorCall(item, store, config))
         return fail(
           "Not briefed: this item is the operator's call; pass it up with a brief for operator.",
         );
@@ -3094,7 +3107,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     let briefedAt = at;
     try {
       // each #n and PR n comes back with its title, so a number never stands alone (#1510)
-      const home = parseTicket(structured.ticket ?? item.ticket ?? "")?.repoId ?? item.repoId;
+      const home = main?.repoId ?? item.repoId;
       const titled = (t: string): string =>
         home === null
           ? t
@@ -3105,11 +3118,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
                   store.pullRequest(home, n)?.title ??
                   null),
             );
-      const mainCard = (() => {
-        const m = parseTicket(structured.ticket ?? item.ticket ?? "");
-        return m ? store.board(m.repoId).find((b) => b.issueNumber === m.number) : undefined;
-      })();
-      const priority = mainCard?.priority ?? structured.priority;
+      const priority = cardPriority ?? structured.priority;
       const content = {
         ...candidate,
         recommendation: titled(recommendation),
@@ -4227,7 +4236,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ),
     superTool(
       MC_TOOL_NAMES.holdPr,
-      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release your own hold. The engine parks the run instead of merging it until the hold is released. You can never release a hold the operator or controller set.",
+      "Hold a run's PR from merging while it is in CI or review (a reason is required), or release your own hold. The engine parks the run instead of merging it until the hold is released. A hold the operator set is theirs to release: ask them in one brief.",
       HoldArgs,
       "hold",
       async (a) => {
@@ -4248,7 +4257,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const hold = run.loop?.mergeHold;
         if (!hold) return fail("Run's merge is not held.");
         if (hold.by !== "FLIGHT")
-          return fail("The controller set this hold; only the controller can release it.");
+          return fail(
+            "The operator set this hold; only the operator can release it. If its reason is met, ask them in one brief.",
+          );
         const r = await engine.releaseMergeHold(run.id, "FLIGHT");
         return r.ok
           ? { text: `Released the hold on ${run.id}.` }
@@ -4434,6 +4445,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           !note ||
           key.startsWith(GUARD_ACK_PREFIX) ||
           key === HUB_UPDATE_HELD_KEY ||
+          key === HUB_UPDATE_PERSON_KEY ||
           note.kind === "ratelimit"
         )
           return fail(note ? protectedItem : notFound);
@@ -4480,7 +4492,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           deps.login,
         ).find((i) => i.key === a.key);
         if (waiting === undefined) return fail("Item is no longer waiting.");
-        if (protectedDecisionItem(store, waiting, config, now()))
+        if (
+          protectedDecisionItem(store, waiting, config, now()) ||
+          waiting.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`
+        )
           return fail(PROTECTED_ITEM_REFUSED);
         if (!holdItem(store, a.key, a.reason, a.condition, "FLIGHT", now()))
           return fail(HOLD_CYCLE_REFUSED);

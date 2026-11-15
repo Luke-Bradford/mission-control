@@ -61,6 +61,7 @@ import {
   NEW_LOOP,
   NO_CI_AFTER_MS,
   originMovedText,
+  type PrCheck,
   type Profile,
   type PullRequestView,
   parkedEventText,
@@ -145,7 +146,8 @@ import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import type { Move } from "../src/github/board.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
+import { activity } from "../src/hud/views.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import {
   type SeatBusy,
@@ -155,7 +157,6 @@ import {
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
-import { activity } from "../src/views.ts";
 import { defined } from "./defined.ts";
 
 const START = Date.parse("2026-10-21T10:00:00Z");
@@ -369,6 +370,8 @@ interface Harness {
   starts: { seat: string; id: number }[];
   /** Makes the next startReview throw. */
   startError: Error | null;
+  /** Makes the startReview of one review throw (the others start). */
+  startErrorFor: ((id: number) => Error | null) | null;
   /** Runs inside startReview, before it answers. */
   duringStart: (() => void) | null;
   /** PR-body edits, and the next results of postMinorFindings (empty: success). */
@@ -455,6 +458,7 @@ function harness(): Harness {
     busyList: [],
     starts: [],
     startError: null,
+    startErrorFor: null,
     duringStart: null,
     minorCalls: [],
     minorResults: [],
@@ -682,6 +686,8 @@ function harness(): Harness {
             x.starts.push({ seat, id });
             x.duringStart?.();
             if (x.startError !== null) throw x.startError;
+            const refused = x.startErrorFor?.(id) ?? null;
+            if (refused !== null) throw refused;
             return { runId: retroRun(id, seat) };
           },
         },
@@ -1401,6 +1407,54 @@ describe("CI and review", () => {
     setPr({ ci: "passing" });
     await h.engine.reconcileRun(RUN);
     expect(loopOf().phase).toBe("review");
+  });
+
+  it("a slow job is judged by its own p90 from merged PRs, and parks only past twice that", async () => {
+    const web = (over: Partial<PrCheck> = {}): PrCheck => ({
+      name: "web",
+      kind: "check",
+      state: "passing",
+      conclusion: "SUCCESS",
+      attempt: 1,
+      url: null,
+      ...over,
+    });
+    store.upsertPullRequests(
+      REPO,
+      [101, 102, 103, 104, 105, 106].map((n) =>
+        prRow({
+          number: n,
+          branch: `feature/old-${n}`,
+          ticket: null,
+          state: "merged",
+          mergedAt: START - n * MIN,
+          checks: [web({ startedAt: 1000, completedAt: 1000 + 30 * MIN })],
+        }),
+      ),
+      clock,
+    );
+    await inCi();
+    const t0 = clock;
+    const running = () =>
+      setPr({
+        ci: "pending",
+        checks: [web({ state: "pending", conclusion: "IN_PROGRESS", startedAt: t0 })],
+      });
+    for (let i = 0; i < 45; i++) {
+      clock += MIN;
+      running();
+      await h.engine.tick();
+    }
+    expect(loopOf().parked).toBeNull();
+    for (let i = 0; i < 20; i++) {
+      clock += MIN;
+      running();
+      await h.engine.tick();
+    }
+    expect(loopOf().parked?.reason).toMatch(/CI pending for 60 minutes .*pending: web/);
+    setPr({ ci: "passing", checks: [web({ startedAt: t0, completedAt: clock })] });
+    await h.engine.reconcileRun(RUN);
+    expect(loopOf()).toMatchObject({ phase: "review", parked: null });
   });
 
   it("a failing check is named in the CI failed event", async () => {
@@ -3959,6 +4013,27 @@ describe("the engine runs reviews", () => {
     expect(loopTexts().some((line) => line.includes(failure))).toBe(true);
   });
 
+  it("a review that cannot start yet stays queued and the seat starts its next one", async () => {
+    const notReady = new SupervisorError(
+      409,
+      "screenshot evidence is not ready for this review head",
+    );
+    h.startErrorFor = (id) => (id === need(reviewRows()[0]).id ? notReady : null);
+    await toReview();
+    expect(first().state).toBe("queued");
+    await secondAuthor();
+    const older = first();
+    const newer = need(store.reviewsOfRun(RUN2)[0]);
+    expect(older.state).toBe("queued");
+    expect(newer.state).toBe("running");
+    expect(h.starts.at(-1)).toEqual({ seat: RETRO, id: newer.id });
+    // its evidence now exists: the older review starts
+    h.startErrorFor = null;
+    store.setReviewState(newer.id, ["running"], "reported", { at: clock });
+    await h.engine.tick();
+    expect(first().state).toBe("running");
+  });
+
   it("queues and starts one review", async () => {
     await toReview();
     const rv = first();
@@ -4728,7 +4803,7 @@ describe("the engine runs reviews", () => {
         expect(h.steps).not.toContain("merge");
       });
 
-      it("FLIGHT cannot release a hold the controller set; the controller can", async () => {
+      it("FLIGHT cannot release a hold the operator set; the operator can", async () => {
         await toReview();
         await h.engine.holdMerge(RUN, "CAPCOM", "veto");
         const refused = await h.engine.releaseMergeHold(RUN, "FLIGHT");
@@ -5992,6 +6067,50 @@ describe("the engine runs reviews", () => {
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
     });
 
+    it("a CI rerun goes through while the rollup is pending but one check has failed", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      const check = (name: string, state: PrCheck["state"]): PrCheck => ({
+        name,
+        kind: "check",
+        conclusion: state === "failing" ? "FAILURE" : "IN_PROGRESS",
+        state,
+        attempt: 1,
+        url: null,
+      });
+      setPr({ ci: "pending", checks: [check("web-core", "failing"), check("review", "pending")] });
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
+    });
+    it("a CI rerun refusal names the condition that stopped it", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      setPr({ ci: "pending", checks: [] });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(/no failed check/i);
+      setPr({
+        ci: "passing",
+        checks: [
+          {
+            name: "mc/review",
+            kind: "status",
+            conclusion: "FAILURE",
+            state: "failing",
+            attempt: null,
+            url: null,
+          },
+        ],
+      });
+      const review = await h.engine.rerunCi(RUN);
+      expect(h.rulingReruns).toEqual([]);
+      expect(review.text).toMatch(/no failed check/i);
+      setPr({ ci: "failing", headSha: "f".repeat(40) });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(
+        /fffffff differs from the run's last push [0-9a-f]{7}/,
+      );
+      setPr({ headSha: null });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(/no known head/i);
+      setPr({ state: "closed" });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(/not open/i);
+    });
     it("an accepted head waits until the waived status has been written", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();

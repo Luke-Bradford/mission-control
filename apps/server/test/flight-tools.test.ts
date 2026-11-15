@@ -172,7 +172,7 @@ import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, type FlightToolsDeps, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github/board.ts";
-import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
+import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
@@ -3404,15 +3404,21 @@ describe("end_run", () => {
     ]);
   });
 
-  it("refuses a set-aside run that is not parked, and a set-aside run with uncommitted work", async () => {
+  it("refuses a set-aside run with uncommitted work, in any phase", async () => {
     setAside();
     const r = store.run("r-g");
     if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
-    expect((await call("end_run", E())).isError).toBe(true);
-    if (r?.loop) store.setRunLoop("r-g", r.loop);
     dirty = ["apps/a.ts"];
     expect((await call("end_run", E())).isError).toBe(true);
     expect(asideEnds).toEqual([]);
+  });
+
+  it("ends a set-aside run that never parked (an evidence hold keeps it in review)", async () => {
+    setAside();
+    const r = store.run("r-g");
+    if (r?.loop) store.setRunLoop("r-g", { ...r.loop, phase: "review", parked: null });
+    expect((await call("end_run", E())).isError).toBeFalsy();
+    expect(asideEnds.length).toBe(1);
   });
 
   it("reports a failed end and records nothing", async () => {
@@ -5564,6 +5570,50 @@ describe("brief_item", () => {
       expect(await call("brief_item", B({ priority: undefined }))).toEqual({ text: BRIEFED_TEXT });
       expect(store.briefs().get(KEY)?.priority).toBe("P0");
     });
+    it("uses the stated priority when the main card's is not P0 to P2 (#1869)", async () => {
+      board(card(7, { priority: "P3" }));
+      expect(await call("brief_item", B({ priority: "P2" }))).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(KEY)?.priority).toBe("P2");
+    });
+    it("briefs an item whose own ticket is in a repo the hub no longer watches (#1869)", async () => {
+      store.upsertRun(run("r-old", "guido-1", { ticket: "autonomy-engine#410" }));
+      store.replaceBoard("autonomy-engine", [
+        { ...card(410, { priority: "P3" }), repoId: "autonomy-engine" },
+      ]);
+      raise("blocked:r-old:0", { runId: "r-old", repoId: "autonomy-engine" });
+      const key = "note:blocked:r-old:0";
+      const ok = await call(
+        "brief_item",
+        B({
+          key,
+          ticket: undefined,
+          priority: "P2",
+          noTicket: { repo: "mc", reason: "The repo is no longer watched." },
+        }),
+      );
+      expect(ok).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(key)?.priority).toBe("P2");
+    });
+    it("noTicket skips the item's own ticket for the priority (#1869)", async () => {
+      store.upsertRun(run("r-old", "guido-1", { ticket: "autonomy-engine#410" }));
+      store.replaceBoard("autonomy-engine", [
+        { ...card(410, { priority: "P0" }), repoId: "autonomy-engine" },
+      ]);
+      raise("blocked:r-old:0", { runId: "r-old", repoId: "autonomy-engine" });
+      const key = "note:blocked:r-old:0";
+      expect(
+        await call(
+          "brief_item",
+          B({
+            key,
+            ticket: undefined,
+            priority: "P2",
+            noTicket: { repo: "mc", reason: "The repo is no longer watched." },
+          }),
+        ),
+      ).toEqual({ text: BRIEFED_TEXT });
+      expect(store.briefs().get(key)?.priority).toBe("P2");
+    });
     it("takes a question with no ticket when the repo and a reason are given", async () => {
       store.upsertRun(run("r-none", "guido-1"));
       raise("blocked:r2:0", { runId: "r-none" });
@@ -6181,8 +6231,6 @@ describe("brief_item", () => {
     expect(await call("brief_item", B({ key: "note:nope" }))).toEqual(
       refused("Not briefed: note:nope is not an item in the operator's Needs-you list."),
     );
-    raise("cleanup-branch:x");
-    expect((await call("brief_item", B({ key: "note:cleanup-branch:x" }))).isError).toBe(true);
     expect(store.briefs().size).toBe(0);
   });
 
@@ -7878,7 +7926,9 @@ describe("superuser housekeeping", () => {
       mergeHold: { by: "CAPCOM", reason: "veto", at: NOW },
     });
     expect(await call("hold_pr", { runId: "r-pr", action: "release", basis: "fine now" })).toEqual(
-      refused("The controller set this hold; only the controller can release it."),
+      refused(
+        "The operator set this hold; only the operator can release it. If its reason is met, ask them in one brief.",
+      ),
     );
     expect(store.getSetting("flight.runaway")).toBeNull();
   });
@@ -7953,7 +8003,7 @@ describe("superuser housekeeping", () => {
       basis: "I think it is fine now.",
     });
     expect(refusal).toHaveProperty("isError", true);
-    expect(JSON.stringify(refusal)).toContain("controller");
+    expect(JSON.stringify(refusal)).toContain("operator");
     expect(holdCalls).toEqual([]);
     expect(need(store.run("r-pr")?.loop).mergeHold).toMatchObject({ by, reason: "veto" });
   });
@@ -9667,6 +9717,26 @@ describe("attention hold tools", () => {
       expect((await call("release_hold", { key: cc.key })).isError).toBeUndefined();
     }
   });
+  it("refuses to hold the held Update even when FLIGHT may run it: a hold would keep it from the operator (#1834)", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.raiseNote({
+      key: "hub-update-held",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW - 1,
+    });
+    expect(
+      await call("hold_item", {
+        key: "note:hub-update-held",
+        reason: "Waiting",
+        condition: { kind: "date", at: NOW + 7 * 86_400_000 },
+      }),
+    ).toEqual(refused(PROTECTED_ITEM_REFUSED));
+    expect(store.getSetting("attention-holds")).toBeNull();
+  });
   it("refuses to hold the not-triaging item: FLIGHT clears it by triaging (#758)", async () => {
     expect(await call("hold_item", { ...args, key: FLIGHT_NOT_TRIAGING_KEY })).toEqual(
       refused(HOLD_NOT_TRIAGING_REFUSED),
@@ -9871,6 +9941,29 @@ describe("brief_item with a hold (#760)", () => {
     expect(r.isError).toBe(true);
     expect(holds(store)[key]).toBeUndefined();
     expect(store.briefs().has(key)).toBe(false);
+  });
+
+  it("refuses to brief the held Update with a hold, even when FLIGHT may run it (#1834)", async () => {
+    need(cfg.repos[0]).flightPowers = "superuser";
+    store.raiseNote({
+      key: "hub-update-held",
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW - 1,
+    });
+    expect(
+      await call(
+        "brief_item",
+        brief({
+          key: "note:hub-update-held",
+          hold: { condition: { kind: "date", at: NOW + 7 * 86_400_000 } },
+        }),
+      ),
+    ).toEqual(refused(PROTECTED_ITEM_REFUSED));
+    expect(store.getSetting("attention-holds")).toBeNull();
   });
 
   it("refuses an item hold that closes a cycle, storing neither brief nor hold", async () => {

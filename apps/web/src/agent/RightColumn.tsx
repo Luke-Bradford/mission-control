@@ -172,7 +172,7 @@ function SetupTab({ row }: { row: CrewRow }) {
       <dd>{row.accountId}</dd>
       <dt>May change</dt>
       <dd>{seatAreaText(row)}</dd>
-      <dd>
+      <dd className="setup-links">
         <a href={setupPath("roles")} onClick={(e) => followLink(e, setupPath("roles"))}>
           Role prompt
         </a>{" "}

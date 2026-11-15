@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { describe, expect, it, vi } from "vitest";
 import { ItemDiscussion } from "../src/comms/ItemDiscussion.tsx";
 import { hub } from "../src/data.ts";
+import type { FlightSeat } from "../src/flight/flightTypes.ts";
 import { stubFetch as fetchRoutes } from "./fetchStub.ts";
 import { readStyles } from "./styles.ts";
 
@@ -205,4 +206,49 @@ it("focuses once when the live seat finishes loading", async () => {
   await waitFor(() =>
     expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this")),
   );
+});
+
+describe("the item's conversation from Comms", () => {
+  it("shows the operator's reply without its item line, FLIGHT's answer, and that FLIGHT read it", async () => {
+    const key = "note%3Ahub-update-held";
+    stubFetch({
+      [path(key)]: thread("note:hub-update-held"),
+      [`/api/attention/${key}/thread`]: {
+        messages: [
+          {
+            id: "comms:1",
+            at: Date.parse("2026-11-13T18:03:19Z"),
+            from: "CAPCOM",
+            to: "flight-1",
+            text: "Re: note:hub-update-held · A new version\n\nwho is asking for this?",
+            operator: true,
+            deliveredAt: Date.parse("2026-11-13T18:03:21Z"),
+            state: "answered",
+          },
+          {
+            id: "comms:2",
+            at: Date.parse("2026-11-13T18:06:33Z"),
+            from: "flight-1",
+            to: "CAPCOM",
+            text: "Nobody is asking.",
+            operator: false,
+            deliveredAt: null,
+          },
+        ],
+      },
+    });
+    render(
+      <ItemDiscussion
+        itemKey="note:hub-update-held"
+        live
+        layout="page"
+        seat={{ id: "flight-1" } as FlightSeat}
+      />,
+    );
+    await screen.findByText("who is asking for this?");
+    expect(screen.queryByText(/Re: note:hub-update-held/)).toBeNull();
+    await screen.findByText("Nobody is asking.");
+    expect(screen.getByText(/FLIGHT read it .*and answered/)).toBeTruthy();
+    expect(screen.queryByText("No messages yet.")).toBeNull();
+  });
 });

@@ -135,6 +135,12 @@ export interface FlightView {
   wakeHistory?: FlightWakeHistory;
   /** What FLIGHT cost in the last FLIGHT_COST_DAYS days, per day and per wake reason, and its share of the crew's. */
   wakeCost?: FlightWakeCost;
+  /** API-equivalent cost of FLIGHT's sessions in the last 60 minutes; null without session data. */
+  costLastHour?: number | null;
+  /** FLIGHT sessions started in the last 60 minutes; 0 when FLIGHT has run data but none started; null when it has no run data. */
+  sessionsLastHour?: number | null;
+  /** Start time of FLIGHT's current session run; null when there is no current run. */
+  runStartedAt?: number | null;
   /** How long an operator message or a blocker waited for a wake, per day. */
   wakeWaits?: FlightWakeWaits;
   /** Every ticket waiting on work that has not merged, with its chain and how long it has waited. */
@@ -781,7 +787,7 @@ export const syncConflictText = (call: string, files: readonly string[]): string
   syncConflictDecision(call, files) + RECORDED;
 
 export const notEndableRunText = (call: string): string =>
-  `Not ended: ${call}'s run is not parked or stalled.`;
+  `Not ended: ${call}'s run is neither on its seat nor set aside.`;
 export const END_UNREADABLE_TEXT = "Not ended: the run's worktree could not be read.";
 export const endDirtyText = (call: string, paths: readonly string[]): string =>
   `Not ended: ${call} has uncommitted changes in ${pathsText(paths)}.`;
@@ -1223,6 +1229,11 @@ export interface FlightState {
     text: string;
     ageMin: number;
     triageRemainingMs: number;
+    /**
+     * Set on FLIGHT's own question: when it was last briefed (0 if never). Its lines grow the text,
+     * so the wake keys on this, and FLIGHT is woken once per brief, not once per line.
+     */
+    ownBriefAt?: number;
     /** Set when a hold on the item was released: the condition it waited on. Refresh your brief. */
     holdReleased?: string;
     /**

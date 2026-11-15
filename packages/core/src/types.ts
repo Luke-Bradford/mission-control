@@ -466,6 +466,10 @@ export interface PrCheck {
   conclusion: string; // a check run's conclusion (its status until done); a status's state
   attempt: number | null; // the Actions run attempt; null for a status or a non-Actions run
   url: string | null;
+  /** When a check run began running (ms); absent for a status, a queued run, or a read before this was kept. */
+  startedAt?: number;
+  /** When a check run finished (ms); absent until it has. */
+  completedAt?: number;
 }
 
 /** A check as a PR list shows it: the name and state, not the run's ids and links. */
@@ -1003,7 +1007,7 @@ export interface CrewLoop {
   planned?: boolean;
   /** The current step's try and its limit (ci: CI tries; review: review rounds), else null. */
   tries?: { n: number; max: number; failures?: number; runs?: number } | null;
-  /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
+  /** What the run waits on (runWait in apps/server/src/hud/hud.ts), else null. */
   wait?: LoopWait | null;
   /** When `wait` is "seat" and the seat is on another ticket: "rework waiting on GUIDO-1 (behind #12)". */
   waitText?: string | null;
@@ -1588,7 +1592,15 @@ export interface OverviewSummary {
      */
     inFlight: { count: number; oldestAt: number | null; series?: number[] };
     /** Rolling 24-hour pass percentage at each minute end; null without outcomes. */
-    ciPassRate24h: { pct: number | null; runs: number; redNow: number; series?: (number | null)[] };
+    ciPassRate24h: {
+      pct: number | null;
+      /** Heads whose checks finished and counted (passed or failed), not loop events. */
+      runs: number;
+      /** Heads left out of `pct` and `runs` because their only finished checks were cancelled. */
+      cancelled?: number;
+      redNow: number;
+      series?: (number | null)[];
+    };
     /**
      * The operator's whole inbox (one per key, never narrowed by the session filter), and its
      * episodes open at each minute end, including retained resolved episodes.
@@ -1609,7 +1621,7 @@ export interface OverviewSummary {
 }
 
 export interface PipelineStage {
-  stage: "ready" | "building" | "checks" | "review" | "merging" | "merged";
+  stage: "ready" | "building" | "checks" | "review" | "merging" | "merged" | "blocked";
   count: number;
   oldestAt: number | null;
   cards: PipelineCard[];
@@ -1626,6 +1638,10 @@ export interface PipelineCard {
   /** The board item's Priority and Size, when the ticket has them. */
   priority?: string | null;
   size?: string | null;
+  /** On a `blocked` card: why it is blocked. */
+  blockedReason?: string;
+  /** On a `merged` card: the PR merged but its ticket is still open, so it is merged, not done. */
+  ticketOpen?: boolean;
   /**
    * Set while the PR's newest review found blocking problems on its current head: the ticket
    * is in rework (In progress with its seat), or Ready after its run ended, and has been reviewed.

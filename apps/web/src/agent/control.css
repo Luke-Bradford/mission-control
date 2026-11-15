@@ -396,6 +396,13 @@
   margin: 0;
   overflow-wrap: anywhere;
 }
+/* The links, the queue with its Focus form and the instructions take the whole list, so the form
+   gets the panel's full width rather than the narrow second column. */
+.setup-list .setup-links,
+.setup-list .setup-queue,
+.setup-list .setup-instructions {
+  grid-column: 1 / -1;
+}
 
 /* A run trace is a long document: it takes the room beside the roster and scrolls itself. */
 .control-main.trace {

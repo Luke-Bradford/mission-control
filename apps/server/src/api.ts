@@ -110,6 +110,7 @@ import {
   OPERATOR_BOOTSTRAP_PATH,
   OPERATOR_HEADER,
   OPERATOR_TOKEN_REQUIRED,
+  OWNER_OPERATOR,
   PACE_SETTING,
   type PaceSettings,
   PR_LIST_DAYS,
@@ -180,7 +181,6 @@ import {
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
-import { agentDetail } from "./agent-detail.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
@@ -235,6 +235,7 @@ import {
   COMMS_SNAPSHOT_LIMIT,
   commsSendState,
   pinComms,
+  raisesAttention,
   reactComms,
   sendComms,
   threadMessages,
@@ -333,6 +334,7 @@ import { type CheckRecorder, plainCall } from "./guard/check-runs.ts";
 import { crewGuardDecision } from "./guard/decision.ts";
 import type { TestLock } from "./guard/lock.ts";
 import { rereadDenial } from "./guard/rereads.ts";
+import { agentDetail } from "./hud/agent-detail.ts";
 import {
   attentionItems,
   attentionVersion,
@@ -344,11 +346,20 @@ import {
   NOTE_KEY,
   pinned,
   seatQuestionTriage,
-} from "./hud.ts";
+} from "./hud/hud.ts";
+import { overviewSummary } from "./hud/overview.ts";
+import {
+  decodeCursor,
+  TICKET_PAGE_DEFAULT,
+  TICKET_PAGE_MAX,
+  ticketHistory,
+} from "./hud/ticket-history.ts";
+import { overviewTimeline } from "./hud/timeline.ts";
+import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
+import { itemThread } from "./item-thread.ts";
 import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
@@ -363,7 +374,6 @@ import {
   readKnown,
   seatPlace,
 } from "./mcp/tools.ts";
-import { metricsView } from "./metrics.ts";
 import {
   type ActionResult,
   answerSetAside,
@@ -375,8 +385,6 @@ import {
   setAsideQuestions,
 } from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
-import { overviewSummary } from "./overview.ts";
-import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import {
@@ -433,19 +441,25 @@ import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
-import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
-import {
-  decodeCursor,
-  TICKET_PAGE_DEFAULT,
-  TICKET_PAGE_MAX,
-  ticketHistory,
-} from "./ticket-history.ts";
-import { overviewTimeline } from "./timeline.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
+import { metricsView } from "./telemetry/metrics.ts";
+import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
+import { lockView, telemetry, usualLockMs } from "./telemetry/telemetry.ts";
 import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";
-import { HUB_UPDATE_HELD_KEY, UPDATE_FAILED, UpdateError, type Updater } from "./update.ts";
-import { activity, configView } from "./views.ts";
+import {
+  createHeldUpdateNote,
+  HUB_HEAD_OFF_MAIN,
+  HUB_INSTALL_NEEDS_PERSON,
+  HUB_UNSAFE_NEEDS_PERSON,
+  HUB_UPDATE_HELD_KEY,
+  type QuietGate,
+  raiseUpdatePersonNote,
+  UPDATE_FAILED,
+  UpdateError,
+  type Updater,
+} from "./update.ts";
 import { webHandler } from "./web.ts";
 
 export const TELEMETRY_COMMIT_READ_LIMIT = 32;
@@ -547,6 +561,8 @@ export interface AppDeps {
   operatorToken?: string;
   /** The per-boot controller token: the controller's own key, which labels its messages. */
   controllerToken?: string;
+  /** Holds new runs while FLIGHT's Update waits for running turns; without it FLIGHT's Update refuses a busy crew. */
+  updateGate?: QuietGate;
   /** The mc tools only a `flight_powers: superuser` repo's seats may call; default: core's list. */
   superuserTools?: readonly McToolName[];
   gh?: GhRunner;
@@ -691,6 +707,8 @@ const MessageBody = z.strictObject({
    * a reply go to a run set aside on that question; without it the text goes to the run on the seat.
    */
   question: z.number().int().positive().optional(),
+  /** The Needs-you item this reply is about: it shows in that item's conversation. */
+  itemKey: z.string().min(1).max(200).optional(),
 });
 
 /** `POST /api/seats/:id/interrupt` and `/end`: no fields. */
@@ -1405,6 +1423,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
   // The controller's own key. A request that carries it passes where the operator token does (it
   // grants nothing new) and is marked, so what it sends is recorded as the controller's.
   const controllerRequests = new WeakSet<FastifyRequest>();
+  /** A Needs-you key built from a Comms message: `comms-open:<id>`, `tag:<seat>:<id>`, `message:<agent>:<id>`. */
+  const COMMS_ITEM_KEY = /^(?:comms-open|tag:[^:]+|message:[^:]+):(comms:\d+)$/;
+  const CONTROLLER_HOLD_REFUSED =
+    "the controller does not hold or release merges; tell FLIGHT what is wrong";
   if (deps.controllerToken !== undefined && deps.operatorToken !== undefined) {
     const { controllerToken, operatorToken: held } = deps;
     app.addHook("onRequest", async (req) => {
@@ -2445,12 +2467,24 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/App.tsx#App (CAPCOM mentions)
-      api.get("/comms/mentions", () => ({
-        mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
-          message: storedCommsMessage(row),
-          seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
-        })),
-      }));
+      api.get("/comms/mentions", () => {
+        // A message needs the operator's reply when its question is open on their Needs you: the
+        // same rules close it in both places, so the badge and Needs you never disagree. Every
+        // Comms-sourced item key (an open question, a tag or a direct line) ends in its message id.
+        const asks = new Set<string>();
+        for (const item of sharedAttention()) {
+          if (item.owner !== OWNER_OPERATOR) continue;
+          const id = COMMS_ITEM_KEY.exec(item.key)?.[1];
+          if (id !== undefined) asks.add(id);
+        }
+        return {
+          mentions: store.commsMentions(COMMS_CAPCOM).map((row) => ({
+            message: storedCommsMessage(row),
+            seen: store.commsMentionSeen(COMMS_CAPCOM, row.id),
+            needsReply: asks.has(row.id),
+          })),
+        };
+      });
       // Reader: apps/web/src/App.tsx#App (CAPCOM mention read state)
       api.post("/comms/mentions/seen", (req, reply) => {
         const body = z
@@ -2542,8 +2576,41 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (scope === null || !scope.rows.some((row) => row.id === body.data.messageId))
           return reply.code(400).send({ error: "invalid Comms read cursor" });
         store.markCommsScopeRead(scope.key, body.data.messageId);
+        // Opening an agent's direct thread also moves the cursor its attention items key on (the
+        // web reads through this route, not the per-thread one)
+        const all = scope.key.match(/^agent-all:(.+)$/)?.[1];
+        const direct = all ?? directAgent(scope.key);
+        if (direct !== undefined && store.threadOwnsMessage(direct, body.data.messageId)) {
+          let through: string | null = body.data.messageId;
+          if (all === undefined) {
+            // The pair view shows only the CAPCOM line: its agent's other lines stay unread, and
+            // the cursor stops before the first one the view did not show that could raise an item
+            const shown = new Set(scope.rows.map((row) => row.id));
+            const limit = Number(body.data.messageId.slice("comms:".length));
+            const after = store.threadReadCursors(direct).get("comms")?.offset ?? 0;
+            through = null;
+            for (const row of store.threadComms(direct, after)) {
+              if (Number(row.id.slice("comms:".length)) > limit) break;
+              // an unshown line that raises no item (a seat's handoff) is stepped over
+              if (!shown.has(row.id) && raisesAttention(row)) break;
+              through = row.id;
+            }
+          }
+          if (through !== null) {
+            store.markThreadRead(direct, [through]);
+            bus.emit("attention");
+          }
+        }
         return { ok: true };
       });
+
+      /** The agent on the other end of CAPCOM's direct line, for a `pair:` scope key. */
+      const directAgent = (key: string): string | undefined => {
+        const pair = key.match(/^pair:([^:]+):([^:]+)$/);
+        if (!pair) return undefined;
+        if (pair[1] === COMMS_CAPCOM) return pair[2];
+        return pair[2] === COMMS_CAPCOM ? pair[1] : undefined;
+      };
 
       const isSeat = (id: string) => agentById(id)?.kind === "crew";
 
@@ -4754,6 +4821,15 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return { ok: true };
           }
           const ticket = runId === null ? null : (store.run(runId)?.ticket ?? null);
+          // Sent from an item's conversation, it answers the seat's latest message there, so a
+          // question the seat asked in that conversation closes.
+          const answers =
+            b.itemKey === undefined
+              ? undefined
+              : store
+                  .itemThreadNow(b.itemKey)
+                  .filter((m) => m.from === id && m.to === sender.from)
+                  .at(-1)?.id;
           try {
             let delivered = false;
             let wakeFailed = false;
@@ -4786,6 +4862,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
                 to: id,
                 text: b.text,
                 ...(b.interrupt === true ? { label: "handoff" as const } : {}),
+                ...(b.itemKey === undefined ? {} : { itemKey: b.itemKey }),
+                ...(answers === undefined ? {} : { replyTo: answers }),
                 ref: ticket ?? undefined,
               },
             );
@@ -5166,7 +5244,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return reply.code(409).send({ error: RUNAWAY_NOT_TRIPPED });
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.get("/flight/memory", async (req, reply) => {
         const parsed = z.object({ repo: z.string().min(1) }).safeParse(req.query);
         if (!parsed.success) return reply.code(400).send({ error: "Invalid repo" });
@@ -5205,7 +5283,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         return { ok: true, id: approval.id };
       });
       const MemoryParams = z.object({ repo: z.string().min(1), topic: FlightMemoryTopic });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.put("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         const body = FlightMemoryInput.omit({ topic: true }).strict().safeParse(req.body);
@@ -5227,7 +5305,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         bus.emit("flight");
         return { ok: true };
       });
-      // Reader: roles/FLIGHT.md#repo-memory-and-the-daily-retrospective (operator memory API)
+      // Reader: roles/FLIGHT.md#orders-and-records (operator memory API)
       api.delete("/flight/memory/:repo/:topic", async (req, reply) => {
         const params = MemoryParams.safeParse(req.params);
         if (!params.success) return reply.code(400).send({ error: "Invalid memory topic" });
@@ -5828,6 +5906,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             (body.data.action === "hold" && !body.data.reason)
           )
             return reply.code(400).send({ error: "invalid merge-hold request" });
+          // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+          if (controllerRequests.has(req))
+            return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
           const target = await externalTarget(req.params.repoId, number, body.data.sha, reply);
           if (!target) return reply;
           const previous = externalMergeHold(store, target.repo.id, number);
@@ -5835,7 +5916,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           if (actor && previous !== null && !previous.startsWith("FLIGHT: "))
             return reply
               .code(403)
-              .send({ error: "Only the controller may change this operator merge hold." });
+              .send({ error: "Only the operator may change this operator merge hold." });
           if (!(await externalNoteAllowed(body.data.reason, reply))) return reply;
           checkBriefDispatch();
           setExternalMergeHold(
@@ -5929,8 +6010,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           return { ok: true };
         },
       );
-      // The controller holds a run's PR from merging, or releases a hold (FLIGHT's or its own).
-      // FLIGHT's hold_pr tool cannot release one set here; the operator token is required.
+      // The operator holds a run's PR from merging, or releases a hold (FLIGHT's or their own).
+      // FLIGHT's hold_pr tool cannot release one set here. The controller's key is refused.
       // Reader: docs/runbook.md#hold-a-run-from-merging
       api.post<{ Params: { id: string } }>("/runs/:id/merge-hold", async (req, reply) => {
         const run = store.run(req.params.id);
@@ -5939,6 +6020,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         if (!crewGate(run.agentId, reply)) return reply;
         const body = MergeHoldBody.safeParse(req.body);
         if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        // The controller is not in the crew's path: a merge hold is the operator's or FLIGHT's.
+        if (controllerRequests.has(req))
+          return reply.code(403).send({ error: CONTROLLER_HOLD_REFUSED });
         if (deps.noLoopWrites) return reply.code(409).send({ error: LOOP_WRITES_DISABLED });
         const engine = deps.engine;
         if (!engine?.holdMerge || !engine.releaseMergeHold || engine.status().on !== true) {
@@ -6241,26 +6325,48 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             return reply
               .code(409)
               .send({ error: "No Update is held for a person.", logged: false });
-          const working = (supervisor?.busy() ?? []).find((b) => b.seatId !== actor.seatId);
-          if (working !== undefined)
-            return reply.code(409).send({
-              error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
-              logged: false,
-            });
+          // a busy crew: hold new runs and wait for the running turns to end (a quiet gap)
+          const busy = () => supervisor?.busy() ?? [];
+          if (deps.updateGate === undefined) {
+            const working = busy().find((b) => b.seatId !== actor.seatId);
+            if (working !== undefined)
+              return reply.code(409).send({
+                error: `${seatCallSign(working.seatId)} is working: run Update once the crew is idle.`,
+                logged: false,
+              });
+          } else {
+            const wait = await deps.updateGate.wait(busy, actor.seatId);
+            if (wait !== null) return reply.code(409).send({ error: wait, logged: false });
+          }
         }
+        let restarting = false;
         try {
-          const out = await updater.update();
-          if ("restarting" in out) updater.restart();
+          // FLIGHT's run never applies a shortcut: only a person does
+          const out = await updater.update(actor === null ? undefined : { refuseUnsafe: true });
+          if ("restarting" in out) {
+            restarting = true;
+            updater.restart();
+          }
           if (!("upToDate" in out))
             store.addHubEvent(actor === null ? "Updated manually" : "Updated by FLIGHT", now());
           return "restarting" in out ? reply.code(202).send(out) : out;
         } catch (e) {
           captureError(reply, e);
+          // a person-only refusal is the operator's at once, with its reason in the note
+          if (actor !== null && e instanceof UpdateError) {
+            if (e.message === HUB_UNSAFE_NEEDS_PERSON && e.held !== undefined)
+              createHeldUpdateNote(store, bus)(e.held);
+            else if (e.message === HUB_INSTALL_NEEDS_PERSON || e.message === HUB_HEAD_OFF_MAIN)
+              raiseUpdatePersonNote(store, bus, e.message);
+          }
           // logged: update.log says why (the page opens it); false for a refusal before the log
           if (e instanceof UpdateError)
             return reply.code(e.status).send({ error: e.message, logged: e.logged });
           reply.log.warn({ err: e instanceof Error ? e.name : typeof e }, "update failed");
           return reply.code(500).send({ error: UPDATE_FAILED, logged: false });
+        } finally {
+          // the hub exits after a restart; otherwise new runs start again
+          if (!restarting) deps.updateGate?.release();
         }
       });
       // Reader: apps/web/src/setup/UpdateLog.tsx (why the last update failed)
@@ -6327,7 +6433,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         },
       );
       // Reader: apps/web/src/shell/ItemPanel.tsx (bound choice contract for child #1390).
-      registerBriefChoiceRoutes(api, app, deps, flightActor);
+      registerBriefChoiceRoutes(api, app, deps, flightActor, (req) => controllerRequests.has(req));
       // Reader: docs/superpowers/specs/2026-11-06-comms-needs-you-flight-design.md#from-flight-s-side-flight-is-the-gate (the Answered group; the web side is a follow-up ticket)
       api.get("/attention/answered", async () =>
         store.questionClosures(now() - ANSWERED_WINDOW_MS, ANSWERED_LIMIT),
@@ -6530,6 +6636,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
+      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
+        const key = req.params.key;
+        if (key.length > 200) return reply.code(400).send({ error: "key too long" });
+        // A note key is raised again later: only this run of the note owns the conversation.
+        // Other item keys name one message, question or issue, so all of theirs is the item's.
+        return itemThread(store.itemThreadNow(key));
+      });
       // Reader: apps/web/src/shell/ItemPanel.tsx
       api.get<{ Params: { key: string }; Querystring: { id?: string } }>(
         "/attention/:key/discussion",

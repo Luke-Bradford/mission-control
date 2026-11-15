@@ -158,13 +158,13 @@ import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } f
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { restartHold, reviewsHeld } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
 import {
@@ -392,10 +392,10 @@ export interface Engine {
   /**
    * Holds the run's merge: the engine does not merge it, even after a clean review and green CI,
    * until the hold is released; it parks as `merge-hold` when it would otherwise merge. The
-   * controller (CAPCOM) may replace any hold; FLIGHT only sets one when none is held.
+   * operator (CAPCOM) may replace any hold; FLIGHT only sets one when none is held.
    */
   holdMerge(runId: string, by: MergeHoldBy, reason: string): Promise<MergeHoldResult>;
-  /** Releases the hold. FLIGHT cannot release one the controller set; the controller can release any. */
+  /** Releases the hold. FLIGHT cannot release one the operator set; the operator can release any. */
   releaseMergeHold(runId: string, by: MergeHoldBy): Promise<MergeHoldResult>;
   /**
    * FLIGHT settles a run parked on a CI ruling. The first call has the hub re-run the failed jobs
@@ -992,6 +992,13 @@ export function createEngine(deps: EngineDeps): Engine {
                 failing: verdict.failing,
                 pending: verdict.pending,
                 missing: verdict.missing,
+                startedAt: Object.fromEntries(
+                  (pr.checks ?? []).flatMap((c) =>
+                    c.state === "pending" && c.startedAt !== undefined
+                      ? [[c.name, c.startedAt]]
+                      : [],
+                  ),
+                ),
               },
               reviewStatus:
                 flightPowersOf(config, run.repoId) === "superuser" &&
@@ -1000,6 +1007,10 @@ export function createEngine(deps: EngineDeps): Engine {
                   ? "pending"
                   : checkState(pr.checks ?? [], REVIEW_STATUS_CONTEXT),
             },
+      ciP90Ms:
+        pr?.ci === "pending" && verdict.pending.length + verdict.missing.length > 0
+          ? store.ciCheckP90Ms(run.repoId)
+          : {},
       autoMerge:
         repo?.autonomy === "merge" && activeAway(store, at, config.operator.timezone) === null,
       hardRulesSet: mergeAllowed,
@@ -2676,7 +2687,9 @@ export function createEngine(deps: EngineDeps): Engine {
         void reconcileRun(author.id);
       }
     }
-    // 4. each free scratch seat starts its oldest wanted review. Existing reviews continue.
+    // 4. each free scratch seat starts its oldest wanted review that can start. One refused for now
+    // (its screenshots are not ready) stays queued and does not stop the seat's later ones.
+    // Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
     if (storedMachineCapacity(store, now(), capacityConfig).blocked) return;
     const scratch = (config.crew?.sessions ?? [])
@@ -2725,7 +2738,11 @@ export function createEngine(deps: EngineDeps): Engine {
           if (isExternalReview(row) && message === REVIEW_NOT_WANTED) {
             dropReview(row);
           } else if (isTransientStart(e)) {
+            // it stays queued and starts once it can (its screenshots may not be ready); the
+            // seat's next queued review is tried in this pass
             store.setReviewState(row.id, ["starting"], "queued", { at: now() });
+            void reconcileRun(row.authorRunId);
+            continue;
           } else {
             const failure = Array.from(message).slice(0, STDERR_TEXT_MAX).join("");
             if (store.setReviewState(row.id, ["starting"], "failed", { at: now(), failure })) {
@@ -3347,7 +3364,7 @@ export function createEngine(deps: EngineDeps): Engine {
           return refuse("the run's PR is already merged");
         if (loop.merging?.done.includes("merge")) return refuse("the run's PR is already merged");
         if (loop.mergeHold && loop.mergeHold.by === "CAPCOM" && by !== "CAPCOM")
-          return refuse("the controller already holds this run's merge");
+          return refuse("the operator already holds this run's merge");
         const at = now();
         // a run already parked on the hold keeps the phase it left, and its park names the new holder
         const parkedOnHold = loop.phase === "parked" && loop.parked?.kind === MERGE_HOLD_PARK;
@@ -3380,7 +3397,7 @@ export function createEngine(deps: EngineDeps): Engine {
         const hold = loop?.mergeHold;
         if (run === null || !loop || !hold) return refuse("the run's merge is not held");
         if (hold.by === "CAPCOM" && by !== "CAPCOM")
-          return refuse("the controller set this hold; only the controller can release it");
+          return refuse("the operator set this hold; only the operator can release it");
         const at = now();
         const next: RunLoop = { ...loop, mergeHold: null };
         if (loop.phase === "parked" && loop.parked?.kind === MERGE_HOLD_PARK) {
@@ -3524,14 +3541,23 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!live() || !run?.loop || run.endedAt !== null || flightHeld(run))
           return no("Run is held or unavailable.");
         const pr = findPr(run, run.loop);
-        const sha = pr?.headSha;
+        if (pr?.state !== "open") return no("The run's PR is not open.");
+        const sha = pr.headSha;
+        if (!sha) return no("The run's PR has no known head commit yet.");
+        const pushed = store.runPush(runId)?.sha;
+        if (pushed !== sha)
+          return no(
+            `The PR's head ${sha.slice(0, 7)} differs from the run's last push ${pushed?.slice(0, 7) ?? "(none)"}.`,
+          );
+        // A failed check is enough: the rollup stays pending while another check runs. The review
+        // status is the review result, not CI, and a re-run cannot clear it.
         if (
-          pr?.state !== "open" ||
-          !sha ||
-          store.runPush(runId)?.sha !== sha ||
-          pr.ci !== "failing"
+          pr.ci !== "failing" &&
+          !pr.checks?.some(
+            (c) => c.name !== REVIEW_STATUS_CONTEXT && c.state === "failing" && !c.skipped,
+          )
         )
-          return no("No failed CI on this run's current head.");
+          return no(`No failed check on the PR's head ${sha.slice(0, 7)}.`);
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const result = await publisher.rerunRuling(github, sha);
         if (!result.ok) return no(result.text);

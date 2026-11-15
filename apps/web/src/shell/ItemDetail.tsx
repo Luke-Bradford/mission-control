@@ -112,6 +112,8 @@ export function useItemDetail(key: string | null) {
   const [chosenLocal, setChosen] = useState<Record<string, string>>({});
   const [choices, setChoices] = useState<Record<string, ChoiceReceipt>>({});
   const [err, setErr] = useState<string | null>(null);
+  // When a typed reply last went through, per item: the conversation opens to show it.
+  const [replied, setReplied] = useState<Record<string, number>>({});
   const tz = useTz();
   const now = useNow();
   const activeKey = useRef(key);
@@ -161,6 +163,7 @@ export function useItemDetail(key: string | null) {
     if (!item || !target || !body || !replyOk || busy) return;
     void act(async () => {
       const failed = await sendAnswer(target, seat, item, about, body);
+      if (failed === null) setReplied((prev) => ({ ...prev, [item.key]: Date.now() }));
       if (failed === null && getDraft("answer", item.key) === text) {
         clearDraft("answer", item.key);
         if (activeKey.current === item.key) setTextState("");
@@ -201,7 +204,7 @@ export function useItemDetail(key: string | null) {
     }
     if (!item || !target || !replyOk || busy || chosen[item.key]) return;
     if (item.kind === "person") {
-      void act(() => sendAnswer(target, seat, item, about, o.answer));
+      void act(() => sendAnswer(target, seat, item, about, o.answer, false));
       return;
     }
     if (item.kind === "approval" && o.label === "Edit") {
@@ -231,7 +234,7 @@ export function useItemDetail(key: string | null) {
     };
     void act(async () => {
       if (target.to !== "flight") {
-        const failed = await sendAnswer(target, seat, item, about, o.answer);
+        const failed = await sendAnswer(target, seat, item, about, o.answer, false);
         if (failed !== null) return failed;
       } else {
         if (!discussion)
@@ -304,6 +307,7 @@ export function useItemDetail(key: string | null) {
     chosen,
     recorded,
     receipts,
+    replied,
     handledHow,
     options,
     currentItem,
@@ -350,6 +354,7 @@ export function ItemDetail({
     chosen,
     recorded,
     receipts,
+    replied,
     handledHow,
     options,
     currentItem,
@@ -565,6 +570,7 @@ export function ItemDetail({
           live={flight === undefined ? undefined : live}
           seat={flightSeat}
           receipt={queueApproval ? undefined : receipts[item.key]}
+          replied={replied[item.key]}
           focus={options.length === 0 && !item.brief?.person?.replies?.length}
           collapsed={options.length > 0 || Boolean(item.brief?.person?.replies?.length)}
         />

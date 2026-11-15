@@ -1439,9 +1439,10 @@ parks as `merge-hold` ("merge held by CAPCOM: ..."), and shows in Needs you; it 
 message does not lift this park. A new push keeps the hold.
 
 FLIGHT has the same power with `mc hold_pr { runId, action, reason, basis }`, logged
-as a decision. FLIGHT may release only its own hold: one set here is released only here. The controller
-may replace or release any hold. The route answers 409 when the engine is off, the run has no open work
-to hold, or the hold is the controller's and the caller is FLIGHT.
+as a decision. FLIGHT may release only its own hold: one set here is released only here. The operator
+may replace or release any hold. The controller's key is refused (403): it neither holds nor releases a
+merge, and it cannot choose an option on the operator's brief. The route answers 409 when the engine is
+off, the run has no open work to hold, or the hold is the operator's and the caller is FLIGHT.
 
 ### FLIGHT's wakes: reasons, calls, accountability and pace
 
@@ -2803,7 +2804,9 @@ FLIGHT gets a fresh session when its context passes `FLIGHT_CONTEXT_ROTATE_TOKEN
 - **After a hub restart** the handover wake is not sent twice for one run: a repeat is refused as a duplicate and the run rotates.
 - **The guard cools down.** After the handover cap trips (4 handovers in an hour) the hub stops restarting FLIGHT, says so in Needs you, and starts FLIGHT again by itself 30 minutes later (`FLIGHT_GUARD_COOLDOWN_MS`). A trip within an hour of that restart stays stopped until the operator starts FLIGHT. Messages sent while FLIGHT is down are kept and reach it when it starts.
 - **Owed answers.** An operator message FLIGHT has read and not answered (no FLIGHT message with `replyTo` naming it) is the `owed` wake fact: it wakes FLIGHT and stays in the wake until FLIGHT replies, for up to 7 days (reacting to it or settling it also clears it). An item reply sent while FLIGHT is down is stored and arrives in the wake when FLIGHT starts; the discussion route no longer answers 503.
-- **FLIGHT runs Update.** On a `flight_powers: superuser` repo FLIGHT may call `POST /api/update` through `mc operator` only for an Update the hub holds for a person (the held-Update item is open; otherwise 409), and only once no other crew seat is working (409 names the seat). It is logged as "Updated by FLIGHT". On any other repo it answers 403. The operator's own call is unchanged.
+- **FLIGHT runs Update.** With `updates.hub: auto`, a range that changes more than the page and docs is held. While FLIGHT is seated and live on a `flight_powers: superuser` repo, the held-Update item (`hub-update-held`) is FLIGHT's, not the operator's: it has the usual triage window (`waiting`, then `missed`, then the operator), counted from when the Update was first held (setting `hub-update-held-since`), not from the latest rewrite. FLIGHT runs it in a quiet gap with `POST /api/update` through `mc operator`, only while that item is open (otherwise 409), and it is logged as "Updated by FLIGHT". On any other repo the call answers 403; the operator's own call is unchanged. The item is the operator's as itself when FLIGHT is stopped, the repo is standard, or FLIGHT's window has passed.
+  - **A busy crew.** FLIGHT's call does not refuse while seats work. It holds new runs (a `CliHold` owner, `hub-update`), waits up to 2 minutes for the other seats' turns to end, then runs Update; a seat that outlasts the wait answers 409 naming it, the hold stays, and FLIGHT calls again. The hold lets go by itself after 15 minutes if FLIGHT does not call back, and when the Update finishes. Running turns are never interrupted.
+  - **Only a person.** These go to the operator at once, under the item `hub-update-person`, with the reason in its words: a change that adds a symlink or gitlink (FLIGHT's call refuses it with `refuseUnsafe`, which also pins the pull to the commit it checked), pnpm needing to purge `node_modules`, and a checkout whose HEAD is off main's history. FLIGHT cannot keep or dismiss it.
 - **The FLIGHT page** gets `seat.context` from `GET /api/flight`: `{ tokens, rotateAt, text }`, where `text` reads "context 142K · fresh session at 150K" (null with no turn yet).
 
 ## Repeating a suspected flaky test
@@ -3027,8 +3030,8 @@ keep their permission checks.
   `hub` (column `sender_kind`; a Comms read returns it as `senderKind`). The hub sets it from how
   the request was made, never from the text. `operator` is a person using the app (sender
   `CAPCOM`). The controller sends with its own token (`<data dir>/controller-token`, header
-  `x-mc-controller`, new each boot), as `CONTROLLER`; it passes where the operator token does and
-  grants nothing more, and a `CONTROLLER` line wakes FLIGHT as `CAPCOM` does. FLIGHT's `mc operator`
+  `x-mc-controller`, new each boot), as `CONTROLLER`; it passes where the operator token does, except
+  merge holds and brief choices, which refuse it, and a `CONTROLLER` line wakes FLIGHT as `CAPCOM` does. FLIGHT's `mc operator`
   sends are FLIGHT's. The hub's own messages are `hub`, sent as `MC`, never `CAPCOM`. Rows stored
   before this have no kind (`senderKind` is null) and keep their old sender.
 - **Retention.** Messages and FLIGHT's decision log keep 90 days. Answered seat questions,

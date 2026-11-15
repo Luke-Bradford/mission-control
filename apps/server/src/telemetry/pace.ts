@@ -8,8 +8,8 @@ import {
   paceIsOn,
 } from "@mc/core";
 import { z } from "zod";
-import type { CcConfig } from "./config.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import type { Store } from "../store.ts";
 
 /** A full PaceSettings. `until` is the end time; the server sets `since` when it is switched on. */
 export const PaceBody = z.strictObject({

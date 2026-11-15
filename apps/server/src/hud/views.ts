@@ -26,10 +26,10 @@ import {
   type TicketState,
   tokenTotal,
 } from "@mc/core";
-import { type LiveSession, sessionForLoop } from "./collectors/sessions.ts";
-import { agentIds, type CcConfig, configuredAgents, seatUnavailable } from "./config.ts";
-import { type PrCache, runPrs, runTicket } from "./run/view.ts";
-import type { Store } from "./store.ts";
+import { type LiveSession, sessionForLoop } from "../collectors/sessions.ts";
+import { agentIds, type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
+import { type PrCache, runPrs, runTicket } from "../run/view.ts";
+import type { Store } from "../store.ts";
 
 const MINUTE_MS = 60e3;
 const DAY_MS = 24 * 60 * MINUTE_MS;
