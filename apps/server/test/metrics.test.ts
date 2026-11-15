@@ -1,9 +1,9 @@
 import type { PullRequestView, Run } from "@mc/core";
 import { NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { type MetricsScope, metricsView } from "../src/metrics.ts";
-import { overviewSummary } from "../src/overview.ts";
+import { overviewSummary } from "../src/hud/overview.ts";
 import { Store } from "../src/store.ts";
+import { type MetricsScope, metricsView } from "../src/telemetry/metrics.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;

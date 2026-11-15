@@ -98,9 +98,8 @@ import {
   seatWorktree,
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
-import { attentionItems, markHubStarted, NO_LOCK } from "./hud.ts";
+import { attentionItems, markHubStarted, NO_LOCK } from "./hud/hud.ts";
 import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./leftovers.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
@@ -145,6 +144,7 @@ import { createScheduler, refreshOnSeatFree } from "./scheduler.ts";
 import { onSignal } from "./shutdown.ts";
 import { crewDir } from "./store/crew-paths.ts";
 import { Store } from "./store.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import {
   createAutoUpdate,
   createHeldUpdateNote,

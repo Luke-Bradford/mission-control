@@ -3,8 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MachineSample } from "@mc/core";
 import { describe, expect, it } from "vitest";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../src/machine-capacity.ts";
 import { Store } from "../src/store.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  storedMachineCapacity,
+} from "../src/telemetry/machine-capacity.ts";
 
 const START = 1_800_000;
 const config = { ...MACHINE_CAPACITY_DEFAULTS, diskFreeGb: 1 };

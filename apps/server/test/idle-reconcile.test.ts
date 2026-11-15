@@ -5,9 +5,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import * as hud from "../src/hud.ts";
+import * as hud from "../src/hud/hud.ts";
+import * as views from "../src/hud/views.ts";
 import { Store } from "../src/store.ts";
-import * as views from "../src/views.ts";
 
 const config: CcConfig = {
   operator: { id: "operator", timezone: "Europe/London" },

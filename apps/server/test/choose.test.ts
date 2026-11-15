@@ -2,9 +2,9 @@ import type { AttentionBrief, AttentionItem, Run } from "@mc/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ChoiceRefused, choiceReceipt, chooseOption } from "../src/choose.ts";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, NO_LOCK } from "../src/hud.ts";
+import { attentionItems, NO_LOCK } from "../src/hud/hud.ts";
+import { ticketHistory } from "../src/hud/ticket-history.ts";
 import { Store } from "../src/store.ts";
-import { ticketHistory } from "../src/ticket-history.ts";
 
 const seat = (id: string, role: string) => ({
   id,

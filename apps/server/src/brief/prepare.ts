@@ -15,7 +15,7 @@ import { activeAway } from "../away.ts";
 import type { CcConfig } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
 import { runawayTrip } from "../flight/runaway.ts";
-import { isOperatorCall, questionWithOperator } from "../hud.ts";
+import { isOperatorCall, questionWithOperator } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
 import { CompleteBriefContent } from "./schema.ts";
 import { briefHash, briefSourceRevision } from "./source.ts";

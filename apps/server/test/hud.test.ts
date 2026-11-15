@@ -50,13 +50,13 @@ import {
   markHubStarted,
   NO_LOCK,
   pinned,
-} from "../src/hud.ts";
+} from "../src/hud/hud.ts";
 import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
 import { clearLeftovers } from "../src/leftovers.ts";
-import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue-reorder.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
+import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";
 import {
   HUB_UPDATE_HELD_KEY,
   HUB_UPDATE_HELD_SINCE,

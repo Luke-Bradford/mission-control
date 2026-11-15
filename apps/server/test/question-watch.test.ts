@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, NOTE_KEY } from "../src/hud.ts";
+import { attentionItems, NOTE_KEY } from "../src/hud/hud.ts";
 import {
   closeSettledQuestions,
   closingFact,

@@ -37,8 +37,8 @@ import {
   portFromEnv,
   seatUnavailable,
 } from "../src/config.ts";
+import { configView } from "../src/hud/views.ts";
 import { CodexModels, codexModels, codexModelsFor } from "../src/runtime/codex-models.ts";
-import { configView } from "../src/views.ts";
 import { CODEX_MODELS, fakeModels, MODEL_PAGES } from "./config-codex.ts";
 
 const catalog = fakeModels();

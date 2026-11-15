@@ -58,9 +58,12 @@ import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./files.ts";
 import { seatFocus } from "./focus.ts";
 import { areaGlob, protectedGlob } from "./globs.ts";
-import { MACHINE_CAPACITY_DEFAULTS, type MachineCapacityConfig } from "./machine-capacity.ts";
 import { type CodexModels, codexModels, codexModelsFor } from "./runtime/codex-models.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  type MachineCapacityConfig,
+} from "./telemetry/machine-capacity.ts";
 
 export { areaGlob } from "./globs.ts";
 

@@ -6,7 +6,7 @@ import {
   textBytes,
   toolResultBytes,
   wakePieces,
-} from "../src/prompt-cost.ts";
+} from "../src/telemetry/prompt-cost.ts";
 
 const sum = (list: readonly { bytes: number }[]) => list.reduce((n, s) => n + s.bytes, 0);
 

@@ -370,10 +370,9 @@ import {
   NO_LOCK,
   NOTE_KEY,
   questionWithOperator,
-} from "../hud.ts";
+} from "../hud/hud.ts";
 import { announceInstruction } from "../instructions/notices.ts";
 import { InstructionInput } from "../instructions/standing.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import type { GhRunner } from "../mcp/gh.ts";
 import { githubReadPath, isolatedGithubRead } from "../mcp/gh-read.ts";
 import type { McTool, McToolContext, McToolResult } from "../mcp/server.ts";
@@ -388,7 +387,6 @@ import {
   seatPlace,
   text,
 } from "../mcp/tools.ts";
-import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { prototypeLinkProblem } from "../prototype-links.ts";
 import { QueueReorderError } from "../queue-reorder.ts";
@@ -400,6 +398,8 @@ import { type SeatBusy, type Supervisor, SupervisorError } from "../runtime/supe
 import { resolveWasteAlarm } from "../spend/waste.ts";
 import { crewDir } from "../store/crew-paths.ts";
 import type { Store } from "../store.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
+import { paceStartCheck } from "../telemetry/pace.ts";
 import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { createAccessTools } from "./access.ts";
 import { collaborator, refreshAuthors } from "./collaborators.ts";

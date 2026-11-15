@@ -1,9 +1,9 @@
 import type { AttentionItem, BoardItem, PullRequestView, Run, RunDigest } from "@mc/core";
 import { NEW_LOOP, OWNER_OPERATOR } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { metricsView } from "../src/metrics.ts";
-import { type OverviewScope, overviewSummary } from "../src/overview.ts";
+import { type OverviewScope, overviewSummary } from "../src/hud/overview.ts";
 import { Store } from "../src/store.ts";
+import { metricsView } from "../src/telemetry/metrics.ts";
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;

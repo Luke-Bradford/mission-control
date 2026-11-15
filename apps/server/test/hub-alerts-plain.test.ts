@@ -1,7 +1,7 @@
 import { flightDownText, flightNotTriagingText, flightStartFailedText } from "@mc/core";
 import { describe, expect, it } from "vitest";
 import { leftWakeText } from "../src/flight/state.ts";
-import { sinceText } from "../src/hud.ts";
+import { sinceText } from "../src/hud/hud.ts";
 import { hubCodeHeldText } from "../src/update.ts";
 
 // Hub alerts are read by a person who has never seen the project (#1582): no raw key, no 10+ digit

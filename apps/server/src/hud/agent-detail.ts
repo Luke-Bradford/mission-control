@@ -10,8 +10,8 @@ import {
   type RunLoopView,
   reviewFor,
 } from "@mc/core";
-import { cleanText } from "./clean.ts";
-import type { Store } from "./store.ts";
+import { cleanText } from "../clean.ts";
+import type { Store } from "../store.ts";
 
 const safe = (text: string | null | undefined) => (text ? cleanText(text).trim() || null : null);
 /** Presentation only. A saved report is not a test verdict, and no control or hold is changed here. */

@@ -117,24 +117,24 @@ import {
   forgetViews,
   NO_LOCK,
   stateInputs,
-} from "./hud.ts";
+} from "./hud/hud.ts";
+import { healthContent, TopicGate } from "./hud/topic-gate.ts";
+import { closeSettledQuestions } from "./question-watch.ts";
+import type { Supervisor } from "./runtime/supervisor.ts";
+import { syncWasteAlarms } from "./spend/waste.ts";
+import type { Store } from "./store.ts";
 import {
   FILE_SERVICE_RESTART_ADVICE,
   fileServiceFault,
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
   storedMachineCapacity,
-} from "./machine-capacity.ts";
-import { closeSettledQuestions } from "./question-watch.ts";
-import type { Supervisor } from "./runtime/supervisor.ts";
-import { syncWasteAlarms } from "./spend/waste.ts";
-import type { Store } from "./store.ts";
+} from "./telemetry/machine-capacity.ts";
 import {
   auditEndedRuns,
   TOKEN_AUDIT_FIRST_DELAY_MS,
   TOKEN_AUDIT_INTERVAL_MS,
 } from "./token-audit/audit.ts";
-import { healthContent, TopicGate } from "./topic-gate.ts";
 import {
   maintainTranscripts,
   TRANSCRIPT_PASS_FIRST_DELAY_MS,

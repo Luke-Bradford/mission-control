@@ -23,7 +23,7 @@ import {
 } from "@mc/core";
 import { z } from "zod";
 import type { CcConfig } from "../config.ts";
-import { crew, NO_CLI_VERSION, NO_LOCK } from "../hud.ts";
+import { crew, NO_CLI_VERSION, NO_LOCK } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
 import { flightBriefView, flightHeadline, flightSeat, flightTriageItems } from "./state.ts";

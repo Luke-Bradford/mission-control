@@ -165,7 +165,6 @@ import {
   validateMemoryNote,
   wakeKeyPrefix,
 } from "@mc/core";
-import { auditThresholds, messageImprovements, toolImprovements } from "./audit-improvements.ts";
 import { CodeHealthReadError } from "./code-health/error.ts";
 import {
   failGitFileSource,
@@ -305,6 +304,11 @@ import {
   THREAD_COMMS_LIMIT,
 } from "./store/types.ts";
 import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
+import {
+  auditThresholds,
+  messageImprovements,
+  toolImprovements,
+} from "./telemetry/audit-improvements.ts";
 
 export * from "./store/types.ts";
 

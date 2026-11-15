@@ -13,7 +13,7 @@ import { limitRows } from "../src/api.ts";
 import type { CcConfig } from "../src/config.ts";
 import { flightSignals, markFlightSignalsShown } from "../src/flight/signals.ts";
 import { createCheckRecorder } from "../src/guard/check-runs.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
 import {
   openWasteAlarms,

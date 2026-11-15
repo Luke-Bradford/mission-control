@@ -10,7 +10,7 @@ import {
 import { sendComms } from "./comms/index.ts";
 import type { CcConfig } from "./config.ts";
 import { flightSeat } from "./flight/seat.ts";
-import { CREW_ERROR_KEY, NOTE_KEY } from "./hud.ts";
+import { CREW_ERROR_KEY, NOTE_KEY } from "./hud/hud.ts";
 import { commsPosition, type QuestionChoiceRow, type Store } from "./store.ts";
 
 /** What a choice route sends back when it refuses: the status and one plain line. */
