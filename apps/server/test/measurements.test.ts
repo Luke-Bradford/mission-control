@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { foldTranscript } from "../src/streamjson.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 
 const frame = (type: string, seconds: number, content: unknown[], extra = {}) =>
   JSON.stringify({

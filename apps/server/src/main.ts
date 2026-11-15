@@ -136,7 +136,7 @@ import {
   reorderQueue,
 } from "./queue/queue-reorder.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
-import { rotatingLog } from "./rotating-log.ts";
+import { rotatingLog } from "./run/rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";
 import { restoreRuns } from "./runtime/restore.ts";
 import { createSupervisor } from "./runtime/supervisor.ts";
