@@ -54,14 +54,14 @@ import {
 import { pausedSeat } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
 import { matchesConfiguredFocus } from "../focus.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
-import { paceStartCheck } from "../pace.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
 import { restartHold, ticketParked } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
+import { paceStartCheck } from "../telemetry/pace.ts";
 import { wakeDueAsideRun } from "./aside.ts";
 import { RepoRulesError } from "./rules.ts";
 
