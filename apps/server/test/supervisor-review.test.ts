@@ -43,7 +43,7 @@ import { seatMayTake } from "../src/engine/queue.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/preview/review.ts";
 import { externalReviewKey } from "../src/review/external.ts";
-import { reviewBrief, watchBrief } from "../src/runtime/brief.ts";
+import { fixBriefKey, reviewBrief, watchBrief } from "../src/runtime/brief.ts";
 import { codexPnpmStoreDir } from "../src/runtime/checkouts.ts";
 import { instructionEnvelope } from "../src/runtime/instruction-context.ts";
 import { clonePeers, type SupervisorEvent } from "../src/runtime/supervisor.ts";
@@ -2016,6 +2016,87 @@ describe("a run set aside in review", () => {
     expect([e.status, e.message]).toEqual([409, "held for the CLI"]);
     expect(m.sup.seatFacts("guido-1")).toBeNull();
     expect(store.run(runId)).toMatchObject({ endedAt: null });
+  });
+
+  describe("wakeRun with fresh (the fix-session trial)", () => {
+    /** The argv without its session id flag, to compare how two starts were configured. */
+    const config = (argv: string[]): string[] => {
+      const i = argv.findIndex((a) => a === "--session-id" || a === "--resume");
+      return argv.filter((_, k) => k !== i && k !== i + 1);
+    };
+
+    it("starts a new session in the same worktree, and sends the handoff with the fix", async () => {
+      const { sup, runId } = await aside(true);
+      const old = store.run(runId)?.sessionId as string;
+      const woke = await sup.wakeRun(runId, { fresh: "review" });
+      expect(woke.fallback).toBeNull();
+      const fresh = woke.freshSessionId as string;
+      expect(fresh).toMatch(/^[0-9a-f-]{36}$/);
+      expect(fresh).not.toBe(old);
+      expect(store.run(runId)?.sessionId).toBe(fresh);
+      expect(store.seatSession("guido-1")).toMatchObject({
+        runId,
+        cliSessionId: fresh,
+        worktree: wt(),
+        state: "idle",
+      });
+      const argv = starts()[1].argv as string[];
+      expect(argv[argv.indexOf("--session-id") + 1]).toBe(fresh);
+      expect(argv).not.toContain("--resume");
+      expect(starts()[1].cwd).toBe(wt());
+      // the same prompt file, model, budget and tools as the run's first start
+      expect(config(argv)).toEqual(config(starts()[0].argv as string[]));
+      expect(store.getSetting(fixBriefKey(runId))).toContain("Fresh session for GUIDO-1");
+      await sup.message("guido-1", "the fix text", { interrupt: false });
+      await until(() => expect(userLines()).toHaveLength(2));
+      const first = userLines()[1] as string;
+      expect(first).toContain("Fresh session for GUIDO-1");
+      expect(first.indexOf("the fix text")).toBeGreaterThan(first.indexOf("mc read_ticket"));
+      // the handoff goes once
+      expect(store.getSetting(fixBriefKey(runId))).toBeNull();
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.message("guido-1", "again", { interrupt: false });
+      await until(() => expect(userLines()).toHaveLength(3));
+      expect(userLines()[2]).not.toContain("Fresh session");
+    });
+
+    it("resumes the old session when the fresh one cannot start, and says why", async () => {
+      const gate = join(root, "fail-new");
+      const m = make({ extraArgs: ["--fail-new-while", gate] });
+      m.sup.start();
+      const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await m.sup.setAside(runId);
+      store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+      const old = store.run(runId)?.sessionId as string;
+      writeFileSync(gate, "");
+      const woke = await m.sup.wakeRun(runId, { fresh: "ci" });
+      expect(woke.freshSessionId).toBeNull();
+      expect(woke.fallback).toContain("cannot start a new session");
+      expect(store.run(runId)?.sessionId).toBe(old);
+      expect(store.getSetting(fixBriefKey(runId))).toBeNull();
+      expect(store.seatSession("guido-1")).toMatchObject({ runId, cliSessionId: old });
+      const argv = starts().at(-1)?.argv as string[];
+      expect(argv[argv.indexOf("--resume") + 1]).toBe(old);
+      expect(store.run(runId)).toMatchObject({ endedAt: null });
+    });
+
+    it("is refused while the CLI is held, and the run stays aside", async () => {
+      const hold = new CliHold();
+      const m = make({ cliHold: hold });
+      m.sup.start();
+      const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await m.sup.setAside(runId);
+      store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+      const old = store.run(runId)?.sessionId;
+      hold.hold("held for the CLI");
+      const e = await refusal(m.sup.wakeRun(runId, { fresh: "ci" }));
+      expect([e.status, e.message]).toEqual([409, "held for the CLI"]);
+      expect(m.sup.seatFacts("guido-1")).toBeNull();
+      expect(store.run(runId)).toMatchObject({ endedAt: null, sessionId: old });
+      expect(store.getSetting(fixBriefKey(runId))).toBeNull();
+    });
   });
 
   it("wakeRun resumes the same session in place", async () => {

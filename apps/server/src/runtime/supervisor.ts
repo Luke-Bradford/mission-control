@@ -214,6 +214,8 @@ import {
   BRIEF_DECISIONS_MAX,
   CLAUDE_MD_HEADING,
   cutNoteText,
+  fixBriefKey,
+  fixSessionBrief,
   type RepoDocs,
   repoReferenceIndex,
   reviewBrief,
@@ -296,6 +298,9 @@ export function crewTempRoot(dbPath: string, runId: string, uid: number): string
   const key = createHash("sha256").update(`${dbPath}:${runId}`).digest("hex").slice(0, 12);
   return `/tmp/m${uid.toString(36)}/${key}`;
 }
+
+/** How long a fresh fix session is watched at start for a CLI that dies at once. */
+const FRESH_START_SETTLE_MS = 750;
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
@@ -649,7 +654,10 @@ export interface Supervisor {
    * "carry on" line. A 409 while the seat is busy (or the run is not aside); a run that cannot be
    * resumed is ended `failed` and a 500 thrown.
    */
-  wakeRun(runId: string): Promise<void>;
+  wakeRun(
+    runId: string,
+    options?: { reviewResume?: boolean; fresh?: "ci" | "review" },
+  ): Promise<{ freshSessionId: string | null; fallback: string | null }>;
   /**
    * The operator ends a run that is set aside, without waking a CLI: the run ends ok (endedBy
    * operator), its worktree is removed and the seat is left as it is. A 409 when the run is not
@@ -958,6 +966,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const starting = new Set<string>();
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
   const startingWorktrees = new Set<string>();
+  /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
+  const freshStarting = new Set<string>();
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
   const checkRuns = new Map<string, { stderr: string | null }>();
   const handoffJobs = new Map<string, Promise<void>>();
@@ -1201,6 +1211,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
     if (live.get(seatId) === l) live.delete(seatId);
+    // a fresh fix session that died at start is the wake's to answer (it resumes the old one)
+    if (freshStarting.has(l.run.id)) return;
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
       fold(l);
@@ -1416,7 +1428,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     return p;
   }
 
-  function writeLine(l: Live, text: string, beforeWrite?: () => void): DeliveryEnvelope {
+  function writeLine(l: Live, line: string, beforeWrite?: () => void): DeliveryEnvelope {
+    // A fresh fix session's handoff goes ahead of the fix in the same turn, once (#1643).
+    const brief = store.getSetting(fixBriefKey(l.run.id));
+    const text = brief === null ? line : `${brief}\n\n${line}`;
     // Reload applies focus by replacing seat objects. Never import the launch-time copy again.
     const current = findSeat(l.info.seat.id);
     if (!current)
@@ -1443,6 +1458,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       throw noLive(l.info);
     }
     store.setSetting(`instruction.delivered:${l.run.id}`, envelope.revision);
+    if (brief !== null) store.deleteSetting(fixBriefKey(l.run.id));
     if (pending) {
       pendingPromptVersions.delete(l.run.id);
       savePromptSections(
@@ -4880,7 +4896,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     await endAside(run, info, aside.worktree, "operator");
   }
 
-  async function wakeRun(runId: string, options: { reviewResume?: boolean } = {}): Promise<void> {
+  async function wakeRun(
+    runId: string,
+    options: { reviewResume?: boolean; fresh?: "ci" | "review" } = {},
+  ): Promise<{ freshSessionId: string | null; fallback: string | null }> {
+    const result: { freshSessionId: string | null; fallback: string | null } = {
+      freshSessionId: null,
+      fallback: null,
+    };
     const run = store.run(runId);
     const aside = run?.endedAt === null ? run.loop?.aside : null;
     if (run === null || !aside) throw new SupervisorError(409, NOT_ASIDE);
@@ -4985,9 +5008,86 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             store.setSeatTurnEnded(seatId, null);
             return undefined;
           };
-      let l: Live;
+      let l: Live | undefined;
+      const oldSessionId = run.sessionId;
+      // The fix-session trial (#1643): a new CLI session, with a bounded handoff, in this run's own
+      // worktree, branch and prompt file. It falls back to the resume below if it cannot start.
+      if (options.fresh !== undefined && run.vendor !== "codex" && !options.reviewResume) {
+        const freshId = randomUUID();
+        let started: Live | undefined;
+        freshStarting.add(runId);
+        try {
+          const pushed = store.runPush(runId);
+          store.setSetting(
+            fixBriefKey(runId),
+            fixSessionBrief({
+              call: call(info),
+              role: info.seat.role,
+              mode: seatDef(info.seat).mode,
+              loop: seatDef(info.seat).loop,
+              here: seatDef(info.seat).here,
+              repo: info.repo.github,
+              issue: issueOf(run) ?? 0,
+              title: run.ticketTitle ?? "",
+              branch: checkout.branch,
+              area: info.seat.area,
+              granted: runPathGrants(store, runId),
+              commands: info.repo.commands?.writer ?? [],
+              fullSuite: info.repo.fullSuite ?? [],
+              ...(run.profile ? { profile: run.profile } : {}),
+              decisions: store.answeredQuestionsOn(
+                run.ticket ?? `${info.repo.id}#${issueOf(run) ?? 0}`,
+                BRIEF_DECISIONS_MAX,
+              ),
+              reason: options.fresh,
+              prNumber: run.loop?.prNumber ?? null,
+              headSha: pushed?.sha ?? "",
+              doneWhen: store.latestEvidence(runId)?.doneWhen ?? [],
+              notes: store.evidenceNotes(runId).map((n) => n.note),
+            }),
+          );
+          started = await checkedLaunch(info, run, freshId, checkout, false, null, "", true, () => {
+            beforeLaunch();
+            const next = { ...(store.run(runId) ?? run), sessionId: freshId };
+            store.upsertRun(next);
+            return next;
+          });
+          await started.session.ready;
+          // a CLI that dies at start says so within moments: wait that long before trusting it
+          let off = (): void => {};
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          await Promise.race([
+            new Promise<void>((done) => {
+              off =
+                started?.session.on((ev) => {
+                  if (ev.kind === "exit") done();
+                }) ?? off;
+            }),
+            new Promise<void>((done) => {
+              timer = setTimeout(done, FRESH_START_SETTLE_MS);
+            }),
+          ]);
+          off();
+          clearTimeout(timer);
+          if (!started.session.alive) throw new Error("the fresh CLI session exited at start");
+          l = started;
+          result.freshSessionId = freshId;
+        } catch (e) {
+          log(`${seatId}: fresh fix session could not start: ${errText(e)}`);
+          if (started !== undefined) await discard(started);
+          store.deleteSetting(fixBriefKey(runId));
+          const stored = store.run(runId);
+          if (stored !== null && stored.sessionId !== oldSessionId)
+            store.upsertRun({ ...stored, sessionId: oldSessionId });
+          if (e instanceof SupervisorError && e.status === 409 && pausedSeat(store, seatId))
+            throw e;
+          result.fallback = cleanText(errText(e), STDERR_TEXT_MAX).trim();
+        } finally {
+          freshStarting.delete(runId);
+        }
+      }
       try {
-        l = await checkedLaunch(
+        l ??= await checkedLaunch(
           info,
           run,
           run.sessionId,
@@ -5025,7 +5125,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       try {
         setSeat(seatId, {
           runId,
-          cliSessionId: run.sessionId,
+          cliSessionId: result.freshSessionId ?? run.sessionId,
           vendor: run.vendor,
           state: "idle",
           reason: null,
@@ -5044,6 +5144,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (current !== null && current !== undefined)
           store.setRunLoop(runId, { ...current, aside: null });
       }
+      return result;
     } finally {
       starting.delete(seatId);
       startingWorktrees.delete(aside.worktree);

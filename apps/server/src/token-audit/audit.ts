@@ -8,10 +8,12 @@ import {
   type RunTokenAudit,
   TOKEN_REWRITE_MIN_WRITE,
   TOKEN_REWRITE_READ_RATIO,
+  TOKEN_SOURCE_FIX_START,
   TOKEN_SOURCE_HUB_LINE,
   TOKEN_SOURCE_OWN_OUTPUT,
   TOKEN_SOURCE_START,
   TOKEN_SOURCE_UNATTRIBUTED,
+  type TokenAuditSession,
   type TokenCall,
   type TokenCounts,
 } from "@mc/core";
@@ -90,6 +92,17 @@ export class TranscriptAuditor {
   private ownChars = 0;
   private reportCall: number | null = null;
   private resultOutput: number | null = null;
+  /** Indexes of the calls that open a fresh fix session. */
+  private freshStarts: number[] = [];
+  private session: string | null = null;
+  private freshPending = false;
+
+  private readonly freshIds: ReadonlySet<string>;
+
+  /** `freshIds`: the CLI session ids the hub started fresh for a fix (`loop.fixSessions`). */
+  constructor(freshIds: ReadonlySet<string> = new Set()) {
+    this.freshIds = freshIds;
+  }
 
   push(line: string): void {
     if (!line.startsWith("{") || line.startsWith(STREAM_EVENT_PREFIX)) return;
@@ -108,6 +121,10 @@ export class TranscriptAuditor {
       return;
     }
     if (!isTop(ev)) return;
+    if (typeof ev.session_id === "string" && ev.session_id !== this.session) {
+      this.session = ev.session_id;
+      this.freshPending = this.freshIds.has(ev.session_id);
+    }
     const msg = isObj(ev.message) ? ev.message : null;
     if (msg === null) return;
     const content: unknown[] = Array.isArray(msg.content) ? msg.content : [];
@@ -134,6 +151,10 @@ export class TranscriptAuditor {
         incoming: this.incoming,
         prevOwnChars: this.ownChars,
       };
+      if (this.freshPending) {
+        this.freshStarts.push(this.calls.length);
+        this.freshPending = false;
+      }
       this.calls.push(call);
       this.byId.set(id, call);
       this.incoming = [];
@@ -205,8 +226,11 @@ export class TranscriptAuditor {
     const byCommand: Record<string, TokenCounts> = {};
     let rewrites = 0;
     let rewriteTokens = 0;
+    // Where each session starts: the run's first call, and each fresh session's first call.
+    const starts = [...new Set([0, ...this.freshStarts])].filter((i) => i < n);
+    const endOf = (i: number): number => starts.find((s) => s > i) ?? n;
     this.calls.forEach((c, i) => {
-      const left = n - i;
+      const left = endOf(i) - i;
       const add = (source: string, tokens: number, command: string | null = null) => {
         if (tokens <= 0) return;
         c.added.push({ source, command, tokens });
@@ -216,6 +240,11 @@ export class TranscriptAuditor {
       const prev = this.calls[i - 1];
       if (prev === undefined) {
         add(TOKEN_SOURCE_START, c.context);
+        return;
+      }
+      // A fresh session carries its whole context in: not an addition, and not a rewrite.
+      if (this.freshStarts.includes(i)) {
+        add(TOKEN_SOURCE_FIX_START, c.context);
         return;
       }
       if (
@@ -258,6 +287,16 @@ export class TranscriptAuditor {
       output: c.output,
       added: c.added,
     }));
+    const sessions: TokenAuditSession[] = starts.map((from, k) => {
+      const part = this.calls.slice(from, starts[k + 1] ?? n);
+      return {
+        fresh: this.freshStarts.includes(from),
+        calls: part.length,
+        startContext: part[0]?.context ?? 0,
+        peakContext: Math.max(...part.map((c) => c.context)),
+        cacheRead: part.reduce((s, c) => s + c.cacheRead, 0),
+      };
+    });
     return {
       calls,
       audit: {
@@ -273,14 +312,18 @@ export class TranscriptAuditor {
         readAfterReport,
         bySource,
         byCommand,
+        ...(this.freshStarts.length > 0 ? { sessions } : {}),
       },
     };
   }
 }
 
 /** The audit of a whole transcript (its lines, in order). */
-export function auditTranscript(lines: Iterable<string>) {
-  const a = new TranscriptAuditor();
+export function auditTranscript(
+  lines: Iterable<string>,
+  freshIds: ReadonlySet<string> = new Set(),
+) {
+  const a = new TranscriptAuditor(freshIds);
   for (const line of lines) a.push(line);
   return a.finish();
 }
@@ -357,7 +400,7 @@ async function readRun(
   try {
     const text = await readText(files, run.transcriptPath);
     if (text === null) return null;
-    const a = new TranscriptAuditor();
+    const a = new TranscriptAuditor(new Set((run.loop?.fixSessions ?? []).map((x) => x.sessionId)));
     return await foldText(
       text,
       (l) => a.push(l),
