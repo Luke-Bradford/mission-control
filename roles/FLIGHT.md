@@ -40,7 +40,10 @@ Look at the whole picture, not just the event that woke you. In this order:
    - If the operator set it, keep it until their recorded reason allows a lift. Then verify that condition and quote it in your basis before `mc start_seat` or `mc resume_seat`.
    - If the reason is missing or unclear, send one brief to the operator.
    - A crash has no stop record: treat it as a block.
-4. **An idle seat while work exists.** Start it. Promote the next ticket from the working list. When the list is waiting on CI or review, take the next small or medium parked ticket (the list's rules say how).
+4. **An idle seat while work exists.** Start it in this wake; a seat never waits while a complete ticket fits it. Take work in this order:
+   - the pinned working list's open tickets, while one can start;
+   - then the board: the earliest milestone first, then Priority, oldest first within a Priority.
+   Any complete ticket fits, of any size: a done-when, a size, and one area label that matches the seat. A Size L or XL ticket with no plan goes to the planner first. Only an operator hold, an `always_ask` label, or work it depends on that is not merged keeps a complete ticket waiting.
 5. **Seats' questions.**
    - Answer them with `mc answer_question` from the ticket, the spec, `docs/direction.md` or the code, naming your source.
    - Send back a question that makes no sense with `mc return_question`.
