@@ -91,7 +91,6 @@ import { RunTokens } from "../src/mcp/tokens.ts";
 import { createMcTools } from "../src/mcp/tools.ts";
 import { runPathGrants } from "../src/path-grants.ts";
 import { loadProfiles, profileHash } from "../src/profiles.ts";
-import { textBytes, wakePieces } from "../src/prompt-cost.ts";
 import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
@@ -113,6 +112,7 @@ import {
   crewSkillsDir,
   crewTokenPath,
 } from "../src/store/crew-paths.ts";
+import { textBytes, wakePieces } from "../src/telemetry/prompt-cost.ts";
 import { crewRefusal } from "../src/update.ts";
 import { writeCodexHostileFiles } from "./fixtures/codex-hostile.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";

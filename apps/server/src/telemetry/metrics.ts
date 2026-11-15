@@ -5,9 +5,9 @@ import {
   percentile,
   startOfLocalDay,
 } from "@mc/core";
-import { inProgressOf, pipelineStages } from "./hud/overview.ts";
-import { runSpend } from "./spend/spend.ts";
-import type { Store } from "./store.ts";
+import { inProgressOf, pipelineStages } from "../hud/overview.ts";
+import { runSpend } from "../spend/spend.ts";
+import type { Store } from "../store.ts";
 
 const DAY_MS = 24 * 60 * 60_000;
 

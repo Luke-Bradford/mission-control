@@ -26,9 +26,9 @@ import {
   watchWaitText,
 } from "../src/crew-apply.ts";
 import { crew } from "../src/hud/hud.ts";
-import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/telemetry/machine-capacity.ts";
 
 const seat = (id: string, over: Partial<CrewSeatConfig> = {}): CrewSeatConfig => ({
   id,

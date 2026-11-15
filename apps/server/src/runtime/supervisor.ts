@@ -168,19 +168,11 @@ import { mapTree } from "../map/snapshot.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
-import { paceStartCheck } from "../pace.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../path-grants.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
 import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import type { ReviewPreviews } from "../preview/review.ts";
 import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
-import {
-  mergeSections,
-  type PromptPiece,
-  promptSections,
-  textBytes,
-  ticketPiece,
-} from "../prompt-cost.ts";
 import { type ExternalReviewSubject, isExternalReview } from "../review/external.ts";
 import { openOlderFindings } from "../review/older-findings.ts";
 import { reviewReach } from "../review/reach.ts";
@@ -209,6 +201,14 @@ import {
   crewTranscriptPath,
 } from "../store/crew-paths.ts";
 import { ACTIVE_SEAT_STATES, type KeeperCursor, type Store } from "../store.ts";
+import { paceStartCheck } from "../telemetry/pace.ts";
+import {
+  mergeSections,
+  type PromptPiece,
+  promptSections,
+  textBytes,
+  ticketPiece,
+} from "../telemetry/prompt-cost.ts";
 import {
   AGENTS_MD_HEADING,
   BRIEF_DECISIONS_MAX,

@@ -29,8 +29,8 @@ import {
 } from "@mc/core";
 import { cleanText } from "../clean.ts";
 import { CLAUDE_COMMAND } from "../cli/version.ts";
-import { toolResultBytes } from "../prompt-cost.ts";
 import { STREAM_EVENT_PREFIX } from "../streamjson.ts";
+import { toolResultBytes } from "../telemetry/prompt-cost.ts";
 import { sleep, str } from "../util.ts";
 import {
   CLI_PID_FILE,

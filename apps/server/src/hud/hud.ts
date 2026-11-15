@@ -999,7 +999,7 @@ export function hubAlert(item: Pick<AttentionItem, "key" | "kind">, store: Store
 
 /**
  * Hub stops that only the operator clears, by note key or key prefix: machine capacity
- * (apps/server/src/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
+ * (apps/server/src/telemetry/machine-capacity.ts), the CLI hold and upgrade (cli-update.ts), the CLI
  * auto-rollback (cli-auto.ts) and a seat's focus import (instructions/notices.ts). hud.test.ts pins
  * them to those modules' keys.
  */
