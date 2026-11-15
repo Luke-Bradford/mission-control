@@ -2065,20 +2065,25 @@ describe("a run set aside in review", () => {
       expect(userLines()[2]).not.toContain("Fresh session");
     });
 
-    it("gives the fresh CLI the budget the run has left", async () => {
-      const base = DEFAULT_PROFILES[0] as Profile;
-      const { sup, runId } = await aside(true);
-      const run = store.run(runId) as Run;
-      store.upsertRun({
-        ...run,
-        costUsd: 4,
-        profile: {
-          profile: { ...base, budgetUsd: 10 },
-          route: { by: "size", size: "S" },
-          hash: "h",
-        },
+    /** A run set aside whose profile caps it at $10 and which has spent `spent`. */
+    async function cappedAside(spent: number) {
+      const m = make({
+        profiles: () => DEFAULT_PROFILES.map((p) => ({ ...p, budgetUsd: 10 })),
       });
-      await sup.wakeRun(runId, { fresh: "ci" });
+      m.sup.start();
+      const { runId } = await m.sup.startRun("guido-1", 42, { loop: REVIEW });
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await m.sup.setAside(runId);
+      store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+      store.upsertRun({ ...(store.run(runId) as Run), costUsd: spent });
+      expect(store.run(runId)?.profile?.profile.budgetUsd).toBe(10);
+      return { sup: m.sup, runId };
+    }
+
+    it("gives the fresh CLI the budget the run has left", async () => {
+      const { sup, runId } = await cappedAside(4);
+      const woke = await sup.wakeRun(runId, { fresh: "ci" });
+      expect(woke.freshSessionId).not.toBeNull();
       await until(() => {
         const argv = starts().at(-1)?.argv as string[];
         expect(argv).toContain("--session-id");
@@ -2087,21 +2092,10 @@ describe("a run set aside in review", () => {
     });
 
     it("resumes instead when the run has no budget left", async () => {
-      const base = DEFAULT_PROFILES[0] as Profile;
-      const { sup, runId } = await aside(true);
-      store.upsertRun({
-        ...(store.run(runId) as Run),
-        costUsd: 10,
-        profile: {
-          profile: { ...base, budgetUsd: 10 },
-          route: { by: "size", size: "S" },
-          hash: "h",
-        },
-      });
+      const { sup, runId } = await cappedAside(10);
       const woke = await sup.wakeRun(runId, { fresh: "ci" });
       expect(woke.freshSessionId).toBeNull();
       expect(woke.fallback).toBeNull();
-      await sup.message("guido-1", "fix", { interrupt: false });
       await until(() => expect(starts().at(-1)?.argv).toContain("--resume"));
     });
 
