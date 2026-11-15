@@ -95,6 +95,7 @@ import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
 import * as seatGit from "../src/runtime/git.ts";
+import { zprofileNodeFirst } from "../src/runtime/node-first.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
