@@ -2114,7 +2114,7 @@ describe("a run set aside in review", () => {
     it("a later resume of a fresh session gets the budget its earlier sessions left", async () => {
       const { sup, runId } = await cappedAside(4);
       const old = (store.run(runId) as Run).sessionId;
-      spend(runId, old, 4);
+      spend(runId, old as string, 4);
       const woke = await sup.wakeRun(runId, { fresh: "ci" });
       const fresh = woke.freshSessionId as string;
       expect(fresh).not.toBeNull();
@@ -2134,7 +2134,7 @@ describe("a run set aside in review", () => {
 
     it("a resume of a run's only session keeps the whole budget", async () => {
       const { sup, runId } = await cappedAside(4);
-      spend(runId, (store.run(runId) as Run).sessionId, 4);
+      spend(runId, (store.run(runId) as Run).sessionId as string, 4);
       await sup.wakeRun(runId);
       await until(() => {
         const argv = starts().at(-1)?.argv as string[];
