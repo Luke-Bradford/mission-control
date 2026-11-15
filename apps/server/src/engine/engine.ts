@@ -158,13 +158,13 @@ import { type CcConfig, type CrewSeatConfig, flightPowersOf, seatUnavailable } f
 import { pausedSeat, reviewPausedMs } from "../crew-pause.ts";
 import { mergeFloorApproval } from "../flight-approvals.ts";
 import type { Move, MoveResult } from "../github/board.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";
 import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { restartHold, reviewsHeld } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
 import { releaseDependents } from "./dependencies.ts";
 import {
@@ -2687,7 +2687,9 @@ export function createEngine(deps: EngineDeps): Engine {
         void reconcileRun(author.id);
       }
     }
-    // 4. each free scratch seat starts its oldest wanted review. Existing reviews continue.
+    // 4. each free scratch seat starts its oldest wanted review that can start. One refused for now
+    // (its screenshots are not ready) stays queued and does not stop the seat's later ones.
+    // Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
     if (storedMachineCapacity(store, now(), capacityConfig).blocked) return;
     const scratch = (config.crew?.sessions ?? [])
@@ -2736,7 +2738,11 @@ export function createEngine(deps: EngineDeps): Engine {
           if (isExternalReview(row) && message === REVIEW_NOT_WANTED) {
             dropReview(row);
           } else if (isTransientStart(e)) {
+            // it stays queued and starts once it can (its screenshots may not be ready); the
+            // seat's next queued review is tried in this pass
             store.setReviewState(row.id, ["starting"], "queued", { at: now() });
+            void reconcileRun(row.authorRunId);
+            continue;
           } else {
             const failure = Array.from(message).slice(0, STDERR_TEXT_MAX).join("");
             if (store.setReviewState(row.id, ["starting"], "failed", { at: now(), failure })) {

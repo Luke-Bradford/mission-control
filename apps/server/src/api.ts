@@ -373,7 +373,6 @@ import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
 import { loopTries } from "./loop/history.ts";
-import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { mapSeats } from "./map/seats.ts";
@@ -388,9 +387,7 @@ import {
   readKnown,
   seatPlace,
 } from "./mcp/tools.ts";
-import { metricsView } from "./metrics.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
-import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
 import {
@@ -447,7 +444,10 @@ import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
 import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
-import { lockView, telemetry, usualLockMs } from "./telemetry.ts";
+import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
+import { metricsView } from "./telemetry/metrics.ts";
+import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
+import { lockView, telemetry, usualLockMs } from "./telemetry/telemetry.ts";
 import { tokenAuditSummary, tokenAuditView, tokenAuditWindowView } from "./token-audit/view.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 import { transcriptFootprint } from "./transcript/lifecycle.ts";

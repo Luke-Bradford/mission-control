@@ -18,7 +18,7 @@ import { writeCrewPause } from "../src/crew-pause.ts";
 import { NO_LOCK } from "../src/hud/hud.ts";
 import { overviewSummary } from "../src/hud/overview.ts";
 import { Store } from "../src/store.ts";
-import { lockView, type TelemetryScope, telemetry } from "../src/telemetry.ts";
+import { lockView, type TelemetryScope, telemetry } from "../src/telemetry/telemetry.ts";
 
 // 13:00 BST in London: local midnight is 2026-10-16T23:00Z.
 const NOW = Date.parse("2026-10-17T12:00:00Z");

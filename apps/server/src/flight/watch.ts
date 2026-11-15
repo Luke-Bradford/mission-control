@@ -52,10 +52,10 @@ import { runAccountId } from "../accounts/bindings.ts";
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
 import { accountAtStop } from "../engine/queue.ts";
-import { wakePieces } from "../prompt-cost.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { restartHold } from "../spend/waste.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
+import { wakePieces } from "../telemetry/prompt-cost.ts";
 import { markRetrospectiveShown, prepareRetrospective, retrospectiveDue } from "./retrospective.ts";
 import { markFlightSignalsShown } from "./signals.ts";
 import {

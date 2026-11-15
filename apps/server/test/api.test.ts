@@ -119,7 +119,6 @@ import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operat
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import * as views from "../src/hud/views.ts";
-import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
 import { PREVIEW_ACTIVITY_HEADER, PreviewManager } from "../src/preview/previews.ts";
@@ -130,6 +129,7 @@ import { recordNoReport } from "../src/runtime/no-report.ts";
 import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { readStreamPage } from "../src/stream.ts";
+import { MACHINE_CAPACITY_DEFAULTS } from "../src/telemetry/machine-capacity.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
 import { mapCheckout } from "./map-checkout.ts";
 

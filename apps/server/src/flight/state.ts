@@ -119,16 +119,16 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud/hud.ts";
-import {
-  MACHINE_CAPACITY_DEFAULTS,
-  MACHINE_CAPACITY_KEY,
-  storedMachineCapacity,
-} from "../machine-capacity.ts";
-import { paceStartCheck, paceView } from "../pace.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
 import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";
+import {
+  MACHINE_CAPACITY_DEFAULTS,
+  MACHINE_CAPACITY_KEY,
+  storedMachineCapacity,
+} from "../telemetry/machine-capacity.ts";
+import { paceStartCheck, paceView } from "../telemetry/pace.ts";
 import { trustedAuthor } from "./collaborators.ts";
 import { controllerDecisions } from "./controller-decisions.ts";
 import {

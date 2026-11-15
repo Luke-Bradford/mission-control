@@ -120,16 +120,16 @@ import {
   stateInputs,
 } from "./hud/hud.ts";
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
+import type { Supervisor } from "./runtime/supervisor.ts";
+import { syncWasteAlarms } from "./spend/waste.ts";
+import type { Store } from "./store.ts";
 import {
   FILE_SERVICE_RESTART_ADVICE,
   fileServiceFault,
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,
   storedMachineCapacity,
-} from "./machine-capacity.ts";
-import type { Supervisor } from "./runtime/supervisor.ts";
-import { syncWasteAlarms } from "./spend/waste.ts";
-import type { Store } from "./store.ts";
+} from "./telemetry/machine-capacity.ts";
 import {
   auditEndedRuns,
   TOKEN_AUDIT_FIRST_DELAY_MS,
