@@ -2080,8 +2080,11 @@ describe("a run set aside in review", () => {
       expect(store.run(runId)?.sessionId).toBe(old);
       expect(store.getSetting(fixBriefKey(runId))).toBeNull();
       expect(store.seatSession("guido-1")).toMatchObject({ runId, cliSessionId: old });
-      const argv = starts().at(-1)?.argv as string[];
-      expect(argv[argv.indexOf("--resume") + 1]).toBe(old);
+      // the resumed CLI records its argv a moment after wakeRun returns
+      await until(() => {
+        const argv = starts().at(-1)?.argv as string[];
+        expect(argv[argv.indexOf("--resume") + 1]).toBe(old);
+      });
       expect(store.run(runId)).toMatchObject({ endedAt: null });
     });
 
