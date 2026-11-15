@@ -2687,7 +2687,9 @@ export function createEngine(deps: EngineDeps): Engine {
         void reconcileRun(author.id);
       }
     }
-    // 4. each free scratch seat starts its oldest wanted review. Existing reviews continue.
+    // 4. each free scratch seat starts its oldest wanted review that can start. One refused for now
+    // (its screenshots are not ready) stays queued and does not stop the seat's later ones.
+    // Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
     if (storedMachineCapacity(store, now(), capacityConfig).blocked) return;
     const scratch = (config.crew?.sessions ?? [])
