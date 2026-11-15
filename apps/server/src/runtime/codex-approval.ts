@@ -209,7 +209,13 @@ export function createCodexApprover(i: {
         const id = params.approvalId ?? params.itemId;
         if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
         const key = { runId: i.runId, toolUseId: String(id) };
-        const granted = await i.lock.acquire(key, i.seatId, verdict.command, CODEX_LOCK_WAIT_MS, signal);
+        const granted = await i.lock.acquire(
+          key,
+          i.seatId,
+          verdict.command,
+          CODEX_LOCK_WAIT_MS,
+          signal,
+        );
         if (!granted || signal.aborted) {
           if (granted) i.lock.release(key);
           const h = i.lock.state().holder;
