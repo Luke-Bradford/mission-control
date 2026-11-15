@@ -3134,7 +3134,12 @@ import(${JSON.stringify(fixture)});
     expect(spawn.env.pnpm_config_pm_on_fail).toBe("ignore");
     expect(spawn.env.npm_config_update_notifier).toBe("false");
     expect(spawn.env.ZDOTDIR).toBe(join(folder, "zsh-empty"));
-    expect(readdirSync(spawn.env.ZDOTDIR)).toEqual([]);
+    expect(readdirSync(spawn.env.ZDOTDIR)).toEqual([".zprofile"]);
+    expect(readFileSync(join(spawn.env.ZDOTDIR, ".zprofile"), "utf8")).toBe(
+      zprofileNodeFirst(process.execPath),
+    );
+    // the hub's Node folder leads PATH, ahead of any other folder that holds a node
+    expect(spawn.env.PATH.split(":")[0]).toBe(dirname(process.execPath));
     expect(spawn.env[CODEX_SEAT_TOKEN_ENV]).toEqual(expect.any(String));
     expect(Object.keys(spawn.env).some((key) => key.startsWith("CLAUDE_"))).toBe(false);
     for (const key of [

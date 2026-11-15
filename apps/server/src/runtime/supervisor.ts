@@ -281,6 +281,7 @@ import {
   processInfo,
 } from "./keeper.ts";
 import { recordNoReport } from "./no-report.ts";
+import { nodeFirstPath, zprofileNodeFirst } from "./node-first.ts";
 import {
   attachSession,
   type CrewSession,
@@ -1552,6 +1553,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (v !== undefined) env[k] = v;
     }
     env.HOME = homedir();
+    env.PATH = nodeFirstPath(process.execPath, env.PATH ?? "");
     env.TMPDIR = tmp;
     env.TMP = tmp;
     env.TEMP = tmp;
@@ -2181,6 +2183,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mkdirSync(runDir, { recursive: true, mode: 0o700 });
             mkdirSync(home, { recursive: true, mode: 0o700 });
             mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
+            // a login shell's /etc/zprofile reorders PATH: put the hub's Node back first
+            writePrivate(join(zdotdir, ".zprofile"), zprofileNodeFirst(process.execPath));
             writePrivate(
               join(home, "config.toml"),
               // Close the shared parent of the Claude seats' temp roots (`crewTempRoot`): the
