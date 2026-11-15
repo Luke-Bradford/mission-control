@@ -14,7 +14,7 @@ import {
 } from "@mc/core";
 import { type CcConfig, flightPowersOf } from "../config.ts";
 import { mcSection } from "../engine/rules.ts";
-import { GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import { GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
 import { codexReadAllowed, realPathOrParent } from "../runtime/codex-floor.ts";
 
 export function crewGuardDecision(

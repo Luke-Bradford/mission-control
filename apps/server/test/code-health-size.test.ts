@@ -10,7 +10,7 @@ import { CodeHealthReader } from "../src/code-health/read.ts";
 import { collectFileSizes, type FileSizeSnapshot } from "../src/code-health/size-source.ts";
 import { codeHealthToolSummary } from "../src/code-health/tool-summary.ts";
 import type { CcConfig } from "../src/config.ts";
-import type { GitExec } from "../src/files.ts";
+import type { GitExec } from "../src/repo/files.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.UTC(2026, 10, 2, 12),

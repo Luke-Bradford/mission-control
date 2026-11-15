@@ -2,7 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { posix } from "node:path";
 import { promisify } from "node:util";
 import type { BoardItem, MapSnapshot, PullRequestView } from "@mc/core";
-import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../files.ts";
+import { GIT_MAX_BUFFER, GIT_TIMEOUT_MS, gitEnv } from "../repo/files.ts";
 import {
   MAP_COUPLING_CAP,
   MAP_COUPLING_PR_FILES_MAX,

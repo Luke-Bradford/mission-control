@@ -1,5 +1,5 @@
 import type { CrewVendor, StreamEvent } from "@mc/core";
-import { cleanText } from "../clean.ts";
+import { cleanText } from "../repo/clean.ts";
 import { CODEX_MCP_ELICITATION } from "../runtime/codex-wire.ts";
 import {
   CODEX_APPROVAL_DECISION,

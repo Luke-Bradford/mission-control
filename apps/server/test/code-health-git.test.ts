@@ -9,7 +9,7 @@ import { createGitFileCollector } from "../src/code-health/git-collector.ts";
 import { collectGitFileSource, parseGitFileLog } from "../src/code-health/git-source.ts";
 import { CodeHealthReader } from "../src/code-health/read.ts";
 import type { CcConfig } from "../src/config.ts";
-import { realGitExec } from "../src/files.ts";
+import { realGitExec } from "../src/repo/files.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.UTC(2026, 10, 2, 12),

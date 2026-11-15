@@ -221,7 +221,6 @@ import { ChoiceRefused, choiceReceipt, chooseOption } from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
-import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -313,14 +312,6 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import {
-  changedFiles,
-  committedLines,
-  fileDiff,
-  type GitExec,
-  GitFailed,
-  NO_WORKTREE_NOTE,
-} from "./files.ts";
 import { fixSessionTrialView } from "./fix-session-trial.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
@@ -411,6 +402,15 @@ import {
   QueueReorderError,
   resolveQueueReorder,
 } from "./queue/queue-reorder.ts";
+import { cleanText } from "./repo/clean.ts";
+import {
+  changedFiles,
+  committedLines,
+  fileDiff,
+  type GitExec,
+  GitFailed,
+  NO_WORKTREE_NOTE,
+} from "./repo/files.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";

@@ -6,7 +6,7 @@ import { type ConfigView, type Crew, OPERATOR_HEADER } from "@mc/core";
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppDeps } from "../src/api.ts";
-import { EVIDENCE_FOLDERS, NO_INDEX_MARKER } from "../src/no-index.ts";
+import { EVIDENCE_FOLDERS, NO_INDEX_MARKER } from "../src/repo/no-index.ts";
 import type { CodexModels, ModelDeps } from "../src/runtime/codex-models.ts";
 import { fakeModels, MODEL_PAGES } from "./config-codex.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";

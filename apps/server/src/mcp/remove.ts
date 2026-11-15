@@ -6,7 +6,7 @@
 import { execFile } from "node:child_process";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
-import { GIT_TIMEOUT_MS } from "../files.ts";
+import { GIT_TIMEOUT_MS } from "../repo/files.ts";
 
 const run = promisify(execFile);
 
