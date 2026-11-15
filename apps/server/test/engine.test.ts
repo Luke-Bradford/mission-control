@@ -4091,6 +4091,55 @@ describe("the engine runs reviews", () => {
     expect(store.run(RUN)?.endedAt).toBeNull();
   });
 
+  it("a hold on constrained capacity names the machine, not a cause that has gone", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    await secondAuthor();
+    const id = need(store.reviewsOfRun(RUN2)[0]).id;
+    expect(reviewHoldOf(store, id)?.reason).toContain("#12");
+    store.upsertPullRequests(
+      REPO,
+      [
+        prRow({ ci: "passing", state: "closed" }),
+        prRow({
+          number: 13,
+          branch: BRANCH2,
+          ticket: `${REPO}#8`,
+          headSha: SHA_B,
+          ci: "passing",
+        }),
+      ],
+      clock,
+    );
+    store.addMachineSample({
+      at: clock,
+      cpuPct: null,
+      cores: 8,
+      memUsedBytes: 1,
+      memTotalBytes: 2,
+      diskFreeBytes: 14 * 1024 ** 3,
+      diskTotalBytes: 100 * 1024 ** 3,
+      agents: null,
+    });
+    await h.engine.tick();
+    expect(store.review(id)?.state).toBe("queued");
+    const reason = reviewHoldOf(store, id)?.reason ?? "";
+    expect(reason).toContain("The machine is held");
+    expect(reason).not.toContain("#12");
+  });
+
+  it("clears the hold of a queued review whose seat the pass skips", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    await secondAuthor();
+    const id = need(store.reviewsOfRun(RUN2)[0]).id;
+    expect(reviewHoldOf(store, id)).not.toBeNull();
+    store.setSetting(
+      "crew.paused",
+      JSON.stringify({ seats: [RETRO], reason: "Save tokens", at: clock, by: "operator" }),
+    );
+    await h.engine.tick();
+    expect(reviewHoldOf(store, id)).toBeNull();
+  });
+
   it("leaves an already-running review alone when capacity becomes constrained", async () => {
     await toReview();
     const before = first();

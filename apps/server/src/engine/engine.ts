@@ -2709,7 +2709,22 @@ export function createEngine(deps: EngineDeps): Engine {
     // (its screenshots are not ready) stays queued and does not stop the seat's later ones.
     // Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    if (storedMachineCapacity(store, now(), capacityConfig).blocked) return;
+    // every queued review leaves this pass with a current hold or none: one this pass did not
+    // record (its seat is paused, busy or at its stop, or an earlier review started) is cleared
+    const recorded = new Set<number>();
+    const hold = (id: number, h: ReviewHold): void => {
+      recorded.add(id);
+      setReviewHold(store, id, h);
+    };
+    const machine = storedMachineCapacity(store, now(), capacityConfig);
+    if (machine.blocked) {
+      for (const row of store.reviewsIn(["queued"]))
+        hold(row.id, {
+          reason: `The machine is held: ${machine.reason ?? "its capacity is low"}.`,
+          prNumber: null,
+        });
+      return;
+    }
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
       .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");
@@ -2726,7 +2741,7 @@ export function createEngine(deps: EngineDeps): Engine {
       const queuedHere = store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id);
       if (storm !== null) {
         for (const row of queuedHere)
-          setReviewHold(store, row.id, {
+          hold(row.id, {
             reason: `The reviewer is held after repeated restarts: ${storm}`,
             prNumber: null,
           });
@@ -2735,7 +2750,7 @@ export function createEngine(deps: EngineDeps): Engine {
       for (const row of queuedHere) {
         // a change past its review rounds waits for FLIGHT's decision (waste alarm)
         if (reviewsHeld(store, row.authorRunId)) {
-          setReviewHold(store, row.id, {
+          hold(row.id, {
             reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
             prNumber: null,
           });
@@ -2747,7 +2762,7 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         const olderWait = await reviewWaitsForOlderPr(row);
         if (olderWait !== null) {
-          setReviewHold(store, row.id, olderWait);
+          hold(row.id, olderWait);
           continue;
         }
         if (!reviewWanted(row)) {
@@ -2779,7 +2794,7 @@ export function createEngine(deps: EngineDeps): Engine {
             // it stays queued and starts once it can (its screenshots may not be ready); the
             // seat's next queued review is tried in this pass
             store.setReviewState(row.id, ["starting"], "queued", { at: now() });
-            setReviewHold(store, row.id, {
+            hold(row.id, {
               reason: `The review could not start yet: ${message}`,
               prNumber: null,
             });
@@ -2812,6 +2827,9 @@ export function createEngine(deps: EngineDeps): Engine {
         void reconcileRun(row.authorRunId);
         break;
       }
+    }
+    for (const row of store.reviewsIn(["queued"])) {
+      if (!recorded.has(row.id)) setReviewHold(store, row.id, null);
     }
   }
 
