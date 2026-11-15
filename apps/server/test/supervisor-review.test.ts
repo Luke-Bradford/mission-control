@@ -2143,11 +2143,21 @@ describe("a run set aside in review", () => {
       });
     });
 
+    it("rounds the fresh CLI's cap down to whole cents", async () => {
+      const { sup, runId } = await cappedAside(4.005);
+      await sup.wakeRun(runId, { fresh: "ci" });
+      await until(() => {
+        const argv = starts().at(-1)?.argv as string[];
+        expect(argv).toContain("--session-id");
+        expect(budgetOf(argv)).toBe("5.99");
+      });
+    });
+
     it("resumes instead when the run has no budget left", async () => {
       const { sup, runId } = await cappedAside(10);
       const woke = await sup.wakeRun(runId, { fresh: "ci" });
       expect(woke.freshSessionId).toBeNull();
-      expect(woke.fallback).toBeNull();
+      expect(woke.fallback).toBe("no budget left for a fresh session");
       await until(() => expect(starts().at(-1)?.argv).toContain("--resume"));
     });
 

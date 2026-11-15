@@ -306,6 +306,9 @@ const FRESH_START_SETTLE_MS = 750;
 /** The least a session is given when the run's budget is spent: it stops at once, and the hub parks the run. */
 const MIN_SESSION_BUDGET_USD = 0.01;
 
+/** Why a fresh fix session did not start when the run's budget is spent. */
+const FRESH_NO_BUDGET_TEXT = "no budget left for a fresh session";
+
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
 /** A running seat's transcript is folded at most this often while it writes. */
@@ -1884,7 +1887,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       [...costs.values()].reduce((a, b) => a + b, 0),
     );
     const others = Math.max(0, spent - (costs.get(sessionId) ?? 0));
-    return Math.max(budget - others, MIN_SESSION_BUDGET_USD);
+    // whole cents, rounded down, so the CLI never gets more than is left
+    const cents = Math.floor((budget - others) * 100 + 1e-9) / 100;
+    return Math.max(cents, MIN_SESSION_BUDGET_USD);
   }
 
   function launch(
@@ -5060,12 +5065,11 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       // with none left resumes, so the dollar cap parks it as before.
       const budget = run.profile?.profile.budgetUsd;
       const budgetLeft = budget == null ? undefined : budget - (run.costUsd ?? 0);
-      if (
-        options.fresh !== undefined &&
-        run.vendor !== "codex" &&
-        !options.reviewResume &&
-        (budgetLeft === undefined || budgetLeft > 0)
-      ) {
+      const freshWanted =
+        options.fresh !== undefined && run.vendor !== "codex" && !options.reviewResume;
+      if (freshWanted && budgetLeft !== undefined && budgetLeft <= 0) {
+        result.fallback = FRESH_NO_BUDGET_TEXT;
+      } else if (freshWanted && options.fresh !== undefined) {
         const freshId = randomUUID();
         let started: Live | undefined;
         freshStarting.add(runId);
