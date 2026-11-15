@@ -6041,6 +6041,50 @@ describe("the engine runs reviews", () => {
       expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
     });
 
+    it("a CI rerun goes through while the rollup is pending but one check has failed", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      const check = (name: string, state: PrCheck["state"]): PrCheck => ({
+        name,
+        kind: "check",
+        conclusion: state === "failing" ? "FAILURE" : "IN_PROGRESS",
+        state,
+        attempt: 1,
+        url: null,
+      });
+      setPr({ ci: "pending", checks: [check("web-core", "failing"), check("review", "pending")] });
+      expect((await h.engine.rerunCi(RUN)).ok).toBe(true);
+    });
+    it("a CI rerun refusal names the condition that stopped it", async () => {
+      need(config.repos[0]).flightPowers = "superuser";
+      await toReview();
+      setPr({ ci: "pending", checks: [] });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(/no failed check/i);
+      setPr({
+        ci: "passing",
+        checks: [
+          {
+            name: "mc/review",
+            kind: "status",
+            conclusion: "FAILURE",
+            state: "failing",
+            attempt: null,
+            url: null,
+          },
+        ],
+      });
+      const review = await h.engine.rerunCi(RUN);
+      expect(h.rulingReruns).toEqual([]);
+      expect(review.text).toMatch(/no failed check/i);
+      setPr({ ci: "failing", headSha: "f".repeat(40) });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(
+        /fffffff differs from the run's last push [0-9a-f]{7}/,
+      );
+      setPr({ headSha: null });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(/no known head/i);
+      setPr({ state: "closed" });
+      expect((await h.engine.rerunCi(RUN)).text).toMatch(/not open/i);
+    });
     it("an accepted head waits until the waived status has been written", async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();

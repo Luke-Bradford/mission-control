@@ -3535,14 +3535,23 @@ export function createEngine(deps: EngineDeps): Engine {
         if (!live() || !run?.loop || run.endedAt !== null || flightHeld(run))
           return no("Run is held or unavailable.");
         const pr = findPr(run, run.loop);
-        const sha = pr?.headSha;
+        if (pr?.state !== "open") return no("The run's PR is not open.");
+        const sha = pr.headSha;
+        if (!sha) return no("The run's PR has no known head commit yet.");
+        const pushed = store.runPush(runId)?.sha;
+        if (pushed !== sha)
+          return no(
+            `The PR's head ${sha.slice(0, 7)} differs from the run's last push ${pushed?.slice(0, 7) ?? "(none)"}.`,
+          );
+        // A failed check is enough: the rollup stays pending while another check runs. The review
+        // status is the review result, not CI, and a re-run cannot clear it.
         if (
-          pr?.state !== "open" ||
-          !sha ||
-          store.runPush(runId)?.sha !== sha ||
-          pr.ci !== "failing"
+          pr.ci !== "failing" &&
+          !pr.checks?.some(
+            (c) => c.name !== REVIEW_STATUS_CONTEXT && c.state === "failing" && !c.skipped,
+          )
         )
-          return no("No failed CI on this run's current head.");
+          return no(`No failed check on the PR's head ${sha.slice(0, 7)}.`);
         const github = config.repos.find((r) => r.id === run.repoId)?.github ?? "";
         const result = await publisher.rerunRuling(github, sha);
         if (!result.ok) return no(result.text);
