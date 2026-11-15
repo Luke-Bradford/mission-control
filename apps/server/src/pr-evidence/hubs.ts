@@ -122,7 +122,9 @@ export async function removeStaleEvidenceWork(o: {
   const removed: string[] = [];
   const sides = join(o.workDir, "sides");
   const stale = [
-    ...(await readdir(o.workDir).catch(() => [])).filter((n) => n.startsWith("capture-") || n.startsWith("kept-")),
+    ...(await readdir(o.workDir).catch(() => [])).filter(
+      (n) => n.startsWith("capture-") || n.startsWith("kept-"),
+    ),
     ...(await readdir(sides).catch(() => [])).map((n) => join("sides", n)),
   ];
   for (const name of stale) {
