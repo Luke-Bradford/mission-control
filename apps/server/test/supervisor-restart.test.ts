@@ -39,6 +39,7 @@ import {
   readPidFile,
 } from "../src/runtime/keeper.ts";
 import { restoreRuns } from "../src/runtime/restore.ts";
+import { attachSession } from "../src/runtime/session.ts";
 import { CREW_LOCK_FILE, crewTempRoot, type SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
   crewCodexDir,
@@ -924,6 +925,42 @@ describe("a seat keeps running through a restart", () => {
     expect(store.run(runId)?.noReport).toBeUndefined();
     expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+  });
+
+  it("a keeper that drops the hub for another client is not killed: the hub attaches again and the turn finishes (#1912)", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    const keeperDir = crewKeeperDir(dbPath, runId);
+    const keeperPid = readPidFile(keeperDir, KEEPER_PID_FILE) as number;
+    // another hub attaches and lets go: the keeper drops the first hub's socket for it
+    const other = await attachSession({ dir: keeperDir, from: () => 0 });
+    expect(other.kind).toBe("attached");
+    if (other.kind === "attached") other.session.detach();
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    expect(pidAlive(keeperPid)).toBe(true);
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")).toContain("echo: SLOW");
+    expect(starts()).toHaveLength(1);
+  });
+
+  it("a keeper that dies mid-turn is resumed, not parked as a crash with the run failed (#1912)", async () => {
+    const { sup } = make();
+    sup.start();
+    const { runId } = await sup.startRun("guido-1", 42);
+    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    await sup.message("guido-1", "SLOW", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
+    process.kill(readPidFile(crewKeeperDir(dbPath, runId), KEEPER_PID_FILE) as number, "SIGKILL");
+    await until(() => expect(store.seatSession("guido-1")?.reason).toBe(RESUMED));
+    expect(starts()).toHaveLength(2);
+    expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    expect(store.run(runId)?.noReport).toBeUndefined();
+    expect(store.notes().filter((n) => n.key === `no_report:${runId}`)).toEqual([]);
   });
 
   it("a seat mid-turn at attach is not sent Carry on", async () => {

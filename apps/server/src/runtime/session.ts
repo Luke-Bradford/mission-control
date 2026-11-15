@@ -61,6 +61,8 @@ const ATTACH_CONNECT_MS = 2000;
 /** How long `attachSession` waits for the pids of a keeper that has exited to go. */
 const EXITED_WAIT_MS = 5000;
 const CONNECT_RETRY_MS = 25;
+/** How many times one session takes back a socket its keeper dropped while the keeper still runs. */
+export const KEEPER_REDIAL_MAX = 3;
 
 export interface SessionInput {
   /** Default `"claude"`; tests pass `process.execPath` with the fake CLI as the first argument. */
@@ -183,6 +185,44 @@ function lineReader(sock: Socket) {
 }
 type LineReader = ReturnType<typeof lineReader>;
 
+/** Whether the run folder's keeper process is alive. */
+function keeperRuns(dir: string): boolean {
+  const pid = readPidFile(dir, KEEPER_PID_FILE);
+  return pid !== null && pidAlive(pid);
+}
+
+/** Connects to the keeper's socket, retrying for ATTACH_CONNECT_MS; null when it never answers. */
+async function dialKeeper(dir: string): Promise<Socket | null> {
+  const socketPath = join(dir, KEEPER_SOCKET);
+  let sock: Socket | null = null;
+  for (const t0 = Date.now(); sock === null && Date.now() - t0 < ATTACH_CONNECT_MS; ) {
+    sock = await new Promise<Socket | null>((resolve) => {
+      const s = connect(socketPath);
+      s.once("connect", () => resolve(s));
+      s.once("error", () => {
+        s.destroy();
+        setTimeout(() => resolve(null), CONNECT_RETRY_MS);
+      });
+    });
+  }
+  return sock;
+}
+
+/** The first line `reader` gets within KEEPER_HELLO_MS; null when none comes. */
+function firstLine(reader: LineReader): Promise<string | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      reader.set(null);
+      resolve(null);
+    }, KEEPER_HELLO_MS);
+    reader.set((line) => {
+      clearTimeout(timer);
+      reader.set(null);
+      resolve(line);
+    });
+  });
+}
+
 /** The first line of `reader` as a hello's version: null when it is not a hello (or not JSON). */
 function parseHello(line: string): KeeperHello | { version: number | null } {
   try {
@@ -234,6 +274,7 @@ function createDriver(i: {
   let finished = false;
   let detached = false;
   let stdinEnded = false;
+  let redialed = 0;
   let inTurn = false;
   let announced = false;
   /** The next keeper line wanted. */
@@ -283,14 +324,19 @@ function createDriver(i: {
   };
 
   /** Reports the exit, once. A line cut off by the exit was kept by the keeper but never sent. */
-  function end(info: { code: number | null; signal: string | null }): void {
+  function end(info: { code: number | null; signal: string | null; keeperLost?: true }): void {
     if (finished) return;
     finished = true;
     alive = false;
     rejectPending();
     resolveReady();
     resolveCloseSent();
-    emit({ kind: "exit", code: info.code, signal: info.signal });
+    emit({
+      kind: "exit",
+      code: info.code,
+      signal: info.signal,
+      ...(info.keeperLost ? { keeperLost: true as const } : {}),
+    });
     resolveExit(info.code);
   }
 
@@ -397,14 +443,51 @@ function createDriver(i: {
     }
   }
 
-  /** The keeper went without saying `exit`: end it by its pids, and report the exit it left. */
+  /**
+   * The keeper's socket closed without an `exit`. A keeper that still runs let go of us (another
+   * hub attached, or it dropped the connection): its CLI is not ours to end, so the session dials
+   * again and carries on from the next line it wants. A keeper that is gone is ended by its pids
+   * (nothing may be left running), and the exit it left is reported; with none left, the exit says
+   * the keeper was lost, which the supervisor resumes instead of failing the run.
+   */
   async function lost(): Promise<void> {
     if (finished || detached) return;
+    if (redialed < KEEPER_REDIAL_MAX && keeperRuns(i.dir)) {
+      redialed++;
+      if (await redial()) return;
+      if (finished || detached) return;
+    }
     stderrText("the keeper ended unexpectedly");
     await endKeeper(i.dir, i.stopGraceMs, i.log);
     if (finished || detached) return;
     const e = readKeeperExit(i.dir);
-    end({ code: e?.code ?? null, signal: e?.signal ?? null });
+    end({
+      code: e?.code ?? null,
+      signal: e?.signal ?? null,
+      ...(e === null ? { keeperLost: true as const } : {}),
+    });
+  }
+
+  /** Dials the running keeper again and links the new socket; false when it cannot be taken back. */
+  async function redial(): Promise<boolean> {
+    // lines written meanwhile wait in the outbox for the new socket
+    sock = null;
+    const s = await dialKeeper(i.dir);
+    if (s === null) return false;
+    s.on("error", () => {});
+    const reader = lineReader(s);
+    const first = await firstLine(reader);
+    if (finished || detached) {
+      s.destroy();
+      return true;
+    }
+    const h = first === null ? null : parseHello(first);
+    if (h === null || !isHello(h)) {
+      s.destroy();
+      return false;
+    }
+    link(s, reader, h, next);
+    return true;
   }
 
   /** The keeper's hello is in: say ours, send what waited, and read the rest. */
@@ -782,18 +865,7 @@ export async function attachSession(i: {
     const keeperPid = readPidFile(i.dir, KEEPER_PID_FILE);
     if (keeperPid === null || !pidAlive(keeperPid)) return { kind: "gone", version: null };
 
-    const socketPath = join(i.dir, KEEPER_SOCKET);
-    let sock: Socket | null = null;
-    for (const t0 = Date.now(); sock === null && Date.now() - t0 < ATTACH_CONNECT_MS; ) {
-      sock = await new Promise<Socket | null>((resolve) => {
-        const s = connect(socketPath);
-        s.once("connect", () => resolve(s));
-        s.once("error", () => {
-          s.destroy();
-          setTimeout(() => resolve(null), CONNECT_RETRY_MS);
-        });
-      });
-    }
+    const sock = await dialKeeper(i.dir);
     if (sock === null) {
       // the keeper may have finished between the checks
       return (await exitedResult()) ?? { kind: "gone", version: null };
@@ -801,17 +873,7 @@ export async function attachSession(i: {
     const s = sock;
     s.on("error", () => {});
     const reader = lineReader(s);
-    const first = await new Promise<string | null>((resolve) => {
-      const timer = setTimeout(() => {
-        reader.set(null);
-        resolve(null);
-      }, KEEPER_HELLO_MS);
-      reader.set((line) => {
-        clearTimeout(timer);
-        reader.set(null);
-        resolve(line);
-      });
-    });
+    const first = await firstLine(reader);
     const said = first === null ? { version: null } : parseHello(first);
     if (!isHello(said)) {
       s.destroy();

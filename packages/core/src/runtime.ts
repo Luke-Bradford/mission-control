@@ -1425,7 +1425,14 @@ export type SessionEvent =
     }
   | { kind: "output"; at: number }
   | { kind: "stderr"; text: string }
-  | { kind: "exit"; code: number | null; signal: string | null; reason?: string }
+  | {
+      kind: "exit";
+      code: number | null;
+      signal: string | null;
+      reason?: string;
+      /** The keeper went without saying how the CLI ended: the run is to be resumed, not failed. */
+      keeperLost?: true;
+    }
   /** The hub attached to a running keeper and has every line it missed; `awaiting`: a turn is on. */
   | { kind: "attached"; awaiting: boolean };
 

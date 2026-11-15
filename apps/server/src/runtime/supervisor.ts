@@ -968,6 +968,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const live = new Map<string, Live>();
   /** Seats whose start is between the busy check and the first seat row. */
   const starting = new Set<string>();
+  /** Runs whose lost keeper was already taken back once: a second loss ends the run as a crash. */
+  const keeperLostRuns = new Set<string>();
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
   const startingWorktrees = new Set<string>();
   /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
@@ -1210,7 +1212,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
 
   function onExit(
     l: Live,
-    e: { code: number | null; signal: string | null; reason?: string },
+    e: { code: number | null; signal: string | null; reason?: string; keeperLost?: true },
   ): void {
     const seatId = l.info.seat.id;
     if (transferState(l.run.id)?.pending) return;
@@ -1220,6 +1222,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     if (stopping && l.ending === null) {
       // The hub is going down: the run stays active and is resumed on the next start.
       fold(l);
+      return;
+    }
+    // The keeper went and left no word on the CLI: the run is not over. It is taken back (attached
+    // if the keeper is up after all, else resumed with --resume) once; the next loss is a crash.
+    if (
+      e.keeperLost === true &&
+      l.ending === null &&
+      l.endedBy === null &&
+      !keeperLostRuns.has(l.run.id) &&
+      !checkRuns.has(l.run.id)
+    ) {
+      keeperLostRuns.add(l.run.id);
+      fold(l);
+      log(`${seatId}: the keeper of ${l.run.id} was lost; taking the run back`);
+      const row = store.seatSession(seatId);
+      if (row !== null) void recoverSession(row);
       return;
     }
     // The engine's end was recorded when it began (its time and status stand).
