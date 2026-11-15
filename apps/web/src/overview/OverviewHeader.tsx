@@ -15,10 +15,13 @@ export function OverviewHeader() {
   const tz = useTz();
   const now = useNow();
   const stale = !!summary.data && (now - summary.data.at >= 120_000 || !!summary.error);
+  // The first open is not a fault: fresh figures already on screen need no warning while it lands.
   const state = !connection.connected
     ? connection.reconnecting
       ? "Disconnected"
-      : "Connecting"
+      : summary.data && !stale && !summary.error
+        ? "Connected"
+        : "Connecting"
     : summary.error
       ? "Refresh failed"
       : stale

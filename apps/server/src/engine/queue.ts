@@ -44,6 +44,8 @@ import {
 import { activeAway } from "../away.ts";
 import type { CardNow } from "../collectors/github.ts";
 import { USAGE_STALE_MAX_MS } from "../collectors/usage-claude.ts";
+import { pausedSeat } from "../config/crew-pause.ts";
+import { chooseRunProfile, type ProfilesError } from "../config/profiles.ts";
 import {
   type CcConfig,
   type CrewSeatConfig,
@@ -51,9 +53,7 @@ import {
   DEFAULT_MAX_OPEN_RUNS_PER_SEAT,
   seatUnavailable,
 } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
 import { matchesConfiguredFocus } from "../instructions/focus.ts";
-import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";

@@ -28,7 +28,7 @@ Retention values:
 
 | Datum | Where | Shape | Retention | Answers |
 |---|---|---|---|---|
-| Template profile per run | `runs.profile`, `runs.profile_hash` (store.ts:1021-1025); `RunProfile` profiles.ts:74; hash apps/server/src/profiles.ts:189 | the profile as chosen (steps, checklist, reviewer depth, checks, tries, rounds) + route (label/size/override) + sha256 | Kept (62 runs have it) | Which ticket template a run used, and when a template changed |
+| Template profile per run | `runs.profile`, `runs.profile_hash` (store.ts:1021-1025); `RunProfile` profiles.ts:74; hash apps/server/src/config/profiles.ts:189 | the profile as chosen (steps, checklist, reviewer depth, checks, tries, rounds) + route (label/size/override) + sha256 | Kept (62 runs have it) | Which ticket template a run used, and when a template changed |
 | `profile_overrides` | store.ts:308 | repo, issue, profile, reason, by (FLIGHT/planner), at | Latest per issue only | Template overrides |
 | CLI version per run | `runs.cli_version` (store.ts:1020; set supervisor.ts:790/1282) | string | Kept | Whether a CLI upgrade lines up with a behaviour change |
 | Role prompt file | `RoleDef.prompt` = `roles/<NAME>.md` (packages/core/src/runtime.ts:117-170); read from `rolesDir` (supervisor.ts:1171) | path only | **No per-run hash or version is stored** | Prompt version per run is not answerable. Only git history of `roles/**` exists |

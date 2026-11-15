@@ -114,8 +114,8 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import { writeCrewPause } from "../src/config/crew-pause.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { writeCrewPause } from "../src/crew-pause.ts";
 import { asideWakeDue } from "../src/engine/aside.ts";
 import {
   createEngine,
@@ -3383,6 +3383,9 @@ describe("the engine runs reviews", () => {
           baseUrl: "http://127.0.0.1:7421",
           async ensure(t: { pr: number; sha: string; paths: readonly string[] }) {
             ensured.push({ pr: t.pr, sha: t.sha, paths: t.paths });
+          },
+          async pages() {
+            return [];
           },
           gate(t: { sha: string; paths: readonly string[] }) {
             const web = t.paths.some((p) => p.startsWith("apps/web/") && !p.includes("test"));

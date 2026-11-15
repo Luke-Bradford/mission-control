@@ -8,8 +8,8 @@
 import { NEW_LOOP, type RepoId, type RepoRules, seatCallSign, seatDef } from "@mc/core";
 import { runAccountId } from "../accounts/bindings.ts";
 import { activeAway } from "../away.ts";
+import { pausedSeat } from "../config/crew-pause.ts";
 import { type CcConfig, type CrewSeatConfig, seatUnavailable } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import { restartHold } from "../spend/waste.ts";
 import type { Store } from "../store.ts";

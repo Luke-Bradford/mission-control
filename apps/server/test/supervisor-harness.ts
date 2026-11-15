@@ -324,8 +324,7 @@ function make(
     hubRoot?: string;
     reviewPreviews?: ReviewPreviews;
     importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
-    prEvidence?: import("../src/pr-evidence/store.ts").PrEvidenceStore;
-    prEvidenceRepo?: string;
+    evidence?: import("../src/pr-evidence/capture.ts").ReviewEvidenceDeps;
     rolesDir?: string;
     node?: string;
     nodeNote?: string;
@@ -417,8 +416,7 @@ function make(
     ...(over.checks === undefined ? {} : { checks: over.checks }),
     ...(over.reviewPreviews === undefined ? {} : { reviewPreviews: over.reviewPreviews }),
     ...(over.importGraph === undefined ? {} : { importGraph: over.importGraph }),
-    ...(over.prEvidence === undefined ? {} : { prEvidence: over.prEvidence }),
-    ...(over.prEvidenceRepo === undefined ? {} : { prEvidenceRepo: over.prEvidenceRepo }),
+    ...(over.evidence === undefined ? {} : { evidence: over.evidence }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,
     ...(over.rolesDir === undefined ? {} : { rolesDir: over.rolesDir }),

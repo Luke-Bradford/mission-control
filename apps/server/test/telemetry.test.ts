@@ -13,8 +13,8 @@ import type {
 } from "@mc/core";
 import { COMMS_CAPCOM, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { writeCrewPause } from "../src/config/crew-pause.ts";
 import type { CcConfig } from "../src/config.ts";
-import { writeCrewPause } from "../src/crew-pause.ts";
 import { NO_LOCK } from "../src/hud/hud.ts";
 import { overviewSummary } from "../src/hud/overview.ts";
 import { Store } from "../src/store.ts";

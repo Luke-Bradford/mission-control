@@ -15,12 +15,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { parseDocument } from "yaml";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { managedSessionPath, parseConfig } from "../src/config.ts";
 import {
   closeSession as closeSessionForFixture,
   createSession as createSessionForFixture,
   setSessionSeats as setSessionSeatsForFixture,
-} from "../src/config-write.ts";
+} from "../src/config/config-write.ts";
+import { managedSessionPath, parseConfig } from "../src/config.ts";
 import { createCrewReloader } from "../src/crew-apply.ts";
 import { removeSessionCheckout } from "../src/runtime/checkouts.ts";
 import { Store } from "../src/store.ts";

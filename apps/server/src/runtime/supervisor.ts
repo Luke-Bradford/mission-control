@@ -97,7 +97,6 @@ import {
   type ProfileOverride,
   pathGrantProblem,
   pathInArea,
-  prEvidenceAffectedPages,
   REVIEW_FULL_MODEL,
   REVIEW_NOT_WANTED,
   type RepoId,
@@ -142,6 +141,8 @@ import type { ChangeBus } from "../bus.ts";
 import type { CliHold } from "../cli/update.ts";
 import { probeClaudeVersion } from "../cli/version.ts";
 import { applyFacts, type FoldState, foldPath, persistDigest } from "../collectors/common.ts";
+import { pausedSeat } from "../config/crew-pause.ts";
+import { chooseRunProfile, type ProfilesError, profileHash } from "../config/profiles.ts";
 import {
   applySeatAccount,
   type CcConfig,
@@ -153,7 +154,6 @@ import {
   realish,
   seatUnavailable,
 } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
 import { wakeDueAsideRun } from "../engine/aside.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
@@ -167,10 +167,9 @@ import { mapTree } from "../map/snapshot.ts";
 import { assertScratchStorage } from "../mcp/restore.ts";
 import type { RunTokens } from "../mcp/tokens.ts";
 import { issueOf } from "../mcp/tools.ts";
+import type { ReviewEvidenceDeps } from "../pr-evidence/capture.ts";
 import { stageReviewEvidence } from "../pr-evidence/review.ts";
-import type { PrEvidenceStore } from "../pr-evidence/store.ts";
 import type { ReviewPreviews } from "../preview/review.ts";
-import { chooseRunProfile, type ProfilesError, profileHash } from "../profiles.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { cleanText } from "../repo/clean.ts";
 import { approvedPaths, runPathGrants, setRunPathGrants } from "../repo/path-grants.ts";
@@ -478,10 +477,8 @@ export interface SupervisorDeps {
   login: () => string | null;
   /** The template profiles, read from user config on each call; default `DEFAULT_PROFILES`. */
   profiles?: () => readonly Profile[] | ProfilesError;
-  /** A web PR's stored screenshot pairs; a review of a head that has them reads them in its copy. */
-  prEvidence?: PrEvidenceStore;
-  /** The repo whose web PRs carry screenshot pairs. */
-  prEvidenceRepo?: RepoId;
+  /** A web PR's stored screenshot pairs, which a review of a head that has them reads in its copy, and the pages the capture finds for a head. */
+  evidence?: ReviewEvidenceDeps;
   now?: () => number;
   /** Process identity lookup for lock reuse; defaults to processInfo. */
   processStart?: (pid: number) => { startedAt: number; command: string } | null;
@@ -4480,7 +4477,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           try {
             const inputs = await writeReviewInputs(checkout, s, review.sha, prev?.sha ?? null);
             const screenshots = await stageReviewEvidence(
-              deps.prEvidence,
+              deps.evidence?.store,
               info.repo.id,
               review.prNumber,
               review.sha,
@@ -4492,15 +4489,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 { cause: e },
               );
             });
-            if (
-              screenshots === undefined &&
-              deps.prEvidenceRepo === info.repo.id &&
-              prEvidenceAffectedPages(store.prFilePaths(info.repo.id, review.prNumber)).length > 0
-            )
-              throw new SupervisorError(
-                409,
-                "screenshot evidence is not ready for this review head",
-              );
+            if (screenshots === undefined && deps.evidence?.repoId === info.repo.id) {
+              const pages = await deps.evidence.pages({
+                repoId: info.repo.id,
+                pr: review.prNumber,
+                sha: review.sha,
+                paths: store.prFilePaths(info.repo.id, review.prNumber),
+              });
+              if (pages.length > 0)
+                throw new SupervisorError(
+                  409,
+                  "screenshot evidence is not ready for this review head",
+                );
+            }
             return {
               scratch: s,
               inputs,

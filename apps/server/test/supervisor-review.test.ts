@@ -31,6 +31,7 @@ import {
 import { dirname, join } from "node:path";
 import {
   DEFAULT_PROFILES,
+  type EvidencePage,
   NEW_LOOP,
   NOT_ASIDE,
   type Profile,
@@ -48,6 +49,7 @@ import { describe, expect, it, vi } from "vitest";
 import { CliHold } from "../src/cli/update.ts";
 import type { CrewSeatConfig } from "../src/config.ts";
 import { seatMayTake } from "../src/engine/queue.ts";
+import { createPrEvidence, evidenceReviewDeps } from "../src/pr-evidence/capture.ts";
 import { prEvidenceStore } from "../src/pr-evidence/store.ts";
 import { createReviewPreviews } from "../src/preview/review.ts";
 import { externalReviewKey } from "../src/review/external.ts";
@@ -741,13 +743,54 @@ describe("startReview", () => {
       },
       [],
     );
-    const { sup } = make({ scratchRetro: true, prEvidence: evidence, prEvidenceRepo: "mc" });
+    const { sup } = make({
+      scratchRetro: true,
+      evidence: { store: evidence, repoId: "mc", pages: async () => ["board"] },
+    });
     sup.start();
     await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow("image is missing");
     expect(userLines()).toHaveLength(0);
     expect(existsSync(scratch(r.reviewId))).toBe(false);
     expect(store.runs("retro", 1)).toHaveLength(0);
   });
+
+  it.each([
+    { reach: [] as string[], starts: true },
+    { reach: ["board"], starts: false },
+  ])(
+    "a web review with no stored evidence starts only when the capture's import graph reaches a photographed page (reach: $reach)",
+    async ({ reach, starts }) => {
+      const r = reviewOfPush();
+      const file = "apps/web/src/ticket/ticketTimeline.ts";
+      vi.spyOn(store, "prFilePaths").mockReturnValue([file]);
+      const evidenceStore = prEvidenceStore(join(dir, "evidence"));
+      // The production composition: the capture's own page reading feeds the supervisor.
+      const capture = createPrEvidence({
+        store: evidenceStore,
+        repoId: "mc",
+        workDir: join(dir, "evidence-work"),
+        baseUrl: "http://localhost",
+        mainSha: async () => r.fork,
+        snapshot: async () => {},
+        startSide: async () => {
+          throw new Error("no capture in this test");
+        },
+        render: async () => Buffer.alloc(0),
+        webGraph: async () => ({ [file]: reach as EvidencePage[] }),
+      });
+      const { sup } = make({
+        scratchRetro: true,
+        evidence: evidenceReviewDeps(capture, evidenceStore, "mc"),
+      });
+      sup.start();
+      const go = sup.startReview("retro", r.reviewId);
+      if (starts) {
+        await expect(go).resolves.toBeDefined();
+        await until(() => expect(seatState("retro")).toBe("idle"));
+      } else await expect(go).rejects.toThrow("screenshot evidence is not ready");
+      await capture.stop();
+    },
+  );
 
   it("refuses scratch storage inside hub data before preparing a review", async () => {
     const r = reviewOfPush();
