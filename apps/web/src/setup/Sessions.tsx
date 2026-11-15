@@ -844,16 +844,35 @@ export function Sessions({ config }: { config: ConfigView }) {
     }
   }, [changes, form?.sessionId, requestedSessionId]);
   // Roles & guards links each seat here with `?edit=session:seat`: open that seat's form once the
-  // seats as config.yaml lists them have loaded.
+  // seats as config.yaml lists them have loaded. A seat the snapshot lacks opens from the configured
+  // seat; a seat in neither is named in an error, and the parameter goes either way.
   const [requestedEdit] = useState(() => editSeatParam(window.location.search));
   const editOpened = useRef(false);
+  const [editMissing, setEditMissing] = useState<string | null>(null);
   useEffect(() => {
     if (!requestedEdit || editOpened.current || !changes) return;
     editOpened.current = true;
-    const input = changes.sessions
-      .find((s) => s.id === requestedEdit.sessionId)
-      ?.seats.find((s) => s.id === requestedEdit.seatId);
-    if (input) setForm(seatForm(config, requestedEdit.sessionId, input));
+    const { sessionId, seatId } = requestedEdit;
+    const fromChanges = changes.sessions
+      .find((s) => s.id === sessionId)
+      ?.seats.find((s) => s.id === seatId);
+    const configured = config.crew?.sessions
+      .find((s) => s.id === sessionId)
+      ?.seats.find((s) => s.id === seatId);
+    const input: SeatInput | null =
+      fromChanges ??
+      (configured
+        ? {
+            id: configured.id,
+            role: configured.role,
+            accountId: configured.accountId,
+            model: configured.model,
+            ...(configured.mode === "scratch" ? { mode: "scratch" as const } : {}),
+            area: configured.area,
+          }
+        : null);
+    if (input) setForm(seatForm(config, sessionId, input));
+    else setEditMissing(`${seatId} is not a seat of session ${sessionId}, so there is no form to open.`);
     navigate(withoutEditSeatParam(), { replace: true });
   }, [changes, config, requestedEdit]);
   const [busy, setBusy] = useState(false);
@@ -1210,6 +1229,11 @@ export function Sessions({ config }: { config: ConfigView }) {
       )}
       {changes && changes.restartNeeded.length > 0 && (
         <p className="note wide">{restartText(changes.restartNeeded)}</p>
+      )}
+      {editMissing && (
+        <p role="alert" className="crit-t s">
+          {editMissing}
+        </p>
       )}
       {failure?.sessionId === null && failure.formKey !== SESSION_FORM_KEY && (
         <p role="alert" className="crit-t s">

@@ -518,10 +518,19 @@ describe("?edit= from Roles & guards", () => {
     await waitFor(() => expect(window.location.search).toBe("?keep=1"));
   });
 
-  it("opens nothing for a seat that is not there", async () => {
+  it("opens the configured seat when the changes snapshot lacks it", async () => {
+    window.history.replaceState(null, "", "/setup/sessions?edit=s1:guido-1");
+    mount();
+    const form = await screen.findByRole("form", { name: "Edit guido-1" });
+    expect(form).toBeTruthy();
+    await waitFor(() => expect(window.location.search).toBe(""));
+  });
+
+  it("says so for a seat that is not there, and opens nothing", async () => {
     window.history.replaceState(null, "", "/setup/sessions?edit=s1:nobody-9");
     mount({ "/api/crew/changes": CHANGES });
     await waitFor(() => expect(window.location.search).toBe(""));
     expect(screen.queryByRole("form", { name: /^Edit / })).toBeNull();
+    expect((await screen.findByRole("alert")).textContent).toContain("nobody-9");
   });
 });
