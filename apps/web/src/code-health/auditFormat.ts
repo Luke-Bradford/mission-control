@@ -1,5 +1,6 @@
 import type {
   CodeHealthFigure,
+  CodeHealthWasteAlarmRow,
   CodeHealthFigureState,
   CodeHealthRecommendation,
   CodeHealthRecommendationState,
@@ -118,3 +119,23 @@ export const OUTCOME_WORD = {
   unmeasured: "Not measured",
   waiting: "Waiting",
 } as const;
+
+/** How far an open waste alarm has gone, with what it counts; the number is the alarm's own level. */
+export const alarmMeasure = (alarm: CodeHealthWasteAlarmRow): string =>
+  `${number(alarm.measure.value)} ${alarm.measure.unit}`;
+
+/** A waste alarm's scope in words: the ticket, run or seat it names, or that it names none. */
+export function alarmScope(alarm: CodeHealthWasteAlarmRow): string {
+  const { ticket, runId, seatId, repoId } = alarm.scope;
+  const parts = [
+    ticket && `ticket ${ticket}`,
+    runId && `run ${runId}`,
+    seatId && `seat ${seatId}`,
+    repoId && `repo ${repoId}`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "No ticket, run or seat is named";
+}
+
+/** The window of a figure in words: its label and the dates it covers (UTC). */
+export const windowWords = (w: { label: string; from: number; until: number }): string =>
+  `${w.label}, ${shortDate(w.from)} to ${shortDate(w.until)}`;

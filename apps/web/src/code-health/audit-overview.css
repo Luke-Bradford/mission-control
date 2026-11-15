@@ -456,10 +456,32 @@
 .ao-frow .path {
   font: var(--fs-s) / var(--lh-s) var(--mono);
   overflow: hidden;
+}
+/* The path is a button: it keeps the compact column and shows the whole path when opened. */
+.ao .pathbtn {
+  display: block;
+  width: 100%;
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   direction: rtl;
   text-align: left;
+}
+.ao .pathbtn:hover {
+  color: var(--accent);
+}
+.ao .path.full .pathbtn {
+  direction: ltr;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  padding: var(--sp-1) 0;
 }
 .ao .trend {
   display: inline-flex;
@@ -607,4 +629,58 @@
   .ao .mg {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* Figure tables size their number columns to their content, so values never paint over each other. */
+.ao-table.ao-fit {
+  table-layout: auto;
+}
+.ao-fit .num,
+.ao-fit th {
+  white-space: nowrap;
+}
+.ao-fit td:not(.lab):not(:first-child),
+.ao-fit th:not(:first-child) {
+  padding-left: var(--sp-4);
+}
+.ao-fit .lab {
+  width: 100%;
+  max-width: 0;
+}
+.ao .fbtn {
+  min-height: 24px;
+}
+.ao .fdef {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--sp-1) var(--sp-4);
+  margin: 0;
+  padding: var(--sp-2) 0 var(--sp-2) var(--sp-4);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao .fdef dt {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: var(--fs-micro);
+}
+.ao .fdef dd {
+  margin: 0;
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.ao .mg .full {
+  color: var(--fg);
+}
+.ao-noact {
+  color: var(--muted);
+  font-size: var(--fs-s);
+  line-height: var(--lh-s);
+}
+.ao-row .src.sub {
+  display: block;
+  color: var(--muted);
+}
+.ao-fit .ao-more > td {
+  padding-left: var(--sp-4);
 }

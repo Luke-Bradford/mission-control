@@ -1,7 +1,15 @@
 import type { CodeHealthFigure, CodeHealthOverview } from "@mc/core";
+import { Fragment, useId, useState } from "react";
 import { VBars } from "../hud/charts/VBars.tsx";
 import { Panel } from "../hud/Panel.tsx";
-import { change, FIGURE_STATE_WORD, measureValue, OUTCOME_WORD, shortDate } from "./auditFormat.ts";
+import {
+  change,
+  FIGURE_STATE_WORD,
+  measureValue,
+  OUTCOME_WORD,
+  shortDate,
+  windowWords,
+} from "./auditFormat.ts";
 import { label } from "./format.ts";
 import { ScrollRegion } from "./ScrollRegion.tsx";
 
@@ -12,39 +20,101 @@ const LEGEND = [
   ["round 3+", "var(--warn)"],
 ] as const;
 
-function FigureRow({ figure }: { figure: CodeHealthFigure }) {
+function FigureRow({
+  figure,
+  open,
+  onToggle,
+  detail,
+}: {
+  figure: CodeHealthFigure;
+  open: boolean;
+  onToggle: () => void;
+  detail: string;
+}) {
   const c = change(figure);
-  const note = [figure.coverage, figure.note].filter(Boolean).join(" ");
   return (
-    <tr className="ao-frow" title={`${figure.source}. ${note}`}>
-      <td className="lab">
-        <span className="clamp1">{figure.label}</span>
-        {figure.state !== "available" && (
-          <span className="sub clamp1">
-            {FIGURE_STATE_WORD[figure.state]}
-            {figure.numerator !== null && figure.denominator !== null
-              ? `: ${figure.numerator} of ${figure.denominator}`
-              : ""}
+    <Fragment>
+      <tr className="ao-frow">
+        <td className="lab">
+          <button
+            type="button"
+            className="rt fbtn"
+            aria-expanded={open}
+            aria-controls={detail}
+            onClick={onToggle}
+          >
+            <i aria-hidden="true">{open ? "▾" : "▸"}</i>
+            <span className="clamp1">{figure.label}</span>
+          </button>
+          {figure.state !== "available" && (
+            <span className="sub clamp1">
+              {FIGURE_STATE_WORD[figure.state]}
+              {figure.numerator !== null && figure.denominator !== null
+                ? `: ${figure.numerator} of ${figure.denominator}`
+                : ""}
+            </span>
+          )}
+        </td>
+        <td className="num mono s m">
+          {measureValue(figure.comparison?.value ?? null, figure.unit)}
+        </td>
+        <td className="num mono s">{measureValue(figure.value, figure.unit)}</td>
+        <td>
+          <span className={`trend ${c.tone}`}>
+            {c.arrow} {c.word}
           </span>
-        )}
-      </td>
-      <td className="num mono s m">
-        {measureValue(figure.comparison?.value ?? null, figure.unit)}
-      </td>
-      <td className="num mono s">{measureValue(figure.value, figure.unit)}</td>
-      <td>
-        <span className={`trend ${c.tone}`}>
-          {c.arrow} {c.word}
-        </span>
-      </td>
-    </tr>
+        </td>
+      </tr>
+      {open && (
+        <tr className="ao-more" id={detail}>
+          <td colSpan={4}>
+            <dl className="fdef">
+              <dt>Now</dt>
+              <dd>{windowWords(figure.window)}</dd>
+              <dt>Before</dt>
+              <dd>
+                {figure.comparison
+                  ? windowWords(figure.comparison)
+                  : "No equal earlier window to compare with."}
+              </dd>
+              <dt>Source</dt>
+              <dd>{figure.source}</dd>
+              <dt>Coverage</dt>
+              <dd>{figure.coverage}</dd>
+              {figure.note && (
+                <>
+                  <dt>Note</dt>
+                  <dd>{figure.note}</dd>
+                </>
+              )}
+              <dt>Latest input</dt>
+              <dd>
+                {figure.updatedAt === null
+                  ? "No stored input behind this figure."
+                  : shortDate(figure.updatedAt)}
+              </dd>
+            </dl>
+          </td>
+        </tr>
+      )}
+    </Fragment>
   );
+}
+
+/** One label when every figure shares it, so the column header can carry the window. */
+function shared(labels: (string | undefined)[]): string | null {
+  const first = labels[0];
+  return first && labels.every((l) => l === first) ? first : null;
 }
 
 /** "How we build": merges a day by review round, and the figures behind the verdict. */
 export function HowWeBuild({ build, figures }: Pick<CodeHealthOverview, "build" | "figures">) {
   const days = build.mergedPerDay;
   const window = build.merged.window.label;
+  const detail = useId();
+  const [openFigure, setOpenFigure] = useState<string | null>(null);
+  const now = shared(figures.map((f) => f.window.label));
+  const before = shared(figures.map((f) => f.comparison?.label));
   return (
     <Panel
       className="ao-build"
@@ -84,24 +154,24 @@ export function HowWeBuild({ build, figures }: Pick<CodeHealthOverview, "build" 
         <p className="ao-empty">No merged PRs are recorded in this window.</p>
       )}
       <ScrollRegion className="ao-scroll ao-hscroll" label="Build measures">
-        <table className="ao-table">
-          <colgroup>
-            <col />
-            <col className="c-fig" />
-            <col className="c-fig" />
-            <col className="c-chg" />
-          </colgroup>
+        <table className="ao-table ao-fit">
           <thead>
             <tr>
               <th>Measure</th>
-              <th className="num">Before</th>
-              <th className="num">Now</th>
+              <th className="num">{before ? `Before (${before})` : "Before"}</th>
+              <th className="num">{now ? `Now (${now})` : "Now"}</th>
               <th>Change</th>
             </tr>
           </thead>
           <tbody>
             {figures.map((f) => (
-              <FigureRow key={f.id} figure={f} />
+              <FigureRow
+                key={f.id}
+                figure={f}
+                detail={`${detail}-${f.id}`}
+                open={openFigure === f.id}
+                onToggle={() => setOpenFigure(openFigure === f.id ? null : f.id)}
+              />
             ))}
           </tbody>
         </table>
@@ -121,6 +191,7 @@ export function WhereFindingsLand({
   onOpenRisk: () => void;
 }) {
   const total = landing.files.reduce((sum, f) => sum + f.findings, 0);
+  const [openPath, setOpenPath] = useState<string | null>(null);
   return (
     <Panel
       className="ao-files"
@@ -159,8 +230,15 @@ export function WhereFindingsLand({
                 const per = f.ratio.value;
                 return (
                   <tr key={f.path} className="ao-frow">
-                    <td className="path" title={f.path}>
-                      <bdi>{f.path}</bdi>
+                    <td className={openPath === f.path ? "path full" : "path"}>
+                      <button
+                        type="button"
+                        className="pathbtn"
+                        aria-expanded={openPath === f.path}
+                        onClick={() => setOpenPath(openPath === f.path ? null : f.path)}
+                      >
+                        <bdi>{f.path}</bdi>
+                      </button>
                     </td>
                     <td className="num mono s">{f.findings}</td>
                     <td className="num mono s f2">{f.touches}</td>

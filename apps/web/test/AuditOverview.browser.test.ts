@@ -90,6 +90,18 @@ describeRendered("the Audit overview in a real browser", () => {
                 expanded: document.querySelectorAll(".ao-more").length,
                 outsideTop: box(document.querySelector(".ao-outside"))?.top ?? 0,
                 sideLeft: box(document.querySelector(".ao-build"))?.left ?? 0,
+                buildOverlaps: [...document.querySelectorAll(".ao-fit .ao-frow")].flatMap((tr) => {
+                  const rects = [...tr.querySelectorAll("td")].slice(1).map((td) => {
+                    const range = document.createRange();
+                    range.selectNodeContents(td);
+                    return range.getBoundingClientRect();
+                  });
+                  return rects.flatMap((a, i) =>
+                    rects
+                      .slice(i + 1)
+                      .filter((b) => a.right > b.left + 0.5 && a.left < b.right - 0.5),
+                  );
+                }).length,
                 small: [...document.querySelectorAll(".ao button,.ao select,.ao a[href]")].filter(
                   (e) => {
                     const r = e.getBoundingClientRect();
@@ -110,6 +122,7 @@ describeRendered("the Audit overview in a real browser", () => {
             expect(m.docWidth, name).toBeLessThanOrEqual(m.innerWidth);
             expect(m.outsideTop, name).toBeGreaterThan(m.scrollerBottom - 1);
             expect(m.small, name).toBe(0);
+            expect(m.buildOverlaps, `${name}: Before, Now and Change text do not overlap`).toBe(0);
             await capture(page, `audit-${width}x${height}-${colorScheme}`);
           } finally {
             await page.close();
@@ -140,6 +153,66 @@ describeRendered("the Audit overview in a real browser", () => {
           undefined,
         );
         expect(docOk).toBe(true);
+      } finally {
+        await page.close();
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS,
+  );
+
+  it(
+    "reads a maximum-length title and file path in full from the keyboard",
+    async () => {
+      const title =
+        `Replace the hand-kept list ${"of every write tool and its callers ".repeat(7)}`.slice(
+          0,
+          240,
+        );
+      const path = `apps/server/src/${"very-long-directory-name/".repeat(7)}module.ts`;
+      const overview = auditOverviewApi(NOW);
+      const base = overviewFixture(NOW);
+      overview["/api/code-health/overview?repo=sample&window=30d"] = overviewFixture(NOW, {
+        over: {
+          rows: base.rows.map((row, i) => (i === 0 ? { ...row, title, proposal: title } : row)),
+          landing: { files: base.landing.files.map((f, i) => (i === 0 ? { ...f, path } : f)) },
+        },
+      });
+      const page = await renderAt({
+        page: "test/desktopBrowser.html",
+        width: 1920,
+        height: 940,
+        search: "?path=/audit",
+        colorScheme: "dark",
+        api: { ...api(), ...overview },
+      });
+      try {
+        await ready(page);
+        // The first row opens on its own: close it and reopen it with the keyboard.
+        await page.evaluate(
+          () => document.querySelector<HTMLElement>(".ao-row .rt")?.focus(),
+          undefined,
+        );
+        await page.press("Enter");
+        await page.press("Enter");
+        const shown = await page.evaluate(
+          (want) => document.querySelector(".ao-more .full")?.textContent?.includes(want) ?? false,
+          title,
+        );
+        expect(shown).toBe(true);
+        await page.evaluate(
+          () => document.querySelector<HTMLElement>(".ao-files .pathbtn")?.focus(),
+          undefined,
+        );
+        await page.press("Enter");
+        const open = await page.evaluate(() => {
+          const el = document.querySelector<HTMLElement>(".ao-files .pathbtn");
+          return (
+            !!el &&
+            el.getAttribute("aria-expanded") === "true" &&
+            el.scrollWidth <= el.clientWidth + 1
+          );
+        }, undefined);
+        expect(open).toBe(true);
       } finally {
         await page.close();
       }

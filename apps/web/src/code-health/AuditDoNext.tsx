@@ -1,12 +1,15 @@
-import type { CodeHealthRecommendation } from "@mc/core";
+import type { CodeHealthRecommendation, CodeHealthWasteAlarmRow } from "@mc/core";
 import { Fragment, useId } from "react";
 import { Panel } from "../hud/Panel.tsx";
 import {
+  alarmMeasure,
+  alarmScope,
   decider,
   nowToTarget,
   PATH_STEPS,
   pathIndex,
   reviewDate,
+  shortDate,
   stateWord,
 } from "./auditFormat.ts";
 import type { Action } from "./dialogs.tsx";
@@ -16,12 +19,19 @@ import { ScrollRegion } from "./ScrollRegion.tsx";
 export type Who = "all" | "operator" | "flight";
 export const WHO_OF = (row: CodeHealthRecommendation): Who => decider(row).tier ?? "all";
 
+/** Open waste alarms are FLIGHT's to close; the summary names no other owner. */
+const ALARM_WHO = (alarm: CodeHealthWasteAlarmRow): Who =>
+  alarm.owner === "FLIGHT" ? "flight" : "all";
+/** A title this long can run past the two-line clamp, so the detail shows it in full. */
+const LONG_TITLE = 80;
+
 const ACTIONS: readonly Action[] = ["accept", "dismiss", "snooze"];
 const cap = (text: string) => text[0]?.toUpperCase() + text.slice(1);
 
 /** The ranked proposals: one question per row, the evidence one click away in its detail. */
 export function DoNext({
   rows,
+  alarms,
   filter,
   onFilter,
   open,
@@ -33,6 +43,8 @@ export function DoNext({
   onHistory,
 }: {
   rows: CodeHealthRecommendation[];
+  /** The open waste alarms from the same summary; they are not ranked and carry no decision. */
+  alarms: CodeHealthWasteAlarmRow[];
   filter: Who;
   onFilter: (who: Who) => void;
   open: string | null;
@@ -46,8 +58,12 @@ export function DoNext({
 }) {
   const detail = useId();
   const yours = rows.filter((r) => WHO_OF(r) === "operator").length;
-  const flights = rows.filter((r) => WHO_OF(r) === "flight").length;
+  const flights =
+    rows.filter((r) => WHO_OF(r) === "flight").length +
+    alarms.filter((a) => ALARM_WHO(a) === "flight").length;
+  const total = rows.length + alarms.length;
   const shown = filter === "all" ? rows : rows.filter((r) => WHO_OF(r) === filter);
+  const shownAlarms = filter === "all" ? alarms : alarms.filter((a) => ALARM_WHO(a) === filter);
   return (
     <Panel
       className="ao-next"
@@ -55,6 +71,12 @@ export function DoNext({
       sub={
         <>
           <b>{rows.length}</b> ranked · strongest cause first, then largest measured baseline
+          {alarms.length > 0 && (
+            <>
+              {" "}
+              · <b>{alarms.length}</b> open waste {alarms.length === 1 ? "alarm" : "alarms"}
+            </>
+          )}
         </>
       }
       actions={
@@ -63,7 +85,7 @@ export function DoNext({
           <span className="seg" role="group" aria-label="Who decides">
             {(
               [
-                ["all", `All ${rows.length}`],
+                ["all", `All ${total}`],
                 ["operator", `Yours ${yours}`],
                 ["flight", `FLIGHT's ${flights}`],
               ] as const
@@ -86,11 +108,11 @@ export function DoNext({
       }
     >
       <ScrollRegion className="ao-scroll" label="Ranked recommendations">
-        {rows.length === 0 ? (
+        {total === 0 ? (
           <p className="ao-empty">{empty}</p>
-        ) : shown.length === 0 ? (
+        ) : shown.length + shownAlarms.length === 0 ? (
           <p className="ao-empty">
-            None of the {rows.length} ranked rows is decided by{" "}
+            None of the {total} {alarms.length ? "" : "ranked "}rows is decided by{" "}
             {filter === "operator" ? "you" : "FLIGHT"}. Choose All to see them.
           </p>
         ) : (
@@ -184,6 +206,11 @@ export function DoNext({
                           <div className="mg">
                             <div>
                               <h3>Why believe it</h3>
+                              {title.length > LONG_TITLE && (
+                                <p className="full">
+                                  <b>Full title:</b> {title}
+                                </p>
+                              )}
                               <p>{row.observation}</p>
                               <p className="m">{row.rankingReason}</p>
                               <button
@@ -222,6 +249,84 @@ export function DoNext({
                               <p>
                                 {stateWord(row.state)} · {reviewDate(row.state)}
                                 {who.owner ? ` · decided by ${who.owner}` : ""}
+                              </p>
+                            </div>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
+              {shownAlarms.map((alarm) => {
+                const key = `waste:${alarm.id}`,
+                  isOpen = open === key;
+                return (
+                  <Fragment key={key}>
+                    <tr className={isOpen ? "ao-row alarm open" : "ao-row alarm"} data-who="flight">
+                      <td className="n">!</td>
+                      <td>
+                        <span className="src">{label(alarm.check)}</span>
+                        <span className="src sub">Waste alarm</span>
+                      </td>
+                      <td>
+                        <button
+                          type="button"
+                          className="rt"
+                          aria-expanded={isOpen}
+                          aria-controls={`${detail}-${key}`}
+                          onClick={() => onOpen(isOpen ? null : key)}
+                        >
+                          <i aria-hidden="true">{isOpen ? "▾" : "▸"}</i>
+                          <span className="clamp">{alarm.title}</span>
+                        </button>
+                        <div className="why clamp">{alarm.evidence}</div>
+                      </td>
+                      <td>
+                        <div className="meas">
+                          <span className="l">{alarm.threshold}</span>
+                          <span className="v">
+                            <i className="ds a" aria-hidden="true" />
+                            <span>{alarmMeasure(alarm)}</span>
+                          </span>
+                        </div>
+                      </td>
+                      <td className="dec">
+                        <b>{alarm.owner}</b>
+                        <span>Open · since {shortDate(alarm.openedAt)}</span>
+                      </td>
+                      <td>
+                        <span className="ao-noact">
+                          Not decided here. {alarm.owner} closes it with a basis.
+                        </span>
+                      </td>
+                    </tr>
+                    {isOpen && (
+                      <tr className="ao-more" id={`${detail}-${key}`}>
+                        <td colSpan={6}>
+                          <div className="mg">
+                            <div>
+                              <h3>Evidence</h3>
+                              <p>{alarm.evidence}</p>
+                            </div>
+                            <div>
+                              <h3>Scope</h3>
+                              <p>{alarmScope(alarm)}</p>
+                            </div>
+                            <div>
+                              <h3>Limit and level</h3>
+                              <p>{alarm.threshold}</p>
+                              <p className="m">Now {alarmMeasure(alarm)}</p>
+                            </div>
+                            <div>
+                              <h3>Cost and owner</h3>
+                              <p>
+                                {alarm.costUsd === null
+                                  ? "The alarm records no cost."
+                                  : `$${alarm.costUsd.toFixed(2)} recorded on the alarm.`}
+                              </p>
+                              <p className="m">
+                                {alarm.owner} · open since {shortDate(alarm.openedAt)}
                               </p>
                             </div>
                           </div>

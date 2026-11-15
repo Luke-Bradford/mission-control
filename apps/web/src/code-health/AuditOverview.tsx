@@ -122,6 +122,7 @@ export function AuditOverview({
   };
 
   const rows = summary?.rows ?? [];
+  const alarms = summary?.wasteAlarms.rows ?? [];
   const effectiveOpen = openId === undefined ? (rows[0]?.id ?? null) : openId;
   const status = disconnected
     ? reconnecting
@@ -261,6 +262,7 @@ export function AuditOverview({
         <div className="ao-col">
           <DoNext
             rows={rows}
+            alarms={alarms}
             filter={filter}
             onFilter={setFilter}
             open={effectiveOpen}

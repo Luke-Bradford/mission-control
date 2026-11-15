@@ -393,3 +393,116 @@ it("opens straight on Code risk at /audit?tab=risk", async () => {
   const tab = await screen.findByRole("tab", { name: "Code risk" });
   expect(tab.getAttribute("aria-selected")).toBe("true");
 });
+
+const alarm = {
+  id: "runs-per-ticket:mission-control#9",
+  check: "runs-per-ticket" as const,
+  title: "Runs without a merge on one ticket",
+  scope: { repoId: "sample", ticket: "sample#9", runId: null, seatId: null },
+  evidence: "7 runs on sample#9 and no merged PR.",
+  measure: { value: 7, unit: "runs without a merge" },
+  threshold: "5 runs without a merge",
+  costUsd: null,
+  owner: "FLIGHT",
+  state: "open" as const,
+  openedAt: NOW - 3_600_000,
+};
+const withAlarms = (list: (typeof alarm)[]) => {
+  const base = overviewFixture(NOW);
+  return overviewFixture(NOW, {
+    over: { wasteAlarms: { ...base.wasteAlarms, rows: list } },
+  });
+};
+
+it("lists open waste alarms in Do next with their evidence, owner and no decision buttons", async () => {
+  setup({ [OVERVIEW]: withAlarms([alarm]) });
+  render(<Audit />);
+  await ready();
+  await waitFor(() => expect(rows()).toHaveLength(9));
+  expect(screen.getByRole("button", { name: "All 9" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "FLIGHT's 6" })).toBeTruthy();
+  expect(document.querySelector(".ao-next")?.textContent).toMatch(/1 open waste alarm/);
+  const row = document.querySelector<HTMLElement>(".ao-row.alarm") as HTMLElement;
+  expect(within(row).getByText("7 runs on sample#9 and no merged PR.")).toBeTruthy();
+  expect(within(row).getByText("7 runs without a merge")).toBeTruthy();
+  expect(within(row).queryByRole("button", { name: /^(Accept|Dismiss|Snooze)/ })).toBeNull();
+  fireEvent.click(within(row).getByRole("button", { name: /Runs without a merge on one ticket/ }));
+  expect(screen.getByText("ticket sample#9, repo sample")).toBeTruthy();
+  expect(screen.getByText("The alarm records no cost.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Yours 3" }));
+  expect(document.querySelector(".ao-row.alarm")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "FLIGHT's 6" }));
+  expect(document.querySelector(".ao-row.alarm")).not.toBeNull();
+});
+
+it("shows no alarm rows, and counts only ranked ones, once the alarm has cleared", async () => {
+  setup({ [OVERVIEW]: withAlarms([]) });
+  render(<Audit />);
+  await ready();
+  await waitFor(() => expect(rows()).toHaveLength(8));
+  expect(document.querySelector(".ao-row.alarm")).toBeNull();
+  expect(screen.getByRole("button", { name: "All 8" })).toBeTruthy();
+  expect(screen.queryByText(/open waste alarm/)).toBeNull();
+});
+
+it("shows alarms even when no proposal is ranked", async () => {
+  setup({
+    [OVERVIEW]: overviewFixture(NOW, {
+      over: { rows: [], wasteAlarms: { state: "available", note: "", rows: [alarm] } },
+    }),
+  });
+  render(<Audit />);
+  await waitFor(() => expect(rows()).toHaveLength(1));
+  expect(screen.queryByText(/No open proposal meets/)).toBeNull();
+});
+
+it("shows the full title in the opened row for a keyboard reader", async () => {
+  const long = `Replace the hand-kept list ${"of every write tool and its callers ".repeat(8)}`;
+  setup({
+    [OVERVIEW]: overviewFixture(NOW, {
+      over: { rows: [proposal(0, NOW, "sample", { title: long })] },
+    }),
+  });
+  render(<Audit />);
+  await ready();
+  const toggle = await waitFor(() => {
+    const found = document.querySelector<HTMLElement>(".ao-row .rt");
+    if (!found) throw new Error("not yet");
+    return found;
+  });
+  // The first row opens on its own; close and reopen it from the keyboard control.
+  fireEvent.click(toggle);
+  expect(document.querySelector(".ao-more .full")).toBeNull();
+  fireEvent.click(toggle);
+  expect(document.querySelector(".ao-more .full")?.textContent).toContain(long);
+});
+
+it("shows each build figure's windows, source and coverage in a keyboard-reachable detail", async () => {
+  setup();
+  render(<Audit />);
+  await ready();
+  const merged = await screen.findByRole("button", { name: "Merged PRs" });
+  expect(screen.getByRole("columnheader", { name: "Now (30d)" })).toBeTruthy();
+  expect(screen.getByRole("columnheader", { name: "Before (Previous 30d)" })).toBeTruthy();
+  expect(merged.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(merged);
+  expect(merged.getAttribute("aria-expanded")).toBe("true");
+  const detail = document.getElementById(merged.getAttribute("aria-controls") as string);
+  expect(detail?.textContent).toContain("30d, ");
+  expect(detail?.textContent).toContain("Previous 30d, ");
+  expect(detail?.textContent).toContain("Source");
+  expect(detail?.textContent).toContain("Coverage");
+});
+
+it("opens a file path in full from a focusable control", async () => {
+  setup();
+  render(<Audit />);
+  await ready();
+  const path = await screen.findByRole("button", {
+    name: "apps/server/src/engine/very-long-module-name-0.ts",
+  });
+  expect(path.getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(path);
+  expect(path.getAttribute("aria-expanded")).toBe("true");
+  expect(path.closest("td")?.className).toContain("full");
+});
