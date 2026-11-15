@@ -4302,7 +4302,7 @@ describe("the engine runs reviews", () => {
       });
     });
 
-    it("a queued review of a change past two review rounds stays queued", async () => {
+    it("a queued review of a change past two review rounds does not start; the run parks for FLIGHT", async () => {
       await toReview();
       const review = first();
       const author = store.run(review.authorRunId);
@@ -4324,12 +4324,16 @@ describe("the engine runs reviews", () => {
         at: clock,
       });
       await h.engine.tick();
-      expect(store.review(third ?? 0)?.state).toBe("queued");
+      await vi.waitFor(() =>
+        expect(store.run(review.authorRunId)?.loop).toMatchObject({
+          phase: "parked",
+          parked: { kind: "review" },
+        }),
+      );
       expect(h.starts).toHaveLength(startsBefore);
-      expect(reviewHoldOf(store, third ?? 0)).toEqual({
-        reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
-        prNumber: null,
-      });
+      // the parked run's review is closed, so it never runs on the same head
+      await h.engine.reconcileRun(review.authorRunId);
+      expect(store.review(third ?? 0)?.state).toBe("superseded");
     });
 
     it("a queued review moves to an available reviewer when its seat's account stops", async () => {
