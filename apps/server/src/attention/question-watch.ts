@@ -10,11 +10,11 @@ import {
   type TestLockState,
   ticketClosedReason,
 } from "@mc/core";
-import { protectedDecisionItem, questionAskAt } from "./holds.ts";
 import type { CcConfig } from "../config.ts";
 import { flightSeat, ownReply } from "../flight/state.ts";
 import { attentionItems, NO_LOCK } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
+import { protectedDecisionItem, questionAskAt } from "./holds.ts";
 
 /** One open question the hub can close on a recorded fact: its ticket, PR and run. */
 export interface QuestionSubject {

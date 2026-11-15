@@ -181,6 +181,11 @@ import {
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "./attention/attention-materials.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
@@ -189,11 +194,21 @@ import {
   nothingForOperator,
   releaseHold,
 } from "./attention/holds.ts";
+import { itemThread } from "./attention/item-thread.ts";
 import {
-  AttentionMaterialsError,
-  type AttentionMaterialsService,
-  createAttentionMaterials,
-} from "./attention/attention-materials.ts";
+  LocalNotifications,
+  NotificationPreferencesBody,
+} from "./attention/local-notifications.ts";
+import {
+  type ActionResult,
+  answerSetAside,
+  drop as dropQuestion,
+  type NeedsYouContext,
+  type NeedsYouDeps,
+  notNow as notNowQuestion,
+  offersFor,
+  setAsideQuestions,
+} from "./attention/needs-you-actions.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -357,8 +372,6 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { itemThread } from "./attention/item-thread.ts";
-import { LocalNotifications, NotificationPreferencesBody } from "./attention/local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
@@ -376,16 +389,6 @@ import {
   seatPlace,
 } from "./mcp/tools.ts";
 import { metricsView } from "./metrics.ts";
-import {
-  type ActionResult,
-  answerSetAside,
-  drop as dropQuestion,
-  type NeedsYouContext,
-  type NeedsYouDeps,
-  notNow as notNowQuestion,
-  offersFor,
-  setAsideQuestions,
-} from "./attention/needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";

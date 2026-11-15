@@ -14,9 +14,6 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { ChangeBus } from "../src/bus.ts";
-import type { CcConfig } from "../src/config.ts";
-import { attentionItems, NOTE_KEY } from "../src/hud/hud.ts";
 import {
   closeSettledQuestions,
   closingFact,
@@ -24,6 +21,9 @@ import {
   openQuestionSubjects,
   questionFacts,
 } from "../src/attention/question-watch.ts";
+import { ChangeBus } from "../src/bus.ts";
+import type { CcConfig } from "../src/config.ts";
+import { attentionItems, NOTE_KEY } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-07T12:00:00Z");
