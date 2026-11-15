@@ -96,6 +96,7 @@ import { CLAUDE_MD_HEADING, ticketBrief } from "../src/runtime/brief.ts";
 import { CheckoutError, prepareCheckout, syncReusedWorktree } from "../src/runtime/checkouts.ts";
 import { CODEX_MCP_ELICITATION, CODEX_OUTBOX_FILE } from "../src/runtime/codex-session.ts";
 import * as seatGit from "../src/runtime/git.ts";
+import { ZSH_NODE_FIRST_DIR, zprofileNodeFirst } from "../src/runtime/node-first.ts";
 import {
   CREW_LOCK_FILE,
   clonePeers,
@@ -3169,8 +3170,21 @@ import(${JSON.stringify(fixture)});
     expect(spawn.env.SHELL).toBe(CODEX_SHELL);
     expect(spawn.env.pnpm_config_pm_on_fail).toBe("ignore");
     expect(spawn.env.npm_config_update_notifier).toBe("false");
-    expect(spawn.env.ZDOTDIR).toBe(join(folder, "zsh-empty"));
-    expect(readdirSync(spawn.env.ZDOTDIR)).toEqual([]);
+    expect(spawn.env.ZDOTDIR).toBe(join(root, ZSH_NODE_FIRST_DIR));
+    // zsh must be able to read it: not inside any path the seat sandbox denies
+    const denied = [
+      ...readFileSync(join(home, "config.toml"), "utf8").matchAll(/^"(.+)"="deny"$/gm),
+    ];
+    expect(denied.length).toBeGreaterThan(0);
+    expect(
+      denied.some(([, d]) => spawn.env.ZDOTDIR === d || spawn.env.ZDOTDIR.startsWith(`${d}/`)),
+    ).toBe(false);
+    expect(readdirSync(spawn.env.ZDOTDIR)).toEqual([".zprofile"]);
+    expect(readFileSync(join(spawn.env.ZDOTDIR, ".zprofile"), "utf8")).toBe(
+      zprofileNodeFirst(process.execPath),
+    );
+    // the hub's Node folder leads PATH, ahead of any other folder that holds a node
+    expect(spawn.env.PATH.split(":")[0]).toBe(dirname(process.execPath));
     expect(spawn.env[CODEX_SEAT_TOKEN_ENV]).toEqual(expect.any(String));
     expect(Object.keys(spawn.env).some((key) => key.startsWith("CLAUDE_"))).toBe(false);
     for (const key of [
