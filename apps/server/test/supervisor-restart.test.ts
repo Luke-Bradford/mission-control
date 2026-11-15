@@ -48,6 +48,7 @@ import {
   crewPromptPath,
   crewTokenPath,
 } from "../src/store/crew-paths.ts";
+import { sleep } from "../src/util.ts";
 import { codexSupervisor } from "./codex-supervisor-harness.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import {
@@ -927,7 +928,7 @@ describe("a seat keeps running through a restart", () => {
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
   });
 
-  it("a keeper that drops the hub for another client is not killed: the hub attaches again and the turn finishes (#1912)", async () => {
+  it("a hub replaced by a newer one lets go: the keeper and its CLI live on and the newer hub gets the turn (#1912)", async () => {
     const { sup } = make();
     sup.start();
     const { runId } = await sup.startRun("guido-1", 42);
@@ -936,16 +937,29 @@ describe("a seat keeps running through a restart", () => {
     await until(() => expect(seatState("guido-1")).toBe("running"));
     const keeperDir = crewKeeperDir(dbPath, runId);
     const keeperPid = readPidFile(keeperDir, KEEPER_PID_FILE) as number;
-    // another hub attaches and lets go: the keeper drops the first hub's socket for it
+    // the newer hub attaches and stays attached: the keeper hands the first hub off
     const other = await attachSession({ dir: keeperDir, from: () => 0 });
     expect(other.kind).toBe("attached");
-    if (other.kind === "attached") other.session.detach();
-    await until(() => expect(seatState("guido-1")).toBe("idle"));
+    if (other.kind !== "attached") return;
+    let results = 0;
+    other.session.on((e) => {
+      if (e.kind === "result") results++;
+    });
+    let exited = false;
+    other.session.on((e) => {
+      if (e.kind === "exit") exited = true;
+    });
+    // the brief's result is replayed, then the SLOW turn's own
+    await until(() => expect(results).toBeGreaterThanOrEqual(2));
+    // the first hub let go and did not dial back: the newer hub still owns the keeper
+    await sleep(500);
+    expect(other.session.alive).toBe(true);
+    expect(exited).toBe(false);
     expect(pidAlive(keeperPid)).toBe(true);
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
     expect(store.run(runId)?.noReport).toBeUndefined();
-    expect(readFileSync(store.run(runId)?.transcriptPath ?? "", "utf8")).toContain("echo: SLOW");
     expect(starts()).toHaveLength(1);
+    await other.session.close();
   });
 
   it("a keeper that dies mid-turn is resumed, not parked as a crash with the run failed (#1912)", async () => {

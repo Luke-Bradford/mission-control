@@ -63,6 +63,8 @@ const EXITED_WAIT_MS = 5000;
 const CONNECT_RETRY_MS = 25;
 /** How many times one session takes back a socket its keeper dropped while the keeper still runs. */
 export const KEEPER_REDIAL_MAX = 3;
+/** A link that held this long starts the redial count over. */
+const KEEPER_REDIAL_STABLE_MS = 60_000;
 
 export interface SessionInput {
   /** Default `"claude"`; tests pass `process.execPath` with the fake CLI as the first argument. */
@@ -275,6 +277,10 @@ function createDriver(i: {
   let detached = false;
   let stdinEnded = false;
   let redialed = 0;
+  /** When the socket in use was linked. */
+  let linkedAt = 0;
+  /** The keeper said a newer hub has replaced this one. */
+  let handedOff = false;
   let inTurn = false;
   let announced = false;
   /** The next keeper line wanted. */
@@ -435,6 +441,8 @@ function createDriver(i: {
       announceIfCaughtUp();
     } else if (m.t === "err" && typeof m.text === "string") {
       stderrText(m.text);
+    } else if (m.t === "handoff") {
+      handedOff = true;
     } else if (m.t === "exit") {
       end({
         code: typeof m.code === "number" ? m.code : null,
@@ -444,18 +452,34 @@ function createDriver(i: {
   }
 
   /**
-   * The keeper's socket closed without an `exit`. A keeper that still runs let go of us (another
-   * hub attached, or it dropped the connection): its CLI is not ours to end, so the session dials
-   * again and carries on from the next line it wants. A keeper that is gone is ended by its pids
-   * (nothing may be left running), and the exit it left is reported; with none left, the exit says
-   * the keeper was lost, which the supervisor resumes instead of failing the run.
+   * The keeper's socket closed without an `exit`. A newer hub that replaced us (`handoff`) owns the
+   * keeper now: this session lets go and neither dials back nor ends anything. A keeper that still
+   * runs and dropped us unexplained is dialled again, a few times in a row (the count starts over
+   * after a link that held); if it will not take us back it is left alone, never ended: its CLI may
+   * be mid-turn for another hub. Only a keeper that is gone is cleaned up by its pids (nothing may be
+   * left running), and the exit it left is reported; with none left, the exit says the keeper was
+   * lost, which the supervisor resumes instead of failing the run.
    */
   async function lost(): Promise<void> {
     if (finished || detached) return;
-    if (redialed < KEEPER_REDIAL_MAX && keeperRuns(i.dir)) {
-      redialed++;
-      if (await redial()) return;
-      if (finished || detached) return;
+    if (handedOff) {
+      session.detach();
+      return;
+    }
+    if (keeperRuns(i.dir)) {
+      if (Date.now() - linkedAt > KEEPER_REDIAL_STABLE_MS) redialed = 0;
+      while (redialed < KEEPER_REDIAL_MAX) {
+        redialed++;
+        if (await redial()) return;
+        if (finished || detached) return;
+        if (handedOff) return session.detach();
+        if (!keeperRuns(i.dir)) break;
+      }
+      if (keeperRuns(i.dir)) {
+        i.log?.(`${i.dir}: the keeper runs but would not take the hub back; leaving it`);
+        session.detach();
+        return;
+      }
     }
     stderrText("the keeper ended unexpectedly");
     await endKeeper(i.dir, i.stopGraceMs, i.log);
@@ -493,6 +517,7 @@ function createDriver(i: {
   /** The keeper's hello is in: say ours, send what waited, and read the rest. */
   function link(s: Socket, reader: LineReader, h: KeeperHello, from: number): void {
     sock = s;
+    linkedAt = Date.now();
     hello = h;
     next = Math.min(Math.max(from, 0), h.lines);
     s.on("error", () => {});

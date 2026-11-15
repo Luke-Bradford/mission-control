@@ -15,7 +15,8 @@
  * The CLI's stdout lines are written to the run's transcript and numbered from 0 (the line's number
  * is its place in this keeper's output, whatever the transcript held before). The wire is newline
  * JSON. Keeper to hub: `hello` (always first; its shape is frozen so an older or newer hub can read
- * it), `{t:"out",n,line}`, `{t:"err",text}`, `{t:"exit",code,signal}`. Hub to keeper:
+ * it), `{t:"out",n,line}`, `{t:"err",text}`, `{t:"exit",code,signal}`, and `{t:"handoff"}` to a hub just
+ * before a newer one replaces it (the old hub lets go and does not dial again). Hub to keeper:
  * `{t:"hello",version,from,secret}` (the first line wanted, and the secret from `spec.json`; a
  * connection whose first line is anything else is closed, and so is one silent for 5 s),
  * `{t:"in",line,user,deliveryId?}` (a line for the CLI's stdin; `user`: it starts a turn;
@@ -831,7 +832,8 @@ export function runKeeper(
       return false;
     }
     c.authed = true;
-    if (client !== null) client.sock.destroy();
+    // the replaced hub is told, so it lets go instead of dialling back (older keepers just close it)
+    if (client !== null) client.sock.end(`${JSON.stringify({ t: "handoff" })}\n`);
     client = c;
     live.clear();
     clearTimeout(absentTimer);
