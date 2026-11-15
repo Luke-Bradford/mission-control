@@ -1,8 +1,16 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type { AccountId, UsageSample } from "@mc/core";
-import { toSample } from "./rows.ts";
 
 type Row = Record<string, SQLInputValue>;
+
+export const toSample = (r: Row): UsageSample => ({
+  accountId: r.account_id as string,
+  window: r.window as "5h" | "7d",
+  at: r.at as number,
+  pct: r.pct as number,
+  resetAt: r.reset_at as number,
+  source: r.source as string,
+});
 
 /** One controller message's token counts, as stored in `controller_messages`. */
 export type ControllerMessageUsage = {
