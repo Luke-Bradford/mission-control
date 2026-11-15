@@ -2458,7 +2458,9 @@ export function createEngine(deps: EngineDeps): Engine {
         own.state !== "open" ||
         (own.headSha !== row.sha && own.headSha !== store.runPush(author.id)?.sha)
       )
-        return unreadOlderPrs("the PR's own state could not be read, or it is closed or its head moved");
+        return unreadOlderPrs(
+          "the PR's own state could not be read, or it is closed or its head moved",
+        );
       const baseFor = (number: number, head: string, base: string): string => {
         const key = `review-base:${author.repoId}:${number}:${head}`;
         const saved = store.getSetting(key);
@@ -2518,7 +2520,8 @@ export function createEngine(deps: EngineDeps): Engine {
           // A known run whose seat disappeared cannot establish disjointness.
           touched = paths;
         } else {
-          if (pr.state === "merged" && !pr.mergeCommitSha) return unreadOlderPrs("an older merged PR has no merge commit on record");
+          if (pr.state === "merged" && !pr.mergeCommitSha)
+            return unreadOlderPrs("an older merged PR has no merge commit on record");
           touched = await publisher.hardRuleTouches(
             run,
             pr.headSha,
@@ -2584,7 +2587,8 @@ export function createEngine(deps: EngineDeps): Engine {
             JSON.stringify(await publisher.reviewPr(author, number)) === snapshot,
         ),
       );
-      if (revalidated.some((unchanged) => !unchanged)) return unreadOlderPrs("an older PR changed while it was being compared");
+      if (revalidated.some((unchanged) => !unchanged))
+        return unreadOlderPrs("an older PR changed while it was being compared");
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
         return unreadOlderPrs("the PR changed while it was being compared with the older PRs");
       return waiting;
