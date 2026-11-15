@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { readdir, realpath, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import type { Run } from "@mc/core";
+import type { RepoRulesView, Run } from "@mc/core";
 import {
   ACK_BATCH_MAX,
   ACTIVITY_LIMIT,
@@ -3490,7 +3490,10 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
-      const rolesRulesView = async (repo: (typeof config.repos)[number], configPath: string) => {
+      const rolesRulesView = async (
+        repo: (typeof config.repos)[number],
+        configPath: string,
+      ): Promise<RepoRulesView> => {
         const bytes = readFileSync(configPath);
         const document = parseDocument(bytes.toString("utf8"));
         const repos = document.get("repos", true);
@@ -3515,9 +3518,9 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         ) =>
           JSON.stringify(value) === JSON.stringify(configured[configuredKey])
             ? source(sourceKey)
-            : "Repo file";
-        const source = (key: string) => (configuredKeys.includes(key) ? "Set here" : "Default");
-        const repoSource = (key: string) => (rawRepo?.has(key) ? "Set here" : "Default");
+            : "repo-file";
+        const source = (key: string) => (configuredKeys.includes(key) ? "set-here" : "default");
+        const repoSource = (key: string) => (rawRepo?.has(key) ? "set-here" : "default");
         return {
           base: createHash("sha256").update(bytes).digest("hex"),
           rules: {
@@ -3552,14 +3555,14 @@ export function buildApp(deps: AppDeps): FastifyInstance {
               value: effective.alwaysAsk,
               source: repoFile("always_ask", "alwaysAsk", effective.alwaysAsk),
             },
-            autonomy: { value: repo.autonomy, source: "Config file" },
-            flight_powers: { value: repo.flightPowers, source: "Config file" },
+            autonomy: { value: repo.autonomy, source: "config-file" },
+            flight_powers: { value: repo.flightPowers, source: "config-file" },
           },
         };
       };
 
       // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
-      api.get<{ Params: { repoId: string } }>("/repos/:repoId/roles-rules", async (req, reply) => {
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
         const configPath = deps.configPath;
         if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
         const repo = config.repos.find((item) => item.id === req.params.repoId);
@@ -3568,7 +3571,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
       });
 
       // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
-      api.post<{ Params: { repoId: string } }>("/repos/:repoId/roles-rules", async (req, reply) => {
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
         const configPath = deps.configPath;
         if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
         const body = RepoRolesBody.safeParse(req.body);

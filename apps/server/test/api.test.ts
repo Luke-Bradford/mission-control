@@ -2163,7 +2163,7 @@ describe("Setup Roles & guards", () => {
   };
 
   it("reads sources and saves every editable rule with a backup, without GitHub", async () => {
-    const read = await get("/api/repos/shop-app/roles-rules");
+    const read = await get("/api/repos/shop-app/rules");
     expect(read.statusCode).toBe(200);
     const body = read.json<{ base: string; rules: Record<string, { source: string }> }>();
     expect(Object.keys(body.rules)).toEqual([
@@ -2171,8 +2171,8 @@ describe("Setup Roles & guards", () => {
       "autonomy",
       "flight_powers",
     ]);
-    expect(body.rules.autonomy).toMatchObject({ source: "Config file" });
-    const saved = await postBody("/api/repos/shop-app/roles-rules", {
+    expect(body.rules.autonomy).toMatchObject({ source: "config-file" });
+    const saved = await postBody("/api/repos/shop-app/rules", {
       base: body.base,
       rules: rolesBody,
     });
@@ -2181,27 +2181,104 @@ describe("Setup Roles & guards", () => {
     expect(readFileSync(configPath, "utf8")).toContain("pick_from:");
     expect(readdirSync(dir)).toContain("config.yaml.bak-20261017T120000Z");
     expect(refreshed).toBe(0);
+    expect(gqlCalls).toEqual([]);
+    const reread = await get("/api/repos/shop-app/rules");
+    expect(reread.json<{ rules: Record<string, { source: string }> }>().rules).toMatchObject({
+      pick_from: { source: "set-here" },
+      needs: { source: "set-here" },
+      areas: { source: "set-here" },
+      promote_backlog: { source: "set-here" },
+      protected: { source: "set-here" },
+      hard_rules: { source: "set-here" },
+      hard_rules_by: { source: "set-here" },
+      commands: { source: "set-here" },
+      full_suite: { source: "set-here" },
+      required_checks: { source: "set-here" },
+      checks: { source: "set-here" },
+      uat: { source: "set-here" },
+      always_ask: { source: "set-here" },
+    });
+  });
+
+  it("reports repo-file replacement and tightening sources", async () => {
+    withCrew();
+    const checkout = mapCheckout(dir);
+    const session = config.crew?.sessions[0];
+    const repo = config.repos.find((item) => item.id === "shop-app");
+    if (!session || !repo) throw new Error("fixture repo missing");
+    session.checkout = checkout;
+    repo.rules = {
+      ...DEFAULT_REPO_RULES,
+      userSet: ["pick_from", "hard_rules", "checks", "always_ask", "uat"],
+      pickFrom: ["Ready"],
+      hardRules: ["config.yaml"],
+      hardRulesSet: true,
+      checks: ["pnpm -s lint"],
+      alwaysAsk: ["deploy"],
+      uat: { labels: ["needs-uat"], paths: [] },
+    };
+    writeFileSync(
+      join(checkout, "CLAUDE.md"),
+      "## Mission Control\n\n```yaml\nmc:\n  pick_from: [In progress]\n  hard_rules: [CLAUDE.md]\n  checks: [pnpm -s typecheck]\n  always_ask: [security]\n  uat:\n    labels: [requires-uat]\n```\n",
+    );
+    execFileSync("git", ["-C", checkout, "add", "CLAUDE.md"]);
+    execFileSync("git", [
+      "-C",
+      checkout,
+      "-c",
+      "user.email=a@b",
+      "-c",
+      "user.name=n",
+      "commit",
+      "-qm",
+      "rules",
+    ]);
+    execFileSync("git", ["-C", checkout, "update-ref", "refs/remotes/origin/main", "HEAD"]);
+
+    const response = await get("/api/repos/shop-app/rules");
+    expect(response.statusCode).toBe(200);
+    expect(response.json().rules).toMatchObject({
+      pick_from: { value: ["In progress"], source: "repo-file" },
+      hard_rules: { value: ["config.yaml", "CLAUDE.md"], source: "repo-file" },
+      checks: { value: ["pnpm -s lint", "pnpm -s typecheck"], source: "repo-file" },
+      always_ask: { value: ["deploy", "security"], source: "repo-file" },
+      uat: { value: { labels: ["needs-uat", "requires-uat"], paths: [] }, source: "repo-file" },
+    });
+    expect(gqlCalls).toEqual([]);
   });
 
   it.each([
-    ["a schema error", { ...rolesBody, checks: ["pnpm -s lint && pnpm -s test"] }],
-    ["autonomy", { ...rolesBody, autonomy: "merge" }],
-    ["flight_powers", { ...rolesBody, flight_powers: "superuser" }],
-  ])("refuses %s without writing", async (_name, rules) => {
-    const read = await get("/api/repos/shop-app/roles-rules");
+    ["pick_from", { ...rolesBody, pick_from: [] }, "expected array to have >=1 items"],
+    ["needs", { ...rolesBody, needs: ["missing"] }, "needs"],
+    ["areas", { ...rolesBody, areas: { server: [] } }, "areas"],
+    ["promote_backlog", { ...rolesBody, promote_backlog: "yes" }, "expected boolean"],
+    ["protected", { ...rolesBody, protected: [""] }, "protected"],
+    ["hard_rules", { ...rolesBody, hard_rules: [""] }, "must hold only letters"],
+    ["hard_rules_by", { ...rolesBody, hard_rules_by: "flight" }, "expected one of"],
+    ["commands", { ...rolesBody, commands: { writer: [""], review: [] } }, "commands"],
+    ["full_suite", { ...rolesBody, full_suite: ["not a writer command"] }, "full_suite"],
+    ["required_checks", { ...rolesBody, required_checks: ["mc/review"] }, "not a CI check"],
+    ["checks", { ...rolesBody, checks: ["pnpm -s lint && pnpm -s test"] }, "checks"],
+    ["uat", { ...rolesBody, uat: { labels: [""], paths: [] } }, "uat"],
+    ["always_ask", { ...rolesBody, always_ask: [""] }, "expected string"],
+    ["autonomy", { ...rolesBody, autonomy: "merge" }, undefined],
+    ["flight_powers", { ...rolesBody, flight_powers: "superuser" }, undefined],
+  ])("refuses %s without writing", async (_name, rules, key) => {
+    const read = await get("/api/repos/shop-app/rules");
     const before = readFileSync(configPath, "utf8");
-    const response = await postBody("/api/repos/shop-app/roles-rules", {
+    const response = await postBody("/api/repos/shop-app/rules", {
       base: read.json<{ base: string }>().base,
       rules,
     });
     expect(response.statusCode).toBe(400);
+    if (key) expect(response.json<{ error: string }>().error).toContain(key);
     expect(readFileSync(configPath, "utf8")).toBe(before);
   });
 
   it("refuses a stale page without a backup", async () => {
-    const read = await get("/api/repos/shop-app/roles-rules");
+    const read = await get("/api/repos/shop-app/rules");
     writeFileSync(configPath, `${readFileSync(configPath, "utf8")}# changed\n`);
-    const response = await postBody("/api/repos/shop-app/roles-rules", {
+    const response = await postBody("/api/repos/shop-app/rules", {
       base: read.json<{ base: string }>().base,
       rules: rolesBody,
     });

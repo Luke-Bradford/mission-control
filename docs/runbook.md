@@ -1877,8 +1877,9 @@ Commands and protected files already live alongside `rules`, at `repos[].command
 `review` lists) and `repos[].protected` (extra globs seats may not edit or commit). They do not come
 from a repo block. Changes to these repo settings, including `rules`, require a hub restart.
 
-**Roles & guards API.** `GET /api/repos/:repoId/roles-rules` returns the editable values and a
-config file version. `POST` to the same route saves the approved rules only. Send the version from
+**Roles & guards API.** `GET /api/repos/:repoId/rules` returns the editable values, their source
+(`set-here`, `repo-file`, `default`, `config-file` or `built-in`), and a config file version. `POST`
+to the same route saves the approved rules only. Send the version from
 the read as `base`; a changed file answers `config.yaml changed since this page loaded it; reload
 and try again` and writes nothing. Each save keeps the normal adjacent config backup. The route
 never accepts `autonomy` or `flight_powers`, and it makes no GitHub call.
