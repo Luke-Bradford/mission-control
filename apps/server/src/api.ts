@@ -6343,6 +6343,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           // FLIGHT's run never applies a shortcut: only a person does
           const out = await updater.update(actor === null ? undefined : { refuseUnsafe: true });
+          // main is now running (or was already): no Update is waiting any more
+          createHeldUpdateNote(store, bus)(null);
           if ("restarting" in out) {
             restarting = true;
             updater.restart();

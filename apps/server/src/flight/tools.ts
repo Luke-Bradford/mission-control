@@ -4438,14 +4438,18 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return { text: `Dismissed ${a.key}.` };
         }
         const key = a.key.slice(NOTE_KEY.length);
+        // the Update notes belong to no repo, so the repo filter must not hide them: the items list shows them
+        const hubUpdate = key === HUB_UPDATE_HELD_KEY || key === HUB_UPDATE_PERSON_KEY;
         const note = store
           .notes()
-          .find((n) => n.key === key && n.repoId === repo.id && n.dismissedAt === null);
+          .find(
+            (n) =>
+              n.key === key && (hubUpdate || n.repoId === repo.id) && n.dismissedAt === null,
+          );
         if (
           !note ||
           key.startsWith(GUARD_ACK_PREFIX) ||
-          key === HUB_UPDATE_HELD_KEY ||
-          key === HUB_UPDATE_PERSON_KEY ||
+          hubUpdate ||
           note.kind === "ratelimit"
         )
           return fail(note ? protectedItem : notFound);
