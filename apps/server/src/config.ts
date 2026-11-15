@@ -55,7 +55,7 @@ import { z } from "zod";
 import { accountBindingProblem, type CliBinding } from "./accounts/bindings.ts";
 import { CLI_UPDATES, type CliUpdates } from "./cli/update.ts";
 import { repoRulesSchema, resolveRepoRules } from "./engine/rule-config.ts";
-import { seatFocus } from "./focus.ts";
+import { seatFocus } from "./instructions/focus.ts";
 import { GIT_TIMEOUT_MS, gitEnv } from "./repo/files.ts";
 import { areaGlob, protectedGlob } from "./repo/globs.ts";
 import { type CodexModels, codexModels, codexModelsFor } from "./runtime/codex-models.ts";

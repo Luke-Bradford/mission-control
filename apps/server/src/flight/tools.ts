@@ -359,7 +359,6 @@ import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
-import { seatFocus } from "../focus.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import {
   attentionItems,
@@ -372,6 +371,7 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud/hud.ts";
+import { seatFocus } from "../instructions/focus.ts";
 import { announceInstruction } from "../instructions/notices.ts";
 import { InstructionInput } from "../instructions/standing.ts";
 import type { GhRunner } from "../mcp/gh.ts";

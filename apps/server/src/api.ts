@@ -217,10 +217,10 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import { ChoiceRefused, choiceReceipt, chooseOption } from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";

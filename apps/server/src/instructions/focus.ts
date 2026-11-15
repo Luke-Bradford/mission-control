@@ -1,7 +1,7 @@
 import type { BoardItem } from "@mc/core";
 import { z } from "zod";
-import type { CcConfig } from "./config.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import type { Store } from "../store.ts";
 
 /** FLIGHT translates natural language into lane/label selectors or stable ticket refs. */
 const tokens = (focus: string): string[] => focus.trim().split(/[\s,]+/);
