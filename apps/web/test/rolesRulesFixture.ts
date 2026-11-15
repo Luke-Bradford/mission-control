@@ -29,7 +29,7 @@ const base = (): Record<RuleKey, RepoRulesView["rules"][RuleKey]> => {
   return out;
 };
 
-/** One repo's rules as the read route will serve them: a spread of sources, one with repo additions. */
+/** One repo's rules as the read route will serve them: a spread of sources, one with repo additions. Demo serves it too. */
 export const rulesFixture = (repoId: string): RepoRulesView => ({
   repoId,
   repoFile: true,
