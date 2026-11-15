@@ -227,6 +227,7 @@ import * as attention from "./store/attention.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
+import * as reviewsStore from "./store/reviews.ts";
 import {
   compactFlightWake,
   evidenceOf,
@@ -3821,10 +3822,7 @@ export class Store {
 
   /** Every review of a PR, oldest first. */
   reviewsOfPr(repoId: RepoId, prNumber: number): ReviewRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? ORDER BY id")
-      .all(repoId, prNumber) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsOfPr(this.db, repoId, prNumber);
   }
 
   /** Every check run read for a PR's heads, newest first. */
@@ -4808,29 +4806,23 @@ export class Store {
   }
 
   review(id: number): ReviewRow | null {
-    const row = this.db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.review(this.db, id);
   }
 
   /** Moves a queued review to another review seat; true only when it was still queued. */
   moveQueuedReview(id: number, seatId: string, at: number): boolean {
-    let moved = false;
-    this.transaction(() => {
-      moved =
-        this.db
-          .prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'")
-          .run(seatId, id).changes === 1;
-      if (moved)
-        this.db
-          .prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)")
-          .run(id, seatId, at);
-    });
-    return moved;
+    return reviewsStore.moveQueuedReview(
+      this.db,
+      (write) => this.transaction(write),
+      id,
+      seatId,
+      at,
+    );
   }
 
   /** Whether FLIGHT assigned the queued review to its current seat. */
   reviewMoved(id: number): boolean {
-    return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
+    return reviewsStore.reviewMoved(this.db, id);
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */
@@ -5083,53 +5075,28 @@ export class Store {
 
   /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
   externalReviewRows(): ReviewRow[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM reviews WHERE author_run_id LIKE 'external-pr:%' AND state != 'superseded' ORDER BY id",
-      )
-      .all() as Row[];
-    return rows.map(toReview);
+    return reviewsStore.externalReviewRows(this.db);
   }
 
   reviewsOfRun(authorRunId: string): ReviewRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM reviews WHERE author_run_id = ? ORDER BY id")
-      .all(authorRunId) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsOfRun(this.db, authorRunId);
   }
 
   /** The latest review of a PR that has reported, else null. */
   latestReportedReview(repoId: string, prNumber: number): ReviewRow | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? AND state = 'reported'
-         ORDER BY ended_at DESC, id DESC LIMIT 1`,
-      )
-      .get(repoId, prNumber) as Row | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.latestReportedReview(this.db, repoId, prNumber);
   }
 
   /** The review the run (a review run) performs, else null. */
   reviewOfRun(reviewRunId: string): ReviewRow | null {
-    const row = this.db.prepare("SELECT * FROM reviews WHERE run_id = ?").get(reviewRunId) as
-      | Row
-      | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.reviewOfRun(this.db, reviewRunId);
   }
 
   reviewsIn(
     states: readonly ReviewState[],
     window?: { repo: string; since: number; until: number },
   ): ReviewRow[] {
-    if (states.length === 0) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM reviews WHERE state IN (${states.map(() => "?").join(", ")})
-         ${window ? "AND repo_id = ? AND ended_at >= ? AND ended_at <= ?" : ""}
-         ORDER BY created_at, id`,
-      )
-      .all(...states, ...(window ? [window.repo, window.since, window.until] : [])) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsIn(this.db, states, window);
   }
 
   /** Moves a review from one of `from` to `to`; true only when exactly one row changed. */
@@ -5339,34 +5306,16 @@ export class Store {
 
   /** The files the author changed since the previous reviewed sha, for tagging late findings. */
   setReviewChangedSince(reviewId: number, files: readonly string[]): void {
-    this.db
-      .prepare("UPDATE reviews SET changed_since = ? WHERE id = ?")
-      .run(JSON.stringify(files), reviewId);
+    reviewsStore.setReviewChangedSince(this.db, reviewId, files);
   }
 
   /** Why this review ran without an install ("reviewed, not installed"), kept with the review. */
   setReviewInstallNote(reviewId: number, note: string): void {
-    this.db.prepare("UPDATE reviews SET install_note = ? WHERE id = ?").run(note, reviewId);
+    reviewsStore.setReviewInstallNote(this.db, reviewId, note);
   }
 
   findingsOf(reviewId: number): StoredFinding[] {
-    const rows = this.db
-      .prepare("SELECT * FROM review_findings WHERE review_id = ? ORDER BY pos")
-      .all(reviewId) as Row[];
-    return rows.map((r) => ({
-      pos: r.pos as number,
-      severity: r.severity as StoredFinding["severity"],
-      file: r.file as string,
-      line: r.line as number,
-      summary: r.summary as string,
-      scenario: r.scenario as string,
-      fix: r.fix as string,
-      category: (r.category as StoredFinding["category"]) ?? undefined,
-      state: r.state as StoredFinding["state"],
-      late: r.late === 1,
-      resolution: (r.resolution as StoredFinding["resolution"]) ?? undefined,
-      resolvedReviewId: (r.resolved_review_id as number | null) ?? undefined,
-    }));
+    return reviewsStore.findingsOf(this.db, reviewId);
   }
 
   /**
@@ -5426,7 +5375,7 @@ export class Store {
       blocking: r.blocking as number,
       minor: r.minor as number,
       endedAt: r.ended_at as number,
-      screenshots: this.reviewShots(r.id as number),
+      screenshots: reviewsStore.reviewShots(this.db, r.id as number),
     }));
   }
 
@@ -5436,11 +5385,7 @@ export class Store {
     shot: { shotId: string; label: string; width: number; theme: ReviewShotView["theme"] },
     at: number,
   ): void {
-    this.db
-      .prepare(
-        "INSERT INTO review_shots (review_id, shot_id, label, width, theme, at) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(reviewId, shot.shotId, shot.label, shot.width, shot.theme, at);
+    reviewsStore.addReviewShot(this.db, reviewId, shot, at);
   }
 
   /** The complete paths a PR changes, as GitHub's paged diff listing gave them. */
@@ -5453,66 +5398,21 @@ export class Store {
   }
 
   reviewShots(reviewId: number): ReviewShotView[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT shot_id, label, width, theme, at FROM review_shots WHERE review_id = ? ORDER BY id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      id: r.shot_id as string,
-      label: r.label as string,
-      width: r.width as number,
-      theme: r.theme as ReviewShotView["theme"],
-      at: r.at as number,
-    }));
+    return reviewsStore.reviewShots(this.db, reviewId);
   }
 
   reviewChecks(reviewId: number): ReviewCheck[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT check_id, result, note FROM review_checks WHERE review_id = ? ORDER BY check_id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      check: r.check_id as ReviewCheck["check"],
-      result: r.result as ReviewCheck["result"],
-      ...(r.note === null ? {} : { note: r.note as string }),
-    }));
+    return reviewsStore.reviewChecks(this.db, reviewId);
   }
 
   reviewTests(reviewId: number): (Omit<ReportedTest, "file"> & { file: string | null })[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT command, file, passed, failed, skipped, duration FROM review_tests WHERE review_id = ? ORDER BY id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      command: r.command as string,
-      file: r.file as string | null,
-      passed: r.passed as number,
-      failed: r.failed as number,
-      skipped: r.skipped as number,
-      duration: r.duration as number,
-    }));
+    return reviewsStore.reviewTests(this.db, reviewId);
   }
 
   reviewResolutions(
     reviewId: number,
   ): { reviewId: number; pos: number; outcome: FindingResolution["outcome"] }[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT prior_review_id, finding_pos, outcome FROM review_resolutions WHERE review_id = ? ORDER BY prior_review_id, finding_pos",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      reviewId: r.prior_review_id as number,
-      pos: r.finding_pos as number,
-      outcome: r.outcome as FindingResolution["outcome"],
-    }));
+    return reviewsStore.reviewResolutions(this.db, reviewId);
   }
 
   /** The run that performs the review, else null. */
