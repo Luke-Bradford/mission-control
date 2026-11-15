@@ -1,9 +1,9 @@
 import type {
   CodeHealthFigure,
-  CodeHealthWasteAlarmRow,
   CodeHealthFigureState,
   CodeHealthRecommendation,
   CodeHealthRecommendationState,
+  CodeHealthWasteAlarmRow,
 } from "@mc/core";
 import { percent } from "../fmt.ts";
 import { label } from "./format.ts";

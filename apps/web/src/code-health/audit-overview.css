@@ -636,11 +636,11 @@
   table-layout: auto;
 }
 .ao-fit .num,
-.ao-fit th {
+.ao-table.ao-fit thead th {
   white-space: nowrap;
 }
 .ao-fit td:not(.lab):not(:first-child),
-.ao-fit th:not(:first-child) {
+.ao-table.ao-fit thead th:not(:first-child) {
   padding-left: var(--sp-4);
 }
 .ao-fit .lab {
