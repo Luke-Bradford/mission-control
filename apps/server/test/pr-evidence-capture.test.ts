@@ -5,8 +5,8 @@ import { EVIDENCE_KINDS, EVIDENCE_SCHEMES, type EvidenceManifest } from "@mc/cor
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createPrEvidence,
-  evidenceReviewDeps,
   type EvidenceTarget,
+  evidenceReviewDeps,
   type PrEvidenceDeps,
 } from "../src/pr-evidence/capture.ts";
 import { decodePng, encodePng } from "../src/pr-evidence/png.ts";
