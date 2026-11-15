@@ -2,8 +2,6 @@
 import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import type {
   FindingResolution,
-  QaFindingView,
-  QaReviewRoundView,
   ReportedTest,
   ReviewCheck,
   ReviewRow,
@@ -30,42 +28,30 @@ export function review(db: DatabaseSync, id: number): ReviewRow | null {
   return row ? toReview(row) : null;
 }
 
-/** Moves a queued review to another review seat; true only when it was still queued. The caller wraps it in a transaction. */
+/** Moves a queued review to another review seat; true only when it was still queued. `transaction` makes the update and the move record one write. */
 export function moveQueuedReview(
   db: DatabaseSync,
+  transaction: (write: () => void) => void,
   id: number,
   seatId: string,
   at: number,
 ): boolean {
-  const moved =
-    db.prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'").run(seatId, id)
-      .changes === 1;
-  if (moved)
-    db.prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)").run(
-      id,
-      seatId,
-      at,
-    );
+  let moved = false;
+  transaction(() => {
+    moved =
+      db.prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'").run(seatId, id)
+        .changes === 1;
+    if (moved)
+      db.prepare(
+        "INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)",
+      ).run(id, seatId, at);
+  });
   return moved;
 }
 
 /** Whether FLIGHT assigned the queued review to its current seat. */
 export function reviewMoved(db: DatabaseSync, id: number): boolean {
   return db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
-}
-
-/** The review screenshot ids of reviews of open PRs. */
-export function reviewShotIdsOfOpenPrs(db: DatabaseSync): Set<string> {
-  return new Set(
-    (
-      db
-        .prepare(
-          `SELECT s.shot_id FROM review_shots s JOIN reviews v ON v.id = s.review_id
-               JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'`,
-        )
-        .all() as Row[]
-    ).map((r) => r.shot_id as string),
-  );
 }
 
 /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
@@ -161,67 +147,6 @@ export function findingsOf(db: DatabaseSync, reviewId: number): StoredFinding[] 
   }));
 }
 
-/**
- * Findings of reviews in the requested window, plus unresolved findings on PRs still open now.
- * The latter protects an open card from losing its blocking review evidence as it ages.
- */
-export function qaFindings(db: DatabaseSync, since: number): QaFindingView[] {
-  const rows = db
-    .prepare(
-      `SELECT f.*, v.repo_id, v.pr_number, v.round, v.ended_at FROM review_findings f
-         JOIN reviews v ON v.id = f.review_id
-         WHERE v.ended_at >= ? OR (f.resolution IS NULL AND EXISTS (
-           SELECT 1 FROM pull_requests p
-           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
-         ))
-         ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
-    )
-    .all(since) as Row[];
-  return rows.map((r) => ({
-    reviewId: r.review_id as number,
-    authorRunId: r.author_run_id as string,
-    repoId: r.repo_id as string,
-    prNumber: r.pr_number as number,
-    round: r.round as number,
-    reviewEndedAt: r.ended_at as number | null,
-    pos: r.pos as number,
-    severity: r.severity as string,
-    category: r.category as string | null,
-    file: r.file as string,
-    line: r.line as number,
-    summary: r.summary as string,
-    resolution: r.resolution as string | null,
-    resolvedReviewId: r.resolved_review_id as number | null,
-  }));
-}
-
-/** Completed review rounds in the requested window, plus the full history of open PRs. */
-export function qaReviewRounds(db: DatabaseSync, since: number): QaReviewRoundView[] {
-  const rows = db
-    .prepare(
-      `SELECT * FROM reviews v
-         WHERE v.state = 'reported' AND v.ended_at IS NOT NULL AND (v.ended_at >= ? OR EXISTS (
-           SELECT 1 FROM pull_requests p
-           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
-         ))
-         ORDER BY v.ended_at DESC, v.id DESC`,
-    )
-    .all(since) as Row[];
-  return rows.map((r) => ({
-    reviewId: r.id as number,
-    authorRunId: r.author_run_id as string,
-    repoId: r.repo_id as string,
-    prNumber: r.pr_number as number,
-    round: r.round as number,
-    sha: r.sha as string,
-    verdict: JSON.parse(r.verdict as string) as QaReviewRoundView["verdict"],
-    blocking: r.blocking as number,
-    minor: r.minor as number,
-    endedAt: r.ended_at as number,
-    screenshots: reviewShots(db, r.id as number),
-  }));
-}
-
 /** Records a screenshot RETRO took on a review's preview; `shotId` names its stored PNG. */
 export function addReviewShot(
   db: DatabaseSync,
@@ -299,16 +224,4 @@ export function reviewResolutions(
     pos: r.finding_pos as number,
     outcome: r.outcome as FindingResolution["outcome"],
   }));
-}
-
-/** Reviews whose run has not ended although the review no longer needs it. */
-export function reviewsWithLiveRun(db: DatabaseSync): ReviewRow[] {
-  const rows = db
-    .prepare(
-      `SELECT reviews.* FROM reviews JOIN runs ON runs.id = reviews.run_id
-         WHERE runs.ended_at IS NULL AND reviews.state NOT IN ('starting', 'running')
-         ORDER BY reviews.id`,
-    )
-    .all() as Row[];
-  return rows.map(toReview);
 }

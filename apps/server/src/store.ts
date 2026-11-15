@@ -4821,11 +4821,13 @@ export class Store {
 
   /** Moves a queued review to another review seat; true only when it was still queued. */
   moveQueuedReview(id: number, seatId: string, at: number): boolean {
-    let moved = false;
-    this.transaction(() => {
-      moved = reviewsStore.moveQueuedReview(this.db, id, seatId, at);
-    });
-    return moved;
+    return reviewsStore.moveQueuedReview(
+      this.db,
+      (write) => this.transaction(write),
+      id,
+      seatId,
+      at,
+    );
   }
 
   /** Whether FLIGHT assigned the queued review to its current seat. */
@@ -5069,7 +5071,16 @@ export class Store {
 
   /** The review screenshot ids of reviews of open PRs. */
   reviewShotIdsOfOpenPrs(): Set<string> {
-    return reviewsStore.reviewShotIdsOfOpenPrs(this.db);
+    return new Set(
+      (
+        this.db
+          .prepare(
+            `SELECT s.shot_id FROM review_shots s JOIN reviews v ON v.id = s.review_id
+               JOIN pull_requests p ON p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'`,
+          )
+          .all() as Row[]
+      ).map((r) => r.shot_id as string),
+    );
   }
 
   /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
@@ -5322,12 +5333,60 @@ export class Store {
    * The latter protects an open card from losing its blocking review evidence as it ages.
    */
   qaFindings(since: number): QaFindingView[] {
-    return reviewsStore.qaFindings(this.db, since);
+    const rows = this.db
+      .prepare(
+        `SELECT f.*, v.repo_id, v.pr_number, v.round, v.ended_at FROM review_findings f
+         JOIN reviews v ON v.id = f.review_id
+         WHERE v.ended_at >= ? OR (f.resolution IS NULL AND EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
+         ))
+         ORDER BY v.ended_at DESC, f.review_id DESC, f.pos`,
+      )
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      reviewId: r.review_id as number,
+      authorRunId: r.author_run_id as string,
+      repoId: r.repo_id as string,
+      prNumber: r.pr_number as number,
+      round: r.round as number,
+      reviewEndedAt: r.ended_at as number | null,
+      pos: r.pos as number,
+      severity: r.severity as string,
+      category: r.category as string | null,
+      file: r.file as string,
+      line: r.line as number,
+      summary: r.summary as string,
+      resolution: r.resolution as string | null,
+      resolvedReviewId: r.resolved_review_id as number | null,
+    }));
   }
 
   /** Completed review rounds in the requested window, plus the full history of open PRs. */
   qaReviewRounds(since: number): QaReviewRoundView[] {
-    return reviewsStore.qaReviewRounds(this.db, since);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM reviews v
+         WHERE v.state = 'reported' AND v.ended_at IS NOT NULL AND (v.ended_at >= ? OR EXISTS (
+           SELECT 1 FROM pull_requests p
+           WHERE p.repo_id = v.repo_id AND p.number = v.pr_number AND p.state = 'open'
+         ))
+         ORDER BY v.ended_at DESC, v.id DESC`,
+      )
+      .all(since) as Row[];
+    return rows.map((r) => ({
+      reviewId: r.id as number,
+      authorRunId: r.author_run_id as string,
+      repoId: r.repo_id as string,
+      prNumber: r.pr_number as number,
+      round: r.round as number,
+      sha: r.sha as string,
+      verdict: JSON.parse(r.verdict as string) as QaReviewRoundView["verdict"],
+      blocking: r.blocking as number,
+      minor: r.minor as number,
+      endedAt: r.ended_at as number,
+      screenshots: reviewsStore.reviewShots(this.db, r.id as number),
+    }));
   }
 
   /** Records a screenshot RETRO took on a review's preview; `shotId` names its stored PNG. */
@@ -5373,7 +5432,14 @@ export class Store {
 
   /** Reviews whose run has not ended although the review no longer needs it. */
   reviewsWithLiveRun(): ReviewRow[] {
-    return reviewsStore.reviewsWithLiveRun(this.db);
+    const rows = this.db
+      .prepare(
+        `SELECT reviews.* FROM reviews JOIN runs ON runs.id = reviews.run_id
+         WHERE runs.ended_at IS NULL AND reviews.state NOT IN ('starting', 'running')
+         ORDER BY reviews.id`,
+      )
+      .all() as Row[];
+    return rows.map(toReview);
   }
 
   evidenceCount(runId: string): number {
