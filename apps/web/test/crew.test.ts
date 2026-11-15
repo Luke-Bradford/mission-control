@@ -214,6 +214,25 @@ describe("stopLine", () => {
     expect(isLoopInFlight({ ...open, loop: null })).toBe(false);
   });
 
+  it("doingLine names an mcp tool once, in plain words, with its time", () => {
+    const running = stoppedSeat({ hudState: "running" });
+    const live = { name: "mcp__mc__screenshot_hud", detail: "screenshot_hud", since: now - 3_000 };
+    const row = { ...running, digest: { ...(running.digest as object), liveTool: live } };
+    expect(doingLine(row as CrewRow, now, TZ)).toBe("Taking a screenshot 0:03");
+    const bare = {
+      ...row,
+      digest: { ...(row.digest as object), liveTool: { ...live, detail: null } },
+    };
+    expect(doingLine(bare as CrewRow, now, TZ)).toBe("run #12 · Taking a screenshot 0:03");
+  });
+
+  it("doingLine keeps a built-in tool's name and detail", () => {
+    const running = stoppedSeat({ hudState: "running" });
+    const live = { name: "Bash", detail: "pnpm test", since: now - 3_000 };
+    const row = { ...running, digest: { ...(running.digest as object), liveTool: live } };
+    expect(doingLine(row as CrewRow, now, TZ)).toBe("Bash 0:03 · pnpm test");
+  });
+
   it("doingLine for a running looped seat shows the tool in hand, not the loop text", () => {
     const loop = { phase: "ci" as const, text: "CI on abc1234", prNumber: null, parked: null };
     const running = stoppedSeat({ hudState: "running", loop });
