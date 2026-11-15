@@ -3,12 +3,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type FoldState, foldPath } from "../src/collectors/common.ts";
-import { foldTranscript } from "../src/streamjson.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 
 // Records the bytes handed to each fold call, passing through to the real fold.
 const foldCalls = vi.hoisted(() => ({ bytes: [] as number[] }));
-vi.mock("../src/streamjson.ts", async (orig) => {
-  const real = await orig<typeof import("../src/streamjson.ts")>();
+vi.mock("../src/run/streamjson.ts", async (orig) => {
+  const real = await orig<typeof import("../src/run/streamjson.ts")>();
   return {
     ...real,
     foldTranscript: (...args: Parameters<typeof real.foldTranscript>) => {

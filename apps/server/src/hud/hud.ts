@@ -123,6 +123,7 @@ import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.t
 import { loopTries } from "../loop/history.ts";
 import { loopPause } from "../loop/pause.ts";
 import { reviewCheckFor } from "../review/check.ts";
+import { lastOutputAt } from "../run/stream.ts";
 import {
   type PrCache,
   parseTicket,
@@ -132,7 +133,6 @@ import {
   runTicketTitle,
 } from "../run/view.ts";
 import type { AttentionNote, Store } from "../store.ts";
-import { lastOutputAt } from "../stream.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
 import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_HELD_SINCE, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";

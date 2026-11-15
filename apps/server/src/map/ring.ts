@@ -11,7 +11,7 @@ import {
   namesOnly,
 } from "@mc/core";
 import { cleanText } from "../clean.ts";
-import { isObj, type Json, timeOf } from "../streamjson.ts";
+import { isObj, type Json, timeOf } from "../run/streamjson.ts";
 import { codexTool, transcriptVendor } from "../transcript/codex-transcript.ts";
 import { offsetSince, readNewLines } from "../transcript/tail.ts";
 import { originalBytes } from "../util.ts";

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AdoptedLoop } from "../config.ts";
-import { foldTranscript, type TranscriptFacts } from "../streamjson.ts";
+import { foldTranscript, type TranscriptFacts } from "../run/streamjson.ts";
 import { USAGE_BACKOFF_CAP_MS, USAGE_BACKOFF_MIN_MS } from "./usage-claude.ts";
 import { DEFAULT_MAX_AGE_MS, isObj } from "./usage-common.ts";
 

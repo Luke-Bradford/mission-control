@@ -243,7 +243,6 @@ import {
 } from "./comms/index.ts";
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
-import { compressResponse } from "./compress.ts";
 import {
   agentIds,
   type CcConfig,
@@ -416,7 +415,9 @@ import {
   AsideAnswerUnconfirmed,
   answerAsideQuestion,
 } from "./run/aside-answer.ts";
+import { compressResponse } from "./run/compress.ts";
 import { publicHandoff } from "./run/handoffs.ts";
+import { lastOutputAt, readStream, readStreamPage } from "./run/stream.ts";
 import {
   type BoardTitleCache,
   type PrCache,
@@ -440,7 +441,6 @@ import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
-import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import { metricsView } from "./telemetry/metrics.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";

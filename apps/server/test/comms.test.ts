@@ -14,8 +14,8 @@ import {
   sendComms,
   threadMessages,
 } from "../src/comms/index.ts";
+import * as stream from "../src/run/stream.ts";
 import { Store } from "../src/store.ts";
-import * as stream from "../src/stream.ts";
 
 let dir: string;
 let path: string;
