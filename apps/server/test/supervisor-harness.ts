@@ -326,6 +326,12 @@ function make(
     importGraph?: (checkout: string) => Promise<readonly { from: string; to: string }[]>;
     prEvidence?: import("../src/pr-evidence/store.ts").PrEvidenceStore;
     prEvidenceRepo?: string;
+    prEvidencePages?: (t: {
+      repoId: string;
+      pr: number;
+      sha: string;
+      paths: readonly string[];
+    }) => Promise<readonly string[]>;
     rolesDir?: string;
     node?: string;
     nodeNote?: string;
@@ -419,6 +425,7 @@ function make(
     ...(over.importGraph === undefined ? {} : { importGraph: over.importGraph }),
     ...(over.prEvidence === undefined ? {} : { prEvidence: over.prEvidence }),
     ...(over.prEvidenceRepo === undefined ? {} : { prEvidenceRepo: over.prEvidenceRepo }),
+    ...(over.prEvidencePages === undefined ? {} : { prEvidencePages: over.prEvidencePages }),
     hubPort: HUB_PORT,
     hubRoot: over.hubRoot ?? HUB_ROOT,
     ...(over.rolesDir === undefined ? {} : { rolesDir: over.rolesDir }),

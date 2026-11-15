@@ -741,6 +741,39 @@ describe("startReview", () => {
     expect(store.runs("retro", 1)).toHaveLength(0);
   });
 
+  it.each([
+    { pages: [] as string[], starts: true },
+    { pages: ["board"], starts: false },
+  ])(
+    "a web review with no stored evidence starts only when the capture's pages are empty (pages: $pages)",
+    async ({ pages, starts }) => {
+      const r = reviewOfPush();
+      vi.spyOn(store, "prFilePaths").mockReturnValue(["apps/web/src/ticket/ticketTimeline.ts"]);
+      const seen: unknown[] = [];
+      const { sup } = make({
+        scratchRetro: true,
+        prEvidence: prEvidenceStore(join(dir, "evidence")),
+        prEvidenceRepo: "mc",
+        prEvidencePages: async (t) => {
+          seen.push(t);
+          return pages;
+        },
+      });
+      sup.start();
+      const go = sup.startReview("retro", r.reviewId);
+      if (starts) await expect(go).resolves.toBeDefined();
+      else await expect(go).rejects.toThrow("screenshot evidence is not ready");
+      expect(seen).toEqual([
+        {
+          repoId: "mc",
+          pr: 9,
+          sha: r.sha,
+          paths: ["apps/web/src/ticket/ticketTimeline.ts"],
+        },
+      ]);
+    },
+  );
+
   it("refuses scratch storage inside hub data before preparing a review", async () => {
     const r = reviewOfPush();
     const worktrees = join(dir, "db", "scratch");

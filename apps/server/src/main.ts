@@ -636,7 +636,11 @@ export async function main(): Promise<void> {
     hubRoot: hubRoot ?? "",
     ...(prEvidence === undefined
       ? {}
-      : { prEvidence: evidenceStore, prEvidenceRepo: previewRepoId as RepoId }),
+      : {
+          prEvidence: evidenceStore,
+          prEvidenceRepo: previewRepoId as RepoId,
+          prEvidencePages: (t) => prEvidence.pages(t),
+        }),
     inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
     ...(reviewPreviews === undefined ? {} : { reviewPreviews }),
   });

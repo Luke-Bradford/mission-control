@@ -470,6 +470,13 @@ export interface SupervisorDeps {
   prEvidence?: PrEvidenceStore;
   /** The repo whose web PRs carry screenshot pairs. */
   prEvidenceRepo?: RepoId;
+  /** The pages a web PR head reaches, as the screenshot capture reads them; default the folder rule. */
+  prEvidencePages?: (target: {
+    repoId: RepoId;
+    pr: number;
+    sha: string;
+    paths: readonly string[];
+  }) => Promise<readonly string[]>;
   now?: () => number;
   /** Process identity lookup for lock reuse; defaults to processInfo. */
   processStart?: (pid: number) => { startedAt: number; command: string } | null;
@@ -4427,15 +4434,22 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 { cause: e },
               );
             });
-            if (
-              screenshots === undefined &&
-              deps.prEvidenceRepo === info.repo.id &&
-              prEvidenceAffectedPages(store.prFilePaths(info.repo.id, review.prNumber)).length > 0
-            )
-              throw new SupervisorError(
+            if (screenshots === undefined && deps.prEvidenceRepo === info.repo.id) {
+              const paths = store.prFilePaths(info.repo.id, review.prNumber);
+              const pages = deps.prEvidencePages
+                ? await deps.prEvidencePages({
+                    repoId: info.repo.id,
+                    pr: review.prNumber,
+                    sha: review.sha,
+                    paths,
+                  })
+                : prEvidenceAffectedPages(paths);
+              if (pages.length > 0)
+                throw new SupervisorError(
                 409,
-                "screenshot evidence is not ready for this review head",
-              );
+                  "screenshot evidence is not ready for this review head",
+                );
+            }
             return {
               scratch: s,
               inputs,

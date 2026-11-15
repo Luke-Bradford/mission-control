@@ -536,6 +536,7 @@ describe("external PR review subjects", () => {
               evidence: {
                 baseUrl: "http://preview.test",
                 ensure: async () => {},
+                pages: async () => [],
                 gate: () => null,
                 stop: async () => {},
               },
@@ -1151,6 +1152,7 @@ describe("external PR review subjects", () => {
       evidence: {
         baseUrl: "http://preview.test",
         ensure,
+        pages: async () => [],
         gate: () => "missing screenshot pairs",
         stop: async () => {},
       },
