@@ -2021,8 +2021,11 @@ describe("a run set aside in review", () => {
   describe("wakeRun with fresh (the fix-session trial)", () => {
     /** The argv without its session id flag, to compare how two starts were configured. */
     const config = (argv: string[]): string[] => {
-      const i = argv.findIndex((a) => a === "--session-id" || a === "--resume");
-      return argv.filter((_, k) => k !== i && k !== i + 1);
+      const skip = new Set<number>();
+      argv.forEach((a, k) => {
+        if (a === "--session-id" || a === "--resume" || a === "--model") skip.add(k).add(k + 1);
+      });
+      return argv.filter((_, k) => !skip.has(k));
     };
 
     it("starts a new session in the same worktree, and sends the handoff with the fix", async () => {
@@ -2044,7 +2047,8 @@ describe("a run set aside in review", () => {
       expect(argv[argv.indexOf("--session-id") + 1]).toBe(fresh);
       expect(argv).not.toContain("--resume");
       expect(starts()[1].cwd).toBe(wt());
-      // the same prompt file, model, budget and tools as the run's first start
+      // the same prompt file, budget and tools as the run's first start, and the model a resume uses
+      expect(argv[argv.indexOf("--model") + 1]).toBe(store.run(runId)?.model);
       expect(config(argv)).toEqual(config(starts()[0].argv as string[]));
       expect(store.getSetting(fixBriefKey(runId))).toContain("Fresh session for GUIDO-1");
       await sup.message("guido-1", "the fix text", { interrupt: false });
@@ -2072,7 +2076,7 @@ describe("a run set aside in review", () => {
       writeFileSync(gate, "");
       const woke = await m.sup.wakeRun(runId, { fresh: "ci" });
       expect(woke.freshSessionId).toBeNull();
-      expect(woke.fallback).toContain("cannot start a new session");
+      expect(woke.fallback).toContain("exited at start");
       expect(store.run(runId)?.sessionId).toBe(old);
       expect(store.getSetting(fixBriefKey(runId))).toBeNull();
       expect(store.seatSession("guido-1")).toMatchObject({ runId, cliSessionId: old });
