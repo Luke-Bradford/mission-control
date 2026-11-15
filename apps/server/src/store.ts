@@ -246,7 +246,6 @@ import {
   toQuestion,
   toReview,
   toRun,
-  toSample,
 } from "./store/rows.ts";
 import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
@@ -290,6 +289,11 @@ import {
   type SeatQuestion,
   type Stray,
 } from "./store/types.ts";
+import {
+  type ControllerMessageUsage,
+  type ControllerUsageTotals,
+  usageQueries,
+} from "./store/usage.ts";
 import { RERUN_REFUSED_ATTEMPT, RESUME_ATTEMPT, wasteQueries } from "./store/waste.ts";
 import {
   auditThresholds,
@@ -1296,6 +1300,14 @@ export class Store {
     return this.runQ.runAttempts(runId);
   }
 
+  private usageQueriesCache: ReturnType<typeof usageQueries> | undefined;
+
+  /** The usage sample and controller usage queries (store/usage.ts). */
+  private get usageQ(): ReturnType<typeof usageQueries> {
+    this.usageQueriesCache ??= usageQueries(this.db, (fn) => this.transaction(fn));
+    return this.usageQueriesCache;
+  }
+
   private runQueriesCache: ReturnType<typeof runQueries> | undefined;
 
   /** The run and attempt queries (store/runs.ts), over the same connection and statement cache. */
@@ -1676,60 +1688,22 @@ export class Store {
    * Stores controller messages' usage numbers (never text). A message id seen again, in a resumed
    * session's copy of its history or a subagent file, counts once; the larger output is kept.
    */
-  saveControllerMessages(
-    sessionId: string,
-    messages: readonly {
-      id: string;
-      at: number;
-      input: number;
-      cacheRead: number;
-      cacheWrite: number;
-      output: number;
-    }[],
-  ): void {
-    const insert = this.db.prepare(
-      `INSERT INTO controller_messages (message_id, session_id, at, input, cache_read, cache_write, output)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(message_id) DO UPDATE SET output = MAX(output, excluded.output)`,
-    );
-    this.transaction(() => {
-      for (const m of messages) {
-        insert.run(m.id, sessionId, m.at, m.input, m.cacheRead, m.cacheWrite, m.output);
-      }
-    });
+  saveControllerMessages(sessionId: string, messages: readonly ControllerMessageUsage[]): void {
+    this.usageQ.saveControllerMessages(sessionId, messages);
   }
 
   /** Controller usage by message time since `since`: distinct sessions, distinct messages and token sums. */
-  controllerUsageSince(since: number): {
-    sessions: number;
-    calls: number;
-    input: number;
-    cacheRead: number;
-    cacheWrite: number;
-    output: number;
-  } {
-    return this.db
-      .prepare(
-        `SELECT COUNT(DISTINCT session_id) AS sessions, COUNT(*) AS calls,
-           COALESCE(SUM(input), 0) AS input, COALESCE(SUM(cache_read), 0) AS cacheRead,
-           COALESCE(SUM(cache_write), 0) AS cacheWrite, COALESCE(SUM(output), 0) AS output
-         FROM controller_messages WHERE at >= ?`,
-      )
-      .get(since) as never;
+  controllerUsageSince(since: number): ControllerUsageTotals {
+    return this.usageQ.controllerUsageSince(since);
   }
 
   /** The mtime a controller file was last read at, or null when it has not been read. */
   controllerFileMtime(path: string): number | null {
-    const r = this.db.prepare("SELECT mtime FROM controller_files WHERE path = ?").get(path) as
-      | { mtime: number }
-      | undefined;
-    return r?.mtime ?? null;
+    return this.usageQ.controllerFileMtime(path);
   }
 
   markControllerFile(path: string, mtime: number): void {
-    this.db
-      .prepare("INSERT OR REPLACE INTO controller_files (path, mtime) VALUES (?, ?)")
-      .run(path, mtime);
+    this.usageQ.markControllerFile(path, mtime);
   }
 
   /** Adds tool-result bytes to the run's latest wake (wake 0 when none is recorded). */
@@ -2648,30 +2622,16 @@ export class Store {
   }
 
   addUsage(s: UsageSample): void {
-    this.db
-      .prepare(
-        "INSERT OR IGNORE INTO usage_samples (account_id, window, at, pct, reset_at, source) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(s.accountId, s.window, s.at, s.pct, s.resetAt, s.source);
+    this.usageQ.addUsage(s);
   }
 
   usage(accountId: AccountId, window: "5h" | "7d", sinceMs: number): UsageSample[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM usage_samples WHERE account_id = ? AND window = ? AND at >= ? ORDER BY at ASC",
-      )
-      .all(accountId, window, sinceMs) as Row[];
-    return rows.map(toSample);
+    return this.usageQ.usage(accountId, window, sinceMs);
   }
 
   /** The newest sample for an account and window, or null when there is none. */
   latestUsage(accountId: AccountId, window: "5h" | "7d"): UsageSample | null {
-    const row = this.db
-      .prepare(
-        "SELECT * FROM usage_samples WHERE account_id = ? AND window = ? ORDER BY at DESC LIMIT 1",
-      )
-      .get(accountId, window) as Row | undefined;
-    return row ? toSample(row) : null;
+    return this.usageQ.latestUsage(accountId, window);
   }
 
   /** True when any stored row changed. */
