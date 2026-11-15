@@ -442,11 +442,11 @@ export type SyncMainResult =
 /** onChain key for superviseReviews (never a run id). */
 const REVIEWS_CHAIN = "\0reviews";
 
-/** The hold when the older open PRs cannot be read or compared yet. */
-const UNREAD_OLDER_PRS: ReviewHold = {
-  reason: "Waiting while the hub checks the older open PRs for shared hard-rule files.",
+/** The hold when the older open PRs cannot be compared yet, and why. */
+const unreadOlderPrs = (why: string): ReviewHold => ({
+  reason: `Waiting to compare with older open PRs for shared hard-rule files: ${why}.`,
   prNumber: null,
-};
+});
 
 /**
  * The review seat for a seat's runs: the first review-loop seat (config order) of its crew session
@@ -2438,7 +2438,7 @@ export function createEngine(deps: EngineDeps): Engine {
   async function reviewWaitsForOlderPr(row: ReviewRow): Promise<ReviewHold | null> {
     if (isExternalReview(row)) return null;
     const author = store.run(row.authorRunId);
-    if (author === null) return UNREAD_OLDER_PRS;
+    if (author === null) return unreadOlderPrs("the review's author run is missing");
     const prs = prsFor(author.repoId);
     const ownAuthor = prs.find((pr) => pr.number === row.prNumber)?.author;
     const older = prs.filter(
@@ -2450,7 +2450,7 @@ export function createEngine(deps: EngineDeps): Engine {
     if (older.length === 0) return null;
     try {
       const rules = await rulesFor(author.repoId);
-      if (rules === null) return UNREAD_OLDER_PRS;
+      if (rules === null) return unreadOlderPrs("the repo's hard rules could not be read");
       const hardRules = effectiveHardRules(rules, flightPowersOf(config, author.repoId));
       const own = await publisher.reviewPr(author, row.prNumber);
       if (
@@ -2458,7 +2458,7 @@ export function createEngine(deps: EngineDeps): Engine {
         own.state !== "open" ||
         (own.headSha !== row.sha && own.headSha !== store.runPush(author.id)?.sha)
       )
-        return UNREAD_OLDER_PRS;
+        return unreadOlderPrs("the PR's own state could not be read, or it is closed or its head moved");
       const baseFor = (number: number, head: string, base: string): string => {
         const key = `review-base:${author.repoId}:${number}:${head}`;
         const saved = store.getSetting(key);
@@ -2474,7 +2474,7 @@ export function createEngine(deps: EngineDeps): Engine {
         baseFor(row.prNumber, own.headSha, own.baseSha),
       );
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
-        return UNREAD_OLDER_PRS;
+        return unreadOlderPrs("the PR changed while its hard-rule files were being read");
       const snapshots = new Map<number, string>();
       const candidates = older.flatMap((pr) => {
         const run = store.runsOnBranch(author.repoId, pr.branch).find((r) => r.id !== author.id);
@@ -2496,7 +2496,7 @@ export function createEngine(deps: EngineDeps): Engine {
       );
       let waiting: ReviewHold | null = null;
       for (const { pr, run, snapshot } of reads) {
-        if (snapshot === null) return UNREAD_OLDER_PRS;
+        if (snapshot === null) return unreadOlderPrs("an older PR's state could not be read");
         if (pr.state === "closed") continue;
         if (
           pr.state === "merged" &&
@@ -2518,7 +2518,7 @@ export function createEngine(deps: EngineDeps): Engine {
           // A known run whose seat disappeared cannot establish disjointness.
           touched = paths;
         } else {
-          if (pr.state === "merged" && !pr.mergeCommitSha) return UNREAD_OLDER_PRS;
+          if (pr.state === "merged" && !pr.mergeCommitSha) return unreadOlderPrs("an older merged PR has no merge commit on record");
           touched = await publisher.hardRuleTouches(
             run,
             pr.headSha,
@@ -2584,15 +2584,15 @@ export function createEngine(deps: EngineDeps): Engine {
             JSON.stringify(await publisher.reviewPr(author, number)) === snapshot,
         ),
       );
-      if (revalidated.some((unchanged) => !unchanged)) return UNREAD_OLDER_PRS;
+      if (revalidated.some((unchanged) => !unchanged)) return unreadOlderPrs("an older PR changed while it was being compared");
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
-        return UNREAD_OLDER_PRS;
+        return unreadOlderPrs("the PR changed while it was being compared with the older PRs");
       return waiting;
     } catch (e) {
       log(
         `${author.id}: could not read review overlaps: ${e instanceof Error ? e.message : String(e)}`,
       );
-      return UNREAD_OLDER_PRS;
+      return unreadOlderPrs("the older PRs could not be compared (see the hub log)");
     }
   }
 

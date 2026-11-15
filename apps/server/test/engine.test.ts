@@ -3632,6 +3632,17 @@ describe("the engine runs reviews", () => {
     });
   });
 
+  it("a younger PR whose rules cannot be read records why it waits", async () => {
+    h.touches = ["packages/core/src/guard.ts"];
+    h.rules = async () => new RepoRulesError("no yaml block");
+    await secondAuthor();
+    expect(reviewHoldOf(store, need(store.reviewsOfRun(RUN2)[0]).id)).toEqual({
+      reason:
+        "Waiting to compare with older open PRs for shared hard-rule files: the repo's hard rules could not be read.",
+      prNumber: null,
+    });
+  });
+
   it("does not make a newer PR wait for the same author's older PR", async () => {
     h.touches = ["packages/core/src/guard.ts"];
     const upsert = store.upsertPullRequests.bind(store);
