@@ -312,6 +312,7 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
+import { fixSessionTrialView } from "./fix-session-trial.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
@@ -4213,6 +4214,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             config.audit?.thresholds,
           ),
         );
+      });
+      // Reader: docs/runbook.md#audit-api (the fix-session trial's receipts; the operator and FLIGHT read it)
+      api.get("/audit/fix-sessions", async (req, reply) => {
+        if (Object.keys(req.query as Record<string, unknown>).length > 0) {
+          return reply.code(400).send({ error: "send no query" });
+        }
+        return fixSessionTrialView(store, config);
       });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
       api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(

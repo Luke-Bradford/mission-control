@@ -254,7 +254,7 @@ const stubSupervisor = (): Supervisor => {
     endRun: call("end", undefined),
     endRunByEngine: call("endByEngine", undefined),
     setAside: call("setAside", null),
-    wakeRun: call("wakeRun", undefined),
+    wakeRun: call("wakeRun", { freshSessionId: null, fallback: null }),
     endAsideRun: call("endAside", undefined),
     send: call("send", "sent" as const),
     resumeRun: call("resumeRun", undefined),
@@ -1630,6 +1630,7 @@ const NEW_REPO = {
 const API_ROUTES: [string, string, object?][] = [
   ["GET", "/api/audit"],
   ["GET", "/api/audit/tokens?days=7"],
+  ["GET", "/api/audit/fix-sessions"],
   ["GET", "/api/qa/history"],
   ["GET", "/api/qa/history/native/:id"],
   ["GET", "/api/qa-reports?repoId=shop-app&prNumber=12"],
