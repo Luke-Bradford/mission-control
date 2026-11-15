@@ -342,10 +342,10 @@ settles itself. An unhandled wake alone creates no new operator decision.
 | Recorded action or fact | Code that owns the exit |
 |---|---|
 | An option is picked | `chooseOption` and `closeItem` in `apps/server/src/brief/choose.ts` |
-| The ticket closes, PR ends or asking run ends | `apps/server/src/question-watch.ts` |
+| The ticket closes, PR ends or asking run ends | `apps/server/src/attention/question-watch.ts` |
 | FLIGHT withdraws its question or returns a seat's question | `withdrawQuestion` and `return_question` in `apps/server/src/flight/tools.ts` |
 | FLIGHT dismisses a settled item it owns | `dismiss_item` in the same file |
-| The operator sets work aside or drops it | `apps/server/src/needs-you-actions.ts`; preserve its existing refusals |
+| The operator sets work aside or drops it | `apps/server/src/attention/needs-you-actions.ts`; preserve its existing refusals |
 | The operator clears an item | New `POST /api/attention/:key/clear`; close the actual source and record a `cleared` question closure |
 
 `route` in hud.ts drops a brief whose choice is already stored at `store.choice(key, brief.at)`.
