@@ -248,6 +248,7 @@ import {
   toRun,
   toSample,
 } from "./store/rows.ts";
+import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
 import {
   ACK_ABSENT_MS,
@@ -276,7 +277,6 @@ import {
   LIVE_LOOP_EVENTS_LIMIT,
   type LockHoldRow,
   MACHINE_RETENTION_MS,
-  MAX_OPEN_RUN_AGE_MS,
   type NewCommsRow,
   type NoteInput,
   type NoteKind,
@@ -1293,19 +1293,15 @@ export class Store {
   runAttempts(
     runId: string,
   ): { id: number; runId: string; kind: string; at: number; data: Record<string, unknown> }[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT * FROM run_attempts WHERE run_id = ? OR run_id IN (SELECT run_id FROM reviews WHERE author_run_id = ?) ORDER BY id",
-        )
-        .all(runId, runId) as Row[]
-    ).map((r) => ({
-      id: r.id as number,
-      runId: r.run_id as string,
-      kind: r.kind as string,
-      at: r.at as number,
-      data: JSON.parse(r.data as string) as Record<string, unknown>,
-    }));
+    return this.runQ.runAttempts(runId);
+  }
+
+  private runQueriesCache: ReturnType<typeof runQueries> | undefined;
+
+  /** The run and attempt queries (store/runs.ts), over the same connection and statement cache. */
+  private get runQ(): ReturnType<typeof runQueries> {
+    this.runQueriesCache ??= runQueries(this.db, (sql) => this.statement(sql));
+    return this.runQueriesCache;
   }
 
   /** The queries over the Comms tables (store/comms.ts); the Comms methods below delegate to it. */
@@ -1338,17 +1334,7 @@ export class Store {
   }
 
   private appendAttempt(runId: string, kind: string, at: number, data: object): void {
-    const encoded = JSON.stringify(data);
-    const previous = this.db
-      .prepare(
-        "SELECT data, at FROM run_attempts WHERE run_id = ? AND kind = ? ORDER BY id DESC LIMIT 1",
-      )
-      .get(runId, kind) as Row | undefined;
-    // Wait completions are events: equal durations at different times are distinct waits.
-    if (previous?.data === encoded && (kind !== "wait-end" || previous.at === at)) return;
-    this.db
-      .prepare("INSERT INTO run_attempts (run_id, kind, at, data) VALUES (?, ?, ?, ?)")
-      .run(runId, kind, at, encoded);
+    this.runQ.appendAttempt(runId, kind, at, data);
   }
 
   /**
@@ -1357,68 +1343,7 @@ export class Store {
    * row's loop is never rewritten here (`setRunLoop`).
    */
   upsertRun(r: Run, folded = false): void {
-    this.appendAttempt(r.id, "run", r.endedAt ?? r.startedAt, {
-      model: r.model,
-      profile: r.profile ?? null,
-      reviewId: r.reviewId ?? null,
-      tokens: r.tokens,
-      costUsd: r.costUsd,
-      status: r.status,
-    });
-    this.db
-      .prepare(
-        `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
-           model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
-           ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-           account_id, effort, prompt_hash, loop_kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
-           started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
-           session_id = excluded.session_id, model = excluded.model, branch = excluded.branch,
-           ticket = excluded.ticket, cost_usd = excluded.cost_usd, tokens = excluded.tokens,
-           transcript_path = excluded.transcript_path, prs = excluded.prs,
-           summary = excluded.summary, folded = MAX(folded, excluded.folded),
-           ticket_title = COALESCE(excluded.ticket_title, ticket_title),
-           cli_version = COALESCE(excluded.cli_version, cli_version),
-           latest_plan = COALESCE(excluded.latest_plan, latest_plan),
-           account_id = COALESCE(account_id, excluded.account_id),
-           effort = COALESCE(effort, excluded.effort),
-           prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
-           loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
-      )
-      .run(
-        r.id,
-        r.agentId,
-        r.repoId,
-        r.seq,
-        r.startedAt,
-        r.endedAt,
-        r.status,
-        r.sessionId,
-        r.model,
-        r.branch,
-        r.ticket,
-        r.costUsd,
-        r.tokens === null ? null : JSON.stringify(r.tokens),
-        r.transcriptPath,
-        JSON.stringify(r.prs),
-        r.summary,
-        folded && r.endedAt !== null ? 1 : 0,
-        r.loop === null || r.loop === undefined ? null : JSON.stringify(r.loop),
-        r.ticketTitle ?? null,
-        r.reviewId ?? null,
-        r.cliVersion ?? null,
-        r.profile ? JSON.stringify({ profile: r.profile.profile, route: r.profile.route }) : null,
-        r.profile?.hash ?? null,
-        r.plan === undefined ? null : JSON.stringify(r.plan),
-        r.vendor ?? "claude",
-        r.latestPlan ?? null,
-        r.accountId ?? null,
-        r.effort ?? null,
-        r.promptHash ?? null,
-        r.loopKind ?? null,
-      );
+    this.runQ.upsertRun(r, folded);
   }
 
   /**
@@ -1427,12 +1352,7 @@ export class Store {
    * Returns how many rows it set.
    */
   backfillRunLoopKinds(kinds: ReadonlyMap<string, LoopKind>): number {
-    const set = this.db.prepare(
-      "UPDATE runs SET loop_kind = ? WHERE agent_id = ? AND loop_kind IS NULL AND review_id IS NULL",
-    );
-    let n = 0;
-    for (const [agentId, kind] of kinds) n += Number(set.run(kind, agentId).changes);
-    return n;
+    return this.runQ.backfillRunLoopKinds(kinds);
   }
 
   /** A prepared first brief may be replaced at final delivery, only while its exact hash still matches. */
@@ -1893,11 +1813,7 @@ export class Store {
 
   /** Records a running Codex CLI's version without allowing a stale launch to revive its run. */
   setRunCliVersionIfLive(runId: string, cliVersion: string): boolean {
-    return (
-      this.db
-        .prepare("UPDATE runs SET cli_version = ? WHERE id = ? AND ended_at IS NULL")
-        .run(cliVersion, runId).changes === 1
-    );
+    return this.runQ.setRunCliVersionIfLive(runId, cliVersion);
   }
 
   /** Records the template profile chosen for a ticket; a later choice replaces it. */
@@ -1923,15 +1839,11 @@ export class Store {
   }
 
   run(id: string): Run | null {
-    const row = this.db.prepare("SELECT * FROM runs WHERE id = ?").get(id) as Row | undefined;
-    return row ? toRun(row) : null;
+    return this.runQ.run(id);
   }
 
   runs(agentId: AgentId, limit: number): Run[] {
-    const rows = this.statement(
-      "SELECT * FROM runs WHERE agent_id = ? ORDER BY started_at DESC, seq DESC LIMIT ?",
-    ).all(agentId, limit) as Row[];
-    return rows.map(toRun);
+    return this.runQ.runs(agentId, limit);
   }
 
   /** Indexed recent-run bounds for each HUD agent, with older held runs retained. */
@@ -1940,65 +1852,22 @@ export class Store {
     limit: number,
     heldRunIds: readonly string[] = [],
   ): Map<AgentId, Run[]> {
-    const out = new Map<AgentId, Run[]>();
-    if (agentIds.length === 0) return out;
-    for (const agentId of agentIds) out.set(agentId, []);
-    const seen = new Set<string>();
-    const take = (row: Row) => {
-      if (seen.has(row.id as string)) return;
-      seen.add(row.id as string);
-      const run = toRun(row);
-      const runs = out.get(run.agentId) ?? [];
-      runs.push(run);
-      out.set(run.agentId, runs);
-    };
-    const recent = this.statement(`SELECT * FROM runs WHERE agent_id = ?
-      ORDER BY started_at DESC, seq DESC
-      LIMIT CASE WHEN ? > 0 THEN CAST(? AS INTEGER) ELSE 0 END`);
-    for (const agentId of out.keys()) {
-      for (const row of recent.all(agentId, limit, limit) as Row[]) take(row);
-    }
-    const held = [...new Set(heldRunIds)];
-    if (held.length > 0)
-      for (const row of this.statement(
-        `SELECT * FROM runs WHERE id IN (${held.map(() => "?").join(", ")})
-        ORDER BY agent_id, started_at DESC, seq DESC`,
-      ).all(...held) as Row[])
-        take(row);
-    for (const runs of out.values())
-      runs.sort((a, b) => b.startedAt - a.startedAt || b.seq - a.seq);
-    return out;
+    return this.runQ.runsForAgents(agentIds, limit, heldRunIds);
   }
 
   /** Set-aside runs retain their unmerged map scope after a seat takes another ticket. */
   mapAsideRuns(agentId: AgentId): Run[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT * FROM runs WHERE agent_id = ? AND json_extract(loop, '$.aside.worktree') > ''",
-        )
-        .all(agentId) as Row[]
-    ).map(toRun);
+    return this.runQ.mapAsideRuns(agentId);
   }
 
   /** The branches this hub's own work runs (not review runs) worked on in a repo, ended or not. */
   runBranches(repoId: RepoId): Set<string> {
-    const rows = this.statement(
-      "SELECT DISTINCT branch FROM runs WHERE repo_id = ? AND review_id IS NULL AND branch IS NOT NULL",
-    ).all(repoId) as { branch: string }[];
-    return new Set(rows.map((r) => r.branch));
+    return this.runQ.runBranches(repoId);
   }
 
   /** Runs still open or ended at or after `since`, across seats and repos. */
   runsActiveSince(since: number): Run[] {
-    const rows = this.db
-      .prepare(`SELECT * FROM (
-        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at IS NULL
-        UNION ALL
-        SELECT * FROM runs INDEXED BY runs_ended_started WHERE ended_at >= ?
-      ) ORDER BY started_at, seq`)
-      .all(since) as Row[];
-    return rows.map(toRun);
+    return this.runQ.runsActiveSince(since);
   }
 
   /** Complete author bindings for flow reads, plus active runs needed for seat queue order. */
@@ -2006,30 +1875,12 @@ export class Store {
     repoId: RepoId,
     prs: readonly Pick<PullRequestView, "number" | "branch" | "ticket">[],
   ): Run[] {
-    const numbers = JSON.stringify(prs.map((p) => p.number));
-    return (
-      this.statement(`SELECT * FROM runs WHERE repo_id = ? AND review_id IS NULL AND (
-      ended_at IS NULL OR branch IN (SELECT json_extract(value, '$.branch') FROM json_each(?))
-      OR ticket IN (SELECT json_extract(value, '$.ticket') FROM json_each(?))
-      OR json_extract(loop, '$.prNumber') IN (SELECT value FROM json_each(?))
-      OR EXISTS (SELECT 1 FROM json_each(prs) p WHERE json_extract(p.value, '$.number') IN (SELECT value FROM json_each(?)))
-    ) ORDER BY started_at, seq`).all(
-        repoId,
-        JSON.stringify(prs),
-        JSON.stringify(prs),
-        numbers,
-        numbers,
-      ) as Row[]
-    ).map(toRun);
+    return this.runQ.prFlowRuns(repoId, prs);
   }
 
   /** Every recorded run on a branch; review ordering needs merged predecessors too. */
   runsOnBranch(repoId: RepoId, branch: string): Run[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM runs WHERE repo_id = ? AND branch = ? ORDER BY started_at, seq")
-        .all(repoId, branch) as Row[]
-    ).map(toRun);
+    return this.runQ.runsOnBranch(repoId, branch);
   }
 
   /**
@@ -2037,8 +1888,7 @@ export class Store {
    * someone releases it. A follow-on run gets a copy (run/handoffs.ts), so only the latest one counts.
    */
   branchMergeHold(repoId: RepoId, branch: string): NonNullable<Run["loop"]>["mergeHold"] | null {
-    const latest = this.runsOnBranch(repoId, branch).findLast((run) => run.reviewId == null);
-    return latest?.loop?.mergeHold ?? null;
+    return this.runQ.branchMergeHold(repoId, branch);
   }
 
   /**
@@ -2046,34 +1896,12 @@ export class Store {
    * observed loops' runs and tickets already started before `since` (then handed on) do not count.
    */
   ticketsStartedSince(since: number, seatIds: readonly string[]): number {
-    if (seatIds.length === 0) return 0;
-    const row = this.db
-      .prepare(
-        `SELECT COUNT(DISTINCT r.ticket) AS n FROM runs r
-         WHERE r.started_at >= ? AND r.ticket IS NOT NULL AND r.review_id IS NULL
-           AND r.agent_id IN (SELECT value FROM json_each(?))
-           AND NOT EXISTS (
-             SELECT 1 FROM runs p
-             WHERE p.ticket = r.ticket AND p.review_id IS NULL AND p.started_at < ?
-           )`,
-      )
-      .get(since, JSON.stringify(seatIds), since) as { n: number };
-    return row.n;
+    return this.runQ.ticketsStartedSince(since, seatIds);
   }
 
   /** Outstanding runs and ended runs with recorded PR merge steps for the away digest. */
   runsForAwayDigest(): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM (
-           SELECT * FROM runs WHERE ended_at IS NULL
-           UNION ALL
-           SELECT * FROM runs INDEXED BY runs_merging_started
-             WHERE json_extract(loop, '$.merging') > '' AND ended_at IS NOT NULL
-         ) ORDER BY started_at, seq`,
-      )
-      .all() as Row[];
-    return rows.map(toRun);
+    return this.runQ.runsForAwayDigest();
   }
 
   /**
@@ -2095,60 +1923,27 @@ export class Store {
    * recorded (the last of them may be owed). Oldest first.
    */
   loopRuns(endedSince: number): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM (
-           SELECT * FROM runs WHERE loop IS NOT NULL AND ended_at IS NULL
-           UNION ALL
-           SELECT * FROM runs INDEXED BY runs_ended_started WHERE loop IS NOT NULL AND ended_at >= ?
-             AND (json_extract(loop, '$.phase') != 'done'
-               OR json_extract(loop, '$.merging') > '')
-         ) ORDER BY started_at, seq`,
-      )
-      .all(endedSince) as Row[];
-    return rows.map(toRun);
+    return this.runQ.loopRuns(endedSince);
   }
 
   /** Ended runs still carrying a merge hold or a parked state, oldest first. */
   endedRunsWithHoldOrPark(): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE ended_at IS NOT NULL AND loop IS NOT NULL
-           AND (json_extract(loop, '$.mergeHold') IS NOT NULL OR json_extract(loop, '$.parked') IS NOT NULL)
-         ORDER BY started_at, seq`,
-      )
-      .all() as Row[];
-    return rows.map(toRun);
+    return this.runQ.endedRunsWithHoldOrPark();
   }
 
   /** Live acceptance metadata never needs to decode ended loop history. */
   activeLoopRuns(repoId: RepoId): Run[] {
-    const rows = this.statement(
-      "SELECT * FROM runs WHERE repo_id = ? AND ended_at IS NULL AND loop IS NOT NULL ORDER BY started_at, seq",
-    ).all(repoId) as Row[];
-    return rows.map(toRun);
+    return this.runQ.activeLoopRuns(repoId);
   }
 
   /** The runs that have not ended and are off their seat in review, oldest first. */
   asideRuns(): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE ended_at IS NULL AND loop IS NOT NULL
-           AND json_extract(loop, '$.aside') IS NOT NULL
-         ORDER BY started_at, seq`,
-      )
-      .all() as Row[];
-    return rows.map(toRun);
+    return this.runQ.asideRuns();
   }
 
   /** The tickets (`repo#n`) of the runs that have not ended. */
   activeTickets(): Set<string> {
-    const rows = this.db
-      .prepare(
-        "SELECT ticket FROM runs WHERE ended_at IS NULL AND ticket IS NOT NULL AND review_id IS NULL",
-      )
-      .all() as Row[];
-    return new Set(rows.map((r) => r.ticket as string));
+    return this.runQ.activeTickets();
   }
 
   /**
@@ -2173,25 +1968,11 @@ export class Store {
    * `since`: a run left open for longer is a dead row, not work in progress.
    */
   hasActiveRunOf(agentIds: readonly string[], since: number): boolean {
-    if (agentIds.length === 0) return false;
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM runs WHERE ended_at IS NULL AND started_at >= ? AND agent_id IN (${agentIds.map(() => "?").join(",")})
-             AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1`,
-        )
-        .get(since, ...agentIds) !== undefined
-    );
+    return this.runQ.hasActiveRunOf(agentIds, since);
   }
 
   hasActiveRun(): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM runs WHERE ended_at IS NULL AND (loop IS NULL OR json_extract(loop, '$.aside') IS NULL) LIMIT 1",
-        )
-        .get() !== undefined
-    );
+    return this.runQ.hasActiveRun();
   }
 
   /**
@@ -2199,57 +1980,27 @@ export class Store {
    * `agentId`'s own run first, any seat's otherwise.
    */
   latestRunOnBranch(repoId: RepoId, branch: string, agentId?: AgentId): Run | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE repo_id = ? AND branch = ? AND review_id IS NULL
-         ORDER BY (agent_id = ?) DESC, started_at DESC, id DESC LIMIT 1`,
-      )
-      .get(repoId, branch, agentId ?? "") as Row | undefined;
-    return row ? toRun(row) : null;
+    return this.runQ.latestRunOnBranch(repoId, branch, agentId);
   }
 
   /** Whether this hub has a run (ended or not) on `branch`. */
   hasRunOnBranch(repoId: RepoId, branch: string): boolean {
-    return (
-      this.db
-        .prepare(
-          "SELECT 1 FROM runs WHERE repo_id = ? AND branch = ? AND review_id IS NULL LIMIT 1",
-        )
-        .get(repoId, branch) !== undefined
-    );
+    return this.runQ.hasRunOnBranch(repoId, branch);
   }
 
   /** Every run on the ticket, ended ones too; review runs do not count. */
   runsOnTicket(repoId: RepoId, ticket: string): Run[] {
-    const rows = this.db
-      .prepare("SELECT * FROM runs WHERE repo_id = ? AND ticket = ? AND review_id IS NULL")
-      .all(repoId, ticket) as Row[];
-    return rows.map(toRun);
+    return this.runQ.runsOnTicket(repoId, ticket);
   }
 
   /** Whether a run is still going on the ticket (`repo#number`); a review run does not count. */
   hasLiveRunOnTicket(repoId: RepoId, ticket: string): boolean {
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM runs WHERE repo_id = ? AND ticket = ? AND status = 'running'
-             AND ended_at IS NULL AND review_id IS NULL LIMIT 1`,
-        )
-        .get(repoId, ticket) !== undefined
-    );
+    return this.runQ.hasLiveRunOnTicket(repoId, ticket);
   }
 
   /** Whether another run on the same ticket started after this one. */
   hasNewerRunOnTicket(run: Run): boolean {
-    if (run.ticket === null) return false;
-    return (
-      this.db
-        .prepare(
-          `SELECT 1 FROM runs WHERE repo_id = ? AND ticket = ? AND started_at > ? AND id != ?
-             AND review_id IS NULL`,
-        )
-        .get(run.repoId, run.ticket, run.startedAt, run.id) !== undefined
-    );
+    return this.runQ.hasNewerRunOnTicket(run);
   }
 
   /**
@@ -2261,25 +2012,11 @@ export class Store {
    * `sinceMs`. Newest first.
    */
   runsOverlapping(sinceMs: number, untilMs: number): Run[] {
-    return this.overlappingRuns("*", sinceMs, untilMs).map(toRun);
+    return this.runQ.runsOverlapping(sinceMs, untilMs);
   }
 
   private overlappingRuns(columns: string, sinceMs: number, untilMs: number): Row[] {
-    return this.db
-      .prepare(
-        `SELECT ${columns} FROM runs WHERE started_at < ?
-           AND (ended_at > ?
-             OR (ended_at IS NULL AND status = ? AND started_at > ?)
-             OR (ended_at IS NULL AND started_at >= ?))
-         ORDER BY started_at DESC, seq DESC`,
-      )
-      .all(
-        untilMs,
-        sinceMs,
-        "running" satisfies RunStatus,
-        untilMs - MAX_OPEN_RUN_AGE_MS,
-        sinceMs,
-      ) as Row[];
+    return this.runQ.overlappingRuns(columns, sinceMs, untilMs);
   }
 
   /**
@@ -2329,13 +2066,7 @@ export class Store {
    * (the backfill's queue).
    */
   runsToFold(limit: number, startedBefore: number): Run[] {
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE folded = 0 AND ended_at IS NOT NULL AND started_at < ?
-         ORDER BY started_at DESC, seq DESC LIMIT ?`,
-      )
-      .all(startedBefore, limit) as Row[];
-    return rows.map(toRun);
+    return this.runQ.runsToFold(limit, startedBefore);
   }
 
   /**
@@ -2347,23 +2078,7 @@ export class Store {
     after: { startedAt: number; id: string } | null,
     limit: number,
   ): Run[] {
-    if (agentIds.length === 0) return [];
-    const agents = agentIds.map(() => "?").join(", ");
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE ended_at IS NOT NULL AND agent_id IN (${agents})
-           AND (? IS NULL OR started_at < ? OR (started_at = ? AND id < ?))
-         ORDER BY started_at DESC, id DESC LIMIT ?`,
-      )
-      .all(
-        ...agentIds,
-        after === null ? null : 1,
-        after?.startedAt ?? 0,
-        after?.startedAt ?? 0,
-        after?.id ?? "",
-        limit,
-      ) as Row[];
-    return rows.map(toRun);
+    return this.runQ.endedRunsPage(agentIds, after, limit);
   }
 
   /**
@@ -2375,49 +2090,22 @@ export class Store {
     after: { startedAt: number; id: string } | null,
     limit: number,
   ): Run[] {
-    if (agentIds.length === 0) return [];
-    const agents = agentIds.map(() => "?").join(", ");
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM runs WHERE ticket IS NOT NULL AND ticket_title IS NULL
-           AND agent_id IN (${agents})
-           AND (? IS NULL OR started_at < ? OR (started_at = ? AND id < ?))
-         ORDER BY started_at DESC, id DESC LIMIT ?`,
-      )
-      .all(
-        ...agentIds,
-        after === null ? null : 1,
-        after?.startedAt ?? 0,
-        after?.startedAt ?? 0,
-        after?.id ?? "",
-        limit,
-      ) as Row[];
-    return rows.map(toRun);
+    return this.runQ.untitledRunsPage(agentIds, after, limit);
   }
 
   /** Sets the title of every run of `ticket` in `repoId` that has none; returns how many it set. */
   setTicketTitle(repoId: string, ticket: string, title: string): number {
-    const r = this.db
-      .prepare(
-        "UPDATE runs SET ticket_title = ? WHERE repo_id = ? AND ticket = ? AND ticket_title IS NULL",
-      )
-      .run(title, repoId, ticket);
-    return Number(r.changes);
+    return this.runQ.setTicketTitle(repoId, ticket, title);
   }
 
   /** Rewrites only a run's summary (nothing else on its row). */
   setRunSummary(runId: string, summary: string): void {
-    this.db.prepare("UPDATE runs SET summary = ? WHERE id = ?").run(summary, runId);
+    this.runQ.setRunSummary(runId, summary);
   }
 
   /** How many runs `runsToFold` has left before `startedBefore`. */
   countToFold(startedBefore: number): number {
-    const row = this.db
-      .prepare(
-        "SELECT COUNT(*) AS n FROM runs WHERE folded = 0 AND ended_at IS NOT NULL AND started_at < ?",
-      )
-      .get(startedBefore) as { n: number };
-    return row.n;
+    return this.runQ.countToFold(startedBefore);
   }
 
   setDigest(runId: string, d: RunDigest): void {
@@ -4439,10 +4127,7 @@ export class Store {
 
   /** The first recorded crew run for a ticket, including one before a telemetry chart's range. */
   ticketStartedAt(ticket: string): number | null {
-    const row = this.db
-      .prepare("SELECT MIN(started_at) AS at FROM runs WHERE ticket = ?")
-      .get(ticket) as { at: number | null };
-    return row.at;
+    return this.runQ.ticketStartedAt(ticket);
   }
 
   /** PRs merged at or after `sinceMs`, across repos, oldest first. */
@@ -4926,36 +4611,7 @@ export class Store {
 
   /** Sets the run's loop state (null clears it). */
   setRunLoop(runId: string, loop: RunLoop | null, at = Date.now()): void {
-    const previous = this.run(runId)?.loop;
-    if (JSON.stringify(previous) !== JSON.stringify(loop)) {
-      this.appendAttempt(runId, "loop", at, loop ?? { phase: null });
-      if (
-        previous &&
-        (previous.phase === "ci" || previous.phase === "review" || previous.awaitingFlight)
-      ) {
-        if (previous.phase !== loop?.phase || previous.awaitingFlight !== loop?.awaitingFlight) {
-          const start = this.db
-            .prepare(
-              "SELECT at FROM run_attempts WHERE run_id = ? AND kind = 'wait' ORDER BY id DESC LIMIT 1",
-            )
-            .get(runId) as Row | undefined;
-          this.appendAttempt(runId, "wait-end", at, {
-            on: previous.awaitingFlight ?? previous.phase,
-            durationMs: start ? Math.max(0, at - (start.at as number)) : null,
-          });
-        }
-      }
-      if (
-        loop &&
-        (loop.phase === "ci" || loop.phase === "review" || loop.awaitingFlight) &&
-        (previous?.phase !== loop.phase || previous?.awaitingFlight !== loop.awaitingFlight)
-      ) {
-        this.appendAttempt(runId, "wait", at, { on: loop.awaitingFlight ?? loop.phase, since: at });
-      }
-    }
-    this.db
-      .prepare("UPDATE runs SET loop = ? WHERE id = ?")
-      .run(loop === null ? null : JSON.stringify(loop), runId);
+    this.runQ.setRunLoop(runId, loop, at);
     if (loop?.phase === "done") this.clearNoReportNotes(runId, at, true);
   }
 
@@ -5063,9 +4719,7 @@ export class Store {
     status: RunStatus,
     endedBy: NonNullable<Run["endedBy"]>,
   ): void {
-    this.db
-      .prepare("UPDATE runs SET ended_at = ?, status = ?, ended_by = ? WHERE id = ?")
-      .run(at, status, endedBy, runId);
+    this.runQ.setRunEnded(runId, at, status, endedBy);
   }
 
   /** Exit diagnostics are controller-owned; transcript upserts never overwrite them. */
@@ -5890,10 +5544,7 @@ export class Store {
 
   /** The run that performs the review, else null. */
   runOfReview(reviewId: number): Run | null {
-    const row = this.db.prepare("SELECT * FROM runs WHERE review_id = ?").get(reviewId) as
-      | Row
-      | undefined;
-    return row ? toRun(row) : null;
+    return this.runQ.runOfReview(reviewId);
   }
 
   /** Reviews whose run has not ended although the review no longer needs it. */
@@ -6210,18 +5861,7 @@ export class Store {
   flightConversationRuns(
     agentId: string,
   ): Pick<Run, "id" | "startedAt" | "endedAt" | "transcriptPath" | "vendor" | "ticket">[] {
-    const rows = this.db
-      .prepare(`SELECT id, started_at, ended_at, transcript_path, vendor, ticket FROM runs
-      WHERE agent_id = ? ORDER BY COALESCE(ended_at, 9223372036854775807) DESC, started_at DESC, seq DESC`)
-      .all(agentId) as Row[];
-    return rows.map((r) => ({
-      id: r.id as string,
-      startedAt: r.started_at as number,
-      endedAt: r.ended_at as number | null,
-      transcriptPath: r.transcript_path as string,
-      ticket: r.ticket as string | null,
-      ...(r.vendor ? { vendor: r.vendor as Run["vendor"] } : {}),
-    }));
+    return this.runQ.flightConversationRuns(agentId);
   }
 
   /** A choice is projected from its durable receipt, never inferred from its rendered text. */
