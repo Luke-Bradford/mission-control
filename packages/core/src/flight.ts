@@ -1270,6 +1270,8 @@ export interface FlightState {
       waitMin?: number;
       /** Free to start a review: not paused, stopped, busy or at its quota stop. */
       idle: boolean;
+      /** Why the engine left a queued review unstarted on its last pass, with the PR it waits on. */
+      holds?: { prNumber: number; reason: string; waitsOn: number | null }[];
     }[];
   };
   /** Files whose merge conflicts between open PRs (a git merge check), with those PRs. */

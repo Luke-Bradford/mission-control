@@ -115,6 +115,7 @@ import { pausedSeat } from "../crew-pause.ts";
 import { asideWakeDue } from "../engine/aside.ts";
 import { reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
+import { reviewHoldOf } from "../engine/review-hold.ts";
 import { runawayLiftedAt, runawayTrip } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.ts";
@@ -777,7 +778,8 @@ function buildCrew(
                     view.stop?.reason ??
                     (accountAtStop(config, store, agent.accountId, now)
                       ? "The reviewer's account is at its stop threshold."
-                      : "Waiting for the reviewer to become available."),
+                      : (reviewHoldOf(store, queued.id)?.reason ??
+                        "Waiting for the reviewer to become available.")),
                 },
               };
             })()),
