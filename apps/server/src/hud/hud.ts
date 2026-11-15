@@ -104,6 +104,7 @@ import {
   flightQuestionMessageId,
   isFlightOperatorQuestion,
 } from "../comms/question.ts";
+import { pausedSeat } from "../config/crew-pause.ts";
 import {
   agentIds,
   type CcConfig,
@@ -111,7 +112,6 @@ import {
   configuredAgents,
   seatUnavailable,
 } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
 import { asideWakeDue } from "../engine/aside.ts";
 import { reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";

@@ -6,8 +6,8 @@ import {
   seatIsPaused,
 } from "@mc/core";
 import { z } from "zod";
-import { type Supervisor, SupervisorError } from "./runtime/supervisor.ts";
-import type { Store } from "./store.ts";
+import { type Supervisor, SupervisorError } from "../runtime/supervisor.ts";
+import type { Store } from "../store.ts";
 
 const seats = z.union([z.literal("all"), z.array(z.string().min(1)).min(1)]);
 export const CrewPauseBody = z.union([

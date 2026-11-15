@@ -12,8 +12,8 @@ import {
 import { heldRun, holdCycle, protectedDecisionItem } from "../attention/holds.ts";
 import { pendingRunApproval } from "../attention/subjects.ts";
 import { activeAway } from "../away.ts";
+import { pausedSeat } from "../config/crew-pause.ts";
 import type { CcConfig } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
 import { runawayTrip } from "../flight/runaway.ts";
 import { isOperatorCall, questionWithOperator } from "../hud/hud.ts";
 import type { Store } from "../store.ts";

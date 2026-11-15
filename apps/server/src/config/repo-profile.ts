@@ -21,11 +21,11 @@ import {
   GqlError,
   isObj,
   projectUrlOf,
-} from "./collectors/github.ts";
-import type { CcConfig } from "./config.ts";
+} from "../collectors/github.ts";
+import type { CcConfig } from "../config.ts";
+import { projectFields } from "../github/fields.ts";
+import type { Store } from "../store.ts";
 import type { RepoLocation } from "./config-write.ts";
-import { projectFields } from "./github/fields.ts";
-import type { Store } from "./store.ts";
 
 export function repoProfiles(config: CcConfig, store: Store): RepoProfile[] {
   return config.repos.map((repo) => {

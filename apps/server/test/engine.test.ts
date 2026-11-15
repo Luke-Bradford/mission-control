@@ -114,8 +114,8 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import { writeCrewPause } from "../src/config/crew-pause.ts";
 import type { CcConfig, CrewSeatConfig } from "../src/config.ts";
-import { writeCrewPause } from "../src/crew-pause.ts";
 import { asideWakeDue } from "../src/engine/aside.ts";
 import {
   createEngine,
