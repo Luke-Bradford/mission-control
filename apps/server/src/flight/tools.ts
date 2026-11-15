@@ -353,7 +353,6 @@ import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms/index.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
-import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
@@ -389,7 +388,8 @@ import {
 } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { prototypeLinkProblem } from "../prototype-links.ts";
-import { QueueReorderError } from "../queue-reorder.ts";
+import { waitReader } from "../queue/dependencies.ts";
+import { QueueReorderError } from "../queue/queue-reorder.ts";
 import { handoffTarget } from "../run/handoffs.ts";
 import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";

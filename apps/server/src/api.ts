@@ -285,7 +285,6 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
-import { readDependencyChains } from "./dependency-chains.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
@@ -402,12 +401,13 @@ import {
   type QaReportService,
   qaReportMarkdown,
 } from "./qa/reports.ts";
+import { readDependencyChains } from "./queue/dependency-chains.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
   QueueReorderError,
   resolveQueueReorder,
-} from "./queue-reorder.ts";
+} from "./queue/queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
