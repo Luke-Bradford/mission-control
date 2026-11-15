@@ -35,6 +35,11 @@ import { createCodexApprover } from "../../src/runtime/codex-approval.ts";
 import { codexSeatConfig } from "../../src/runtime/codex-floor.ts";
 import { CODEX_OUTBOX_FILE, startCodexSession } from "../../src/runtime/codex-session.ts";
 import { probeCodexVersion } from "../../src/runtime/codex-version.ts";
+import {
+  nodeFirstPath,
+  ZSH_NODE_FIRST_DIR,
+  zprofileNodeFirst,
+} from "../../src/runtime/node-first.ts";
 import type { CrewSession } from "../../src/runtime/session.ts";
 import { writeCodexHostileFiles } from "../fixtures/codex-hostile.ts";
 
@@ -44,6 +49,7 @@ const root = realpathSync(mkdtempSync("/tmp/mc-live-"));
 const cwd = join(root, "repo");
 const data = join(root, "data");
 const run = join(data, "run");
+const zdotdir = join(root, ZSH_NODE_FIRST_DIR);
 const home = join(run, "codex-home");
 const operator = join(root, "operator");
 const secret = join(root, "secret");
@@ -217,7 +223,9 @@ let deniedRead = false;
 try { fs.readFileSync(${JSON.stringify(join(secret, "t.txt"))}); }
 catch (e) { deniedRead = e.code === "EPERM" || e.code === "EACCES"; }
 const curl = spawnSync("curl", ["-sS", "-m", "3", ${JSON.stringify(`${url}/`)}], { encoding: "utf8" });
-console.log("MC_LIVE_PROBE " + JSON.stringify({ deniedRead, loopbackBlocked: curl.status === 7, curlExit: curl.status, curlError: curl.stderr,
+// the seat's own PATH, as its login shell left it: must be the hub's Node, not Homebrew's
+const node = spawnSync("node", ["-v"], { encoding: "utf8" });
+console.log("MC_LIVE_PROBE " + JSON.stringify({ deniedRead, nodeVersion: (node.stdout || "").trim(), loopbackBlocked: curl.status === 7, curlExit: curl.status, curlError: curl.stderr,
   tokenExcluded: !Object.hasOwn(process.env, ${JSON.stringify(CODEX_SEAT_TOKEN_ENV)}),
   startupExcluded: !Object.hasOwn(process.env, "MC_HOSTILE_STARTUP") }));
 `,
@@ -261,10 +269,10 @@ console.log("MC_LIVE_PROBE " + JSON.stringify({ deniedRead, loopbackBlocked: cur
     cwd,
     env: {
       HOME: operator,
-      PATH: process.env.PATH ?? "",
+      PATH: nodeFirstPath(process.execPath, process.env.PATH ?? ""),
       CODEX_HOME: home,
       SHELL: CODEX_SHELL,
-      ZDOTDIR: join(run, "zsh-empty"),
+      ZDOTDIR: zdotdir,
       [CODEX_SEAT_TOKEN_ENV]: token,
       TMPDIR: temp,
       [PNPM_STORE_ENV]: join(temp, "pnpm"),
@@ -305,7 +313,11 @@ console.log("MC_LIVE_PROBE " + JSON.stringify({ deniedRead, loopbackBlocked: cur
     },
     prepare: () => {
       mkdirSync(home, { mode: 0o700 });
-      mkdirSync(join(run, "zsh-empty"), { mode: 0o700 });
+      // outside `data`, which the seat sandbox denies: zsh must be able to read its .zprofile
+      mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
+      writeFileSync(join(zdotdir, ".zprofile"), zprofileNodeFirst(process.execPath), {
+        mode: 0o600,
+      });
       writeFileSync(join(home, "auth.json"), readFileSync(join(homedir(), ".codex", "auth.json")), {
         mode: 0o600,
       });
@@ -366,6 +378,7 @@ console.log("MC_LIVE_PROBE " + JSON.stringify({ deniedRead, loopbackBlocked: cur
     probe.loopbackBlocked === true &&
     probe.tokenExcluded === true &&
     probe.startupExcluded === true &&
+    probe.nodeVersion === process.version &&
     !hostileInstructions &&
     hostileFiles.length === 0;
   console.log(

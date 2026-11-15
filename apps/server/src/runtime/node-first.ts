@@ -4,6 +4,9 @@
  */
 import { delimiter, dirname } from "node:path";
 
+/** The folder under the crew worktrees root that holds the seat zsh's startup files. */
+export const ZSH_NODE_FIRST_DIR = ".mc-zsh";
+
 /** `path` with the folder of `execPath` first (moved, not repeated). */
 export function nodeFirstPath(execPath: string, path: string): string {
   const dir = dirname(execPath);
