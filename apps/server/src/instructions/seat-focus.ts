@@ -1,5 +1,5 @@
+import { ConfigWriteError, setSessionSeats } from "../config/config-write.ts";
 import { type CcConfig, loadConfig, seatInput } from "../config.ts";
-import { ConfigWriteError, setSessionSeats } from "../config-write.ts";
 import type { CrewReloader } from "../crew-apply.ts";
 
 /** Uses the session editor's optimistic check and reload, with the persisted session as its base. */

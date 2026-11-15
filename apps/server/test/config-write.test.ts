@@ -15,7 +15,6 @@ import { DEFAULT_SEAT_COMMANDS, type NewRepo, OPERATOR_HEADER, type SeatInput } 
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
-import { type ConfigSeatInput, loadConfig, seatInput } from "../src/config.ts";
 import {
   addAccount,
   addRepo,
@@ -30,7 +29,8 @@ import {
   SeatsBody,
   setAccount,
   setSessionSeats,
-} from "../src/config-write.ts";
+} from "../src/config/config-write.ts";
+import { type ConfigSeatInput, loadConfig, seatInput } from "../src/config.ts";
 import { setSeatFocus } from "../src/instructions/seat-focus.ts";
 import { codexModels } from "../src/runtime/codex-models.ts";
 import { Store } from "../src/store.ts";

@@ -108,8 +108,8 @@ import {
   personKey,
 } from "../src/collectors/notifications.ts";
 import { USAGE_BACKOFF_SETTING } from "../src/collectors/usage-claude.ts";
+import { noSessionText, SEATS_CHANGED } from "../src/config/config-write.ts";
 import { type CcConfig, loadConfig, seatInput } from "../src/config.ts";
-import { noSessionText, SEATS_CHANGED } from "../src/config-write.ts";
 import type { CrewReloader } from "../src/crew-apply.ts";
 import { DesignPreviews } from "../src/design-preview/previews.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";

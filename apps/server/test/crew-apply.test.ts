@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { NEW_LOOP, type Run, type Topic } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ChangeBus } from "../src/bus.ts";
+import { setSessionSeats } from "../src/config/config-write.ts";
 import {
   type CcConfig,
   ConfigError,
@@ -11,7 +12,6 @@ import {
   loadConfig,
   seatInput,
 } from "../src/config.ts";
-import { setSessionSeats } from "../src/config-write.ts";
 import {
   accountNewText,
   areaWaitText,
