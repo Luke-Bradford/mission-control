@@ -223,6 +223,7 @@ import { StandingInstructions } from "./instructions/standing.ts";
 import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
+import * as attention from "./store/attention.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
@@ -270,7 +271,6 @@ import {
   MACHINE_RETENTION_MS,
   type NewCommsRow,
   type NoteInput,
-  type NoteKind,
   type NotificationRead,
   type NotificationRow,
   OPERATIONAL_RETENTION_DAYS,
@@ -5959,24 +5959,7 @@ export class Store {
    * episodes, since a refresh moves the note's own time forward. 0 for a key never raised.
    */
   noteRunStart(noteKey: string): number {
-    const latest = this.db
-      .prepare(
-        `SELECT at FROM attention_episodes WHERE key = ?
-         ORDER BY (cleared_at IS NULL) DESC, at DESC LIMIT 1`,
-      )
-      .get(noteKey) as { at: number } | undefined;
-    if (latest === undefined) return 0;
-    const before = this.db.prepare(
-      `SELECT at FROM attention_episodes WHERE key = ? AND at < ? AND cleared_at >= ?
-       ORDER BY at DESC LIMIT 1`,
-    );
-    let start = latest.at;
-    for (let i = 0; i < 1000; i++) {
-      const row = before.get(noteKey, start, start - 60_000) as { at: number } | undefined;
-      if (row === undefined) break;
-      start = row.at;
-    }
-    return start;
+    return attention.noteRunStart(this.db, noteKey);
   }
 
   /** An item's conversation since its current run (`noteRunStart` for a note key, else all). */
@@ -6213,87 +6196,35 @@ export class Store {
    * text and time. A re-opened note is no longer dismissed.
    */
   raiseNote(n: NoteInput): void {
-    this.db
-      .prepare(
-        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
-           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
-           at = excluded.at, cleared_at = NULL, dismissed_at = NULL
-         WHERE attention_notes.cleared_at IS NOT NULL`,
-      )
-      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+    attention.raiseNote(this.db, n);
   }
 
   /** Updates one open operator item in place, keeping its key and history. */
   refreshNote(n: NoteInput): void {
-    this.db
-      .prepare(
-        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
-           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
-           at = excluded.at, cleared_at = NULL, dismissed_at = NULL`,
-      )
-      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+    attention.refreshNote(this.db, n);
   }
 
   /** Refresh measured details without restarting or unacknowledging an open episode. */
   refreshNoteInEpisode(n: NoteInput): void {
-    this.db
-      .prepare(
-        `INSERT INTO attention_notes (key, kind, run_id, seat_id, repo_id, text, at, cleared_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
-         ON CONFLICT(key) DO UPDATE SET kind = excluded.kind, run_id = excluded.run_id,
-           seat_id = excluded.seat_id, repo_id = excluded.repo_id, text = excluded.text,
-           at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.at ELSE excluded.at END,
-           dismissed_at = CASE WHEN attention_notes.cleared_at IS NULL THEN attention_notes.dismissed_at ELSE NULL END,
-           cleared_at = NULL`,
-      )
-      .run(n.key, n.kind, n.runId, n.seatId, n.repoId, n.text, n.at);
+    attention.refreshNoteInEpisode(this.db, n);
   }
 
   clearNote(key: string, at: number): void {
-    this.db
-      .prepare("UPDATE attention_notes SET cleared_at = ? WHERE key = ? AND cleared_at IS NULL")
-      .run(at, key);
+    attention.clearNote(this.db, key, at);
   }
 
   clearNotesFor(runId: string, at: number): void {
-    this.db
-      .prepare("UPDATE attention_notes SET cleared_at = ? WHERE run_id = ? AND cleared_at IS NULL")
-      .run(at, runId);
+    attention.clearNotesFor(this.db, runId, at);
   }
 
   /** Dismisses an open note of any kind from Needs you; false when there is no such note. */
   dismissNote(key: string, at: number): boolean {
-    return (
-      Number(
-        this.db
-          .prepare(
-            "UPDATE attention_notes SET dismissed_at = ? WHERE key = ? AND cleared_at IS NULL",
-          )
-          .run(at, key).changes,
-      ) > 0
-    );
+    return attention.dismissNote(this.db, key, at);
   }
 
   /** The open notes, oldest first. */
   notes(): AttentionNote[] {
-    const rows = this.db
-      .prepare("SELECT * FROM attention_notes WHERE cleared_at IS NULL ORDER BY at, key")
-      .all() as Row[];
-    return rows.map((r) => ({
-      key: r.key as string,
-      kind: r.kind as NoteKind,
-      runId: r.run_id as string | null,
-      seatId: r.seat_id as string | null,
-      repoId: r.repo_id as string | null,
-      text: r.text as string,
-      at: r.at as number,
-      clearedAt: null,
-      dismissedAt: (r.dismissed_at as number | null) ?? null,
-    }));
+    return attention.notes(this.db);
   }
 
   /** Historical waits, including cleared notes; only the named seat's evidence counts. */
@@ -6303,26 +6234,11 @@ export class Store {
     now: number,
     kinds: string[],
   ): [number, number][] {
-    const rows = this.db
-      .prepare(
-        "SELECT at, cleared_at, kind FROM attention_episodes WHERE seat_id = ? AND at < ? AND (cleared_at IS NULL OR cleared_at > ?) ORDER BY at",
-      )
-      .all(seatId, now, since) as Row[];
-    return rows
-      .filter((r) => kinds.includes(r.kind as string))
-      .map((r) => [
-        Math.max(since, r.at as number),
-        Math.min(now, (r.cleared_at as number | null) ?? now),
-      ]);
+    return attention.telemetryNoteIntervals(this.db, seatId, since, now, kinds);
   }
 
   openNoteKeys(runId: string): string[] {
-    const rows = this.db
-      .prepare(
-        "SELECT key FROM attention_notes WHERE run_id = ? AND cleared_at IS NULL ORDER BY key",
-      )
-      .all(runId) as { key: string }[];
-    return rows.map((r) => r.key);
+    return attention.openNoteKeys(this.db, runId);
   }
 
   seatSession(seatId: string): SeatSessionRow | null {
@@ -6413,13 +6329,7 @@ export class Store {
 
   /** How long each cleared attention note of `kinds` raised since `since` stood open. */
   noteWaits(kinds: string[], since: number): number[] {
-    if (kinds.length === 0) return [];
-    const rows = this.db
-      .prepare(`SELECT cleared_at - at AS wait FROM attention_notes
-      WHERE kind IN (${kinds.map(() => "?").join(",")}) AND at >= ? AND cleared_at IS NOT NULL
-      ORDER BY at, key`)
-      .all(...kinds, since) as Row[];
-    return rows.map((r) => r.wait as number);
+    return attention.noteWaits(this.db, kinds, since);
   }
 
   /**
