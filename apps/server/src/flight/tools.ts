@@ -4443,15 +4443,9 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const note = store
           .notes()
           .find(
-            (n) =>
-              n.key === key && (hubUpdate || n.repoId === repo.id) && n.dismissedAt === null,
+            (n) => n.key === key && (hubUpdate || n.repoId === repo.id) && n.dismissedAt === null,
           );
-        if (
-          !note ||
-          key.startsWith(GUARD_ACK_PREFIX) ||
-          hubUpdate ||
-          note.kind === "ratelimit"
-        )
+        if (!note || key.startsWith(GUARD_ACK_PREFIX) || hubUpdate || note.kind === "ratelimit")
           return fail(note ? protectedItem : notFound);
         const run = note.runId ? store.run(note.runId) : null;
         if (run && held(run)) return fail("This hold belongs to the operator.");

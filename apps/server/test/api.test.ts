@@ -7914,9 +7914,7 @@ describe("update routes", () => {
     store.setSetting("hub-update-held-since", String(NOW - 1));
     updaterResult = async () => ({ restarting: true });
     await post("/api/update");
-    expect(store.notes().filter((n) => n.dismissedAt === null && n.clearedAt === undefined)).toEqual(
-      [],
-    );
+    expect(store.notes()).toEqual([]);
     expect(store.getSetting("hub-update-held-since")).toBeNull();
   });
 
