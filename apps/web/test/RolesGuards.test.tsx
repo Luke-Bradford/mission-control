@@ -63,7 +63,7 @@ describe("Setup › Roles & guards", () => {
     page();
     const rules = await rulesPanel();
     expect(RULE_GROUPS).toHaveLength(5);
-    expect(RULE_GROUPS.flatMap((g) => g.rules)).toHaveLength(17);
+    expect(RULE_GROUPS.flatMap((g) => g.rules as readonly unknown[])).toHaveLength(17);
     expect(
       rules.querySelectorAll("[data-source][data-key]:not([data-key=test-lock])"),
     ).toHaveLength(17);
