@@ -227,7 +227,11 @@ describe("hub-written messages", () => {
 
   it("names a sender kind at every send site", () => {
     const bare = calls.filter(
-      (c) => c.path !== "store.ts" && c.path !== "comms.ts" && !/senderKind/.test(c.block),
+      (c) =>
+        c.path !== "store.ts" &&
+        c.path !== "store/comms.ts" &&
+        c.path !== "comms.ts" &&
+        !/senderKind/.test(c.block),
     );
     expect(bare.map((c) => `${c.path}:${c.at}`)).toEqual([]);
   });
