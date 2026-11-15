@@ -1,5 +1,7 @@
 # FLIGHT central mind — design
 
+**Status, 15 November 2026:** the page layout below is history. The page as built has four tabs: Handling, What FLIGHT did, Crew & board and What FLIGHT knows (`apps/web/src/flight/tabs.ts`). The operator console roadmap and the 6 November Comms, Needs you and FLIGHT spec describe it.
+
 **Date:** 2026-10-27
 
 ## Decision
