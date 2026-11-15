@@ -1400,7 +1400,7 @@ function isValidationCommand(writer: readonly string[], cmd: string): boolean {
 
 /**
  * Validates config.yaml text: the one loader for the file the server starts with and for any text
- * it would write (`config-write.ts`). `source` names the text in errors (a path, or a description).
+ * it would write (`config/config-write.ts`). `source` names the text in errors (a path, or a description).
  * `guard.hubRoot` is the hub's own checkout, which crew paths must stay clear of; with no guard it is
  * found from this module's location. A crew section with no hub root is an error (fails closed).
  * `deferModels` is for loading existing files: Codex model errors become seat unavailability.

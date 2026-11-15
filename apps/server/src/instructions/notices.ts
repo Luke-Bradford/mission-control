@@ -1,8 +1,8 @@
 import { COMMS_MC, type InstructionMutation, seatDef } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
 import { sendComms } from "../comms/index.ts";
+import { messageUnpausedSeat } from "../config/crew-pause.ts";
 import type { CcConfig } from "../config.ts";
-import { messageUnpausedSeat } from "../crew-pause.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
 import type { Store } from "../store.ts";
 

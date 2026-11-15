@@ -606,6 +606,15 @@ describe("FLIGHT summary", () => {
   });
 });
 
+describe("summary connection state", () => {
+  it("shows no Connecting pill over a loaded summary while the stream opens", async () => {
+    streamStatus.set({ connected: false, reconnecting: false, lastMessageAt: null });
+    const { container } = render(<Dock />);
+    await waitFor(() => expect(container.querySelector(".dock-headline-text")).toBeTruthy());
+    expect(screen.queryByText("Connecting")).toBeNull();
+  });
+});
+
 describe("stopped FLIGHT", () => {
   it("keeps the input open, says FLIGHT is stopped and offers Start FLIGHT", async () => {
     const fn = stubFlight(

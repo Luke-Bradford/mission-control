@@ -26,8 +26,8 @@ import {
 } from "@mc/core";
 import { holds } from "../attention/holds-read.ts";
 import { activeAway } from "../away.ts";
+import { pausedSeat } from "../config/crew-pause.ts";
 import { type CcConfig, type CrewSeatConfig, seatUnavailable } from "../config.ts";
-import { pausedSeat } from "../crew-pause.ts";
 import { prFlow } from "../pr/flow.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { CREW_GIT_SLOW_MS, gitIdentity, MC_MERGE_AUTHOR } from "../runtime/checkouts.ts";

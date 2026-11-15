@@ -353,8 +353,9 @@ import type { ChangeBus } from "../bus.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms/index.ts";
+import { pausedSeat, readCrewPause, writeCrewPause } from "../config/crew-pause.ts";
+import { chooseRunProfile, type ProfilesError } from "../config/profiles.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
-import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
@@ -388,7 +389,6 @@ import {
   seatPlace,
   text,
 } from "../mcp/tools.ts";
-import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { QueueReorderError } from "../queue/queue-reorder.ts";
 import { cleanText } from "../repo/clean.ts";

@@ -1,5 +1,5 @@
 import { carriedFrom, fixKey, type Run, reviewFor, seatIsPaused } from "@mc/core";
-import { readCrewPause } from "../crew-pause.ts";
+import { readCrewPause } from "../config/crew-pause.ts";
 import type { Store } from "../store.ts";
 
 /**
