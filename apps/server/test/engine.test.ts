@@ -6438,6 +6438,61 @@ describe("the engine runs reviews", () => {
       }
     });
 
+    describe("a review held at the review-round limit", () => {
+      // round 1 reported blocking; round 3 is queued and held by the waste check
+      const heldAtLimit = async (checks: Parameters<typeof reported>[2] = []) => {
+        need(config.repos[0]).flightPowers = "superuser";
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        const one = first();
+        reported(one.id, [finding("Important")], checks);
+        const third = store.requestReview({
+          authorRunId: one.authorRunId,
+          repoId: one.repoId,
+          seatId: RETRO,
+          prNumber: one.prNumber,
+          sha: one.sha,
+          epoch: one.epoch,
+          attempt: one.attempt + 1,
+          round: 3,
+          at: clock,
+        });
+        setLoop({ reviewReplyTo: one.id });
+        await h.engine.tick();
+        return need(third);
+      };
+
+      it("parks the run for FLIGHT's decision and drops the held review", async () => {
+        const third = await heldAtLimit();
+        expect(loopOf()).toMatchObject({ phase: "parked", parked: { kind: "review" } });
+        await h.engine.reconcileRun(RUN);
+        expect(store.review(third)?.state).toBe("superseded");
+      });
+
+      it("accept moves the run on, with no review on the same head", async () => {
+        const third = await heldAtLimit();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
+        // the accepted head goes on to the merge, as after any accepted review
+        expect(loopOf()).toMatchObject({ reviewWaivedSha: SHA });
+        expect(loopOf().phase).not.toBe("parked");
+        expect(h.steps).toContain("merge");
+        expect(store.review(third)?.state).toBe("superseded");
+      });
+
+      it("rework grants the next round and sends the findings to the seat", async () => {
+        await heldAtLimit();
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "rework" })).toBe(true);
+        expect(loopOf()).toMatchObject({ phase: "working", flightReworks: { [SHA]: 1 } });
+        expect(h.sent.at(-1)?.text).toContain("Important");
+      });
+
+      it("accept is refused when the last review failed the design check", async () => {
+        await heldAtLimit([{ check: "design", result: "fail" }]);
+        expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(false);
+        expect(loopOf().phase).toBe("parked");
+      });
+    });
+
     const parkedForRework = async () => {
       need(config.repos[0]).flightPowers = "superuser";
       await toReview();

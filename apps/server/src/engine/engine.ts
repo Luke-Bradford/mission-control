@@ -110,6 +110,7 @@ import {
   modeOfSeat,
   NEW_LOOP,
   parkedEventText,
+  reviewHeldParkText,
   pendingSeatWork,
   pendingWakeText,
   REFUSAL_TRIES,
@@ -2487,6 +2488,35 @@ export function createEngine(deps: EngineDeps): Engine {
     return ok;
   }
 
+  /**
+   * Parks the author run (kind `review`) whose queued review is held at the review-round limit, so
+   * FLIGHT can accept, rework or ask for a second review with `settle_park`. The parked run's next
+   * pass supersedes the held review. A run that is not in review on this review's head is left alone.
+   */
+  function parkForHeldReview(row: ReviewRow): Promise<void> {
+    return onChain(row.authorRunId, async () => {
+      const run = store.run(row.authorRunId);
+      const loop = run?.loop;
+      if (run === null || !loop || loop.phase !== "review" || loop.parked) return;
+      if (!reviewWanted(row) || loop.reviewWaivedSha === row.sha) return;
+      const reason = reviewHeldParkText(seatCallSign(row.seatId), row.sha, row.round);
+      const at = now();
+      store.setRunLoop(run.id, {
+        ...loop,
+        phase: "parked",
+        parked: { kind: "review", reason, ended: false },
+      });
+      store.addLoopEvent(
+        `${run.id}:${loop.epoch}:parked:review-held:${row.id}`,
+        run.id,
+        parkedEventText(reason),
+        at,
+      );
+      bus.emit("agents");
+      await pass(run.id);
+    });
+  }
+
   /** Ends the review's run when it has one that has not ended. */
   async function endReviewRun(row: ReviewRow, reason?: "superseded"): Promise<void> {
     if (row.runId === null) return;
@@ -2832,6 +2862,8 @@ export function createEngine(deps: EngineDeps): Engine {
             reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
             prNumber: null,
           });
+          // park the run (as a failed review at the cap does) so FLIGHT can settle it
+          void parkForHeldReview(row);
           continue;
         }
         if (!reviewWanted(row)) {
