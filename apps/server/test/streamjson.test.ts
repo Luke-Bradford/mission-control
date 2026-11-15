@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { LAST_TEXT_MAX, LIVE_DETAIL_MAX, NO_REPORT_REASON_MAX, NO_REPORT_TEXT_MAX } from "@mc/core";
 import { describe, expect, it, vi } from "vitest";
-import { foldTranscript } from "../src/streamjson.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 
 const lines = readFileSync(resolve(import.meta.dirname, "fixtures/iteration.sample.log"), "utf8")
   .split("\n")
@@ -179,6 +179,19 @@ describe("foldTranscript", () => {
     expect(f.costUsd).toBe(3);
     expect(f.resultCount).toBe(2);
     expect(f.isError).toBe(true);
+  });
+
+  it("sums the cost across CLI sessions, counting each session's latest figure once", () => {
+    const init = (id: string) =>
+      JSON.stringify({ type: "system", subtype: "init", session_id: id });
+    const result = (id: string, cost: number) =>
+      JSON.stringify({ type: "result", session_id: id, total_cost_usd: cost });
+    const first = foldTranscript(null, [init("old"), result("old", 4.5)], 1);
+    expect(first.costUsd).toBe(4.5);
+    const next = foldTranscript(first, [init("new"), result("new", 0.75)], 2);
+    expect(next.costUsd).toBe(5.25);
+    // the old session resumes: its cumulative figure replaces its earlier one
+    expect(foldTranscript(next, [init("old"), result("old", 5)], 3).costUsd).toBe(5.75);
   });
 
   it("retains the latest top-level stop reason and full cleaned assistant text across folds", () => {

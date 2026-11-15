@@ -1,7 +1,7 @@
 import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
-import { type GitExec, readOnlyObjectBase, realGitExec } from "../files.ts";
+import { type GitExec, readOnlyObjectBase, realGitExec } from "../repo/files.ts";
 import { RISK_MEMBERSHIP_MAX, RISK_PR_MAX, riskPath } from "./risk.ts";
 
 export const GIT_FILE_SOURCE_VERSION = 1;

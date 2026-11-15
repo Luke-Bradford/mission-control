@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { foldTranscript } from "../src/streamjson.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 
 const assistant = (id: string, output: number) =>
   JSON.stringify({

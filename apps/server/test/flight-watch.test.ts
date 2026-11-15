@@ -103,11 +103,11 @@ import {
   flightToolsDigest,
 } from "../src/flight/watch.ts";
 import { attentionItems } from "../src/hud/hud.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 import { recordNoReport } from "../src/runtime/no-report.ts";
 import type { SeatFacts, SendResult, SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { weeklyProjection } from "../src/spend/projection.ts";
 import { Store } from "../src/store.ts";
-import { foldTranscript } from "../src/streamjson.ts";
 
 const T0 = Date.parse("2026-10-22T12:00:00Z");
 const MIN = 60_000;

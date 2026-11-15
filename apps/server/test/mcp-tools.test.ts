@@ -129,8 +129,8 @@ import {
   pushRun,
   seatWroteBody,
 } from "../src/mcp/tools.ts";
-import { setRunPathGrants } from "../src/path-grants.ts";
 import { ProfilesError } from "../src/profiles.ts";
+import { setRunPathGrants } from "../src/repo/path-grants.ts";
 import { externalReviewKey } from "../src/review/external-key.ts";
 import { CREW_GIT_SLOW_MS, MC_MERGE_AUTHOR } from "../src/runtime/checkouts.ts";
 import { crewGit } from "../src/runtime/git.ts";

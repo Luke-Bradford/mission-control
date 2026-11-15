@@ -95,7 +95,6 @@ import {
 import { confirmedResumeAfter, pendingRunApproval } from "../attention/subjects.ts";
 import { briefReadState, briefSourceRevision } from "../brief/source.ts";
 import { claudeVersion } from "../cli/version.ts";
-import { cloneData } from "../clone.ts";
 import { collectorName, noteCollectorName } from "../collectors/common.ts";
 import { notificationOpen, personKey, personText } from "../collectors/notifications.ts";
 import { attentionChatter, resolvedCommsReason } from "../comms/index.ts";
@@ -117,13 +116,15 @@ import { asideWakeDue } from "../engine/aside.ts";
 import { reviewerOf } from "../engine/engine.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { reviewHoldOf } from "../engine/review-hold.ts";
-import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "../file-deps.ts";
 import { runawayLiftedAt, runawayTrip } from "../flight/runaway.ts";
 import { flightRunsUpdate } from "../flight/seat.ts";
 import { crewSeatIds, flightLive, flightSeat, ownReply } from "../flight/state.ts";
 import { loopTries } from "../loop/history.ts";
 import { loopPause } from "../loop/pause.ts";
+import { cloneData } from "../repo/clone.ts";
+import { collectFiles, type FileDeps, filesUnchanged, statNoted } from "../repo/file-deps.ts";
 import { reviewCheckFor } from "../review/check.ts";
+import { lastOutputAt } from "../run/stream.ts";
 import {
   type PrCache,
   parseTicket,
@@ -133,9 +134,8 @@ import {
   runTicketTitle,
 } from "../run/view.ts";
 import type { AttentionNote, Store } from "../store.ts";
-import { lastOutputAt } from "../stream.ts";
 import { transcriptFilePath } from "../transcript/file.ts";
-import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_HELD_SINCE, HUB_UPDATE_PERSON_KEY } from "../update.ts";
+import { HUB_UPDATE_HELD_KEY, HUB_UPDATE_PERSON_KEY } from "../update.ts";
 import { runEvents, runEventsIndex } from "./views.ts";
 
 /** A crew error's attention key: this, then its row id (an ack of it acks the row). */
@@ -1602,17 +1602,12 @@ function buildAttentionItems(
       return { ...item, owner: OWNER_OPERATOR };
     // An Update only a person can run reaches the operator at once, with its reason
     if (i.key === `${NOTE_KEY}${HUB_UPDATE_PERSON_KEY}`) return item;
-    // The held Update (#1834): FLIGHT's to run in a quiet gap. Its window runs from when the
-    // Update was first held, whatever FLIGHT keeps or briefs; past it, or with FLIGHT not
-    // triaging, it is the operator's as itself.
+    // The held Update (#1834): FLIGHT's to run in a quiet gap. FLIGHT may hold it on purpose (a
+    // seat mid-check, a fix about to merge), so no timer hands it on: it stays FLIGHT's while
+    // FLIGHT is triaging, and is the operator's as itself only when FLIGHT is not.
     if (i.owner === OWNER_FLIGHT && i.key === `${NOTE_KEY}${HUB_UPDATE_HELD_KEY}`) {
       if (triage === null || !triaging) return { ...item, owner: OWNER_OPERATOR };
-      const since = Number(store.getSetting(HUB_UPDATE_HELD_SINCE));
-      const raisedAt = Number.isFinite(since) && since > 0 ? Math.min(since, i.at) : i.at;
-      const triageDueAt = Math.max(raisedAt, triage.liveSince) + FLIGHT_TRIAGE_WAIT_MS;
-      return now < triageDueAt
-        ? { ...item, owner: OWNER_FLIGHT, flightTriage: "waiting", triageDueAt }
-        : { ...item, owner: OWNER_OPERATOR, flightTriage: "missed", triageDueAt };
+      return { ...item, owner: OWNER_FLIGHT, flightTriage: "handling" };
     }
     // A seat's question is FLIGHT's from the start (#758); only FLIGHT's brief makes it the
     // operator's. With no FLIGHT seat nobody else can answer it, so it is the operator's.

@@ -1,6 +1,6 @@
 import type { ChangeBus } from "../bus.ts";
 import type { CcConfig } from "../config.ts";
-import { type GitExec, realGitExec } from "../files.ts";
+import { type GitExec, realGitExec } from "../repo/files.ts";
 import type { Store } from "../store.ts";
 import { collectGitFileSource, gitFileHead } from "./git-source.ts";
 import { collectFileSizes, SIZE_SCOPE_VERSION } from "./size-source.ts";

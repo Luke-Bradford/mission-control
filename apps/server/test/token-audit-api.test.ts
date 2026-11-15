@@ -378,3 +378,19 @@ describe("GET /api/audit/tokens", () => {
     expect(v.figures?.contextByRole.recorded).toBe(false);
   });
 });
+
+describe("GET /api/audit/fix-sessions", () => {
+  it("answers the receipts, and 400 for any query", async () => {
+    const res = await app.inject({ method: "GET", url: "/api/audit/fix-sessions" });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({
+      enabled: false,
+      target: 10,
+      runs: [],
+      arms: { continue: { assigned: 0 }, fresh: { assigned: 0 } },
+    });
+    const bad = await app.inject({ method: "GET", url: "/api/audit/fix-sessions?days=1" });
+    expect(bad.statusCode).toBe(400);
+    expect(bad.json()).toEqual({ error: "send no query" });
+  });
+});

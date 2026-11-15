@@ -217,11 +217,10 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import { ChoiceRefused, choiceReceipt, chooseOption } from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
-import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
 import { RecommendationMutation } from "./code-health/recommendations.ts";
@@ -258,7 +257,6 @@ import {
 } from "./comms/index.ts";
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
-import { compressResponse } from "./compress.ts";
 import {
   agentIds,
   type CcConfig,
@@ -314,14 +312,7 @@ import {
   setExternalPrControl,
   withdrawExternalReview,
 } from "./external-pr-control.ts";
-import {
-  changedFiles,
-  committedLines,
-  fileDiff,
-  type GitExec,
-  GitFailed,
-  NO_WORKTREE_NOTE,
-} from "./files.ts";
+import { fixSessionTrialView } from "./fix-session-trial.ts";
 import { flightFloor, flightShellContext } from "./flight/floor.ts";
 import type { HudShotStore } from "./flight/hud-store.ts";
 import { FlightLedgerArgs, flightLedgerView, flightSummary } from "./flight/ledger.ts";
@@ -411,6 +402,15 @@ import {
   QueueReorderError,
   resolveQueueReorder,
 } from "./queue/queue-reorder.ts";
+import { cleanText } from "./repo/clean.ts";
+import {
+  changedFiles,
+  committedLines,
+  fileDiff,
+  type GitExec,
+  GitFailed,
+  NO_WORKTREE_NOTE,
+} from "./repo/files.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
@@ -419,7 +419,9 @@ import {
   AsideAnswerUnconfirmed,
   answerAsideQuestion,
 } from "./run/aside-answer.ts";
+import { compressResponse } from "./run/compress.ts";
 import { publicHandoff } from "./run/handoffs.ts";
+import { lastOutputAt, readStream, readStreamPage } from "./run/stream.ts";
 import {
   type BoardTitleCache,
   type PrCache,
@@ -443,7 +445,6 @@ import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
-import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import { metricsView } from "./telemetry/metrics.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
@@ -4213,6 +4214,13 @@ export function buildApp(deps: AppDeps): FastifyInstance {
             config.audit?.thresholds,
           ),
         );
+      });
+      // Reader: docs/runbook.md#audit-api (the fix-session trial's receipts; the operator and FLIGHT read it)
+      api.get("/audit/fix-sessions", async (req, reply) => {
+        if (Object.keys(req.query as Record<string, unknown>).length > 0) {
+          return reply.code(400).send({ error: "send no query" });
+        }
+        return fixSessionTrialView(store, config);
       });
       // Reader: docs/runbook.md#audit-api (where each run's tokens go; the web reads it in a later page)
       api.get<{ Querystring: { days?: string; hours?: string; shape?: string } }>(

@@ -1,15 +1,15 @@
 import type { CrewVendor, StreamEvent } from "@mc/core";
-import { cleanText } from "./clean.ts";
-import { CODEX_MCP_ELICITATION } from "./runtime/codex-wire.ts";
-import { isObj, type Json, STREAM_EVENT_PREFIX, str, timeOf } from "./streamjson.ts";
+import { cleanText } from "../repo/clean.ts";
+import { CODEX_MCP_ELICITATION } from "../runtime/codex-wire.ts";
 import {
   CODEX_APPROVAL_DECISION,
   codexPlan,
   codexTool,
   transcriptVendor,
-} from "./transcript/codex-transcript.ts";
-import { openTranscript } from "./transcript/file.ts";
-import { originalBytes } from "./util.ts";
+} from "../transcript/codex-transcript.ts";
+import { openTranscript } from "../transcript/file.ts";
+import { originalBytes } from "../util.ts";
+import { isObj, type Json, STREAM_EVENT_PREFIX, str, timeOf } from "./streamjson.ts";
 
 export const STREAM_CHUNK_BYTES = 256 * 1024;
 export const STREAM_SCAN_BYTES = 8 * 1024 * 1024;

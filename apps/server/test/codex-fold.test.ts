@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { foldTranscript } from "../src/streamjson.ts";
+import { foldTranscript } from "../src/run/streamjson.ts";
 
 const at = Date.parse("2026-10-24T12:00:00Z");
 const usage = (inputTokens: number, cachedInputTokens: number, outputTokens: number, time = at) =>

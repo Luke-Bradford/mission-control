@@ -15,7 +15,7 @@ import {
   gitEnv,
   NO_ORIGIN_HEAD_NOTE,
   realGitExec,
-} from "../src/files.ts";
+} from "../src/repo/files.ts";
 
 const WT = "/tmp/never-a-real-worktree";
 const SHA = "a".repeat(40);

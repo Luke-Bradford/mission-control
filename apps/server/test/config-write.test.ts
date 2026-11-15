@@ -31,8 +31,8 @@ import {
   setAccount,
   setSessionSeats,
 } from "../src/config-write.ts";
+import { setSeatFocus } from "../src/instructions/seat-focus.ts";
 import { codexModels } from "../src/runtime/codex-models.ts";
-import { setSeatFocus } from "../src/seat-focus.ts";
 import { Store } from "../src/store.ts";
 import { fakeModels } from "./config-codex.ts";
 
