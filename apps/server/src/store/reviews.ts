@@ -14,6 +14,8 @@ import { toReview } from "./rows.ts";
 
 type Row = Record<string, SQLInputValue>;
 
+// The queries over the review tables; the review methods of `Store` (store.ts) delegate here.
+
 /** Every review of a PR, oldest first. */
 export function reviewsOfPr(db: DatabaseSync, repoId: string, prNumber: number): ReviewRow[] {
   const rows = db
