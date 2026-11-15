@@ -15,8 +15,8 @@ import { COMMS_CAPCOM, NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import { writeCrewPause } from "../src/crew-pause.ts";
-import { NO_LOCK } from "../src/hud.ts";
-import { overviewSummary } from "../src/overview.ts";
+import { NO_LOCK } from "../src/hud/hud.ts";
+import { overviewSummary } from "../src/hud/overview.ts";
 import { Store } from "../src/store.ts";
 import { lockView, type TelemetryScope, telemetry } from "../src/telemetry.ts";
 

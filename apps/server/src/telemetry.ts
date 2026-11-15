@@ -26,11 +26,11 @@ import {
 } from "@mc/core";
 import { WINDOWS } from "./collectors/usage-common.ts";
 import { agentIds, type CcConfig, configuredAgents, crewSeatDef } from "./config.ts";
-import { crew } from "./hud.ts";
+import { crew } from "./hud/hud.ts";
+import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "./hud/views.ts";
 import { type PrCache, runPrs, runTicket } from "./run/view.ts";
 import { runSpend } from "./spend/spend.ts";
 import type { Store } from "./store.ts";
-import { clippedMs, dayFormatter, endOf, lastDays, lockLabel } from "./views.ts";
 
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;

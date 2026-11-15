@@ -109,7 +109,7 @@ export interface HeldRange {
 }
 /**
  * The one item for a range auto-Update holds. FLIGHT runs it in a quiet moment while it is seated
- * and on a superuser repo (hud.ts gives it the triage window); otherwise it is the operator's.
+ * and on a superuser repo (hud/hud.ts gives it the triage window); otherwise it is the operator's.
  */
 export const HUB_UPDATE_HELD_KEY = "hub-update-held";
 /** An Update only a person can run (a shortcut in the change, pnpm, a checkout off main): the operator's at once. */

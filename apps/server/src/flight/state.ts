@@ -111,7 +111,7 @@ import {
   NO_LOCK,
   NOTE_KEY,
   questionWithOperator,
-} from "../hud.ts";
+} from "../hud/hud.ts";
 import {
   MACHINE_CAPACITY_DEFAULTS,
   MACHINE_CAPACITY_KEY,

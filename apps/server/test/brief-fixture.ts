@@ -6,7 +6,7 @@ import {
   prepareOrdinaryGuidance,
 } from "../src/brief/prepare.ts";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import type { Store } from "../src/store.ts";
 
 /** Real retained run/session rows, never an eligibility boolean. */

@@ -19,7 +19,7 @@ import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
 import { applyDecisionDefaults } from "../src/decision-defaults.ts";
 import { recordWrite, runawayTrip } from "../src/flight/runaway.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 import { prepareFixtureGuidance } from "./brief-fixture.ts";
 

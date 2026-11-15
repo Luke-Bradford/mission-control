@@ -50,7 +50,7 @@ import {
   markHubStarted,
   NO_LOCK,
   pinned,
-} from "../src/hud.ts";
+} from "../src/hud/hud.ts";
 import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
 import { clearLeftovers } from "../src/leftovers.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";

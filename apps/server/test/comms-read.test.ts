@@ -8,7 +8,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { threadMessages } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 import * as stream from "../src/stream.ts";
 import { foldTranscript } from "../src/streamjson.ts";

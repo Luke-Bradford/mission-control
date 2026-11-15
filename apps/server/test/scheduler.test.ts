@@ -33,7 +33,8 @@ import { fetchUsage } from "../src/collectors/usage-sources.ts";
 import type { CcConfig } from "../src/config.ts";
 import { TRANSCRIPT_RETENTION_DEFAULTS } from "../src/config.ts";
 import { flightState, markItemsShown } from "../src/flight/state.ts";
-import * as hud from "../src/hud.ts";
+import * as hud from "../src/hud/hud.ts";
+import * as views from "../src/hud/views.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/machine-capacity.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import {
@@ -60,7 +61,6 @@ import { openWasteAlarms } from "../src/spend/waste.ts";
 import { ACK_ABSENT_MS, Store } from "../src/store.ts";
 import { TOKEN_AUDIT_FIRST_DELAY_MS, TOKEN_AUDIT_INTERVAL_MS } from "../src/token-audit/audit.ts";
 import { VERSION_CHECK_MS } from "../src/update.ts";
-import * as views from "../src/views.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");
 

@@ -1,8 +1,8 @@
 import type { PullRequestView, Run } from "@mc/core";
 import { NEW_LOOP } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { overviewSummary } from "../src/hud/overview.ts";
 import { type MetricsScope, metricsView } from "../src/metrics.ts";
-import { overviewSummary } from "../src/overview.ts";
 import { Store } from "../src/store.ts";
 
 const MIN = 60_000;

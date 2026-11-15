@@ -98,7 +98,7 @@ import {
   seatWorktree,
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
-import { attentionItems, markHubStarted, NO_LOCK } from "./hud.ts";
+import { attentionItems, markHubStarted, NO_LOCK } from "./hud/hud.ts";
 import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./leftovers.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";

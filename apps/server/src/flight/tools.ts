@@ -370,7 +370,7 @@ import {
   NO_LOCK,
   NOTE_KEY,
   questionWithOperator,
-} from "../hud.ts";
+} from "../hud/hud.ts";
 import { announceInstruction } from "../instructions/notices.ts";
 import { InstructionInput } from "../instructions/standing.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../machine-capacity.ts";

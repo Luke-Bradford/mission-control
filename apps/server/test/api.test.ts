@@ -117,6 +117,7 @@ import { GitFailed, NO_WORKTREE_NOTE } from "../src/files.ts";
 import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operator-call.ts";
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
+import * as views from "../src/hud/views.ts";
 import { LocalNotifications } from "../src/local-notifications.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { mapTree } from "../src/map/snapshot.ts";
@@ -130,7 +131,6 @@ import { type Supervisor, SupervisorError } from "../src/runtime/supervisor.ts";
 import { type NotificationRead, Store } from "../src/store.ts";
 import { readStreamPage } from "../src/stream.ts";
 import { UpdateError, type Updater } from "../src/update.ts";
-import * as views from "../src/views.ts";
 import { mapCheckout } from "./map-checkout.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");

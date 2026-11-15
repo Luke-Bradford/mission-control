@@ -12,8 +12,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { threadMessages } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
+import { activity, configView, overview, runEventsIndex } from "../src/hud/views.ts";
 import { Store } from "../src/store.ts";
-import { activity, configView, overview, runEventsIndex } from "../src/views.ts";
 
 let dir: string;
 let store: Store;

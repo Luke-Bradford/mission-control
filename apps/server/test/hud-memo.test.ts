@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Run, TestLockState } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
-import { attentionItems, crew, NO_CLI_VERSION } from "../src/hud.ts";
+import { attentionItems, crew, NO_CLI_VERSION } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-10-17T12:00:00Z");

@@ -172,7 +172,7 @@ import { type CrewTidy, createCrewTidy } from "../src/flight/tidy.ts";
 import { createFlightTools, cut, type FlightToolsDeps, seatFree } from "../src/flight/tools.ts";
 import { grantApproval } from "../src/flight-approvals.ts";
 import type { Move, MoveResult } from "../src/github/board.ts";
-import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud.ts";
+import { attentionItems, CREW_ERROR_KEY, isOperatorCall } from "../src/hud/hud.ts";
 import type { GhResult } from "../src/mcp/gh.ts";
 import type { McTool, McToolContext } from "../src/mcp/server.ts";
 import { RunTokens } from "../src/mcp/tokens.ts";
