@@ -97,6 +97,13 @@ import {
   wakeKeyPrefix,
 } from "@mc/core";
 import { runAccountId } from "../accounts/bindings.ts";
+import {
+  closingFact,
+  factsText,
+  openQuestionSubjects,
+  questionFacts,
+  subjectId,
+} from "../attention/question-watch.ts";
 import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms/index.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
@@ -112,13 +119,6 @@ import {
   questionWithOperator,
 } from "../hud/hud.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
-import {
-  closingFact,
-  factsText,
-  openQuestionSubjects,
-  questionFacts,
-  subjectId,
-} from "../question-watch.ts";
 import { blockedWork, waitReader } from "../queue/dependencies.ts";
 import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";

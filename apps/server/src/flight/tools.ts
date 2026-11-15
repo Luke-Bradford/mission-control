@@ -323,6 +323,15 @@ import {
 import { z } from "zod";
 import { runAccountId } from "../accounts/bindings.ts";
 import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "../attention/attention-materials.ts";
+import {
+  MaterialsOptionImages,
+  MaterialsStoryShape,
+} from "../attention/attention-materials-schema.ts";
+import {
   AttentionHoldInput,
   attentionHoldError,
   heldRun,
@@ -332,12 +341,6 @@ import {
   questionAskAt,
   releaseHold,
 } from "../attention/holds.ts";
-import {
-  AttentionMaterialsError,
-  type AttentionMaterialsService,
-  createAttentionMaterials,
-} from "../attention-materials.ts";
-import { MaterialsOptionImages, MaterialsStoryShape } from "../attention-materials-schema.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
