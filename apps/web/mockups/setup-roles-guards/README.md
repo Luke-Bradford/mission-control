@@ -87,4 +87,9 @@ Provenance (`docs/runbooks/visual-qa.md`): FLIGHT rendered `index.html` in headl
 - `screenshots/<repo>-<width>-<theme>.png`: `demo-app` and `demo-site`, dark and light, at 1280×900, 1600×1000, 1920×940 and 2560×1145 (16 files).
 - `screenshots/demo-app-1600x700-<theme>.png`: 1600×700, where the page scrolls (2 files).
 - `screenshots/state-<state>-1920-dark.png`: `normal`, `loading`, `empty`, `long`, `error`, `stale`, `disconnected` and `conflict` at 1920×940 dark (8 files).
+- `screenshots/demo-app-1920-dark-full.png`, `demo-app-1920-light-full.png`, `demo-app-1280-dark-full.png`: the whole page, so the Authority rows, the Roles table and the Planned roles disclosure show (3 files).
+- `screenshots/focus-prompt-drawer-retro-1920-dark.png`: the prompt drawer open on RETRO.
+- `screenshots/focus-checks-error-demo-site-1920-dark.png`: Edit on `checks` after adding a value with `&&`; the error shows and the text stays.
+- `screenshots/focus-long-uat-labels-expanded-1920-dark.png`: the long state with `+n` on `uat.labels` expanded to 30 chips.
+- `screenshots/focus-conflict-save-1920-dark.png`: the conflict state after adding `design-review` and pressing Save.
 - Today's Roles page: the hub render `hud-shot:2c0c18bd92bba608b5d52fce30280063` (1600×1000), captured by FLIGHT from the running hub.

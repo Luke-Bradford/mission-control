@@ -206,7 +206,7 @@ function openEditor(key){
   ed.innerHTML=`<div class="chips"></div><label>Add a value<span class="addrow"><input type="text" autocomplete="off" aria-label="Add a value to ${key}"><button type="button" data-add>Add</button></span></label>${err}<div class="actions"><button type="button" class="primary" data-save data-write="needs-build">Save</button><button type="button" data-cancel>Cancel</button></div>`;
   row.appendChild(ed);draw();
   const input=ed.querySelector('input');
-  const add=()=>{const v=input.value.trim();const p=problem(key,v);const e=ed.querySelector('.field-error');
+  const add=()=>{const v=input.value.trim();const p=problem(key,v)||(draft.includes(v)||(data[key].repoAdds||[]).includes(v)?'is already in the list':null);const e=ed.querySelector('.field-error');
    if(p){e.textContent=p;return}e.textContent='';draft.push(v);input.value='';draw()};
   ed.querySelector('[data-add]').onclick=add;
   input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();add()}};

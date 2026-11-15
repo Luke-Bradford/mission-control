@@ -182,6 +182,19 @@ describe("Setup Roles & guards mockup", () => {
     expect(window.fetch).toBeUndefined();
   });
 
+  it("refuses a value already in the list", () => {
+    const document = render("?repo=demo-site");
+    const row = document.querySelector('[data-key="uat.paths"]');
+    row?.querySelector<HTMLElement>("[data-edit]")?.click();
+    const input = row?.querySelector<HTMLInputElement>("input");
+    if (!input) throw new Error("no editor field");
+    input.value = "content/**";
+    row?.querySelector<HTMLElement>("[data-add]")?.click();
+    expect(row?.querySelector(".field-error")?.textContent).toBe("is already in the list");
+    expect(row?.querySelectorAll(".editor .chip")).toHaveLength(1);
+    expect(input.value).toBe("content/**");
+  });
+
   it("keeps the repo file's added checks after a save", () => {
     const document = render("?repo=demo-app");
     const row = document.querySelector('[data-key="checks"]');
