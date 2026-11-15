@@ -57,6 +57,35 @@ function readBound(store: Store, flightId: string): (Rank & { id: string }) | nu
   }
 }
 
+/**
+ * Ids of the end-of-turn texts to leave out of the thread: a turn (from one `op` line to the next)
+ * that ends on text, after FLIGHT messaged the operator in it. The reply is the answer; the end
+ * text stays in the transcript and on the run.
+ */
+function endTextsAfterOwnReply(
+  events: readonly StreamEvent[],
+  replies: readonly number[],
+): Set<string> {
+  const dropped = new Set<string>();
+  let turnStart: number | null = null;
+  let last: StreamEvent | null = null;
+  const close = () => {
+    if (turnStart !== null && last?.kind === "msg" && last.at !== null) {
+      const end = last.at;
+      if (replies.some((at) => at >= turnStart && at <= end)) dropped.add(last.id);
+    }
+    last = null;
+  };
+  for (const event of events) {
+    if (event.kind === "op") {
+      close();
+      turnStart = event.at;
+    } else if (event.kind === "msg" || event.kind === "tool") last = event;
+  }
+  close();
+  return dropped;
+}
+
 /** The old conversation join used threadMessages' latest three runs. Page the retained sources instead. */
 async function runLines(store: Store, flightId: string, run: SourceRun): Promise<Line[]> {
   if (!run.transcriptPath) return [];
@@ -105,37 +134,42 @@ async function runLines(store: Store, flightId: string, run: SourceRun): Promise
   let orderAt = run.startedAt;
   const seen = new Set<string>();
   const lines: Line[] = [];
+  const ordered: StreamEvent[] = [];
   for (const events of pages.reverse())
     for (const event of events) {
       if (seen.has(event.id)) continue;
       seen.add(event.id);
-      if (event.at !== null) orderAt = event.at;
-      if (event.kind !== "msg" || internal(event.text)) continue;
-      const id = `stream:${run.id}:${event.id}`;
-      const position = commsPosition(id);
-      if (!position) continue;
-      lines.push({
-        at: event.at ?? orderAt,
-        source: position.source,
-        offset: position.offset,
-        block: position.block,
-        message: {
-          id,
-          at: event.at,
-          from: flightId,
-          to: COMMS_CAPCOM,
-          text: event.text,
-          ticket: run.ticket ?? null,
-          label: null,
-          ref: null,
-          replyTo: null,
-          mentions: [],
-          reactions: [],
-          operator: false,
-          senderKind: "flight",
-        },
-      });
+      ordered.push(event);
     }
+  const posted = endTextsAfterOwnReply(ordered, store.flightOperatorMessageTimes(flightId));
+  for (const event of ordered) {
+    if (event.at !== null) orderAt = event.at;
+    if (event.kind !== "msg" || internal(event.text) || posted.has(event.id)) continue;
+    const id = `stream:${run.id}:${event.id}`;
+    const position = commsPosition(id);
+    if (!position) continue;
+    lines.push({
+      at: event.at ?? orderAt,
+      source: position.source,
+      offset: position.offset,
+      block: position.block,
+      message: {
+        id,
+        at: event.at,
+        from: flightId,
+        to: COMMS_CAPCOM,
+        text: event.text,
+        ticket: run.ticket ?? null,
+        label: null,
+        ref: null,
+        replyTo: null,
+        mentions: [],
+        reactions: [],
+        operator: false,
+        senderKind: "flight",
+      },
+    });
+  }
   const bytes = lines.reduce((sum, line) => sum + Buffer.byteLength(line.message.text) + 256, 0);
   const after = statNoted(transcriptFilePath(run.transcriptPath));
   if (stamp.size === after.size && stamp.mtimeMs === after.mtimeMs && bytes <= CACHE_BYTES) {

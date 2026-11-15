@@ -529,3 +529,47 @@ it("includes an actual operator choice for this crew without exposing ordinary p
     }),
   ]);
 });
+
+const wake = (at: number) => ({
+  type: "user",
+  timestamp: new Date(at).toISOString(),
+  message: { content: "[Mission Control] woke you" },
+});
+const toolUse = (at: number) => ({
+  type: "assistant",
+  timestamp: new Date(at).toISOString(),
+  message: { content: [{ type: "tool_use", id: "t1", name: "mc", input: {} }] },
+});
+const texts = (result: { messages: { text: string }[] }) => result.messages.map((m) => m.text);
+
+it("a turn that messaged the operator adds one message: the end text is not posted again", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("Looking at it.", AT + 2),
+    toolUse(AT + 3),
+    text("Summary of the turn.", AT + 5),
+  ]);
+  stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Looking at it.", "Here is your answer."]);
+});
+
+it("a turn that messaged nobody still shows its end text once", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("Looking at it.", AT + 2),
+    toolUse(AT + 3),
+    text("Summary of the turn.", AT + 5),
+  ]);
+  expect(texts(await page())).toEqual(["Looking at it.", "Summary of the turn."]);
+});
+
+it("a message in an earlier turn does not hide a later turn's end text", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("Done one.", AT + 3),
+    wake(AT + 10),
+    text("Done two.", AT + 12),
+  ]);
+  stored("Answer to the first.", AT + 2, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Answer to the first.", "Done two."]);
+});

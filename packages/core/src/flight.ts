@@ -1558,7 +1558,7 @@ export const flightDownText = (reason: string): string =>
 export const flightStartFailedText = (reason: string): string =>
   `FLIGHT could not be kept running: ${reason}. Start it again from FLIGHT's dock once that is fixed.`;
 export const WAKE_ASK =
-  "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary for the operator.";
+  "Act on it with your mc tools (mc flight_state reads the current state), then end your turn with your summary. It is posted to the operator only if you have not already replied to them this turn.";
 
 /** "1 change", "2 changes". */
 export const counted = (n: number, one: string, many: string): string =>

@@ -5233,6 +5233,10 @@ export class Store {
     return this.commsStore.latestFlightStoredReplyAt(flightId);
   }
 
+  flightOperatorMessageTimes(flightId: string): number[] {
+    return this.commsStore.flightOperatorMessageTimes(flightId);
+  }
+
   flightConversationUnread(
     flightId: string,
     seats: readonly string[],
