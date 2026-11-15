@@ -146,7 +146,8 @@ import { resolveRepoRules } from "../src/engine/rule-config.ts";
 import { parseRepoRules, RepoRulesError } from "../src/engine/rules.ts";
 import { tickLogOf } from "../src/engine/ticks.ts";
 import type { Move } from "../src/github/board.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
+import { activity } from "../src/hud/views.ts";
 import { externalReviewKey } from "../src/review/external.ts";
 import {
   type SeatBusy,
@@ -156,7 +157,6 @@ import {
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";
-import { activity } from "../src/views.ts";
 import { defined } from "./defined.ts";
 
 const START = Date.parse("2026-10-21T10:00:00Z");
@@ -370,6 +370,8 @@ interface Harness {
   starts: { seat: string; id: number }[];
   /** Makes the next startReview throw. */
   startError: Error | null;
+  /** Makes the startReview of one review throw (the others start). */
+  startErrorFor: ((id: number) => Error | null) | null;
   /** Runs inside startReview, before it answers. */
   duringStart: (() => void) | null;
   /** PR-body edits, and the next results of postMinorFindings (empty: success). */
@@ -456,6 +458,7 @@ function harness(): Harness {
     busyList: [],
     starts: [],
     startError: null,
+    startErrorFor: null,
     duringStart: null,
     minorCalls: [],
     minorResults: [],
@@ -683,6 +686,8 @@ function harness(): Harness {
             x.starts.push({ seat, id });
             x.duringStart?.();
             if (x.startError !== null) throw x.startError;
+            const refused = x.startErrorFor?.(id) ?? null;
+            if (refused !== null) throw refused;
             return { runId: retroRun(id, seat) };
           },
         },
@@ -4006,6 +4011,27 @@ describe("the engine runs reviews", () => {
     await toReview();
     expect(first()).toMatchObject({ state: "failed", failure });
     expect(loopTexts().some((line) => line.includes(failure))).toBe(true);
+  });
+
+  it("a review that cannot start yet stays queued and the seat starts its next one", async () => {
+    const notReady = new SupervisorError(
+      409,
+      "screenshot evidence is not ready for this review head",
+    );
+    h.startErrorFor = (id) => (id === need(reviewRows()[0]).id ? notReady : null);
+    await toReview();
+    expect(first().state).toBe("queued");
+    await secondAuthor();
+    const older = first();
+    const newer = need(store.reviewsOfRun(RUN2)[0]);
+    expect(older.state).toBe("queued");
+    expect(newer.state).toBe("running");
+    expect(h.starts.at(-1)).toEqual({ seat: RETRO, id: newer.id });
+    // its evidence now exists: the older review starts
+    h.startErrorFor = null;
+    store.setReviewState(newer.id, ["running"], "reported", { at: clock });
+    await h.engine.tick();
+    expect(first().state).toBe("running");
   });
 
   it("queues and starts one review", async () => {

@@ -23,7 +23,7 @@ import {
 import { mergeExternalPr } from "../src/flight/external-merge.ts";
 import { operatorCall } from "../src/flight/operator-call.ts";
 import { grantApproval, mergeFloorScope } from "../src/flight-approvals.ts";
-import { attentionItems } from "../src/hud.ts";
+import { attentionItems } from "../src/hud/hud.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { ownsPr } from "../src/ownership.ts";
 import { prAcceptanceFor, prUat } from "../src/pr/uat.ts";

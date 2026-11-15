@@ -2687,7 +2687,9 @@ export function createEngine(deps: EngineDeps): Engine {
         void reconcileRun(author.id);
       }
     }
-    // 4. each free scratch seat starts its oldest wanted review. Existing reviews continue.
+    // 4. each free scratch seat starts its oldest wanted review that can start. One refused for now
+    // (its screenshots are not ready) stays queued and does not stop the seat's later ones.
+    // Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
     if (storedMachineCapacity(store, now(), capacityConfig).blocked) return;
     const scratch = (config.crew?.sessions ?? [])
@@ -2736,7 +2738,11 @@ export function createEngine(deps: EngineDeps): Engine {
           if (isExternalReview(row) && message === REVIEW_NOT_WANTED) {
             dropReview(row);
           } else if (isTransientStart(e)) {
+            // it stays queued and starts once it can (its screenshots may not be ready); the
+            // seat's next queued review is tried in this pass
             store.setReviewState(row.id, ["starting"], "queued", { at: now() });
+            void reconcileRun(row.authorRunId);
+            continue;
           } else {
             const failure = Array.from(message).slice(0, STDERR_TEXT_MAX).join("");
             if (store.setReviewState(row.id, ["starting"], "failed", { at: now(), failure })) {

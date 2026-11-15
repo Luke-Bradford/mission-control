@@ -11,9 +11,9 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import type { CcConfig } from "../src/config.ts";
+import { overviewTimeline } from "../src/hud/timeline.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
-import { overviewTimeline } from "../src/timeline.ts";
 
 const NOW = 10_000_000;
 const FROM = NOW - TIMELINE_WINDOW_MS;

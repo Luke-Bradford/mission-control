@@ -76,7 +76,7 @@ export interface AutoCliDeps {
 }
 
 const heldKey = (tool: AutoCliTool) => `cli-auto-held:${tool}`;
-/** The note key prefix of a CLI auto-rollback; hud.ts lists it as a hub stop. */
+/** The note key prefix of a CLI auto-rollback; hud/hud.ts lists it as a hub stop. */
 export const CLI_AUTO_NOTE_PREFIX = "cli-auto";
 const noteKey = (tool: AutoCliTool, version: string) =>
   `${CLI_AUTO_NOTE_PREFIX}:${tool}:${version}`;

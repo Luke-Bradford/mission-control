@@ -317,7 +317,7 @@ it("requires area keywords nearby and does not match partial aliases or referenc
 });
 
 it("feeds existing person attention without creating drafts or publishing arrivals", async () => {
-  const { attentionItems } = await import("../src/hud.ts");
+  const { attentionItems } = await import("../src/hud/hud.ts");
   const { config, store } = setup();
   await collectTeams(config, store, 1_000, {
     token: async () => "secret",
@@ -382,7 +382,7 @@ it("refuses a channel message continuation that changes to a reply endpoint", as
 });
 
 it("splits asks from digest signals and preserves legacy person items", async () => {
-  const { attentionItems } = await import("../src/hud.ts");
+  const { attentionItems } = await import("../src/hud/hud.ts");
   const { flightState, pending, wakeFacts, flightArrivalSource } = await import(
     "../src/flight/state.ts"
   );

@@ -5,7 +5,7 @@ import {
   percentile,
   startOfLocalDay,
 } from "@mc/core";
-import { inProgressOf, pipelineStages } from "./overview.ts";
+import { inProgressOf, pipelineStages } from "./hud/overview.ts";
 import { runSpend } from "./spend/spend.ts";
 import type { Store } from "./store.ts";
 

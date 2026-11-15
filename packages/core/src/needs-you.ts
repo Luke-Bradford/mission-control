@@ -49,7 +49,7 @@ export type NeedsYou = readonly AttentionItem[] & { readonly [NEEDS_YOU]: true }
  * dock's and Comms' "Waiting on you", Comms' Decisions, FLIGHT's pulse, Stand-up focus and Operator
  * actions, the Overview banner, KPI and Live log filter, and the Board's "You:" chips and Needs-me
  * filter. The metric registry's Needs you (`METRICS.needsYou`) is its length, and the server's
- * Overview history (apps/server/src/overview.ts) counts the same set.
+ * Overview history (apps/server/src/hud/overview.ts) counts the same set.
  */
 export function needsYouItems(items: readonly AttentionItem[] | undefined): NeedsYou {
   const seen = new Set<string>();

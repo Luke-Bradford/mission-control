@@ -2,7 +2,7 @@ import type { TestLockState } from "@mc/core";
 import { COMMS_CAPCOM, COMMS_MC } from "@mc/core";
 import type { ChangeBus } from "../bus.ts";
 import { sendComms, validateCommsText } from "../comms/index.ts";
-import { attentionItems, NO_LOCK } from "../hud.ts";
+import { attentionItems, NO_LOCK } from "../hud/hud.ts";
 import {
   prepareQueueReorderSnapshot,
   type QueueReorderDeps,

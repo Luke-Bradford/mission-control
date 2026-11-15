@@ -25,7 +25,7 @@ import {
   seatMovingText,
   watchWaitText,
 } from "../src/crew-apply.ts";
-import { crew } from "../src/hud.ts";
+import { crew } from "../src/hud/hud.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import type { SupervisorEvent } from "../src/runtime/supervisor.ts";
 import { Store } from "../src/store.ts";

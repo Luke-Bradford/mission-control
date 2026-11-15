@@ -1010,7 +1010,7 @@ export interface CrewLoop {
   planned?: boolean;
   /** The current step's try and its limit (ci: CI tries; review: review rounds), else null. */
   tries?: { n: number; max: number; failures?: number; runs?: number } | null;
-  /** What the run waits on (runWait in apps/server/src/hud.ts), else null. */
+  /** What the run waits on (runWait in apps/server/src/hud/hud.ts), else null. */
   wait?: LoopWait | null;
   /** When `wait` is "seat" and the seat is on another ticket: "rework waiting on GUIDO-1 (behind #12)". */
   waitText?: string | null;

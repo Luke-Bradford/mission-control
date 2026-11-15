@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import type { HealthRow } from "@mc/core";
-import type { Topic } from "./bus.ts";
+import type { Topic } from "../bus.ts";
 
 /** Builds what a topic's page would show; the gate compares it with the last one it saw. */
 export type TopicContent = Partial<Record<Topic, () => unknown>>;
