@@ -735,7 +735,10 @@ describe("startReview", () => {
       },
       [],
     );
-    const { sup } = make({ scratchRetro: true, prEvidence: evidence, prEvidenceRepo: "mc" });
+    const { sup } = make({
+      scratchRetro: true,
+      evidence: { store: evidence, repoId: "mc", pages: async () => ["board"] },
+    });
     sup.start();
     await expect(sup.startReview("retro", r.reviewId)).rejects.toThrow("image is missing");
     expect(userLines()).toHaveLength(0);
@@ -769,7 +772,7 @@ describe("startReview", () => {
       });
       const { sup } = make({
         scratchRetro: true,
-        ...evidenceReviewDeps(capture, evidenceStore, "mc"),
+        evidence: evidenceReviewDeps(capture, evidenceStore, "mc"),
       });
       sup.start();
       const go = sup.startReview("retro", r.reviewId);

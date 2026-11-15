@@ -5,6 +5,7 @@ import { EVIDENCE_KINDS, EVIDENCE_SCHEMES, type EvidenceManifest } from "@mc/cor
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createPrEvidence,
+  evidenceReviewDeps,
   type EvidenceTarget,
   type PrEvidenceDeps,
 } from "../src/pr-evidence/capture.ts";
@@ -859,5 +860,16 @@ describe("PrEvidence gate", () => {
         paths: [...WEB, "apps/web/src/map/Treemap.tsx"],
       }),
     ).toContain("map");
+  });
+});
+
+describe("evidenceReviewDeps", () => {
+  it("hands the review start check the capture's own page resolver", async () => {
+    const target: EvidenceTarget = { repoId: "mc", pr: 7, sha: HEAD, paths: ["apps/web/src/x.ts"] };
+    const pages = vi.fn(async () => ["board"] as const);
+    const deps = evidenceReviewDeps({ pages } as never, {} as never, "mc");
+    expect(deps.repoId).toBe("mc");
+    await expect(deps.pages(target)).resolves.toEqual(["board"]);
+    expect(pages).toHaveBeenCalledWith(target);
   });
 });

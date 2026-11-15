@@ -529,21 +529,22 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
 }
 
 /**
- * What the supervisor needs to hold a web review for screenshot evidence: the store, the one repo,
- * and the pages the capture itself reads for a head, so both agree on what a PR touches.
+ * What the supervisor needs to hold a web review for screenshot evidence. `pages` is required, so
+ * a caller cannot fall back to the folder rule: the capture and the review start check must agree
+ * on what a head touches.
  */
+export interface ReviewEvidenceDeps {
+  store: PrEvidenceStore;
+  /** The one repo whose web PRs carry screenshot pairs. */
+  repoId: string;
+  /** The pages the capture itself reads for a head. */
+  pages(target: EvidenceTarget): Promise<readonly EvidencePage[]>;
+}
+
 export function evidenceReviewDeps(
   evidence: PrEvidence,
   store: PrEvidenceStore,
   repoId: string,
-): {
-  prEvidence: PrEvidenceStore;
-  prEvidenceRepo: string;
-  prEvidencePages: (target: EvidenceTarget) => Promise<readonly EvidencePage[]>;
-} {
-  return {
-    prEvidence: store,
-    prEvidenceRepo: repoId,
-    prEvidencePages: (target) => evidence.pages(target),
-  };
+): ReviewEvidenceDeps {
+  return { store, repoId, pages: (target) => evidence.pages(target) };
 }

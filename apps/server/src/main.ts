@@ -636,7 +636,7 @@ export async function main(): Promise<void> {
     hubRoot: hubRoot ?? "",
     ...(prEvidence === undefined
       ? {}
-      : evidenceReviewDeps(prEvidence, evidenceStore, previewRepoId as RepoId)),
+      : { evidence: evidenceReviewDeps(prEvidence, evidenceStore, previewRepoId as RepoId) }),
     inbox: (seatId, runId) => commsInboxContext(store, seatId, runId),
     ...(reviewPreviews === undefined ? {} : { reviewPreviews }),
   });
