@@ -60,7 +60,7 @@ export function parsePlan(raw: string): { plan?: Run["plan"] } {
 }
 
 /** A run's stored advice; a value that won't parse is dropped rather than failing every run read. */
-export function parseAdvice(raw: string): { advice?: ModelAdvice } {
+function parseAdvice(raw: string): { advice?: ModelAdvice } {
   try {
     const advice = JSON.parse(raw) as ModelAdvice;
     return advice !== null && typeof advice === "object" ? { advice } : {};
