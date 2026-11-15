@@ -40,7 +40,7 @@ describeRendered("Setup Roles & guards mockup in a browser", () => {
   it(
     "renders each repo and state at the design sizes",
     async () => {
-      const cases: Array<[string, number, number, string, string]> = [];
+      const cases: Array<[string, number, number, "light" | "dark", string]> = [];
       for (const repo of REPOS)
         for (const theme of THEMES)
           for (const [w, h] of SIZES) cases.push([repo, w, h, theme, "normal"]);
