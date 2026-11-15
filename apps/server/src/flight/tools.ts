@@ -3000,6 +3000,16 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     ) {
       return fail(briefNoItemText(key));
     }
+    // noTicket means FLIGHT found the item's own ticket is not the main one: do not look it up
+    const main = parseTicket(
+      structured.ticket ?? (structured.noTicket === undefined ? (item.ticket ?? "") : ""),
+    );
+    const card = main ? store.board(main.repoId).find((b) => b.issueNumber === main.number) : null;
+    // an old card's label that is not P0 to P2 gives way to the priority FLIGHT states (#1869)
+    const cardPriority =
+      card?.priority && (PRIORITIES as readonly string[]).includes(card.priority)
+        ? card.priority
+        : null;
     // a protected item always reaches the operator: it is briefed, never held back
     // (the held Update is FLIGHT's to keep, not to hold: a hold would keep it off the operator's list past its window)
     if (
@@ -3049,14 +3059,10 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
       );
       if (faults.length > 0) return fail(`${BRIEF_ENTRY_REFUSED}${faults.join("; ")}.`);
       // rule 4's added parts (#1510)
-      const main = parseTicket(structured.ticket ?? item.ticket ?? "");
-      const card = main
-        ? store.board(main.repoId).find((b) => b.issueNumber === main.number)
-        : null;
       const partFaults = briefPartFaults({
         title: structured.title,
         ask: structured.ask ?? "",
-        priority: card?.priority ?? structured.priority ?? null,
+        priority: cardPriority ?? structured.priority ?? null,
         hasTicket: main !== null || item.url !== null,
         noTicket: structured.noTicket,
         looks: structured.looks === true,
@@ -3101,7 +3107,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     let briefedAt = at;
     try {
       // each #n and PR n comes back with its title, so a number never stands alone (#1510)
-      const home = parseTicket(structured.ticket ?? item.ticket ?? "")?.repoId ?? item.repoId;
+      const home = main?.repoId ?? item.repoId;
       const titled = (t: string): string =>
         home === null
           ? t
@@ -3112,11 +3118,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
                   store.pullRequest(home, n)?.title ??
                   null),
             );
-      const mainCard = (() => {
-        const m = parseTicket(structured.ticket ?? item.ticket ?? "");
-        return m ? store.board(m.repoId).find((b) => b.issueNumber === m.number) : undefined;
-      })();
-      const priority = mainCard?.priority ?? structured.priority;
+      const priority = cardPriority ?? structured.priority;
       const content = {
         ...candidate,
         recommendation: titled(recommendation),
