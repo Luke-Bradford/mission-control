@@ -63,6 +63,7 @@ import {
   MC_PLAN_NO_TESTS,
   MC_PLAN_NOT_FAO,
   MC_PLAN_PROFILE_ONLY,
+  MC_PLAN_STEPS_PLANNER_ONLY,
   MC_PLAN_WRITTEN,
   MC_PLAN_WRITTEN_CONTINUE,
   MC_PR_BODY_EMPTY,
@@ -5887,6 +5888,26 @@ describe("report_plan", () => {
     expect(ghCalls()).toEqual([]);
   });
 
+  it("refuses steps from a build seat", async () => {
+    const runId = "guido:steps";
+    store.upsertRun(run({ id: runId, agentId: "guido-1", branch: "guido/7", ticket: "mc#7" }));
+    store.setSeatSession({
+      seatId: "guido-1",
+      runId,
+      cliSessionId: "cli-build",
+      state: "running",
+      reason: null,
+      worktree: null,
+      updatedAt: NOW,
+    });
+    const steps = [{ step: "build", model: "opus-5.5", reason: "hard" }];
+    expect(
+      await tool("report_plan", pt).call({ seatId: "guido-1", runId }, { plan: PLAN, steps }),
+    ).toEqual(refused(MC_PLAN_STEPS_PLANNER_ONLY));
+    expect(store.modelAdvice("mc", 7, "build")).toBeNull();
+    expect(ghCalls()).toEqual([]);
+  });
+
   it("refuses profile fields from a build seat", async () => {
     const runId = "guido:profile";
     store.upsertRun(run({ id: runId, agentId: "guido-1", branch: "guido/7", ticket: "mc#7" }));
@@ -6330,6 +6351,37 @@ describe("report_plan", () => {
       refused(planNoProfilesText("boom")),
     );
     expect(ghCalls()).toEqual([]);
+  });
+
+  it("report_plan records model advice per step", async () => {
+    expect(
+      await planWith({
+        steps: [
+          { step: "build", model: "sonnet-5.5", effort: "medium", reason: "small change" },
+          { step: "review", model: "opus-5.5", reason: "safety step" },
+        ],
+      }),
+    ).toEqual({ text: MC_PLAN_WRITTEN });
+    expect(store.modelAdvice("mc", 7, "build")).toMatchObject({
+      step: "build",
+      model: "sonnet-5.5",
+      effort: "medium",
+      reason: "small change",
+      by: "planner",
+    });
+    expect(store.modelAdvice("mc", 7, "review")).toMatchObject({ model: "opus-5.5", effort: null });
+    expect(store.modelAdvice("mc", 7, "plan")).toBeNull();
+  });
+
+  it("refuses a step given twice before gh is called, and records no advice when the plan fails", async () => {
+    const one = { step: "build", model: "sonnet-5.5", reason: "r" };
+    expect(await planWith({ steps: [one, one] })).toEqual(
+      refused(`${MC_BAD_ARGS}steps: each step may appear once`),
+    );
+    expect(ghCalls()).toEqual([]);
+    ghState(view("Do X.", "CLOSED"));
+    await planWith({ steps: [one] });
+    expect(store.modelAdvice("mc", 7, "build")).toBeNull();
   });
 
   it("takes a profile and its reason together or not at all", async () => {

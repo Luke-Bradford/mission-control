@@ -1,4 +1,5 @@
 import type { CommsSenderKind } from "./comms.ts";
+import type { ModelAdvice } from "./model-advice.ts";
 import type { ProfileStep, ReviewDepth } from "./profiles-model.ts";
 import type { ReportedTest, ReviewVerdict } from "./review.ts";
 import type { ConfigSeatMode, CrewEffort } from "./runtime.ts";
@@ -661,7 +662,18 @@ export interface TicketPrView {
 
 /** One entry of the ticket's timeline; `key` is stable and orders entries that share a time. */
 export type TicketEvent = { key: string; at: number } & (
-  | { kind: "run"; runId: string; seat: AgentId; status: RunStatus; phase: string | null }
+  | {
+      kind: "run";
+      runId: string;
+      seat: AgentId;
+      status: RunStatus;
+      phase: string | null;
+      /** What the run ran on; null when the CLI never reported a model or used its default effort. */
+      model?: string | null;
+      effort?: string | null;
+      /** The model and effort recommended for its step when it started; absent when none was recorded. */
+      advice?: ModelAdvice;
+    }
   | {
       kind: "review";
       prNumber: number;

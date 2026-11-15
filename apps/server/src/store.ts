@@ -21,6 +21,7 @@ import type {
 } from "@mc/core";
 import {
   type AccountId,
+  type AdviceStep,
   type AgentId,
   ASKING_RUN_ENDED_REASON,
   type AttentionBrief,
@@ -113,6 +114,7 @@ import {
   linkEscapedDefect,
   type MachineSample,
   type MergedPrFacts,
+  type ModelAdvice,
   memoryTopicKey,
   OLDER_FINDINGS_MAX,
   overusePrevention,
@@ -1007,6 +1009,8 @@ export class Store {
       ["profile_hash", "TEXT"],
       // The plan at run creation; later transcript folds never rewrite it.
       ["plan", "TEXT"],
+      // The model advice for the run's step at creation; kept when a later write has none.
+      ["advice", "TEXT"],
       ["account_id", "TEXT"],
       ["effort", "TEXT"],
       ["prompt_hash", "TEXT"],
@@ -1374,8 +1378,8 @@ export class Store {
         `INSERT INTO runs (id, agent_id, repo_id, seq, started_at, ended_at, status, session_id,
            model, branch, ticket, cost_usd, tokens, transcript_path, prs, summary, folded, loop,
            ticket_title, review_id, cli_version, profile, profile_hash, plan, vendor, latest_plan,
-           account_id, effort, prompt_hash, loop_kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           account_id, effort, prompt_hash, loop_kind, advice)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            agent_id = excluded.agent_id, repo_id = excluded.repo_id, seq = excluded.seq,
            started_at = excluded.started_at, ended_at = excluded.ended_at, status = excluded.status,
@@ -1389,7 +1393,8 @@ export class Store {
            account_id = COALESCE(account_id, excluded.account_id),
            effort = COALESCE(effort, excluded.effort),
            prompt_hash = COALESCE(prompt_hash, excluded.prompt_hash),
-           loop_kind = COALESCE(loop_kind, excluded.loop_kind)`,
+           loop_kind = COALESCE(loop_kind, excluded.loop_kind),
+           advice = COALESCE(advice, excluded.advice)`,
       )
       .run(
         r.id,
@@ -1422,6 +1427,7 @@ export class Store {
         r.effort ?? null,
         r.promptHash ?? null,
         r.loopKind ?? null,
+        r.advice === undefined ? null : JSON.stringify(r.advice),
       );
   }
 
@@ -1922,6 +1928,36 @@ export class Store {
           profile: r.profile as string,
           reason: r.reason as string,
           by: r.by as ProfileOverride["by"],
+        }
+      : null;
+  }
+
+  /** Records the model and effort recommended for a ticket's step; a later write replaces it. */
+  setModelAdvice(repoId: RepoId, issue: number, a: ModelAdvice): void {
+    this.db
+      .prepare(
+        `INSERT INTO model_advice (repo_id, issue, step, model, effort, reason, by, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(repo_id, issue, step) DO UPDATE SET model = excluded.model,
+           effort = excluded.effort, reason = excluded.reason, by = excluded.by, at = excluded.at`,
+      )
+      .run(repoId, issue, a.step, a.model, a.effort, a.reason, a.by, a.at);
+  }
+
+  modelAdvice(repoId: RepoId, issue: number, step: AdviceStep): ModelAdvice | null {
+    const r = this.db
+      .prepare(
+        "SELECT model, effort, reason, by, at FROM model_advice WHERE repo_id = ? AND issue = ? AND step = ?",
+      )
+      .get(repoId, issue, step) as Row | undefined;
+    return r
+      ? {
+          step,
+          model: r.model as string | null,
+          effort: r.effort as string | null,
+          reason: r.reason as string,
+          by: r.by as ModelAdvice["by"],
+          at: r.at as number,
         }
       : null;
   }

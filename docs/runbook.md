@@ -266,6 +266,7 @@ profiles:
 ```
 
 - **Routing.** The first profile with a label the ticket has wins. With none, Size XS or S takes `small-change`; anything else, or no Size, takes `feature`. FLIGHT (`start_seat`) and the planner (`report_plan`) may name another profile with `profile` and `profile_reason`; the choice is kept per ticket with its reason, and the profile keeps every check the routed one required.
+- **Model advice.** Each plan, build or review run starts with a recommended model and effort for its step, with the reason: the planner's (`steps` of `report_plan`, only when Audit's model table or a trial result supports it) or, with none, the hub's default (the seat's own model and effort). The ticket page shows what the run ran on beside what was recommended. The advice is a record: nothing launches with it yet, and a RETRO change stays FLIGHT's call.
 - **Snapshot.** Each build or planner start copies the chosen profile, with a sha256 hash, onto its run. Editing the file changes later starts only. The file is read afresh on every start.
 - **A file that cannot be loaded** refuses starts (502, or FLIGHT's refusal text) naming the problem; the hub keeps running. Fix the file and the next start works.
 - **Limits.** The `tries` and `rounds` of the snapshot replace the defaults (3 and 3). The engine still judges the PR's combined CI; `checks` is briefed, not enforced one by one.

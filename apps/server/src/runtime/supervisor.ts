@@ -40,6 +40,7 @@ import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import {
   AWAY_QUOTA_REFUSED,
+  adviceStepOf,
   BLOCKING_SEVERITIES,
   CANNOT_START,
   CODEX_COMMAND,
@@ -73,6 +74,7 @@ import {
   grantRefusedText,
   grantUngrantableText,
   guardHookCommand,
+  HUB_DEFAULT_REASON,
   HUD_STATE_LABEL,
   handoffText,
   hasPlanSection,
@@ -80,9 +82,11 @@ import {
   isProtectedPath,
   isResumeLineKey,
   LOOPBACK_HOST,
+  type LoopKind,
   MC_TMP_DIR_NAME,
   MCP_PATH,
   type McToolName,
+  type ModelAdvice,
   mainConflictText,
   mergedMainText,
   modeOfSeat,
@@ -882,6 +886,33 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const markInboxRead = (seatId: string, inbox: InboxContext) =>
     store.markCommsInboxRead(seatId, inbox.messageIds);
   const crew = config.crew;
+
+  /**
+   * The advice a new run starts with: the one recorded for its ticket and step, else the hub's
+   * default (the seat's own model and effort), which is recorded too. A loop with no step gets none.
+   */
+  function adviceFor(
+    repoId: RepoId,
+    issue: number,
+    loop: LoopKind,
+    seat: CrewSeatConfig,
+    at: number,
+  ): ModelAdvice | null {
+    const step = adviceStepOf(loop);
+    if (step === null) return null;
+    const stored = store.modelAdvice(repoId, issue, step);
+    if (stored !== null) return stored;
+    const fallback: ModelAdvice = {
+      step,
+      model: seat.model,
+      effort: seat.effort ?? null,
+      reason: HUB_DEFAULT_REASON,
+      by: "hub",
+      at,
+    };
+    store.setModelAdvice(repoId, issue, fallback);
+    return fallback;
+  }
 
   function seatForAccount(seat: CrewSeatConfig, accountId: string): CrewSeatConfig {
     const account = config.accounts.find((a) => a.id === accountId);
@@ -3661,6 +3692,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       let runId = `${seatId}:${compactUtc(startedAt)}`;
       if (store.run(runId) !== null) runId = `${runId}-${seq}`;
       const cliSessionId = randomUUID();
+      const advice = adviceFor(info.repo.id, issue, def.loop, info.seat, startedAt);
       const handoffLoop =
         handoff && !readOnly && !planner
           ? inheritedHandoffLoop(store.run(handoff.runId)?.loop, opts?.loop)
@@ -3704,6 +3736,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           : {}),
         profile: { ...chosen, hash: profileHash(chosen.profile) },
         ...(plan === undefined ? {} : { plan }),
+        ...(advice === null ? {} : { advice }),
       };
       if (opts?.override) store.setProfileOverride(info.repo.id, issue, opts.override, startedAt);
       const handoffCommits =

@@ -26,6 +26,7 @@ export * from "./map-fixture.ts";
 export * from "./map-wire.ts";
 export * from "./mcp.ts";
 export * from "./metrics.ts";
+export * from "./model-advice.ts";
 export * from "./needs-you.ts";
 export * from "./needs-you-actions.ts";
 export * from "./needs-you-entry.ts";

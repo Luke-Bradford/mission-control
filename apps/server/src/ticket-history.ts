@@ -182,6 +182,9 @@ export function ticketHistory(i: TicketHistoryInput): TicketHistory | null {
       seat: r.agentId,
       status: r.status,
       phase: r.loop?.phase ?? null,
+      model: r.model,
+      effort: r.effort ?? null,
+      ...(r.advice === undefined ? {} : { advice: r.advice }),
     });
   for (const pr of prs) {
     for (const v of pr.rounds)
