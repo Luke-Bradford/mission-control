@@ -8418,6 +8418,21 @@ describe("superuser housekeeping", () => {
       true,
     );
   });
+  it("answers a repo-less held Update note as protected, not missing (#1886)", async () => {
+    elevated();
+    store.raiseNote({
+      key: HUB_UPDATE_HELD_KEY,
+      kind: "blocked",
+      runId: null,
+      seatId: null,
+      repoId: null,
+      text: "A new version is waiting.",
+      at: NOW,
+    });
+    const r = await call("dismiss_item", { key: `note:${HUB_UPDATE_HELD_KEY}` });
+    expect(r).toHaveProperty("isError", true);
+    expect(JSON.stringify(r)).not.toContain("No open item with that key");
+  });
   it.each(["stopped", "account", "approval"])(
     "dismiss_item respects real %s records even for ended runs",
     async (hold) => {

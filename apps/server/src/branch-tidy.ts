@@ -15,7 +15,7 @@ import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import type { CcConfig } from "./config.ts";
 import type { GhRunner } from "./mcp/gh.ts";
-import { ownsBranch } from "./ownership.ts";
+import { ownsBranch } from "./queue/ownership.ts";
 import { CREW_GIT_SLOW_MS } from "./runtime/checkouts.ts";
 import { crewGit } from "./runtime/git.ts";
 import { crewDir } from "./store/crew-paths.ts";

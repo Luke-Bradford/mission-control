@@ -108,7 +108,6 @@ import { activeAway } from "../away.ts";
 import { flightQuestion } from "../comms/index.ts";
 import { type CcConfig, configuredAgents, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause } from "../crew-pause.ts";
-import { blockedWork, waitReader } from "../dependencies.ts";
 import { accountAtStop } from "../engine/queue.ts";
 import { stuckPrs } from "../engine/stuck-prs.ts";
 import {
@@ -120,6 +119,7 @@ import {
   questionWithOperator,
 } from "../hud/hud.ts";
 import { prFlow, prFlowFacts, prFlowWakeTimes } from "../pr/flow.ts";
+import { blockedWork, waitReader } from "../queue/dependencies.ts";
 import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";

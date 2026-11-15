@@ -1,5 +1,5 @@
 import { carriedFrom, type PullRequestView, type ReviewRow, reviewFor } from "@mc/core";
-import type { Store } from "./store.ts";
+import type { Store } from "../store.ts";
 
 /**
  * The review of an open PR's current head when it reported blocking findings the loop still

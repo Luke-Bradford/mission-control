@@ -6,8 +6,8 @@
  * limited.
  */
 import type { PullRequestView, RepoId } from "@mc/core";
-import { externalReviewAsked } from "./external-pr-control.ts";
-import type { Store } from "./store.ts";
+import { externalReviewAsked } from "../external-pr-control.ts";
+import type { Store } from "../store.ts";
 
 /** A build run in this store has the branch. An ended run counts; a review run does not. */
 export function ownsBranch(store: Store, repoId: RepoId, branch: string): boolean {

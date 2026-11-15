@@ -3,8 +3,8 @@
  * lives on GitHub: a hub assigns its own `gh` login to the issue when it starts a run, and never
  * deals or starts a ticket assigned to another login. Assigning does not move the card.
  */
-import type { CcConfig } from "./config.ts";
-import type { GhRunner } from "./mcp/gh.ts";
+import type { CcConfig } from "../config.ts";
+import type { GhRunner } from "../mcp/gh.ts";
 
 export const CLAIM_FAILED = "could not claim the ticket on GitHub";
 

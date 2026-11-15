@@ -52,9 +52,9 @@ import {
   seatUnavailable,
 } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
-import { waitReader } from "../dependencies.ts";
 import { matchesConfiguredFocus } from "../focus.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
+import { waitReader } from "../queue/dependencies.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import { CREW_ACTION_FAILED, type Supervisor, SupervisorError } from "../runtime/supervisor.ts";

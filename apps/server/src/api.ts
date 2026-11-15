@@ -300,7 +300,6 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
-import { readDependencyChains } from "./dependency-chains.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
@@ -405,12 +404,13 @@ import {
   type QaReportService,
   qaReportMarkdown,
 } from "./qa/reports.ts";
+import { readDependencyChains } from "./queue/dependency-chains.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
   QueueReorderError,
   resolveQueueReorder,
-} from "./queue-reorder.ts";
+} from "./queue/queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
@@ -6346,6 +6346,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           // FLIGHT's run never applies a shortcut: only a person does
           const out = await updater.update(actor === null ? undefined : { refuseUnsafe: true });
+          // main is now running (or was already): no Update is waiting any more
+          createHeldUpdateNote(store, bus)(null);
           if ("restarting" in out) {
             restarting = true;
             updater.restart();
