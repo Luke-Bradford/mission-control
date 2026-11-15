@@ -75,6 +75,29 @@ describe("lockedCheck", () => {
     expect(lockedCheck(command, CHECKS)).toBe(TYPES);
   });
 
+  it("names the related-tests check for its other spellings, which load the Mac the same", () => {
+    const RELATED = "pnpm -s test:related";
+    const checks = [LINT, RELATED];
+    for (const command of [
+      "pnpm test:related",
+      "pnpm run test:related",
+      "pnpm -s run test:related",
+      "node --experimental-strip-types scripts/check-related.ts",
+      `cd x && pnpm run test:related | tail`,
+    ]) {
+      expect(lockedCheck(command, checks), command).toBe(RELATED);
+    }
+    expect(lockedCheck("pnpm run lint", checks)).toBe(LINT);
+  });
+
+  it("takes no lock for a single test file or another script", () => {
+    const checks = [LINT, "pnpm -s test:related"];
+    expect(lockedCheck("pnpm -s vitest run apps/server/test/a.test.ts", checks)).toBeNull();
+    expect(lockedCheck("pnpm test:related:other", checks)).toBeNull();
+    expect(lockedCheck("pnpm run test:related --foo", checks)).toBeNull();
+    expect(lockedCheck("echo pnpm run test:related", checks)).toBeNull();
+  });
+
   it("names nothing for a command that only mentions or extends a check", () => {
     expect(lockedCheck("echo pnpm -s lint", CHECKS)).toBeNull();
     expect(lockedCheck("pnpm -s lint --fix", CHECKS)).toBeNull();
