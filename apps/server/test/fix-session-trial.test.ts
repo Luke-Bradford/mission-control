@@ -153,6 +153,19 @@ describe("fixSessionTrialView", () => {
     });
   });
 
+  it("takes the true median at an even count, not a rounded one", () => {
+    for (const [i, cost, rewrites] of [
+      [0, 3.2, 0],
+      [1, 3.9, 1],
+    ] as const) {
+      const run = seed("fresh", i, { costUsd: cost });
+      store.saveRunTokenAudit(run.id, NOW, audit(40_000, 400_000, { rewrites }), []);
+    }
+    const { median } = fixSessionTrialView(store, config(true)).arms.fresh;
+    expect(median.costUsd).toBeCloseTo(3.55);
+    expect(median.rewrites).toBe(0.5);
+  });
+
   it("is empty with no run in the trial", () => {
     const view = fixSessionTrialView(store, config(false));
     expect(view.enabled).toBe(false);

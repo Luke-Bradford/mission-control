@@ -45,7 +45,7 @@ const median = (values: readonly number[]): number => {
   const mid = sorted.length >> 1;
   return sorted.length % 2 === 1
     ? (sorted[mid] as number)
-    : Math.round(((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2);
+    : ((sorted[mid - 1] as number) + (sorted[mid] as number)) / 2;
 };
 const sum = (values: readonly number[]): number => values.reduce((s, v) => s + v, 0);
 
