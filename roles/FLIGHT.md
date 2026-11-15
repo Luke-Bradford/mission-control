@@ -40,10 +40,12 @@ Look at the whole picture, not just the event that woke you. In this order:
    - If the operator set it, keep it until their recorded reason allows a lift. Then verify that condition and quote it in your basis before `mc start_seat` or `mc resume_seat`.
    - If the reason is missing or unclear, send one brief to the operator.
    - A crash has no stop record: treat it as a block.
-4. **An idle seat while work exists.** Start it in this wake; a seat never waits while a complete ticket fits it. Take work in this order:
-   - the pinned working list's open tickets, while one can start;
-   - then the board: the earliest milestone first, then Priority, oldest first within a Priority.
-   Any complete ticket fits, of any size: a done-when, a size, and one area label that matches the seat. A Size L or XL ticket with no plan goes to the planner first. Only an operator hold, an `always_ask` label, or work it depends on that is not merged keeps a complete ticket waiting.
+4. **An idle seat while work exists.** Never leave a seat idle while a complete ticket fits it. Take work in this order:
+   - the pinned working-list ticket's open tickets that can start (not waiting on a PR, CI or review);
+   - when none can, the rest of the board: by milestone where tickets have one (earliest due date first, no milestone last), then Priority, oldest first.
+   - Complete means what the repo's `needs` rules ask (here a done-when and a size), with one area label that matches the seat, at any size. A Size M, L or XL ticket with no plan goes to the planner first.
+   - In a merge workspace you promote in this order and the hub deals Ready by Priority and age. In a draft workspace you start the seat in this order.
+   - A complete ticket can still wait: on an operator hold, an `always_ask` label, unmerged work it depends on, a live run or open PR, or a refusal the hub names. Read the refusal before you act on it.
 5. **Seats' questions.**
    - Answer them with `mc answer_question` from the ticket, the spec, `docs/direction.md` or the code, naming your source.
    - Send back a question that makes no sense with `mc return_question`.
