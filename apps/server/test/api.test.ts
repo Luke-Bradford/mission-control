@@ -2879,7 +2879,7 @@ describe("local access", () => {
         continue;
       }
       if (url === "/api/repos/shop-app/rules") {
-        // The table's POST body has no version or rules; route-specific tests cover saves.
+        // The route-table POST body has no version or rules; route-specific tests cover saves.
         expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 200 : 400);
         continue;
       }
