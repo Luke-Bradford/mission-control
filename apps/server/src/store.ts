@@ -3,7 +3,6 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlit
 import type {
   AttentionMaterials,
   BriefChoiceReceipt,
-  ChoiceTargetKind,
   ItemChatMessage,
   ItemDiscussion,
   PersonSource,
@@ -65,7 +64,6 @@ import {
   FLIGHT_INCOMING_LIMIT,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_SIGNALS_SETTING,
-  FLIGHT_WAKE_HEAD,
   FLIGHT_WAKE_STORED_BYTES,
   type FlightArrivalDisposition,
   type FlightDecision,
@@ -113,7 +111,6 @@ import {
   type QaFlowView,
   type QaReviewRoundView,
   type QuestionClosure,
-  type QuestionClosureKind,
   type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
@@ -144,7 +141,6 @@ import {
   testsTouched,
   tokenBaselines,
   type UsageSample,
-  wakeKeyPrefix,
 } from "@mc/core";
 import { CodeHealthReadError } from "./code-health/error.ts";
 import {
@@ -229,21 +225,18 @@ import { flightQueries } from "./store/flight.ts";
 import {
   compactFlightWake,
   evidenceOf,
-  queueRow,
-  seatRow,
   toBoardItem,
   toCiRun,
   toEscalation,
   toGuardHit,
-  toQuestion,
   toReview,
   toRun,
 } from "./store/rows.ts";
 import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
+import { seatQueries } from "./store/seats.ts";
 import {
   ACK_ABSENT_MS,
-  ACTIVE_SEAT_STATES,
   type AgentEvent,
   type AttentionNote,
   AUDIT_RETENTION_DAYS,
@@ -256,7 +249,6 @@ import {
   type CommsRow,
   type CommsSettlement,
   type CrewError,
-  commsMessageNumber,
   type Evidence,
   type FinancialRun,
   FLIGHT_DECISIONS_RETENTION_DAYS,
@@ -277,7 +269,6 @@ import {
   type QuestionChoiceRow,
   type QueueRow,
   type SeatLine,
-  type SeatLineOrigin,
   type SeatQuestion,
   type Stray,
 } from "./store/types.ts";
@@ -1339,6 +1330,18 @@ export class Store {
       (sql) => this.statement(sql),
     );
     return this.flightQueriesCache;
+  }
+
+  private seatQueriesCache: ReturnType<typeof seatQueries> | undefined;
+
+  /** The queries over the seat tables (store/seats.ts); the seat methods below delegate to it. */
+  private get seatQ(): ReturnType<typeof seatQueries> {
+    this.seatQueriesCache ??= seatQueries(
+      this.db,
+      (fn, writeLock) => this.transaction(fn, writeLock),
+      (sql) => this.statement(sql),
+    );
+    return this.seatQueriesCache;
   }
 
   /** The waste checks' queries and the alarms table (spend/waste.ts). */
@@ -5541,43 +5544,22 @@ export class Store {
 
   /** Records a line under `key`; false (and nothing written) when the key is already there. */
   claimLine(key: string, line: SeatLine): boolean {
-    let text = line.text;
-    if (
-      line.origin === "engine" &&
-      key.startsWith(wakeKeyPrefix(line.runId)) &&
-      text.startsWith(FLIGHT_WAKE_HEAD)
-    ) {
-      text = compactFlightWake(text);
-    }
-    const r = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO seat_lines (key, run_id, seat_id, origin, text, at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(key, line.runId, line.seatId, line.origin, text, line.at);
-    return r.changes === 1;
+    return this.seatQ.claimLine(key, line);
   }
 
   /** Frees a key, so its line can be claimed (and sent) again. */
   dropLine(key: string): void {
-    this.db.prepare("DELETE FROM seat_lines WHERE key = ?").run(key);
+    this.seatQ.dropLine(key);
   }
 
   /** The run's claimed line keys, each with the time it was claimed. */
   claimedKeys(runId: string): Record<string, number> {
-    const rows = this.db.prepare("SELECT key, at FROM seat_lines WHERE run_id = ?").all(runId) as {
-      key: string;
-      at: number;
-    }[];
-    return Object.fromEntries(rows.map((r) => [r.key, r.at]));
+    return this.seatQ.claimedKeys(runId);
   }
 
   /** When the engine last sent the run a line, else null. */
   lastEngineLineAt(runId: string): number | null {
-    const r = this.db
-      .prepare("SELECT MAX(at) AS at FROM seat_lines WHERE run_id = ? AND origin = ?")
-      .get(runId, "engine" satisfies SeatLineOrigin) as { at: number | null };
-    return r.at;
+    return this.seatQ.lastEngineLineAt(runId);
   }
 
   /** Records a loop event; false when its key is already recorded. */
@@ -5653,38 +5635,12 @@ export class Store {
    * call made it, so a second click gets the first receipt.
    */
   claimChoice(c: QuestionChoiceRow): { row: QuestionChoiceRow; fresh: boolean } {
-    const r = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO question_choices
-           (key, brief_at, option_id, label, answer, question, ticket, target, target_kind, message_id, chosen_at, chosen_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        c.key,
-        c.briefAt,
-        c.optionId,
-        c.label,
-        c.answer,
-        c.question,
-        c.ticket,
-        c.target,
-        c.targetKind,
-        c.messageId === null ? null : commsMessageNumber(c.messageId),
-        c.chosenAt,
-        c.chosenBy,
-      );
-    const row = this.choice(c.key, c.briefAt);
-    if (row === null) throw new Error("Choice was not stored.");
-    return { row, fresh: Number(r.changes) > 0 };
+    return this.seatQ.claimChoice(c);
   }
 
   /** Names the message that carries a claimed choice's answer. */
   setChoiceMessage(key: string, briefAt: number, messageId: string): void {
-    const n = commsMessageNumber(messageId);
-    if (n !== null)
-      this.db
-        .prepare("UPDATE question_choices SET message_id = ? WHERE key = ? AND brief_at = ?")
-        .run(n, key, briefAt);
+    this.seatQ.setChoiceMessage(key, briefAt, messageId);
   }
 
   /**
@@ -5692,60 +5648,27 @@ export class Store {
    * operator owes a reply to leaves these out: they answer, they do not ask.
    */
   isChoiceAnswer(messageId: string): boolean {
-    const n = commsMessageNumber(messageId);
-    return (
-      n !== null &&
-      this.db.prepare("SELECT 1 FROM question_choices WHERE message_id = ?").get(n) !== undefined
-    );
+    return this.seatQ.isChoiceAnswer(messageId);
   }
 
   /** Drops a claim whose answer could not be sent. */
   releaseChoice(key: string, briefAt: number): void {
-    this.db
-      .prepare("DELETE FROM question_choices WHERE key = ? AND brief_at = ?")
-      .run(key, briefAt);
-  }
-
-  private choiceOf(r: Row): QuestionChoiceRow {
-    return {
-      key: r.key as string,
-      briefAt: r.brief_at as number,
-      optionId: r.option_id as string,
-      label: r.label as string,
-      answer: r.answer as string,
-      question: r.question as string,
-      ticket: (r.ticket as string | null) ?? null,
-      target: r.target as string,
-      targetKind: r.target_kind as ChoiceTargetKind,
-      messageId: r.message_id == null ? null : `comms:${r.message_id}`,
-      chosenBy: (r.chosen_by as string | null) ?? "the operator",
-      chosenAt: r.chosen_at as number,
-    };
+    this.seatQ.releaseChoice(key, briefAt);
   }
 
   /** The choice made on one brief of a key; null when none. */
   choice(key: string, briefAt: number): QuestionChoiceRow | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_choices WHERE key = ? AND brief_at = ?")
-      .get(key, briefAt) as Row | undefined;
-    return r ? this.choiceOf(r) : null;
+    return this.seatQ.choice(key, briefAt);
   }
 
   /** The newest choice on a key; null when none. */
   latestChoice(key: string): QuestionChoiceRow | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_choices WHERE key = ? ORDER BY chosen_at DESC LIMIT 1")
-      .get(key) as Row | undefined;
-    return r ? this.choiceOf(r) : null;
+    return this.seatQ.latestChoice(key);
   }
 
   /** The choices made on a ticket, newest first. */
   choicesOnTicket(ticket: string, limit: number): QuestionChoiceRow[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM question_choices WHERE ticket = ? ORDER BY chosen_at DESC LIMIT ?")
-        .all(ticket, limit) as Row[]
-    ).map((r) => this.choiceOf(r));
+    return this.seatQ.choicesOnTicket(ticket, limit);
   }
 
   markCommsWakeFailed(id: string, at: number): void {
@@ -6129,35 +6052,12 @@ export class Store {
    * queued).
    */
   replaceQueues(queues: { seatId: string; items: { repoId: RepoId; issue: number }[] }[]): void {
-    this.transaction(() => {
-      const del = this.db.prepare("DELETE FROM queues WHERE seat_id = ? AND taken_at IS NULL");
-      for (const q of queues) del.run(q.seatId);
-      const queuedElsewhere = this.db.prepare(
-        "SELECT 1 FROM queues WHERE repo_id = ? AND issue = ? AND seat_id != ?",
-      );
-      const ins = this.db.prepare(
-        "INSERT INTO queues (seat_id, pos, repo_id, issue, taken_at) VALUES (?, ?, ?, ?, NULL)",
-      );
-      for (const { seatId, items } of queues) {
-        const kept = this.queue(seatId);
-        const held = new Set(kept.map((q) => `${q.repoId}#${q.issue}`));
-        let pos = kept.reduce((max, q) => Math.max(max, q.pos), -1) + 1;
-        for (const i of items) {
-          const ref = `${i.repoId}#${i.issue}`;
-          if (held.has(ref) || queuedElsewhere.get(i.repoId, i.issue, seatId)) continue;
-          held.add(ref);
-          ins.run(seatId, pos++, i.repoId, i.issue);
-        }
-      }
-    }, true);
+    this.seatQ.replaceQueues(queues);
   }
 
   /** The seat's queue in order, taken row first. */
   queue(seatId: string): QueueRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM queues WHERE seat_id = ? ORDER BY pos")
-      .all(seatId) as Row[];
-    return rows.map(queueRow);
+    return this.seatQ.queue(seatId);
   }
 
   /**
@@ -6166,46 +6066,21 @@ export class Store {
    * `between` is a test seam: it runs after the head is read and before it is stamped.
    */
   takeQueued(seatId: string, at: number, between?: () => void): QueueRow | null {
-    let taken: QueueRow | null = null;
-    this.transaction(() => {
-      const held = this.db
-        .prepare("SELECT 1 FROM queues WHERE seat_id = ? AND taken_at IS NOT NULL")
-        .get(seatId);
-      if (held) return;
-      const head = this.db
-        .prepare("SELECT * FROM queues WHERE seat_id = ? ORDER BY pos LIMIT 1")
-        .get(seatId) as Row | undefined;
-      if (!head) return;
-      between?.();
-      this.db
-        .prepare("UPDATE queues SET taken_at = ? WHERE seat_id = ? AND pos = ?")
-        .run(at, seatId, head.pos as number);
-      taken = { ...queueRow(head), takenAt: at };
-    }, true);
-    return taken;
+    return this.seatQ.takeQueued(seatId, at, between);
   }
 
   /** Gives a taken row back to the queue. */
   untake(seatId: string, repoId: RepoId, issue: number): void {
-    this.db
-      .prepare("UPDATE queues SET taken_at = NULL WHERE seat_id = ? AND repo_id = ? AND issue = ?")
-      .run(seatId, repoId, issue);
+    this.seatQ.untake(seatId, repoId, issue);
   }
 
   dropQueued(seatId: string, repoId: RepoId, issue: number): void {
-    this.db
-      .prepare("DELETE FROM queues WHERE seat_id = ? AND repo_id = ? AND issue = ?")
-      .run(seatId, repoId, issue);
+    this.seatQ.dropQueued(seatId, repoId, issue);
   }
 
   /** Rows taken before `before` (a take whose run never began), oldest first. */
   staleTakes(before: number): QueueRow[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM queues WHERE taken_at IS NOT NULL AND taken_at < ? ORDER BY taken_at, seat_id",
-      )
-      .all(before) as Row[];
-    return rows.map(queueRow);
+    return this.seatQ.staleTakes(before);
   }
 
   /**
@@ -6326,56 +6201,16 @@ export class Store {
   }
 
   seatSession(seatId: string): SeatSessionRow | null {
-    const r = this.db.prepare("SELECT * FROM seat_sessions WHERE seat_id = ?").get(seatId) as
-      | Row
-      | undefined;
-    return r ? seatRow(r) : null;
+    return this.seatQ.seatSession(seatId);
   }
 
   /** Seat sessions for the configured HUD rows, indexed after one table read. */
   seatSessions(seatIds: readonly AgentId[]): Map<AgentId, SeatSessionRow> {
-    const out = new Map<AgentId, SeatSessionRow>();
-    if (seatIds.length === 0) return out;
-    const rows = this.statement(
-      `SELECT * FROM seat_sessions WHERE seat_id IN (${seatIds.map(() => "?").join(", ")})`,
-    ).all(...seatIds) as Row[];
-    for (const row of rows) {
-      const seat = seatRow(row);
-      out.set(seat.seatId, seat);
-    }
-    return out;
+    return this.seatQ.seatSessions(seatIds);
   }
 
   setSeatSession(row: SeatSessionRow): void {
-    this.db
-      .prepare(
-        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at, error_since, vendor, stop_by, stop_reason, stop_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(seat_id) DO UPDATE SET run_id = excluded.run_id,
-           cli_session_id = excluded.cli_session_id, state = excluded.state, vendor = excluded.vendor,
-           reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
-           stop_by = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_by ELSE NULL END,
-           stop_reason = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_reason ELSE NULL END,
-           stop_at = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_at ELSE NULL END,
-           error_since = CASE WHEN excluded.state != 'error' THEN NULL
-             WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
-             ELSE excluded.updated_at END,
-           quiet_turns = CASE WHEN seat_sessions.run_id IS excluded.run_id THEN seat_sessions.quiet_turns ELSE 0 END`,
-      )
-      .run(
-        row.seatId,
-        row.runId,
-        row.cliSessionId,
-        row.state,
-        row.reason,
-        row.worktree,
-        row.updatedAt,
-        row.state === "error" ? row.updatedAt : null,
-        row.vendor ?? "claude",
-        row.stop?.by ?? null,
-        row.stop?.reason ?? null,
-        row.stop?.at ?? null,
-      );
+    this.seatQ.setSeatSession(row);
   }
 
   /**
@@ -6397,9 +6232,7 @@ export class Store {
 
   /** Records that the seat started a turn at `at`. */
   setSeatTurnStarted(seatId: string, at: number): void {
-    this.db
-      .prepare("UPDATE seat_sessions SET last_turn_started_at = ? WHERE seat_id = ?")
-      .run(at, seatId);
+    this.seatQ.setSeatTurnStarted(seatId, at);
   }
 
   /** Commits since `since`, per agent, joined to their runs. */
@@ -6744,10 +6577,7 @@ export class Store {
 
   /** Sessions that hold a run and are not stopped or in error. */
   activeSeatSessions(): SeatSessionRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM seat_sessions WHERE run_id IS NOT NULL ORDER BY seat_id ASC")
-      .all() as Row[];
-    return rows.map(seatRow).filter((r) => ACTIVE_SEAT_STATES.includes(r.state));
+    return this.seatQ.activeSeatSessions();
   }
 
   /** Unended runs a seat row names (any seat state), with the row's worktree; by seat id. */
@@ -6987,18 +6817,12 @@ export class Store {
 
   /** Records a seat's question; returns its id. */
   addQuestion(q: Omit<SeatQuestion, "id" | "passedAt" | "asideAt">): number {
-    const r = this.db
-      .prepare("INSERT INTO seat_questions (agent_id, run_id, text, at) VALUES (?, ?, ?, ?)")
-      .run(q.agentId, q.runId, q.text, q.at);
-    return Number(r.lastInsertRowid);
+    return this.seatQ.addQuestion(q);
   }
 
   /** When the seat asked its questions, answered or not (ask_flight mirrors each to Comms). */
   questionTimes(agentId: AgentId): Set<number> {
-    const rows = this.db
-      .prepare("SELECT at FROM seat_questions WHERE agent_id = ?")
-      .all(agentId) as { at: number }[];
-    return new Set(rows.map((r) => r.at));
+    return this.seatQ.questionTimes(agentId);
   }
 
   /**
@@ -7029,22 +6853,12 @@ export class Store {
 
   /** Questions not yet answered and not set aside, oldest first: the ones that wait in Needs you. */
   openQuestions(): SeatQuestion[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NULL ORDER BY id ASC",
-      )
-      .all() as Row[];
-    return rows.map(toQuestion);
+    return this.seatQ.openQuestions();
   }
 
   /** Questions the operator set aside with Not now and nobody has answered, oldest first. */
   asideQuestions(): SeatQuestion[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NOT NULL ORDER BY id ASC",
-      )
-      .all() as Row[];
-    return rows.map(toQuestion);
+    return this.seatQ.asideQuestions();
   }
 
   /** The seat's questions open at any time in [from, to), oldest first. */
@@ -7053,51 +6867,27 @@ export class Store {
     from: number,
     to: number,
   ): { at: number; answeredAt: number | null }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT at, answered_at FROM seat_questions
-         WHERE agent_id = ? AND at < ? AND (answered_at IS NULL OR answered_at > ?) ORDER BY id`,
-      )
-      .all(agentId, to, from) as Row[];
-    return rows.map((r) => ({ at: r.at as number, answeredAt: r.answered_at as number | null }));
+    return this.seatQ.questionsOverlapping(agentId, from, to);
   }
 
   /** One question by id, answered or not; null when there is none. */
   question(id: number): (SeatQuestion & { answeredAt: number | null }) | null {
-    const r = this.db.prepare("SELECT * FROM seat_questions WHERE id = ?").get(id) as
-      | Row
-      | undefined;
-    return r ? { ...toQuestion(r), answeredAt: r.answered_at as number | null } : null;
+    return this.seatQ.question(id);
   }
 
   /** Sets an open question aside (Not now); true only when it was open and not yet set aside. */
   setQuestionAside(id: number, at: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET aside_at = ? WHERE id = ? AND answered_at IS NULL AND aside_at IS NULL",
-      )
-      .run(at, id);
-    return Number(r.changes) > 0;
+    return this.seatQ.setQuestionAside(id, at);
   }
 
   /** Puts a set-aside question back in Needs you, for a Not now whose GitHub writes failed. */
   clearQuestionAside(id: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET aside_at = NULL WHERE id = ? AND answered_at IS NULL AND aside_at IS NOT NULL",
-      )
-      .run(id);
-    return Number(r.changes) > 0;
+    return this.seatQ.clearQuestionAside(id);
   }
 
   /** Marks an open question passed to the operator; true only when it was open and not yet passed. */
   passQuestion(id: number, at: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET passed_at = ? WHERE id = ? AND answered_at IS NULL AND passed_at IS NULL",
-      )
-      .run(at, id);
-    return Number(r.changes) > 0;
+    return this.seatQ.passQuestion(id, at);
   }
 
   /**
@@ -7105,19 +6895,12 @@ export class Store {
    * without a brief before #758. True only when it was passed.
    */
   unpassQuestion(id: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET passed_at = NULL WHERE id = ? AND answered_at IS NULL AND passed_at IS NOT NULL",
-      )
-      .run(id);
-    return Number(r.changes) > 0;
+    return this.seatQ.unpassQuestion(id);
   }
 
   /** Marks one open question answered at `at`. */
   answerQuestion(id: number, at: number): void {
-    this.db
-      .prepare("UPDATE seat_questions SET answered_at = ? WHERE id = ? AND answered_at IS NULL")
-      .run(at, id);
+    this.seatQ.answerQuestion(id, at);
   }
 
   /**
@@ -7125,13 +6908,7 @@ export class Store {
    * passed to the operator open.
    */
   answerQuestions(agentId: AgentId, at: number, unpassedOnly = false): void {
-    this.db
-      .prepare(
-        `UPDATE seat_questions SET answered_at = ? WHERE agent_id = ? AND answered_at IS NULL${
-          unpassedOnly ? " AND passed_at IS NULL" : ""
-        }`,
-      )
-      .run(at, agentId);
+    this.seatQ.answerQuestions(agentId, at, unpassedOnly);
   }
 
   /**
@@ -7139,13 +6916,7 @@ export class Store {
    * passed to the operator open. Another run of the same seat keeps its own questions.
    */
   answerRunQuestions(runId: string, at: number, unpassedOnly = false): void {
-    this.db
-      .prepare(
-        `UPDATE seat_questions SET answered_at = ? WHERE run_id = ? AND answered_at IS NULL${
-          unpassedOnly ? " AND passed_at IS NULL" : ""
-        }`,
-      )
-      .run(at, runId);
+    this.seatQ.answerRunQuestions(runId, at, unpassedOnly);
   }
 
   /**
@@ -7154,11 +6925,7 @@ export class Store {
    * longer waits on it.
    */
   closeQuestion(c: QuestionClosure): boolean {
-    let stored = false;
-    this.transaction(() => {
-      stored = this.insertClosure(c);
-    });
-    return stored;
+    return this.seatQ.closeQuestion(c);
   }
 
   /** Operator Clear closes the displayed source and records its closure in the same transaction. */
@@ -7202,38 +6969,12 @@ export class Store {
 
   /** `closeQuestion` without its own transaction, for a caller already in one. */
   private insertClosure(c: QuestionClosure): boolean {
-    const r = this.db
-      .prepare(
-        `INSERT INTO question_closures (key, ask_at, kind, reason, by, question, ticket, operator, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key, ask_at) DO NOTHING`,
-      )
-      .run(c.key, c.askAt, c.kind, c.reason, c.by, c.question, c.ticket, c.operator ? 1 : 0, c.at);
-    const stored = Number(r.changes) > 0;
-    const ask = /^ask:(\d+)$/.exec(c.key);
-    if (stored && ask !== null) this.answerQuestion(Number(ask[1]), c.at);
-    return stored;
-  }
-
-  private closureOf(r: Row): QuestionClosure {
-    return {
-      key: r.key as string,
-      askAt: r.ask_at as number,
-      kind: r.kind as QuestionClosureKind,
-      reason: r.reason as string,
-      by: r.by as string,
-      question: r.question as string,
-      ticket: (r.ticket as string | null) ?? null,
-      operator: r.operator === 1,
-      at: r.at as number,
-    };
+    return this.seatQ.insertClosure(c);
   }
 
   /** The closure of one ask of a key; null when it was not closed without an answer. */
   questionClosure(key: string, askAt: number): QuestionClosure | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_closures WHERE key = ? AND ask_at = ?")
-      .get(key, askAt) as Row | undefined;
-    return r ? this.closureOf(r) : null;
+    return this.seatQ.questionClosure(key, askAt);
   }
 
   /**
@@ -7241,27 +6982,12 @@ export class Store {
    * question, which leaves when answered), by key, newest first; read once per build.
    */
   closedItemKeys(): Map<string, QuestionClosure[]> {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM question_closures WHERE key NOT LIKE 'ask:%' ORDER BY at DESC, rowid DESC",
-      )
-      .all() as Row[];
-    const byKey = new Map<string, QuestionClosure[]>();
-    for (const r of rows) {
-      const c = this.closureOf(r);
-      byKey.set(c.key, [...(byKey.get(c.key) ?? []), c]);
-    }
-    return byKey;
+    return this.seatQ.closedItemKeys();
   }
 
   /** The closures the operator had in Needs you since `since`, newest first. */
   questionClosures(since: number, limit: number): QuestionClosure[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM question_closures WHERE operator = 1 AND at >= ? ORDER BY at DESC, rowid DESC LIMIT ?",
-      )
-      .all(since, limit) as Row[];
-    return rows.map((r) => this.closureOf(r));
+    return this.seatQ.questionClosures(since, limit);
   }
 
   /** Whether FLIGHT's newest brief on the key is for the operator. */
@@ -7274,14 +7000,7 @@ export class Store {
 
   private endQuestions(where: "run_id" | "agent_id", id: string, at: number): void {
     this.transaction(() => {
-      const rows = this.db
-        // a question the operator set aside outlives its run: it is answered on the Ticket page
-        .prepare(
-          `SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL AND aside_at IS NULL`,
-        )
-        .all(id) as Row[];
-      for (const r of rows) {
-        const q = toQuestion(r);
+      for (const q of this.seatQ.openQuestionsOf(where, id)) {
         const key = `ask:${q.id}`;
         this.insertClosure({
           key,
