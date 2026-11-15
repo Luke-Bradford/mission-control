@@ -3004,9 +3004,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
     const main = parseTicket(
       structured.ticket ?? (structured.noTicket === undefined ? (item.ticket ?? "") : ""),
     );
-    const card = main
-      ? store.board(main.repoId).find((b) => b.issueNumber === main.number)
-      : null;
+    const card = main ? store.board(main.repoId).find((b) => b.issueNumber === main.number) : null;
     // an old card's label that is not P0 to P2 gives way to the priority FLIGHT states (#1869)
     const cardPriority =
       card?.priority && (PRIORITIES as readonly string[]).includes(card.priority)
