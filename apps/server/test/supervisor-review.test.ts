@@ -19,8 +19,16 @@ vi.mock("../src/runtime/codex-version.ts", async (importOriginal) => {
 // Register the shared mocks before importing the modules under test.
 import "./supervisor-harness.ts";
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, join } from "node:path";
 import {
   DEFAULT_PROFILES,
   NEW_LOOP,
@@ -2088,6 +2096,50 @@ describe("a run set aside in review", () => {
         const argv = starts().at(-1)?.argv as string[];
         expect(argv).toContain("--session-id");
         expect(argv[argv.indexOf("--max-budget-usd") + 1]).toBe("6");
+      });
+    });
+
+    /** Appends a session's init and its cumulative cost to the run's transcript, as the CLI does. */
+    const spend = (runId: string, session: string, usd: number): void => {
+      const path = (store.run(runId) as Run).transcriptPath;
+      mkdirSync(dirname(path), { recursive: true });
+      appendFileSync(
+        path,
+        `${JSON.stringify({ type: "system", subtype: "init", session_id: session })}\n${JSON.stringify({ type: "result", session_id: session, total_cost_usd: usd })}\n`,
+      );
+    };
+    const budgetOf = (argv: string[]): string =>
+      argv[argv.indexOf("--max-budget-usd") + 1] as string;
+
+    it("a later resume of a fresh session gets the budget its earlier sessions left", async () => {
+      const { sup, runId } = await cappedAside(4);
+      const old = (store.run(runId) as Run).sessionId;
+      spend(runId, old, 4);
+      const woke = await sup.wakeRun(runId, { fresh: "ci" });
+      const fresh = woke.freshSessionId as string;
+      expect(fresh).not.toBeNull();
+      // the fresh session spends $1 more, then the run is set aside and woken again
+      spend(runId, fresh, 1);
+      store.upsertRun({ ...(store.run(runId) as Run), costUsd: 5 });
+      await until(() => expect(seatState("guido-1")).toBe("idle"));
+      await sup.setAside(runId);
+      store.setRunLoop(runId, { ...REVIEW, aside: { worktree: wt(), wake: true } });
+      await sup.wakeRun(runId);
+      await until(() => {
+        const argv = starts().at(-1)?.argv as string[];
+        expect(argv[argv.indexOf("--resume") + 1]).toBe(fresh);
+        expect(budgetOf(argv)).toBe("6");
+      });
+    });
+
+    it("a resume of a run's only session keeps the whole budget", async () => {
+      const { sup, runId } = await cappedAside(4);
+      spend(runId, (store.run(runId) as Run).sessionId, 4);
+      await sup.wakeRun(runId);
+      await until(() => {
+        const argv = starts().at(-1)?.argv as string[];
+        expect(argv).toContain("--resume");
+        expect(budgetOf(argv)).toBe("10");
       });
     });
 

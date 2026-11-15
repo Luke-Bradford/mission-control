@@ -77,6 +77,7 @@ import {
   handoffText,
   hasPlanSection,
   inferTicket,
+  isObj,
   isProtectedPath,
   isResumeLineKey,
   LOOPBACK_HOST,
@@ -301,6 +302,9 @@ export function crewTempRoot(dbPath: string, runId: string, uid: number): string
 
 /** How long a fresh fix session is watched at start for a CLI that dies at once. */
 const FRESH_START_SETTLE_MS = 750;
+
+/** The least a session is given when the run's budget is spent: it stops at once, and the hub parks the run. */
+const MIN_SESSION_BUDGET_USD = 0.01;
 
 /** In `crew.worktrees`; holds the pid of the one process that runs crew. */
 export const CREW_LOCK_FILE = ".mc-crew.lock";
@@ -1775,8 +1779,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     beforeLaunch?: () => Run | undefined,
     beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
     stage?: { cli: boolean },
-    /** A cap for this CLI session: the budget a fresh fix session has left (#1643). */
-    maxBudgetUsd?: number,
   ): Promise<Live> {
     const binding = transferState(run.id);
     const info =
@@ -1842,8 +1844,47 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       keepPrompt,
       beforeSpawn,
       privateEnv,
-      maxBudgetUsd,
     );
+  }
+
+  /**
+   * The dollars one CLI session may spend: the run's budget less what its other sessions spent. The
+   * CLI counts only its own session, so a fresh fix session (#1643), or a resume of one, would
+   * otherwise get the whole budget again. A run with one session gets its whole budget. The spend
+   * is the larger of the run's cost and the sum of the transcript's latest `total_cost_usd` per
+   * session; this session's own figure is left out. Undefined when the run has no dollar cap.
+   */
+  function sessionBudget(run: Run, sessionId: string): number | undefined {
+    const budget = run.profile?.profile.budgetUsd;
+    if (budget == null) return undefined;
+    const costs = new Map<string, number>();
+    try {
+      let current = "";
+      for (const line of readFileSync(run.transcriptPath, "utf8").split("\n")) {
+        if (!line.startsWith("{")) continue;
+        const init = line.includes('"init"');
+        if (!init && !line.includes('"total_cost_usd"')) continue;
+        let ev: unknown;
+        try {
+          ev = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        if (!isObj(ev)) continue;
+        if (ev.type === "system" && ev.subtype === "init" && typeof ev.session_id === "string")
+          current = ev.session_id;
+        else if (ev.type === "result" && typeof ev.total_cost_usd === "number")
+          costs.set(typeof ev.session_id === "string" ? ev.session_id : current, ev.total_cost_usd);
+      }
+    } catch {
+      // no readable transcript: the run's own cost stands
+    }
+    const spent = Math.max(
+      run.costUsd ?? 0,
+      [...costs.values()].reduce((a, b) => a + b, 0),
+    );
+    const others = Math.max(0, spent - (costs.get(sessionId) ?? 0));
+    return Math.max(budget - others, MIN_SESSION_BUDGET_USD);
   }
 
   function launch(
@@ -1857,7 +1898,6 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     keepPrompt = false,
     beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
     privateEnv?: Record<string, string>,
-    maxBudgetUsd?: number,
   ): Live {
     const pause = pausedSeat(store, info.seat.id, run.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
@@ -2175,7 +2215,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           granted: runPathGrants(store, run.id),
           model,
           effort: info.seat.effort,
-          maxBudgetUsd: maxBudgetUsd ?? run.profile?.profile.budgetUsd,
+          maxBudgetUsd: sessionBudget(run, cliSessionId),
           mode: def.mode,
           profile: crewProfileOf(info.seat.role, def.loop),
           mcTools: def.mcTools,
@@ -5059,25 +5099,12 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               notes: store.evidenceNotes(runId).map((n) => n.note),
             }),
           );
-          started = await checkedLaunch(
-            info,
-            run,
-            freshId,
-            checkout,
-            false,
-            null,
-            "",
-            true,
-            () => {
-              beforeLaunch();
-              const next = { ...(store.run(runId) ?? run), sessionId: freshId };
-              store.upsertRun(next);
-              return next;
-            },
-            undefined,
-            undefined,
-            budgetLeft,
-          );
+          started = await checkedLaunch(info, run, freshId, checkout, false, null, "", true, () => {
+            beforeLaunch();
+            const next = { ...(store.run(runId) ?? run), sessionId: freshId };
+            store.upsertRun(next);
+            return next;
+          });
           await started.session.ready;
           // a CLI that dies at start says so within moments: wait that long before trusting it
           let off = (): void => {};
