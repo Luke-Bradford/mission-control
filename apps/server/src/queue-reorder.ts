@@ -23,8 +23,8 @@ import { type CcConfig, type CrewSeatConfig, seatInput, seatUnavailable } from "
 import { waitReader } from "./dependencies.ts";
 import { refillQueues } from "./engine/queue.ts";
 import { RepoRulesError } from "./engine/rules.ts";
-import { matchesConfiguredFocus } from "./focus.ts";
 import type { MoveResult } from "./github/board.ts";
+import { matchesConfiguredFocus } from "./instructions/focus.ts";
 import { chooseRunProfile, type ProfilesError } from "./profiles.ts";
 import type { Store } from "./store.ts";
 

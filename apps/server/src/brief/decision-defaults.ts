@@ -1,10 +1,10 @@
 import { type BriefChoiceRequest, COMMS_CAPCOM, type TestLockState } from "@mc/core";
-import { decisionDefault } from "./attention/holds.ts";
-import { type BriefChoiceDeps, chooseBrief, retainedBriefChoice } from "./brief/choices.ts";
-import { BriefDeferred, checkBriefRun, currentBriefFlight } from "./brief/prepare.ts";
-import type { CcConfig } from "./config.ts";
-import { attentionItems, NO_LOCK } from "./hud/hud.ts";
-import type { Store } from "./store.ts";
+import { decisionDefault } from "../attention/holds.ts";
+import type { CcConfig } from "../config.ts";
+import { attentionItems, NO_LOCK } from "../hud/hud.ts";
+import type { Store } from "../store.ts";
+import { type BriefChoiceDeps, chooseBrief, retainedBriefChoice } from "./choices.ts";
+import { BriefDeferred, checkBriefRun, currentBriefFlight } from "./prepare.ts";
 
 export interface DecisionDefaultsDeps {
   config: CcConfig;

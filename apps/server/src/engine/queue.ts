@@ -53,7 +53,7 @@ import {
 } from "../config.ts";
 import { pausedSeat } from "../crew-pause.ts";
 import { waitReader } from "../dependencies.ts";
-import { matchesConfiguredFocus } from "../focus.ts";
+import { matchesConfiguredFocus } from "../instructions/focus.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { CheckoutError, CREW_GIT_SLOW_MS, cloneGitDir } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
