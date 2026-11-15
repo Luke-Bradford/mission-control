@@ -2,7 +2,13 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type CrewMode, GUARD_RULES, MC_MCP_SERVER, MC_TOOL_NAMES } from "@mc/core";
+import {
+  CODEX_LOCK_WAIT_MS,
+  type CrewMode,
+  GUARD_RULES,
+  MC_MCP_SERVER,
+  MC_TOOL_NAMES,
+} from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CcConfig } from "../src/config.ts";
 import type { CheckRecorder } from "../src/guard/check-runs.ts";
@@ -23,6 +29,7 @@ function approver(
   checks?: CheckRecorder,
   lock = new TestLock(),
   fullAccess = false,
+  tell?: (text: string) => void,
 ) {
   const config: CcConfig = {
     operator: { id: "op", timezone: "UTC" },
@@ -47,6 +54,7 @@ function approver(
     seatGrants,
     ...(runGrants === undefined ? {} : { runGrants }),
     ...(checks === undefined ? {} : { checks }),
+    ...(tell === undefined ? {} : { tell }),
   });
   return { approve, record, seatGrants, config };
 }
@@ -392,6 +400,48 @@ describe("Codex check records", () => {
     expect(await h.approve(request("ls", { itemId: "item-10" }), undefined, signal())).toBe(
       "accept",
     );
+  });
+
+  describe("a check queued behind a long lock hold", () => {
+    const holdLock = async () => {
+      const lock = new TestLock();
+      const key = { runId: "other", toolUseId: "x" };
+      await lock.acquire(key, "other-seat", "pnpm -s test:related", 1000, signal());
+      return { lock, key };
+    };
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it("keeps waiting past 10 minutes and runs once the lock frees", async () => {
+      const { checks } = recorder();
+      const { lock, key } = await holdLock();
+      const h = approver("writer", [], undefined, checks, lock);
+      const waiting = h.approve(
+        request("pnpm -s typecheck", { itemId: "item-20" }),
+        undefined,
+        signal(),
+      );
+      await vi.advanceTimersByTimeAsync(13 * 60_000);
+      lock.release(key);
+      expect(await waiting).toBe("accept");
+    });
+
+    it("tells the seat who holds the lock when the wait runs out", async () => {
+      const { checks } = recorder();
+      const { lock } = await holdLock();
+      const tell = vi.fn();
+      const h = approver("writer", [], undefined, checks, lock, false, tell);
+      const waiting = h.approve(
+        request("pnpm -s typecheck", { itemId: "item-21" }),
+        undefined,
+        signal(),
+      );
+      await vi.advanceTimersByTimeAsync(CODEX_LOCK_WAIT_MS);
+      expect(await waiting).toBe("decline");
+      expect(tell).toHaveBeenCalledTimes(1);
+      expect(tell.mock.calls[0]?.[0]).toContain("The test lock is busy");
+      expect(tell.mock.calls[0]?.[0]).toContain("pnpm -s test:related");
+    });
   });
 
   it("starts no record for a command run from a subfolder of the worktree", async () => {
