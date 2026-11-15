@@ -1,5 +1,5 @@
 import { COMMS_CAPCOM, type ItemThread } from "@mc/core";
-import type { CommsRow } from "./store/types.ts";
+import type { CommsRow } from "../store/types.ts";
 
 /**
  * A Needs-you item's conversation as the item shows it: each operator message says whether its

@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import type { AttentionStoryRegistration } from "@mc/core";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { createAttentionMaterials } from "../src/attention-materials.ts";
+import { createAttentionMaterials } from "../src/attention/attention-materials.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { Store } from "../src/store.ts";
 

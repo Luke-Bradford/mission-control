@@ -181,6 +181,11 @@ import {
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "./attention/attention-materials.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
@@ -189,11 +194,21 @@ import {
   nothingForOperator,
   releaseHold,
 } from "./attention/holds.ts";
+import { itemThread } from "./attention/item-thread.ts";
 import {
-  AttentionMaterialsError,
-  type AttentionMaterialsService,
-  createAttentionMaterials,
-} from "./attention-materials.ts";
+  LocalNotifications,
+  NotificationPreferencesBody,
+} from "./attention/local-notifications.ts";
+import {
+  type ActionResult,
+  answerSetAside,
+  drop as dropQuestion,
+  type NeedsYouContext,
+  type NeedsYouDeps,
+  notNow as notNowQuestion,
+  offersFor,
+  setAsideQuestions,
+} from "./attention/needs-you-actions.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -356,8 +371,6 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { itemThread } from "./item-thread.ts";
-import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
@@ -373,16 +386,6 @@ import {
   readKnown,
   seatPlace,
 } from "./mcp/tools.ts";
-import {
-  type ActionResult,
-  answerSetAside,
-  drop as dropQuestion,
-  type NeedsYouContext,
-  type NeedsYouDeps,
-  notNow as notNowQuestion,
-  offersFor,
-  setAsideQuestions,
-} from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
