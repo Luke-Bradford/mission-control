@@ -42,7 +42,7 @@
 
 .rg-group h3 {
   margin: 0;
-  font: 400 var(--fs-micro) / 16px var(--mono);
+  font: 400 var(--fs-micro) / var(--lh-s) var(--mono);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--fg-2);
@@ -69,13 +69,13 @@
 
 .rg-name .mono {
   font-size: var(--fs-s);
-  line-height: 16px;
+  line-height: var(--lh-s);
   overflow-wrap: anywhere;
 }
 
 .rg-name small {
   font-size: var(--fs-s);
-  line-height: 16px;
+  line-height: var(--lh-s);
   color: var(--fg-2);
 }
 
@@ -96,7 +96,7 @@
   border: 1px solid var(--line-2);
   border-radius: 3px;
   background: var(--surface-2);
-  font: var(--fs-s) / 16px var(--mono);
+  font: var(--fs-s) / var(--lh-s) var(--mono);
 }
 
 .rg-chip > span {
@@ -134,7 +134,7 @@
   padding: 0 var(--sp-2);
   border: 1px solid var(--line-2);
   border-radius: 3px;
-  font: var(--fs-s) / 16px var(--sans);
+  font: var(--fs-s) / var(--lh-s) var(--sans);
   white-space: nowrap;
   color: var(--fg-2);
 }
@@ -177,7 +177,7 @@
   -webkit-box-orient: vertical;
   overflow: hidden;
   font-size: var(--fs-s);
-  line-height: 16px;
+  line-height: var(--lh-s);
 }
 
 .rg-count {
@@ -205,7 +205,7 @@
 }
 
 .rg-table th {
-  font: 400 var(--fs-micro) / 16px var(--mono);
+  font: 400 var(--fs-micro) / var(--lh-s) var(--mono);
   color: var(--fg-2);
   text-transform: uppercase;
 }
