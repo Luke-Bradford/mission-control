@@ -3384,6 +3384,9 @@ describe("the engine runs reviews", () => {
           async ensure(t: { pr: number; sha: string; paths: readonly string[] }) {
             ensured.push({ pr: t.pr, sha: t.sha, paths: t.paths });
           },
+          async pages() {
+            return [];
+          },
           gate(t: { sha: string; paths: readonly string[] }) {
             const web = t.paths.some((p) => p.startsWith("apps/web/") && !p.includes("test"));
             return !web || have.has(t.sha)
