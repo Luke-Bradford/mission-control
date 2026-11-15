@@ -1852,7 +1852,9 @@ repo it makes no call at all. The engine moves only a looped run's own card. Eve
 Activity (`{repo}#{issue} → {column}`, or `… failed: {reason}`); a card already in place makes no
 write and no row.
 
-**Per-repo board rules.** Set `repos[].rules` on the matching repo in
+## Per-repo board rules
+
+Set `repos[].rules` on the matching repo in
 `~/.config/mission-control/config.yaml` (or the file selected by `MC_CONFIG`). The target repo
 needs no Mission Control file, heading or block. `config.example.yaml` shows the shape. Keys:
 

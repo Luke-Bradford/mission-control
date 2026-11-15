@@ -1706,6 +1706,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/previews/41/activity", {}],
   ["POST", "/api/repos", NEW_REPO],
   ["POST", "/api/repos/onboard"],
+  ["GET", "/api/repos/shop-app/rules"],
+  ["POST", "/api/repos/shop-app/rules", {}],
   [
     "POST",
     "/api/repos/shop-app/setup",
@@ -2874,6 +2876,11 @@ describe("local access", () => {
       }
       if (url === "/api/repos/onboard") {
         expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/repos/shop-app/rules") {
+        // The table's POST body has no version or rules; route-specific tests cover saves.
+        expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 200 : 400);
         continue;
       }
       if (
