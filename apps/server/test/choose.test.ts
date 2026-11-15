@@ -1,6 +1,6 @@
 import type { AttentionBrief, AttentionItem, Run } from "@mc/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "../src/choose.ts";
+import { ChoiceRefused, choiceReceipt, chooseOption } from "../src/brief/choose.ts";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems, NO_LOCK } from "../src/hud/hud.ts";
 import { ticketHistory } from "../src/hud/ticket-history.ts";

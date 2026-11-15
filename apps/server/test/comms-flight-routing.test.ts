@@ -12,9 +12,9 @@ import {
 import type { FastifyInstance } from "fastify";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
+import * as defaults from "../src/brief/decision-defaults.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { CcConfig } from "../src/config.ts";
-import * as defaults from "../src/decision-defaults.ts";
 import { createScheduler } from "../src/scheduler.ts";
 import { Store } from "../src/store.ts";
 

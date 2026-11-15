@@ -37,7 +37,7 @@ import {
   seatInput,
   ticketState,
 } from "./config.ts";
-import { seatFocus } from "./focus.ts";
+import { seatFocus } from "./instructions/focus.ts";
 import {
   CheckoutError,
   createSessionCheckout,

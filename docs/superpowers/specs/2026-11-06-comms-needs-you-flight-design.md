@@ -313,7 +313,7 @@ pages as the narrow drawer already does. No new mockup gate is added by this ame
 | Typed text stored by `sendComms` | Keep once as the source message |
 | `Re: <key> · <about>` from `flightText` and `itemLead` in `apps/web/src/comms/answer.ts` | Remove; `itemKey` carries context |
 | `You chose: <label>` posted to the item discussion by ItemDetail | Remove that post; draw the durable `choice` receipt once |
-| `… chose "<label>"` in `apps/server/src/choose.ts` | Keep the delivered seat copy; the operator sees the choice receipt |
+| `… chose "<label>"` in `apps/server/src/brief/choose.ts` | Keep the delivered seat copy; the operator sees the choice receipt |
 | `Short version: …` from `openDiscussion` in `apps/server/src/api.ts` | Remove with the discussion routes |
 | Item-discussion JSON sent to FLIGHT | Remove with the discussion store |
 | FLIGHT's actual turn text | Keep in the shared thread |
@@ -341,7 +341,7 @@ settles itself. An unhandled wake alone creates no new operator decision.
 
 | Recorded action or fact | Code that owns the exit |
 |---|---|
-| An option is picked | `chooseOption` and `closeItem` in `apps/server/src/choose.ts` |
+| An option is picked | `chooseOption` and `closeItem` in `apps/server/src/brief/choose.ts` |
 | The ticket closes, PR ends or asking run ends | `apps/server/src/attention/question-watch.ts` |
 | FLIGHT withdraws its question or returns a seat's question | `withdrawQuestion` and `return_question` in `apps/server/src/flight/tools.ts` |
 | FLIGHT dismisses a settled item it owns | `dismiss_item` in the same file |
@@ -527,7 +527,7 @@ Every message records a sender kind: `operator`, `controller`, `flight`, `seat` 
 - FLIGHT's actions through its operator tool are recorded as FLIGHT's.
 - The hub's own messages get kind `hub`. Today some are sent as `MC` and some as `CAPCOM`. Examples, where the hub is the sender:
   `apps/server/src/crew-apply.ts:421`, `apps/server/src/engine/engine.ts:1226`,
-  `apps/server/src/decision-defaults.ts:38` and `apps/server/src/instructions/notices.ts:44`. Every
+  `apps/server/src/brief/decision-defaults.ts:38` and `apps/server/src/instructions/notices.ts:44`. Every
   such place changes.
 - Messages stored before this change keep their old sender.
 - Rooms will add a sixth kind, for an agent on another hub.
@@ -950,7 +950,7 @@ Each of these is a change, stated so nobody finds it by surprise.
 | Requests "for the controller" (#765, now closed) | They go to the controller's address and clear by action (the amendment). They reach the operator only when the operator alone can act |
 | #1453: Enter rule on the Needs you boxes | Unchanged until the fly-out mockup settles one rule |
 | The roadmap, decision 1: one Needs-you set, counted the same everywhere | The count narrows to open questions, and the page shows only those. Held items and timed defaults leave the page; alerts have their chip |
-| Timed defaults (#741, `apps/server/src/decision-defaults.ts`) | Retired for questions to the operator. FLIGHT decides or asks |
+| Timed defaults (#741, `apps/server/src/brief/decision-defaults.ts`) | Retired for questions to the operator. FLIGHT decides or asks |
 | Hold on a Needs-you item (#638: `apps/web/src/needs/HoldItem.tsx`, `holdItem` in `apps/server/src/attention/holds.ts`) | Becomes **Not now** and **Drop** for the operator. FLIGHT's own holds (its hold tool, and holds set through `brief_item`) move to its watch list |
 | The roadmap, plan item 7: notices only for briefed asks and "FLIGHT is down" | Two more alerts send a notice: an Update the operator must run, and an account at its limit |
 | The role files: use `comms_read` for missed crew context | Read by ticket |
