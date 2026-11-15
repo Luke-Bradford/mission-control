@@ -79,3 +79,12 @@ A protected route that writes these keys through `apps/server/src/config-write.t
 
 - Done when: Repo rules, Built-in guard and Roles render as the mockup does at 1280, 1600, 1920 and 2560 px in both themes; Edit, Save and the conflict text work; the prompt drawer traps focus.
 - Size: M
+
+## Screenshots
+
+Provenance (`docs/runbooks/visual-qa.md`): FLIGHT rendered `index.html` in headless Chrome at the commit that holds these files, with the sizes and query shown in each file name. Look at the whole composition, not only the bounds: at 2560 px Repo rules is capped at 1100 px and the guard at 520 px, so the right side of the page is empty by design.
+
+- `screenshots/<repo>-<width>-<theme>.png`: `demo-app` and `demo-site`, dark and light, at 1280×900, 1600×1000, 1920×940 and 2560×1145 (16 files).
+- `screenshots/demo-app-1600x700-<theme>.png`: 1600×700, where the page scrolls (2 files).
+- `screenshots/state-<state>-1920-dark.png`: `normal`, `loading`, `empty`, `long`, `error`, `stale`, `disconnected` and `conflict` at 1920×940 dark (8 files).
+- Today's Roles page: the hub render `hud-shot:2c0c18bd92bba608b5d52fce30280063` (1600×1000), captured by FLIGHT from the running hub.
