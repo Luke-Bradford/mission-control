@@ -872,7 +872,10 @@ export function Sessions({ config }: { config: ConfigView }) {
           }
         : null);
     if (input) setForm(seatForm(config, sessionId, input));
-    else setEditMissing(`${seatId} is not a seat of session ${sessionId}, so there is no form to open.`);
+    else
+      setEditMissing(
+        `${seatId} is not a seat of session ${sessionId}, so there is no form to open.`,
+      );
     navigate(withoutEditSeatParam(), { replace: true });
   }, [changes, config, requestedEdit]);
   const [busy, setBusy] = useState(false);
