@@ -1,5 +1,5 @@
 import { approvedGrantPaths } from "@mc/core";
-import type { Store } from "./store.ts";
+import type { Store } from "../store.ts";
 
 const RUN_GRANT_KEY = (runId: string): string => `run-path-grant:${runId}`;
 

@@ -1,7 +1,7 @@
 import type { BoardItem } from "@mc/core";
-import type { CcConfig } from "./config.ts";
-import { endedWorkOver, runSubjectGone } from "./hud/hud.ts";
-import type { Store } from "./store.ts";
+import type { CcConfig } from "../config.ts";
+import { endedWorkOver, runSubjectGone } from "../hud/hud.ts";
+import type { Store } from "../store.ts";
 
 /** How often the hub clears leftovers; the pass is idempotent, so a missed or repeated one is harmless. */
 export const LEFTOVERS_EVERY_MS = 60 * 60_000;

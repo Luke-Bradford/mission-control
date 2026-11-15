@@ -7,7 +7,7 @@ import {
   type RepoRules,
 } from "@mc/core";
 import { z } from "zod";
-import { protectedGlob } from "../globs.ts";
+import { protectedGlob } from "../repo/globs.ts";
 
 /**
  * A label glob: repo-relative, and `**` only as a trailing `/**`, else it would match wrongly
