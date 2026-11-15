@@ -39,7 +39,6 @@ import {
   type AuditThresholds,
   type AuditTokenOveruse,
   type AuditView,
-  auditTier,
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
@@ -220,6 +219,7 @@ import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
+import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
@@ -1524,9 +1524,7 @@ export class Store {
 
   /** Records that a run's transcript could not give call times, so it is not tried again. */
   markTokenTimesChecked(runId: string): void {
-    this.db
-      .prepare("UPDATE run_token_audit SET timestamps_checked = 1 WHERE run_id = ?")
-      .run(runId);
+    markTokenTimesChecked(this.db, runId);
   }
 
   /**
@@ -3457,23 +3455,12 @@ export class Store {
     detail: string;
     at: number;
   }): void {
-    this.db
-      .prepare(
-        `INSERT INTO audit_items (kind, subject, tier, state, detail, at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(kind, subject) DO UPDATE SET state = excluded.state, detail = excluded.detail
-         WHERE audit_items.state = 'open' AND excluded.state = 'done'`,
-      )
-      .run(i.kind, i.subject, auditTier(i.kind), i.state, i.detail, i.at);
+    recordAuditItem(this.db, i);
   }
 
   /** Items recorded in range, newest first. */
   private auditItems(since: number, until: number): AuditItem[] {
-    return this.db
-      .prepare(
-        `SELECT id, kind, subject, tier, state, detail, at FROM audit_items
-         WHERE at >= ? AND at <= ? ORDER BY at DESC, id DESC`,
-      )
-      .all(since, until) as unknown as AuditItem[];
+    return auditItems(this.db, since, until);
   }
 
   /** Merged PRs in range that have a recorded size, largest first. */
