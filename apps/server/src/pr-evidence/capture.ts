@@ -97,6 +97,8 @@ export interface PrEvidence {
   readonly baseUrl: string;
   /** Captures the head's pairs if it needs them and has none; never rejects. */
   ensure(target: EvidenceTarget): Promise<void>;
+  /** The pages the head's changes reach: the ones `ensure` photographs and `gate` waits for. */
+  pages(target: EvidenceTarget): Promise<readonly EvidencePage[]>;
   /** Why the PR must stay in draft (the pages without pairs), or null when it may leave. */
   gate(target: EvidenceTarget): string | null;
   /** Cancel captures and wait for their owned hubs/worktrees to be removed. */
@@ -482,6 +484,7 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       );
       return running.get(key);
     },
+    pages: pagesFor,
     gate(t) {
       if (t.repoId !== deps.repoId) return null;
       const uncatalogued = prEvidenceUncatalogued(t.paths);
@@ -523,4 +526,25 @@ export function createPrEvidence(deps: PrEvidenceDeps): PrEvidence {
       await Promise.allSettled([...running.values(), ...readingPages.values()]);
     },
   };
+}
+
+/**
+ * What the supervisor needs to hold a web review for screenshot evidence. `pages` is required, so
+ * a caller cannot fall back to the folder rule: the capture and the review start check must agree
+ * on what a head touches.
+ */
+export interface ReviewEvidenceDeps {
+  store: PrEvidenceStore;
+  /** The one repo whose web PRs carry screenshot pairs. */
+  repoId: string;
+  /** The pages the capture itself reads for a head. */
+  pages(target: EvidenceTarget): Promise<readonly EvidencePage[]>;
+}
+
+export function evidenceReviewDeps(
+  evidence: PrEvidence,
+  store: PrEvidenceStore,
+  repoId: string,
+): ReviewEvidenceDeps {
+  return { store, repoId, pages: (target) => evidence.pages(target) };
 }

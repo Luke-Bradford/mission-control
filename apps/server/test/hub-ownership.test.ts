@@ -455,6 +455,7 @@ async function runEveryTimer(
       ensure: async (t) => {
         await t.onStored?.(manifest(t.pr, t.sha));
       },
+      pages: async () => [],
       gate: () => null,
       stop: async () => {},
     },
