@@ -1842,6 +1842,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       keepPrompt,
       beforeSpawn,
       privateEnv,
+      maxBudgetUsd,
     );
   }
 
@@ -1856,6 +1857,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     keepPrompt = false,
     beforeSpawn?: (system: readonly PromptPiece[] | null) => void,
     privateEnv?: Record<string, string>,
+    maxBudgetUsd?: number,
   ): Live {
     const pause = pausedSeat(store, info.seat.id, run.id);
     if (pause) throw new SupervisorError(409, `Paused: ${pause.reason}`);
