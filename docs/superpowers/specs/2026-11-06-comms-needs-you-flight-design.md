@@ -191,8 +191,9 @@ Hub code checks every item before it counts in Needs you (`packages/core/src/nee
    - FLIGHT is not triaging;
    - an Update only a person can run (the alert says how much changed, not which commits or paths).
      A held Update FLIGHT can run is not this alert: while FLIGHT is live on a `superuser` repo it
-     is FLIGHT's item with the usual triage window, and FLIGHT runs it in a quiet gap. It becomes
-     the alert only when FLIGHT is stopped, the repo is standard, or the window has passed. A
+     is FLIGHT's item with no window, since FLIGHT may hold it on purpose, and FLIGHT runs it in a
+     quiet gap. It becomes the alert only when FLIGHT is stopped or not triaging, or the repo is
+     standard (#1908). A
      change that adds a shortcut, pnpm needing a person, or a checkout off main is the alert from
      the start, with the reason (#1834);
    - the runaway breaker tripped;

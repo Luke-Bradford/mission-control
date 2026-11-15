@@ -32,6 +32,7 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { pendingRunApproval } from "../src/attention/subjects.ts";
+import { CommsQueries } from "../src/store/comms.ts";
 import { crewPromptPath, crewTranscriptPath } from "../src/store/crew-paths.ts";
 import {
   ACK_ABSENT_MS,
@@ -3553,7 +3554,7 @@ describe("comms", () => {
     for (let i = 0; i < 40; i++) store.addComms({ ...row(`unrelated ${i}`, 200 + i) });
     const ref = store.addComms({ ...row("mentions #703", 300) });
     const direct = store.addComms({ ...row("ref", 301), ref: "#703" });
-    const hydrate = vi.spyOn(store as never, "commsRow" as never);
+    const hydrate = vi.spyOn(CommsQueries.prototype as never, "commsRow" as never);
     expect(store.commsForTicket("#703").rows.map((m) => m.id)).toEqual([ref?.id, direct?.id]);
     expect(hydrate).toHaveBeenCalledTimes(2);
   });
