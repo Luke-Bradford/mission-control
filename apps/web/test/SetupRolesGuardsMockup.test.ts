@@ -18,11 +18,12 @@ const GROUPS = {
   "Your approval": ["uat.labels", "uat.paths", "always_ask"],
   Authority: ["autonomy", "flight_powers"],
 } as const;
-const SOURCES = ["here", "repo", "default", "builtin"];
+const SOURCES = ["here", "repo", "default", "builtin", "file"];
 const BADGES: Record<string, [string, string]> = {
   here: ["Set here", "Saved in config.yaml. Edit it here."],
   repo: ["Repo file", "Set in the repo's CLAUDE.md. Change it with a reviewed PR."],
   default: ["Default", "Mission Control's default. Edit it here to set your own."],
+  file: ["Config file", "Saved in config.yaml. Edit the file; this page cannot change it."],
   builtin: ["Built in", "Part of Mission Control's code. It cannot be turned off."],
 };
 const STATES = [
@@ -96,14 +97,19 @@ describe("Setup Roles & guards mockup", () => {
         expect(badge?.textContent).toMatch(new RegExp(`^${text}`));
         expect(badge?.getAttribute("title")).toBe(title);
         const edit = row.querySelector("[data-edit]");
-        if (source === "repo" || source === "builtin") expect(edit).toBeNull();
+        if (["repo", "builtin", "file"].includes(source)) expect(edit).toBeNull();
         if (source === "default") expect(edit).not.toBeNull();
       }
     }
     const app = render("?repo=demo-app");
     for (const key of ["hard_rules", "areas"])
       expect(app.querySelector(`[data-key="${key}"]`)?.getAttribute("data-source")).toBe("repo");
-    expect(app.querySelector('[data-key="checks"] .src')?.textContent).toContain("Repo file wins");
+    expect(app.querySelector('[data-key="pick_from"] .src')?.textContent).toContain(
+      "Repo file wins",
+    );
+    // the repo file adds to checks; it does not override the user's
+    expect(app.querySelector('[data-key="checks"]')?.getAttribute("data-source")).toBe("here");
+    expect(app.querySelector('[data-key="checks"] [data-edit]')).not.toBeNull();
     const site = render("?repo=demo-site");
     expect(site.querySelector('[data-key="hard_rules"]')?.getAttribute("data-source")).not.toBe(
       "repo",
@@ -112,11 +118,33 @@ describe("Setup Roles & guards mockup", () => {
       expect(button.getAttribute("data-write")).toBe("needs-build");
   });
 
+  it("links only to files that exist", () => {
+    const document = render();
+    const links = [...document.querySelectorAll("a[href]")]
+      .map((a) => a.getAttribute("href") ?? "")
+      .filter((h) => h !== "#" && !/^[a-z]+:/.test(h) && !h.startsWith("#"));
+    expect(links.length).toBeGreaterThanOrEqual(5);
+    for (const href of links)
+      expect(() => readFileSync(resolve(dir, href.split("#")[0] ?? ""))).not.toThrow();
+  });
+
+  it("opens every value behind +n for a keyboard user", () => {
+    const document = render("?state=long");
+    const more = document.querySelector<HTMLButtonElement>('[data-more="uat.labels"]');
+    expect(more?.getAttribute("aria-expanded")).toBe("false");
+    more?.click();
+    expect(document.querySelectorAll('[data-key="uat.labels"] .chip')).toHaveLength(30);
+    expect(document.querySelector('[data-more="uat.labels"]')?.getAttribute("aria-expanded")).toBe(
+      "true",
+    );
+  });
+
   it("keeps Authority read-only with the reason", () => {
     const document = render();
     for (const key of ["autonomy", "flight_powers"]) {
       const row = document.querySelector(`[data-key="${key}"]`);
       expect(row?.querySelector("[data-edit]")).toBeNull();
+      expect(row?.querySelector(".src")?.getAttribute("title")).not.toContain("Edit it here");
       expect(row?.textContent).toContain("Only config.yaml sets this. A change restarts FLIGHT.");
     }
   });

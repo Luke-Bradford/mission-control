@@ -90,6 +90,14 @@ describeRendered("Setup Roles & guards mockup in a browser", () => {
         if (input) input.value = "pnpm -s lint && pnpm -s test";
       }, null);
       await page.click('[data-key="checks"] [data-add]');
+      const small = await page.evaluate(
+        () =>
+          [...document.querySelectorAll<HTMLElement>(".editor button")]
+            .map((b) => b.getBoundingClientRect())
+            .filter((r) => r.width < 24 || r.height < 24).length,
+        null,
+      );
+      expect(small, "editor controls under 24px").toBe(0);
       const shown = await page.evaluate(
         () => ({
           error: document.querySelector('[data-key="checks"] .field-error')?.textContent,

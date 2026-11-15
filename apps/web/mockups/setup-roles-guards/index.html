@@ -56,13 +56,14 @@ small,.small{font:12px/16px var(--sans);color:var(--fg2)}
 .chips{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0}
 .chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;min-height:24px;padding:0 8px;border:1px solid var(--line);background:var(--surface2);font:12px/16px var(--mono);border-radius:3px}
 .chip>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.chip button{min-height:20px;min-width:20px;padding:0 4px;border:0;background:none}
+.chip button{min-height:24px;min-width:24px;padding:0 4px;border:0;background:none}.chip.repo{border-style:dashed;color:var(--think)}
 .chips .none{color:var(--fg2);font-size:12px}
 .more{min-height:24px;padding:0 8px;font-size:12px}
 .src{display:inline-flex;align-items:center;min-height:20px;padding:0 8px;border:1px solid var(--line);font:12px/16px var(--sans);white-space:nowrap;border-radius:3px}
 .src.here{color:var(--ok);border-color:var(--ok)}
 .src.repo{color:var(--think);border-color:var(--think)}
 .src.default{color:var(--fg2)}
+.src.file{color:var(--fg2)}
 .src.builtin{color:var(--warn);border-color:var(--warn)}
 .ro{flex-basis:100%}
 .editor{grid-column:1/-1;max-width:640px;display:grid;gap:8px;padding:8px 0 12px}
@@ -122,7 +123,7 @@ setTheme(q.get('theme')==='light'?'light':'dark');
 $('#theme').onclick=()=>setTheme(document.documentElement.dataset.theme==='dark'?'light':'dark');
 $('#state').innerHTML=STATES.map(s=>`<option>${s}</option>`).join('');
 $('#state').value=state;$('#repo').value=repo;
-const SOURCE={here:['Set here',"Saved in config.yaml. Edit it here."],repo:['Repo file',"Set in the repo's CLAUDE.md. Change it with a reviewed PR."],default:['Default',"Mission Control's default. Edit it here to set your own."],builtin:['Built in',"Part of Mission Control's code. It cannot be turned off."]};
+const SOURCE={here:['Set here',"Saved in config.yaml. Edit it here."],repo:['Repo file',"Set in the repo's CLAUDE.md. Change it with a reviewed PR."],default:['Default',"Mission Control's default. Edit it here to set your own."],file:['Config file','Saved in config.yaml. Edit the file; this page cannot change it.'],builtin:['Built in',"Part of Mission Control's code. It cannot be turned off."]};
 const READONLY='Only config.yaml sets this. A change restarts FLIGHT.';
 const HARD=['loops/**','roles/**','CLAUDE.md','.github/**','config.example.yaml'];
 // [group, key, plain label, kind, default]
@@ -149,15 +150,15 @@ const GROUPS=[['Work the crew picks',[
 ['autonomy','What the hub may do alone','ro',['draft']],
 ['flight_powers','What FLIGHT may do','ro',['standard']]]]];
 const SAMPLE={
-'demo-app':{pick_from:['here',['Ready','Triage']],needs:['default'],areas:['repo',['web: apps/web/**','server: apps/server/**','core: packages/core/**']],promote_backlog:['here',['Off']],protected:['here',['.github/**','config.example.yaml']],hard_rules:['repo',['roles/**','loops/**','CLAUDE.md','.github/**','config.example.yaml','packages/core/src/review.ts']],hard_rules_by:['here',['operator']],'commands.writer':['here',['pnpm -s lint','pnpm -s typecheck','pnpm -s test']],'commands.review':['here',['pnpm -s test:related']],full_suite:['here',['pnpm -s test']],required_checks:['here',['ci / test','ci / build']],checks:['repo',['pnpm -s lint','pnpm -s typecheck','pnpm -s test:related']],'uat.labels':['here',['ui','needs-uat']],'uat.paths':['here',['apps/web/src/**']],always_ask:['here',['change a deploy target']],autonomy:['here',['draft']],flight_powers:['here',['standard']]},
-'demo-site':{pick_from:['here',['Ready']],needs:['here',['size']],areas:['default'],promote_backlog:['here',['On']],protected:['here',['content/legal/**']],hard_rules:['default'],hard_rules_by:['default'],'commands.writer':['here',['npm run build']],'commands.review':['default'],full_suite:['default'],required_checks:['here',['build']],checks:['here',['npm run lint']],'uat.labels':['default'],'uat.paths':['here',['content/**']],always_ask:['default'],autonomy:['here',['merge']],flight_powers:['here',['standard']]}};
+'demo-app':{pick_from:['repo',['Ready','In review']],needs:['default'],areas:['repo',['web: apps/web/**','server: apps/server/**','core: packages/core/**']],promote_backlog:['here',['Off']],protected:['here',['.github/**','config.example.yaml']],hard_rules:['repo',['roles/**','loops/**','CLAUDE.md','.github/**','config.example.yaml','packages/core/src/review.ts']],hard_rules_by:['here',['operator']],'commands.writer':['here',['pnpm -s lint','pnpm -s typecheck','pnpm -s test']],'commands.review':['here',['pnpm -s test:related']],full_suite:['here',['pnpm -s test']],required_checks:['here',['ci / test','ci / build']],checks:['here',['pnpm -s lint'],['pnpm -s typecheck','pnpm -s test:related']],'uat.labels':['here',['ui','needs-uat']],'uat.paths':['here',['apps/web/src/**']],always_ask:['here',['change a deploy target']],autonomy:['file',['draft']],flight_powers:['file',['standard']]},
+'demo-site':{pick_from:['here',['Ready']],needs:['here',['size']],areas:['default'],promote_backlog:['here',['On']],protected:['here',['content/legal/**']],hard_rules:['default'],hard_rules_by:['default'],'commands.writer':['here',['npm run build']],'commands.review':['default'],full_suite:['default'],required_checks:['here',['build']],checks:['here',['npm run lint']],'uat.labels':['default'],'uat.paths':['here',['content/**']],always_ask:['default'],autonomy:['file',['merge']],flight_powers:['file',['standard']]}};
 const LONGS={'uat.labels':['here',Array.from({length:30},(_,i)=>'label-'+(i+1))],'uat.paths':['here',['apps/web/src/components/long-folder-name/**','apps/web/src/components/another-long-name/**']],checks:['here',['npm run '+'long-check-'.repeat(17).slice(0,190)]]};
 const kindOf={};GROUPS.forEach(([,ks])=>ks.forEach(k=>kindOf[k[0]]=k));
 let data={};
 function load(){data={};const base=SAMPLE[repo];GROUPS.forEach(([,ks])=>ks.forEach(([key,,kind,def])=>{
  let s=state==='empty'&&kind!=='ro'?['default']:base[key]||['default'];
  if(state==='long'&&LONGS[key]&&repo==='demo-app'||state==='long'&&LONGS[key])s=LONGS[key];
- data[key]={source:s[0],value:s[0]==='default'?[...def]:[...s[1]]};}));}
+ data[key]={source:s[0],value:s[0]==='default'?[...def]:[...s[1]],repoAdds:s[2]||[]};}));}
 const globMsg=g=>g.startsWith('/')?'must be repo-relative, not start with /':g.replace(/\/\*\*$/,'').includes('**')?'`**` only as a trailing /**':null;
 const PLAIN=/^[A-Za-z0-9._/=+,@-]+( [A-Za-z0-9._/=+,@-]+)*$/;
 function problem(key,v){
@@ -172,31 +173,35 @@ function problem(key,v){
  if(key==='required_checks')return v==='mc/review'?"mc/review is Mission Control's review status, not a CI check":null;
  return null}
 const MAXCHIPS=4;
-function chipsHtml(key){const d=data[key],vals=d.value;
- if(!vals.length)return '<span class="none">None set</span>';
- const shown=vals.slice(0,MAXCHIPS).map(v=>`<span class="chip" title="${esc(v)}"><span>${esc(v)}</span></span>`).join('');
- const more=vals.length>MAXCHIPS?`<button type="button" class="more" title="${esc(vals.slice(MAXCHIPS).join(', '))}" data-more="${key}">+${vals.length-MAXCHIPS}</button>`:'';
- return shown+more}
+const expanded=new Set();
+function chipsHtml(key){const d=data[key],vals=d.value,adds=d.repoAdds||[];
+ if(!vals.length&&!adds.length)return '<span class="none">None set</span>';
+ const all=[...vals.map(v=>[v,0]),...adds.map(v=>[v,1])];
+ const open=expanded.has(key),cut=open?all.length:MAXCHIPS;
+ const chip=([v,r])=>`<span class="chip${r?' repo':''}" title="${esc(r?v+' · added by the repo file':v)}"><span>${esc(v)}</span></span>`;
+ const more=all.length>MAXCHIPS?`<button type="button" class="more" data-more="${key}" aria-expanded="${open}">${open?'Show fewer':'+'+(all.length-MAXCHIPS)}</button>`:'';
+ return all.slice(0,cut).map(chip).join('')+more}
 function srcHtml(key){const d=data[key];let t=SOURCE[d.source];let label=t[0];
- if(d.source==='repo'&&key==='checks'&&repo==='demo-app')label='Repo file wins';
+ if(d.source==='repo'&&key==='pick_from')label='Repo file wins';
  return `<span class="src ${d.source}" title="${esc(t[1])}">${label}</span>`}
 function rowHtml(key,label,kind){const d=data[key];const ro=kind==='ro';
  const edit=!ro&&(d.source==='here'||d.source==='default')?`<button type="button" data-edit="${key}" aria-label="Edit ${key}">Edit</button>`:'';
  const reason=ro?`<span class="small ro">${READONLY}</span>`:'';
- return `<div class="krow" data-key="${key}" data-source="${ro?'here':d.source}"><div class="kname"><span class="mono">${key}</span><small>${label}</small></div><div class="chips">${chipsHtml(key)}${reason}</div><div>${srcHtml(key).replace(/class="src [a-z]+"/,m=>ro?'class="src here"':m)}</div><div>${edit}</div></div>`}
+ return `<div class="krow" data-key="${key}" data-source="${d.source}"><div class="kname"><span class="mono">${key}</span><small>${label}</small></div><div class="chips">${chipsHtml(key)}${reason}</div><div>${srcHtml(key)}</div><div>${edit}</div></div>`}
 function renderRules(){
  const body=$('#rules-body');$('#rules-sub').textContent=repo+(repo==='demo-app'?' · repo file found':' · no repo file');
  if(state==='loading'){body.innerHTML="<div class=\"pb\"><p>Reading the repo's rules…</p></div>";return}
  if(state==='error'){body.innerHTML='<div class="pb"><p>Rules did not load.</p><button type="button" data-retry>Try again</button></div>';$('[data-retry]').onclick=()=>{state='normal';$('#state').value='normal';sync();$('#state').focus()};return}
  body.innerHTML=GROUPS.map(([g,ks])=>`<div class="group"><h3>${g}</h3>${ks.map(([k,l,kind])=>rowHtml(k,l,kind)).join('')}${g==='Checks'?`<div class="krow" data-key="test-lock" data-source="builtin"><div class="kname"><span class="mono">test lock</span><small>One full suite at a time</small></div><div class="chips"><span class="small">No full-suite run in progress. Others wait in line, oldest first. Max at once: 1.</span></div><div><span class="src builtin" title="${SOURCE.builtin[1]}">Built in</span></div><div></div></div>`:''}</div>`).join('');
- $$('[data-edit]').forEach(b=>b.onclick=()=>openEditor(b.dataset.edit))}
+ $$('[data-edit]').forEach(b=>b.onclick=()=>openEditor(b.dataset.edit));
+ $$('[data-more]').forEach(b=>b.onclick=()=>{const k=b.dataset.more;expanded.has(k)?expanded.delete(k):expanded.add(k);renderRules();$(`[data-more="${k}"]`).focus()})}
 function openEditor(key){
  const row=$(`[data-key="${key}"]`);if(row.querySelector('.editor'))return;
  const kind=kindOf[key][2],opts=kindOf[key][4],draft=[...data[key].value];
  const ed=document.createElement('div');ed.className='editor';
  const err='<div class="field-error" role="alert"></div>';
  if(kind==='list'){
-  const draw=()=>{ed.querySelector('.chips').innerHTML=draft.map((v,i)=>`<span class="chip" title="${esc(v)}"><span>${esc(v)}</span><button type="button" aria-label="Remove ${esc(v)}" data-rm="${i}">×</button></span>`).join('')||'<span class="none">None set</span>';
+  const draw=()=>{ed.querySelector('.chips').innerHTML=(data[key].repoAdds||[]).map(v=>`<span class="chip repo" title="${esc(v+' · added by the repo file')}"><span>${esc(v)}</span></span>`).join('')+draft.map((v,i)=>`<span class="chip" title="${esc(v)}"><span>${esc(v)}</span><button type="button" aria-label="Remove ${esc(v)}" data-rm="${i}">×</button></span>`).join('')||'<span class="none">None set</span>';
    ed.querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{draft.splice(+b.dataset.rm,1);draw()})};
   ed.innerHTML=`<div class="chips"></div><label>Add a value<span class="addrow"><input type="text" autocomplete="off" aria-label="Add a value to ${key}"><button type="button" data-add>Add</button></span></label>${err}<div class="actions"><button type="button" class="primary" data-save data-write="needs-build">Save</button><button type="button" data-cancel>Cancel</button></div>`;
   row.appendChild(ed);draw();
@@ -248,7 +253,7 @@ const ROLEROWS=[['FLIGHT','Flight Director','Head agent: assigns, unblocks, brin
 ['RETRO','Retrofire Officer','Reviewer: findings with file and line','Read only',2,['What you may do','How you review','Try to break it','What you may not do']]];
 const PLANNED=[['FIDO','Flight Dynamics Officer','Architect: plans changes across areas','Read only'],['BOOSTER','Booster Systems Engineer','Devops: CI, builds and releases','Writes code'],['SURGEON','Flight Surgeon','QA: writes and runs tests','Writes code'],['NETWORK','Network Controller','Researcher: code, docs, the web and Teams','Read only']];
 function renderRoles(){
- $('#roles-body').innerHTML=ROLEROWS.map(([c,l,p,m,n],i)=>`<tr data-role="${c}"><td><b data-call>${c}</b><br><small>${l}</small></td><td class="purpose">${p}</td><td>${m}</td><td><a href="../../../docs/mockups/2026-10/setup-sessions-density.html">${n} seat${n>1?'s':''}</a></td><td><button type="button" data-prompt="${i}">Read prompt</button></td></tr>`).join('');
+ $('#roles-body').innerHTML=ROLEROWS.map(([c,l,p,m,n],i)=>`<tr data-role="${c}"><td><b data-call>${c}</b><br><small>${l}</small></td><td class="purpose">${p}</td><td>${m}</td><td><a href="../../../../docs/mockups/2026-10/setup-sessions-density.html">${n} seat${n>1?'s':''}</a></td><td><button type="button" data-prompt="${i}">Read prompt</button></td></tr>`).join('');
  $('#planned-body').innerHTML=PLANNED.map(([c,l,p,m])=>`<tr data-planned><td><b>${c}</b><br><small>${l}</small></td><td class="purpose">${p}</td><td>${m}</td></tr>`).join('');
  $$('[data-prompt]').forEach(b=>b.onclick=()=>openDrawer(+b.dataset.prompt,b))}
 let opener=null;

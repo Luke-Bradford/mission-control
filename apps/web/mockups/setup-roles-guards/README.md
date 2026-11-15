@@ -14,13 +14,14 @@ Reference: today's `apps/web/src/setup/Roles.tsx` (guard texts, note, lock lines
 
 ## Sources
 
-Settings come from `apps/server/src/config.ts` and `apps/server/src/engine/rule-config.ts`; sources follow `apps/server/src/engine/rules.ts` (the repo file's block tightens the rules and fills keys left out). Each rule row carries one badge:
+Settings come from `apps/server/src/config.ts` and `apps/server/src/engine/rule-config.ts`; sources follow `apps/server/src/engine/rules.ts` (the repo file's block tightens the rules and fills keys left out). The repo file replaces `pick_from` and `areas` (and `hard_rules` when the user has not set it); it only adds to `checks`, `uat.*` and `always_ask`, so those keep their Edit and show the repo file's additions as dashed chips with no remove button. Each rule row carries one badge:
 
 | Badge | Meaning | Edit here |
 | --- | --- | --- |
 | `Set here` | Saved in config.yaml | Yes |
-| `Repo file` | Set in the repo's CLAUDE.md; `Repo file wins` where it overrides a user value | No: change it with a reviewed PR |
+| `Repo file` | Set in the repo's CLAUDE.md; `Repo file wins` where it replaces a user value (`pick_from` on `demo-app`) | No: change it with a reviewed PR |
 | `Default` | Mission Control's default | Yes: edit it to set your own |
+| `Config file` | Saved in config.yaml, but this page cannot change it (Authority) | No: edit the file |
 | `Built in` | Part of Mission Control's code | No |
 
 ## Stats
