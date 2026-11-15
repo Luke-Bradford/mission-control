@@ -12,7 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { rotatingLog } from "../src/rotating-log.ts";
+import { rotatingLog } from "../src/run/rotating-log.ts";
 
 let dir: string;
 let path: string;

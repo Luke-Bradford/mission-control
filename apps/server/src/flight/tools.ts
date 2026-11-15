@@ -323,6 +323,15 @@ import {
 import { z } from "zod";
 import { runAccountId } from "../accounts/bindings.ts";
 import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "../attention/attention-materials.ts";
+import {
+  MaterialsOptionImages,
+  MaterialsStoryShape,
+} from "../attention/attention-materials-schema.ts";
+import {
   AttentionHoldInput,
   attentionHoldError,
   heldRun,
@@ -332,12 +341,6 @@ import {
   questionAskAt,
   releaseHold,
 } from "../attention/holds.ts";
-import {
-  AttentionMaterialsError,
-  type AttentionMaterialsService,
-  createAttentionMaterials,
-} from "../attention-materials.ts";
-import { MaterialsOptionImages, MaterialsStoryShape } from "../attention-materials-schema.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,
@@ -353,12 +356,10 @@ import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms/index.ts";
 import { type CcConfig, crewSeatDef, flightPowersOf, SEAT_ID, seatUnavailable } from "../config.ts";
 import { pausedSeat, readCrewPause, writeCrewPause } from "../crew-pause.ts";
-import { waitReader } from "../dependencies.ts";
 import { type Engine, operatorRefusalText } from "../engine/engine.ts";
 import { CI_LOG_MAX_BUFFER } from "../engine/publish.ts";
 import { accountAtStop, awayQuotaReserve, awayQuotaUnknown } from "../engine/queue.ts";
 import { RepoRulesError } from "../engine/rules.ts";
-import { seatFocus } from "../focus.ts";
 import type { Move, MoveResult } from "../github/board.ts";
 import {
   attentionItems,
@@ -371,6 +372,7 @@ import {
   NOTE_KEY,
   questionWithOperator,
 } from "../hud/hud.ts";
+import { seatFocus } from "../instructions/focus.ts";
 import { announceInstruction } from "../instructions/notices.ts";
 import { InstructionInput } from "../instructions/standing.ts";
 import type { GhRunner } from "../mcp/gh.ts";
@@ -389,7 +391,8 @@ import {
 } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
 import { prototypeLinkProblem } from "../prototype-links.ts";
-import { QueueReorderError } from "../queue-reorder.ts";
+import { waitReader } from "../queue/dependencies.ts";
+import { QueueReorderError } from "../queue/queue-reorder.ts";
 import { handoffTarget } from "../run/handoffs.ts";
 import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";
@@ -4438,16 +4441,14 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
           return { text: `Dismissed ${a.key}.` };
         }
         const key = a.key.slice(NOTE_KEY.length);
+        // the Update notes belong to no repo, so the repo filter must not hide them: the items list shows them
+        const hubUpdate = key === HUB_UPDATE_HELD_KEY || key === HUB_UPDATE_PERSON_KEY;
         const note = store
           .notes()
-          .find((n) => n.key === key && n.repoId === repo.id && n.dismissedAt === null);
-        if (
-          !note ||
-          key.startsWith(GUARD_ACK_PREFIX) ||
-          key === HUB_UPDATE_HELD_KEY ||
-          key === HUB_UPDATE_PERSON_KEY ||
-          note.kind === "ratelimit"
-        )
+          .find(
+            (n) => n.key === key && (hubUpdate || n.repoId === repo.id) && n.dismissedAt === null,
+          );
+        if (!note || key.startsWith(GUARD_ACK_PREFIX) || hubUpdate || note.kind === "ratelimit")
           return fail(note ? protectedItem : notFound);
         const run = note.runId ? store.run(note.runId) : null;
         if (run && held(run)) return fail("This hold belongs to the operator.");

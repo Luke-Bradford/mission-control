@@ -30,8 +30,10 @@ import {
 } from "@mc/core";
 import { codexProfile } from "./accounts/bindings.ts";
 import { evaluateHolds, holds } from "./attention/holds.ts";
+import { closeSettledQuestions } from "./attention/question-watch.ts";
 import { backfillRuns, fillTicketTitles, rewriteCrewSummaries } from "./backfill.ts";
 import type { BriefChoiceDeps } from "./brief/choices.ts";
+import { applyDecisionDefaults } from "./brief/decision-defaults.ts";
 import type { ChangeBus, Topic } from "./bus.ts";
 import {
   AUTO_CLI_TOOLS,
@@ -104,7 +106,6 @@ import {
 } from "./collectors/usage-sources.ts";
 import type { CcConfig } from "./config.ts";
 import { configuredAgents, TRANSCRIPT_RETENTION_DEFAULTS } from "./config.ts";
-import { applyDecisionDefaults } from "./decision-defaults.ts";
 import type { DiskUse } from "./disk/use.ts";
 import { ENDED_RECONCILE_MS } from "./engine/engine.ts";
 import { flightLoopHeartbeat } from "./flight/signals.ts";
@@ -119,7 +120,6 @@ import {
   stateInputs,
 } from "./hud/hud.ts";
 import { healthContent, TopicGate } from "./hud/topic-gate.ts";
-import { closeSettledQuestions } from "./question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";

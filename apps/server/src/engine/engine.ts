@@ -192,6 +192,7 @@ import {
   maxOpenRunsOf,
   seatMayTake,
 } from "./queue.ts";
+import { type ReviewHold, setReviewHold } from "./review-hold.ts";
 import { hardRulesBy, type RepoRulesError } from "./rules.ts";
 import { overrunText, tickLogOf } from "./ticks.ts";
 
@@ -446,6 +447,12 @@ export type SyncMainResult =
 
 /** onChain key for superviseReviews (never a run id). */
 const REVIEWS_CHAIN = "\0reviews";
+
+/** The hold when the older open PRs cannot be compared yet, and why. */
+const unreadOlderPrs = (why: string): ReviewHold => ({
+  reason: `Waiting to compare with older open PRs for shared hard-rule files: ${why}.`,
+  prNumber: null,
+});
 
 /**
  * The review seat for a seat's runs: the first review-loop seat (config order) of its crew session
@@ -2505,10 +2512,11 @@ export function createEngine(deps: EngineDeps): Engine {
     return pr !== null && pr.state === "open" && (pr.headSha === row.sha || pr.headSha === head);
   }
 
-  async function reviewWaitsForOlderPr(row: ReviewRow): Promise<boolean> {
-    if (isExternalReview(row)) return false;
+  /** The hold an older open PR puts on this review (it shares hard-rule files), or null. */
+  async function reviewWaitsForOlderPr(row: ReviewRow): Promise<ReviewHold | null> {
+    if (isExternalReview(row)) return null;
     const author = store.run(row.authorRunId);
-    if (author === null) return true;
+    if (author === null) return unreadOlderPrs("the review's author run is missing");
     const prs = prsFor(author.repoId);
     const ownAuthor = prs.find((pr) => pr.number === row.prNumber)?.author;
     const older = prs.filter(
@@ -2517,10 +2525,10 @@ export function createEngine(deps: EngineDeps): Engine {
         pr.number < row.prNumber &&
         !(ownAuthor != null && pr.author != null && pr.author === ownAuthor),
     );
-    if (older.length === 0) return false;
+    if (older.length === 0) return null;
     try {
       const rules = await rulesFor(author.repoId);
-      if (rules === null) return true;
+      if (rules === null) return unreadOlderPrs("the repo's hard rules could not be read");
       const hardRules = effectiveHardRules(rules, flightPowersOf(config, author.repoId));
       const own = await publisher.reviewPr(author, row.prNumber);
       if (
@@ -2528,7 +2536,9 @@ export function createEngine(deps: EngineDeps): Engine {
         own.state !== "open" ||
         (own.headSha !== row.sha && own.headSha !== store.runPush(author.id)?.sha)
       )
-        return true;
+        return unreadOlderPrs(
+          "the PR's own state could not be read, or it is closed or its head moved",
+        );
       const baseFor = (number: number, head: string, base: string): string => {
         const key = `review-base:${author.repoId}:${number}:${head}`;
         const saved = store.getSetting(key);
@@ -2544,7 +2554,7 @@ export function createEngine(deps: EngineDeps): Engine {
         baseFor(row.prNumber, own.headSha, own.baseSha),
       );
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
-        return true;
+        return unreadOlderPrs("the PR changed while its hard-rule files were being read");
       const snapshots = new Map<number, string>();
       const candidates = older.flatMap((pr) => {
         const run = store.runsOnBranch(author.repoId, pr.branch).find((r) => r.id !== author.id);
@@ -2564,9 +2574,9 @@ export function createEngine(deps: EngineDeps): Engine {
           return { pr: { ...pr, ...snapshot }, run, snapshot };
         }),
       );
-      let waiting = false;
+      let waiting: ReviewHold | null = null;
       for (const { pr, run, snapshot } of reads) {
-        if (snapshot === null) return true;
+        if (snapshot === null) return unreadOlderPrs("an older PR's state could not be read");
         if (pr.state === "closed") continue;
         if (
           pr.state === "merged" &&
@@ -2588,7 +2598,8 @@ export function createEngine(deps: EngineDeps): Engine {
           // A known run whose seat disappeared cannot establish disjointness.
           touched = paths;
         } else {
-          if (pr.state === "merged" && !pr.mergeCommitSha) return true;
+          if (pr.state === "merged" && !pr.mergeCommitSha)
+            return unreadOlderPrs("an older merged PR has no merge commit on record");
           touched = await publisher.hardRuleTouches(
             run,
             pr.headSha,
@@ -2631,10 +2642,16 @@ export function createEngine(deps: EngineDeps): Engine {
               branchUpdated(current, { ...loop }, mainSha, result, now());
             }
           });
-          waiting = true;
+          waiting ??= {
+            reason: `Waiting for #${pr.number}'s merge to reach this branch (shared: ${shared.join(", ")}).`,
+            prNumber: pr.number,
+          };
           continue;
         }
-        waiting = true;
+        waiting ??= {
+          reason: `Waiting for older PR #${pr.number}, which shares hard-rule files (${shared.join(", ")}).`,
+          prNumber: pr.number,
+        };
         store.addLoopEvent(
           reviewEventKey(author.id, row.id, `waits:${pr.number}:${pr.headSha}`),
           author.id,
@@ -2648,15 +2665,16 @@ export function createEngine(deps: EngineDeps): Engine {
             JSON.stringify(await publisher.reviewPr(author, number)) === snapshot,
         ),
       );
-      if (revalidated.some((unchanged) => !unchanged)) return true;
+      if (revalidated.some((unchanged) => !unchanged))
+        return unreadOlderPrs("an older PR changed while it was being compared");
       if (JSON.stringify(await publisher.reviewPr(author, row.prNumber)) !== JSON.stringify(own))
-        return true;
+        return unreadOlderPrs("the PR changed while it was being compared with the older PRs");
       return waiting;
     } catch (e) {
       log(
         `${author.id}: could not read review overlaps: ${e instanceof Error ? e.message : String(e)}`,
       );
-      return true;
+      return unreadOlderPrs("the older PRs could not be compared (see the hub log)");
     }
   }
 
@@ -2769,7 +2787,22 @@ export function createEngine(deps: EngineDeps): Engine {
     // (its screenshots are not ready) stays queued and does not stop the seat's later ones.
     // Existing reviews continue.
     const capacityConfig = config.crew?.machineCapacity ?? MACHINE_CAPACITY_DEFAULTS;
-    if (storedMachineCapacity(store, now(), capacityConfig).blocked) return;
+    // every queued review leaves this pass with a current hold or none: one this pass did not
+    // record (its seat is paused, busy or at its stop, or an earlier review started) is cleared
+    const recorded = new Set<number>();
+    const hold = (id: number, h: ReviewHold): void => {
+      recorded.add(id);
+      setReviewHold(store, id, h);
+    };
+    const machine = storedMachineCapacity(store, now(), capacityConfig);
+    if (machine.blocked) {
+      for (const row of store.reviewsIn(["queued"]))
+        hold(row.id, {
+          reason: `The machine is held: ${machine.reason ?? "its capacity is low"}.`,
+          prNumber: null,
+        });
+      return;
+    }
     const scratch = (config.crew?.sessions ?? [])
       .flatMap((s) => s.seats)
       .filter((x) => !x.retiring && !seatUnavailable(x) && modeOfSeat(x) === "scratch");
@@ -2782,15 +2815,34 @@ export function createEngine(deps: EngineDeps): Engine {
       const at = now();
       if (accountAtStop(config, store, seat.accountId, at)) continue;
       // a reviewer in a restart storm keeps its queued reviews; they wait, they do not fail
-      if (restartHold(store, seat.id) !== null) continue;
-      for (const row of store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id)) {
+      const storm = restartHold(store, seat.id);
+      const queuedHere = store.reviewsIn(["queued"]).filter((r) => r.seatId === seat.id);
+      if (storm !== null) {
+        for (const row of queuedHere)
+          hold(row.id, {
+            reason: `The reviewer is held after repeated restarts: ${storm}`,
+            prNumber: null,
+          });
+        continue;
+      }
+      for (const row of queuedHere) {
         // a change past its review rounds waits for FLIGHT's decision (waste alarm)
-        if (reviewsHeld(store, row.authorRunId)) continue;
+        if (reviewsHeld(store, row.authorRunId)) {
+          hold(row.id, {
+            reason: "Held: the change is past its review rounds and waits for FLIGHT's decision.",
+            prNumber: null,
+          });
+          continue;
+        }
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;
         }
-        if (await reviewWaitsForOlderPr(row)) continue;
+        const olderWait = await reviewWaitsForOlderPr(row);
+        if (olderWait !== null) {
+          hold(row.id, olderWait);
+          continue;
+        }
         if (!reviewWanted(row)) {
           dropReview(row);
           continue;
@@ -2807,6 +2859,7 @@ export function createEngine(deps: EngineDeps): Engine {
         )
           break;
         if (!store.setReviewState(row.id, ["queued"], "starting", { at: now() })) continue;
+        setReviewHold(store, row.id, null);
         let runId: string | null = null;
         try {
           ({ runId } = await supervisor.startReview(seat.id, row.id));
@@ -2819,6 +2872,10 @@ export function createEngine(deps: EngineDeps): Engine {
             // it stays queued and starts once it can (its screenshots may not be ready); the
             // seat's next queued review is tried in this pass
             store.setReviewState(row.id, ["starting"], "queued", { at: now() });
+            hold(row.id, {
+              reason: `The review could not start yet: ${message}`,
+              prNumber: null,
+            });
             void reconcileRun(row.authorRunId);
             continue;
           } else {
@@ -2848,6 +2905,9 @@ export function createEngine(deps: EngineDeps): Engine {
         void reconcileRun(row.authorRunId);
         break;
       }
+    }
+    for (const row of store.reviewsIn(["queued"])) {
+      if (!recorded.has(row.id)) setReviewHold(store, row.id, null);
     }
   }
 

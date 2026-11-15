@@ -29,7 +29,7 @@ import {
 } from "@mc/core";
 import { cleanText } from "../clean.ts";
 import { CLAUDE_COMMAND } from "../cli/version.ts";
-import { STREAM_EVENT_PREFIX } from "../streamjson.ts";
+import { STREAM_EVENT_PREFIX } from "../run/streamjson.ts";
 import { toolResultBytes } from "../telemetry/prompt-cost.ts";
 import { sleep, str } from "../util.ts";
 import {

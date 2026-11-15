@@ -181,6 +181,11 @@ import {
   discoverAccountModels,
   readAccountStatus,
 } from "./accounts/accounts.ts";
+import {
+  AttentionMaterialsError,
+  type AttentionMaterialsService,
+  createAttentionMaterials,
+} from "./attention/attention-materials.ts";
 import { clearAttentionItem } from "./attention/clear.ts";
 import {
   AttentionHoldInput,
@@ -189,11 +194,21 @@ import {
   nothingForOperator,
   releaseHold,
 } from "./attention/holds.ts";
+import { itemThread } from "./attention/item-thread.ts";
 import {
-  AttentionMaterialsError,
-  type AttentionMaterialsService,
-  createAttentionMaterials,
-} from "./attention-materials.ts";
+  LocalNotifications,
+  NotificationPreferencesBody,
+} from "./attention/local-notifications.ts";
+import {
+  type ActionResult,
+  answerSetAside,
+  drop as dropQuestion,
+  type NeedsYouContext,
+  type NeedsYouDeps,
+  notNow as notNowQuestion,
+  offersFor,
+  setAsideQuestions,
+} from "./attention/needs-you-actions.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -202,10 +217,10 @@ import {
   readAwaySettings,
 } from "./away.ts";
 import { registerBriefChoiceRoutes } from "./brief/api.ts";
+import { ChoiceRefused, choiceReceipt, chooseOption } from "./brief/choose.ts";
 import { checkBriefDispatch } from "./brief/dispatch.ts";
 import { boundBriefGuard } from "./brief/dispatch-context.ts";
 import type { ChangeBus } from "./bus.ts";
-import { ChoiceRefused, choiceReceipt, chooseOption } from "./choose.ts";
 import { cleanText } from "./clean.ts";
 import { cleanCodeHealth } from "./code-health/clean.ts";
 import { CodeHealthReadError, CodeHealthReader } from "./code-health/read.ts";
@@ -243,7 +258,6 @@ import {
 } from "./comms/index.ts";
 import { replyRoute } from "./comms/reply.ts";
 import { commsTicketCounts } from "./comms/ticket-counts.ts";
-import { compressResponse } from "./compress.ts";
 import {
   agentIds,
   type CcConfig,
@@ -285,7 +299,6 @@ import {
   startUnpausedRun,
   writeCrewPause,
 } from "./crew-pause.ts";
-import { readDependencyChains } from "./dependency-chains.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
@@ -358,8 +371,6 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { itemThread } from "./item-thread.ts";
-import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
@@ -375,16 +386,6 @@ import {
   readKnown,
   seatPlace,
 } from "./mcp/tools.ts";
-import {
-  type ActionResult,
-  answerSetAside,
-  drop as dropQuestion,
-  type NeedsYouContext,
-  type NeedsYouDeps,
-  notNow as notNowQuestion,
-  offersFor,
-  setAsideQuestions,
-} from "./needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";
 import type { PrEvidenceStore } from "./pr-evidence/store.ts";
@@ -403,12 +404,13 @@ import {
   type QaReportService,
   qaReportMarkdown,
 } from "./qa/reports.ts";
+import { readDependencyChains } from "./queue/dependency-chains.ts";
 import {
   proposeQueueReorder,
   type QueueReorderDeps,
   QueueReorderError,
   resolveQueueReorder,
-} from "./queue-reorder.ts";
+} from "./queue/queue-reorder.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./repo-profile.ts";
 import { reviewCheckFor } from "./review/check.ts";
 import { branchOwned, readExternalSubject } from "./review/external.ts";
@@ -417,7 +419,9 @@ import {
   AsideAnswerUnconfirmed,
   answerAsideQuestion,
 } from "./run/aside-answer.ts";
+import { compressResponse } from "./run/compress.ts";
 import { publicHandoff } from "./run/handoffs.ts";
+import { lastOutputAt, readStream, readStreamPage } from "./run/stream.ts";
 import {
   type BoardTitleCache,
   type PrCache,
@@ -441,7 +445,6 @@ import { weeklyProjection } from "./spend/projection.ts";
 import { wasteReport } from "./spend/waste.ts";
 import { crewDir, crewPrBodyPath } from "./store/crew-paths.ts";
 import { type CommsReadScope, commsMessageNumber, commsPosition, type Store } from "./store.ts";
-import { lastOutputAt, readStream, readStreamPage } from "./stream.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./telemetry/machine-capacity.ts";
 import { metricsView } from "./telemetry/metrics.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./telemetry/pace.ts";
@@ -6351,6 +6354,8 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         try {
           // FLIGHT's run never applies a shortcut: only a person does
           const out = await updater.update(actor === null ? undefined : { refuseUnsafe: true });
+          // main is now running (or was already): no Update is waiting any more
+          createHeldUpdateNote(store, bus)(null);
           if ("restarting" in out) {
             restarting = true;
             updater.restart();
