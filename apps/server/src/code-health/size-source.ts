@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
-import { GIT_TIMEOUT_MS, type GitExec, gitEnv, readOnlyObjectBase, realGitExec } from "../repo/files.ts";
+import {
+  GIT_TIMEOUT_MS,
+  type GitExec,
+  gitEnv,
+  readOnlyObjectBase,
+  realGitExec,
+} from "../repo/files.ts";
 import { riskFile } from "./risk.ts";
 
 export const SIZE_SCOPE_VERSION = 1;

@@ -347,7 +347,6 @@ import {
 } from "../brief/prepare.ts";
 import { BriefActionInput, BriefDecisionInput } from "../brief/schema.ts";
 import type { ChangeBus } from "../bus.ts";
-import { cleanText } from "../repo/clean.ts";
 import { TICKET_BODY_MAX } from "../collectors/github.ts";
 import { catchUpKind, parsePersonKey } from "../collectors/notifications.ts";
 import { attentionChatter, canReadComms, pinComms, sendComms } from "../comms/index.ts";
@@ -387,9 +386,10 @@ import {
   text,
 } from "../mcp/tools.ts";
 import { chooseRunProfile, type ProfilesError } from "../profiles.ts";
-import { prototypeLinkProblem } from "../repo/prototype-links.ts";
 import { waitReader } from "../queue/dependencies.ts";
 import { QueueReorderError } from "../queue/queue-reorder.ts";
+import { cleanText } from "../repo/clean.ts";
+import { prototypeLinkProblem } from "../repo/prototype-links.ts";
 import { handoffTarget } from "../run/handoffs.ts";
 import { parseTicket } from "../run/view.ts";
 import { cutNoteText } from "../runtime/brief.ts";

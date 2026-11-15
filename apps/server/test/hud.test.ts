@@ -52,8 +52,8 @@ import {
   pinned,
 } from "../src/hud/hud.ts";
 import { INSTRUCTION_FOCUS_NOTE_PREFIX } from "../src/instructions/notices.ts";
-import { clearLeftovers } from "../src/repo/leftovers.ts";
 import { PREFIX as QUEUE_REORDER_PREFIX } from "../src/queue/queue-reorder.ts";
+import { clearLeftovers } from "../src/repo/leftovers.ts";
 import { Store } from "../src/store.ts";
 import { foldTranscript } from "../src/streamjson.ts";
 import { MACHINE_CAPACITY_KEY } from "../src/telemetry/machine-capacity.ts";

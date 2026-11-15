@@ -38,9 +38,9 @@ import {
   type VersionInfo,
 } from "@mc/core";
 import type { ChangeBus } from "./bus.ts";
-import { cleanText } from "./repo/clean.ts";
 import type { CliHold } from "./cli/update.ts";
 import { type CcConfig, configuredAgents } from "./config.ts";
+import { cleanText } from "./repo/clean.ts";
 import { gitEnv } from "./repo/files.ts";
 import { installEnv } from "./runtime/checkouts.ts";
 import { SAFE_CONFIG } from "./runtime/git.ts";

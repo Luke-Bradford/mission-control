@@ -35,7 +35,6 @@ import {
   type Run,
 } from "@mc/core";
 import { buildApp, crewGuardDeps } from "./api.ts";
-import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./repo/branch-tidy.ts";
 import { routineBriefChoices } from "./brief/routine.ts";
 import { ChangeBus } from "./bus.ts";
 import { CliHold } from "./cli/update.ts";
@@ -98,7 +97,6 @@ import {
 } from "./guard/check-runs.ts";
 import { lockChanged, TestLock } from "./guard/lock.ts";
 import { attentionItems, markHubStarted, NO_LOCK } from "./hud/hud.ts";
-import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
 import { MapConflicts } from "./map/conflicts.ts";
 import { CallRing, type RingSource } from "./map/ring.ts";
 import { createGh, ghCommand } from "./mcp/gh.ts";
@@ -112,7 +110,6 @@ import {
   readKnown,
 } from "./mcp/tools.ts";
 import { releaseWaitingOperator } from "./needs-you-actions.ts";
-import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";
 import {
@@ -135,6 +132,9 @@ import {
   type QueueReorderDeps,
   reorderQueue,
 } from "./queue/queue-reorder.ts";
+import { createBranchTidy, SWEEP_EVERY_MS, TIDY_EVERY_MS } from "./repo/branch-tidy.ts";
+import { clearLeftovers, LEFTOVERS_EVERY_MS } from "./repo/leftovers.ts";
+import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./repo/no-index.ts";
 import { branchOwned, createExternalReviews, readExternalSubject } from "./review/external.ts";
 import { rotatingLog } from "./rotating-log.ts";
 import { startCodexDiscovery } from "./runtime/codex-discovery.ts";

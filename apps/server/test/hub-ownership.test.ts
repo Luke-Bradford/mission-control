@@ -16,7 +16,6 @@ import {
 } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
-import { createBranchTidy } from "../src/repo/branch-tidy.ts";
 import { ChangeBus } from "../src/bus.ts";
 import type { Gql } from "../src/collectors/github.ts";
 import type { CcConfig } from "../src/config.ts";
@@ -25,6 +24,7 @@ import { externalReviewAsked } from "../src/external-pr-control.ts";
 import { clearBoardIds, moveCard } from "../src/github/board.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
 import { createEvidenceSweep, postPrEvidence } from "../src/pr-evidence/sweep.ts";
+import { createBranchTidy } from "../src/repo/branch-tidy.ts";
 import { createExternalReviews, externalReviewKey } from "../src/review/external.ts";
 import { createScheduler, realCollectors } from "../src/scheduler.ts";
 import { Store } from "../src/store.ts";

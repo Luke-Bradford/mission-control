@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NEW_LOOP, type PullRequestView, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it } from "vitest";
-import { createBranchTidy, isKept, SWEEP_MIN_AGE_MS } from "../src/repo/branch-tidy.ts";
 import type { CcConfig } from "../src/config.ts";
 import type { GhRunner } from "../src/mcp/gh.ts";
+import { createBranchTidy, isKept, SWEEP_MIN_AGE_MS } from "../src/repo/branch-tidy.ts";
 import { Store } from "../src/store.ts";
 
 let dir: string;

@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Run, RunDigest } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FOLD_WINDOW_MS, foldPath } from "../src/collectors/common.ts";
+import type { CcConfig } from "../src/config.ts";
 import {
   BACKFILL_BATCH,
   backfillRuns,
@@ -19,8 +21,6 @@ import {
   SUMMARY_REWRITE_DONE,
   TITLES_FILLED_DONE,
 } from "../src/repo/backfill.ts";
-import { FOLD_WINDOW_MS, foldPath } from "../src/collectors/common.ts";
-import type { CcConfig } from "../src/config.ts";
 import { Store } from "../src/store.ts";
 
 // The real foldPath, counted: no run's transcript may be read twice.
