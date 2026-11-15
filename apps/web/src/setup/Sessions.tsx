@@ -32,7 +32,14 @@ import { AgentTag } from "../hud/AgentTag.tsx";
 import { CrewOff } from "../hud/CrewOff.tsx";
 import { Panel } from "../hud/Panel.tsx";
 import { Pill } from "../hud/Pill.tsx";
-import { addAgentParam, agentPath, navigate, withoutAddAgentParam } from "../router.ts";
+import {
+  addAgentParam,
+  agentPath,
+  editSeatParam,
+  navigate,
+  withoutAddAgentParam,
+  withoutEditSeatParam,
+} from "../router.ts";
 import {
   getSession,
   inSession,
@@ -836,6 +843,19 @@ export function Sessions({ config }: { config: ConfigView }) {
       navigate(withoutAddAgentParam(), { replace: true });
     }
   }, [changes, form?.sessionId, requestedSessionId]);
+  // Roles & guards links each seat here with `?edit=session:seat`: open that seat's form once the
+  // seats as config.yaml lists them have loaded.
+  const [requestedEdit] = useState(() => editSeatParam(window.location.search));
+  const editOpened = useRef(false);
+  useEffect(() => {
+    if (!requestedEdit || editOpened.current || !changes) return;
+    editOpened.current = true;
+    const input = changes.sessions
+      .find((s) => s.id === requestedEdit.sessionId)
+      ?.seats.find((s) => s.id === requestedEdit.seatId);
+    if (input) setForm(seatForm(config, requestedEdit.sessionId, input));
+    navigate(withoutEditSeatParam(), { replace: true });
+  }, [changes, config, requestedEdit]);
   const [busy, setBusy] = useState(false);
   // Restore only after the form unmounts and its opener is enabled again.
   useEffect(() => {

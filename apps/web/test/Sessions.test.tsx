@@ -508,3 +508,20 @@ describe("session form: grouping and recoverable input", () => {
     expect(posts(fetch, SESSIONS)).toHaveLength(1);
   });
 });
+
+describe("?edit= from Roles & guards", () => {
+  it("opens that seat's edit form once the seats load, and drops the parameter", async () => {
+    window.history.replaceState(null, "", "/setup/sessions?edit=s1:guido-1&keep=1");
+    mount({ "/api/crew/changes": CHANGES });
+    const form = await screen.findByRole("form", { name: "Edit guido-1" });
+    expect((within(form).getByLabelText("Area") as HTMLInputElement).value).toBe("apps/**");
+    await waitFor(() => expect(window.location.search).toBe("?keep=1"));
+  });
+
+  it("opens nothing for a seat that is not there", async () => {
+    window.history.replaceState(null, "", "/setup/sessions?edit=s1:nobody-9");
+    mount({ "/api/crew/changes": CHANGES });
+    await waitFor(() => expect(window.location.search).toBe(""));
+    expect(screen.queryByRole("form", { name: /^Edit / })).toBeNull();
+  });
+});
