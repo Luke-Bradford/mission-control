@@ -7900,6 +7900,24 @@ describe("update routes", () => {
     expect((await get("/api/telemetry")).json<Telemetry>().series?.annotations).toEqual([]);
   });
 
+  it("drops the held-Update notes once an Update has run (#1886)", async () => {
+    for (const key of ["hub-update-held", "hub-update-person"])
+      store.raiseNote({
+        key,
+        kind: "blocked",
+        runId: null,
+        seatId: null,
+        repoId: null,
+        text: "A new version of Mission Control is waiting.",
+        at: NOW - 1,
+      });
+    store.setSetting("hub-update-held-since", String(NOW - 1));
+    updaterResult = async () => ({ restarting: true });
+    await post("/api/update");
+    expect(store.notes()).toEqual([]);
+    expect(store.getSetting("hub-update-held-since")).toBeNull();
+  });
+
   it("restarts a successful Update when the client disconnects before its response", async () => {
     updaterResult = async () => ({ restarting: true });
     dropUpdateResponse = true;
