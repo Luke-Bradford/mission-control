@@ -336,8 +336,8 @@ import {
   AttentionMaterialsError,
   type AttentionMaterialsService,
   createAttentionMaterials,
-} from "../attention-materials.ts";
-import { MaterialsOptionImages, MaterialsStoryShape } from "../attention-materials-schema.ts";
+} from "../attention/attention-materials.ts";
+import { MaterialsOptionImages, MaterialsStoryShape } from "../attention/attention-materials-schema.ts";
 import { activeAway } from "../away.ts";
 import {
   type BriefPreparationDeps,

@@ -193,7 +193,7 @@ import {
   AttentionMaterialsError,
   type AttentionMaterialsService,
   createAttentionMaterials,
-} from "./attention-materials.ts";
+} from "./attention/attention-materials.ts";
 import {
   AWAY_STARTED_SETTING,
   AwayBody,
@@ -357,8 +357,8 @@ import {
 import { overviewTimeline } from "./hud/timeline.ts";
 import { activity, configView } from "./hud/views.ts";
 import { registerInstructionRoutes } from "./instructions/api.ts";
-import { itemThread } from "./item-thread.ts";
-import { LocalNotifications, NotificationPreferencesBody } from "./local-notifications.ts";
+import { itemThread } from "./attention/item-thread.ts";
+import { LocalNotifications, NotificationPreferencesBody } from "./attention/local-notifications.ts";
 import { loopTries } from "./loop/history.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "./machine-capacity.ts";
 import { MapConflicts } from "./map/conflicts.ts";
@@ -385,7 +385,7 @@ import {
   notNow as notNowQuestion,
   offersFor,
   setAsideQuestions,
-} from "./needs-you-actions.ts";
+} from "./attention/needs-you-actions.ts";
 import { BOOTSTRAP_REFUSED, operatorTokenMatches } from "./operator.ts";
 import { activePace, PaceInput, paceView, readPaceSettings } from "./pace.ts";
 import { prAcceptanceFor, prUat } from "./pr/uat.ts";

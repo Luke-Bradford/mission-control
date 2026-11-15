@@ -125,7 +125,7 @@ import {
   openQuestionSubjects,
   questionFacts,
   subjectId,
-} from "../question-watch.ts";
+} from "../attention/question-watch.ts";
 import { parseTicket } from "../run/view.ts";
 import type { SeatBusy } from "../runtime/supervisor.ts";
 import { ACTIVE_SEAT_STATES, type Store } from "../store.ts";

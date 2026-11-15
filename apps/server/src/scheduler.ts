@@ -126,7 +126,7 @@ import {
   MACHINE_CAPACITY_KEY,
   storedMachineCapacity,
 } from "./machine-capacity.ts";
-import { closeSettledQuestions } from "./question-watch.ts";
+import { closeSettledQuestions } from "./attention/question-watch.ts";
 import type { Supervisor } from "./runtime/supervisor.ts";
 import { syncWasteAlarms } from "./spend/waste.ts";
 import type { Store } from "./store.ts";

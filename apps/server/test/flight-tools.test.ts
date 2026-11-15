@@ -145,7 +145,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
 import { evaluateHolds, holds } from "../src/attention/holds.ts";
-import { AttentionMaterialsError } from "../src/attention-materials.ts";
+import { AttentionMaterialsError } from "../src/attention/attention-materials.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { upsertRecommendation } from "../src/code-health/recommendations.ts";
 import { TICKET_BODY_MAX } from "../src/collectors/github.ts";

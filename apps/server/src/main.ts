@@ -113,7 +113,7 @@ import {
   prTextProblem,
   readKnown,
 } from "./mcp/tools.ts";
-import { releaseWaitingOperator } from "./needs-you-actions.ts";
+import { releaseWaitingOperator } from "./attention/needs-you-actions.ts";
 import { EVIDENCE_FOLDERS, keepOutOfSpotlight } from "./no-index.ts";
 import { newOperatorToken, writeControllerToken, writeOperatorToken } from "./operator.ts";
 import { createPrEvidence } from "./pr-evidence/capture.ts";

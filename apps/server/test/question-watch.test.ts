@@ -23,7 +23,7 @@ import {
   factsText,
   openQuestionSubjects,
   questionFacts,
-} from "../src/question-watch.ts";
+} from "../src/attention/question-watch.ts";
 import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-07T12:00:00Z");

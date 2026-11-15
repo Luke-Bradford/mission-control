@@ -7,7 +7,7 @@ import { buildApp } from "../src/api.ts";
 import { ChangeBus } from "../src/bus.ts";
 import { sendComms } from "../src/comms/index.ts";
 import type { CcConfig } from "../src/config.ts";
-import { itemThread } from "../src/item-thread.ts";
+import { itemThread } from "../src/attention/item-thread.ts";
 import type { Supervisor } from "../src/runtime/supervisor.ts";
 import type { CommsRow } from "../src/store/types.ts";
 import { Store } from "../src/store.ts";

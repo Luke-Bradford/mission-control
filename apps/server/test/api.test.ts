@@ -118,7 +118,7 @@ import { FLIGHT_OPERATOR_ACTOR_HEADER, operatorCall } from "../src/flight/operat
 import { recordSeatCall } from "../src/flight/signals.ts";
 import { TestLock } from "../src/guard/lock.ts";
 import * as views from "../src/hud/views.ts";
-import { LocalNotifications } from "../src/local-notifications.ts";
+import { LocalNotifications } from "../src/attention/local-notifications.ts";
 import { MACHINE_CAPACITY_DEFAULTS } from "../src/machine-capacity.ts";
 import { mapTree } from "../src/map/snapshot.ts";
 import { BOOTSTRAP_REFUSED } from "../src/operator.ts";
