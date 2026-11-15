@@ -514,6 +514,105 @@ describe("ItemPanel, acting on an item", () => {
     });
   });
 
+  describe("an option with a prepared action (a hub brief or an escalation)", () => {
+    const BOUND = "/api/attention/hold%3Astudio/choice";
+    const REVISION = "c".repeat(64);
+    const bound = (over: Partial<AttentionItem> = {}) =>
+      item({
+        key: "hold:studio",
+        kind: "decision",
+        agentId: "studio",
+        escalationId: null,
+        ticket: null,
+        url: null,
+        text: "The studio switch-over is still open.",
+        brief: {
+          ...brief({
+            for: "operator",
+            by: "hub",
+            options: [
+              { id: "clear", label: "Not now, clear it", answer: "Clear it." },
+              { id: "keep", label: "Keep it", answer: "Keep it open." },
+            ],
+          }),
+          id: 31,
+          binding: {
+            version: 2,
+            sourceRevision: REVISION,
+            meaningKey: "m",
+            epoch: "e1",
+            epochId: 31,
+            preparedAt: NOW,
+            preparedBy: { service: "stalled-comms" },
+            actions: [
+              {
+                optionId: "clear",
+                action: { kind: "record-decision" },
+                defaultable: false,
+                effect: "Records the decision.",
+              },
+              {
+                optionId: "keep",
+                action: {
+                  kind: "attention-hold",
+                  reason: "Kept open",
+                  condition: { kind: "time", at: NOW + HOUR },
+                } as never,
+                defaultable: false,
+                effect: "Holds the item.",
+              },
+            ],
+          },
+        },
+        ...over,
+      });
+    const applied = (over: object = {}) => ({
+      epoch: "e1",
+      requestId: "r",
+      optionId: "clear",
+      at: NOW + 1,
+      state: "applied",
+      text: "Decision recorded. No external action was performed.",
+      actor: { operator: true },
+      ...over,
+    });
+
+    it.each([
+      ["a hub brief", bound()],
+      ["an escalation", bound({ key: "hold:studio", escalationId: "shop-app#4001" })],
+    ])("%s: clicking an option posts the bound choice and shows it recorded", async (_n, ask) => {
+      const fn = acting([ask], { [`POST ${BOUND}`]: applied() });
+      fireEvent.click(await enabled("Not now, clear it"));
+      await waitFor(() => expect(posts(fn, BOUND)).toHaveLength(1));
+      expect(posts(fn, BOUND)[0]).toMatchObject({
+        briefId: 31,
+        sourceRevision: REVISION,
+        optionId: "clear",
+      });
+      expect(typeof posts(fn, BOUND)[0].requestId).toBe("string");
+      expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
+      expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(
+        "Decision recorded.",
+      );
+      expect(
+        (within(panel()).getByRole("button", { name: "Keep it" }) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    });
+
+    it("shows the server's refusal and leaves the options clickable", async () => {
+      acting([bound()], {
+        [`POST ${BOUND}`]: () => ({
+          status: 409,
+          body: { error: "This decision is held; a choice cannot release it implicitly." },
+        }),
+      });
+      fireEvent.click(await enabled("Keep it"));
+      expect((await within(panel()).findByRole("alert")).textContent).toContain("is held");
+      expect(within(panel()).queryByTestId("choice-line")).toBeNull();
+      await enabled("Keep it");
+    });
+  });
+
   it("Dismiss posts the dismiss route, refreshes the list and closes the panel", async () => {
     const fn = acting([BLOCKED], { [DISMISS]: { dismissed: BLOCKED.key } });
     fireEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
