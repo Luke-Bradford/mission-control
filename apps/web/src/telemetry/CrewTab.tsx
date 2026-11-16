@@ -102,7 +102,10 @@ function Lanes({
       </div>
       <ul className="readout" aria-label="Seats in each state now">
         {STATES.map((s) => (
-          <li key={s.key}>
+          <li
+            key={s.key}
+            title={`Seats in the ${s.label.toLowerCase()} state now, of the seats in view`}
+          >
             <i className={`sw st ${s.key}`} aria-hidden="true" />
             <span className="nm">{s.label}</span>
             <span className="vl num">{nowCount(s.key)} now</span>

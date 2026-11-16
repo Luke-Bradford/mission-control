@@ -398,10 +398,7 @@ describe("the Crew tab", () => {
   it("draws a lane per seat, each state with its own shape, and counts the seats in each state", async () => {
     await open();
     const lanes = [...document.querySelectorAll("#tCrewState .lane")];
-    expect(lanes.map((l) => l.textContent)).toEqual([
-      "shop-app-tanow waiting",
-      "studionow idle",
-    ]);
+    expect(lanes.map((l) => l.textContent)).toEqual(["shop-app-tanow waiting", "studionow idle"]);
     const spans = [...(lanes[0] as Element).querySelectorAll(".span")].map((s) => s.className);
     expect(spans).toEqual(["span running", "span waiting"]);
     const first = (lanes[0] as Element).querySelector(".span") as HTMLElement;
