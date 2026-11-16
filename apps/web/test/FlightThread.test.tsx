@@ -121,6 +121,16 @@ describe("FlightThread", () => {
     expect(await screen.findByText("FLIGHT is working… since 09:05")).toBeTruthy();
   });
 
+  it("shows a PR link as its text only, with no host after it", async () => {
+    stub([msg("comms:1", "See [PR 1959](https://github.com/o/r/pull/1959) now")]);
+    render(<FlightThread />);
+    const link = await screen.findByRole("link", { name: /PR 1959/ });
+    expect(link.getAttribute("href")).toBe("https://github.com/o/r/pull/1959");
+    const article = link.closest("article") as HTMLElement;
+    expect(article.textContent).not.toContain("github.com");
+    expect(article.querySelector(".safe-link-host")).toBeNull();
+  });
+
   it("shows no working line when the server omits it", async () => {
     stub([msg("comms:1", "hi")]);
     render(<FlightThread />);

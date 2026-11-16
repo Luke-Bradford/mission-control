@@ -184,7 +184,7 @@ export function FlightThread({
               {message.choice ? (
                 `You chose: ${message.choice.label}`
               ) : (
-                <OpenLinks>
+                <OpenLinks hideHost>
                   <Markdown text={linkRefs(message.text, message.ticket, repo, config)} />
                 </OpenLinks>
               )}
