@@ -474,7 +474,8 @@ describe("Header", () => {
     unmount();
     render(<Header page="comms" />);
     const open = screen.getByRole("button", { name: "FLIGHT chat" });
-    expect(open.title).toBe("FLIGHT chat is open in Comms");
+    expect(open.title).toBe("Show or hide FLIGHT's chat (f)");
+    // The click on Setup opened the dock; the same button on Comms reports that state.
     expect(open.getAttribute("aria-pressed")).toBe("true");
   });
 });
