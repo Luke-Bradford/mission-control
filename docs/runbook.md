@@ -81,7 +81,11 @@ findings are left out), over those merged PRs that changed that exact path, and 
 touches is null (undefined), not 0; the funnel counts every stored proposal in SQL, not the newest 200;
 after-date results come only from stored remeasure records; a PR with a run whose cost is not recorded
 (for example Codex) is left out of the median cost and counted as unpriced, never as free. Outside sources
-read "not collected" and waste alarms "not available" until those parts exist. The summary is stored in
+read "not collected" until that part exists. Waste alarms are supplied: the repo's open alarms from
+`waste_alarms` (all six families), one Do next row per check-and-subject cause with the alarm's own
+scope, evidence, measure, threshold, owner and state; an unrecorded cost stays null, never zero. An
+alarm opening or closing does not touch the code-health revision, so a stored summary is compared with
+the live alarm rows and rebuilt when they differ. The summary is stored in
 `code_health_overview`, one row per repo and window, and served while the code-health source revision is
 unchanged and the row is under 10 minutes old; a new hub process serves the stored row without rebuilding.
 The hub emits the `health` topic only when a rebuild changes the content shown (`summaryRevision`).

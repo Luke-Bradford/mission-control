@@ -324,6 +324,21 @@ const notificationRow = (r: Row): NotificationRow => ({
 const memPct = (s: MachineSample): number | null =>
   s.memUsedBytes !== null && s.memTotalBytes > 0 ? (s.memUsedBytes / s.memTotalBytes) * 100 : null;
 
+const GIB = 1024 ** 3;
+
+/** Two decimals keep the served series short; null stays null. */
+const round2 = (n: number | null): number | null => (n === null ? null : Math.round(n * 100) / 100);
+
+/** Swap in use as a percentage of the swap file; null when unmeasured or there is no swap file. */
+const swapPct = (s: MachineSample): number | null =>
+  s.swapUsedBytes != null && s.swapTotalBytes != null && s.swapTotalBytes > 0
+    ? (s.swapUsedBytes / s.swapTotalBytes) * 100
+    : null;
+
+/** 100 minus the free percentage `memory_pressure` reports; null when unmeasured. */
+const pressurePct = (s: MachineSample): number | null =>
+  s.memoryPressureFreePct == null ? null : 100 - s.memoryPressureFreePct;
+
 /**
  * A stored digest; one persisted before `background` existed has none in flight, one before
  * `compactions` existed has none counted, one before `lastText` existed has no text.
@@ -3674,9 +3689,20 @@ export class Store {
     this.transaction(() => {
       this.db
         .prepare(
-          "INSERT OR REPLACE INTO machine_samples (at, sample, cpu_pct, mem_pct) VALUES (?, ?, ?, ?)",
+          `INSERT OR REPLACE INTO machine_samples
+             (at, sample, cpu_pct, mem_pct, swap_pct, pressure_pct, agent_gb, test_gb)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
-        .run(s.at, JSON.stringify(s), s.cpuPct, memPct(s));
+        .run(
+          s.at,
+          JSON.stringify(s),
+          s.cpuPct,
+          memPct(s),
+          swapPct(s),
+          pressurePct(s),
+          s.agents ? s.agents.rssBytes / GIB : null,
+          s.testRun ? s.testRun.rssBytes / GIB : null,
+        );
       this.db.prepare("DELETE FROM machine_samples WHERE at < ?").run(s.at - MACHINE_RETENTION_MS);
     });
   }
@@ -3704,7 +3730,9 @@ export class Store {
   ): Telemetry["machine"] {
     const rows = this.db
       .prepare(
-        `SELECT MAX(at) AS at, AVG(cpu_pct) AS cpu, AVG(mem_pct) AS mem FROM machine_samples
+        `SELECT MAX(at) AS at, AVG(cpu_pct) AS cpu, AVG(mem_pct) AS mem, AVG(swap_pct) AS swap,
+                AVG(pressure_pct) AS pressure, AVG(agent_gb) AS agent, AVG(test_gb) AS test
+         FROM machine_samples
          WHERE at >= ? AND at <= ?
          GROUP BY MIN(?, CAST((at - ?) / ? AS INTEGER)) ORDER BY 1 ASC`,
       )
@@ -3712,8 +3740,20 @@ export class Store {
       at: number;
       cpu: number | null;
       mem: number | null;
+      swap: number | null;
+      pressure: number | null;
+      agent: number | null;
+      test: number | null;
     }[];
-    return rows.map((r) => ({ at: r.at, cpuPct: r.cpu, memPct: r.mem }));
+    return rows.map((r) => ({
+      at: r.at,
+      cpuPct: r.cpu,
+      memPct: r.mem,
+      swapPct: round2(r.swap),
+      pressurePct: round2(r.pressure),
+      agentGb: round2(r.agent),
+      testRunGb: round2(r.test),
+    }));
   }
 
   /** Acknowledges attention item keys at `at` (a re-ack moves the time; absence is kept). */

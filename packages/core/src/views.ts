@@ -452,7 +452,19 @@ export interface Telemetry {
   }[];
   subagents: (SubagentInfo & { agentId: AgentId })[];
   quota: { accountId: AccountId; window: "5h" | "7d"; points: { at: number; pct: number }[] }[];
-  machine: { at: number; cpuPct: number | null; memPct: number | null }[];
+  machine: {
+    at: number;
+    cpuPct: number | null;
+    memPct: number | null;
+    /** Swap file in use, % of its size. null = not collected (or no swap file), never 0 for a gap. */
+    swapPct?: number | null;
+    /** Memory pressure: 100 minus macOS's system-wide free percentage. null = not collected. */
+    pressurePct?: number | null;
+    /** Memory held by the claude and codex processes, GB. null = not collected. */
+    agentGb?: number | null;
+    /** Memory held by full-suite test runs, GB; null when no run was sampled in the bucket. */
+    testRunGb?: number | null;
+  }[];
   tokensByTicket: {
     ticket: string;
     tokens: number;

@@ -160,6 +160,7 @@ import {
   SupervisorError,
   type SupervisorEvent,
 } from "../src/runtime/supervisor.ts";
+import { reviewsHeld, syncWasteAlarms } from "../src/spend/waste.ts";
 import { Store } from "../src/store.ts";
 import { defined } from "./defined.ts";
 
@@ -6379,6 +6380,41 @@ describe("the engine runs reviews", () => {
         expect(loopOf().parked).not.toBeNull();
       });
 
+      it("past the round cap, resolves the live-level alarm and starts the independent review", async () => {
+        addSecondReviewer();
+        await parkOnBlocking();
+        const one = first();
+        store.requestReview({
+          authorRunId: one.authorRunId,
+          repoId: one.repoId,
+          seatId: RETRO,
+          prNumber: one.prNumber,
+          sha: one.sha,
+          epoch: one.epoch,
+          attempt: one.attempt + 1,
+          round: 3,
+          at: clock,
+        });
+        expect(reviewsHeld(store, RUN)).toBe(true);
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review"],
+            action: "second_review",
+            basis: "the floor review looks wrong",
+            note: "the floor review looks wrong",
+          }),
+        ).toEqual({ lifted: true });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(
+          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+        ).toMatchObject({ basis: "the floor review looks wrong", level: 3 });
+        await vi.waitFor(() => expect(secondReview().seatId).toBe(SECOND));
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        expect(secondReview().state).toBe("running");
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
       it("refuses off the floor paths, and when the review is not blocking", async () => {
         addSecondReviewer();
         await parkOnBlocking();
@@ -6484,6 +6520,82 @@ describe("the engine runs reviews", () => {
         expect(loopOf()).toMatchObject({ phase: "working", flightReworks: { [SHA]: 1 } });
       });
 
+      it("rereview resolves the review-rounds alarm with FLIGHT's basis, and the review runs", async () => {
+        const third = await heldAtLimit();
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review", "review-ruling", "review-failed"],
+            action: "rereview",
+            basis: "the findings are fixed",
+          }),
+        ).toEqual({ lifted: true });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(
+          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+        ).toMatchObject({ basis: "the findings are fixed", level: 3 });
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const fresh = store
+          .reviewsOfRun(RUN)
+          .filter((r) => r.id > third && r.state !== "superseded");
+        expect(fresh).toHaveLength(1);
+        expect(fresh[0]).toMatchObject({ state: "running" });
+        expect(fresh[0]?.runId).not.toBeNull();
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      it("rereview raises a stale open alarm to the live round and resolves it", async () => {
+        const third = await heldAtLimit();
+        syncWasteAlarms(config, store, clock);
+        const open = store.waste.alarms(
+          "WHERE check_id = 'review-rounds' AND subject = ? AND resolved_at IS NULL",
+          RUN,
+        )[0];
+        expect(open).toMatchObject({ level: 3 });
+        // a fourth round is requested after the scan wrote level 3
+        const row = need(store.review(third));
+        store.requestReview({
+          authorRunId: row.authorRunId,
+          repoId: row.repoId,
+          seatId: RETRO,
+          prNumber: row.prNumber,
+          sha: row.sha,
+          epoch: row.epoch,
+          attempt: row.attempt + 1,
+          round: 4,
+          at: clock,
+        });
+        expect(store.waste.maxRound(RUN)).toBe(4);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review", "review-ruling", "review-failed"],
+            action: "rereview",
+            basis: "the findings are fixed",
+          }),
+        ).toEqual({ lifted: true });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(store.waste.alarms("WHERE id = ?", open?.id ?? 0)[0]).toMatchObject({
+          level: 4,
+          basis: "the findings are fixed",
+        });
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const fresh = store
+          .reviewsOfRun(RUN)
+          .filter((r) => r.round < 3 && r.state !== "superseded" && r.id > third);
+        expect(fresh.map((r) => r.state)).toEqual(["running"]);
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      it("a run past its rounds with no settle stays held", async () => {
+        await heldAtLimit();
+        syncWasteAlarms(config, store, clock);
+        expect(reviewsHeld(store, RUN)).toBe(true);
+        expect(loopOf().phase).toBe("parked");
+      });
+
       it("accept moves the run on, with no review on the same head", async () => {
         const third = await heldAtLimit();
         expect(await operate(RUN, "FLIGHT", { kinds: ["review"], action: "accept" })).toBe(true);
@@ -6492,6 +6604,22 @@ describe("the engine runs reviews", () => {
         expect(loopOf().phase).not.toBe("parked");
         expect(h.steps).toContain("merge");
         expect(store.review(third)?.state).toBe("superseded");
+      });
+
+      it("accept resolves the live-level alarm with FLIGHT's basis", async () => {
+        await heldAtLimit();
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review"],
+            action: "accept",
+            basis: "the findings are minor",
+          }),
+        ).toEqual({ lifted: true });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(
+          store.waste.alarms("WHERE check_id = 'review-rounds' AND subject = ?", RUN)[0],
+        ).toMatchObject({ basis: "the findings are minor", level: 3 });
+        expect(loopOf().phase).not.toBe("parked");
       });
 
       it("rework grants the next round and sends the findings to the seat", async () => {
