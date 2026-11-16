@@ -3,7 +3,6 @@ import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlit
 import type {
   AttentionMaterials,
   BriefChoiceReceipt,
-  ChoiceTargetKind,
   ItemChatMessage,
   ItemDiscussion,
   PersonSource,
@@ -40,7 +39,6 @@ import {
   type AuditThresholds,
   type AuditTokenOveruse,
   type AuditView,
-  auditTier,
   BLOCKING_SEVERITIES,
   type BoardItem,
   type BriefOption,
@@ -49,7 +47,6 @@ import {
   CODE_HEALTH_FLIGHT_TIER_RULES,
   COMMS_CAPCOM,
   COMMS_MC,
-  COMMS_NOTICE,
   COMMS_OPEN_PREFIX,
   type CodeHealthWindow,
   type CommsReaction,
@@ -65,8 +62,6 @@ import {
   FLIGHT_INCOMING_LIMIT,
   FLIGHT_RETROSPECTIVE_SETTING,
   FLIGHT_SIGNALS_SETTING,
-  FLIGHT_WAKE_HEAD,
-  FLIGHT_WAKE_STORED_BYTES,
   type FlightArrivalDisposition,
   type FlightDecision,
   type FlightDecisionKind,
@@ -90,7 +85,6 @@ import {
   type HealthRow,
   type HudColumn,
   type HudState,
-  inferTicket,
   isBugLabelled,
   type LoopEvent,
   type LoopKind,
@@ -113,7 +107,6 @@ import {
   type QaFlowView,
   type QaReviewRoundView,
   type QuestionClosure,
-  type QuestionClosureKind,
   type ReadRecord,
   type ReplyDraft,
   type RepoGoal,
@@ -138,13 +131,11 @@ import {
   type Telemetry,
   type TestLockRun,
   TICKET_SIZES,
-  TITLE_MARKERS,
   type TicketWait,
   type TokenUsage,
   testsTouched,
   tokenBaselines,
   type UsageSample,
-  wakeKeyPrefix,
 } from "@mc/core";
 import { CodeHealthReadError } from "./code-health/error.ts";
 import {
@@ -224,27 +215,26 @@ import { qaNativeIdentity } from "./qa/history-key.ts";
 import { externalReviewKey } from "./review/external-key.ts";
 import { openOlderFindings } from "./review/older-findings.ts";
 import * as attention from "./store/attention.ts";
+import { auditItems, markTokenTimesChecked, recordAuditItem } from "./store/audit.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
 import { strayKey } from "./store/crew-paths.ts";
 import { flightQueries } from "./store/flight.ts";
+import { DIGEST_CONTEXT_WINDOW_SQL, migrate } from "./store/migrations.ts";
+import * as reviewsStore from "./store/reviews.ts";
 import {
-  compactFlightWake,
   evidenceOf,
-  queueRow,
-  seatRow,
   toBoardItem,
   toCiRun,
   toEscalation,
   toGuardHit,
-  toQuestion,
   toReview,
   toRun,
 } from "./store/rows.ts";
 import { runQueries } from "./store/runs.ts";
 import { SCHEMA } from "./store/schema.ts";
+import { seatQueries } from "./store/seats.ts";
 import {
   ACK_ABSENT_MS,
-  ACTIVE_SEAT_STATES,
   type AgentEvent,
   type AttentionNote,
   AUDIT_RETENTION_DAYS,
@@ -257,7 +247,6 @@ import {
   type CommsRow,
   type CommsSettlement,
   type CrewError,
-  commsMessageNumber,
   type Evidence,
   type FinancialRun,
   FLIGHT_DECISIONS_RETENTION_DAYS,
@@ -277,7 +266,6 @@ import {
   type QuestionChoiceRow,
   type QueueRow,
   type SeatLine,
-  type SeatLineOrigin,
   type SeatQuestion,
   type Stray,
 } from "./store/types.ts";
@@ -336,8 +324,6 @@ const notificationRow = (r: Row): NotificationRow => ({
 const memPct = (s: MachineSample): number | null =>
   s.memUsedBytes !== null && s.memTotalBytes > 0 ? (s.memUsedBytes / s.memTotalBytes) * 100 : null;
 
-/** `PRAGMA user_version` once the usage_samples dedupe and its unique index are in place. */
-const USAGE_DEDUPE_VERSION = 1;
 /**
  * A stored digest; one persisted before `background` existed has none in flight, one before
  * `compactions` existed has none counted, one before `lastText` existed has no text.
@@ -361,8 +347,6 @@ type RepoTable = keyof typeof REPO_TABLES;
 
 /** Run ids per `digests()` query (well under SQLite's bound-parameter limit). */
 const DIGEST_BATCH = 500;
-const DIGEST_CONTEXT_WINDOW_SQL =
-  "CASE WHEN json_valid(digest) THEN json_extract(digest, '$.contextWindow') END";
 
 /** The `sessions` of a stored audit: set only when the run had a fresh session. */
 const sessionsOf = (raw: unknown): { sessions?: TokenAuditSession[] } => {
@@ -426,7 +410,7 @@ export class Store {
       this.db.exec(
         "INSERT OR IGNORE INTO attention_episodes SELECT key, kind, seat_id, at, cleared_at FROM attention_notes",
       );
-    this.migrate();
+    migrate(this.db, (fn, writeLock) => this.transaction(fn, writeLock));
     this.instructions = new StandingInstructions(this.db);
     this.backfillAuditHistory();
     installRiskMemberships(this.db);
@@ -828,435 +812,6 @@ export class Store {
     this.db.close();
   }
 
-  private hasColumn(table: string, column: string): boolean {
-    const cols = this.db.prepare(`PRAGMA table_info(${table})`).all() as Row[];
-    return cols.some((c) => c.name === column);
-  }
-
-  /**
-   * Runs `fn` if `table` lacks `column`. The check is made again inside a write-locked transaction
-   * so a second process opening the same file waits, then finds the column added and skips it,
-   * rather than failing on a duplicate ALTER.
-   */
-  private whenColumnMissing(table: string, column: string, fn: () => void): void {
-    if (this.hasColumn(table, column)) return;
-    this.transaction(() => {
-      if (!this.hasColumn(table, column)) fn();
-    }, true);
-  }
-
-  /** Adds `column` to `table` when it is missing. */
-  private addColumn(table: string, column: string, type: string): void {
-    this.whenColumnMissing(table, column, () =>
-      this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`),
-    );
-  }
-
-  /** Columns added after the first release; each runs once, on a database that lacks it. */
-  private migrate(): void {
-    // the forecast brake's Needs-you note is gone with the brake
-    if (
-      this.db.prepare("SELECT 1 FROM attention_notes WHERE key = 'budget-brake'").get() !==
-      undefined
-    )
-      this.db.prepare("DELETE FROM attention_notes WHERE key = 'budget-brake'").run();
-    // Token audit call times (#1646): audits stored before this have none until re-read.
-    this.addColumn("run_token_calls", "at", "INTEGER");
-    this.addColumn("run_token_audit", "timestamps_checked", "INTEGER NOT NULL DEFAULT 0");
-    this.addColumn("run_token_audit", "sessions", "TEXT NOT NULL DEFAULT '[]'");
-    this.db.exec("CREATE INDEX IF NOT EXISTS run_token_calls_at ON run_token_calls(at)");
-    this.addColumn("flight_decisions", "order_id", "INTEGER");
-    this.addColumn("flight_decisions", "wake_id", "TEXT");
-    this.addColumn("flight_wakes", "wake_id", "TEXT");
-    this.db.exec(
-      "CREATE UNIQUE INDEX IF NOT EXISTS flight_memory_key ON flight_memory(repo_id, topic_key)",
-    );
-    // Flow now retains open work for the cumulative-flow chart. SQLite cannot drop NOT NULL in
-    // place, so reconstruct databases created before open rows were recorded.
-    const flowDone = this.db.prepare("PRAGMA table_info(flow_issues)").all() as Row[];
-    if (flowDone.find((column) => column.name === "done_at")?.notnull === 1) {
-      this.transaction(() => {
-        const current = this.db.prepare("PRAGMA table_info(flow_issues)").all() as Row[];
-        if (current.find((column) => column.name === "done_at")?.notnull !== 1) return;
-        this.db.exec(`
-          ALTER TABLE flow_issues RENAME TO flow_issues_before_open_work;
-          CREATE TABLE flow_issues (
-            repo_id TEXT NOT NULL, number INTEGER NOT NULL, size TEXT, start_at INTEGER,
-            done_at INTEGER, PRIMARY KEY (repo_id, number)
-          );
-          INSERT INTO flow_issues (repo_id, number, size, start_at, done_at)
-            SELECT repo_id, number, size, start_at, done_at FROM flow_issues_before_open_work;
-          DROP TABLE flow_issues_before_open_work;
-        `);
-      }, true);
-    }
-    if (this.getSetting("flight-wake-compact-v1") === null) {
-      this.transaction(() => {
-        if (this.getSetting("flight-wake-compact-v1") !== null) return;
-        const rows = this.db
-          .prepare(
-            "SELECT key, text FROM seat_lines WHERE key LIKE 'flight:wake:%' AND length(CAST(text AS BLOB)) > ?",
-          )
-          .all(FLIGHT_WAKE_STORED_BYTES) as { key: string; text: string }[];
-        const update = this.db.prepare("UPDATE seat_lines SET text = ? WHERE key = ?");
-        for (const row of rows) update.run(compactFlightWake(row.text), row.key);
-        this.setSetting("flight-wake-compact-v1", "1");
-      }, true);
-    }
-    // Discard the old later-state fallback starts; the next flow collection reads Ready history.
-    if (this.getSetting("flow-ready-start-v1") === null) {
-      this.transaction(() => {
-        if (this.getSetting("flow-ready-start-v1") !== null) return;
-        this.db.exec("DELETE FROM flow_issues");
-        this.setSetting("flow-ready-start-v1", "1");
-      }, true);
-    }
-    this.addColumn("notifications", "source_content", "TEXT");
-    this.addColumn("briefs", "structured", "TEXT");
-    this.addColumn("drafts", "source", "TEXT");
-    this.addColumn("drafts", "metadata", "TEXT");
-    this.addColumn("drafts", "completed_at", "INTEGER");
-    // An ok row last succeeded when it was recorded; a failing row's last success is unknown.
-    this.whenColumnMissing("collector_status", "last_ok_at", () => {
-      this.db.exec("ALTER TABLE collector_status ADD COLUMN last_ok_at INTEGER");
-      this.db.exec("UPDATE collector_status SET last_ok_at = at WHERE ok = 1");
-    });
-    // When a failing collector began failing; a row failing at upgrade takes its next poll's time.
-    this.addColumn("collector_status", "failing_since", "INTEGER");
-    this.whenColumnMissing("check_runs", "invoked_command", () => {
-      this.db.exec("ALTER TABLE check_runs ADD COLUMN invoked_command TEXT");
-      this.db.exec("UPDATE check_runs SET invoked_command = command WHERE invoked_command IS NULL");
-    });
-    this.addColumn("check_runs", "exit_code", "INTEGER");
-    // A re-polled fallback reading has the same key every time: keep one row per reading. Once per
-    // database (`PRAGMA user_version`); the unique index keeps it true afterwards. An up-to-date
-    // database takes no write lock; one that is behind re-checks once it holds it.
-    const userVersion = (): number =>
-      (this.db.prepare("PRAGMA user_version").get() as Row).user_version as number;
-    if (userVersion() < USAGE_DEDUPE_VERSION) {
-      this.transaction(() => {
-        if (userVersion() >= USAGE_DEDUPE_VERSION) return;
-        this.db.exec(
-          `DELETE FROM usage_samples WHERE rowid NOT IN (
-             SELECT MIN(rowid) FROM usage_samples GROUP BY account_id, window, at, source
-           )`,
-        );
-        this.db.exec(
-          "CREATE UNIQUE INDEX IF NOT EXISTS usage_unique ON usage_samples(account_id, window, at, source)",
-        );
-        this.db.exec(`PRAGMA user_version = ${USAGE_DEDUPE_VERSION}`);
-      }, true);
-    }
-    // Board columns added with the Stage/Owner/hierarchy fields; the next GitHub poll fills them.
-    const boardColumns: [string, string][] = [
-      ["author", "TEXT"],
-      ["stage", "TEXT"],
-      ["owner", "TEXT"],
-      ["parent", "INTEGER"],
-      ["sub_done", "INTEGER"],
-      ["sub_total", "INTEGER"],
-      ["blocked_by", "TEXT NOT NULL DEFAULT '[]'"],
-      ["milestone", "TEXT"],
-      ["size", "TEXT"],
-      ["closed", "INTEGER NOT NULL DEFAULT 0"],
-      ["priority_source", "TEXT"],
-    ];
-    for (const [column, type] of boardColumns) this.addColumn("board_items", column, type);
-    // Logins assigned to the card's issue (a JSON list); the next GitHub poll fills it.
-    this.addColumn("board_items", "assignees", "TEXT NOT NULL DEFAULT '[]'");
-    // What the issue body waits on (`{ issues, prs }` JSON), null for none; the next poll fills it.
-    this.addColumn("board_items", "after_deps", "TEXT");
-    // What a bug card's body names (`{ prs, shas, paths }` JSON), null for none.
-    this.addColumn("board_items", "defect_refs", "TEXT");
-    // What a run was about (#26 A3). `folded`: the transcript of the ended run has been folded
-    // into the row, so the backfill can skip it.
-    const runColumns: [string, string][] = [
-      ["vendor", "TEXT NOT NULL DEFAULT 'claude'"],
-      ["latest_plan", "TEXT"],
-      ["prs", "TEXT NOT NULL DEFAULT '[]'"],
-      ["summary", "TEXT"],
-      ["folded", "INTEGER NOT NULL DEFAULT 0"],
-      // The first loop's state (JSON) and who ended the run; `upsertRun` never writes them.
-      ["loop", "TEXT"],
-      ["ended_by", "TEXT"],
-      ["no_report", "TEXT"],
-      // The ticket's title as the run started with it; null on rows from before it was stored.
-      ["ticket_title", "TEXT"],
-      // The review a run performs (7b-1); `upsertRun` never rewrites it.
-      ["review_id", "INTEGER"],
-      // The `claude` CLI version the run started on; null on rows from before it was recorded.
-      ["cli_version", "TEXT"],
-      // The template profile the run started with (JSON of profile and route) and its hash;
-      // `upsertRun` writes them on a new row only.
-      ["profile", "TEXT"],
-      ["profile_hash", "TEXT"],
-      // The plan at run creation; later transcript folds never rewrite it.
-      ["plan", "TEXT"],
-      ["account_id", "TEXT"],
-      ["effort", "TEXT"],
-      ["prompt_hash", "TEXT"],
-      // The seat's loop kind at the start; `upsertRun` keeps the first value.
-      ["loop_kind", "TEXT"],
-    ];
-    for (const [column, type] of runColumns) this.addColumn("runs", column, type);
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS loop_events_run ON loop_events(run_id);
-      CREATE INDEX IF NOT EXISTS reviews_run ON reviews(run_id);
-      CREATE INDEX IF NOT EXISTS reviews_repo_pr ON reviews(repo_id, pr_number, state);
-      CREATE INDEX IF NOT EXISTS board_moves_run ON board_moves(run_id);
-      CREATE INDEX IF NOT EXISTS flight_decisions_target_kind ON flight_decisions(target_run_id, kind);
-      CREATE INDEX IF NOT EXISTS flight_decisions_ref ON flight_decisions(ref, at);
-      CREATE INDEX IF NOT EXISTS ci_runs_pr ON ci_runs(repo_id, pr_number);
-      CREATE INDEX IF NOT EXISTS runs_review ON runs(review_id);
-      CREATE INDEX IF NOT EXISTS runs_repo_branch ON runs(repo_id, branch);
-      CREATE INDEX IF NOT EXISTS runs_repo_ticket ON runs(repo_id, ticket);
-      CREATE INDEX IF NOT EXISTS runs_ended ON runs(ended_at);
-      CREATE INDEX IF NOT EXISTS runs_folded ON runs(folded, started_at);
-      CREATE INDEX IF NOT EXISTS runs_loop_aside ON runs(ended_at, json_extract(loop, '$.aside'), started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_loop_merging ON runs(ended_at, json_extract(loop, '$.merging'), started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_merging_started ON runs(json_extract(loop, '$.merging'), started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_agent_aside_worktree ON runs(agent_id, json_extract(loop, '$.aside.worktree'));
-      CREATE INDEX IF NOT EXISTS runs_ended_started ON runs(ended_at, started_at, seq);
-      CREATE INDEX IF NOT EXISTS runs_loop_pr_number ON runs(json_extract(loop, '$.prNumber'));
-      CREATE INDEX IF NOT EXISTS runs_started ON runs(started_at);
-      CREATE INDEX IF NOT EXISTS runs_agent_recent ON runs(agent_id, started_at DESC, seq DESC, id);
-      CREATE INDEX IF NOT EXISTS run_digests_context_window ON run_digests(run_id, ${DIGEST_CONTEXT_WINDOW_SQL});
-      CREATE INDEX IF NOT EXISTS attention_notes_open ON attention_notes(cleared_at, at, key);
-      CREATE INDEX IF NOT EXISTS attention_notes_run_open ON attention_notes(run_id, cleared_at, key);
-      CREATE INDEX IF NOT EXISTS pull_requests_ticket ON pull_requests(ticket, updated_at DESC);
-      CREATE INDEX IF NOT EXISTS pull_requests_branch ON pull_requests(repo_id, branch, number DESC);
-      CREATE INDEX IF NOT EXISTS reviews_ended ON reviews(ended_at DESC, id DESC);
-      CREATE INDEX IF NOT EXISTS attention_episodes_cleared ON attention_episodes(cleared_at);
-      CREATE INDEX IF NOT EXISTS drafts_state_created ON drafts(state, created_at);
-      CREATE INDEX IF NOT EXISTS crew_errors_acked_at ON crew_errors(acked, at);
-      CREATE INDEX IF NOT EXISTS pr_history_at ON pr_history(merged_at);
-      CREATE INDEX IF NOT EXISTS review_tests_review ON review_tests(review_id);
-      CREATE INDEX IF NOT EXISTS seat_questions_answered ON seat_questions(answered_at);
-      CREATE INDEX IF NOT EXISTS seat_questions_run_time ON seat_questions(run_id, at DESC, id DESC);
-      CREATE INDEX IF NOT EXISTS flight_decisions_question_answer ON flight_decisions(question_id, kind, at DESC, id DESC);
-    `);
-    // 0 / null: stored before the card ids were read; the next GitHub poll fills them.
-    this.addColumn("board_items", "created_at", "INTEGER NOT NULL DEFAULT 0");
-    // When the seat's last turn ended; the engine's quiet-seat check reads it.
-    this.addColumn("seat_sessions", "last_turn_ended_at", "INTEGER");
-    this.addColumn("comms", "item_key", "TEXT");
-    // A Needs-you item's conversation reads by item (itemThread).
-    this.db.exec("CREATE INDEX IF NOT EXISTS comms_item_key ON comms(item_key, at, id)");
-    // A note's unbroken run walks its episodes by key (noteRunStart).
-    this.db.exec(
-      "CREATE INDEX IF NOT EXISTS attention_episodes_key ON attention_episodes(key, at)",
-    );
-    this.addColumn("seat_sessions", "last_turn_started_at", "INTEGER");
-    this.addColumn("seat_sessions", "error_since", "INTEGER");
-    // Turns in a row that ended with no new commit; the resume line reads it.
-    this.addColumn("seat_sessions", "quiet_turns", "INTEGER NOT NULL DEFAULT 0");
-    this.addColumn("seat_sessions", "vendor", "TEXT NOT NULL DEFAULT 'claude'");
-    this.addColumn("seat_sessions", "stop_by", "TEXT");
-    this.addColumn("seat_sessions", "stop_reason", "TEXT");
-    this.addColumn("seat_sessions", "stop_at", "INTEGER");
-    this.addColumn("board_items", "item_id", "TEXT");
-    this.addColumn("board_items", "project_id", "TEXT");
-    // When FLIGHT passed the question to the operator (it stays open until they answer).
-    this.addColumn("seat_questions", "passed_at", "INTEGER");
-    // When the operator set the question aside with Not now; it stays open, out of Needs you.
-    this.addColumn("seat_questions", "aside_at", "INTEGER");
-    // When the operator dismissed the note from Needs you; a re-raised note is shown again.
-    this.addColumn("attention_notes", "dismissed_at", "INTEGER");
-    // A PR snapshot's `polledAt` is `read_at` (our clock, written with every upsert); there is no
-    // separate column. `mergeable` UNKNOWN means GitHub has not computed it yet: poll again.
-    this.addColumn("holds", "told_state", "TEXT");
-    this.addColumn("decision_defaults", "target", "TEXT");
-    this.addColumn("decision_defaults", "answer", "TEXT");
-    this.addColumn("decision_defaults", "delivered_at", "INTEGER");
-    this.addColumn("decision_defaults", "binding", "TEXT");
-    this.addColumn("decision_defaults", "delivery_state", "TEXT NOT NULL DEFAULT 'legacy'");
-    this.addColumn("decision_defaults", "delivery_note", "TEXT");
-    this.addColumn("pull_requests", "head_sha", "TEXT");
-    this.addColumn("pull_requests", "merge_commit_sha", "TEXT");
-    this.addColumn("pull_requests", "mergeable", "TEXT");
-    // Who opened the PR and who is assigned: a PR run by another hub's login is that lane's.
-    this.addColumn("pull_requests", "author", "TEXT");
-    this.addColumn("pull_requests", "assignees", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("pull_requests", "checks", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("run_evidence", "tests", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("run_evidence", "tests_added", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("run_evidence", "done_when", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("reviews", "changed_since", "TEXT");
-    this.addColumn("reviews", "install_note", "TEXT");
-    this.addColumn("review_findings", "late", "INTEGER NOT NULL DEFAULT 0");
-    this.addColumn("review_findings", "category", "TEXT");
-    this.addColumn("review_findings", "resolution", "TEXT");
-    this.addColumn("review_findings", "resolved_review_id", "INTEGER");
-    // Old PRs keep []: followPrs falls back to their ticket, even without another GitHub poll.
-    this.addColumn("pull_requests", "closing_issues", "TEXT NOT NULL DEFAULT '[]'");
-    this.addColumn("pull_requests", "additions", "INTEGER");
-    this.addColumn("pull_requests", "deletions", "INTEGER");
-    this.addColumn("pull_requests", "changed_files", "INTEGER");
-    // The branch the PR merges into: another open PR's branch means it is stacked on that PR.
-    this.addColumn("pull_requests", "base", "TEXT");
-    // On every start: a row whose branch names a ticket the pattern did not know when the row was
-    // stored (`docs/` branches) gets it now. A row's ticket is never replaced.
-    this.transaction(() => {
-      const rows = this.db
-        .prepare("SELECT id, repo_id, branch FROM runs WHERE branch IS NOT NULL AND ticket IS NULL")
-        .all() as { id: string; repo_id: string; branch: string }[];
-      const set = this.db.prepare("UPDATE runs SET ticket = ? WHERE id = ?");
-      for (const r of rows) {
-        const ticket = inferTicket(r.branch, r.repo_id);
-        if (ticket !== null) set.run(ticket, r.id);
-      }
-    });
-    // When we read the row from GitHub, by our own clock (GitHub's updatedAt does not move when a
-    // PR's CI finishes). 0: stored before it existed, older than any read.
-    this.addColumn("pull_requests", "read_at", "INTEGER NOT NULL DEFAULT 0");
-    // 1 while the latest poll failed to read the repo's PRs: the row is the last good read.
-    this.addColumn("pull_requests", "stale", "INTEGER NOT NULL DEFAULT 0");
-    // Machine samples' CPU and memory shares, extracted once so the telemetry ranges average
-    // columns rather than parsing every sample's JSON.
-    this.whenColumnMissing("machine_samples", "cpu_pct", () => {
-      this.db.exec("ALTER TABLE machine_samples ADD COLUMN cpu_pct REAL");
-      this.db.exec("ALTER TABLE machine_samples ADD COLUMN mem_pct REAL");
-      // The same arithmetic as memPct, so a backfilled row equals a freshly stored one.
-      this.db.exec(
-        `UPDATE machine_samples SET
-           cpu_pct = json_extract(sample, '$.cpuPct'),
-           mem_pct = CASE WHEN json_extract(sample, '$.memTotalBytes') > 0
-             THEN json_extract(sample, '$.memUsedBytes') * 1.0
-               / json_extract(sample, '$.memTotalBytes') * 100 END`,
-      );
-    });
-    // Rows from before `source`: a title marker (as the GitHub collector matches it) means
-    // `title`. The next GitHub poll rewrites every row anyway.
-    this.whenColumnMissing("escalations", "source", () => {
-      this.db.exec("ALTER TABLE escalations ADD COLUMN source TEXT NOT NULL DEFAULT 'label'");
-      this.db.exec(
-        `UPDATE escalations SET source = 'title' WHERE ${TITLE_MARKERS.map(
-          (m) => `ltrim(title) LIKE '[${m}]%'`,
-        ).join(" OR ")}`,
-      );
-    });
-    // Stored Comms v2 is deliberately additive: hubs can open databases written by older hubs.
-    this.addColumn(
-      "comms",
-      "label",
-      "TEXT CHECK (label IS NULL OR label IN ('question','handoff','blocker','none'))",
-    );
-    this.addColumn("comms", "ref", "TEXT");
-    this.addColumn("comms", "reply_to", "INTEGER");
-    this.addColumn("comms", "target_run_id", "TEXT");
-    // The hub stamps a seat's message with the run that sent it and that run's newest open PR.
-    this.addColumn("comms", "from_run_id", "TEXT");
-    this.addColumn("comms", "pr", "INTEGER");
-    // Set when waking the recipient failed, so an identical retry wakes them instead of being skipped.
-    this.addColumn("comms", "wake_failed_at", "INTEGER");
-    this.addColumn("comms", "delivered_at", "INTEGER");
-    this.addColumn("question_choices", "chosen_by", "TEXT");
-    // Who sent it, set by the hub; NULL on rows stored before this column.
-    this.addColumn("comms", "sender_kind", "TEXT");
-    // `notice` on a line the hub wrote; NULL on any other message.
-    this.addColumn("comms", "kind", "TEXT");
-    // An up-to-date reader must not take a write lock merely to open the store.
-    if (
-      this.db
-        .prepare("SELECT 1 FROM comms WHERE sender_kind = ? AND kind IS NULL LIMIT 1")
-        .get("hub")
-    )
-      this.db
-        .prepare("UPDATE comms SET kind = ? WHERE sender_kind = ? AND kind IS NULL")
-        .run(COMMS_NOTICE, "hub");
-    this.migrateCommsLabels();
-    this.db.exec(`
-      CREATE INDEX IF NOT EXISTS comms_target_run ON comms(target_run_id, at, id);
-      CREATE INDEX IF NOT EXISTS comms_ticket ON comms(ticket, at, id);
-      CREATE INDEX IF NOT EXISTS comms_ref ON comms(ref, at, id);
-      CREATE INDEX IF NOT EXISTS comms_ticket_count_refs ON comms(ticket, ref, from_id);
-      -- Preserve reference totals when retention removes bodies. Null flags avoid sentinel collisions.
-      CREATE TABLE IF NOT EXISTS comms_ticket_archived_counts (
-        ticket TEXT NOT NULL, ref TEXT NOT NULL, from_id TEXT NOT NULL,
-        ticket_null INTEGER NOT NULL, ref_null INTEGER NOT NULL, count INTEGER NOT NULL,
-        PRIMARY KEY (ticket, ref, from_id, ticket_null, ref_null)
-      );
-      CREATE TRIGGER IF NOT EXISTS comms_archive_ticket_count BEFORE DELETE ON comms
-      WHEN OLD.ticket IS NOT NULL OR OLD.ref IS NOT NULL
-      BEGIN
-        INSERT INTO comms_ticket_archived_counts (ticket, ref, from_id, ticket_null, ref_null, count)
-        VALUES (COALESCE(OLD.ticket, ''), COALESCE(OLD.ref, ''), OLD.from_id,
-          OLD.ticket IS NULL, OLD.ref IS NULL, 1)
-        ON CONFLICT(ticket, ref, from_id, ticket_null, ref_null)
-        DO UPDATE SET count = comms_ticket_archived_counts.count + 1;
-      END;
-      CREATE INDEX IF NOT EXISTS comms_reply_to ON comms(reply_to);
-      CREATE TABLE IF NOT EXISTS comms_mentions (
-        message_id INTEGER NOT NULL, mentioned_id TEXT NOT NULL, seen_at INTEGER,
-        PRIMARY KEY (message_id, mentioned_id)
-      );
-      CREATE INDEX IF NOT EXISTS comms_mentions_target ON comms_mentions(mentioned_id, seen_at, message_id);
-      CREATE TABLE IF NOT EXISTS comms_reactions (
-        message_id INTEGER NOT NULL, actor_id TEXT NOT NULL, reaction TEXT NOT NULL
-          CHECK (reaction IN ('seen','on_it','done','cant')),
-        reason TEXT, at INTEGER NOT NULL,
-        CHECK ((reaction = 'cant' AND length(trim(reason)) BETWEEN 1 AND 80)
-          OR (reaction != 'cant' AND reason IS NULL)),
-        PRIMARY KEY (message_id, actor_id)
-      );
-      CREATE INDEX IF NOT EXISTS comms_reactions_message ON comms_reactions(message_id);
-      CREATE TABLE IF NOT EXISTS comms_settlements (
-        message_id INTEGER PRIMARY KEY, settled_by TEXT NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS comms_pins (
-        message_id INTEGER PRIMARY KEY, pinned_by TEXT NOT NULL, pinned_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS comms_inbox_reads (
-        seat_id TEXT NOT NULL, message_id INTEGER NOT NULL,
-        PRIMARY KEY (seat_id, message_id)
-      );
-      CREATE INDEX IF NOT EXISTS comms_inbox_reads_message ON comms_inbox_reads(message_id);
-      CREATE TRIGGER IF NOT EXISTS comms_reactions_valid_insert
-      BEFORE INSERT ON comms_reactions
-      WHEN (NEW.reaction = 'cant' AND (NEW.reason IS NULL OR length(trim(NEW.reason)) NOT BETWEEN 1 AND 80))
-        OR (NEW.reaction != 'cant' AND NEW.reason IS NOT NULL)
-      BEGIN SELECT RAISE(ABORT, 'invalid Comms reaction reason'); END;
-      CREATE TRIGGER IF NOT EXISTS comms_reactions_valid_update
-      BEFORE UPDATE OF reaction, reason ON comms_reactions
-      WHEN (NEW.reaction = 'cant' AND (NEW.reason IS NULL OR length(trim(NEW.reason)) NOT BETWEEN 1 AND 80))
-        OR (NEW.reaction != 'cant' AND NEW.reason IS NOT NULL)
-      BEGIN SELECT RAISE(ABORT, 'invalid Comms reaction reason'); END;
-    `);
-  }
-
-  /** Adds the explicit `none` label to databases created before Comms recorded it. */
-  private migrateCommsLabels(): void {
-    const schema = this.db
-      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'comms'")
-      .get() as { sql?: string } | undefined;
-    if (schema?.sql?.includes("'none'")) {
-      if (this.db.prepare("SELECT 1 FROM comms WHERE label IS NULL LIMIT 1").get())
-        this.db.prepare("UPDATE comms SET label = 'none' WHERE label IS NULL").run();
-      return;
-    }
-    this.transaction(() => {
-      this.db.exec(`
-        ALTER TABLE comms RENAME TO comms_before_none_label;
-        CREATE TABLE comms (
-          id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, from_id TEXT NOT NULL,
-          to_id TEXT NOT NULL, ticket TEXT, text TEXT NOT NULL,
-          label TEXT NOT NULL CHECK (label IN ('question','handoff','blocker','none')),
-          ref TEXT, reply_to INTEGER, target_run_id TEXT, from_run_id TEXT, pr INTEGER,
-          wake_failed_at INTEGER, delivered_at INTEGER, sender_kind TEXT, item_key TEXT
-        );
-        INSERT INTO comms (id, at, from_id, to_id, ticket, text, label, ref, reply_to,
-          target_run_id, from_run_id, pr, wake_failed_at, delivered_at, sender_kind, item_key)
-        SELECT id, at, from_id, to_id, ticket, text, COALESCE(label, 'none'), ref, reply_to,
-          target_run_id, from_run_id, pr, wake_failed_at, delivered_at, sender_kind, item_key
-        FROM comms_before_none_label;
-        DROP TABLE comms_before_none_label;
-        CREATE INDEX comms_at ON comms(at);
-        CREATE INDEX comms_from_id ON comms(from_id, id);
-        CREATE INDEX comms_to_id ON comms(to_id, id);
-      `);
-    }, true);
-  }
-
   /** Runs `fn` in a transaction; `writeLock` takes the write lock first (BEGIN IMMEDIATE). */
   private transaction(fn: () => void, writeLock = false): void {
     this.db.exec(writeLock ? "BEGIN IMMEDIATE" : "BEGIN");
@@ -1339,6 +894,18 @@ export class Store {
       (sql) => this.statement(sql),
     );
     return this.flightQueriesCache;
+  }
+
+  private seatQueriesCache: ReturnType<typeof seatQueries> | undefined;
+
+  /** The queries over the seat tables (store/seats.ts); the seat methods below delegate to it. */
+  private get seatQ(): ReturnType<typeof seatQueries> {
+    this.seatQueriesCache ??= seatQueries(
+      this.db,
+      (fn, writeLock) => this.transaction(fn, writeLock),
+      (sql) => this.statement(sql),
+    );
+    return this.seatQueriesCache;
   }
 
   /** The waste checks' queries and the alarms table (spend/waste.ts). */
@@ -1520,9 +1087,7 @@ export class Store {
 
   /** Records that a run's transcript could not give call times, so it is not tried again. */
   markTokenTimesChecked(runId: string): void {
-    this.db
-      .prepare("UPDATE run_token_audit SET timestamps_checked = 1 WHERE run_id = ?")
-      .run(runId);
+    markTokenTimesChecked(this.db, runId);
   }
 
   /**
@@ -3453,23 +3018,12 @@ export class Store {
     detail: string;
     at: number;
   }): void {
-    this.db
-      .prepare(
-        `INSERT INTO audit_items (kind, subject, tier, state, detail, at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(kind, subject) DO UPDATE SET state = excluded.state, detail = excluded.detail
-         WHERE audit_items.state = 'open' AND excluded.state = 'done'`,
-      )
-      .run(i.kind, i.subject, auditTier(i.kind), i.state, i.detail, i.at);
+    recordAuditItem(this.db, i);
   }
 
   /** Items recorded in range, newest first. */
   private auditItems(since: number, until: number): AuditItem[] {
-    return this.db
-      .prepare(
-        `SELECT id, kind, subject, tier, state, detail, at FROM audit_items
-         WHERE at >= ? AND at <= ? ORDER BY at DESC, id DESC`,
-      )
-      .all(since, until) as unknown as AuditItem[];
+    return auditItems(this.db, since, until);
   }
 
   /** Merged PRs in range that have a recorded size, largest first. */
@@ -3821,10 +3375,7 @@ export class Store {
 
   /** Every review of a PR, oldest first. */
   reviewsOfPr(repoId: RepoId, prNumber: number): ReviewRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? ORDER BY id")
-      .all(repoId, prNumber) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsOfPr(this.db, repoId, prNumber);
   }
 
   /** Every check run read for a PR's heads, newest first. */
@@ -4808,29 +4359,23 @@ export class Store {
   }
 
   review(id: number): ReviewRow | null {
-    const row = this.db.prepare("SELECT * FROM reviews WHERE id = ?").get(id) as Row | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.review(this.db, id);
   }
 
   /** Moves a queued review to another review seat; true only when it was still queued. */
   moveQueuedReview(id: number, seatId: string, at: number): boolean {
-    let moved = false;
-    this.transaction(() => {
-      moved =
-        this.db
-          .prepare("UPDATE reviews SET seat_id = ? WHERE id = ? AND state = 'queued'")
-          .run(seatId, id).changes === 1;
-      if (moved)
-        this.db
-          .prepare("INSERT OR REPLACE INTO review_moves (review_id, seat_id, at) VALUES (?, ?, ?)")
-          .run(id, seatId, at);
-    });
-    return moved;
+    return reviewsStore.moveQueuedReview(
+      this.db,
+      (write) => this.transaction(write),
+      id,
+      seatId,
+      at,
+    );
   }
 
   /** Whether FLIGHT assigned the queued review to its current seat. */
   reviewMoved(id: number): boolean {
-    return this.db.prepare("SELECT 1 FROM review_moves WHERE review_id = ?").get(id) !== undefined;
+    return reviewsStore.reviewMoved(this.db, id);
   }
 
   /** The first snapshot wins. No update method exists; later evidence creates a new report. */
@@ -5083,53 +4628,28 @@ export class Store {
 
   /** Every review of an external PR (author id `external-pr:...`) that has not been superseded. */
   externalReviewRows(): ReviewRow[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM reviews WHERE author_run_id LIKE 'external-pr:%' AND state != 'superseded' ORDER BY id",
-      )
-      .all() as Row[];
-    return rows.map(toReview);
+    return reviewsStore.externalReviewRows(this.db);
   }
 
   reviewsOfRun(authorRunId: string): ReviewRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM reviews WHERE author_run_id = ? ORDER BY id")
-      .all(authorRunId) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsOfRun(this.db, authorRunId);
   }
 
   /** The latest review of a PR that has reported, else null. */
   latestReportedReview(repoId: string, prNumber: number): ReviewRow | null {
-    const row = this.db
-      .prepare(
-        `SELECT * FROM reviews WHERE repo_id = ? AND pr_number = ? AND state = 'reported'
-         ORDER BY ended_at DESC, id DESC LIMIT 1`,
-      )
-      .get(repoId, prNumber) as Row | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.latestReportedReview(this.db, repoId, prNumber);
   }
 
   /** The review the run (a review run) performs, else null. */
   reviewOfRun(reviewRunId: string): ReviewRow | null {
-    const row = this.db.prepare("SELECT * FROM reviews WHERE run_id = ?").get(reviewRunId) as
-      | Row
-      | undefined;
-    return row ? toReview(row) : null;
+    return reviewsStore.reviewOfRun(this.db, reviewRunId);
   }
 
   reviewsIn(
     states: readonly ReviewState[],
     window?: { repo: string; since: number; until: number },
   ): ReviewRow[] {
-    if (states.length === 0) return [];
-    const rows = this.db
-      .prepare(
-        `SELECT * FROM reviews WHERE state IN (${states.map(() => "?").join(", ")})
-         ${window ? "AND repo_id = ? AND ended_at >= ? AND ended_at <= ?" : ""}
-         ORDER BY created_at, id`,
-      )
-      .all(...states, ...(window ? [window.repo, window.since, window.until] : [])) as Row[];
-    return rows.map(toReview);
+    return reviewsStore.reviewsIn(this.db, states, window);
   }
 
   /** Moves a review from one of `from` to `to`; true only when exactly one row changed. */
@@ -5339,34 +4859,16 @@ export class Store {
 
   /** The files the author changed since the previous reviewed sha, for tagging late findings. */
   setReviewChangedSince(reviewId: number, files: readonly string[]): void {
-    this.db
-      .prepare("UPDATE reviews SET changed_since = ? WHERE id = ?")
-      .run(JSON.stringify(files), reviewId);
+    reviewsStore.setReviewChangedSince(this.db, reviewId, files);
   }
 
   /** Why this review ran without an install ("reviewed, not installed"), kept with the review. */
   setReviewInstallNote(reviewId: number, note: string): void {
-    this.db.prepare("UPDATE reviews SET install_note = ? WHERE id = ?").run(note, reviewId);
+    reviewsStore.setReviewInstallNote(this.db, reviewId, note);
   }
 
   findingsOf(reviewId: number): StoredFinding[] {
-    const rows = this.db
-      .prepare("SELECT * FROM review_findings WHERE review_id = ? ORDER BY pos")
-      .all(reviewId) as Row[];
-    return rows.map((r) => ({
-      pos: r.pos as number,
-      severity: r.severity as StoredFinding["severity"],
-      file: r.file as string,
-      line: r.line as number,
-      summary: r.summary as string,
-      scenario: r.scenario as string,
-      fix: r.fix as string,
-      category: (r.category as StoredFinding["category"]) ?? undefined,
-      state: r.state as StoredFinding["state"],
-      late: r.late === 1,
-      resolution: (r.resolution as StoredFinding["resolution"]) ?? undefined,
-      resolvedReviewId: (r.resolved_review_id as number | null) ?? undefined,
-    }));
+    return reviewsStore.findingsOf(this.db, reviewId);
   }
 
   /**
@@ -5426,7 +4928,7 @@ export class Store {
       blocking: r.blocking as number,
       minor: r.minor as number,
       endedAt: r.ended_at as number,
-      screenshots: this.reviewShots(r.id as number),
+      screenshots: reviewsStore.reviewShots(this.db, r.id as number),
     }));
   }
 
@@ -5436,11 +4938,7 @@ export class Store {
     shot: { shotId: string; label: string; width: number; theme: ReviewShotView["theme"] },
     at: number,
   ): void {
-    this.db
-      .prepare(
-        "INSERT INTO review_shots (review_id, shot_id, label, width, theme, at) VALUES (?, ?, ?, ?, ?, ?)",
-      )
-      .run(reviewId, shot.shotId, shot.label, shot.width, shot.theme, at);
+    reviewsStore.addReviewShot(this.db, reviewId, shot, at);
   }
 
   /** The complete paths a PR changes, as GitHub's paged diff listing gave them. */
@@ -5453,66 +4951,21 @@ export class Store {
   }
 
   reviewShots(reviewId: number): ReviewShotView[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT shot_id, label, width, theme, at FROM review_shots WHERE review_id = ? ORDER BY id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      id: r.shot_id as string,
-      label: r.label as string,
-      width: r.width as number,
-      theme: r.theme as ReviewShotView["theme"],
-      at: r.at as number,
-    }));
+    return reviewsStore.reviewShots(this.db, reviewId);
   }
 
   reviewChecks(reviewId: number): ReviewCheck[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT check_id, result, note FROM review_checks WHERE review_id = ? ORDER BY check_id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      check: r.check_id as ReviewCheck["check"],
-      result: r.result as ReviewCheck["result"],
-      ...(r.note === null ? {} : { note: r.note as string }),
-    }));
+    return reviewsStore.reviewChecks(this.db, reviewId);
   }
 
   reviewTests(reviewId: number): (Omit<ReportedTest, "file"> & { file: string | null })[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT command, file, passed, failed, skipped, duration FROM review_tests WHERE review_id = ? ORDER BY id",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      command: r.command as string,
-      file: r.file as string | null,
-      passed: r.passed as number,
-      failed: r.failed as number,
-      skipped: r.skipped as number,
-      duration: r.duration as number,
-    }));
+    return reviewsStore.reviewTests(this.db, reviewId);
   }
 
   reviewResolutions(
     reviewId: number,
   ): { reviewId: number; pos: number; outcome: FindingResolution["outcome"] }[] {
-    return (
-      this.db
-        .prepare(
-          "SELECT prior_review_id, finding_pos, outcome FROM review_resolutions WHERE review_id = ? ORDER BY prior_review_id, finding_pos",
-        )
-        .all(reviewId) as Row[]
-    ).map((r) => ({
-      reviewId: r.prior_review_id as number,
-      pos: r.finding_pos as number,
-      outcome: r.outcome as FindingResolution["outcome"],
-    }));
+    return reviewsStore.reviewResolutions(this.db, reviewId);
   }
 
   /** The run that performs the review, else null. */
@@ -5541,43 +4994,22 @@ export class Store {
 
   /** Records a line under `key`; false (and nothing written) when the key is already there. */
   claimLine(key: string, line: SeatLine): boolean {
-    let text = line.text;
-    if (
-      line.origin === "engine" &&
-      key.startsWith(wakeKeyPrefix(line.runId)) &&
-      text.startsWith(FLIGHT_WAKE_HEAD)
-    ) {
-      text = compactFlightWake(text);
-    }
-    const r = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO seat_lines (key, run_id, seat_id, origin, text, at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(key, line.runId, line.seatId, line.origin, text, line.at);
-    return r.changes === 1;
+    return this.seatQ.claimLine(key, line);
   }
 
   /** Frees a key, so its line can be claimed (and sent) again. */
   dropLine(key: string): void {
-    this.db.prepare("DELETE FROM seat_lines WHERE key = ?").run(key);
+    this.seatQ.dropLine(key);
   }
 
   /** The run's claimed line keys, each with the time it was claimed. */
   claimedKeys(runId: string): Record<string, number> {
-    const rows = this.db.prepare("SELECT key, at FROM seat_lines WHERE run_id = ?").all(runId) as {
-      key: string;
-      at: number;
-    }[];
-    return Object.fromEntries(rows.map((r) => [r.key, r.at]));
+    return this.seatQ.claimedKeys(runId);
   }
 
   /** When the engine last sent the run a line, else null. */
   lastEngineLineAt(runId: string): number | null {
-    const r = this.db
-      .prepare("SELECT MAX(at) AS at FROM seat_lines WHERE run_id = ? AND origin = ?")
-      .get(runId, "engine" satisfies SeatLineOrigin) as { at: number | null };
-    return r.at;
+    return this.seatQ.lastEngineLineAt(runId);
   }
 
   /** Records a loop event; false when its key is already recorded. */
@@ -5653,38 +5085,12 @@ export class Store {
    * call made it, so a second click gets the first receipt.
    */
   claimChoice(c: QuestionChoiceRow): { row: QuestionChoiceRow; fresh: boolean } {
-    const r = this.db
-      .prepare(
-        `INSERT OR IGNORE INTO question_choices
-           (key, brief_at, option_id, label, answer, question, ticket, target, target_kind, message_id, chosen_at, chosen_by)
-         VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
-      )
-      .run(
-        c.key,
-        c.briefAt,
-        c.optionId,
-        c.label,
-        c.answer,
-        c.question,
-        c.ticket,
-        c.target,
-        c.targetKind,
-        c.messageId === null ? null : commsMessageNumber(c.messageId),
-        c.chosenAt,
-        c.chosenBy,
-      );
-    const row = this.choice(c.key, c.briefAt);
-    if (row === null) throw new Error("Choice was not stored.");
-    return { row, fresh: Number(r.changes) > 0 };
+    return this.seatQ.claimChoice(c);
   }
 
   /** Names the message that carries a claimed choice's answer. */
   setChoiceMessage(key: string, briefAt: number, messageId: string): void {
-    const n = commsMessageNumber(messageId);
-    if (n !== null)
-      this.db
-        .prepare("UPDATE question_choices SET message_id = ? WHERE key = ? AND brief_at = ?")
-        .run(n, key, briefAt);
+    this.seatQ.setChoiceMessage(key, briefAt, messageId);
   }
 
   /**
@@ -5692,60 +5098,27 @@ export class Store {
    * operator owes a reply to leaves these out: they answer, they do not ask.
    */
   isChoiceAnswer(messageId: string): boolean {
-    const n = commsMessageNumber(messageId);
-    return (
-      n !== null &&
-      this.db.prepare("SELECT 1 FROM question_choices WHERE message_id = ?").get(n) !== undefined
-    );
+    return this.seatQ.isChoiceAnswer(messageId);
   }
 
   /** Drops a claim whose answer could not be sent. */
   releaseChoice(key: string, briefAt: number): void {
-    this.db
-      .prepare("DELETE FROM question_choices WHERE key = ? AND brief_at = ?")
-      .run(key, briefAt);
-  }
-
-  private choiceOf(r: Row): QuestionChoiceRow {
-    return {
-      key: r.key as string,
-      briefAt: r.brief_at as number,
-      optionId: r.option_id as string,
-      label: r.label as string,
-      answer: r.answer as string,
-      question: r.question as string,
-      ticket: (r.ticket as string | null) ?? null,
-      target: r.target as string,
-      targetKind: r.target_kind as ChoiceTargetKind,
-      messageId: r.message_id == null ? null : `comms:${r.message_id}`,
-      chosenBy: (r.chosen_by as string | null) ?? "the operator",
-      chosenAt: r.chosen_at as number,
-    };
+    this.seatQ.releaseChoice(key, briefAt);
   }
 
   /** The choice made on one brief of a key; null when none. */
   choice(key: string, briefAt: number): QuestionChoiceRow | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_choices WHERE key = ? AND brief_at = ?")
-      .get(key, briefAt) as Row | undefined;
-    return r ? this.choiceOf(r) : null;
+    return this.seatQ.choice(key, briefAt);
   }
 
   /** The newest choice on a key; null when none. */
   latestChoice(key: string): QuestionChoiceRow | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_choices WHERE key = ? ORDER BY chosen_at DESC LIMIT 1")
-      .get(key) as Row | undefined;
-    return r ? this.choiceOf(r) : null;
+    return this.seatQ.latestChoice(key);
   }
 
   /** The choices made on a ticket, newest first. */
   choicesOnTicket(ticket: string, limit: number): QuestionChoiceRow[] {
-    return (
-      this.db
-        .prepare("SELECT * FROM question_choices WHERE ticket = ? ORDER BY chosen_at DESC LIMIT ?")
-        .all(ticket, limit) as Row[]
-    ).map((r) => this.choiceOf(r));
+    return this.seatQ.choicesOnTicket(ticket, limit);
   }
 
   markCommsWakeFailed(id: string, at: number): void {
@@ -6112,35 +5485,12 @@ export class Store {
    * queued).
    */
   replaceQueues(queues: { seatId: string; items: { repoId: RepoId; issue: number }[] }[]): void {
-    this.transaction(() => {
-      const del = this.db.prepare("DELETE FROM queues WHERE seat_id = ? AND taken_at IS NULL");
-      for (const q of queues) del.run(q.seatId);
-      const queuedElsewhere = this.db.prepare(
-        "SELECT 1 FROM queues WHERE repo_id = ? AND issue = ? AND seat_id != ?",
-      );
-      const ins = this.db.prepare(
-        "INSERT INTO queues (seat_id, pos, repo_id, issue, taken_at) VALUES (?, ?, ?, ?, NULL)",
-      );
-      for (const { seatId, items } of queues) {
-        const kept = this.queue(seatId);
-        const held = new Set(kept.map((q) => `${q.repoId}#${q.issue}`));
-        let pos = kept.reduce((max, q) => Math.max(max, q.pos), -1) + 1;
-        for (const i of items) {
-          const ref = `${i.repoId}#${i.issue}`;
-          if (held.has(ref) || queuedElsewhere.get(i.repoId, i.issue, seatId)) continue;
-          held.add(ref);
-          ins.run(seatId, pos++, i.repoId, i.issue);
-        }
-      }
-    }, true);
+    this.seatQ.replaceQueues(queues);
   }
 
   /** The seat's queue in order, taken row first. */
   queue(seatId: string): QueueRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM queues WHERE seat_id = ? ORDER BY pos")
-      .all(seatId) as Row[];
-    return rows.map(queueRow);
+    return this.seatQ.queue(seatId);
   }
 
   /**
@@ -6149,46 +5499,21 @@ export class Store {
    * `between` is a test seam: it runs after the head is read and before it is stamped.
    */
   takeQueued(seatId: string, at: number, between?: () => void): QueueRow | null {
-    let taken: QueueRow | null = null;
-    this.transaction(() => {
-      const held = this.db
-        .prepare("SELECT 1 FROM queues WHERE seat_id = ? AND taken_at IS NOT NULL")
-        .get(seatId);
-      if (held) return;
-      const head = this.db
-        .prepare("SELECT * FROM queues WHERE seat_id = ? ORDER BY pos LIMIT 1")
-        .get(seatId) as Row | undefined;
-      if (!head) return;
-      between?.();
-      this.db
-        .prepare("UPDATE queues SET taken_at = ? WHERE seat_id = ? AND pos = ?")
-        .run(at, seatId, head.pos as number);
-      taken = { ...queueRow(head), takenAt: at };
-    }, true);
-    return taken;
+    return this.seatQ.takeQueued(seatId, at, between);
   }
 
   /** Gives a taken row back to the queue. */
   untake(seatId: string, repoId: RepoId, issue: number): void {
-    this.db
-      .prepare("UPDATE queues SET taken_at = NULL WHERE seat_id = ? AND repo_id = ? AND issue = ?")
-      .run(seatId, repoId, issue);
+    this.seatQ.untake(seatId, repoId, issue);
   }
 
   dropQueued(seatId: string, repoId: RepoId, issue: number): void {
-    this.db
-      .prepare("DELETE FROM queues WHERE seat_id = ? AND repo_id = ? AND issue = ?")
-      .run(seatId, repoId, issue);
+    this.seatQ.dropQueued(seatId, repoId, issue);
   }
 
   /** Rows taken before `before` (a take whose run never began), oldest first. */
   staleTakes(before: number): QueueRow[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM queues WHERE taken_at IS NOT NULL AND taken_at < ? ORDER BY taken_at, seat_id",
-      )
-      .all(before) as Row[];
-    return rows.map(queueRow);
+    return this.seatQ.staleTakes(before);
   }
 
   /**
@@ -6242,56 +5567,16 @@ export class Store {
   }
 
   seatSession(seatId: string): SeatSessionRow | null {
-    const r = this.db.prepare("SELECT * FROM seat_sessions WHERE seat_id = ?").get(seatId) as
-      | Row
-      | undefined;
-    return r ? seatRow(r) : null;
+    return this.seatQ.seatSession(seatId);
   }
 
   /** Seat sessions for the configured HUD rows, indexed after one table read. */
   seatSessions(seatIds: readonly AgentId[]): Map<AgentId, SeatSessionRow> {
-    const out = new Map<AgentId, SeatSessionRow>();
-    if (seatIds.length === 0) return out;
-    const rows = this.statement(
-      `SELECT * FROM seat_sessions WHERE seat_id IN (${seatIds.map(() => "?").join(", ")})`,
-    ).all(...seatIds) as Row[];
-    for (const row of rows) {
-      const seat = seatRow(row);
-      out.set(seat.seatId, seat);
-    }
-    return out;
+    return this.seatQ.seatSessions(seatIds);
   }
 
   setSeatSession(row: SeatSessionRow): void {
-    this.db
-      .prepare(
-        `INSERT INTO seat_sessions (seat_id, run_id, cli_session_id, state, reason, worktree, updated_at, error_since, vendor, stop_by, stop_reason, stop_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(seat_id) DO UPDATE SET run_id = excluded.run_id,
-           cli_session_id = excluded.cli_session_id, state = excluded.state, vendor = excluded.vendor,
-           reason = excluded.reason, worktree = excluded.worktree, updated_at = excluded.updated_at,
-           stop_by = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_by ELSE NULL END,
-           stop_reason = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_reason ELSE NULL END,
-           stop_at = CASE WHEN excluded.state = 'stopped' THEN excluded.stop_at ELSE NULL END,
-           error_since = CASE WHEN excluded.state != 'error' THEN NULL
-             WHEN seat_sessions.state = 'error' THEN COALESCE(seat_sessions.error_since, seat_sessions.updated_at)
-             ELSE excluded.updated_at END,
-           quiet_turns = CASE WHEN seat_sessions.run_id IS excluded.run_id THEN seat_sessions.quiet_turns ELSE 0 END`,
-      )
-      .run(
-        row.seatId,
-        row.runId,
-        row.cliSessionId,
-        row.state,
-        row.reason,
-        row.worktree,
-        row.updatedAt,
-        row.state === "error" ? row.updatedAt : null,
-        row.vendor ?? "claude",
-        row.stop?.by ?? null,
-        row.stop?.reason ?? null,
-        row.stop?.at ?? null,
-      );
+    this.seatQ.setSeatSession(row);
   }
 
   /**
@@ -6313,9 +5598,7 @@ export class Store {
 
   /** Records that the seat started a turn at `at`. */
   setSeatTurnStarted(seatId: string, at: number): void {
-    this.db
-      .prepare("UPDATE seat_sessions SET last_turn_started_at = ? WHERE seat_id = ?")
-      .run(at, seatId);
+    this.seatQ.setSeatTurnStarted(seatId, at);
   }
 
   /** Commits since `since`, per agent, joined to their runs. */
@@ -6654,10 +5937,7 @@ export class Store {
 
   /** Sessions that hold a run and are not stopped or in error. */
   activeSeatSessions(): SeatSessionRow[] {
-    const rows = this.db
-      .prepare("SELECT * FROM seat_sessions WHERE run_id IS NOT NULL ORDER BY seat_id ASC")
-      .all() as Row[];
-    return rows.map(seatRow).filter((r) => ACTIVE_SEAT_STATES.includes(r.state));
+    return this.seatQ.activeSeatSessions();
   }
 
   /** Unended runs a seat row names (any seat state), with the row's worktree; by seat id. */
@@ -6897,18 +6177,12 @@ export class Store {
 
   /** Records a seat's question; returns its id. */
   addQuestion(q: Omit<SeatQuestion, "id" | "passedAt" | "asideAt">): number {
-    const r = this.db
-      .prepare("INSERT INTO seat_questions (agent_id, run_id, text, at) VALUES (?, ?, ?, ?)")
-      .run(q.agentId, q.runId, q.text, q.at);
-    return Number(r.lastInsertRowid);
+    return this.seatQ.addQuestion(q);
   }
 
   /** When the seat asked its questions, answered or not (ask_flight mirrors each to Comms). */
   questionTimes(agentId: AgentId): Set<number> {
-    const rows = this.db
-      .prepare("SELECT at FROM seat_questions WHERE agent_id = ?")
-      .all(agentId) as { at: number }[];
-    return new Set(rows.map((r) => r.at));
+    return this.seatQ.questionTimes(agentId);
   }
 
   /**
@@ -6939,22 +6213,12 @@ export class Store {
 
   /** Questions not yet answered and not set aside, oldest first: the ones that wait in Needs you. */
   openQuestions(): SeatQuestion[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NULL ORDER BY id ASC",
-      )
-      .all() as Row[];
-    return rows.map(toQuestion);
+    return this.seatQ.openQuestions();
   }
 
   /** Questions the operator set aside with Not now and nobody has answered, oldest first. */
   asideQuestions(): SeatQuestion[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM seat_questions WHERE answered_at IS NULL AND aside_at IS NOT NULL ORDER BY id ASC",
-      )
-      .all() as Row[];
-    return rows.map(toQuestion);
+    return this.seatQ.asideQuestions();
   }
 
   /** The seat's questions open at any time in [from, to), oldest first. */
@@ -6963,51 +6227,27 @@ export class Store {
     from: number,
     to: number,
   ): { at: number; answeredAt: number | null }[] {
-    const rows = this.db
-      .prepare(
-        `SELECT at, answered_at FROM seat_questions
-         WHERE agent_id = ? AND at < ? AND (answered_at IS NULL OR answered_at > ?) ORDER BY id`,
-      )
-      .all(agentId, to, from) as Row[];
-    return rows.map((r) => ({ at: r.at as number, answeredAt: r.answered_at as number | null }));
+    return this.seatQ.questionsOverlapping(agentId, from, to);
   }
 
   /** One question by id, answered or not; null when there is none. */
   question(id: number): (SeatQuestion & { answeredAt: number | null }) | null {
-    const r = this.db.prepare("SELECT * FROM seat_questions WHERE id = ?").get(id) as
-      | Row
-      | undefined;
-    return r ? { ...toQuestion(r), answeredAt: r.answered_at as number | null } : null;
+    return this.seatQ.question(id);
   }
 
   /** Sets an open question aside (Not now); true only when it was open and not yet set aside. */
   setQuestionAside(id: number, at: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET aside_at = ? WHERE id = ? AND answered_at IS NULL AND aside_at IS NULL",
-      )
-      .run(at, id);
-    return Number(r.changes) > 0;
+    return this.seatQ.setQuestionAside(id, at);
   }
 
   /** Puts a set-aside question back in Needs you, for a Not now whose GitHub writes failed. */
   clearQuestionAside(id: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET aside_at = NULL WHERE id = ? AND answered_at IS NULL AND aside_at IS NOT NULL",
-      )
-      .run(id);
-    return Number(r.changes) > 0;
+    return this.seatQ.clearQuestionAside(id);
   }
 
   /** Marks an open question passed to the operator; true only when it was open and not yet passed. */
   passQuestion(id: number, at: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET passed_at = ? WHERE id = ? AND answered_at IS NULL AND passed_at IS NULL",
-      )
-      .run(at, id);
-    return Number(r.changes) > 0;
+    return this.seatQ.passQuestion(id, at);
   }
 
   /**
@@ -7015,19 +6255,12 @@ export class Store {
    * without a brief before #758. True only when it was passed.
    */
   unpassQuestion(id: number): boolean {
-    const r = this.db
-      .prepare(
-        "UPDATE seat_questions SET passed_at = NULL WHERE id = ? AND answered_at IS NULL AND passed_at IS NOT NULL",
-      )
-      .run(id);
-    return Number(r.changes) > 0;
+    return this.seatQ.unpassQuestion(id);
   }
 
   /** Marks one open question answered at `at`. */
   answerQuestion(id: number, at: number): void {
-    this.db
-      .prepare("UPDATE seat_questions SET answered_at = ? WHERE id = ? AND answered_at IS NULL")
-      .run(at, id);
+    this.seatQ.answerQuestion(id, at);
   }
 
   /**
@@ -7035,13 +6268,7 @@ export class Store {
    * passed to the operator open.
    */
   answerQuestions(agentId: AgentId, at: number, unpassedOnly = false): void {
-    this.db
-      .prepare(
-        `UPDATE seat_questions SET answered_at = ? WHERE agent_id = ? AND answered_at IS NULL${
-          unpassedOnly ? " AND passed_at IS NULL" : ""
-        }`,
-      )
-      .run(at, agentId);
+    this.seatQ.answerQuestions(agentId, at, unpassedOnly);
   }
 
   /**
@@ -7049,13 +6276,7 @@ export class Store {
    * passed to the operator open. Another run of the same seat keeps its own questions.
    */
   answerRunQuestions(runId: string, at: number, unpassedOnly = false): void {
-    this.db
-      .prepare(
-        `UPDATE seat_questions SET answered_at = ? WHERE run_id = ? AND answered_at IS NULL${
-          unpassedOnly ? " AND passed_at IS NULL" : ""
-        }`,
-      )
-      .run(at, runId);
+    this.seatQ.answerRunQuestions(runId, at, unpassedOnly);
   }
 
   /**
@@ -7064,11 +6285,7 @@ export class Store {
    * longer waits on it.
    */
   closeQuestion(c: QuestionClosure): boolean {
-    let stored = false;
-    this.transaction(() => {
-      stored = this.insertClosure(c);
-    });
-    return stored;
+    return this.seatQ.closeQuestion(c);
   }
 
   /** Operator Clear closes the displayed source and records its closure in the same transaction. */
@@ -7112,38 +6329,12 @@ export class Store {
 
   /** `closeQuestion` without its own transaction, for a caller already in one. */
   private insertClosure(c: QuestionClosure): boolean {
-    const r = this.db
-      .prepare(
-        `INSERT INTO question_closures (key, ask_at, kind, reason, by, question, ticket, operator, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(key, ask_at) DO NOTHING`,
-      )
-      .run(c.key, c.askAt, c.kind, c.reason, c.by, c.question, c.ticket, c.operator ? 1 : 0, c.at);
-    const stored = Number(r.changes) > 0;
-    const ask = /^ask:(\d+)$/.exec(c.key);
-    if (stored && ask !== null) this.answerQuestion(Number(ask[1]), c.at);
-    return stored;
-  }
-
-  private closureOf(r: Row): QuestionClosure {
-    return {
-      key: r.key as string,
-      askAt: r.ask_at as number,
-      kind: r.kind as QuestionClosureKind,
-      reason: r.reason as string,
-      by: r.by as string,
-      question: r.question as string,
-      ticket: (r.ticket as string | null) ?? null,
-      operator: r.operator === 1,
-      at: r.at as number,
-    };
+    return this.seatQ.insertClosure(c);
   }
 
   /** The closure of one ask of a key; null when it was not closed without an answer. */
   questionClosure(key: string, askAt: number): QuestionClosure | null {
-    const r = this.db
-      .prepare("SELECT * FROM question_closures WHERE key = ? AND ask_at = ?")
-      .get(key, askAt) as Row | undefined;
-    return r ? this.closureOf(r) : null;
+    return this.seatQ.questionClosure(key, askAt);
   }
 
   /**
@@ -7151,27 +6342,12 @@ export class Store {
    * question, which leaves when answered), by key, newest first; read once per build.
    */
   closedItemKeys(): Map<string, QuestionClosure[]> {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM question_closures WHERE key NOT LIKE 'ask:%' ORDER BY at DESC, rowid DESC",
-      )
-      .all() as Row[];
-    const byKey = new Map<string, QuestionClosure[]>();
-    for (const r of rows) {
-      const c = this.closureOf(r);
-      byKey.set(c.key, [...(byKey.get(c.key) ?? []), c]);
-    }
-    return byKey;
+    return this.seatQ.closedItemKeys();
   }
 
   /** The closures the operator had in Needs you since `since`, newest first. */
   questionClosures(since: number, limit: number): QuestionClosure[] {
-    const rows = this.db
-      .prepare(
-        "SELECT * FROM question_closures WHERE operator = 1 AND at >= ? ORDER BY at DESC, rowid DESC LIMIT ?",
-      )
-      .all(since, limit) as Row[];
-    return rows.map((r) => this.closureOf(r));
+    return this.seatQ.questionClosures(since, limit);
   }
 
   /** Whether FLIGHT's newest brief on the key is for the operator. */
@@ -7184,14 +6360,7 @@ export class Store {
 
   private endQuestions(where: "run_id" | "agent_id", id: string, at: number): void {
     this.transaction(() => {
-      const rows = this.db
-        // a question the operator set aside outlives its run: it is answered on the Ticket page
-        .prepare(
-          `SELECT * FROM seat_questions WHERE ${where} = ? AND answered_at IS NULL AND aside_at IS NULL`,
-        )
-        .all(id) as Row[];
-      for (const r of rows) {
-        const q = toQuestion(r);
+      for (const q of this.seatQ.openQuestionsOf(where, id)) {
         const key = `ask:${q.id}`;
         this.insertClosure({
           key,

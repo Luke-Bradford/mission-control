@@ -281,6 +281,7 @@ import {
   processInfo,
 } from "./keeper.ts";
 import { recordNoReport } from "./no-report.ts";
+import { nodeFirstPath, ZSH_NODE_FIRST_DIR, zprofileNodeFirst } from "./node-first.ts";
 import {
   attachSession,
   type CrewSession,
@@ -1570,6 +1571,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       if (v !== undefined) env[k] = v;
     }
     env.HOME = homedir();
+    env.PATH = nodeFirstPath(process.execPath, env.PATH ?? "");
     env.TMPDIR = tmp;
     env.TMP = tmp;
     env.TEMP = tmp;
@@ -2144,7 +2146,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         const dir = crewKeeperDir(deps.dbPath, run.id);
         const runDir = crewCodexDir(deps.dbPath, run.id);
         const home = join(runDir, "codex-home");
-        const zdotdir = join(runDir, "zsh-empty");
+        // outside the data folder, which the seat sandbox denies: zsh could not read a .zprofile there
+        const zdotdir = join(crew?.worktrees ?? "", ZSH_NODE_FIRST_DIR);
         const env = Object.fromEntries(
           Object.entries(
             crewEnv(
@@ -2199,6 +2202,9 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             mkdirSync(runDir, { recursive: true, mode: 0o700 });
             mkdirSync(home, { recursive: true, mode: 0o700 });
             mkdirSync(zdotdir, { recursive: true, mode: 0o700 });
+            // a login shell's /etc/zprofile reorders PATH: put the hub's Node back first
+            // (the same file for every seat, so one folder; read-only to a seat)
+            writePrivate(join(zdotdir, ".zprofile"), zprofileNodeFirst(process.execPath));
             writePrivate(
               join(home, "config.toml"),
               // Close the shared parent of the Claude seats' temp roots (`crewTempRoot`): the
@@ -2333,6 +2339,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       cwd,
       lock: deps.lock,
       ...(deps.checks === undefined ? {} : { checks: deps.checks }),
+      tell: (text) => {
+        const l = live.get(info.seat.id);
+        if (l?.run.id !== run.id) return;
+        try {
+          l.session.send(text);
+        } catch {
+          // the seat is gone; the guard hit still records the refusal
+        }
+      },
       superuserTools: deps.superuserTools,
       runGrants: () => runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }),
       record: (rule, text) => {

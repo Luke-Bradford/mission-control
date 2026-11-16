@@ -107,12 +107,13 @@ export function pruneFoldState(
 /**
  * Copies folded transcript facts onto `r`, which holds what is already known of the run (the
  * stored row). A transcript that does not name a session, model or branch never nulls a known
- * one; cost, tokens, PRs and summary are the transcript's.
+ * one; cost, tokens, PRs and summary are the transcript's. A watch run (FLIGHT) never takes a branch: its
+ * transcript names the PR branches it reads, and a branch on its row would read as a seat's own.
  */
 export function applyFacts(r: Run, facts: TranscriptFacts): void {
   r.sessionId = facts.sessionId ?? r.sessionId;
   r.model = facts.model ?? r.model;
-  r.branch = facts.branch ?? r.branch;
+  if (r.loopKind !== "watch") r.branch = facts.branch ?? r.branch;
   r.costUsd = facts.costUsd;
   r.tokens = facts.tokens;
   r.prs = facts.prs.map((p) => ({ ...p }));

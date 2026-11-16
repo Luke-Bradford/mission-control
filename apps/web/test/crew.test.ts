@@ -873,8 +873,8 @@ describe("waitText", () => {
   it("operator: a park reason, none, and in review", () => {
     expect(
       waitText(loop("parked", { wait: "operator", parked: "CI failed 3 times" }), CALL, null, NOW),
-    ).toBe("waiting on you: CI failed 3 times");
-    expect(waitText(loop("parked", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
+    ).toBe("Held: CI failed 3 times");
+    expect(waitText(loop("parked", { wait: "operator" }), CALL, null, NOW)).toBe("Held");
     expect(waitText(loop("review", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
   });
 
