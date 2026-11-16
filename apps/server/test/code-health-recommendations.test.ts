@@ -283,8 +283,12 @@ describe("durable code-health decisions", () => {
       (row) => typeof row.measure?.current === "number" && typeof row.target.value === "number",
     );
     expect(complete).toHaveLength(5);
+    for (const [category, summary, fix] of causes) {
+      const row = present(recurring.find((value) => value.scope?.category === category));
+      expect(row.title).toBe(`Apply recorded ${category} fix: ${fix}`);
+      expect(row.scope).toMatchObject({ findingSummary: summary, findingFix: fix });
+    }
     for (const row of recurring) {
-      expect(row.title).toMatch(/^Apply recorded .+ fix: .+/);
       expect(row.target).toMatchObject({ value: 0, source: "clean-review target" });
       expect(row.decision).toEqual({ owner: "operator", tier: "operator" });
       expect(row.measure?.unit).toBe("findings");
