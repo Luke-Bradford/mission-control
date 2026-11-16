@@ -3705,6 +3705,22 @@ describe("push and draft_pr", () => {
       expect(remoteTip()).toBeNull();
     });
 
+    it("pushes while FLIGHT's watch run is live, even if its row carries the seat's branch", async () => {
+      const sha = await commitOk("apps/a.ts", "a2\n");
+      store.upsertRun(run({ id: "flight-1:1", agentId: "flight-1", loopKind: "watch" }));
+      store.setSeatSession({
+        seatId: "flight-1",
+        runId: "flight-1:1",
+        cliSessionId: null,
+        state: "running",
+        reason: null,
+        worktree: null,
+        updatedAt: NOW,
+      });
+      expect((await push()).text).toBe(`Pushed ${sha.slice(0, 7)} to ${BRANCH}.`);
+      expect(remoteTip()).toBe(sha);
+    });
+
     it("refuses an ended run and a read-only seat", async () => {
       await commitOk("apps/a.ts", "a2\n");
       liveSeat("retro", "retro:1");
