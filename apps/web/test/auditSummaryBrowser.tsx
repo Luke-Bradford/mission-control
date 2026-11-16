@@ -9,12 +9,25 @@ import "@fontsource/ibm-plex-mono/latin-500.css";
 import "@fontsource/ibm-plex-mono/latin-600.css";
 import "../src/hud.css";
 import { createRoot } from "react-dom/client";
-import { App } from "../src/App.tsx";
+import { CodeHealth } from "../src/code-health/CodeHealth.tsx";
 import { streamStatus } from "../src/data.ts";
 
-// The real shell on the Audit route, so the page is judged inside the header and dock it ships with.
-history.replaceState(null, "", "/audit");
 streamStatus.set({ connected: true, reconnecting: false, lastMessageAt: Date.now() });
 const root = document.getElementById("root");
 if (!root) throw Error("Fixture root missing");
-createRoot(root).render(<App />);
+// The shell's geometry: a 49 px header, a 380 px dock beside the work area, and the page filling `main`.
+const style = document.createElement("style");
+style.textContent =
+  "html,body,#root{height:100%;margin:0;overflow:hidden}.frame{height:100%;display:flex;flex-direction:column}.frame-head{flex:none;height:49px;border-bottom:1px solid var(--line)}.frame-body{flex:1;min-height:0;display:flex}.frame-body main{flex:1;min-width:0;min-height:0;padding:12px}.frame-dock{flex:none;width:380px;border-left:1px solid var(--line)}";
+document.head.append(style);
+createRoot(root).render(
+  <div className="frame">
+    <header className="frame-head" />
+    <div className="frame-body">
+      <main>
+        <CodeHealth />
+      </main>
+      <aside className="frame-dock" />
+    </div>
+  </div>,
+);
