@@ -66,22 +66,22 @@ function StatePanel({
 }) {
   if (kind === "loading")
     return (
-      <section className="panel state" aria-busy="true" aria-label="Loading telemetry">
+      <section className="panel state-panel" aria-busy="true" aria-label="Loading telemetry">
         <p>Loading…</p>
         <div className="skeleton" />
       </section>
     );
   if (kind === "empty")
     return (
-      <section className="panel state">
+      <section className="panel state-panel">
         <p>Nothing ran in the last {fixed ? "14 days" : range}.</p>
         <span className="pnote">Seats that start a run will appear here.</span>
       </section>
     );
   return (
-    <section className="panel state" role="alert">
+    <section className="panel state-panel" role="alert">
       <p>Telemetry did not load.</p>
-      <button type="button" className="primary" onClick={onRetry}>
+      <button type="button" className="tel-primary" onClick={onRetry}>
         Try again
       </button>
     </section>

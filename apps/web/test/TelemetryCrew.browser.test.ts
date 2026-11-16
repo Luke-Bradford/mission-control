@@ -54,7 +54,7 @@ async function geometry(page: RenderedPage) {
       tabs: box(".tablist"),
       lanes: document.querySelectorAll("#tCrewState .lane").length,
       laneScroll: (() => {
-        const l = document.querySelector("#tCrewState .lanes") as HTMLElement | null;
+        const l = document.querySelector("#tCrewState .crew-lanes") as HTMLElement | null;
         return l ? l.scrollHeight - l.clientHeight : null;
       })(),
       timeScroll: (() => {

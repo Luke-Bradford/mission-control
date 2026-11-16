@@ -61,7 +61,7 @@ function Lanes({
   return (
     <div className="pbody">
       <div className="lanes-chart">
-        <ul className="lanes" aria-label="Seat state lanes">
+        <ul className="crew-lanes" aria-label="Seat state lanes">
           {lanes.map(({ agent, spans: mine, now }) => (
             <li className="lane" key={agent.id}>
               <AgentTag id={agent.id} index={agent.index} sm bare />
@@ -88,7 +88,7 @@ function Lanes({
             </li>
           ))}
         </ul>
-        <div className="lane-axis" aria-hidden="true">
+        <div className="crew-lane-axis" aria-hidden="true">
           {axisLabels(from, to, tz).map((l, i, all) => (
             <span
               key={l.at}
@@ -106,7 +106,7 @@ function Lanes({
             key={s.key}
             title={`Seats in the ${s.label.toLowerCase()} state now, of the seats in view`}
           >
-            <i className={`sw st ${s.key}`} aria-hidden="true" />
+            <i className={`crew-sw st ${s.key}`} aria-hidden="true" />
             <span className="nm">{s.label}</span>
             <span className="vl num">{nowCount(s.key)} now</span>
           </li>
@@ -149,10 +149,10 @@ function AgentTime({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
                   aria-label={`${r.agentId}: ${tip}`}
                 >
                   {TIME_SHARES.filter((s) => (r[s.key] ?? 0) > 0).map((s) => (
-                    <i key={s.key} className={`seg ${s.cls}`} style={{ width: `${r[s.key]}%` }} />
+                    <i key={s.key} className={`share ${s.cls}`} style={{ width: `${r[s.key]}%` }} />
                   ))}
                   {(r.unknown ?? 0) > 0 && (
-                    <i className="seg unknown" style={{ width: `${r.unknown}%` }} />
+                    <i className="share unknown" style={{ width: `${r.unknown}%` }} />
                   )}
                 </div>
                 <span className="vl num">{percent(r.working)} working</span>
@@ -163,7 +163,7 @@ function AgentTime({ t, scope }: { t: Telemetry | undefined; scope: Scope }) {
         <ul className="readout" aria-label="Agent time shapes">
           {TIME_SHARES.map((s) => (
             <li key={s.key}>
-              <i className={`sw st ${s.cls}`} aria-hidden="true" />
+              <i className={`crew-sw st ${s.cls}`} aria-hidden="true" />
               <span className="nm">{s.label}</span>
             </li>
           ))}
