@@ -91,6 +91,8 @@ export function createCodexApprover(i: {
       .slice(0, REFUSAL_DETAIL_MAX);
     const refuse = (rule: GuardRule, text: string = GUARD_RULES[rule]): "decline" => {
       i.record(rule, `${text}: ${excerpt}`);
+      // a declined command shows the seat only `rejected by user`: say why, unless the seat is stopping
+      if (!signal.aborted) i.tell?.(text);
       return "decline";
     };
     // The driver also calls here with an already-aborted signal to audit forced refusals.
@@ -223,8 +225,6 @@ export function createCodexApprover(i: {
             h === null ? "another seat" : seatCallSign(h.seatId),
             h?.command ?? "a full suite",
           );
-          // a declined command shows the seat only `declined`: say why, unless the seat is stopping
-          if (!signal.aborted) i.tell?.(busy);
           return refuse("full-suite", busy);
         }
       }
