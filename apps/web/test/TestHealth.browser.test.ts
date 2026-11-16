@@ -120,7 +120,7 @@ describeRendered("Test health measured layout", () => {
               api,
             });
             try {
-              await page.boxes(".ch-recommendation");
+              await page.boxes(".as-rec");
               if (rail === "expanded") await page.click("#dock .dockrail button");
               await page.click("#ch-tab-test");
               await page.boxes(".ch-test");
@@ -264,7 +264,7 @@ describeRendered("Test health measured layout", () => {
             api: fixture.api,
           });
           try {
-            await page.boxes(".ch-recommendation");
+            await page.boxes(".as-rec");
             await page.click("#ch-tab-test");
             await page.boxes(".ch-test-disruption");
             const metrics = await page.evaluate(
@@ -358,7 +358,7 @@ describeRendered("Test health measured layout", () => {
             api: fixture.api,
           });
           try {
-            await page.boxes(".ch-recommendation");
+            await page.boxes(".as-rec");
             await page.click("#ch-tab-test");
             await page.boxes(".ch-test");
             expect(await metadataOverflow(page)).toEqual([]);
@@ -545,7 +545,7 @@ describeRendered("Test health measured layout", () => {
             api: fixture.api,
           });
           try {
-            await page.boxes(".ch-recommendation");
+            await page.boxes(".as-rec");
             await page.click("#ch-tab-test");
             if (state === "error") await page.boxes('[role="alert"]');
             else if (state === "loading") await page.boxes('.ch-notice[role="status"]');

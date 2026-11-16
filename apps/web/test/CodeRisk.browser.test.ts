@@ -26,7 +26,7 @@ describeRendered("Code risk measured layout", () => {
             api: codeRiskFixture().api,
           });
           try {
-            await page.boxes(".ch-recommendation");
+            await page.boxes(".as-rec");
             await page.click("#ch-tab-risk");
             await page.boxes(".ch-risk-table");
             const metrics = await page.evaluate(
@@ -87,7 +87,7 @@ describeRendered("Code risk measured layout", () => {
           api: fixture.api,
         });
         try {
-          await page.boxes(".ch-recommendation");
+          await page.boxes(".as-rec");
           await page.click("#ch-tab-risk");
           await page.boxes(".ch-risk");
           expect((await page.unclipped(".ch-risk")).every(Boolean)).toBe(true);

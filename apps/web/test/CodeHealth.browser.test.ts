@@ -18,10 +18,10 @@ describeRendered("code health in a real browser", () => {
           api: codeHealthBrowserApi(),
         });
         try {
-          await page.boxes(".ch-recommendation");
-          for (const tab of ["overview", "review"]) {
+          await page.boxes(".as-rec");
+          for (const tab of ["summary", "review"]) {
             if (tab === "review") await page.click("#ch-tab-review");
-            await page.boxes(".ch-bar-row");
+            await page.boxes(tab === "review" ? ".ch-bar-row" : ".as-rec");
             const metrics = await page.evaluate(
               () => ({
                 width: innerWidth,
@@ -62,9 +62,9 @@ describeRendered("code health in a real browser", () => {
           api: codeHealthBrowserApi(),
         });
         try {
-          await page.boxes(".ch-recommendation");
+          await page.boxes(".as-rec");
           expect((await page.unclipped(".code-health")).every(Boolean)).toBe(true);
-          await page.click(".ch-recommendation button");
+          await page.click(".as-more .as-btn");
           await page.boxes(".ch-evidence-item");
           expect((await page.reachable(".ch-dialog button")).every(Boolean)).toBe(true);
           const rows = await page.boxes(".ch-evidence-rows details");

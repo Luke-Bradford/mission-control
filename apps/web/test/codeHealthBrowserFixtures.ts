@@ -1,3 +1,4 @@
+import { overviewFixture } from "./codeHealthOverviewFixtures.ts";
 import type { CodeHealthCoverage, CodeHealthRecommendation, CodeHealthView } from "@mc/core";
 export function codeHealthBrowserApi(at = Date.now()) {
   const coverage: CodeHealthCoverage = {
@@ -144,6 +145,11 @@ export function codeHealthBrowserApi(at = Date.now()) {
         window,
         data: tab === "overview" ? overview.data : { tab, review },
       };
+  for (const window of ["7d", "30d", "90d"] as const)
+    api[`/api/code-health/overview?repo=sample&window=${window}`] = {
+      ...overviewFixture({ rows: 0, window, generatedAt: at }),
+      rows: recommendations.map((r) => ({ ...r, evidence: [] })),
+    };
   for (const ref of refs) {
     api[`/api/code-health/evidence/${ref.id}?repo=sample&cursor=0`] = {
       reference: ref,
