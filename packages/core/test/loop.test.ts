@@ -4,6 +4,8 @@ import type { LoopAction, LoopSnapshot } from "../src/loop.ts";
 import {
   asideEventText,
   asideInCiEventText,
+  blockedItemPrefix,
+  blockedNoteKey,
   CI_FAILED_TEXT,
   CI_PENDING_MAX_MS,
   CI_TRIES,
@@ -31,6 +33,7 @@ import {
   NEW_LOOP,
   NO_CI_AFTER_MS,
   NO_NEW_COMMIT_TEXT,
+  NOTE_ITEM_PREFIX,
   NUDGE_TEXT,
   noShaDeleteText,
   pendingSeatWork,
@@ -3823,5 +3826,16 @@ describe("withControllerCheckItem", () => {
     expect(withControllerCheckItem("## Why\r\nx\r\n", item).body).toBe(
       `## Why\r\nx\r\n\r\n## Controller check\r\n\r\n- ${item}\r\n`,
     );
+  });
+});
+
+describe("park note keys", () => {
+  it("every park item of a run shares one prefix, and another run's does not", () => {
+    expect(
+      `${NOTE_ITEM_PREFIX}${blockedNoteKey("r-1", 3)}`.startsWith(blockedItemPrefix("r-1")),
+    ).toBe(true);
+    expect(
+      `${NOTE_ITEM_PREFIX}${blockedNoteKey("r-10", 0)}`.startsWith(blockedItemPrefix("r-1")),
+    ).toBe(false);
   });
 });

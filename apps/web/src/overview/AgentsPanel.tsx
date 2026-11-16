@@ -2,10 +2,12 @@
 import {
   type AttentionItem,
   type BoardItem,
+  blockedItemPrefix,
   type ConfigView,
   type Crew,
   FLIGHT_TICK_MS,
   type FlightBriefView,
+  isOperatorItem,
   type OverviewTimeline,
   type RunLoop,
   type TestLockState,
@@ -780,9 +782,9 @@ function AgentRow({
 
 /**
  * The overview keeps the explicit review waiver beside a parked seat, including set-aside runs, only
- * while the operator owns a Needs-you item for that seat and ticket: that owner already says who
- * settles the park (FLIGHT, or the operator for acceptance, budget, a brief or FLIGHT being down).
- * The Agent page keeps the waiver as an operator override.
+ * while the park's own Needs-you item (its `blocked:` note) is the operator's, or FLIGHT is not
+ * triaging it (down or missed). Otherwise FLIGHT settles the park; the Agent page keeps the waiver
+ * as an operator override. An item the operator has put on hold is not listed, so it shows none.
  */
 function ReviewParkSeatActions({
   row,
@@ -791,13 +793,18 @@ function ReviewParkSeatActions({
   row: Crew["rows"][number];
   items: AttentionItem[];
 }) {
-  const operatorAsks = (ticket: string | null | undefined) =>
-    ticket != null &&
-    items.some((i) => i.owner === "operator" && i.agentId === row.id && i.ticket === ticket);
+  const operatorSettles = (runId: string) => {
+    const key = blockedItemPrefix(runId);
+    return items.some(
+      (i) =>
+        i.key.startsWith(key) &&
+        (isOperatorItem(i) || i.flightTriage === "down" || i.flightTriage === "missed"),
+    );
+  };
   const ids = [
-    ...(row.loop?.phase === "parked" && row.run && operatorAsks(row.ticket) ? [row.run.id] : []),
+    ...(row.loop?.phase === "parked" && row.run && operatorSettles(row.run.id) ? [row.run.id] : []),
     ...(row.asideRuns ?? [])
-      .filter((run) => run.loop.phase === "parked" && operatorAsks(run.ticket))
+      .filter((run) => run.loop.phase === "parked" && operatorSettles(run.runId))
       .map((run) => run.runId),
   ];
   const loops = useResources<{ loop: RunLoop | null }>(ids.map(RESOURCES.runLoop));

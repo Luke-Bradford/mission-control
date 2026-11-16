@@ -874,7 +874,7 @@ describe("waitText", () => {
     expect(
       waitText(loop("parked", { wait: "operator", parked: "CI failed 3 times" }), CALL, null, NOW),
     ).toBe("Held: CI failed 3 times");
-    expect(waitText(loop("parked", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
+    expect(waitText(loop("parked", { wait: "operator" }), CALL, null, NOW)).toBe("Held");
     expect(waitText(loop("review", { wait: "operator" }), CALL, null, NOW)).toBe("waiting on you");
   });
 

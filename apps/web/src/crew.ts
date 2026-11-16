@@ -619,9 +619,9 @@ export function waitText(
     case "operator":
       // a park's reason names who settles it (FLIGHT, or the operator's acceptance), so the line
       // does not claim the operator for every park
-      return loop.phase === "parked" && loop.parked
-        ? `${PARKED_WAIT_LEAD}: ${loop.parked}`
-        : WAIT_TEXT.operator;
+      if (loop.phase === "parked")
+        return loop.parked ? `${PARKED_WAIT_LEAD}: ${loop.parked}` : PARKED_WAIT_LEAD;
+      return WAIT_TEXT.operator;
     case "lock":
       return lockSince === null
         ? WAIT_TEXT.lock

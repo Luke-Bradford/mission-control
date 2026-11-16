@@ -329,7 +329,7 @@ it("names and confirms the waiver for a review-parked seat", async () => {
     parked: "RETRO finding",
   };
   const row = seatRow({ hudState: "parked", loop, ticket: "shop-app#9" });
-  const ask = item({ key: "note:park", kind: "blocked", agentId: "guido-1", ticket: "shop-app#9" });
+  const ask = item({ key: "note:blocked:r-12:0", kind: "blocked", agentId: "guido-1" });
   const f = stub([row], true, [ask], "CI", undefined, {
     "/api/runs/r-12/loop": {
       loop: {
@@ -351,7 +351,7 @@ it("names and confirms the waiver for a review-parked seat", async () => {
   confirm.mockRestore();
 });
 
-it("offers no waiver on the overview for a review park the operator does not own", async () => {
+describe("the overview's waiver follows the park's own Needs-you item", () => {
   const run = seatRow().run as NonNullable<CrewRow["run"]>;
   const parked = {
     phase: "parked" as const,
@@ -360,30 +360,65 @@ it("offers no waiver on the overview for a review park the operator does not own
     parked: "held past its review rounds; FLIGHT decides",
     wait: "operator" as const,
   };
-  const row = seatRow({
-    hudState: "parked",
-    loop: parked,
-    ticket: "shop-app#30",
-    run: { ...run, id: "r-30" },
-    asideRuns: [{ runId: "r-31", ticket: "shop-app#31", ticketTitle: null, loop: parked }],
-  });
-  // FLIGHT owns the seat's item; another seat's operator item names the same ticket
-  const asks = [
-    item({
-      key: "note:a",
-      kind: "blocked",
-      agentId: "guido-1",
-      ticket: "shop-app#31",
-      owner: "flight",
-    }),
-    item({ key: "note:b", kind: "blocked", agentId: "guido-2", ticket: "shop-app#30" }),
+  const row = () =>
+    seatRow({
+      hudState: "parked",
+      loop: parked,
+      ticket: "shop-app#30",
+      run: { ...run, id: "r-30" },
+      asideRuns: [{ runId: "r-31", ticket: null, ticketTitle: null, loop: parked }],
+    });
+  const loops = {
+    "/api/runs/r-30/loop": {
+      loop: { parked: { kind: "review", reason: "held", ended: false }, pushFor: "eee5555000" },
+    },
+    "/api/runs/r-31/loop": {
+      loop: { parked: { kind: "review", reason: "held", ended: false }, pushFor: "ddd4444000" },
+    },
+  };
+  const waivers = () => [
+    ...screen.queryAllByRole("button", { name: /Waive findings/ }),
+    ...screen.queryAllByRole("combobox", { name: /Waive review findings/ }),
   ];
-  const f = stub([row], true, asks);
-  render(<AgentsPanel />);
-  await waitFor(() => expect(f).toHaveBeenCalled());
-  expect(screen.queryByRole("button", { name: /Waive findings/ })).toBeNull();
-  expect(screen.queryByRole("combobox", { name: /Waive review findings/ })).toBeNull();
-  expect(f.mock.calls.some(([path]) => String(path).startsWith("/api/runs/r-3"))).toBe(false);
+
+  it("offers none while FLIGHT owns the park, even beside another operator item on the same seat and ticket", async () => {
+    const asks = [
+      item({ key: "note:blocked:r-31:2", kind: "blocked", agentId: "guido-1", owner: "flight" }),
+      item({ key: "note:ready:r-30:abc", kind: "pr", agentId: "guido-1", ticket: "shop-app#30" }),
+      item({ key: "note:blocked:r-30:0", kind: "blocked", agentId: "guido-2", owner: "flight" }),
+    ];
+    const f = stub([row()], true, asks, "CI", undefined, loops);
+    render(<AgentsPanel />);
+    await waitFor(() => expect(f).toHaveBeenCalled());
+    expect(waivers()).toEqual([]);
+    expect(f.mock.calls.some(([path]) => String(path).startsWith("/api/runs/r-3"))).toBe(false);
+  });
+
+  it("offers it for a run with no ticket once the park's item is the operator's", async () => {
+    const asks = [item({ key: "note:blocked:r-31:2", kind: "blocked", agentId: "guido-1" })];
+    stub([row()], true, asks, "CI", undefined, loops);
+    render(<AgentsPanel />);
+    expect(
+      await screen.findByRole("button", { name: "Waive findings on ddd4444 and resume" }),
+    ).toBeTruthy();
+  });
+
+  it("offers it while FLIGHT is down and the park's item waits on nobody", async () => {
+    const asks = [
+      item({
+        key: "note:blocked:r-30:0",
+        kind: "blocked",
+        agentId: "guido-1",
+        owner: "flight",
+        flightTriage: "down",
+      }),
+    ];
+    stub([row()], true, asks, "CI", undefined, loops);
+    render(<AgentsPanel />);
+    expect(
+      await screen.findByRole("button", { name: "Waive findings on eee5555 and resume" }),
+    ).toBeTruthy();
+  });
 });
 
 it("waives the run chosen from the menu when a seat has several review-parked runs", async () => {
@@ -410,7 +445,7 @@ it("waives the run chosen from the menu when a seat has several review-parked ru
     })),
   });
   const asks = ["20", "21", "22"].map((n) =>
-    item({ key: `note:park-${n}`, kind: "blocked", agentId: "guido-1", ticket: `shop-app#${n}` }),
+    item({ key: `note:blocked:r-${n}:1`, kind: "blocked", agentId: "guido-1" }),
   );
   const f = stub([row], true, asks, "CI", undefined, {
     "/api/runs/r-20/loop": park("aaa1111000", "finding on r-20"),
