@@ -328,9 +328,7 @@ describe("Needs you page", () => {
     fireEvent.change(box, { target: { value: "Half a thought" } });
     view.rerender(<Needs item="q2" />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement).value).toBe(
-        "",
-      ),
+      expect((screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement).value).toBe(""),
     );
     view.rerender(<Needs item="q1" />);
     await waitFor(() =>
@@ -793,7 +791,10 @@ describe("actions on the page", () => {
       },
     });
     const addMessage = async (n: number) => {
-      messages = [...messages, { ...(messages[0] as (typeof messages)[number]), id: `m${n}`, text: `Message ${n}` }];
+      messages = [
+        ...messages,
+        { ...(messages[0] as (typeof messages)[number]), id: `m${n}`, text: `Message ${n}` },
+      ];
       act(() => {
         hub.refetch("/api/comms/flight");
       });

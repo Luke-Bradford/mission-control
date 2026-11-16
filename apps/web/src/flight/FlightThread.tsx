@@ -72,7 +72,9 @@ export function FlightThread({
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   // Beside a question the unsent text is kept per item, so opening another question does not lose it.
-  const [text, setTextState] = useState(() => (itemKey === undefined ? "" : getDraft("ask", itemKey)));
+  const [text, setTextState] = useState(() =>
+    itemKey === undefined ? "" : getDraft("ask", itemKey),
+  );
   const setText = (value: string) => {
     setTextState(value);
     if (itemKey !== undefined) setDraft("ask", itemKey, value);

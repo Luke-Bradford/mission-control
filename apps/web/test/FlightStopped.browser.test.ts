@@ -174,7 +174,9 @@ describeRendered("Needs you with FLIGHT stopped", () => {
             );
             await page.evaluate(() => {
               (
-                document.querySelector("#needsSide .flight-thread-form textarea") as HTMLTextAreaElement
+                document.querySelector(
+                  "#needsSide .flight-thread-form textarea",
+                ) as HTMLTextAreaElement
               ).focus();
             }, undefined);
             await page.press("Tab");

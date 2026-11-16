@@ -12,7 +12,6 @@ import { installKeys } from "../src/shell/keys.ts";
 import { closeItem, openItem, syncItem, toggleDock, useItem } from "../src/shell/overlays.ts";
 import { stubFetch as fetchRoutes } from "./fetchStub.ts";
 
-
 const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
 function stubFetch(routes: Parameters<typeof fetchRoutes>[0]) {
   const items = routes["/api/attention"];
@@ -1369,7 +1368,16 @@ describe("ItemPanel beside the one FLIGHT thread", () => {
   });
 
   it("shows a picked option once, as the choice the thread draws, and sends no second message", async () => {
-    const choice = { id: "comms:3", at: NOW + 2, from: "CAPCOM", to: "flight-1", text: "", operator: true, itemKey: "ask:7", choice: { label: "5174" } };
+    const choice = {
+      id: "comms:3",
+      at: NOW + 2,
+      from: "CAPCOM",
+      to: "flight-1",
+      text: "",
+      operator: true,
+      itemKey: "ask:7",
+      choice: { label: "5174" },
+    };
     const fn = stubFetch({
       "/api/attention": [SEAT_Q],
       "/api/crew?shape=summary": {

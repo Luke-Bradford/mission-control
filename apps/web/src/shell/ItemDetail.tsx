@@ -153,7 +153,6 @@ export function useItemDetail(key: string | null) {
   const holding = Boolean(item?.escalationId) && escalations === undefined && escRes.error === null;
   const agentId = item?.agentId ?? null;
   const agentIndex = crew?.rows.find((r) => r.id === agentId)?.index ?? 0;
-  const live = seat?.live === true;
   // The item's title: the thread beside the question is headed with it.
   const about = esc?.title ?? item?.text ?? "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
@@ -282,7 +281,6 @@ export function useItemDetail(key: string | null) {
     agentIndex,
     seat,
     about,
-    live,
     flight,
     target,
     queueApproval,
@@ -330,7 +328,6 @@ export function ItemDetail({
     tz,
     now,
     about,
-    live,
     flight,
     target,
     queueApproval,

@@ -5,10 +5,11 @@ import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
 import { stubFetch as fetchRoutes } from "./fetchStub.ts";
 
-const stubFetch = (routes: Parameters<typeof fetchRoutes>[0]) =>
-  fetchRoutes({ "/api/comms/flight": { messages: [] }, ...routes });
 import { item } from "./fixtures.ts";
 import { readStyles } from "./styles.ts";
+
+const stubFetch = (routes: Parameters<typeof fetchRoutes>[0]) =>
+  fetchRoutes({ "/api/comms/flight": { messages: [] }, ...routes });
 
 const key = "person:123:1000";
 const path = `/api/attention/${encodeURIComponent(key)}`;
