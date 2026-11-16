@@ -340,15 +340,59 @@ describe("review rounds on a sliced ticket", () => {
   });
 });
 
+const boardCard = (issueNumber: number, closed: boolean): BoardItem => ({
+  repoId: "mc",
+  issueNumber,
+  title: `Ticket ${issueNumber}`,
+  status: closed ? "Done" : "In progress",
+  state: "planned",
+  labels: [],
+  assignees: [],
+  priority: null,
+  updatedAt: NOW,
+  url: "u",
+  stage: null,
+  owner: null,
+  parent: null,
+  subIssues: null,
+  blockedBy: [],
+  milestone: null,
+  size: "S",
+  closed,
+  prioritySource: null,
+  createdAt: NOW - DAY,
+  itemId: `I${issueNumber}`,
+  projectId: "P",
+});
+
 describe("alarms that only alarm", () => {
-  it("flags a ticket that passes three runs without a merge, with its runs and findings", () => {
+  const fourRuns = (ticket: string) => {
     for (let i = 0; i < 4; i++)
-      store.upsertRun(run("guido-1", { ticket: "mc#30", startedAt: NOW - (5 - i) * HOUR }));
+      store.upsertRun(run("guido-1", { ticket, startedAt: NOW - (5 - i) * HOUR }));
+  };
+
+  it("flags an open ticket that passes three runs without a merge, with its runs and findings", () => {
+    store.replaceBoard("mc", [boardCard(30, false)]);
+    fourRuns("mc#30");
     syncWasteAlarms(config, store, NOW);
     const a = openWasteAlarms(store).find((x) => x.check === "runs-per-ticket");
     expect(a?.evidence).toMatch(/mc#30 has taken 4 runs without a merge/);
     expect(a?.evidence).toMatch(/r\d+ \(0\)/);
     expect(ticketParked(store, "mc#30")).toBeNull();
+  });
+
+  it("raises no runs-per-ticket alarm for a closed ticket", () => {
+    store.replaceBoard("mc", [boardCard(30, true)]);
+    fourRuns("mc#30");
+    syncWasteAlarms(config, store, NOW);
+    expect(openWasteAlarms(store).find((x) => x.check === "runs-per-ticket")).toBeUndefined();
+  });
+
+  it("raises no runs-per-ticket alarm for a ticket that is not on the board", () => {
+    store.replaceBoard("mc", [boardCard(31, false)]);
+    fourRuns("mc#30");
+    syncWasteAlarms(config, store, NOW);
+    expect(openWasteAlarms(store).find((x) => x.check === "runs-per-ticket")).toBeUndefined();
   });
 
   it("flags cost past 3x the median of the ticket's size when nothing merged", () => {
@@ -435,6 +479,7 @@ describe("alarms that only alarm", () => {
 
 describe("no waste alarm reaches Needs you", () => {
   it("leaves the notes and the attention items empty with checks firing", () => {
+    store.replaceBoard("mc", [boardCard(30, false)]);
     for (let i = 0; i < 8; i++) store.upsertRun(run("flight-1", { startedAt: NOW - i * MIN }));
     for (let i = 0; i < 4; i++)
       store.upsertRun(
