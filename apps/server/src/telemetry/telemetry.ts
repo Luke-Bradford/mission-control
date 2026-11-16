@@ -240,6 +240,43 @@ export function telemetry(
   }
   const throughput = days.map((day) => ({ day, merged: perDay.get(day) ?? 0 }));
 
+  // Each stored column move gives a ticket's state from that point onward. We do not infer a
+  // state before the first recorded move, so days without history stay visibly unknown.
+  const moves = store.flowColumnMoves().filter((move) => move.at <= now);
+  const dayStarts = [dayStart];
+  while (dayStarts.length < CYCLE_TIME_DAYS) {
+    dayStarts.unshift(startOfLocalDay((dayStarts[0] as number) - 1, tz));
+  }
+  const ticketColumns = new Map<string, string>();
+  let moveIndex = 0;
+  let inProgress = 0;
+  const ticketsInProgress: NonNullable<TelemetrySeries["ticketsInProgress"]> = days.map(
+    (day, index) => {
+      const live = index === days.length - 1;
+      const end = live ? now : (dayStarts[index + 1] as number);
+      while (
+        moveIndex < moves.length &&
+        ((moves[moveIndex]?.at ?? Infinity) < end || (live && moves[moveIndex]?.at === end))
+      ) {
+        const move = moves[moveIndex] as (typeof moves)[number];
+        const ticket = `${move.repoId}#${move.number}`;
+        const wasInProgress = ticketColumns.get(ticket) === "In progress";
+        const isInProgress = move.column === "In progress";
+        if (wasInProgress !== isInProgress) inProgress += isInProgress ? 1 : -1;
+        ticketColumns.set(ticket, move.column);
+        moveIndex += 1;
+      }
+      const firstMove = moves[0]?.at;
+      return {
+        day,
+        tickets:
+          firstMove === undefined || firstMove > end || (!live && firstMove === end)
+            ? null
+            : inProgress,
+      };
+    },
+  );
+
   const flowSince = now - CYCLE_TIME_DAYS * DAY_MS;
   const bySize = new Map<string, number[]>();
   let excluded = 0;
@@ -714,6 +751,7 @@ export function telemetry(
     quota: chartQuota,
     tickets,
     throughput: throughputPoints,
+    ticketsInProgress,
     quality: qualityPoints,
     annotations,
   };

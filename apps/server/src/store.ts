@@ -75,6 +75,7 @@ import {
   type FlightWakeRecord,
   type FlightWatchEntry,
   type FlightWatchOperation,
+  type FlowColumnMove,
   type FlowIssue,
   type FlowPr,
   GUARD_HITS_LIMIT,
@@ -3631,19 +3632,42 @@ export class Store {
   }
 
   /** Replaces the repo's finished and open flow rows. */
-  replaceFlow(repoId: RepoId, issues: FlowIssue[], prs: FlowPr[]): void {
+  replaceFlow(
+    repoId: RepoId,
+    issues: FlowIssue[],
+    prs: FlowPr[],
+    moves: FlowColumnMove[] = [],
+  ): void {
     this.transaction(() => {
       this.db.prepare("DELETE FROM flow_issues WHERE repo_id = ?").run(repoId);
+      this.db.prepare("DELETE FROM flow_column_moves WHERE repo_id = ?").run(repoId);
       this.db.prepare("DELETE FROM flow_prs WHERE repo_id = ?").run(repoId);
       const insIssue = this.db.prepare(
         "INSERT INTO flow_issues (repo_id, number, size, start_at, done_at) VALUES (?, ?, ?, ?, ?)",
       );
       for (const i of issues) insIssue.run(repoId, i.number, i.size, i.startAt, i.doneAt);
+      const insMove = this.db.prepare(
+        "INSERT INTO flow_column_moves (repo_id, number, at, column) VALUES (?, ?, ?, ?)",
+      );
+      for (const m of moves) insMove.run(repoId, m.number, m.at, m.column);
       const insPr = this.db.prepare(
         "INSERT INTO flow_prs (repo_id, number, merged_at, first_push_ci) VALUES (?, ?, ?, ?)",
       );
       for (const p of prs) insPr.run(repoId, p.number, p.mergedAt, p.firstPushCi);
     });
+  }
+
+  /** Every observed flow-column move, oldest first, for local telemetry reads. */
+  flowColumnMoves(): FlowColumnMove[] {
+    const rows = this.db
+      .prepare("SELECT * FROM flow_column_moves ORDER BY at ASC, repo_id, number, id")
+      .all() as Row[];
+    return rows.map((r) => ({
+      repoId: r.repo_id as string,
+      number: r.number as number,
+      at: r.at as number,
+      column: r.column as FlowColumnMove["column"],
+    }));
   }
 
   /** Issues done at or after `sinceMs`, plus every open flow issue, oldest first. */
