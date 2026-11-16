@@ -252,4 +252,27 @@ describe("sweepBugEscapes", () => {
     expect(visited).toContain("r21");
     expect(new Set(visited)).toEqual(new Set(ids));
   });
+
+  it("moves past bugs it cannot trace, so ten of them do not starve an older one", async () => {
+    const { fix } = fixture();
+    // ten newer bugs whose fix commits are not in the clone, then the traceable one, oldest
+    const lost = Array.from({ length: 10 }, (_, i) => 21 + i);
+    store.upsertPullRequests(
+      "r1",
+      [
+        pr(9, { ticket: "r1#20", mergeCommitSha: fix }),
+        ...lost.map((n) => pr(100 + n, { ticket: `r1#${n}`, mergeCommitSha: "ab".repeat(20) })),
+      ],
+      NOW,
+    );
+    store.replaceBoard("r1", [
+      bug({ issueNumber: 20, createdAt: NOW - 20 * DAY }),
+      ...lost.map((n) => bug({ issueNumber: n, createdAt: NOW - ((40 - n) * DAY) / 4 })),
+    ]);
+    let clock = NOW;
+    const pass = () => sweepBugEscapes({ config: config(), store, exec, now: () => ++clock });
+    expect(await pass()).toBe(0);
+    expect(await pass()).toBe(1);
+    expect(store.audit(0, NOW).bugEscapes?.map((e) => e.issue)).toEqual([20]);
+  });
 });

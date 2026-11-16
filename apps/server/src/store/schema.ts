@@ -69,6 +69,11 @@ CREATE TABLE IF NOT EXISTS bug_escapes (
   fix_pr INTEGER NOT NULL, commit_sha TEXT NOT NULL, introduced_pr INTEGER,
   merged_at INTEGER NOT NULL, missed TEXT NOT NULL, PRIMARY KEY (repo_id, issue_number)
 );
+-- When a bug's trace was last tried and failed, so a pass moves on to the bugs tried least recently.
+CREATE TABLE IF NOT EXISTS bug_escape_tries (
+  repo_id TEXT NOT NULL, issue_number INTEGER NOT NULL, tried_at INTEGER NOT NULL,
+  PRIMARY KEY (repo_id, issue_number)
+);
 CREATE INDEX IF NOT EXISTS bug_escapes_filed ON bug_escapes(filed_at);
 CREATE TABLE IF NOT EXISTS retrospectives (
   repo_id TEXT NOT NULL, day TEXT NOT NULL, at INTEGER NOT NULL, report TEXT NOT NULL,

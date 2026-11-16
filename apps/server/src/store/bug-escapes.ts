@@ -14,7 +14,7 @@ export interface BugFixCandidate {
 
 /**
  * Closed bug tickets of a repo with a merged fix PR (the PR's ticket or a closing issue), not yet
- * recorded, newest filed first. The latest merged PR naming the ticket is the fix.
+ * recorded: never tried first, then least recently tried, newest filed first within those. The latest merged PR naming the ticket is the fix.
  */
 export function bugFixCandidates(
   db: DatabaseSync,
@@ -28,7 +28,9 @@ export function bugFixCandidates(
          WHERE repo_id = ? AND closed = 1 AND created_at > 0 AND NOT EXISTS (
            SELECT 1 FROM bug_escapes e WHERE e.repo_id = board_items.repo_id
              AND e.issue_number = board_items.issue_number)
-         ORDER BY created_at DESC`,
+         ORDER BY COALESCE((SELECT tried_at FROM bug_escape_tries t
+           WHERE t.repo_id = board_items.repo_id AND t.issue_number = board_items.issue_number), 0),
+           created_at DESC`,
       )
       .all(repoId) as Row[]
   ).filter((b) => isBugLabelled(JSON.parse(b.labels as string) as string[]));
@@ -62,6 +64,19 @@ export function bugFixCandidates(
     if (out.length >= limit) break;
   }
   return out;
+}
+
+/** Notes that a bug's trace was tried and failed, so the next pass takes other bugs first. */
+export function noteBugTraceTried(
+  db: DatabaseSync,
+  repoId: string,
+  issue: number,
+  at: number,
+): void {
+  db.prepare(
+    `INSERT INTO bug_escape_tries (repo_id, issue_number, tried_at) VALUES (?, ?, ?)
+     ON CONFLICT(repo_id, issue_number) DO UPDATE SET tried_at = excluded.tried_at`,
+  ).run(repoId, issue, at);
 }
 
 /** What the hub recorded about the PR a bug came in on. */

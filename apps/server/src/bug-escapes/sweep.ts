@@ -22,6 +22,7 @@ export async function sweepBugEscapes(deps: {
   stopped?: () => boolean;
   /** Where the next pass starts; kept between passes so every repo is reached. */
   cursor?: { next: number };
+  now?: () => number;
 }): Promise<number> {
   const exec = deps.exec ?? realGitExec;
   let added = 0;
@@ -37,7 +38,11 @@ export async function sweepBugEscapes(deps: {
     for (const bug of deps.store.bugFixCandidates(repo.id, BUG_ESCAPE_BATCH)) {
       if (deps.stopped?.() === true) return added;
       const trace = await traceFix(checkout, bug.fixSha, exec);
-      if (trace === null) continue;
+      if (trace === null) {
+        // move this bug behind the others, so ten untraceable ones cannot starve the rest
+        deps.store.noteBugTraceTried(repo.id, bug.issue, (deps.now ?? Date.now)());
+        continue;
+      }
       const facts =
         trace.prNumber === null
           ? { mergedAt: null, hasReview: false, doneWhen: [] }

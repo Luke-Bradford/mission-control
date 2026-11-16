@@ -36,4 +36,28 @@ describe("classifyMissed", () => {
     expect(classifyMissed({ ...none, hasReview: true })).toBe("requirement");
     expect(classifyMissed({ ...none, hasReview: true, doneWhen: covered.doneWhen })).toBe("test");
   });
+
+  it("matches tests that carry a qualifier before .test", () => {
+    for (const test of [
+      "apps/web/test/Audit.browser.test.tsx",
+      "apps/web/test/Audit.node.spec.ts",
+      "apps/web/test/Audit.test.tsx",
+    ]) {
+      expect(
+        classifyMissed({
+          ...covered,
+          fixedFiles: ["apps/web/src/Audit.tsx"],
+          introFiles: ["apps/web/src/Audit.tsx", test],
+        }),
+      ).toBe("none");
+    }
+    // a different file that merely starts with the same letters is not a match
+    expect(
+      classifyMissed({
+        ...covered,
+        fixedFiles: ["apps/web/src/Audit.tsx"],
+        introFiles: ["apps/web/test/AuditLog.browser.test.tsx"],
+      }),
+    ).toBe("test");
+  });
 });

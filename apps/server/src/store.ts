@@ -223,6 +223,7 @@ import {
   bugFixCandidates,
   type IntroducingPrFacts,
   introducingPrFacts,
+  noteBugTraceTried,
   recordBugEscape,
 } from "./store/bug-escapes.ts";
 import { CommsQueries, cutCommsText } from "./store/comms.ts";
@@ -2082,6 +2083,7 @@ export class Store {
       ],
       ["pr_history", "merged_at < ?", AUDIT_RETENTION_DAYS],
       ["bug_escapes", "filed_at < ?", AUDIT_RETENTION_DAYS],
+      ["bug_escape_tries", "tried_at < ?", AUDIT_RETENTION_DAYS],
     ] as const;
     const operationalIndex = this.operationalHistoryNextTable % operationalTables.length;
     const [table, condition, retentionDays] = operationalTables[operationalIndex];
@@ -3038,6 +3040,10 @@ export class Store {
   /** Closed bugs with a merged fix that are not traced yet (see store/bug-escapes.ts). */
   bugFixCandidates(repoId: RepoId, limit: number): BugFixCandidate[] {
     return bugFixCandidates(this.db, repoId, limit);
+  }
+
+  noteBugTraceTried(repoId: RepoId, issue: number, at: number): void {
+    noteBugTraceTried(this.db, repoId, issue, at);
   }
 
   introducingPrFacts(repoId: RepoId, pr: number): IntroducingPrFacts {
