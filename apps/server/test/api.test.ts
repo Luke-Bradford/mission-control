@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   AUDIT_MEASURED_TOOLS,
   COMMS_FLIGHT_ESCALATION_MS,
@@ -1706,6 +1707,8 @@ const API_ROUTES: [string, string, object?][] = [
   ["POST", "/api/previews/41/activity", {}],
   ["POST", "/api/repos", NEW_REPO],
   ["POST", "/api/repos/onboard"],
+  ["GET", "/api/repos/shop-app/rules"],
+  ["POST", "/api/repos/shop-app/rules", {}],
   [
     "POST",
     "/api/repos/shop-app/setup",
@@ -2143,6 +2146,239 @@ describe("add a repo (POST /api/repos)", () => {
     expect(readFileSync(target, "utf8")).toBe(exampleText());
     expect(readdirSync(dir).some((f) => f.startsWith("config.yaml.bak-"))).toBe(false);
     expect(config.repos).toHaveLength(2);
+  });
+});
+
+describe("Setup Roles & guards", () => {
+  const rolesBody = {
+    pick_from: ["Ready"],
+    needs: ["done_when", "size"],
+    areas: { server: ["apps/server/**"] },
+    promote_backlog: true,
+    protected: [".github/**"],
+    hard_rules: ["roles/**"],
+    hard_rules_by: "operator",
+    commands: { writer: ["pnpm -s test"], review: ["pnpm -s test"] },
+    full_suite: ["pnpm -s test"],
+    required_checks: ["ci / test"],
+    checks: ["pnpm -s lint"],
+    uat: { labels: ["needs-uat"], paths: ["apps/web/**"] },
+    always_ask: ["deploy"],
+  };
+
+  type View = {
+    base: string;
+    rules: Record<string, { value: unknown; source: string; repoAdds?: string[] }>;
+  };
+  const KEYS = [
+    "pick_from",
+    "needs",
+    "areas",
+    "promote_backlog",
+    "protected",
+    "hard_rules",
+    "hard_rules_by",
+    "commands.writer",
+    "commands.review",
+    "full_suite",
+    "required_checks",
+    "checks",
+    "uat.labels",
+    "uat.paths",
+    "always_ask",
+    "autonomy",
+    "flight_powers",
+  ];
+  const SHOP = "    github: octo-org/shop-app\n";
+  /** Puts lines under shop-app in the file on disk, behind the hub's loaded config. */
+  const onDisk = (lines: string) =>
+    writeFileSync(configPath, exampleText().replace(SHOP, `${SHOP}${lines}`));
+  const view = async () => (await get("/api/repos/shop-app/rules")).json<View>();
+  /** A crew clone whose origin/HEAD CLAUDE.md holds `block`. */
+  const repoFile = (block: string) => {
+    withCrew();
+    const checkout = mapCheckout(dir);
+    const session = config.crew?.sessions[0];
+    if (!session) throw new Error("fixture session missing");
+    session.checkout = checkout;
+    writeFileSync(
+      join(checkout, "CLAUDE.md"),
+      `## Mission Control\n\n\`\`\`yaml\n${block}\`\`\`\n`,
+    );
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-C", checkout, "-c", "user.email=a@b", "-c", "user.name=n", ...args]);
+    git("add", "CLAUDE.md");
+    git("commit", "-qm", "rules");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+  };
+
+  it("reads all 17 keys with defaults, then saves every editable rule with a backup, without GitHub", async () => {
+    const first = await view();
+    expect(Object.keys(first.rules)).toEqual(KEYS);
+    expect(first.rules.pick_from).toMatchObject({ value: ["Ready"], source: "default" });
+    expect(first.rules["commands.writer"]?.source).toBe("default");
+    expect(first.rules.autonomy).toMatchObject({ value: "draft", source: "config-file" });
+    expect(first.rules.flight_powers).toMatchObject({ source: "config-file" });
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: first.base,
+      rules: rolesBody,
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(saved.json()).toEqual({ backup: "config.yaml.bak-20261017T120000Z" });
+    expect(readFileSync(configPath, "utf8")).toContain("pick_from:");
+    expect(readdirSync(dir)).toContain("config.yaml.bak-20261017T120000Z");
+    expect(refreshed).toBe(0);
+    expect(gqlCalls).toEqual([]);
+    const reread = await view();
+    for (const key of KEYS.slice(0, 15)) expect(reread.rules[key]?.source).toBe("set-here");
+    expect(reread.rules["commands.review"]?.value).toEqual(["pnpm -s test"]);
+    expect(reread.rules.areas?.value).toEqual({ server: ["apps/server/**"] });
+    // the live config took the owned fields only
+    expect(config.repos.find((r) => r.id === "shop-app")?.rules?.checks).toEqual(["pnpm -s lint"]);
+  });
+
+  it("saves one leaf of commands or uat and keeps its sibling", async () => {
+    const first = await view();
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: first.base,
+      rules: { uat: { labels: ["needs-uat"] }, commands: { writer: ["pnpm -s test"] } },
+    });
+    expect(saved.statusCode).toBe(200);
+    const read = await view();
+    expect(read.rules["uat.labels"]).toMatchObject({ value: ["needs-uat"], source: "set-here" });
+    expect(read.rules["uat.paths"]).toMatchObject({ value: [], source: "default" });
+    expect(read.rules["commands.writer"]?.value).toEqual(["pnpm -s test"]);
+    expect(read.rules["commands.review"]?.value).toEqual(first.rules["commands.review"]?.value);
+  });
+
+  it("reads the file on disk, not stale loaded rules, so the page saves what it shows", async () => {
+    expect(config.repos.find((r) => r.id === "shop-app")?.rules).toBeUndefined();
+    onDisk("    rules:\n      pick_from: [Todo]\n");
+    const read = await view();
+    expect(read.rules.pick_from).toMatchObject({ value: ["Todo"], source: "set-here" });
+    expect(createHash("sha256").update(readFileSync(configPath)).digest("hex")).toBe(read.base);
+  });
+
+  it("a rules save never makes an unapplied Authority change on disk live", async () => {
+    onDisk("    flight_powers: superuser\n");
+    const live = config.repos.find((r) => r.id === "shop-app");
+    const before = { autonomy: live?.autonomy, flightPowers: live?.flightPowers };
+    const read = await view();
+    expect(read.rules.flight_powers).toMatchObject({ value: "superuser", source: "config-file" });
+    const saved = await postBody("/api/repos/shop-app/rules", {
+      base: read.base,
+      rules: { checks: ["pnpm -s lint"] },
+    });
+    expect(saved.statusCode).toBe(200);
+    expect(readFileSync(configPath, "utf8")).toContain("flight_powers: superuser");
+    expect({ autonomy: live?.autonomy, flightPowers: live?.flightPowers }).toEqual(before);
+    expect(live?.rules?.checks).toEqual(["pnpm -s lint"]);
+  });
+
+  describe("repo-file sources come from what the block declares, not from equal values", () => {
+    it("replacing keys: pick_from and areas belong to the repo file even when equal", async () => {
+      onDisk(
+        "    rules:\n      pick_from: [Ready]\n      areas: {server: [apps/server/**]}\n      always_ask: [deploy]\n",
+      );
+      repoFile("mc:\n  pick_from: [Ready]\n  areas: {server: [apps/server/**]}\n");
+      const read = await view();
+      expect(read.rules.pick_from).toMatchObject({ value: ["Ready"], source: "repo-file" });
+      expect(read.rules.areas).toMatchObject({ source: "repo-file" });
+      expect(read.rules.always_ask).toMatchObject({ source: "set-here", repoAdds: [] });
+      expect(gqlCalls).toEqual([]);
+    });
+
+    it("filling keys: needs and promote_backlog fill only when config.yaml leaves them out", async () => {
+      onDisk("    rules:\n      needs: [size]\n");
+      repoFile("mc:\n  needs: [done_when]\n  promote_backlog: false\n");
+      const read = await view();
+      expect(read.rules.needs).toMatchObject({ value: ["size"], source: "set-here" });
+      expect(read.rules.promote_backlog).toMatchObject({ value: false, source: "repo-file" });
+    });
+
+    it("additive keys keep the config source and list the repo file's additions apart", async () => {
+      onDisk(
+        "    rules:\n      hard_rules: [config.yaml]\n      checks: [pnpm -s lint]\n      uat:\n        labels: [needs-uat]\n",
+      );
+      repoFile(
+        "mc:\n  hard_rules: [CLAUDE.md]\n  checks: [pnpm -s lint, pnpm -s typecheck]\n  uat:\n    labels: [needs-uat]\n    paths: [apps/web/**]\n  always_ask: [security]\n",
+      );
+      const { rules } = await view();
+      expect(rules.hard_rules).toMatchObject({
+        value: ["config.yaml"],
+        source: "set-here",
+        repoAdds: ["CLAUDE.md"],
+      });
+      expect(rules.checks).toMatchObject({
+        value: ["pnpm -s lint"],
+        source: "set-here",
+        repoAdds: ["pnpm -s typecheck"],
+      });
+      expect(rules["uat.labels"]).toMatchObject({ source: "set-here", repoAdds: [] });
+      expect(rules["uat.paths"]).toMatchObject({
+        value: [],
+        source: "default",
+        repoAdds: ["apps/web/**"],
+      });
+      expect(rules.always_ask).toMatchObject({ source: "default", repoAdds: ["security"] });
+    });
+
+    it("hard_rules the config leaves out come from the repo file", async () => {
+      repoFile("mc:\n  hard_rules: [CLAUDE.md]\n");
+      const { rules } = await view();
+      expect(rules.hard_rules).toMatchObject({ value: ["CLAUDE.md"], source: "repo-file" });
+    });
+
+    it("an unreadable block is named and the config values still show", async () => {
+      repoFile("mc:\n  nonsense: 1\n");
+      const read = (await get("/api/repos/shop-app/rules")).json<
+        View & { repoFileError: string }
+      >();
+      expect(read.repoFileError).toContain("unknown key");
+      expect(read.rules.pick_from?.source).toBe("default");
+    });
+  });
+
+  it.each([
+    ["pick_from", { ...rolesBody, pick_from: [] }, "expected array to have >=1 items"],
+    ["needs", { ...rolesBody, needs: ["missing"] }, "needs"],
+    ["areas", { ...rolesBody, areas: { server: [] } }, "areas"],
+    ["promote_backlog", { ...rolesBody, promote_backlog: "yes" }, "expected boolean"],
+    ["protected", { ...rolesBody, protected: [""] }, "protected"],
+    ["hard_rules", { ...rolesBody, hard_rules: [""] }, "must hold only letters"],
+    ["hard_rules_by", { ...rolesBody, hard_rules_by: "flight" }, "expected one of"],
+    ["commands", { ...rolesBody, commands: { writer: [""], review: [] } }, "commands"],
+    ["full_suite", { ...rolesBody, full_suite: ["not a writer command"] }, "full_suite"],
+    ["required_checks", { ...rolesBody, required_checks: ["mc/review"] }, "not a CI check"],
+    ["checks", { ...rolesBody, checks: ["pnpm -s lint && pnpm -s test"] }, "checks"],
+    ["uat", { ...rolesBody, uat: { labels: [""], paths: [] } }, "uat"],
+    ["always_ask", { ...rolesBody, always_ask: [""] }, "expected string"],
+    ["autonomy", { ...rolesBody, autonomy: "merge" }, undefined],
+    ["flight_powers", { ...rolesBody, flight_powers: "superuser" }, undefined],
+  ])("refuses %s without writing", async (_name, rules, key) => {
+    const read = await get("/api/repos/shop-app/rules");
+    const before = readFileSync(configPath, "utf8");
+    const response = await postBody("/api/repos/shop-app/rules", {
+      base: read.json<{ base: string }>().base,
+      rules,
+    });
+    expect(response.statusCode).toBe(400);
+    if (key) expect(response.json<{ error: string }>().error).toContain(key);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+  });
+
+  it("refuses a stale page without a backup", async () => {
+    const read = await get("/api/repos/shop-app/rules");
+    writeFileSync(configPath, `${readFileSync(configPath, "utf8")}# changed\n`);
+    const response = await postBody("/api/repos/shop-app/rules", {
+      base: read.json<{ base: string }>().base,
+      rules: rolesBody,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: "config.yaml changed since this page loaded it; reload and try again",
+    });
+    expect(readdirSync(dir).some((name) => name.startsWith("config.yaml.bak-"))).toBe(false);
   });
 });
 
@@ -2729,6 +2965,11 @@ describe("local access", () => {
       }
       if (url === "/api/repos/onboard") {
         expect(r.statusCode, `${method} ${url}`).toBe(400);
+        continue;
+      }
+      if (url === "/api/repos/shop-app/rules") {
+        // The route-table POST body has no version or rules; route-specific tests cover saves.
+        expect(r.statusCode, `${method} ${url}`).toBe(method === "GET" ? 200 : 400);
         continue;
       }
       if (

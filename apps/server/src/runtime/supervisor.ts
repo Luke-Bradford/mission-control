@@ -2321,6 +2321,15 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       cwd,
       lock: deps.lock,
       ...(deps.checks === undefined ? {} : { checks: deps.checks }),
+      tell: (text) => {
+        const l = live.get(info.seat.id);
+        if (l?.run.id !== run.id) return;
+        try {
+          l.session.send(text);
+        } catch {
+          // the seat is gone; the guard hit still records the refusal
+        }
+      },
       superuserTools: deps.superuserTools,
       runGrants: () => runSeatGrants(config, store, { seatId: info.seat.id, runId: run.id }),
       record: (rule, text) => {

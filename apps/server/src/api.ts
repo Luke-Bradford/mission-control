@@ -72,6 +72,7 @@ import {
   fixesSent,
   flightShellBreakerWrite,
   flightShellWrite,
+  freezeRules,
   fullAt5h,
   GITHUB_RATE_SETTING,
   type GithubRateState,
@@ -272,10 +273,13 @@ import {
   onboardRepo,
   RepoLocation,
   RepoOnboardBody,
+  RepoRolesBody,
   RepoSetupBody,
+  readRepoRolesConfig,
   removeAccount,
   SeatsBody,
   setAccount,
+  setRepoRoles,
   setRepoSetup,
   setSessionSeats,
   setTeamsSelection,
@@ -289,6 +293,7 @@ import {
 } from "./config/crew-pause.ts";
 import { createProfile, NewProfileBody, profilesView } from "./config/profiles.ts";
 import { PreviewError, repoPreview, repoProfiles } from "./config/repo-profile.ts";
+import { repoRulesView } from "./config/repo-roles-view.ts";
 import {
   agentIds,
   type CcConfig,
@@ -303,7 +308,7 @@ import type { CrewReloader } from "./crew-apply.ts";
 import type { DesignPreviews } from "./design-preview/previews.ts";
 import { cachedDiskUse, type DiskUseReader } from "./disk/use.ts";
 import { type Engine, operatorRefusalText } from "./engine/engine.ts";
-import { RepoRulesError, readRepoRules } from "./engine/rules.ts";
+import { RepoRulesError, readRepoBlock, readRepoRules } from "./engine/rules.ts";
 import { overrunText, TICKS_COLLECTOR, tickLogOf } from "./engine/ticks.ts";
 import {
   askExternalReview,
@@ -3488,6 +3493,86 @@ export function buildApp(deps: AppDeps): FastifyInstance {
         }
       });
 
+      const rolesError = (reply: FastifyReply, e: unknown) => {
+        captureError(reply, e);
+        if (e instanceof ConfigWriteError) {
+          const status: Partial<Record<ConfigWriteError["kind"], number>> = {
+            missing: 404,
+            invalid: 400,
+            current: 409,
+            conflict: 409,
+          };
+          const code = status[e.kind];
+          if (code !== undefined) return reply.code(code).send({ error: e.message });
+        }
+        return reply.code(500).send({ error: CONFIG_WRITE_FAILED });
+      };
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.get<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        try {
+          // Every value comes from the same config.yaml bytes the version is taken from, so the
+          // page can never save a version it did not show.
+          const { base, repo, raw } = await readRepoRolesConfig(configPath, req.params.repoId);
+          const checkout = config.crew?.sessions.find(
+            (session) => session.repoId === repo.id,
+          )?.checkout;
+          const repoFile =
+            checkout === undefined
+              ? null
+              : await readRepoBlock(repo.github, checkout, repo.rules ?? DEFAULT_REPO_RULES);
+          return repoRulesView({
+            base,
+            repo,
+            raw,
+            repoFile: repoFile instanceof RepoRulesError ? repoFile.message : repoFile,
+          });
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
+      // Reader: docs/runbook.md#per-repo-board-rules (Setup › Roles & guards)
+      api.post<{ Params: { repoId: string } }>("/repos/:repoId/rules", async (req, reply) => {
+        const configPath = deps.configPath;
+        if (!configPath) return reply.code(409).send({ error: CONFIG_WRITES_UNAVAILABLE });
+        const body = RepoRolesBody.safeParse(req.body);
+        if (!body.success) return reply.code(400).send({ error: zodError(body.error) });
+        try {
+          const result = await setRepoRoles(
+            configPath,
+            req.params.repoId,
+            body.data.base,
+            body.data.rules,
+            now(),
+          );
+          const live = config.repos.find((repo) => repo.id === req.params.repoId);
+          const saved = result.config.repos.find((repo) => repo.id === req.params.repoId);
+          if (!live || !saved) return reply.code(404).send({ error: "unknown repo" });
+          // Disk can hold unapplied Authority, crew or rotation changes. This route owns only
+          // the rule, command, check and protected-file fields; nothing else goes live.
+          live.protectedFiles = saved.protectedFiles;
+          live.commands = saved.commands;
+          live.fullSuite = saved.fullSuite;
+          live.requiredChecks = saved.requiredChecks;
+          if (saved.rules === undefined) delete live.rules;
+          else {
+            const { templates, techDebtIssue } = live.rules ?? {};
+            live.rules = freezeRules({
+              ...saved.rules,
+              ...(templates === undefined ? {} : { templates }),
+              ...(techDebtIssue === undefined ? {} : { techDebtIssue }),
+            });
+          }
+          bus.emit("config");
+          return { backup: basename(result.backup) };
+        } catch (e) {
+          return rolesError(reply, e);
+        }
+      });
+
       // Reader: docs/runbook.md#what-it-observes
       api.post("/github/refresh", async (_req, reply) => {
         refreshBoards();
@@ -6649,7 +6734,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
-      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      // Reader: apps/web/src/data.ts (the item thread read)
       api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
         const key = req.params.key;
         if (key.length > 200) return reply.code(400).send({ error: "key too long" });

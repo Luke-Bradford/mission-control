@@ -2,10 +2,12 @@
 import {
   type AttentionItem,
   type BoardItem,
+  blockedItemPrefix,
   type ConfigView,
   type Crew,
   FLIGHT_TICK_MS,
   type FlightBriefView,
+  isOperatorItem,
   type OverviewTimeline,
   type RunLoop,
   type TestLockState,
@@ -505,7 +507,7 @@ function AgentWork({
           <AgentNeeds row={row} items={items} now={now} lock={lock} />
         ) : undefined
       }
-      actions={<ReviewParkSeatActions row={row} />}
+      actions={<ReviewParkSeatActions row={row} items={items} />}
     />
   );
 }
@@ -778,11 +780,32 @@ function AgentRow({
   );
 }
 
-/** The overview keeps the explicit review waiver beside the parked seat, including set-aside runs. */
-function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
+/**
+ * The overview keeps the explicit review waiver beside a parked seat, including set-aside runs, only
+ * while the park's own Needs-you item (its `blocked:` note) is the operator's, or FLIGHT is not
+ * triaging it (down or missed). Otherwise FLIGHT settles the park; the Agent page keeps the waiver
+ * as an operator override. An item the operator has put on hold is not listed, so it shows none.
+ */
+function ReviewParkSeatActions({
+  row,
+  items,
+}: {
+  row: Crew["rows"][number];
+  items: AttentionItem[];
+}) {
+  const operatorSettles = (runId: string) => {
+    const key = blockedItemPrefix(runId);
+    return items.some(
+      (i) =>
+        i.key.startsWith(key) &&
+        (isOperatorItem(i) || i.flightTriage === "down" || i.flightTriage === "missed"),
+    );
+  };
   const ids = [
-    ...(row.loop?.phase === "parked" && row.run ? [row.run.id] : []),
-    ...(row.asideRuns ?? []).filter((run) => run.loop.phase === "parked").map((run) => run.runId),
+    ...(row.loop?.phase === "parked" && row.run && operatorSettles(row.run.id) ? [row.run.id] : []),
+    ...(row.asideRuns ?? [])
+      .filter((run) => run.loop.phase === "parked" && operatorSettles(run.runId))
+      .map((run) => run.runId),
   ];
   const loops = useResources<{ loop: RunLoop | null }>(ids.map(RESOURCES.runLoop));
   const parks = ids.flatMap((runId, i) => {

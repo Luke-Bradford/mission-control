@@ -12,6 +12,7 @@ import {
   MACHINE_COLLECTOR,
   type MachineSample,
   type PullRequestView,
+  REPO_UNWATCHED_REASON,
   type Run,
   type TestLockState,
   type UsageSample,
@@ -196,6 +197,57 @@ const taRun = (seq: number): Run => ({
 });
 
 describe("scheduler", () => {
+  it("closes unwatched Needs-you items at start and on a later sweep", async () => {
+    vi.useFakeTimers({ now: NOW });
+    const addUnwatchedQuestion = (id: string, n: number) => {
+      store.upsertRun({
+        id,
+        agentId: "gone-seat",
+        repoId: "studio",
+        seq: 1,
+        startedAt: NOW - 60_000,
+        endedAt: null,
+        status: "running",
+        sessionId: "cli",
+        model: "x",
+        branch: "studio/1",
+        ticket: `studio#${n}`,
+        costUsd: null,
+        tokens: null,
+        transcriptPath: "/x",
+        prs: [],
+        summary: null,
+      } satisfies Run);
+      const question = store.addQuestion({
+        agentId: "gone-seat",
+        runId: id,
+        text: `Studio question ${n}`,
+        at: NOW - 60_000,
+      });
+      return `ask:${question}`;
+    };
+    const first = addUnwatchedQuestion("studio-run-1", 1);
+    const s = createScheduler({ config, store, bus, now: () => NOW, collectors: stubs() });
+
+    s.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.questionClosure(first, NOW - 60_000)).toMatchObject({
+      kind: "repo-unwatched",
+      reason: REPO_UNWATCHED_REASON,
+    });
+    await vi.advanceTimersByTimeAsync(EMIT_COALESCE_MS);
+    expect(topics).toContain("attention");
+
+    const second = addUnwatchedQuestion("studio-run-2", 2);
+    await s.tick("ta");
+    expect(store.questionClosure(second, NOW - 60_000)).toMatchObject({
+      kind: "repo-unwatched",
+      reason: REPO_UNWATCHED_REASON,
+    });
+    expect(store.flightDecisions(0, 10).filter((d) => d.ref === "studio#2")).toHaveLength(1);
+    await s.stop();
+  });
+
   it("runs transcript maintenance with default retention", async () => {
     const transcripts = vi.fn(async () => ({ gzipped: 1, deleted: 0, skippedLive: 0, failed: [] }));
     const log = vi.fn();

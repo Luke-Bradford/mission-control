@@ -40,6 +40,7 @@ export * from "./qa-flow.ts";
 export * from "./qa-history.ts";
 export * from "./qa-report.ts";
 export * from "./repo-rules.ts";
+export * from "./repo-rules-view.ts";
 export * from "./repos.ts";
 export * from "./review.ts";
 export * from "./roles.ts";

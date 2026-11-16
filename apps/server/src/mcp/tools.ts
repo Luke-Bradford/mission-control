@@ -779,7 +779,7 @@ function writerPlace(
 
 /**
  * Whether `branch` is the run's own: the `branchFor` shape for the run's issue, not origin's
- * default, and not any other live run's. The push takes no argument, so this guards the
+ * default, and not any other live run's (a watch run holds no branch of its own). The push takes no argument, so this guards the
  * supervisor's own rows, not a seat's input.
  */
 function ownBranch(store: Store, run: Run, branch: string, defaultBranch: string): boolean {
@@ -791,7 +791,12 @@ function ownBranch(store: Store, run: Run, branch: string, defaultBranch: string
   return !store.activeSeatSessions().some((row) => {
     if (row.runId === null || row.runId === run.id) return false;
     const other = store.run(row.runId);
-    return other !== null && other.repoId === run.repoId && other.branch === branch;
+    return (
+      other !== null &&
+      other.loopKind !== "watch" &&
+      other.repoId === run.repoId &&
+      other.branch === branch
+    );
   });
 }
 

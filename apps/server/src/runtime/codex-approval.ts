@@ -1,6 +1,7 @@
 /** The same Codex approval path for supervisor runs and the controller's live check. */
 import { realpathSync } from "node:fs";
 import {
+  CODEX_LOCK_WAIT_MS,
   type CrewMode,
   codexCommand,
   GUARD_RULES,
@@ -8,7 +9,6 @@ import {
   type GuardRule,
   type GuardVerdict,
   isObj,
-  LOCK_WAIT_MS,
   lockBusyText,
   MC_MCP_SERVER,
   MC_TOOL_GRANTS,
@@ -72,6 +72,8 @@ export function createCodexApprover(i: {
   runGrants?: () => readonly string[];
   /** Notes the clone a shell command starts on, for the push gate's check record. */
   checks?: CheckRecorder;
+  /** Puts a note in front of the seat (its next turn): a decline carries no text of its own. */
+  tell?: (text: string) => void;
 }): CodexSessionInput["approve"] {
   // Command approvals (approvalId, else itemId) this approver was asked about: a second request
   // for one is a sandbox retry.
@@ -89,6 +91,8 @@ export function createCodexApprover(i: {
       .slice(0, REFUSAL_DETAIL_MAX);
     const refuse = (rule: GuardRule, text: string = GUARD_RULES[rule]): "decline" => {
       i.record(rule, `${text}: ${excerpt}`);
+      // a declined command shows the seat only `rejected by user`: say why, unless the seat is stopping
+      if (!signal.aborted) i.tell?.(text);
       return "decline";
     };
     // The driver also calls here with an already-aborted signal to audit forced refusals.
@@ -207,17 +211,21 @@ export function createCodexApprover(i: {
         const id = params.approvalId ?? params.itemId;
         if (typeof id !== "string" && typeof id !== "number") return refuse("codex-allowlist");
         const key = { runId: i.runId, toolUseId: String(id) };
-        const granted = await i.lock.acquire(key, i.seatId, verdict.command, LOCK_WAIT_MS, signal);
+        const granted = await i.lock.acquire(
+          key,
+          i.seatId,
+          verdict.command,
+          CODEX_LOCK_WAIT_MS,
+          signal,
+        );
         if (!granted || signal.aborted) {
           if (granted) i.lock.release(key);
           const h = i.lock.state().holder;
-          return refuse(
-            "full-suite",
-            lockBusyText(
-              h === null ? "another seat" : seatCallSign(h.seatId),
-              h?.command ?? "a full suite",
-            ),
+          const busy = lockBusyText(
+            h === null ? "another seat" : seatCallSign(h.seatId),
+            h?.command ?? "a full suite",
           );
+          return refuse("full-suite", busy);
         }
       }
     }
