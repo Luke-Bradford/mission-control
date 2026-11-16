@@ -1,3 +1,5 @@
+import { createReadStream } from "node:fs";
+import { createInterface } from "node:readline";
 import { setImmediate as yieldEventLoop } from "node:timers/promises";
 import {
   COMMS_CAPCOM,
@@ -7,6 +9,7 @@ import {
 } from "@mc/core";
 import { statNoted } from "./repo/file-deps.ts";
 import { readStreamPage } from "./run/stream.ts";
+import { timeOf } from "./run/streamjson.ts";
 import { commsPosition, type Store } from "./store.ts";
 import { transcriptFilePath } from "./transcript/file.ts";
 
@@ -57,6 +60,30 @@ function readBound(store: Store, flightId: string): (Rank & { id: string }) | nu
   }
 }
 
+interface TurnStart {
+  offset: number;
+  at: number | null;
+}
+
+/** Codex writes no operator line for a wake: its turns begin at `turn/started` notifications. */
+async function codexTurnStarts(transcriptPath: string): Promise<TurnStart[]> {
+  const starts: TurnStart[] = [];
+  const input = createReadStream(transcriptFilePath(transcriptPath));
+  let offset = 0;
+  for await (const line of createInterface({ input, crlfDelay: Infinity })) {
+    if (line.includes('"turn/started"')) {
+      try {
+        const ev = JSON.parse(line) as { method?: unknown; timestamp?: unknown };
+        if (ev.method === "turn/started") starts.push({ offset, at: timeOf(ev.timestamp) });
+      } catch {
+        // a partial or non-JSON line starts no turn
+      }
+    }
+    offset += Buffer.byteLength(line) + 1;
+  }
+  return starts;
+}
+
 /**
  * Ids of the end-of-turn texts to leave out of the thread: a turn (from one `op` line to the next)
  * that ends on text, after FLIGHT messaged the operator in it. The reply is the answer; the end
@@ -65,6 +92,7 @@ function readBound(store: Store, flightId: string): (Rank & { id: string }) | nu
 function endTextsAfterOwnReply(
   events: readonly StreamEvent[],
   replies: readonly number[],
+  starts: readonly TurnStart[],
 ): Set<string> {
   const dropped = new Set<string>();
   let turnStart: number | null = null;
@@ -77,7 +105,13 @@ function endTextsAfterOwnReply(
     }
     last = null;
   };
+  let next = 0;
   for (const event of events) {
+    const offset = Number(event.id.split(":")[0]);
+    while (next < starts.length && starts[next].offset <= offset) {
+      close();
+      turnStart = starts[next++].at;
+    }
     if (event.kind === "op") {
       close();
       turnStart = event.at;
@@ -142,7 +176,8 @@ async function runLines(store: Store, flightId: string, run: SourceRun): Promise
       seen.add(event.id);
       ordered.push(event);
     }
-  const posted = endTextsAfterOwnReply(ordered, store.flightOperatorMessageTimes(flightId));
+  const starts = run.vendor === "codex" ? await codexTurnStarts(run.transcriptPath) : [];
+  const posted = endTextsAfterOwnReply(ordered, store.flightOperatorMessageTimes(flightId), starts);
   for (const event of ordered) {
     if (event.at !== null) orderAt = event.at;
     if (event.kind !== "msg" || internal(event.text) || posted.has(event.id)) continue;

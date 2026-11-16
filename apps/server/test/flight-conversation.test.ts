@@ -58,7 +58,7 @@ const text = (value: string, at: number | null) => ({
   ...(at === null ? {} : { timestamp: new Date(at).toISOString() }),
   message: { content: [{ type: "text", text: value }] },
 });
-function run(id: string, frames: object[], seq = 1) {
+function run(id: string, frames: object[], seq = 1, vendor?: "codex") {
   let body = "";
   const ids: string[] = [];
   for (const frame of frames) {
@@ -90,6 +90,7 @@ function run(id: string, frames: object[], seq = 1) {
     transcriptPath: path,
     prs: [],
     summary: null,
+    ...(vendor ? { vendor } : {}),
   };
   store.upsertRun(row);
   return ids;
@@ -572,4 +573,43 @@ it("a message in an earlier turn does not hide a later turn's end text", async (
   ]);
   stored("Answer to the first.", AT + 2, FLIGHT, "CAPCOM");
   expect(texts(await page())).toEqual(["Answer to the first.", "Done two."]);
+});
+
+const codexStart = (at: number) => ({
+  method: "turn/started",
+  timestamp: new Date(at).toISOString(),
+  params: { turn: { id: `turn-${at}` } },
+});
+const codexText = (value: string, at: number) => ({
+  method: "item/completed",
+  timestamp: new Date(at).toISOString(),
+  params: { item: { type: "agentMessage", id: `m-${at}`, text: value } },
+});
+const codexSend = (at: number) => ({
+  method: "item/completed",
+  timestamp: new Date(at).toISOString(),
+  params: {
+    item: { type: "mcpToolCall", id: `c-${at}`, server: "mc", tool: "comms_send", arguments: {} },
+  },
+});
+
+it("a Codex turn that messaged the operator adds one message", async () => {
+  run(
+    "flight-run",
+    [codexStart(AT + 1), codexSend(AT + 3), codexText("Summary of the turn.", AT + 5)],
+    1,
+    "codex",
+  );
+  stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Here is your answer."]);
+});
+
+it("a Codex turn that messaged nobody still shows its end text", async () => {
+  run(
+    "flight-run",
+    [codexStart(AT + 1), codexSend(AT + 3), codexText("Summary of the turn.", AT + 5)],
+    1,
+    "codex",
+  );
+  expect(texts(await page())).toEqual(["Summary of the turn."]);
 });
