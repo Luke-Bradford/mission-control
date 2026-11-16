@@ -60,7 +60,7 @@ function readBound(store: Store, flightId: string): (Rank & { id: string }) | nu
 /**
  * Ids of the end-of-turn texts to leave out of the thread: a turn (from one `op` line to the next)
  * that ends on text, after FLIGHT messaged the operator in it. The reply is the answer; the end
- * text stays in the transcript and on the run.
+ * text stays in the transcript and on the run. A turn with no wake line before it is never cut.
  */
 function endTextsAfterOwnReply(
   events: readonly StreamEvent[],
