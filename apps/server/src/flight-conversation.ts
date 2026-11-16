@@ -1,5 +1,3 @@
-import { createReadStream } from "node:fs";
-import { createInterface } from "node:readline";
 import { setImmediate as yieldEventLoop } from "node:timers/promises";
 import {
   COMMS_CAPCOM,
@@ -11,7 +9,7 @@ import { statNoted } from "./repo/file-deps.ts";
 import { readStreamPage } from "./run/stream.ts";
 import { timeOf } from "./run/streamjson.ts";
 import { commsPosition, type Store } from "./store.ts";
-import { transcriptFilePath } from "./transcript/file.ts";
+import { openTranscript, transcriptFilePath } from "./transcript/file.ts";
 
 type SourceRun = ReturnType<Store["flightConversationRuns"]>[number];
 interface Rank {
@@ -68,18 +66,38 @@ interface TurnStart {
 /** Codex writes no operator line for a wake: its turns begin at `turn/started` notifications. */
 async function codexTurnStarts(transcriptPath: string): Promise<TurnStart[]> {
   const starts: TurnStart[] = [];
-  const input = createReadStream(transcriptFilePath(transcriptPath));
-  let offset = 0;
-  for await (const line of createInterface({ input, crlfDelay: Infinity })) {
-    if (line.includes('"turn/started"')) {
+  const file = openTranscript(transcriptPath);
+  try {
+    const chunk = Buffer.allocUnsafe(1024 * 1024);
+    let carry: Buffer = Buffer.alloc(0);
+    let carryAt = 0;
+    const take = (line: Buffer, offset: number) => {
+      if (!line.includes('"turn/started"')) return;
       try {
-        const ev = JSON.parse(line) as { method?: unknown; timestamp?: unknown };
+        const ev = JSON.parse(line.toString("utf8")) as { method?: unknown; timestamp?: unknown };
         if (ev.method === "turn/started") starts.push({ offset, at: timeOf(ev.timestamp) });
       } catch {
         // a partial or non-JSON line starts no turn
       }
+    };
+    for (let pos = 0; pos < file.size; ) {
+      const n = file.read(chunk, 0, chunk.length, pos);
+      if (n === 0) break;
+      let buf = Buffer.concat([carry, chunk.subarray(0, n)]);
+      let at = carryAt;
+      for (let nl = buf.indexOf(10); nl !== -1; nl = buf.indexOf(10)) {
+        take(buf.subarray(0, nl), at);
+        at += nl + 1;
+        buf = buf.subarray(nl + 1);
+      }
+      carry = Buffer.from(buf);
+      carryAt = at;
+      pos += n;
+      await yieldEventLoop();
     }
-    offset += Buffer.byteLength(line) + 1;
+    take(carry, carryAt);
+  } finally {
+    file.close();
   }
   return starts;
 }

@@ -1,7 +1,8 @@
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { gzipSync } from "node:zlib";
 import { OPERATOR_HEADER, type Run } from "@mc/core";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { buildApp } from "../src/api.ts";
@@ -612,4 +613,18 @@ it("a Codex turn that messaged nobody still shows its end text", async () => {
     "codex",
   );
   expect(texts(await page())).toEqual(["Summary of the turn."]);
+});
+
+it("a gzipped Codex transcript cuts the end text after a reply too", async () => {
+  run(
+    "flight-run",
+    [codexStart(AT + 1), codexSend(AT + 3), codexText("Summary of the turn.", AT + 5)],
+    1,
+    "codex",
+  );
+  const path = join(dir, "flight-run.jsonl");
+  writeFileSync(`${path}.gz`, gzipSync(readFileSync(path)));
+  rmSync(path);
+  stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
+  expect(texts(await page())).toEqual(["Here is your answer."]);
 });
