@@ -257,3 +257,104 @@ describe("a parked ticket", () => {
     expect(worktreeCount()).toBe(1);
   });
 });
+
+const PYPROJECT = '[project]\nname = "x"\nversion = "0"\n';
+const UV_LOCK = "version = 1\n";
+
+/** A fake uv: counts its runs and leaves a .venv behind. */
+function fakeUv() {
+  const runs: string[] = [];
+  const run: InstallRunner = async (command, _args, options) => {
+    if (command !== "uv") return;
+    runs.push(options.cwd);
+    mkdirSync(join(options.cwd, ".venv"), { recursive: true });
+    writeFileSync(join(options.cwd, ".venv", "made"), String(runs.length));
+  };
+  return { runs, run };
+}
+
+describe("a uv repository", () => {
+  beforeEach(() => {
+    commit(seed, { "pyproject.toml": PYPROJECT, "uv.lock": UV_LOCK, ".gitignore": ".venv\n" });
+    git(seed, "push", "-q", "origin", "main");
+  });
+
+  it("keeps one build path and one worktree add across two tickets", async () => {
+    const f = fakeUv();
+    countWorktreeAdds();
+    const a = await prepareCheckout(seat(1), f.run);
+    expect(f.runs).toHaveLength(1);
+    const b = await prepareCheckout(seat(2), f.run);
+    expect(b.path).toBe(a.path);
+    expect(b.path).toBe(seatTreePath(root, "a", "guido"));
+    expect(adds()).toBe(1);
+    // the venv is made again through the verified sync, not carried over from the last ticket
+    expect(f.runs).toHaveLength(2);
+    expect(readFileSync(join(b.path, ".venv", "made"), "utf8")).toBe("2");
+  });
+
+  it("keeps one review path and one worktree add across two reviews", async () => {
+    const f = fakeUv();
+    countWorktreeAdds();
+    const heads = [1, 2].map((n) => {
+      git(clone, "fetch", "-q", "origin");
+      const tmp = join(dir, `uvpr${n}`);
+      git(dir, "clone", "-q", join(dir, "origin.git"), tmp);
+      git(tmp, "checkout", "-q", "-b", `uvpr${n}`);
+      const sha = commit(tmp, { [`f${n}.txt`]: "x\n" });
+      git(tmp, "push", "-q", "origin", `uvpr${n}`);
+      git(clone, "fetch", "-q", "origin");
+      return sha;
+    });
+    const review = (sha: string, reviewId: number) => ({
+      checkout: clone,
+      worktreesRoot: root,
+      sessionId: "a",
+      seatId: "retro",
+      reviewId,
+      sha,
+      seatTree: true as const,
+    });
+    const s1 = await prepareScratch(review(heads[0], 20), f.run);
+    const s2 = await prepareScratch(review(heads[1], 21), f.run);
+    expect(s2.path).toBe(s1.path);
+    expect(s2.path).toBe(reviewTreePath(root, "a", "retro"));
+    expect(adds()).toBe(1);
+    expect(f.runs).toHaveLength(2);
+  });
+});
+
+describe("a handed-over run in another seat's tree", () => {
+  it("resumes with its commits after the first seat has moved its tree on", async () => {
+    const { run } = fakeInstall();
+    const a = await prepareCheckout(seat(1), run);
+    const sha = commit(a.path, { "work.txt": "w\n" });
+    // seat guido-2 takes the ended author's tree where it is
+    const adopted = await prepareCheckout(
+      { ...seat(1), seatId: "guido-2", handoff: { branch: a.branch, worktree: a.path } },
+      run,
+    );
+    expect(adopted.path).toBe(a.path);
+    // guido-2's run is set aside; guido starts another ticket in the same tree
+    const b = await prepareCheckout(seat(2), run);
+    expect(b.path).toBe(a.path);
+    expect(existsSync(join(a.path, "work.txt"))).toBe(false);
+    const resumeAs = { checkout: clone, worktreesRoot: root, sessionId: "a", seatId: "guido-2" };
+    // while guido's run holds the tree, the resume waits instead of taking it
+    const held = await resumeSeatCheckout(
+      { ...resumeAs, inUse: () => true },
+      a.path,
+      a.branch,
+    ).then(
+      () => null,
+      (x: unknown) => x,
+    );
+    expect(held).toBeInstanceOf(CheckoutError);
+    expect((held as CheckoutError).code).toBe("busy");
+    // once it is free, the branch comes back with its commits
+    const back = await resumeSeatCheckout(resumeAs, a.path, a.branch);
+    expect(back.path).toBe(a.path);
+    expect(git(a.path, "rev-parse", "HEAD")).toBe(sha);
+    expect(worktreeCount()).toBe(1);
+  });
+});

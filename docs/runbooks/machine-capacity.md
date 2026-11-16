@@ -61,10 +61,16 @@ worktree, so the Mac no longer writes and deletes about 12,000 files per ticket 
 - **Parked tickets.** A ticket that waits for review keeps its branch, not a tree. Resuming it
   moves the seat's tree back to the branch; that is refused while the tree holds uncommitted
   changes.
-- **uv repos** (a `uv.lock` at the top) still get a tree per ticket and per review, because a
-  moved tree is not re-synced by uv.
+- **uv repos** (a `uv.lock` at the top) use the same seat trees. A moved tree's `.venv` is always
+  dropped and made again through the verified `uv sync` (uv's own cache keeps it quick): a venv a
+  seat could write is not vouched for by the input checks, so it is not carried over.
+- **Handed-over runs.** A run handed to another seat sits in the first seat's tree. If that seat
+  has moved the tree on while the run waits, the resume takes the branch back once no other seat's
+  run holds the tree; until then the wake answers 409 and the engine retries.
 - **Old trees.** `{seat}-{issue}` and `{seat}-review-{id}` trees of runs already live stay where
-  they are; the crew tidy removes them once their runs end. The tidy never removes a seat tree.
+  they are; the crew tidy removes them once their runs end. The tidy keeps the tree of a seat that
+  is in the crew config, and removes one whose seat has been dropped from it (with its install
+  record) once its runs are finished.
 - **Measuring.** Count `git worktree add` runs per day, and the entries of `git worktree list` in
   the crew clone: at most one per seat (and one per review seat) once the old trees are gone.
 - **Spotlight.** The hub's `.metadata_never_index` file is honoured only at a volume's root. A

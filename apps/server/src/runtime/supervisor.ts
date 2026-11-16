@@ -226,6 +226,7 @@ import {
   withoutHubConfig,
 } from "./brief.ts";
 import {
+  CheckoutError,
   cloneGitDir,
   existingCheckout,
   existingDetached,
@@ -5030,6 +5031,13 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               sessionId: info.session.id,
               seatId,
               peers: clonePeers(deps.config, deps.hubRoot),
+              inUse: (path) =>
+                info.session.seats.some(
+                  (x) =>
+                    x.id !== seatId &&
+                    isActive(store.seatSession(x.id)) &&
+                    store.seatSession(x.id)?.worktree === path,
+                ),
             },
             aside.worktree,
             branch,
@@ -5053,6 +5061,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           return c;
         });
       } catch (e) {
+        // a handed-over run's tree is in use by the seat it came from: wait, do not lose the run
+        if (e instanceof CheckoutError && e.code === "busy") {
+          throw new SupervisorError(409, "could not resume: the worktree is in use", { cause: e });
+        }
         return fail("could not resume: checkout missing", e);
       }
       if (reinstall.failed) {

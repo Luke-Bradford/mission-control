@@ -5,7 +5,7 @@
  * folder is refused.
  */
 import { realpath, rm, stat } from "node:fs/promises";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import type { Run } from "@mc/core";
 import type { CcConfig } from "../config.ts";
 import { CheckoutError, isSeatTree, removeCheckout } from "../runtime/checkouts.ts";
@@ -94,8 +94,19 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
     const real = await realpath(path).catch(() => resolve(path));
     const base = await realpath(root).catch(() => resolve(root));
     if (!real.startsWith(base + sep)) return "That worktree is not in the crew's folder.";
-    // a seat's one tree is kept for its next ticket; it is moved, never removed (#1976)
-    if (isSeatTree(path)) return "That is a seat's own worktree; it stays.";
+    // A seat's one tree is kept for its next ticket (#1976); one whose seat is gone from the
+    // crew config is nobody's and is tidied like any other.
+    if (isSeatTree(path)) {
+      const seatId = basename(path).replace(/-(?:tree|review)$/, "");
+      const known = (deps.config.crew?.sessions ?? []).some((s) =>
+        s.seats.some((x) => x.id === seatId),
+      );
+      if (known) return "That is a seat's own worktree; it stays.";
+      // a run set aside in review holds its worktree with no seat row
+      if (deps.store.asideRuns().some((r) => r.loop?.aside?.worktree === path))
+        return "A set-aside run holds that worktree.";
+    }
+
     // a seat that still points at the worktree is using it
     if (
       deps.config.crew?.sessions

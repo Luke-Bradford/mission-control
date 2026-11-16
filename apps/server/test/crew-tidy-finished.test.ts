@@ -237,3 +237,25 @@ it("never removes a set-aside run's worktree, even when its PR has merged", asyn
   expect((await tidyOf().tidyFinished(NOW)).removed).toEqual([]);
   expect(existsSync(wt)).toBe(true);
 });
+
+it("keeps a live seat's own tree after its run's PR merged", async () => {
+  const wt = worktree("guido-1-tree", "mc/6");
+  store.upsertRun(run("r6", "mc/6"));
+  prs("merged", "mc/6", 6);
+  expect((await tidyOf().tidyFinished(NOW)).removed).toEqual([]);
+  expect(existsSync(wt)).toBe(true);
+});
+
+it("removes a retired seat's tree and its install record once its run is finished", async () => {
+  // the tree sits in the session folder, as a seat's does; no seat of that name is configured now
+  const wt = join(root, "wt", "s1", "gone-tree");
+  git(join(root, "clone"), "worktree", "add", "-q", "-b", "mc/7", wt);
+  const record = join(root, "wt", ".mc-install", "s1", "gone-tree");
+  mkdirSync(join(root, "wt", ".mc-install", "s1"), { recursive: true });
+  writeFileSync(record, "hash\n");
+  store.upsertRun({ ...run("r7", "mc/7"), agentId: "gone" });
+  prs("merged", "mc/7", 7);
+  expect((await tidyOf().tidyFinished(NOW)).removed).toEqual(["r7"]);
+  expect(existsSync(wt)).toBe(false);
+  expect(existsSync(record)).toBe(false);
+});
