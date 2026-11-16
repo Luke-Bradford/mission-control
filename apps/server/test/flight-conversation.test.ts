@@ -553,6 +553,7 @@ it("a turn that messaged the operator adds one message: the end text is not post
   ]);
   stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
   expect(texts(await page())).toEqual(["Looking at it.", "Here is your answer."]);
+  expect(readFileSync(join(dir, "flight-run.jsonl"), "utf8")).toContain("Summary of the turn.");
 });
 
 it("a turn that messaged nobody still shows its end text once", async () => {
