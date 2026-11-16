@@ -338,6 +338,22 @@ class Migrations {
                / json_extract(sample, '$.memTotalBytes') * 100 END`,
       );
     });
+    // Swap, memory pressure and agent and test-run memory for the Telemetry Machine tab, extracted
+    // the same way. A sample that lacks a field leaves its column null.
+    this.whenColumnMissing("machine_samples", "swap_pct", () => {
+      for (const col of ["swap_pct", "pressure_pct", "agent_gb", "test_gb"]) {
+        this.db.exec(`ALTER TABLE machine_samples ADD COLUMN ${col} REAL`);
+      }
+      this.db.exec(
+        `UPDATE machine_samples SET
+           swap_pct = CASE WHEN json_extract(sample, '$.swapTotalBytes') > 0
+             THEN json_extract(sample, '$.swapUsedBytes') * 100.0
+               / json_extract(sample, '$.swapTotalBytes') END,
+           pressure_pct = 100 - json_extract(sample, '$.memoryPressureFreePct'),
+           agent_gb = json_extract(sample, '$.agents.rssBytes') / 1073741824.0,
+           test_gb = json_extract(sample, '$.testRun.rssBytes') / 1073741824.0`,
+      );
+    });
     // Rows from before `source`: a title marker (as the GitHub collector matches it) means
     // `title`. The next GitHub poll rewrites every row anyway.
     this.whenColumnMissing("escalations", "source", () => {
