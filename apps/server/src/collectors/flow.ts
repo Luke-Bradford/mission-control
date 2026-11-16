@@ -223,9 +223,8 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
     // A ticket can leave active work for Backlog before the next collection. Keep reading a
     // recently observed ticket until its saved moves age out, so that exit remains available to
     // the telemetry history even though Backlog is not an open flow column.
-    const savedMoves = store
-      .flowColumnMoves()
-      .filter((move) => move.repoId === repo.id && move.at >= since);
+    const storedMoves = store.flowColumnMoves().filter((move) => move.repoId === repo.id);
+    const savedMoves = storedMoves.filter((move) => move.at >= since);
     const trackedNumbers = new Set(savedMoves.map((move) => move.number));
     const flowIssues = [
       ...done,
@@ -258,8 +257,16 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
       merged.map((p) => p.number),
     );
 
+    const retainedNumbers = new Set(flowIssues.map((issue) => issue.issueNumber));
+    const savedAnchors = new Map<number, FlowColumnMove>();
+    for (const move of storedMoves) {
+      if (move.at >= since || !retainedNumbers.has(move.number)) continue;
+      const previous = savedAnchors.get(move.number);
+      if (!previous || previous.at <= move.at) savedAnchors.set(move.number, move);
+    }
+
     const issues: FlowIssue[] = [];
-    const moves: FlowColumnMove[] = [...savedMoves];
+    const moves: FlowColumnMove[] = [...savedMoves, ...savedAnchors.values()];
     const knownMoves = new Set(moves.map((move) => `${move.number}:${move.at}:${move.column}`));
     for (const i of flowIssues) {
       const node = timelines.get(i.issueNumber);
@@ -281,6 +288,21 @@ export async function collectFlow(repo: Repo, store: Store, gql: Gql, now: numbe
         ...flow,
         doneAt: openNumbers.has(i.issueNumber) ? null : flow.doneAt,
       });
+      const openingMove = flow.moves.filter((move) => move.at < since).at(-1);
+      if (openingMove) {
+        const savedAnchor = savedAnchors.get(i.issueNumber);
+        if (!savedAnchor || savedAnchor.at <= openingMove.at) {
+          if (savedAnchor) {
+            const index = moves.indexOf(savedAnchor);
+            if (index !== -1) moves.splice(index, 1);
+            knownMoves.delete(`${savedAnchor.number}:${savedAnchor.at}:${savedAnchor.column}`);
+          }
+          const anchor = { ...openingMove, repoId: repo.id, number: i.issueNumber };
+          moves.push(anchor);
+          savedAnchors.set(i.issueNumber, anchor);
+          knownMoves.add(`${anchor.number}:${anchor.at}:${anchor.column}`);
+        }
+      }
       for (const move of flow.moves) {
         if (move.at < since) continue;
         const key = `${i.issueNumber}:${move.at}:${move.column}`;

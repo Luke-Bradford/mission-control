@@ -208,6 +208,36 @@ describe("collectFlow issues", () => {
     expect(series?.find((point) => point.day === "2026-10-17")?.tickets).toBe(0);
   });
 
+  it("keeps an In progress entry before the window as telemetry's opening state", async () => {
+    store.replaceBoard("shop-app", [
+      board(1, { status: "In Progress", state: "in progress", closed: false }),
+    ]);
+    await run(stub({ 1: timeline(ev("In Progress", FLOW_DAYS + 1)) }).gql);
+
+    expect(store.flowColumnMoves()).toEqual([
+      {
+        repoId: "shop-app",
+        number: 1,
+        at: Date.parse(at(FLOW_DAYS + 1)),
+        column: "In progress",
+      },
+    ]);
+    const series = telemetry(
+      {
+        operator: { id: "operator", timezone: "UTC" },
+        accounts: [],
+        repos: [repo],
+        loops: [],
+        poll: { usageMinutes: 30, githubSeconds: 60 },
+      },
+      store,
+      "6h",
+      NOW,
+      { agent: null, account: null },
+    ).series?.ticketsInProgress;
+    expect(series?.every((point) => point.tickets === 1)).toBe(true);
+  });
+
   it("clears an earlier Done timestamp when a ticket is active again", async () => {
     store.replaceBoard("shop-app", [
       board(1, { status: "In Progress", state: "in progress", closed: false }),
