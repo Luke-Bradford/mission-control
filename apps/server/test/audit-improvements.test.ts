@@ -137,7 +137,7 @@ describe("silence alarms", () => {
   });
 
   it("does not let an ended budget park suppress alarms", () => {
-    store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok", loop: { parked: { kind: "budget" } } }));
+    store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok", loop: { parked: { kind: "budget", reason: "limit", ended: false } } }));
     expect(store.silenceAlarmsBudgetStopped()).toBe(false);
   });
 

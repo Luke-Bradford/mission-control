@@ -966,9 +966,7 @@ export class Store {
    * row's loop is never rewritten here (`setRunLoop`).
    */
   upsertRun(r: Run, folded = false): void {
-    const isNew = this.run(r.id) === null;
     this.runQ.upsertRun(r, folded);
-    if (isNew) this.recordSilenceEvent("seat-run-started", r.startedAt);
   }
 
   /**
