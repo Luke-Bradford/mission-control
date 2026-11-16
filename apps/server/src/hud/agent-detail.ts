@@ -136,7 +136,6 @@ export function agentDetail({
       retro: "Waiting on RETRO",
       main: "Waiting for main",
       operator: "Waiting on you",
-      flight: "Waiting on FLIGHT",
       lock: "Waiting for the test lock",
       seat: "Waiting for a seat",
     };

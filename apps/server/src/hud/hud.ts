@@ -429,8 +429,7 @@ export function runWait(
 ): LoopWait | null {
   if (run.endedAt !== null || loop.phase === "done") return null;
   if (lock.waiting.some((w) => w.runId === run.id)) return "lock";
-  // FLIGHT settles every park while it is seated; the operator only when no FLIGHT seat exists
-  if (loop.phase === "parked") return flightSeat(config) !== null ? "flight" : "operator";
+  if (loop.phase === "parked") return "operator";
   if (asideWakeDue(store, run)) return "seat";
   if (loop.mainMerge) return "main";
   if (loop.phase === "ci") return "ci";

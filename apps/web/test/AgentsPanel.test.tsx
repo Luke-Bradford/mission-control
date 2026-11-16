@@ -327,10 +327,10 @@ it("names and confirms the waiver for a review-parked seat", async () => {
     text: "Blocked: RETRO finding",
     prNumber: 9,
     parked: "RETRO finding",
-    wait: "operator" as const,
   };
   const row = seatRow({ hudState: "parked", loop, ticket: "shop-app#9" });
-  const f = stub([row], true, [], "CI", undefined, {
+  const ask = item({ key: "note:park", kind: "blocked", agentId: "guido-1", ticket: "shop-app#9" });
+  const f = stub([row], true, [ask], "CI", undefined, {
     "/api/runs/r-12/loop": {
       loop: {
         parked: { kind: "review", reason: "RETRO finding", ended: false },
@@ -351,36 +351,39 @@ it("names and confirms the waiver for a review-parked seat", async () => {
   confirm.mockRestore();
 });
 
-it("offers no waiver on the overview for a review park FLIGHT settles", async () => {
+it("offers no waiver on the overview for a review park the operator does not own", async () => {
   const run = seatRow().run as NonNullable<CrewRow["run"]>;
+  const parked = {
+    phase: "parked" as const,
+    text: "Blocked: held past its review rounds",
+    prNumber: 31,
+    parked: "held past its review rounds; FLIGHT decides",
+    wait: "operator" as const,
+  };
   const row = seatRow({
-    hudState: "waiting",
+    hudState: "parked",
+    loop: parked,
+    ticket: "shop-app#30",
     run: { ...run, id: "r-30" },
-    asideRuns: [
-      {
-        runId: "r-31",
-        ticket: "shop-app#31",
-        ticketTitle: null,
-        loop: {
-          phase: "parked" as const,
-          text: "Blocked: held past its review rounds",
-          prNumber: 31,
-          parked: "held past its review rounds; FLIGHT decides",
-          wait: "flight" as const,
-        },
-      },
-    ],
+    asideRuns: [{ runId: "r-31", ticket: "shop-app#31", ticketTitle: null, loop: parked }],
   });
-  const f = stub([row], true, [], "CI", undefined, {
-    "/api/runs/r-31/loop": {
-      loop: { parked: { kind: "review", reason: "held", ended: false }, pushFor: "ddd4444000" },
-    },
-  });
+  // FLIGHT owns the seat's item; another seat's operator item names the same ticket
+  const asks = [
+    item({
+      key: "note:a",
+      kind: "blocked",
+      agentId: "guido-1",
+      ticket: "shop-app#31",
+      owner: "flight",
+    }),
+    item({ key: "note:b", kind: "blocked", agentId: "guido-2", ticket: "shop-app#30" }),
+  ];
+  const f = stub([row], true, asks);
   render(<AgentsPanel />);
   await waitFor(() => expect(f).toHaveBeenCalled());
   expect(screen.queryByRole("button", { name: /Waive findings/ })).toBeNull();
   expect(screen.queryByRole("combobox", { name: /Waive review findings/ })).toBeNull();
-  expect(f.mock.calls.some(([path]) => path === "/api/runs/r-31/loop")).toBe(false);
+  expect(f.mock.calls.some(([path]) => String(path).startsWith("/api/runs/r-3"))).toBe(false);
 });
 
 it("waives the run chosen from the menu when a seat has several review-parked runs", async () => {
@@ -389,7 +392,6 @@ it("waives the run chosen from the menu when a seat has several review-parked ru
     text: reason,
     prNumber: 9,
     parked: reason,
-    wait: "operator" as const,
   });
   const park = (sha: string, reason: string) => ({
     loop: { parked: { kind: "review", reason, ended: false }, pushFor: sha },
@@ -399,14 +401,18 @@ it("waives the run chosen from the menu when a seat has several review-parked ru
     hudState: "parked",
     loop: loop("first"),
     run: { ...run, id: "r-20" },
+    ticket: "shop-app#20",
     asideRuns: ["r-21", "r-22"].map((runId) => ({
       runId,
-      ticket: null,
+      ticket: `shop-app#${runId.slice(2)}`,
       ticketTitle: null,
       loop: loop("aside"),
     })),
   });
-  const f = stub([row], true, [], "CI", undefined, {
+  const asks = ["20", "21", "22"].map((n) =>
+    item({ key: `note:park-${n}`, kind: "blocked", agentId: "guido-1", ticket: `shop-app#${n}` }),
+  );
+  const f = stub([row], true, asks, "CI", undefined, {
     "/api/runs/r-20/loop": park("aaa1111000", "finding on r-20"),
     "/api/runs/r-21/loop": park("bbb2222000", "finding on r-21"),
     "/api/runs/r-22/loop": park("ccc3333000", "finding on r-22"),

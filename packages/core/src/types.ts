@@ -1021,8 +1021,7 @@ export interface CrewLoop {
 }
 
 /** What a looped run waits on; null: nothing (its seat is on it, or it is done). */
-/** `flight`: a parked run while a FLIGHT seat is configured (FLIGHT settles parks); `operator` otherwise. */
-export type LoopWait = "ci" | "retro" | "main" | "operator" | "flight" | "lock" | "seat";
+export type LoopWait = "ci" | "retro" | "main" | "operator" | "lock" | "seat";
 
 /** One ticket in a writer seat's queue. */
 export interface CrewQueueItem {

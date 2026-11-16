@@ -575,13 +575,14 @@ export const WAIT_TEXT = {
   retro: "waiting on RETRO's review",
   main: "waiting on main: updating the branch",
   operator: "waiting on you",
-  flight: "waiting on FLIGHT",
   lock: "in line for the test lock",
 } as const;
+/** The lead of a parked run's wait line; the park's reason follows. */
+export const PARKED_WAIT_LEAD = "Held";
 /** A set-aside run whose rework or park is due back on its seat. */
 export const seatWaitText = (call: string): string => `waiting on ${call} for rework`;
 /** Waits shown amber, as the mockup's lock line. */
-export const WAIT_WARN: readonly LoopWait[] = ["lock", "operator", "flight"];
+export const WAIT_WARN: readonly LoopWait[] = ["lock", "operator"];
 /** The lead of a set-aside run's line under its seat's row. */
 export const SET_ASIDE_LABEL = "Set aside";
 
@@ -616,10 +617,11 @@ export function waitText(
     case "main":
       return WAIT_TEXT[wait];
     case "operator":
-    case "flight":
+      // a park's reason names who settles it (FLIGHT, or the operator's acceptance), so the line
+      // does not claim the operator for every park
       return loop.phase === "parked" && loop.parked
-        ? `${WAIT_TEXT[wait]}: ${loop.parked}`
-        : WAIT_TEXT[wait];
+        ? `${PARKED_WAIT_LEAD}: ${loop.parked}`
+        : WAIT_TEXT.operator;
     case "lock":
       return lockSince === null
         ? WAIT_TEXT.lock

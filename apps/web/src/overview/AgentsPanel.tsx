@@ -505,7 +505,7 @@ function AgentWork({
           <AgentNeeds row={row} items={items} now={now} lock={lock} />
         ) : undefined
       }
-      actions={<ReviewParkSeatActions row={row} />}
+      actions={<ReviewParkSeatActions row={row} items={items} />}
     />
   );
 }
@@ -780,16 +780,24 @@ function AgentRow({
 
 /**
  * The overview keeps the explicit review waiver beside a parked seat, including set-aside runs, only
- * while the park waits on the operator. A park FLIGHT settles offers none here; the Agent page keeps
- * the waiver for an operator override.
+ * while the operator owns a Needs-you item for that seat and ticket: that owner already says who
+ * settles the park (FLIGHT, or the operator for acceptance, budget, a brief or FLIGHT being down).
+ * The Agent page keeps the waiver as an operator override.
  */
-function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
+function ReviewParkSeatActions({
+  row,
+  items,
+}: {
+  row: Crew["rows"][number];
+  items: AttentionItem[];
+}) {
+  const operatorAsks = (ticket: string | null | undefined) =>
+    ticket != null &&
+    items.some((i) => i.owner === "operator" && i.agentId === row.id && i.ticket === ticket);
   const ids = [
-    ...(row.loop?.phase === "parked" && row.loop.wait === "operator" && row.run
-      ? [row.run.id]
-      : []),
+    ...(row.loop?.phase === "parked" && row.run && operatorAsks(row.ticket) ? [row.run.id] : []),
     ...(row.asideRuns ?? [])
-      .filter((run) => run.loop.phase === "parked" && run.loop.wait === "operator")
+      .filter((run) => run.loop.phase === "parked" && operatorAsks(run.ticket))
       .map((run) => run.runId),
   ];
   const loops = useResources<{ loop: RunLoop | null }>(ids.map(RESOURCES.runLoop));
