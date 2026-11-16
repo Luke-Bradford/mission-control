@@ -6734,7 +6734,7 @@ export function buildApp(deps: AppDeps): FastifyInstance {
           : "Anything you want to check before you decide? I can show the full text, the ticket or the numbers behind it.";
         return store.ensureDiscussion(item.key, item.version, { text, at: now() });
       };
-      // Reader: apps/web/src/comms/ItemDiscussion.tsx (the item's conversation, from Comms)
+      // Reader: apps/web/src/data.ts (the item thread read)
       api.get<{ Params: { key: string } }>("/attention/:key/thread", async (req, reply) => {
         const key = req.params.key;
         if (key.length > 200) return reply.code(400).send({ error: "key too long" });
