@@ -43,7 +43,17 @@ function ci(pr: number, name: string, conclusion: string, at = FROM + 1000, atte
       `INSERT INTO ci_runs (repo_id, run_key, sha, name, attempt, pr_number, state, conclusion, url, first_seen_at, at)
        VALUES (?, ?, 'abcdef1234567', ?, ?, ?, 'COMPLETED', ?, ?, ?, ?)`,
     )
-    .run(REPO, `${pr}:${name}:${attempt}:${at}`, name, attempt, pr, conclusion, `https://ci/${name}`, at, at);
+    .run(
+      REPO,
+      `${pr}:${name}:${attempt}:${at}`,
+      name,
+      attempt,
+      pr,
+      conclusion,
+      `https://ci/${name}`,
+      at,
+      at,
+    );
 }
 function review(summary: string, endedAt = FROM + 5000): number {
   const r = raw

@@ -5,8 +5,8 @@
 //   node --experimental-strip-types apps/server/scripts/pipeline-window.ts --db <copy> --repo <repo id> --from <ISO time> [--hours 24]
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
+import { fileURLToPath } from "node:url";
 import { BLOCKING_SEVERITIES, CI_FAILED_STATES } from "@mc/core";
 
 export type CiFailureClass = "lint-typecheck-build" | "tests" | "other";
@@ -112,7 +112,9 @@ export function pipelineWindow(db: DatabaseSync, input: PipelineWindowInput): Pi
       if (!blocking.has(String(f.severity))) continue;
       blockingFindings++;
       for (const text of [f.summary, f.scenario, f.fix]) {
-        const matched = CONTROLLER_ONLY_PATTERNS.map((p) => p.exec(String(text))?.[0]).find(Boolean);
+        const matched = CONTROLLER_ONLY_PATTERNS.map((p) => p.exec(String(text))?.[0]).find(
+          Boolean,
+        );
         if (!matched) continue;
         controllerOnly.push({
           reviewId: Number(v.id),
@@ -134,7 +136,9 @@ export function pipelineWindow(db: DatabaseSync, input: PipelineWindowInput): Pi
     byClass,
     reviewsEnded: reviews.length,
     blockingFindings,
-    controllerCheckSummaries: reviews.filter((v) => String(v.summary ?? "").includes("Controller check:")).length,
+    controllerCheckSummaries: reviews.filter((v) =>
+      String(v.summary ?? "").includes("Controller check:"),
+    ).length,
     controllerOnly,
   };
 }
@@ -150,7 +154,8 @@ export function formatPipelineReport(r: PipelineReport): string[] {
     `Reviews ended: ${r.reviewsEnded}; blocking findings: ${r.blockingFindings}; reviews naming a Controller check: ${r.controllerCheckSummaries}`,
     `Blocking findings that might ask for controller-only evidence (read each): ${r.controllerOnly.length}`,
     ...r.controllerOnly.map(
-      (c) => `  PR ${c.pr} round ${c.round} review ${c.reviewId} ${c.severity}: ${c.summary} [matched: ${c.matched}]`,
+      (c) =>
+        `  PR ${c.pr} round ${c.round} review ${c.reviewId} ${c.severity}: ${c.summary} [matched: ${c.matched}]`,
     ),
   ];
 }
