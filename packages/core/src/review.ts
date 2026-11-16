@@ -464,6 +464,8 @@ export const readyHardRuleText = (ref: string, pr: number, paths: readonly strin
   `${ref}: PR #${pr} passed every check but touches hard-rule files (${paths.join(", ")}); merge it yourself`;
 export const headMovedText = (ref: string, pr: number, head: string, pushed: string): string =>
   `${ref}: PR #${pr}'s head ${head.slice(0, 7)} is not the commit Mission Control pushed (${pushed.slice(0, 7)}); it is not reviewed, so check it before merging`;
+export const reviewHeldParkText = (retro: string, sha: string, round: number): string =>
+  `${retro}'s review of ${sha.slice(0, 7)} is held: the change is past its review rounds (round ${round}); FLIGHT decides`;
 export const reviewParkText = (
   retro: string,
   sha: string,
