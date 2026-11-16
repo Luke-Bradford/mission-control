@@ -203,6 +203,9 @@ function limit(nodes: MdNode[], max: number): MdNode[] {
 
 /** True under `OpenLinks`: links and bare http(s) URLs become safe, openable links. */
 const OpenLinksContext = createContext(false);
+const NEVER = () => false;
+/** Under `<OpenLinks hostHidden>`: true for a URL whose link is its text only, without the host after it. */
+const LinkHostContext = createContext<(url: string) => boolean>(NEVER);
 
 /** How a caller turns each plain-text run into elements (references, mentions); text by default. */
 export type TextRenderer = (text: string) => ReactNode;
@@ -219,6 +222,7 @@ const LinkRendererContext = createContext<LinkRenderer | null>(null);
 function MdText({ text }: { text: string }) {
   const open = useContext(OpenLinksContext);
   const custom = useContext(TextRendererContext);
+  const hostHidden = useContext(LinkHostContext);
   if (custom) return <>{custom(text)}</>;
   if (!open || !text.includes("http")) return <>{text}</>;
   const parts = text.split(BARE_URL);
@@ -227,7 +231,7 @@ function MdText({ text }: { text: string }) {
       {parts.map((part, i) =>
         i % 2 === 1 ? (
           // biome-ignore lint/suspicious/noArrayIndexKey: split parts never reorder
-          <SafeLink key={i} url={part}>
+          <SafeLink key={i} url={part} showHost={!hostHidden(part)}>
             {part}
           </SafeLink>
         ) : (
@@ -251,11 +255,12 @@ function MdLink({
   image?: boolean;
 }) {
   const open = useContext(OpenLinksContext);
+  const hostHidden = useContext(LinkHostContext);
   const custom = useContext(LinkRendererContext)?.(url, children, image);
   if (custom !== undefined) return <>{custom}</>;
   // The label is plain text: a URL written as the label of a link must not become a link inside it.
   return open ? (
-    <SafeLink url={url}>
+    <SafeLink url={url} showHost={!hostHidden(url)}>
       <OpenLinksContext.Provider value={false}>{children}</OpenLinksContext.Provider>
     </SafeLink>
   ) : (
@@ -267,8 +272,19 @@ function MdLink({
  * Markdown links under it open in the browser (https, loopback http, same-origin paths only; the
  * rest are refused in text). Elsewhere a link is its text with the URL in `title`.
  */
-export function OpenLinks({ children }: { children: ReactNode }) {
-  return <OpenLinksContext.Provider value={true}>{children}</OpenLinksContext.Provider>;
+export function OpenLinks({
+  children,
+  hostHidden,
+}: {
+  children: ReactNode;
+  /** Links this accepts show as their text only; every other link keeps its host beside it. */
+  hostHidden?: (url: string) => boolean;
+}) {
+  return (
+    <OpenLinksContext.Provider value={true}>
+      <LinkHostContext.Provider value={hostHidden ?? NEVER}>{children}</LinkHostContext.Provider>
+    </OpenLinksContext.Provider>
+  );
 }
 
 function render(nodes: MdNode[]): ReactNode[] {
