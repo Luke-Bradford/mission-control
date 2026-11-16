@@ -41,6 +41,7 @@ function routes(
     "/api/settings/away": DEFAULT_AWAY,
     "/api/machine": { latest: null },
     "/api/limits": [],
+    "/api/comms/flight": { messages: [] },
     ...discussions,
     ...more,
   });
@@ -323,17 +324,17 @@ describe("Needs you page", () => {
   it("keeps a typed draft when another item is opened and back", async () => {
     routes([ask("q1"), ask("q2")]);
     const view = render(<Needs item="q1" />);
-    const box = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLTextAreaElement;
+    const box = (await screen.findByLabelText("Message FLIGHT")) as HTMLTextAreaElement;
     fireEvent.change(box, { target: { value: "Half a thought" } });
     view.rerender(<Needs item="q2" />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Ask FLIGHT about this") as HTMLTextAreaElement).value).toBe(
+      expect((screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement).value).toBe(
         "",
       ),
     );
     view.rerender(<Needs item="q1" />);
     await waitFor(() =>
-      expect((screen.getByLabelText("Ask FLIGHT about this") as HTMLTextAreaElement).value).toBe(
+      expect((screen.getByLabelText("Message FLIGHT") as HTMLTextAreaElement).value).toBe(
         "Half a thought",
       ),
     );
@@ -741,34 +742,42 @@ describe("actions on the page", () => {
     await waitFor(() => expect(bodies(fn, "/api/seats/flight-1/message")).toHaveLength(1));
   });
 
-  it("Ctrl or Cmd+Enter sends the question to FLIGHT; plain Enter does not", async () => {
+  it("Enter sends the question to FLIGHT with its item key; Shift+Enter does not", async () => {
     const fn = routes([ask("q1")], {
       "/api/flight": LIVE_FLIGHT,
-      [`POST ${discussionPath("q1")}`]: { id: "d:q1", itemKey: "q1", version: "v2", messages: [] },
+      "POST /api/comms": { message: { id: "comms:9" } },
     });
     render(<Needs item="q1" />);
-    const box = (await screen.findByLabelText("Ask FLIGHT about this")) as HTMLTextAreaElement;
+    const box = (await screen.findByLabelText("Message FLIGHT")) as HTMLTextAreaElement;
     await waitFor(() => expect(box.disabled).toBe(false));
     fireEvent.change(box, { target: { value: "Why this one?" } });
+    fireEvent.keyDown(box, { key: "Enter", shiftKey: true });
+    expect(bodies(fn, "/api/comms")).toHaveLength(0);
     fireEvent.keyDown(box, { key: "Enter" });
-    expect(bodies(fn, discussionPath("q1"))).toHaveLength(0);
-    fireEvent.keyDown(box, { key: "Enter", metaKey: true });
-    await waitFor(() => expect(bodies(fn, discussionPath("q1"))).toHaveLength(1));
+    await waitFor(() =>
+      expect(bodies(fn, "/api/comms")).toEqual([
+        { to: "flight-1", text: "Why this one?", itemKey: "q1" },
+      ]),
+    );
+  });
+
+  it("heads the thread About: the question's title", async () => {
+    routes([ask("q1")], { "/api/flight": LIVE_FLIGHT });
+    render(<Needs item="q1" />);
+    expect(await screen.findByRole("heading", { name: "About: Question q1" })).toBeTruthy();
   });
 
   it("the log follows a new message only within 40 px of its end", async () => {
     let messages = [1, 2].map((n) => ({
       id: `m${n}`,
-      itemKey: "q1",
-      correlationId: "d:q1",
-      role: "flight",
-      text: `Message ${n}`,
       at: NOW - n * MIN,
+      from: "flight-1",
+      to: "CAPCOM",
+      text: `Message ${n}`,
+      operator: false,
     }));
-    const thread = () => ({ id: "d:q1", itemKey: "q1", version: "v1", messages });
     routes([ask("q1")], {
-      [discussionPath("q1")]: () => ({ status: 200, body: thread() }),
-      [`${discussionPath("q1")}?id=d%3Aq1`]: () => ({ status: 200, body: thread() }),
+      "/api/comms/flight": () => ({ status: 200, body: { messages } }),
     });
     render(<Needs item="q1" />);
     const log = (await screen.findByRole("log")) as HTMLElement;
@@ -784,13 +793,9 @@ describe("actions on the page", () => {
       },
     });
     const addMessage = async (n: number) => {
-      messages = [
-        ...messages,
-        { ...(messages[0] as (typeof messages)[number]), id: `m${n}`, text: `Message ${n}` },
-      ];
+      messages = [...messages, { ...(messages[0] as (typeof messages)[number]), id: `m${n}`, text: `Message ${n}` }];
       act(() => {
-        hub.refetch(`/api/attention/q1/discussion`);
-        hub.refetch(`/api/attention/q1/discussion?id=d%3Aq1`);
+        hub.refetch("/api/comms/flight");
       });
       await screen.findByText(`Message ${n}`);
     };

@@ -21,21 +21,22 @@ const MOCKUP = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="100
 const ASSETS = { [PICTURE]: { contentType: "image/svg+xml", body: MOCKUP } };
 
 const KEY = "decision:layout";
-const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
 
 const LONG = Array.from(
   { length: 9 },
   (_, i) => `Line ${i + 1} of a longer reply that explains the trade-off in some detail.`,
 ).join("\n");
 
+/** The stored FLIGHT thread: the operator's messages sent from this question, and FLIGHT's replies. */
 function messages(n: number) {
   return Array.from({ length: n }, (_, i) => ({
-    id: `m${i}`,
-    itemKey: KEY,
-    correlationId: "d1",
-    role: i % 2 ? "operator" : "flight",
-    text: i % 5 === 0 ? LONG : `Message ${i + 1}: short and plain.`,
+    id: `comms:${i + 1}`,
     at: NOW - (n - i) * MIN,
+    from: i % 2 ? "CAPCOM" : "flight-1",
+    to: i % 2 ? "flight-1" : "CAPCOM",
+    text: i % 5 === 0 ? LONG : `Message ${i + 1}: short and plain.`,
+    operator: i % 2 === 1,
+    ...(i % 2 ? { itemKey: KEY } : {}),
   }));
 }
 
@@ -76,15 +77,13 @@ function api(n = 6, optionCount = 2, extraAsks = 0) {
     ),
   ];
   const base = desktopFixture().api;
-  const discussion = { id: "d1", itemKey: KEY, version: "v1", messages: messages(n) };
   return {
     ...base,
     "/api/attention": asks,
     "/api/attention/answered": [],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
-    [discussionPath(KEY)]: discussion,
-    [`${discussionPath(KEY)}?id=d1`]: discussion,
+    "/api/comms/flight": { messages: messages(n) },
   };
 }
 
@@ -268,11 +267,11 @@ describeRendered("Needs you page", () => {
         });
         try {
           await ready(page);
-          await page.boxes("#needsMsgs .dmsg");
+          await page.boxes("#needsSide .flight-thread-message");
           const before = await page.box(".needs-band");
           for (const to of ["top", "bottom"] as const) {
             await page.evaluate((where) => {
-              const log = document.getElementById("needsMsgs") as HTMLElement;
+              const log = document.querySelector("#needsSide .flight-thread-log") as HTMLElement;
               log.scrollTop = where === "top" ? 0 : log.scrollHeight;
             }, to);
             expect(
@@ -281,18 +280,18 @@ describeRendered("Needs you page", () => {
             ).toEqual(before);
           }
           if (width >= 1920) {
-            const message = await page.box("#needsMsgs .dmsg");
+            const message = await page.box("#needsSide .flight-thread-message");
             expect(
               message.width,
               `${label}: messages are wide enough to read`,
             ).toBeGreaterThanOrEqual(400);
           }
           expect(
-            await page.reachable("#needsMsgs .dmsg:last-of-type"),
+            await page.reachable("#needsSide .flight-thread-message:last-of-type"),
             `${label}: last message`,
           ).toEqual([true]);
           expect(
-            await page.reachable("#needsDiscussionForm textarea"),
+            await page.reachable("#needsSide .flight-thread-form textarea"),
             `${label}: composer`,
           ).toEqual([true]);
           expect(before.height, `${label}: the band stays within its limit`).toBeLessThanOrEqual(
@@ -331,7 +330,7 @@ describeRendered("Needs you page", () => {
             last.y + last.height,
             `${label}: the last option is inside the side column`,
           ).toBeLessThanOrEqual(side.y + side.height);
-          const log = await page.box("#needsMsgs");
+          const log = await page.box("#needsSide .flight-thread-log");
           expect(
             log.height,
             `${label}: the conversation log is tall enough`,
@@ -361,12 +360,12 @@ describeRendered("Needs you page", () => {
         });
         try {
           await ready(page);
-          const composer = await page.box("#needsDiscussionForm");
-          const area = await page.box("#needsDiscussionForm textarea");
+          const composer = await page.box("#needsSide .flight-thread-form");
+          const area = await page.box("#needsSide .flight-thread-form textarea");
           expect(
             area.width / composer.width,
-            `${label}: the conversation textarea fills its row`,
-          ).toBeGreaterThanOrEqual(0.9);
+            `${label}: the conversation textarea takes the row beside Send`,
+          ).toBeGreaterThanOrEqual(0.7);
           const answer = await page.boxes(".needs-answer .composer textarea");
           expect(answer.length, `${label}: the answer composer is there`).toBeGreaterThan(0);
           if (SHOTS) {
@@ -471,7 +470,7 @@ describeRendered("Needs you page", () => {
             await pictureLoaded(page);
             // populated: the question, the picture, the options and the conversation are all there
             await page.boxes(".needs-band-title");
-            await page.boxes("#needsMsgs .dmsg");
+            await page.boxes("#needsSide .flight-thread-message");
             await page.boxes(".needs-row");
             if (SHOTS) {
               mkdirSync(SHOTS, { recursive: true });
@@ -555,8 +554,7 @@ describeRendered("Needs you page", () => {
         api: {
           ...api(),
           "/api/attention": [protectedAsk],
-          [discussionPath(key)]: { id: "d2", itemKey: key, version: "v1", messages: [] },
-          [`${discussionPath(key)}?id=d2`]: { id: "d2", itemKey: key, version: "v1", messages: [] },
+          "/api/comms/flight": { messages: [] },
           // the harness answers by path, so the receipt route's GET and the choice POST share it
           [choicePath]: receipt,
         },

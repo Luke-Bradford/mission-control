@@ -3,7 +3,10 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { expect, it, vi } from "vitest";
 import { ItemPanel } from "../src/shell/ItemPanel.tsx";
 import { openItem } from "../src/shell/overlays.ts";
-import { stubFetch } from "./fetchStub.ts";
+import { stubFetch as fetchRoutes } from "./fetchStub.ts";
+
+const stubFetch = (routes: Parameters<typeof fetchRoutes>[0]) =>
+  fetchRoutes({ "/api/comms/flight": { messages: [] }, ...routes });
 import { item } from "./fixtures.ts";
 import { readStyles } from "./styles.ts";
 
@@ -180,12 +183,13 @@ it.each(["Mark handled", "Let FLIGHT handle it"])(
 it("shows an empty reply state and keeps keyboard focus in the panel", async () => {
   setup("github", false, true);
   await screen.findByText("No suggested replies yet.");
-  const last = screen.getByRole("button", { name: "Ask FLIGHT" });
+  const last = screen.getByRole("button", { name: "Send" });
   const first = screen.getByRole("link", { name: "Open in GitHub ↗" });
   first.focus();
   fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
-  // The question box stays open with FLIGHT unavailable, so it is the last stop.
-  expect(document.activeElement).toBe(screen.getByLabelText("Ask FLIGHT about this"));
+  // The thread's box is disabled with FLIGHT unavailable, so the focus stays on the panel's own stops.
+  expect(screen.getByLabelText("Message FLIGHT")).toBeTruthy();
+  expect(document.activeElement).not.toBe(document.body);
   expect(last.hasAttribute("disabled")).toBe(true);
 });
 it.each(["loading", "failed", "empty"])("shows a %s person source response", async (state) => {

@@ -1,6 +1,7 @@
 import { COMMS_MC, COMMS_NOTICE, type ConfigView, type FlightConversationMessage } from "@mc/core";
 import { type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { apiPost, errorNote } from "../api.ts";
+import { clearDraft, getDraft, setDraft } from "../comms/drafts.ts";
 import { useNoticeResource } from "../comms/model.ts";
 import type { OlderMessages } from "../comms/older.ts";
 import { linkRefs } from "../comms/refLinks.ts";
@@ -48,8 +49,14 @@ export function FlightThread({
   older,
   jumpId = null,
   onJumped,
+  itemKey,
+  about,
 }: {
   id?: string;
+  /** The Needs-you question this thread sits beside: sends carry it, so FLIGHT knows what they are about. */
+  itemKey?: string;
+  /** That question's title, shown as the `About:` heading. */
+  about?: string;
   /** Comms' "Hide hub notices" switch: the page is read without them and they are filtered out. */
   hideNotices?: boolean;
   /** Older pages the route has not sent: Comms passes them in, with a "Load older" control. */
@@ -64,7 +71,12 @@ export function FlightThread({
   const repo = config?.repos.length === 1 ? config.repos[0]?.id : undefined;
   const log = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
-  const [text, setText] = useState("");
+  // Beside a question the unsent text is kept per item, so opening another question does not lose it.
+  const [text, setTextState] = useState(() => (itemKey === undefined ? "" : getDraft("ask", itemKey)));
+  const setText = (value: string) => {
+    setTextState(value);
+    if (itemKey !== undefined) setDraft("ask", itemKey, value);
+  };
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const all = older?.messages ?? res.data?.messages ?? [];
@@ -120,8 +132,13 @@ export function FlightThread({
     setBusy(true);
     setErr(null);
     try {
-      await apiPost("/api/comms", { to: seat.id, text: body });
-      setText("");
+      await apiPost("/api/comms", {
+        to: seat.id,
+        text: body,
+        ...(itemKey === undefined ? {} : { itemKey }),
+      });
+      if (itemKey !== undefined) clearDraft("ask", itemKey);
+      setTextState("");
       hub.refetchTopic("agents");
     } catch (e) {
       setErr(failNote(e));
@@ -137,6 +154,11 @@ export function FlightThread({
 
   return (
     <section className="flight-thread" aria-label="Conversation with FLIGHT">
+      {itemKey !== undefined && (
+        <h3 className="bsec flight-thread-about">
+          About: {about === undefined || about.trim() === "" ? itemKey : about}
+        </h3>
+      )}
       <div
         className="flight-thread-log"
         role="log"

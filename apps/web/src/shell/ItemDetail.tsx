@@ -4,7 +4,6 @@ import type {
   BriefOption,
   ChoiceReceipt,
   Crew,
-  ItemDiscussion as Discussion,
   Escalation,
   FlightView,
   TicketView,
@@ -14,7 +13,6 @@ import { ApiError, apiPost } from "../api.ts";
 import { useNow, useTz } from "../clock.ts";
 import {
   answerTarget,
-  askFlight,
   boundChoice,
   boundChoiceStands,
   choiceLine,
@@ -33,13 +31,13 @@ import {
   PersonChoices,
   Recommendation,
 } from "../comms/ItemBrief.tsx";
-import { ItemDiscussion } from "../comms/ItemDiscussion.tsx";
 import { MentionText } from "../comms/messages.tsx";
 import { Expandable, Toggle } from "../components/Expandable.tsx";
 import { ExternalLink } from "../components/ExternalLink.tsx";
 import { Markdown, MarkdownInline } from "../components/Markdown.tsx";
 import { hub, RESOURCES, useResource } from "../data.ts";
 import { FlightStoppedNote } from "../flight/FlightStoppedNote.tsx";
+import { FlightThread } from "../flight/FlightThread.tsx";
 import { dayMonth, rel } from "../fmt.ts";
 import { Pill } from "../hud/Pill.tsx";
 import { RepoRef } from "../hud/RepoRef.tsx";
@@ -67,7 +65,7 @@ import "./ItemPanel.css";
 
 /**
  * A 540px fly-out for one thing that needs the operator. Every item uses the same brief sections;
- * escalations retain their GitHub reply link. Item discussion uses its own persisted history.
+ * escalations retain their GitHub reply link. The FLIGHT thread beside the question is the one stored conversation.
 
 /** Everything one open item shows and does, shared by the flyout and the Needs you page. */
 export function useItemDetail(key: string | null) {
@@ -117,8 +115,6 @@ export function useItemDetail(key: string | null) {
   const [choices, setChoices] = useState<Record<string, ChoiceReceipt>>({});
   const [boundReceipts, setBoundReceipts] = useState<Record<string, BriefChoiceReceipt>>({});
   const [err, setErr] = useState<string | null>(null);
-  // When a typed reply last went through, per item: the conversation opens to show it.
-  const [replied, setReplied] = useState<Record<string, number>>({});
   const tz = useTz();
   const now = useNow();
   const activeKey = useRef(key);
@@ -158,7 +154,7 @@ export function useItemDetail(key: string | null) {
   const agentId = item?.agentId ?? null;
   const agentIndex = crew?.rows.find((r) => r.id === agentId)?.index ?? 0;
   const live = seat?.live === true;
-  // Led by the item's title, so the answer reads in context.
+  // The item's title: the thread beside the question is headed with it.
   const about = esc?.title ?? item?.text ?? "";
   const target = item ? answerTarget(item, crew?.rows, seat) : null;
   const queueApproval = item?.kind === "approval" && item.key.startsWith("note:queue-reorder:");
@@ -177,8 +173,7 @@ export function useItemDetail(key: string | null) {
     const body = text.trim();
     if (!item || !target || !body || !replyOk || busy) return;
     void act(async () => {
-      const failed = await sendAnswer(target, seat, item, about, body);
-      if (failed === null) setReplied((prev) => ({ ...prev, [item.key]: Date.now() }));
+      const failed = await sendAnswer(target, seat, item, body);
       if (failed === null && getDraft("answer", item.key) === text) {
         clearDraft("answer", item.key);
         if (activeKey.current === item.key) setTextState("");
@@ -230,7 +225,7 @@ export function useItemDetail(key: string | null) {
     }
     if (!item || !target || !replyOk || busy || chosen[item.key]) return;
     if (item.kind === "person") {
-      void act(() => sendAnswer(target, seat, item, about, o.answer, false));
+      void act(() => sendAnswer(target, seat, item, o.answer));
       return;
     }
     if (item.kind === "approval" && o.label === "Edit") {
@@ -248,46 +243,11 @@ export function useItemDetail(key: string | null) {
       });
       return;
     }
-    const resource = RESOURCES.discussion(item.key);
-    const discussion = hub.snapshot(resource.path, resource.topic).data as Discussion | undefined;
-    const id = crypto.randomUUID();
-    const receiptText = `You chose: ${o.label}\n\n${o.answer}`;
-    const receipt = (note?: string) =>
-      setReceipts((prev) => ({ ...prev, [item.key]: { id, text: receiptText, note } }));
-    const refresh = () => {
-      hub.refetch(resource.path);
-      if (discussion) hub.refetch(RESOURCES.discussion(item.key, discussion.id).path);
-    };
     void act(async () => {
-      if (target.to !== "flight") {
-        const failed = await sendAnswer(target, seat, item, about, o.answer, false);
-        if (failed !== null) return failed;
-      } else {
-        if (!discussion)
-          return "The discussion couldn't be loaded. Refresh discussion and try again.";
-        try {
-          await askFlight(item.key, discussion.version, id, o.answer);
-          refresh();
-        } catch (e) {
-          return e instanceof Error ? e.message : "server unreachable";
-        }
-      }
-      // These results belong to the captured item even if another item is now open.
+      const failed = await sendAnswer(target, seat, item, o.answer);
+      if (failed !== null) return failed;
+      // The thread beside the question shows the pick: it is the one message sent.
       setChosen((prev) => ({ ...prev, [item.key]: o.label }));
-      if (target.to === "flight") {
-        receipt("FLIGHT hasn't replied yet.");
-      } else if (discussion && live) {
-        receipt("FLIGHT hasn't replied yet.");
-        void askFlight(item.key, discussion.version, id, `You chose: ${o.label}`)
-          .catch(() => receipt("Answer sent. FLIGHT hasn't replied yet."))
-          .finally(refresh);
-      } else {
-        receipt(
-          discussion
-            ? "FLIGHT hasn't replied yet."
-            : "Answer sent. The discussion couldn't be loaded.",
-        );
-      }
       return null;
     });
   };
@@ -321,6 +281,7 @@ export function useItemDetail(key: string | null) {
     agentId,
     agentIndex,
     seat,
+    about,
     live,
     flight,
     target,
@@ -334,7 +295,6 @@ export function useItemDetail(key: string | null) {
     recorded,
     boundReceipt,
     receipts,
-    replied,
     handledHow,
     options,
     currentItem,
@@ -369,6 +329,7 @@ export function ItemDetail({
     notesRes,
     tz,
     now,
+    about,
     live,
     flight,
     target,
@@ -382,7 +343,6 @@ export function ItemDetail({
     recorded,
     boundReceipt,
     receipts,
-    replied,
     handledHow,
     options,
     currentItem,
@@ -601,16 +561,7 @@ export function ItemDetail({
   const discussionBlock = (
     <>
       {item && !holding && (
-        <ItemDiscussion
-          layout={layout}
-          itemKey={item.key}
-          live={flight === undefined ? undefined : live}
-          seat={flightSeat}
-          receipt={queueApproval ? undefined : receipts[item.key]}
-          replied={replied[item.key]}
-          focus={options.length === 0 && !item.brief?.person?.replies?.length}
-          collapsed={options.length > 0 || Boolean(item.brief?.person?.replies?.length)}
-        />
+        <FlightThread key={item.key} id={`${p}Thread`} itemKey={item.key} about={about} />
       )}
     </>
   );

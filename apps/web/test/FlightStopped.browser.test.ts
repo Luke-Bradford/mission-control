@@ -15,12 +15,10 @@ const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR;
 const KEY = "decision:layout";
 const NOTICE = "FLIGHT is stopped. It reads this when it starts.";
-const discussionPath = `/api/attention/${encodeURIComponent(KEY)}/discussion`;
 
 /** Needs you with a FLIGHT question open and FLIGHT stopped. */
 function api() {
   const base = desktopFixture().api;
-  const discussion = { id: "d1", itemKey: KEY, version: "v1", messages: [] };
   return {
     ...base,
     "/api/flight": {
@@ -52,8 +50,7 @@ function api() {
     ],
     "/api/attention/held": [],
     "/api/notifications": { open: [], handledToday: [] },
-    [discussionPath]: discussion,
-    [`${discussionPath}?id=d1`]: discussion,
+    "/api/comms/flight": { messages: [] },
   };
 }
 
@@ -110,7 +107,7 @@ describeRendered("Needs you with FLIGHT stopped", () => {
                   ...document.querySelectorAll<HTMLButtonElement>(".option-pick"),
                 ].map((b) => b.disabled),
                 askDisabled: document.querySelector<HTMLInputElement>(
-                  "#needsDiscussionForm textarea, #needsDiscussionForm input",
+                  "#needsSide .flight-thread-form textarea, #needsSide .flight-thread-form input",
                 )?.disabled,
                 notice,
                 start: rect(start),
@@ -121,8 +118,8 @@ describeRendered("Needs you with FLIGHT stopped", () => {
                     button: rect(n.querySelector("button")),
                   }),
                 ),
-                ask: rect(q("#needsDiscussionForm")),
-                stopped: rect(q("#needsDiscussionForm .flight-stopped")),
+                ask: rect(q("#needsSide .flight-thread-form")),
+                stopped: rect(q("#needsSide .flight-thread-form .flight-stopped")),
                 input: rect(input),
                 width: innerWidth,
                 height: innerHeight,
@@ -177,7 +174,7 @@ describeRendered("Needs you with FLIGHT stopped", () => {
             );
             await page.evaluate(() => {
               (
-                document.querySelector("#needsDiscussionForm textarea") as HTMLTextAreaElement
+                document.querySelector("#needsSide .flight-thread-form textarea") as HTMLTextAreaElement
               ).focus();
             }, undefined);
             await page.press("Tab");
