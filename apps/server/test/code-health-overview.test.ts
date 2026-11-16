@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
+  CODE_HEALTH_OVERVIEW_FILES_MAX,
+  CODE_HEALTH_OVERVIEW_PAST_MAX,
+  CODE_HEALTH_OVERVIEW_ROWS_MAX,
   CODE_HEALTH_OVERVIEW_TTL_MS,
   type CodeHealthOverview,
   type CodeHealthView,
@@ -309,6 +312,26 @@ describe("Audit first-screen summary", () => {
     const funnel = (await overview()).past.funnel;
     expect(funnel).toContainEqual({ kind: "dismissed", count: 250 });
     expect(funnel).toContainEqual({ kind: "proposed", count: 1 });
+  });
+
+  it("caps ranked rows, file findings and past items at their limits and keeps the funnel exact", async () => {
+    db.exec("BEGIN");
+    for (let n = 0; n < CODE_HEALTH_OVERVIEW_FILES_MAX + 5; n++) {
+      const id = review(n + 1, 1);
+      merged(n + 1, NOW - DAY, id);
+      touch(n + 1, `src/f${n}.ts`);
+      finding(id, `src/f${n}.ts`, `s${n}`);
+    }
+    for (let n = 0; n < CODE_HEALTH_OVERVIEW_PAST_MAX + 5; n++) proposal(`acc${n}`, "accepted");
+    db.exec("COMMIT");
+    const view = await overview();
+    expect(view.rows.length).toBeLessThanOrEqual(CODE_HEALTH_OVERVIEW_ROWS_MAX);
+    expect(view.landing.files).toHaveLength(CODE_HEALTH_OVERVIEW_FILES_MAX);
+    expect(view.past.items).toHaveLength(CODE_HEALTH_OVERVIEW_PAST_MAX);
+    expect(view.past.funnel).toContainEqual({
+      kind: "accepted",
+      count: CODE_HEALTH_OVERVIEW_PAST_MAX + 5,
+    });
   });
 
   it("shows after-date results only from stored remeasure records", async () => {
