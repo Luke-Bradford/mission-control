@@ -327,6 +327,7 @@ it("names and confirms the waiver for a review-parked seat", async () => {
     text: "Blocked: RETRO finding",
     prNumber: 9,
     parked: "RETRO finding",
+    wait: "operator" as const,
   };
   const row = seatRow({ hudState: "parked", loop, ticket: "shop-app#9" });
   const f = stub([row], true, [], "CI", undefined, {
@@ -350,12 +351,45 @@ it("names and confirms the waiver for a review-parked seat", async () => {
   confirm.mockRestore();
 });
 
+it("offers no waiver on the overview for a review park FLIGHT settles", async () => {
+  const run = seatRow().run as NonNullable<CrewRow["run"]>;
+  const row = seatRow({
+    hudState: "waiting",
+    run: { ...run, id: "r-30" },
+    asideRuns: [
+      {
+        runId: "r-31",
+        ticket: "shop-app#31",
+        ticketTitle: null,
+        loop: {
+          phase: "parked" as const,
+          text: "Blocked: held past its review rounds",
+          prNumber: 31,
+          parked: "held past its review rounds; FLIGHT decides",
+          wait: "flight" as const,
+        },
+      },
+    ],
+  });
+  const f = stub([row], true, [], "CI", undefined, {
+    "/api/runs/r-31/loop": {
+      loop: { parked: { kind: "review", reason: "held", ended: false }, pushFor: "ddd4444000" },
+    },
+  });
+  render(<AgentsPanel />);
+  await waitFor(() => expect(f).toHaveBeenCalled());
+  expect(screen.queryByRole("button", { name: /Waive findings/ })).toBeNull();
+  expect(screen.queryByRole("combobox", { name: /Waive review findings/ })).toBeNull();
+  expect(f.mock.calls.some(([path]) => path === "/api/runs/r-31/loop")).toBe(false);
+});
+
 it("waives the run chosen from the menu when a seat has several review-parked runs", async () => {
   const loop = (reason: string) => ({
     phase: "parked" as const,
     text: reason,
     prNumber: 9,
     parked: reason,
+    wait: "operator" as const,
   });
   const park = (sha: string, reason: string) => ({
     loop: { parked: { kind: "review", reason, ended: false }, pushFor: sha },

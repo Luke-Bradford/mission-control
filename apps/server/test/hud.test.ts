@@ -1886,6 +1886,20 @@ describe("crew seats in the rows", () => {
         start({ phase: "parked", parked: { kind: "ci", reason: "x", ended: false } });
         expect(waitOf(withCrew())).toBe("operator");
       });
+      it("flight: the run is parked while a FLIGHT seat is configured", () => {
+        start({ phase: "parked", parked: { kind: "review", reason: "x", ended: false } });
+        const c = withCrew();
+        const session = c.crew?.sessions[0];
+        if (!session) throw new Error("no session");
+        session.seats.push({
+          id: "FLIGHT-1",
+          role: "FLIGHT",
+          accountId: "claude-main",
+          model: "opus",
+          area: [],
+        });
+        expect(waitOf(c)).toBe("flight");
+      });
       it("seat: a set-aside run flagged to wake", () => {
         start({ phase: "review", aside: { ...aside, wake: true } });
         expect(waitOf(withCrew())).toBe("seat");

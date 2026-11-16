@@ -778,11 +778,19 @@ function AgentRow({
   );
 }
 
-/** The overview keeps the explicit review waiver beside the parked seat, including set-aside runs. */
+/**
+ * The overview keeps the explicit review waiver beside a parked seat, including set-aside runs, only
+ * while the park waits on the operator. A park FLIGHT settles offers none here; the Agent page keeps
+ * the waiver for an operator override.
+ */
 function ReviewParkSeatActions({ row }: { row: Crew["rows"][number] }) {
   const ids = [
-    ...(row.loop?.phase === "parked" && row.run ? [row.run.id] : []),
-    ...(row.asideRuns ?? []).filter((run) => run.loop.phase === "parked").map((run) => run.runId),
+    ...(row.loop?.phase === "parked" && row.loop.wait === "operator" && row.run
+      ? [row.run.id]
+      : []),
+    ...(row.asideRuns ?? [])
+      .filter((run) => run.loop.phase === "parked" && run.loop.wait === "operator")
+      .map((run) => run.runId),
   ];
   const loops = useResources<{ loop: RunLoop | null }>(ids.map(RESOURCES.runLoop));
   const parks = ids.flatMap((runId, i) => {
