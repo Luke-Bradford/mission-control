@@ -2,7 +2,7 @@ import "./supervisor-harness.ts";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { NEW_LOOP } from "@mc/core";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { externalReviewKey } from "../src/review/external.ts";
 import { blockedHere, skipTestsIf } from "./sandbox-gaps.ts";
 import { clone, git, make, prep, store, until, userLines } from "./supervisor-harness.ts";
@@ -241,4 +241,93 @@ it("starts the returned seat on the open PR's own ref, not the ended run's local
   if (!worktree) throw new Error("missing checkout");
   expect(git(worktree, "symbolic-ref", "HEAD")).toBe(`refs/heads/${head}`);
   expect(git(worktree, "rev-parse", "HEAD")).toBe(tip);
+});
+
+/** guido-1 ends ticket 42; guido-2 takes it over in guido-1's tree, commits, and is set aside. */
+async function handedOverAside(sup: ReturnType<typeof make>["sup"]) {
+  const first = await sup.startRun("guido-1", 42, { loop: NEW_LOOP });
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const path = store.seatSession("guido-1")?.worktree;
+  if (!path) throw new Error("missing checkout");
+  await sup.endRun("guido-1");
+  const handed = await sup.startRun("guido-2", 42, { loop: NEW_LOOP });
+  expect(store.seatSession("guido-2")?.worktree).toBe(path);
+  await until(() => expect(store.seatSession("guido-2")?.state).toBe("idle"));
+  writeFileSync(join(path, "waiting.txt"), "committed while waiting\n");
+  git(path, "add", "waiting.txt");
+  git(path, "commit", "-qm", "waiting work");
+  const sha = git(path, "rev-parse", "HEAD");
+  const aside = await sup.setAside(handed.runId);
+  if (!aside) throw new Error("missing aside");
+  store.setRunLoop(handed.runId, { ...NEW_LOOP, aside: { ...aside, wake: false } });
+  return { path, branch: first.branch, handed, sha };
+}
+const headOf = (path: string) => git(path, "rev-parse", "--abbrev-ref", "HEAD");
+
+it("a handed-over run waits (409, still aside) while the first seat's new run holds the tree, then resumes with its commits", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const { path, branch, handed, sha } = await handedOverAside(sup);
+  await sup.startRun("guido-1", 43);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  expect(headOf(path)).not.toBe(branch);
+  await expect(sup.wakeRun(handed.runId)).rejects.toMatchObject({ status: 409 });
+  expect(store.run(handed.runId)?.endedAt).toBeNull();
+  expect(store.run(handed.runId)?.loop?.aside).not.toBeNull();
+  expect(headOf(path)).not.toBe(branch);
+  await sup.endRun("guido-1");
+  await sup.wakeRun(handed.runId);
+  expect(store.seatSession("guido-2")).toMatchObject({ runId: handed.runId, worktree: path });
+  expect(headOf(path)).toBe(branch);
+  expect(git(path, "rev-parse", "HEAD")).toBe(sha);
+});
+
+it("a handed-over run's wake is refused while the first seat's start is still claiming its ticket", async () => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const claim = vi.fn(async (_repo: unknown, issue: number) => {
+    if (issue === 43) await gate;
+  });
+  const { sup } = make({ extraSeat, claim });
+  sup.start();
+  const { path, branch, handed } = await handedOverAside(sup);
+  const starting = sup.startRun("guido-1", 43);
+  try {
+    // the tree is on ticket 43's branch, but guido-1's seat row does not name it yet
+    await until(() => expect(claim).toHaveBeenCalledWith(expect.anything(), 43));
+    expect(store.seatSession("guido-1")?.runId ?? null).toBeNull();
+    await expect(sup.wakeRun(handed.runId)).rejects.toMatchObject({ status: 409 });
+    expect(headOf(path)).not.toBe(branch);
+    expect(headOf(path)).toMatch(/^feature\/43/);
+  } finally {
+    release();
+  }
+  await starting;
+  expect(headOf(path)).toMatch(/^feature\/43/);
+  expect(store.run(handed.runId)?.endedAt).toBeNull();
+});
+
+it("the first seat's start waits (409) while a handed-over run holds its tree, and moves it once that run ended", async () => {
+  const { sup } = make({ extraSeat });
+  sup.start();
+  const first = await sup.startRun("guido-1", 42);
+  await until(() => expect(store.seatSession("guido-1")?.state).toBe("idle"));
+  const path = store.seatSession("guido-1")?.worktree;
+  if (!path) throw new Error("missing checkout");
+  await sup.endRun("guido-1");
+  const handed = await sup.startRun("guido-2", 42);
+  await until(() => expect(store.seatSession("guido-2")?.state).toBe("idle"));
+  const before = store.runs("guido-1", 10).length;
+  await expect(sup.startRun("guido-1", 43)).rejects.toMatchObject({ status: 409 });
+  expect(store.runs("guido-1", 10)).toHaveLength(before);
+  expect(headOf(path)).toBe(first.branch);
+  // the handed-over run ends: its seat row still names the tree, but no run holds it
+  await sup.endRun("guido-2");
+  expect(store.seatSession("guido-2")?.worktree).toBe(path);
+  expect(store.run(handed.runId)?.endedAt).not.toBeNull();
+  const other = await sup.startRun("guido-1", 43);
+  expect(store.seatSession("guido-1")?.worktree).toBe(path);
+  expect(headOf(path)).toBe(other.branch);
 });

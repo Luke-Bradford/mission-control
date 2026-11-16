@@ -974,6 +974,19 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
   const starting = new Set<string>();
   /** Worktrees a start is using, from the checkout until the seat row points at them (or the start fails). */
   const startingWorktrees = new Set<string>();
+  /**
+   * Another seat's run is in `path` or is being started there: a run started or resumed in a seat
+   * tree would share it. A seat whose last run has ended only names the path; it does not hold it.
+   * Read inside the clone lock, where a start or resume adds its path to `startingWorktrees`.
+   */
+  const treeHeldByOther = (seatId: string, session: { seats: { id: string }[] }, path: string) =>
+    startingWorktrees.has(path) ||
+    session.seats.some(
+      (x) =>
+        x.id !== seatId &&
+        store.seatSession(x.id)?.worktree === path &&
+        (starting.has(x.id) || live.has(x.id) || isActive(store.seatSession(x.id))),
+    );
   /** Runs whose fresh fix session is being started: its exit at start does not end the run. */
   const freshStarting = new Set<string>();
   /** Runs of a CLI update's live check: nothing of theirs is a seat's own to answer for. */
@@ -3703,10 +3716,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
                 ...where,
                 seatTree: true,
                 // an adopted handoff leaves another seat's run in this seat's tree
-                inUse: (path) =>
-                  info.session.seats.some(
-                    (x) => x.id !== seatId && store.seatSession(x.id)?.worktree === path,
-                  ),
+                inUse: (path) => treeHeldByOther(seatId, info.session, path),
                 title,
                 ...(handoff ? { handoff: handoffTarget(store, handoff) } : {}),
                 pending: {
@@ -3725,6 +3735,14 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
           repoDocs: await readRepoDocsAndSkills(info.session.checkout, c.baseSha),
           references: await repoReferenceIndex(info.session.checkout, c.baseSha),
         };
+      }).catch((e: unknown) => {
+        // a handed-over run holds this seat's tree: the card waits, it is not this card's fault
+        if (e instanceof CheckoutError && e.code === "busy") {
+          throw new SupervisorError(409, "the seat's worktree is in use by another run; retry", {
+            cause: e,
+          });
+        }
+        throw e;
       });
       if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
       // A writer claims the ticket for this hub (another hub on the board skips an assigned card);
@@ -5031,13 +5049,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               sessionId: info.session.id,
               seatId,
               peers: clonePeers(deps.config, deps.hubRoot),
-              inUse: (path) =>
-                info.session.seats.some(
-                  (x) =>
-                    x.id !== seatId &&
-                    isActive(store.seatSession(x.id)) &&
-                    store.seatSession(x.id)?.worktree === path,
-                ),
+              inUse: (path) => treeHeldByOther(seatId, info.session, path),
             },
             aside.worktree,
             branch,

@@ -1887,7 +1887,7 @@ export async function prepareCheckout(
       : "";
     let moved: { fresh: boolean } | null = null;
     if (path === seatPath && i.inUse?.(path) === true) {
-      throw new CheckoutError("path", `${path} is held by another seat's run; it was not moved`);
+      throw new CheckoutError("busy", `${path} is held by another seat's run; it was not moved`);
     }
     if (gitDir !== null && path === seatPath && head.trim() !== `refs/heads/${branch}`) {
       const fresh = await moveSeatTree({

@@ -5611,6 +5611,26 @@ describe("the engine runs reviews", () => {
         expect(h.updates).toHaveLength(1);
       });
 
+      it("an aside run whose seat's tree moved on is woken, not parked as refused", async () => {
+        behindMain();
+        const tree = join("/", "wt-aside", "guido-1-tree");
+        h.asideOn = true;
+        seatIdle(RUN);
+        store.setSeatSession({ ...need(store.seatSession(SEAT)), worktree: tree });
+        await toReview();
+        await h.engine.reconcileRun(RUN);
+        // the update runs in the run's recorded tree, which holds another branch now
+        h.updateResults = [{ ok: true, kind: "away" }];
+        setPr({ ci: "passing", mergeable: "CONFLICTING" });
+        reported(first().id, []);
+        await vi.waitFor(() => expect(h.updates).toEqual([{ mainSha: MAIN, worktree: tree }]));
+        await h.engine.reconcileRun(RUN);
+        expect(loopOf().phase).not.toBe("parked");
+        expect(loopOf()).toMatchObject({ parked: null, lastRefusal: null, transient: 0 });
+        // it is due back: woken now, or flagged to be woken once its seat is free
+        expect(h.wakes.length > 0 || loopOf().aside?.wake === true).toBe(true);
+      });
+
       describe("FLIGHT asks for it", () => {
         const parkedOnConflict = async () => {
           await toReview();

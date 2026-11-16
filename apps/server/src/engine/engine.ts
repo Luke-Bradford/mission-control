@@ -1788,6 +1788,12 @@ export function createEngine(deps: EngineDeps): Engine {
         const r = await publisher.updateBranch(live(), a.mainSha, worktree);
         if (!r.ok) return refused(r);
         if (r.kind === "wait") return;
+        if (r.kind === "away") {
+          // its seat's tree moved on: the run is woken, which takes the tree back (a 409 while
+          // the seat is busy is retried), and the update runs in its own tree
+          if (cur.aside) cur.aside = { ...cur.aside, wake: true };
+          return;
+        }
         cur.transient = 0;
         cur.lastRefusal = null;
         lastTransient.delete(run.id);
@@ -2670,7 +2676,7 @@ export function createEngine(deps: EngineDeps): Engine {
             const onSeat = supervisor.seat(current.agentId)?.runId === current.id;
             if (onSeat && supervisor.seatFacts(current.agentId)?.inTurn !== false) return;
             const result = await publisher.updateBranch(current, mainSha, worktree);
-            if (result.ok && result.kind !== "wait") {
+            if (result.ok && (result.kind === "merged" || result.kind === "conflict")) {
               branchUpdated(current, { ...loop }, mainSha, result, now());
             }
           });
@@ -3875,6 +3881,7 @@ export function createEngine(deps: EngineDeps): Engine {
             return { text: MC_SYNC_UP_TO_DATE };
           }
           if (r.kind === "wait") return refused(MC_SYNC_DIRTY);
+          if (r.kind === "away") return refused("its worktree is not on the run's branch");
           if (store.run(runId)?.endedAt === null) lastSync.set(runId, at);
           const latestLoop = store.run(runId)?.loop;
           if (!latestLoop) return refused(MC_RUN_ENDED);
@@ -3954,6 +3961,11 @@ export function createEngine(deps: EngineDeps): Engine {
         const r = await publisher.updateBranch({ ...run, loop: cur }, mainSha, worktree);
         if (!r.ok) return refused(r.text);
         if (r.kind === "wait") return refused("the worktree has uncommitted changes");
+        if (r.kind === "away") {
+          // the seat's tree moved on: the run is woken to take it back, then FLIGHT can resume it
+          if (cur.aside) store.setRunLoop(run.id, { ...cur, aside: { ...cur.aside, wake: true } });
+          return refused("its seat's worktree is on another branch; the run is being woken");
+        }
         if (parkedOnConflict || parkedStuck) {
           cur.epoch += 1;
           cur.parked = null;

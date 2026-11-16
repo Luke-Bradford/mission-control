@@ -62,6 +62,7 @@ import {
   CREW_GIT_SLOW_MS,
   gitIdentity,
   installAfterSync,
+  isSeatTree,
   MC_MERGE_AUTHOR,
   mainMergeArgs,
 } from "../runtime/checkouts.ts";
@@ -135,13 +136,15 @@ export type GateResult =
 
 /**
  * Merging main into a run's branch: `merged` (a new merge commit, recorded in run_commits),
- * `conflict` (the markers and MERGE_HEAD stay in the worktree), or `wait` (the worktree has
- * changes, so nothing was merged).
+ * `conflict` (the markers and MERGE_HEAD stay in the worktree), `wait` (the worktree has
+ * changes, so nothing was merged), or `away` (the run's recorded worktree is its seat's one tree,
+ * which is on another branch now: nothing was merged, and the run is to be woken to take it back).
  */
 export type UpdateBranchResult =
   | { ok: true; kind: "merged"; sha: string; parent: string; prSame: boolean; installNote?: string }
   | { ok: true; kind: "conflict"; files: string[] }
   | { ok: true; kind: "wait" }
+  | { ok: true; kind: "away" }
   | { ok: false; text: string; transient: boolean };
 
 export type RerunResult =
@@ -1336,7 +1339,10 @@ export function createPublisher(deps: McToolsDeps): Publisher {
             (s) => s.trim(),
             () => null, // detached
           );
-          if (head !== `refs/heads/${branch}`) return final(MERGE_NOT_RUN_BRANCH);
+          if (head !== `refs/heads/${branch}`) {
+            // a seat's tree that moved on to another ticket while this run waits is not a refusal
+            return isSeatTree(worktree) ? { ok: true, kind: "away" } : final(MERGE_NOT_RUN_BRANCH);
+          }
           const mergeHead = await w(["rev-parse", "-q", "--verify", "MERGE_HEAD"]).then(
             (s) => s.trim(),
             (e: unknown) => {

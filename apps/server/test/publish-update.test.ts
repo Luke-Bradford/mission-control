@@ -308,6 +308,18 @@ describe("updateBranch (real git)", () => {
     expect(r).toMatchObject({ ok: false, transient: false });
   });
 
+  it("a seat's tree that moved on to another branch is away, not a refusal", async () => {
+    setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
+    // the run's recorded worktree is its seat's one tree, which now holds another ticket's branch
+    const seatTree = join(dir, "worktrees", "s", "guido-1-tree");
+    git(clone, "worktree", "add", "-q", "-b", "feature/8-other", seatTree);
+    const r = await publisher().updateBranch(run(), mainSha, seatTree);
+    expect(r).toEqual({ ok: true, kind: "away" });
+    // nothing was merged into the other branch
+    expect(git(seatTree, "rev-parse", "HEAD")).toBe(git(clone, "rev-parse", "feature/8-other"));
+    expect(git(clone, "rev-parse", BRANCH)).toBe(tip);
+  });
+
   it("a main tip only origin has (a merge made on GitHub) is fetched, then merged", async () => {
     setup((root) => write(root, "docs/c.md", "doc\nmore\n"));
     const onOrigin = elsewhereOnMain((root) => write(root, "docs/d.md", "new\n"));
