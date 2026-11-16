@@ -29,6 +29,8 @@ type ItemDiscussionProps = {
   /** When the operator's last typed reply on this item went through: the conversation opens. */
   replied?: number;
   focus?: boolean;
+  /** Bumped by Discuss: the conversation opens and its input takes focus. */
+  openRequest?: number;
   collapsed?: boolean;
   /** `page`: the whole conversation on the Needs you page, no fold, its log scrolling itself. */
   layout?: "panel" | "page";
@@ -90,6 +92,12 @@ function Conversation(p: ItemDiscussionProps) {
   useEffect(() => {
     if ((p.receipt || p.replied) && details.current) details.current.open = true;
   }, [p.receipt, p.replied]);
+  useEffect(() => {
+    const el = details.current;
+    if (!p.openRequest || !el) return;
+    el.open = true;
+    el.querySelector<HTMLElement>("input, textarea")?.focus();
+  }, [p.openRequest]);
   return (
     <details ref={details} className="item-conversation" open={initialOpen.current}>
       <summary>Conversation with FLIGHT</summary>
@@ -104,6 +112,7 @@ function DiscussionBody({
   seat,
   receipt,
   focus = false,
+  openRequest = 0,
   layout = "panel",
 }: {
   itemKey: string;
@@ -111,6 +120,7 @@ function DiscussionBody({
   seat?: FlightSeat | null;
   receipt?: Receipt;
   focus?: boolean;
+  openRequest?: number;
   layout?: "panel" | "page";
 }) {
   const page = layout === "page";
@@ -135,6 +145,9 @@ function DiscussionBody({
       active = false;
     };
   }, [live]);
+  useEffect(() => {
+    if (openRequest > 0) input.current?.focus();
+  }, [openRequest]);
   const tz = useTz();
   const thread = useResource<ItemThread>(RESOURCES.itemThread(itemKey));
   const sent = thread.data?.messages ?? [];

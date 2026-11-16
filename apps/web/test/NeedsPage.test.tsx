@@ -13,7 +13,17 @@ import { Needs } from "../src/pages/Needs.tsx";
 import { navigate } from "../src/router.ts";
 import { Header } from "../src/shell/Header.tsx";
 import { stubFetch } from "./fetchStub.ts";
-import { brief, CONFIG, crewRow, HOUR, item, MIN, NOW } from "./fixtures.ts";
+import {
+  BRIEF_REVISION,
+  boundBrief,
+  brief,
+  CONFIG,
+  crewRow,
+  HOUR,
+  item,
+  MIN,
+  NOW,
+} from "./fixtures.ts";
 
 const discussionPath = (key: string) => `/api/attention/${encodeURIComponent(key)}/discussion`;
 
@@ -818,5 +828,84 @@ describe("the Comms redirect", () => {
     render(<Comms item="f1" view={{ kind: "flight" }} />);
     await waitFor(() => expect(window.location.pathname).toBe("/comms"));
     await waitFor(() => expect(window.location.search).toContain("item=f1"));
+  });
+});
+
+describe("Needs you page, a complete brief", () => {
+  const CHOICE = "/api/attention/ask%3Abound/choice";
+  const bound = item({
+    key: "ask:bound",
+    kind: "question",
+    agentId: "mc-dev-1",
+    escalationId: null,
+    text: "Which port?",
+    brief: boundBrief(),
+  });
+  const posts = (fn: ReturnType<typeof routes>, path: string) =>
+    fn.mock.calls
+      .filter(([p, init]) => p === path && init?.method === "POST")
+      .map(([, init]) => JSON.parse(init?.body as string));
+
+  it("shows the facts without a click and Accept posts the bound recommendation", async () => {
+    const fn = routes([bound], {
+      [`POST ${CHOICE}`]: {
+        epoch: "e1",
+        requestId: "r",
+        optionId: "a",
+        at: NOW,
+        state: "applied",
+        text: "Answer sent.",
+        actor: { operator: true },
+      },
+    });
+    render(<Needs item="ask:bound" />);
+    expect(await screen.findByText("Why it needs you")).toBeTruthy();
+    expect(screen.getByText("Cost of delay")).toBeTruthy();
+    const details = document.querySelector(".needs-more") as HTMLDetailsElement;
+    expect(details.contains(screen.getByText("Why it needs you"))).toBe(false);
+    const accept = (await screen.findByRole("button", {
+      name: "Accept recommendation: 5174",
+    })) as HTMLButtonElement;
+    await waitFor(() => expect(accept.disabled).toBe(false));
+    fireEvent.click(accept);
+    await waitFor(() => expect(posts(fn, CHOICE)).toHaveLength(1));
+    expect(posts(fn, CHOICE)[0]).toEqual({
+      briefId: 31,
+      sourceRevision: BRIEF_REVISION,
+      optionId: "a",
+      requestId: expect.any(String),
+    });
+    expect((await screen.findByTestId("choice-line")).textContent).toContain("Answer sent.");
+  });
+
+  it("Discuss focuses the conversation and sends no choice, even when it says approve", async () => {
+    const fn = routes([bound]);
+    render(<Needs item="ask:bound" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Discuss" }));
+    const input = screen.getByLabelText("Ask FLIGHT about this");
+    await waitFor(() => expect(document.activeElement).toBe(input));
+    fireEvent.change(input, { target: { value: "approve" } });
+    expect(posts(fn, CHOICE)).toEqual([]);
+    expect(fn.mock.calls.filter(([, init]) => init?.method === "POST")).toEqual([]);
+  });
+
+  it("opens a person item's brief block without a click", async () => {
+    const person = item({
+      key: "person:1:1",
+      kind: "person",
+      agentId: null,
+      escalationId: null,
+      brief: brief({
+        person: {
+          source: { kind: "github" },
+          take: "Looks fine.",
+          replies: [{ id: "r1", label: "Reply", text: "Thanks" }],
+        } as never,
+      }),
+    });
+    routes([person]);
+    render(<Needs item="person:1:1" />);
+    await screen.findByText("Suggested replies");
+    expect((document.querySelector(".needs-more") as HTMLDetailsElement).open).toBe(true);
   });
 });

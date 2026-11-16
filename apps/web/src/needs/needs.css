@@ -214,7 +214,7 @@
 .needs-answer .optlist {
   width: 100%;
   min-width: 0;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .needs-answer .optlist > .recommendation {
@@ -631,4 +631,18 @@ fieldset.needs-controls {
 .mat-viewer-frame.actual .mat-viewer-img {
   max-width: none;
   margin: 0;
+}
+
+.answer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  max-width: 800px;
+}
+
+.answer-actions .note {
+  flex: 1 0 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
 }

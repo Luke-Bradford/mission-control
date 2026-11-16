@@ -9,7 +9,7 @@ import {
   type RenderedPage,
 } from "./browserRunner.ts";
 import { desktopFixture } from "./desktopFixtures.ts";
-import { brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
+import { boundBrief, brief, HOUR, item, MIN, NOW } from "./fixtures.ts";
 
 const { renderAt } = browserSession();
 const SHOTS = process.env.MC_SHOT_DIR;
@@ -599,5 +599,119 @@ describeRendered("Needs you page", () => {
       }
     },
     BROWSER_TEST_TIMEOUT_MS,
+  );
+  it(
+    "complete brief composition: facts, options, Accept and Discuss stay whole and reachable",
+    async () => {
+      const BIG = "A long sentence that must be read in full. ".repeat(190).slice(0, 8000);
+      const variants = [
+        { name: "two", options: 2, asks: 0, big: false },
+        { name: "four", options: 4, asks: 0, big: false },
+        { name: "three-asks", options: 2, asks: 2, big: false },
+        { name: "fifty-asks", options: 2, asks: 49, big: false },
+        { name: "stress", options: 4, asks: 0, big: true },
+      ] as const;
+      const sizes = [
+        [1280, 900],
+        [1600, 1000],
+        [1920, 940],
+        [1600, 700],
+      ] as const;
+      for (const variant of variants) {
+        for (const [width, height] of sizes) {
+          for (const colorScheme of ["light", "dark"] as const) {
+            const options = Array.from({ length: variant.options }, (_, i) => ({
+              id: `o${i}`,
+              label: `Option ${i + 1}`,
+              answer: `Answer ${i + 1}`,
+              ...(variant.big ? { description: BIG } : {}),
+            }));
+            const base = api(0, 2, variant.asks);
+            const decisionBrief = boundBrief({
+              options,
+              recommendedOptionId: "o0",
+              ...(variant.big ? { context: BIG, recommendation: BIG } : {}),
+            });
+            if (variant.big && decisionBrief.decision) {
+              decisionBrief.decision.costOfDelay = BIG;
+              decisionBrief.decision.consulted = [{ who: "mc-dev-1", finding: BIG }];
+            }
+            for (const o of decisionBrief.options)
+              if (variant.big) {
+                o.consequence = BIG;
+                if (o.reversibility) o.reversibility.detail = BIG;
+              }
+            const asks = (base["/api/attention"] as ReturnType<typeof item>[]).map((a) =>
+              a.key === KEY ? { ...a, brief: decisionBrief } : a,
+            );
+            const page = await renderAt({
+              page: "test/needsBrowser.html",
+              width,
+              height,
+              colorScheme,
+              api: { ...base, "/api/attention": asks },
+              assets: ASSETS,
+            });
+            const label = `${variant.name} ${width}x${height} ${colorScheme}`;
+            try {
+              await ready(page);
+              await page.boxes(".needs-answer .decision-facts");
+              const overflow = await page.evaluate(
+                () => document.documentElement.scrollWidth - innerWidth,
+                undefined,
+              );
+              expect(overflow, `${label}: no horizontal overflow`).toBeLessThanOrEqual(0);
+              const factsInFold = await page.evaluate(
+                () =>
+                  document
+                    .querySelector(".needs-more")
+                    ?.contains(document.querySelector(".decision-facts")) ?? false,
+                undefined,
+              );
+              expect(factsInFold, `${label}: facts are outside the Details fold`).toBe(false);
+              await page.evaluate(() => {
+                const last = [...document.querySelectorAll<HTMLElement>(".opt .option-pick")].pop();
+                last?.focus();
+              }, undefined);
+              const focused = await page.evaluate(
+                () => document.activeElement?.classList.contains("option-pick") ?? false,
+                undefined,
+              );
+              expect(focused, `${label}: the last option takes focus`).toBe(true);
+              const reach = await page.evaluate(() => {
+                const hit = (el: Element | null) => {
+                  if (!el) return false;
+                  el.scrollIntoView({ block: "nearest" });
+                  const r = el.getBoundingClientRect();
+                  const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+                  return top !== null && (el === top || el.contains(top));
+                };
+                const accept = [...document.querySelectorAll("button")].find((b) =>
+                  b.textContent?.startsWith("Accept recommendation"),
+                );
+                const last = [...document.querySelectorAll(".opt .option-pick")].pop() ?? null;
+                return {
+                  accept: hit(accept ?? null),
+                  last: hit(last),
+                };
+              }, undefined);
+              expect(reach.accept, `${label}: Accept is painted and hit-testable`).toBe(true);
+              expect(reach.last, `${label}: the last option is painted and hit-testable`).toBe(
+                true,
+              );
+              if (SHOTS) {
+                mkdirSync(SHOTS, { recursive: true });
+                await page.screenshot(
+                  join(SHOTS, `needs-brief-${variant.name}-${width}x${height}-${colorScheme}.png`),
+                );
+              }
+            } finally {
+              await page.close();
+            }
+          }
+        }
+      }
+    },
+    BROWSER_TEST_TIMEOUT_MS * 4,
   );
 });

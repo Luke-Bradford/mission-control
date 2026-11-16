@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { BRIEF_LINES, BriefOptions, ItemBrief } from "../src/comms/ItemBrief.tsx";
-import { brief } from "./fixtures.ts";
+import { BRIEF_LINES, BriefOptions, DecisionFacts, ItemBrief } from "../src/comms/ItemBrief.tsx";
+import { boundBrief, brief, NOW } from "./fixtures.ts";
 import { readStyles } from "./styles.ts";
 
 afterEach(() => {
@@ -346,4 +346,99 @@ it("shows the approval recommendation above a labelled call group and all option
   for (const description of ["Send the reviewed draft", "Leave the draft unsent"])
     expect(screen.getByText(description).closest(".opt")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Approve" }).title).toBe("");
+});
+
+describe("DecisionFacts", () => {
+  const opts = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({
+      id: `o${i}`,
+      label: `Option ${i}`,
+      answer: `Answer ${i}`,
+    }));
+
+  it.each([2, 4])("renders complete decision facts with %i options", (n) => {
+    const b = boundBrief({
+      options: opts(n),
+      decision: {
+        whyOperator: { kind: "money", explanation: "It spends budget." },
+        consulted: [],
+        costOfDelay: "Nothing ships until you answer.",
+      },
+    });
+    render(
+      <>
+        <DecisionFacts brief={b} tz="UTC" />
+        <BriefOptions
+          options={b.options}
+          recommendedOptionId="o1"
+          live={false}
+          disabled={false}
+          variant="panel"
+          onPick={() => {}}
+        />
+      </>,
+    );
+    for (const h of [
+      "Why it needs you",
+      "Who FLIGHT consulted",
+      "If nobody answers",
+      "Cost of delay",
+    ])
+      expect(screen.getByRole("heading", { name: h })).toBeTruthy();
+    expect(screen.getByText("Nobody consulted")).toBeTruthy();
+    expect(screen.getByText("Money.")).toBeTruthy();
+    expect(screen.getByText("Nothing ships until you answer.")).toBeTruthy();
+    for (const o of b.options) expect(screen.getByText(`Consequence of ${o.label}.`)).toBeTruthy();
+    expect(screen.getAllByText("Can be undone.")).toHaveLength(n);
+    const rec = document.querySelectorAll(".opt.rec");
+    expect(rec).toHaveLength(1);
+    expect(rec[0].textContent).toContain("Option 1");
+  });
+
+  it("legacy brief shows Needs a refreshed brief", () => {
+    const legacy = brief({
+      state: {
+        completeness: "incomplete",
+        freshness: "unknown",
+        reason: "Written before briefs were bound.",
+      },
+    });
+    render(<DecisionFacts brief={legacy} tz="UTC" />);
+    expect(screen.getByText("Needs a refreshed brief")).toBeTruthy();
+    expect(screen.getByText(/Written before briefs were bound/)).toBeTruthy();
+    expect(screen.queryByText("Why it needs you")).toBeNull();
+    expect(screen.queryByText("Cost of delay")).toBeNull();
+  });
+
+  it("shows a stale badge with the reason", () => {
+    render(
+      <DecisionFacts
+        brief={boundBrief({
+          state: { completeness: "complete", freshness: "stale", reason: "The head moved." },
+        })}
+        tz="UTC"
+      />,
+    );
+    expect(screen.getByText("Stale")).toBeTruthy();
+    expect(screen.getByText(/The head moved\./)).toBeTruthy();
+  });
+
+  it("countdown only for FYI", () => {
+    const fyi = boundBrief({
+      decision: { consulted: [], costOfDelay: "Slower." },
+    });
+    const { unmount } = render(
+      <DecisionFacts brief={fyi} defaultDueAt={Date.UTC(2026, 9, 17, 14, 40)} tz="UTC" />,
+    );
+    expect(
+      screen.getByText(/FLIGHT will Records 5174\. at 14:40 unless you choose\./),
+    ).toBeTruthy();
+    expect(screen.getByText("Within FLIGHT's standing authority")).toBeTruthy();
+    unmount();
+    render(<DecisionFacts brief={boundBrief()} defaultDueAt={NOW} tz="UTC" />);
+    expect(
+      screen.getByText(/Waits for your answer\. Nothing happens automatically\./),
+    ).toBeTruthy();
+    expect(screen.queryByText(/FLIGHT will/)).toBeNull();
+  });
 });

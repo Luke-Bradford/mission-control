@@ -44,3 +44,68 @@ div.opt {
   width: 100%;
   min-width: 0;
 }
+
+/* The facts that let the operator decide: open, full text, one block each. */
+.decision-facts {
+  display: grid;
+  gap: var(--sp-2);
+  max-width: 800px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.decision-facts .fact > p,
+.decision-facts .fact > ul,
+.brief-fresh {
+  margin: 0;
+}
+
+.decision-facts .fact > .bsec {
+  margin: 0 0 var(--sp-1);
+}
+
+.brief-fresh {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--sp-1);
+  overflow-wrap: anywhere;
+}
+
+/* An option stacks its parts; with room (a 640px+ list) it reads as a row. */
+.optlist {
+  container-type: inline-size;
+}
+
+.opt-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+
+.opt-body,
+.opt-rev {
+  display: grid;
+  gap: var(--sp-1);
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.opt-consequence {
+  margin: 0;
+}
+
+@container (min-width: 640px) {
+  .optlist > .opt {
+    grid-template-columns: minmax(160px, 200px) minmax(0, 1fr) minmax(180px, 240px);
+    align-items: start;
+    column-gap: var(--sp-2);
+  }
+
+  .optlist > .opt:not(:has(.opt-rev)) {
+    grid-template-columns: minmax(160px, 200px) minmax(0, 1fr);
+  }
+}

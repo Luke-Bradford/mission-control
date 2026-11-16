@@ -481,3 +481,47 @@ export const OVERVIEW: OverviewSummary = {
   pipeline: [],
   machine: { cpu: [], mem: [], diskFreeGb: null },
 };
+
+export const BRIEF_REVISION = "d".repeat(64);
+
+/**
+ * `brief` as the server writes it for an operator ask: an id, every option identified with a
+ * consequence and reversibility, a binding with one typed action per option, and a current state.
+ */
+export function boundBrief(over: Partial<AttentionBrief> = {}): AttentionBrief {
+  const options = (over.options ?? brief().options).map((o, i) => ({
+    consequence: `Consequence of ${o.label}.`,
+    reversibility: { kind: "reversible" as const, detail: "Change it later." },
+    ...o,
+    id: o.id ?? String.fromCharCode(97 + i),
+  }));
+  return {
+    ...brief(),
+    for: "operator",
+    id: 31,
+    recommendedOptionId: options[0]?.id,
+    decision: {
+      whyOperator: { kind: "product-direction", explanation: "It sets which port the team uses." },
+      consulted: [{ who: "mc-dev-1", finding: "5174 is free." }],
+      costOfDelay: "The dev seat waits.",
+    },
+    state: { completeness: "complete", freshness: "current", reason: "Matches the source." },
+    ...over,
+    options,
+    binding: over.binding ?? {
+      version: 2,
+      sourceRevision: BRIEF_REVISION,
+      meaningKey: "m",
+      epoch: "e1",
+      epochId: 31,
+      preparedAt: NOW,
+      preparedBy: { service: "stalled-comms" },
+      actions: options.map((o) => ({
+        optionId: o.id as string,
+        action: { kind: "record-decision" as const },
+        defaultable: false,
+        effect: `Records ${o.label}.`,
+      })),
+    },
+  };
+}
