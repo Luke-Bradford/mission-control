@@ -5,6 +5,7 @@ import {
   COMMS_OPEN_ITEM_ROLLOUT_CUTOFF_AT,
   FLIGHT_TRIAGE_WAIT_MS,
   joinMapGraph,
+  SPEC_BOUNCE_CAUSES,
   unpackMap,
 } from "@mc/core";
 import "./temp-home.ts";
@@ -517,6 +518,10 @@ describe("audit", () => {
       calls: 0,
       chars: 0,
     })),
+    specBounces: {
+      rows: [],
+      counts: SPEC_BOUNCE_CAUSES.map((cause) => ({ cause, days7: 0, days30: 0 })),
+    },
     surgeonProposals: [],
   });
 
