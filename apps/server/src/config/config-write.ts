@@ -5,6 +5,8 @@
  * string concatenation; other spacing and quoting may be normalised), re-validates the whole result
  * with the startup loader, keeps a backup beside it, and swaps the file in by an atomic rename.
  */
+
+import { createHash } from "node:crypto";
 import { type FileHandle, lstat, open, readdir, readFile, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -92,6 +94,33 @@ export const RepoSetupBody = z.strictObject({
     direction: z.string().max(4000),
   }),
 });
+
+/** The editable config.yaml fields on Setup › Roles & guards. */
+const RepoRolesValues = z.strictObject({
+  pick_from: z.unknown().optional(),
+  needs: z.unknown().optional(),
+  areas: z.unknown().optional(),
+  promote_backlog: z.unknown().optional(),
+  protected: z.unknown().optional(),
+  hard_rules: z.unknown().optional(),
+  hard_rules_by: z.unknown().optional(),
+  commands: z.unknown().optional(),
+  full_suite: z.unknown().optional(),
+  required_checks: z.unknown().optional(),
+  checks: z.unknown().optional(),
+  uat: z.unknown().optional(),
+  always_ask: z.unknown().optional(),
+});
+
+/** `base` is the config.yaml digest returned by the Roles & guards reader. */
+export const RepoRolesBody = z.strictObject({
+  base: z.string().regex(/^[a-f0-9]{64}$/),
+  rules: RepoRolesValues,
+});
+
+export type RepoRolesValues = z.infer<typeof RepoRolesValues>;
+export const REPO_ROLES_CHANGED =
+  "config.yaml changed since this page loaded it; reload and try again";
 
 /** One all-or-nothing Add/Convert submission from Setup › Repos & seats. */
 export const RepoOnboardBody = z.strictObject({
@@ -445,6 +474,136 @@ export function setRepoSetup(
   const run = queue.then(() => setRepo(path, repoId, setup, now));
   queue = run.catch(() => undefined);
   return run;
+}
+
+/** Replaces the Roles & guards fields for one repo after checking the page's file version. */
+export function setRepoRoles(
+  path: string,
+  repoId: string,
+  base: string,
+  rules: RepoRolesValues,
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  const run = queue.then(() => setRoles(path, repoId, base, rules, now));
+  queue = run.catch(() => undefined);
+  return run;
+}
+
+const repoRolesHash = (bytes: Buffer): string => createHash("sha256").update(bytes).digest("hex");
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * One repo as config.yaml holds it right now: the digest of the bytes read, the loaded repo and
+ * its raw `repos[]` entry (so a caller can tell a key set in the file from one left to a default).
+ * Every value the Roles & guards page shows comes from this one read.
+ */
+export async function readRepoRolesConfig(
+  path: string,
+  repoId: string,
+): Promise<{ base: string; repo: ConfigRepo; raw: Record<string, unknown> }> {
+  const { bytes, text, current } = await readCurrent(path);
+  const repo = current.repos.find((item) => item.id === repoId);
+  if (!repo) throw new ConfigWriteError("missing", `unknown repo ${repoId}`);
+  const rawRepos = (parseDocument(text).toJS() as { repos?: unknown }).repos;
+  const raw = Array.isArray(rawRepos)
+    ? rawRepos.find((item) => isPlainObject(item) && item.id === repoId)
+    : undefined;
+  return { base: repoRolesHash(bytes), repo, raw: isPlainObject(raw) ? raw : {} };
+}
+
+/**
+ * `commands` and `uat` save one leaf at a time: a body naming only `writer` or `labels` keeps the
+ * sibling already in the file (or, for `commands`, the default), so the page edits one list.
+ */
+function leafMerge(key: string, value: unknown, holder: YAMLMap): unknown {
+  if ((key !== "commands" && key !== "uat") || !isPlainObject(value)) return value;
+  const existing = holder.get(key, true);
+  const kept = isMap(existing) ? existing.toJSON() : {};
+  const fallback = key === "commands" && !isMap(existing) ? defaultSeatCommands() : kept;
+  return { ...fallback, ...value };
+}
+
+async function setRoles(
+  path: string,
+  repoId: string,
+  base: string,
+  rules: RepoRolesValues,
+  now: number,
+): Promise<{ config: CcConfig; backup: string }> {
+  const parsed = RepoRolesBody.safeParse({ base, rules });
+  if (!parsed.success)
+    throw new ConfigWriteError("invalid", parsed.error.issues[0]?.message ?? "invalid repo rules");
+  const { bytes, text, current } = await readCurrent(path);
+  if (repoRolesHash(bytes) !== base) throw new ConfigWriteError("conflict", REPO_ROLES_CHANGED);
+  const index = current.repos.findIndex((repo) => repo.id === repoId);
+  if (index < 0) throw new ConfigWriteError("missing", `unknown repo ${repoId}`);
+  const doc = parseDocument(text);
+  const repos = doc.get("repos", true);
+  if (doc.errors.length > 0 || !isSeq(repos) || !isMap(repos.items[index]))
+    throw new ConfigWriteError("current", "config.yaml has no repo list to edit");
+  const repo = repos.items[index] as YAMLMap;
+  const existingRules = repo.get("rules", true);
+  const configRules = isMap(existingRules) ? existingRules : (doc.createNode({}) as YAMLMap);
+  for (const key of [
+    "pick_from",
+    "needs",
+    "areas",
+    "promote_backlog",
+    "hard_rules",
+    "hard_rules_by",
+    "checks",
+    "uat",
+    "always_ask",
+  ] as const) {
+    const value = parsed.data.rules[key];
+    if (value !== undefined)
+      configRules.set(key, doc.createNode(leafMerge(key, value, configRules)));
+  }
+  repo.set("rules", configRules);
+  for (const key of ["protected", "commands", "full_suite", "required_checks"] as const) {
+    const value = parsed.data.rules[key];
+    if (value !== undefined) repo.set(key, doc.createNode(leafMerge(key, value, repo)));
+  }
+  const newText = doc.toString({ lineWidth: 0 });
+  let next: CcConfig;
+  try {
+    next = parseConfig(newText, "the new config.yaml");
+  } catch (e) {
+    if (e instanceof ConfigError) throw new ConfigWriteError("invalid", e.message);
+    throw new ConfigWriteError("write", "the new config.yaml would not load");
+  }
+  const nextRepo = next.repos[index];
+  const currentRepo = current.repos[index];
+  if (!nextRepo || !currentRepo)
+    throw new ConfigWriteError("write", "the new config.yaml has no repo");
+  const unchanged = (repo: ConfigRepo) => {
+    const {
+      rules: _rules,
+      protectedFiles: _protected,
+      commands: _commands,
+      fullSuite: _suite,
+      requiredChecks: _checks,
+      ...rest
+    } = repo;
+    return rest;
+  };
+  if (
+    !isDeepStrictEqual(unchanged(nextRepo), unchanged(currentRepo)) ||
+    !isDeepStrictEqual(
+      next.repos.map((repo, i) => (i === index ? currentRepo : repo)),
+      current.repos,
+    )
+  )
+    throw new ConfigWriteError(
+      "write",
+      "the new config.yaml would change more than this repo's rules",
+    );
+  const backup = await backUp(path, bytes, now);
+  await replace(path, newText);
+  await pruneBackups(path, basename(backup)).catch(() => undefined);
+  return { config: next, backup };
 }
 
 async function setRepo(
