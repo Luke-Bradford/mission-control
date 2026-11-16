@@ -3066,7 +3066,7 @@ export class Store {
   /** Opens alarms for routine events that stopped during active crew work, and clears resumed ones. */
   checkSilenceAlarms(at: number, quiet: { crewPaused: boolean; budgetStopped: boolean }): void {
     if (quiet.crewPaused || quiet.budgetStopped) return;
-    const ran = this.db.prepare("SELECT 1 FROM runs LIMIT 1").get() !== undefined;
+    const ran = this.db.prepare("SELECT 1 FROM runs WHERE ended_at IS NULL LIMIT 1").get() !== undefined;
     if (!ran) return;
     for (const event of SILENCE_WATCHED_EVENTS) {
       const lastSeenAt = auditEventLastSeen(this.db, event.kind);
@@ -3083,7 +3083,7 @@ export class Store {
   silenceAlarmsBudgetStopped(): boolean {
     return (
       this.db
-        .prepare("SELECT 1 FROM runs WHERE json_extract(loop, '$.parked.kind') = 'budget' LIMIT 1")
+        .prepare("SELECT 1 FROM runs WHERE ended_at IS NULL AND json_extract(loop, '$.parked.kind') = 'budget' LIMIT 1")
         .get() !== undefined
     );
   }

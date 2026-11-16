@@ -128,6 +128,19 @@ describe("silence alarms", () => {
     );
   });
 
+  it("does not treat an ended historical run as active crew work", () => {
+    const watched = screenshotEvent();
+    store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok" }));
+    store.recordSilenceEvent(watched.kind, NOW - watched.gapMs - 1);
+    store.checkSilenceAlarms(NOW, { crewPaused: false, budgetStopped: false });
+    expect(store.audit(SINCE, NOW).items?.filter((item) => item.kind === "silence-alarm")).toEqual([]);
+  });
+
+  it("does not let an ended budget park suppress alarms", () => {
+    store.upsertRun(run({ endedAt: NOW - HOUR, status: "ok", loop: { parked: { kind: "budget" } } }));
+    expect(store.silenceAlarmsBudgetStopped()).toBe(false);
+  });
+
   it("includes the event, last seen time, and expected gap in Audit's Do next data", () => {
     const watched = screenshotEvent();
     const lastSeenAt = NOW - watched.gapMs - 1;
