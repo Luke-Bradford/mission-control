@@ -6505,6 +6505,52 @@ describe("the engine runs reviews", () => {
           .reviewsOfRun(RUN)
           .filter((r) => r.id > third && r.state !== "superseded");
         expect(fresh).toHaveLength(1);
+        expect(fresh[0]).toMatchObject({ state: "running" });
+        expect(fresh[0]?.runId).not.toBeNull();
+        expect(loopOf().phase).not.toBe("parked");
+      });
+
+      it("rereview raises a stale open alarm to the live round and resolves it", async () => {
+        const third = await heldAtLimit();
+        syncWasteAlarms(config, store, clock);
+        const open = store.waste.alarms(
+          "WHERE check_id = 'review-rounds' AND subject = ? AND resolved_at IS NULL",
+          RUN,
+        )[0];
+        expect(open).toMatchObject({ level: 3 });
+        // a fourth round is requested after the scan wrote level 3
+        const row = need(store.review(third));
+        store.requestReview({
+          authorRunId: row.authorRunId,
+          repoId: row.repoId,
+          seatId: RETRO,
+          prNumber: row.prNumber,
+          sha: row.sha,
+          epoch: row.epoch,
+          attempt: row.attempt + 1,
+          round: 4,
+          at: clock,
+        });
+        expect(store.waste.maxRound(RUN)).toBe(4);
+        await vi.waitFor(() => expect(loopOf()).toMatchObject({ phase: "parked" }));
+        expect(
+          await h.engine.onOperatorMessage(RUN, "FLIGHT", {
+            kinds: ["review", "review-ruling", "review-failed"],
+            action: "rereview",
+            basis: "the findings are fixed",
+          }),
+        ).toEqual({ lifted: true });
+        expect(reviewsHeld(store, RUN)).toBe(false);
+        expect(store.waste.alarms("WHERE id = ?", open?.id ?? 0)[0]).toMatchObject({
+          level: 4,
+          basis: "the findings are fixed",
+        });
+        await h.engine.tick();
+        await h.engine.reconcileRun(RUN);
+        const fresh = store
+          .reviewsOfRun(RUN)
+          .filter((r) => r.round < 3 && r.state !== "superseded" && r.id > third);
+        expect(fresh.map((r) => r.state)).toEqual(["running"]);
         expect(loopOf().phase).not.toBe("parked");
       });
 
