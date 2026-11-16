@@ -84,7 +84,7 @@ describe("wake stuck", () => {
     expect(stuck).toEqual([
       expect.objectContaining({ key: "guido-1:r1", told: false, evidence: `guido-1:r1: ${text}` }),
     ]);
-    markFlightSignalsShown(store, state, NOW);
+    markFlightSignalsShown(store, state as FlightState, NOW);
     expect(read(NOW + MIN).stuck).toEqual([expect.objectContaining({ told: true })]);
   });
 
