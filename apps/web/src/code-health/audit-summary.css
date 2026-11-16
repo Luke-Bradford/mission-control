@@ -121,7 +121,7 @@
   align-items: center;
   gap: var(--sp-3);
 }
-.as-do .sub b {
+.as-do .as-count {
   color: var(--fg);
 }
 .as-scroll {
@@ -135,17 +135,15 @@
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
-.code-health .as-empty,
-.code-health .as-foot {
+.code-health .as-empty {
   margin: 0;
-}
-.as-empty {
   padding: var(--sp-3) var(--sp-4);
   color: var(--fg-2);
   font-size: var(--fs-s);
   line-height: var(--lh-s);
 }
-.as-foot {
+.code-health .as-foot {
+  margin: 0;
   padding: var(--sp-2) var(--sp-4);
   border-top: 1px solid var(--line);
   color: var(--fg-2);
@@ -161,12 +159,12 @@
   font-size: var(--fs-s);
 }
 
-.as-scroll table {
+:where(.as-scroll) table {
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
 }
-.as-scroll thead th {
+:where(.as-scroll) thead th {
   position: sticky;
   top: 0;
   z-index: 2;
@@ -178,7 +176,7 @@
   white-space: nowrap;
   box-shadow: inset 0 -1px 0 var(--line-2);
 }
-.as-scroll td {
+:where(.as-scroll) td {
   padding: var(--sp-2);
   border-bottom: 1px solid var(--line);
   vertical-align: top;
@@ -186,15 +184,15 @@
   line-height: var(--lh-s);
   overflow-wrap: anywhere;
 }
-.as-scroll th:first-child,
-.as-scroll td:first-child {
+:where(.as-scroll) th:first-child,
+:where(.as-scroll) td:first-child {
   padding-left: var(--sp-4);
 }
-.as-scroll th:last-child,
-.as-scroll td:last-child {
+:where(.as-scroll) th:last-child,
+:where(.as-scroll) td:last-child {
   padding-right: var(--sp-4);
 }
-.as-scroll .as-r {
+:where(.as-scroll) .as-r {
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -223,10 +221,10 @@
 }
 
 .as-rec:hover > td,
-.as-open > td {
+.as-scroll .as-open > td {
   background: var(--surface-2);
 }
-.as-open > td {
+.as-scroll .as-open > td {
   border-bottom-color: transparent;
 }
 .as-n {
@@ -293,14 +291,14 @@
 .as-unit {
   color: var(--muted);
 }
-.as-dec b {
+.as-scroll .as-dec b {
   font-weight: 600;
   color: var(--fg);
 }
-.as-dec b.as-you {
+.as-scroll .as-dec b.as-you {
   color: var(--warn);
 }
-.as-dec span {
+.as-scroll .as-dec span {
   color: var(--muted);
 }
 .as-acts {
@@ -344,7 +342,7 @@
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
-.as-more > td {
+.as-scroll .as-more > td {
   background: var(--surface-2);
   padding-top: 0;
   padding-bottom: var(--sp-3);
@@ -465,24 +463,20 @@
   flex-wrap: wrap;
   border-block: 1px solid var(--line);
 }
-.as-fun div {
+.as-cell {
   flex: 1 1 0;
   min-width: 0;
   padding: var(--sp-1) var(--sp-2);
   border-left: 1px solid var(--line);
 }
-.as-fun div:first-child {
-  border-left: 0;
-  padding-left: var(--sp-4);
-}
-.as-fun b {
-  display: block;
-  font: 600 var(--fs-panel) / var(--lh-panel) var(--mono);
-}
-.as-fun span {
+.as-cap {
   font-size: var(--fs-s);
   line-height: var(--lh-s);
   color: var(--muted);
+}
+.as-fig {
+  display: block;
+  font: 600 var(--fs-panel) / var(--lh-panel) var(--mono);
 }
 .as-sub {
   color: var(--muted);
@@ -525,4 +519,8 @@
 }
 .as-c-out {
   width: 116px;
+}
+.as-cell:first-child {
+  border-left: 0;
+  padding-left: var(--sp-4);
 }

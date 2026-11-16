@@ -1,5 +1,5 @@
-import { overviewFixture } from "./codeHealthOverviewFixtures.ts";
 import type { CodeHealthCoverage, CodeHealthRecommendation, CodeHealthView } from "@mc/core";
+import { overviewFixture } from "./codeHealthOverviewFixtures.ts";
 export function codeHealthBrowserApi(at = Date.now()) {
   const coverage: CodeHealthCoverage = {
     state: "available",

@@ -1,7 +1,7 @@
 import type {
   CodeHealthCoverage,
-  CodeHealthOverview,
   CodeHealthEvidenceRef,
+  CodeHealthOverview,
   CodeHealthRecommendation,
   CodeHealthView,
   ConfigView,

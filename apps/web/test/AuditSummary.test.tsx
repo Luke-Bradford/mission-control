@@ -202,8 +202,8 @@ it("keeps long titles and long evidence whole in the page text", async () => {
     }),
   );
   render(<CodeHealth />);
-  await screen.findByRole("button", { name: new RegExp("end-of-title") });
-  expect(screen.getAllByText(new RegExp("end-of-evidence")).length).toBeGreaterThan(0);
+  await screen.findByRole("button", { name: /end-of-title/ });
+  expect(screen.getAllByText(/end-of-evidence/).length).toBeGreaterThan(0);
 });
 
 it("expands a row on click and filters by the server's decision facts", async () => {

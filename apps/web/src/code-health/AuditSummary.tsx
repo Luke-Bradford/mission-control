@@ -5,7 +5,7 @@ import type {
   CodeHealthRecommendation,
   CodeHealthWasteAlarmRow,
 } from "@mc/core";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Panel } from "../hud/Panel.tsx";
 import { Seg } from "../hud/Seg.tsx";
 import type { Action } from "./dialogs.tsx";
@@ -348,6 +348,24 @@ function MergedChart({ days }: { days: CodeHealthOverview["build"]["mergedPerDay
   );
 }
 
+/** A scrolling list the keyboard can reach and a screen reader can name. */
+function ScrollRegion({
+  className,
+  label,
+  children,
+}: {
+  className: string;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: the list scrolls, so the keyboard must reach it
+    <section className={className} tabIndex={0} aria-label={label}>
+      {children}
+    </section>
+  );
+}
+
 /** The Audit first screen: one stored summary, shown. It reads nothing and decides nothing itself. */
 export function AuditSummary({
   overview,
@@ -393,7 +411,7 @@ export function AuditSummary({
             title="Do next"
             sub={
               <>
-                <b>{rows.length}</b> ranked
+                <b className="as-count">{rows.length}</b> ranked
                 {alarms.length > 0 && <> · {alarms.length} waste alarms</>} · what blocks the
                 evidence first, then measured size
               </>
@@ -418,13 +436,7 @@ export function AuditSummary({
               </>
             }
           >
-            {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the list scrolls, so the keyboard must reach it */}
-            <div
-              className="as-scroll as-grow"
-              tabIndex={0}
-              role="region"
-              aria-label="Recommendations"
-            >
+            <ScrollRegion className="as-scroll as-grow" label="Recommendations">
               {shown.length === 0 && alarms.length === 0 ? (
                 <p className="as-empty">
                   {rows.length === 0
@@ -478,7 +490,7 @@ export function AuditSummary({
                   </tbody>
                 </table>
               )}
-            </div>
+            </ScrollRegion>
             {!overview.wasteAlarms && (
               <p className="as-foot">Waste alarms: not yet supplied by this server.</p>
             )}
@@ -496,13 +508,7 @@ export function AuditSummary({
             {outside.state === "not-collected" && outside.items.length === 0 ? (
               <p className="as-empty">Not collected yet. {outside.note}</p>
             ) : (
-              // biome-ignore lint/a11y/noNoninteractiveTabindex: the list scrolls, so the keyboard must reach it
-              <div
-                className="as-scroll as-out"
-                tabIndex={0}
-                role="region"
-                aria-label="External items"
-              >
+              <ScrollRegion className="as-scroll as-out" label="External items">
                 <table>
                   <colgroup>
                     <col className="as-c-so" />
@@ -526,7 +532,7 @@ export function AuditSummary({
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             )}
           </Panel>
         </div>
@@ -557,13 +563,7 @@ export function AuditSummary({
             }
           >
             <MergedChart days={overview.build.mergedPerDay} />
-            {/* biome-ignore lint/a11y/noNoninteractiveTabindex: the list scrolls, so the keyboard must reach it */}
-            <div
-              className="as-scroll as-hscroll"
-              tabIndex={0}
-              role="region"
-              aria-label="Health measures"
-            >
+            <ScrollRegion className="as-scroll as-hscroll" label="Health measures">
               <table>
                 <colgroup>
                   <col />
@@ -597,7 +597,7 @@ export function AuditSummary({
                   ))}
                 </tbody>
               </table>
-            </div>
+            </ScrollRegion>
           </Panel>
           <Panel
             className="as-files"
@@ -614,13 +614,7 @@ export function AuditSummary({
                 No review findings are recorded against a file in this window.
               </p>
             ) : (
-              // biome-ignore lint/a11y/noNoninteractiveTabindex: the list scrolls, so the keyboard must reach it
-              <div
-                className="as-scroll as-grow"
-                tabIndex={0}
-                role="region"
-                aria-label="Files by findings"
-              >
+              <ScrollRegion className="as-scroll as-grow" label="Files by findings">
                 <table>
                   <colgroup>
                     <col />
@@ -649,7 +643,7 @@ export function AuditSummary({
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             )}
           </Panel>
           <Panel
@@ -659,9 +653,9 @@ export function AuditSummary({
           >
             <div className="as-fun">
               {overview.past.funnel.map((f) => (
-                <div key={f.kind}>
-                  <b>{f.count}</b>
-                  <span>{label(f.kind)}</span>
+                <div key={f.kind} className="as-cell">
+                  <b className="as-fig">{f.count}</b>
+                  <span className="as-cap">{label(f.kind)}</span>
                 </div>
               ))}
             </div>
@@ -670,13 +664,7 @@ export function AuditSummary({
                 No proposal has been decided yet, so there is no result to show.
               </p>
             ) : (
-              // biome-ignore lint/a11y/noNoninteractiveTabindex: the list scrolls, so the keyboard must reach it
-              <div
-                className="as-scroll as-pastrows"
-                tabIndex={0}
-                role="region"
-                aria-label="Past results"
-              >
+              <ScrollRegion className="as-scroll as-pastrows" label="Past results">
                 <table>
                   <colgroup>
                     <col className="as-c-date" />
@@ -709,7 +697,7 @@ export function AuditSummary({
                     ))}
                   </tbody>
                 </table>
-              </div>
+              </ScrollRegion>
             )}
           </Panel>
         </div>

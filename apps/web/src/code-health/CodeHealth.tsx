@@ -10,7 +10,6 @@ import {
 } from "@mc/core";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { hub, RESOURCES, streamStatus, useResource } from "../data.ts";
-import { Panel } from "../hud/Panel.tsx";
 import { AuditSummary } from "./AuditSummary.tsx";
 import { CodeRisk } from "./CodeRisk.tsx";
 import { type Action, ActionDialog, EvidenceDialog, HistoryDialog } from "./dialogs.tsx";
