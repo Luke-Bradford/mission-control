@@ -4194,6 +4194,7 @@ export function createFlightTools(deps: FlightToolsDeps): McTool[] {
         const settled = await deps.engine?.onOperatorMessage(run.id, "FLIGHT", {
           kinds,
           action: a.action,
+          basis: a.basis,
           ...(a.action === "second_review"
             ? { note: a.note ?? a.basis }
             : a.note === undefined

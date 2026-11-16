@@ -7866,6 +7866,7 @@ describe("superuser housekeeping", () => {
         {
           kinds: ["review", "review-ruling"],
           action: "second_review",
+          basis: "the finding misreads the guard",
           note: "the finding misreads the guard",
         },
       ],
@@ -7897,6 +7898,7 @@ describe("superuser housekeeping", () => {
         {
           kinds: ["review", "review-ruling"],
           action: "rework",
+          basis: "Checked the current state",
           note: "Fix the validation branch and add its regression test.",
         },
       ],

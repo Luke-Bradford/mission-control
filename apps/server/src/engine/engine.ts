@@ -169,7 +169,7 @@ import { issueOf } from "../mcp/tools.ts";
 import type { PrEvidence } from "../pr-evidence/capture.ts";
 import { type ExternalReviews, isExternalReview } from "../review/external.ts";
 import type { Supervisor } from "../runtime/supervisor.ts";
-import { restartHold, reviewsHeld } from "../spend/waste.ts";
+import { restartHold, reviewsHeld, settleReviewRounds } from "../spend/waste.ts";
 import type { Store } from "../store.ts";
 import { MACHINE_CAPACITY_DEFAULTS, storedMachineCapacity } from "../telemetry/machine-capacity.ts";
 import { fixWakeReason, reworkDueBesides, wakeDueAsideRun } from "./aside.ts";
@@ -373,6 +373,8 @@ export interface Engine {
       beforeLift?: () => Promise<boolean>;
       /** A short FLIGHT fix list, appended after RETRO's findings for the author; for `second_review`, FLIGHT's reason. */
       note?: string;
+      /** FLIGHT's basis for the settle; it closes the run's review-rounds hold when one stands. */
+      basis?: string;
     },
   ): Promise<OperatorResult>;
   /**
@@ -3341,6 +3343,22 @@ export function createEngine(deps: EngineDeps): Engine {
         }
         if (next.aside) next.aside = { ...next.aside, wake: true };
         checkBriefDispatch();
+        // a settle that sends the change back to review is FLIGHT's decision on the round cap: it
+        // closes the run's review-rounds hold, or the review would be held and dropped at once
+        const reopens =
+          opts?.action === "rereview" ||
+          opts?.action === "accept" ||
+          opts?.action === "second_review";
+        if (by === "FLIGHT" && reopens) {
+          const basis = opts?.basis ?? opts?.note ?? `FLIGHT settled the park with ${opts?.action}`;
+          if (settleReviewRounds(store, run, at, basis))
+            store.addLoopEvent(
+              `${run.id}:review-rounds-resolved:${next.epoch}`,
+              run.id,
+              `review-rounds hold resolved by FLIGHT's ${opts?.action}`,
+              at,
+            );
+        }
         store.setRunLoop(run.id, next);
         lastTransient.delete(run.id);
         store.addLoopEvent(`${run.id}:resumed:${next.epoch}`, run.id, `resumed by ${by}`, at);
