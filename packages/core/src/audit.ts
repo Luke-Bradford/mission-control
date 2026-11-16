@@ -1,6 +1,7 @@
 import { MC_TOOL_NAMES } from "./mcp.ts";
 import type { FindingCategory } from "./review.ts";
 import type { LoopKind } from "./runtime-model.ts";
+import type { AuditSpecBounce, AuditSpecBounceCount } from "./spec-bounce.ts";
 
 /** A merged PR at or above this many changed lines (additions plus deletions) is a size outlier. */
 export const AUDIT_PR_OUTLIER_LINES = 800;
@@ -137,6 +138,30 @@ export interface AuditImprovement {
   chars?: number;
 }
 
+/** Why a bug got past the PR that introduced it, worked out from the hub's own records. */
+export const BUG_MISSED_REASONS = ["requirement", "test", "review", "none"] as const;
+export type BugMissedReason = (typeof BUG_MISSED_REASONS)[number];
+
+/** A closed bug traced to the commit and PR that introduced it. */
+export interface AuditBugEscape {
+  repoId: string;
+  /** The bug ticket's number. */
+  issue: number;
+  /** When the bug was filed. */
+  filedAt: number;
+  /** The merged PR that fixed it. */
+  fixPr: number;
+  /** The commit that introduced the bug. */
+  commit: string;
+  /** The PR that commit came in on; null when git names none. */
+  introducedPr: number | null;
+  /** When that PR was merged. */
+  mergedAt: number;
+  missed: BugMissedReason;
+  /** Time from that merge to the bug being filed, in ms. */
+  discoveryMs: number;
+}
+
 /** The `/api/audit` response for one range. */
 export interface AuditView {
   range: { since: number; until: number };
@@ -204,6 +229,16 @@ export interface AuditView {
    * server always sets it; optional so web fixtures built before it type-check.
    */
   improvements?: AuditImprovement[];
+  /**
+   * Bugs filed in range that are closed with a merged fix, each traced to the commit and PR that
+   * introduced it, newest first. The server always sets it; optional so web fixtures built before it type-check.
+   */
+  bugEscapes?: AuditBugEscape[];
+  /**
+   * PRs whose review failed on spec (not only quality), by cause, and the rounds per cause over
+   * 7 and 30 days up to the range end. The server always sets it; optional so web fixtures built before it type-check.
+   */
+  specBounces?: { rows: AuditSpecBounce[]; counts: AuditSpecBounceCount[] };
   /** Empty, in its final shape, until SURGEON proposals are stored. */
   surgeonProposals: { id: string; at: number; summary: string }[];
   /** Lists the server cut to AUDIT_LIST_CAP, by name, with how many each held; absent when none was cut. */
@@ -273,7 +308,16 @@ export function capAudit(audit: AuditView): AuditView {
     flakes: cut("flakes", audit.flakes),
     changes: cut("changes", audit.changes),
     surgeonProposals: cut("surgeonProposals", audit.surgeonProposals),
+    ...(audit.specBounces === undefined
+      ? {}
+      : {
+          specBounces: {
+            ...audit.specBounces,
+            rows: cut("specBounces.rows", audit.specBounces.rows),
+          },
+        }),
     ...(audit.items === undefined ? {} : { items: cut("items", audit.items) }),
+    ...(audit.bugEscapes === undefined ? {} : { bugEscapes: cut("bugEscapes", audit.bugEscapes) }),
     ...(audit.improvements === undefined
       ? {}
       : { improvements: cut("improvements", audit.improvements) }),

@@ -594,6 +594,14 @@ export interface FlowIssue {
   doneAt: number | null;
 }
 
+/** An observed board-column move in the stored flow history. */
+export interface FlowColumnMove {
+  repoId: RepoId;
+  number: number;
+  at: number;
+  column: HudColumn;
+}
+
 /** One merged PR and the CI state of its earliest commit that has a check rollup. */
 export interface FlowPr {
   repoId: RepoId;

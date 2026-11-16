@@ -352,6 +352,8 @@ export interface Telemetry {
     }[];
     /** Range-bounded throughput buckets. `at` is the start of the bucket. */
     throughput?: { at: number; merged: number }[];
+    /** Last 14 local days of observed board WIP; today ends at the read time. */
+    ticketsInProgress?: { day: string; tickets: number | null }[];
     /** Daily quality buckets. Missing observations remain null rather than becoming zero. */
     quality?: {
       at: number;
