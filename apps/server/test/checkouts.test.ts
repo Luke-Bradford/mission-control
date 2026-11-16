@@ -1496,7 +1496,10 @@ describe("prepareCheckout", () => {
       it("still reuses and reinstalls the worktree (16 Nov)", async () => {
         const first = await prepareCheckout(input(), payloadInstall);
         plant(first.path, join(MC_TMP_DIR_NAME, "t1"));
-        expect(await prepareCheckout(input(), payloadInstall)).toMatchObject({ path: first.path, created: false });
+        expect(await prepareCheckout(input(), payloadInstall)).toMatchObject({
+          path: first.path,
+          created: false,
+        });
         expect(readdirSync(outside)).toEqual(["keep.txt"]);
       });
 

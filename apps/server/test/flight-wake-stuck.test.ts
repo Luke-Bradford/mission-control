@@ -9,7 +9,6 @@ import { Store } from "../src/store.ts";
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
 const MIN = 60_000;
-const DAY = 24 * 60 * MIN;
 
 let dir: string;
 let store: Store;

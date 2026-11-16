@@ -35,11 +35,11 @@ import {
   isFlakeNoteKey,
   noReportExitReason,
   type PullRequestView,
-  WAKE_STUCK_KEY_SUFFIX,
   parkedEventText,
   STUCK_PARK,
   seatDef,
   WAITING_OPERATOR_LABEL,
+  WAKE_STUCK_KEY_SUFFIX,
   WASTE_CHECK_TITLES,
 } from "@mc/core";
 import type { CcConfig, CrewSessionConfig } from "../config.ts";
