@@ -281,6 +281,7 @@ import {
   messageImprovements,
   toolImprovements,
 } from "./telemetry/audit-improvements.ts";
+import { specBounces } from "./telemetry/spec-bounces.ts";
 
 export * from "./store/types.ts";
 
@@ -3019,6 +3020,7 @@ export class Store {
           this.commsChatter(since, until),
         ),
       ],
+      specBounces: specBounces(this.db, since, until),
       surgeonProposals: [],
     };
   }
