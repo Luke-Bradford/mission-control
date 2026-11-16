@@ -26,6 +26,8 @@ function round(o: {
   spec: "pass" | "fail";
   quality: "pass" | "fail";
   text: string;
+  category?: string;
+  extra?: { text: string; category: string };
   ageDays: number;
   doneWhen?: readonly string[];
 }) {
@@ -61,6 +63,18 @@ function round(o: {
     o.runId,
     o.text,
   );
+  if (o.category !== undefined)
+    raw("UPDATE review_findings SET category = ? WHERE review_id = ? AND pos = 0", o.category, id);
+  if (o.extra !== undefined) {
+    raw(
+      `INSERT INTO review_findings (review_id, author_run_id, pos, severity, file, line, summary, scenario, fix, state, category)
+       VALUES (?, ?, 1, 'Important', 'a.ts', 1, ?, '', '', 'open', ?)`,
+      id,
+      o.runId,
+      o.extra.text,
+      o.extra.category,
+    );
+  }
 }
 
 const bounces = (days = 30) => store.audit(NOW - days * DAY, NOW, new Map()).specBounces;
@@ -158,6 +172,25 @@ describe("specBounces", () => {
       "repo#5": "other",
       "repo#6": "no-done-when",
     });
+  });
+
+  it("classifies a mixed spec and quality review from its spec findings only", () => {
+    round({
+      runId: "m",
+      ticket: "repo#1",
+      pr: 1,
+      n: 1,
+      spec: "fail",
+      quality: "fail",
+      text: "This is an unrelated change.",
+      category: "correctness",
+      extra: { text: "The ticket names no mockup.", category: "spec" },
+      ageDays: 1,
+      doneWhen: ["x"],
+    });
+    const row = bounces()?.rows[0];
+    expect(row?.cause).toBe("missing-reference");
+    expect(row?.findings).toEqual(["The ticket names no mockup."]);
   });
 
   it("counts rounds per cause over 7 and 30 days", () => {

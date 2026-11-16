@@ -16,7 +16,7 @@ const RULES: readonly [Exclude<SpecBounceCause, "other">, RegExp][] = [
   ],
   [
     "missing-reference",
-    /mock-?up|prototype|no page|which page|page (?:is )?(?:not )?(?:named|referenced|reference)|design (?:link|reference)|no reference/i,
+    /mock-?up|prototype|no page|which page|page (?:is )?(?:not )?(?:named|referenced|reference)|design (?:link|reference)|no reference|(?:does not|doesn't|did not|never|fails? to) (?:name|reference|link|mention|show|say) (?:a |an |the |which |any )?(?:page|screen|view|design)|(?:page|screen) (?:name|reference|link) (?:is |was )?(?:missing|absent)|(?:missing|no|without a?) (?:page|screen) (?:name|reference|link)/i,
   ],
   [
     "ambiguous-wording",
@@ -24,7 +24,7 @@ const RULES: readonly [Exclude<SpecBounceCause, "other">, RegExp][] = [
   ],
   [
     "no-done-when",
-    /done[- ]when|acceptance criteri|no criterion|no criteria|not covered by (?:the )?ticket|ticket (?:does not|doesn't) (?:say|cover|name)/i,
+    /done[- ]when|acceptance criteri|no criterion|no criteria|not covered by (?:the )?ticket|ticket (?:does not|doesn't) (?:say|cover) (?:the |this |that )?(?:case|behaviour|behavior|criteri)/i,
   ],
 ];
 

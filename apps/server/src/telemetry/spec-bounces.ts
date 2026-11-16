@@ -8,6 +8,9 @@ import {
 
 const DAY_MS = 86_400_000;
 
+/** Finding categories that support a failed spec verdict. */
+const SPEC_FINDING_CATEGORIES = ["spec", "scope"] as const;
+
 type Row = Record<string, unknown>;
 
 /**
@@ -33,17 +36,24 @@ export function specBounces(
     )
     .all(Math.min(since, from30), until) as Row[];
   const findingsOf = db.prepare(
-    "SELECT summary, scenario FROM review_findings WHERE review_id = ? ORDER BY pos",
+    "SELECT summary, scenario, category FROM review_findings WHERE review_id = ? ORDER BY pos",
   );
 
   const counts = new Map(SPEC_BOUNCE_CAUSES.map((c) => [c, { days7: 0, days30: 0 }]));
   const rows = new Map<string, AuditSpecBounce>();
   for (const v of reviews) {
-    const found = findingsOf.all(v.id as number) as Row[];
+    const all = findingsOf.all(v.id as number) as Row[];
+    // The findings behind the spec verdict: spec-category ones (scope included), else, for
+    // reviews recorded before findings were categorised, the uncategorised ones. A finding
+    // categorised as something else (correctness, style) is quality text and is left out.
+    const specCategories: readonly (string | null)[] = SPEC_FINDING_CATEGORIES;
+    const specOnly = all.filter((f) => specCategories.includes(f.category as string | null));
+    const found = specOnly.length > 0 ? specOnly : all.filter((f) => f.category === null);
     const summaries = found.map((f) => f.summary as string);
     const text = [
       ...found.flatMap((f) => [f.summary as string, f.scenario as string]),
-      (v.summary as string | null) ?? "",
+      // The review's own summary speaks for both verdicts, so it is used only when no finding is.
+      ...(found.length === 0 ? [(v.summary as string | null) ?? ""] : []),
     ].join("\n");
     // A ticket with no recorded Done-when lines is told to the rule as an empty list.
     const cause = classifySpecBounce(text, (v.done_when as number) === 0 ? [] : ["recorded"]);
