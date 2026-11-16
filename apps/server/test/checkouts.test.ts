@@ -1511,6 +1511,37 @@ describe("prepareCheckout", () => {
         expect(e.message).toContain(`has a symlink at docs/${MC_TMP_DIR_NAME}/t1/`);
       });
 
+      describe("when the base workspace makes .mc-tmp an install importer", () => {
+        beforeEach(() => {
+          commit(seed, {
+            "package.json": PAYLOAD_PKG,
+            "pnpm-lock.yaml": `${EMPTY_LOCK}\n  ${MC_TMP_DIR_NAME}/pkg: {}\n`,
+            "pnpm-workspace.yaml": `packages:\n  - ${MC_TMP_DIR_NAME}/pkg\n`,
+            [`${MC_TMP_DIR_NAME}/pkg/package.json`]: PKG,
+          });
+          git(seed, "push", "-q", "origin", "main");
+        });
+
+        it("refuses a linked manifest there", async () => {
+          const first = await prepareCheckout(input(), payloadInstall);
+          const manifest = join(first.path, MC_TMP_DIR_NAME, "pkg", "package.json");
+          rmSync(manifest);
+          symlinkSync(join(outside, "keep.txt"), manifest);
+          const e = await fail(prepareCheckout(input(), payloadInstall));
+          expect(e.code).toBe("protected");
+          expect(e.message).toContain(`has a symlink at ${MC_TMP_DIR_NAME}/pkg/package.json`);
+        });
+
+        it("refuses a linked workspace node_modules there", async () => {
+          const first = await prepareCheckout(input(), payloadInstall);
+          symlinkSync(outside, join(first.path, MC_TMP_DIR_NAME, "pkg", "node_modules"));
+          const e = await fail(prepareCheckout(input(), payloadInstall));
+          expect(e.code).toBe("protected");
+          expect(e.message).toContain(`${MC_TMP_DIR_NAME}/pkg/node_modules`);
+          expect(readdirSync(outside)).toEqual(["keep.txt"]);
+        });
+      });
+
       it("still refuses a scratch folder that is itself a symlink", async () => {
         const first = await prepareCheckout(input(), payloadInstall);
         symlinkSync(outside, join(first.path, MC_TMP_DIR_NAME));
