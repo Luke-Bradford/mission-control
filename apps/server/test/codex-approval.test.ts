@@ -440,6 +440,7 @@ describe("Codex check records", () => {
       expect(await waiting).toBe("decline");
       expect(tell).toHaveBeenCalledTimes(1);
       expect(tell.mock.calls[0]?.[0]).toContain("The test lock is busy");
+      expect(tell.mock.calls[0]?.[0]).toContain("other-seat");
       expect(tell.mock.calls[0]?.[0]).toContain("pnpm -s test:related");
     });
   });
