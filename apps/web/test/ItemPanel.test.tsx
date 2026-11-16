@@ -556,8 +556,8 @@ describe("ItemPanel, acting on an item", () => {
                 action: {
                   kind: "attention-hold",
                   reason: "Kept open",
-                  condition: { kind: "time", at: NOW + HOUR },
-                } as never,
+                  condition: { kind: "date", at: NOW + HOUR },
+                },
                 defaultable: false,
                 effect: "Holds the item.",
               },
@@ -577,26 +577,38 @@ describe("ItemPanel, acting on an item", () => {
       ...over,
     });
 
-    it.each([
-      ["a hub brief", bound()],
-      ["an escalation", bound({ key: "hold:studio", escalationId: "shop-app#4001" })],
-    ])("%s: clicking an option posts the bound choice and shows it recorded", async (_n, ask) => {
-      const fn = acting([ask], { [`POST ${BOUND}`]: applied() });
-      fireEvent.click(await enabled("Not now, clear it"));
+    const choices = [
+      { label: "Not now, clear it", id: "clear", other: "Keep it", text: "Decision recorded." },
+      { label: "Keep it", id: "keep", other: "Not now, clear it", text: "Held until later." },
+    ];
+    it.each(
+      choices.flatMap((c) => [
+        [`a hub brief, ${c.id}`, bound(), c] as const,
+        [
+          `an escalation, ${c.id}`,
+          bound({ key: "hold:studio", escalationId: "shop-app#4001" }),
+          c,
+        ] as const,
+      ]),
+    )("%s: clicking posts that option's bound choice and shows it recorded", async (_n, ask, c) => {
+      const fn = acting([ask], {
+        [`POST ${BOUND}`]: applied({ optionId: c.id, text: `${c.text} No external action.` }),
+      });
+      fireEvent.click(await enabled(c.label));
       await waitFor(() => expect(posts(fn, BOUND)).toHaveLength(1));
       expect(posts(fn, BOUND)[0]).toMatchObject({
         briefId: 31,
         sourceRevision: REVISION,
-        optionId: "clear",
+        optionId: c.id,
       });
       expect(typeof posts(fn, BOUND)[0].requestId).toBe("string");
       expect(posts(fn, "/api/seats/flight-1/message")).toEqual([]);
-      expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(
-        "Decision recorded.",
-      );
-      expect(
-        (within(panel()).getByRole("button", { name: "Keep it" }) as HTMLButtonElement).disabled,
-      ).toBe(true);
+      expect((await within(panel()).findByTestId("choice-line")).textContent).toContain(c.text);
+      expect(within(panel()).getByText("You chose:").parentElement?.textContent).toContain(c.label);
+      for (const name of [c.label, c.other])
+        expect((within(panel()).getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(
+          true,
+        );
     });
 
     it("still posts when the page is served over plain http, where crypto.randomUUID is missing", async () => {
