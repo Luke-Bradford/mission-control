@@ -1604,7 +1604,7 @@ describe("prepareCheckout", () => {
           ],
           [
             ".npmrc virtual-store-dir (path built from a variable)",
-            { ".npmrc": "virtual-store-dir=${X}/s\n" },
+            { ".npmrc": `virtual-store-dir=$\u007bX}/s\n` },
           ],
           [
             "workspace lockfileDir elsewhere",
