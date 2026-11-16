@@ -552,7 +552,7 @@ it("a turn that messaged the operator adds one message: the end text is not post
     text("Summary of the turn.", AT + 5),
   ]);
   stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
-  expect(texts(await page())).toEqual(["Looking at it.", "Here is your answer."]);
+  expect(texts(await page())).toEqual(["Here is your answer."]);
   expect(readFileSync(join(dir, "flight-run.jsonl"), "utf8")).toContain("Summary of the turn.");
 });
 
@@ -563,7 +563,36 @@ it("a turn that messaged nobody still shows its end text once", async () => {
     toolUse(AT + 3),
     text("Summary of the turn.", AT + 5),
   ]);
-  expect(texts(await page())).toEqual(["Looking at it.", "Summary of the turn."]);
+  expect(texts(await page())).toEqual(["Summary of the turn."]);
+});
+
+it("a turn with three text blocks and no operator message shows only the last", async () => {
+  run("flight-run", [
+    wake(AT + 1),
+    text("First progress.", AT + 2),
+    toolUse(AT + 3),
+    text("Second progress.", AT + 4),
+    toolUse(AT + 5),
+    text("The answer.", AT + 6),
+  ]);
+  expect(texts(await page())).toEqual(["The answer."]);
+  expect(readFileSync(join(dir, "flight-run.jsonl"), "utf8")).toContain("First progress.");
+});
+
+it("a Codex turn with three text blocks and no operator message shows only the last", async () => {
+  run(
+    "flight-run",
+    [
+      codexStart(AT + 1),
+      codexText("First progress.", AT + 2),
+      codexSend(AT + 3),
+      codexText("Second progress.", AT + 4),
+      codexText("The answer.", AT + 6),
+    ],
+    1,
+    "codex",
+  );
+  expect(texts(await page())).toEqual(["The answer."]);
 });
 
 it("a message in an earlier turn does not hide a later turn's end text", async () => {
@@ -647,5 +676,5 @@ it("a closing frame with several text blocks is cut whole after a reply", async 
     },
   ]);
   stored("Here is your answer.", AT + 4, FLIGHT, "CAPCOM");
-  expect(texts(await page())).toEqual(["Looking at it.", "Here is your answer."]);
+  expect(texts(await page())).toEqual(["Here is your answer."]);
 });
