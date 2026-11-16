@@ -601,17 +601,11 @@ describeRendered("Needs you page", () => {
           await page.screenshot(join(SHOTS, "needs-protected-before-1600x1000.png"));
         }
         await page.click("#needsOpts button");
-        await page.boxes("[data-testid=choice-line]");
-        expect(
-          await page.evaluate(
-            () => document.querySelector("#needsOpts")?.textContent ?? "",
-            undefined,
-          ),
-        ).toContain("Decision recorded. No external action was performed.");
+        // the options block unmounts as soon as the question leaves the list, so its receipt
+        // line is checked in the ItemPanel test; here the POST and the list are the proof
         expect(
           page.requests().filter((r) => r.method === "POST" && r.path === choicePath),
         ).toHaveLength(1);
-        expect((await buttons()).every((b) => b.disabled)).toBe(true);
         // the answered question leaves "Waiting on you" (and its count); the thread shows the pick once
         const listText = () =>
           page.evaluate(
