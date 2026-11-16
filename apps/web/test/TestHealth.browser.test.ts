@@ -132,8 +132,7 @@ describeRendered("Test health measured layout", () => {
                   workAreaBottom: document.querySelector("main")?.getBoundingClientRect().bottom,
                   workAreaHeight: document.querySelector("main")?.clientHeight,
                   workAreaContentHeight: document.querySelector("main")?.scrollHeight,
-                  footerBottom: document.querySelector("#ch-panel")?.getBoundingClientRect()
-                    .bottom,
+                  footerBottom: document.querySelector("#ch-panel")?.getBoundingClientRect().bottom,
                   firstDurationBottom: document
                     .querySelector(".ch-test-durations tbody tr")
                     ?.getBoundingClientRect().bottom,
