@@ -8,7 +8,7 @@ import { realpath, rm, stat } from "node:fs/promises";
 import { join, resolve, sep } from "node:path";
 import type { Run } from "@mc/core";
 import type { CcConfig } from "../config.ts";
-import { CheckoutError, removeCheckout } from "../runtime/checkouts.ts";
+import { CheckoutError, isSeatTree, removeCheckout } from "../runtime/checkouts.ts";
 import { crewGit } from "../runtime/git.ts";
 import type { Store } from "../store.ts";
 
@@ -94,6 +94,8 @@ export function createCrewTidy(deps: CrewTidyDeps): CrewTidyCycle {
     const real = await realpath(path).catch(() => resolve(path));
     const base = await realpath(root).catch(() => resolve(root));
     if (!real.startsWith(base + sep)) return "That worktree is not in the crew's folder.";
+    // a seat's one tree is kept for its next ticket; it is moved, never removed (#1976)
+    if (isSeatTree(path)) return "That is a seat's own worktree; it stays.";
     // a seat that still points at the worktree is using it
     if (
       deps.config.crew?.sessions

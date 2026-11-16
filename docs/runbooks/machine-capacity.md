@@ -41,3 +41,34 @@ current reading, reload the hub configuration, and attempt a start. The start is
 measured reason. Send `force: true` only to confirm that an operator override can start it; the
 override is recorded in the decision log. Remove the threshold override after the check. The
 warning and start admission clear automatically after sustained headroom.
+
+## One worktree per seat (#1976)
+
+A build seat keeps one worktree per repo, `{crew.worktrees}/{session}/{seat}-tree`, and a review
+seat keeps `{seat}-review`. A new ticket moves the tree onto its branch instead of making a
+worktree, so the Mac no longer writes and deletes about 12,000 files per ticket and per review.
+
+- **Switch.** The hub refuses the move when the tree holds uncommitted changes and names the files
+  in the start error; commit or discard them (a run's end already needs its work on the branch).
+  It then removes what the last ticket left outside git (untracked and ignored files), keeping
+  `node_modules`. A branch another idle seat tree still has checked out is detached there first.
+- **Install only on change.** The hash of the install inputs of the last install (every
+  `package.json`, the lockfile, `pnpm-workspace.yaml`, `.npmrc`, `.pnpmfile.*`, read from git
+  objects) is kept in `{crew.worktrees}/.mc-install/{session}/`, outside every seat's tree. A start
+  whose inputs match skips `pnpm install`; one whose inputs differ reinstalls. The checks on
+  install inputs (`refuseInstallInputs`, `inspectDisk`, `refuseChangedInputs`) run on every start
+  either way.
+- **Parked tickets.** A ticket that waits for review keeps its branch, not a tree. Resuming it
+  moves the seat's tree back to the branch; that is refused while the tree holds uncommitted
+  changes.
+- **uv repos** (a `uv.lock` at the top) still get a tree per ticket and per review, because a
+  moved tree is not re-synced by uv.
+- **Old trees.** `{seat}-{issue}` and `{seat}-review-{id}` trees of runs already live stay where
+  they are; the crew tidy removes them once their runs end. The tidy never removes a seat tree.
+- **Measuring.** Count `git worktree add` runs per day, and the entries of `git worktree list` in
+  the crew clone: at most one per seat (and one per review seat) once the old trees are gone.
+- **Spotlight.** The hub's `.metadata_never_index` file is honoured only at a volume's root. A
+  folder whose name ends in `.noindex` is skipped by Spotlight; this could not be checked from the
+  seat's sandbox (`mdfind` returns nothing there). If `mdfind -onlyin <crew worktrees folder>
+  package.json` still lists files, add the folder under System Settings > Spotlight > Search
+  Privacy, or point `crew.worktrees` at a folder named `worktrees.noindex`.

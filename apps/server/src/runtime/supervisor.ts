@@ -235,6 +235,7 @@ import {
   findHandoffCheckout,
   inheritedHandoffCommits,
   installAfterSync,
+  isSeatTree,
   prepareCheckout,
   prepareDetachedCheckout,
   preparePlanCheckout,
@@ -244,6 +245,7 @@ import {
   type RepoPeer,
   reinstallTrimmed,
   removeCheckout,
+  resumeSeatCheckout,
   sharedPnpmStoreDir,
   sweepPnpmStores,
   syncReusedWorktree,
@@ -2576,7 +2578,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
     seq: number,
     worktree: string | null,
   ): Promise<void> {
-    if (worktree === null) return;
+    // a seat's one tree stays for its next run (#1976)
+    if (worktree === null || isSeatTree(worktree)) return;
     await handoffJobs.get(runId);
     if (store.handoff(runId) !== null) return;
     const seatId = info.seat.id;
@@ -3697,6 +3700,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             ? await prepareReadOnlyCheckout(where)
             : await prepareCheckout({
                 ...where,
+                seatTree: true,
                 title,
                 ...(handoff ? { handoff: handoffTarget(store, handoff) } : {}),
                 pending: {
@@ -4487,6 +4491,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
             seatId,
             reviewId,
             sha: review.sha,
+            seatTree: true,
             peers: clonePeers(deps.config, deps.hubRoot),
           });
           try {
@@ -4525,7 +4530,8 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
               references: await repoReferenceIndex(checkout, s.baseSha),
             };
           } catch (e) {
-            await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
+            if (!isSeatTree(s.path))
+              await removeCheckout(checkout, s.path, { force: true }).catch(() => {});
             throw e;
           }
         },
@@ -4534,9 +4540,10 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         if (stopping) throw new SupervisorError(409, SHUTTING_DOWN);
         if (external && !(await readSubject())) throw notWanted;
       } catch (error) {
-        await inClone(checkout, () =>
-          removeCheckout(checkout, scratch.path, { force: true }),
-        ).catch(() => {});
+        if (!isSeatTree(scratch.path))
+          await inClone(checkout, () =>
+            removeCheckout(checkout, scratch.path, { force: true }),
+          ).catch(() => {});
         throw error;
       }
 
@@ -4884,7 +4891,7 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
       await enrichHandoff(store, handoff, info.session.checkout, crew?.worktrees ?? "");
       return;
     }
-    if (worktree === null) return;
+    if (worktree === null || isSeatTree(worktree)) return;
     try {
       await inClone(info.session.checkout, () =>
         removeCheckout(info.session.checkout, worktree, { force: true }),
@@ -5010,7 +5017,18 @@ export function createSupervisor(deps: SupervisorDeps): Supervisor {
         // Under the clone lock, as the crew tidy is: the worktree is marked in use before the lock
         // lets go, and its dependencies are back (the tidy trims a set-aside run's) before launch.
         checkout = await inClone(info.session.checkout, async () => {
-          const c = await existingCheckout(info.session.checkout, aside.worktree, branch);
+          // the seat's tree may have moved on to another ticket while this one waited
+          const c = await resumeSeatCheckout(
+            {
+              checkout: info.session.checkout,
+              worktreesRoot: crew?.worktrees ?? "",
+              sessionId: info.session.id,
+              seatId,
+              peers: clonePeers(deps.config, deps.hubRoot),
+            },
+            aside.worktree,
+            branch,
+          );
           startingWorktrees.add(aside.worktree);
           try {
             await reinstallTrimmed(

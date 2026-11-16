@@ -122,6 +122,28 @@ const CHECKOUT_TEXT = "the crew checkout is missing or has uncommitted changes";
 export const codexPnpmStoreDir = (worktree: string): string =>
   join(dirname(worktree), CODEX_PNPM_STORES_DIR, basename(worktree));
 
+/**
+ * A seat's one worktree per repo (#1976): `{worktreesRoot}/{sessionId}/{seatId}-tree`, moved
+ * between tickets' branches instead of made and deleted per ticket. A review seat's is
+ * `{seatId}-review`. Neither name ends in digits, as a per-ticket tree's (`{seatId}-{issue}`,
+ * `{seatId}-review-{id}`) does, so the two kinds are told apart by name alone.
+ */
+export const seatTreePath = (worktreesRoot: string, sessionId: string, seatId: string): string =>
+  join(worktreesRoot, sessionId, `${seatId}-tree`);
+
+/** The review seat's one tree. */
+export const reviewTreePath = (worktreesRoot: string, sessionId: string, seatId: string): string =>
+  join(worktreesRoot, sessionId, `${seatId}-review`);
+
+/** Whether `path` is a seat's or review seat's own tree, not a per-ticket one. */
+export const isSeatTree = (path: string): boolean => /-(?:tree|review)$/.test(basename(path));
+
+/**
+ * Where the hash of the inputs a worktree's install was made from is kept: beside the worktrees,
+ * never inside one, so a seat cannot write it.
+ */
+export const INSTALL_STATE_DIR = ".mc-install";
+
 /** The sole hub-owned pnpm store for all checkouts and review scratch copies. */
 export const sharedPnpmStoreDir = (worktreesRoot: string): string =>
   join(worktreesRoot, CODEX_PNPM_STORES_DIR, SHARED_PNPM_STORE_NAME);
@@ -329,6 +351,11 @@ export interface CheckoutInput {
   pending?: PendingCheckouts;
   /** Checked at this start against the clone's git repository; none given, none checked. */
   peers?: readonly RepoPeer[];
+  /**
+   * Use the seat's one tree (`seatTreePath`), moved onto this ticket's branch, instead of a tree
+   * per ticket. A per-ticket tree already there for this ticket is still reused where it is.
+   */
+  seatTree?: true;
 }
 
 export interface Checkout {
@@ -941,6 +968,8 @@ type InstallVerification = {
   compare: boolean;
   subject: string;
   worktreesRoot: string;
+  /** A seat tree's record of the inputs its install was made from (see `INSTALL_STATE_DIR`). */
+  state?: string;
 };
 
 /** Injectable process runner: tests never invoke a real uv. */
@@ -1091,6 +1120,37 @@ async function verifyInstall(
   return [...allowedInstallDirs];
 }
 
+/**
+ * A hash of the install inputs (every pnpm manifest, lockfile and config) as git holds them at
+ * `rev`. Read from git objects, never from the seat-written tree.
+ */
+async function installInputsHash(
+  inClone: (args: string[], timeoutMs?: number) => Promise<string>,
+  rev: string,
+): Promise<string> {
+  const listed = await inClone(["ls-tree", "-r", "-z", "--full-tree", "--end-of-options", rev]);
+  const lines: string[] = [];
+  for (const entry of listed.split("\0")) {
+    const tab = entry.indexOf("\t");
+    if (tab < 0) continue;
+    const path = entry.slice(tab + 1);
+    if (!PNPM_INPUTS.has(path.split("/").pop() ?? "")) continue;
+    lines.push(`${path}\t${entry.slice(0, tab).split(" ")[2] ?? ""}`);
+  }
+  return createHash("sha256").update(lines.sort().join("\n")).digest("hex");
+}
+
+const readInstallState = (state: string): Promise<string | null> =>
+  readFile(state, "utf8").then(
+    (t) => t.trim(),
+    () => null,
+  );
+
+async function writeInstallState(state: string, hash: string): Promise<void> {
+  await mkdir(dirname(state), { recursive: true, mode: 0o700 });
+  await writeFile(state, `${hash}\n`, { mode: 0o600 });
+}
+
 async function installAll(
   s: InstallVerification & { name: string },
   run: InstallRunner,
@@ -1115,6 +1175,9 @@ async function installAll(
       await addMcTmpExclude(s.common);
     }
     await install(tool, s.path, s.name, run, tool === PNPM_TOOL ? pnpmStore : undefined);
+  }
+  if (s.state !== undefined && picked.includes(PNPM_TOOL)) {
+    await writeInstallState(s.state, await installInputsHash(s.inClone, s.rev));
   }
 }
 
@@ -1150,6 +1213,22 @@ async function installReusedPnpm(
       () => false,
     );
   });
+  // The checks above ran against git objects; only the install itself is skipped, and only when
+  // the inputs are the ones the install on disk was made from.
+  let hash: string | null = null;
+  if (s.state !== undefined) {
+    hash = await installInputsHash(s.inClone, s.rev);
+    const same = (await readInstallState(s.state)) === hash;
+    if (
+      same &&
+      (await lstat(modules).then(
+        (st) => st.isDirectory(),
+        () => false,
+      ))
+    )
+      return;
+    await rm(s.state, { force: true });
+  }
   try {
     await rm(modules, { recursive: true, force: true });
     for (const nested of nestedModules)
@@ -1166,6 +1245,7 @@ async function installReusedPnpm(
   const pnpmStore = await prepareSharedPnpmStore(s.worktreesRoot, s.name);
   await addMcTmpExclude(s.common);
   await install(PNPM_TOOL, s.path, s.name, run, pnpmStore);
+  if (s.state !== undefined && hash !== null) await writeInstallState(s.state, hash);
 }
 
 /**
@@ -1612,6 +1692,126 @@ async function followOrigin(w: (args: string[]) => Promise<string>, branch: stri
   }
 }
 
+const CLEAN_KEEP = ["-e", "!node_modules", "-e", "!.venv"];
+
+/** What a switch would lose: the changes the commit tool would stage, as porcelain lines. */
+async function uncommitted(w: (args: string[]) => Promise<string>): Promise<string[]> {
+  const status = await w([
+    "--no-optional-locks",
+    "-c",
+    "core.quotePath=true",
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+    "--",
+    ...COMMIT_ADD_PATHSPEC,
+  ]);
+  return status.split("\n").filter((l) => l !== "");
+}
+
+/**
+ * Removes what the last ticket left outside git (untracked and ignored files), keeping the
+ * dependency install. Run after the tree is known clean of work.
+ */
+async function cleanOutsideGit(w: (args: string[]) => Promise<string>): Promise<void> {
+  // untracked files first (the install is ignored, so it is not among them), then ignored ones
+  await w(["clean", "-fdq"]);
+  await w(["clean", "-fdXq", ...CLEAN_KEEP]);
+}
+
+/**
+ * Moves a seat's tree onto `branch`: refuses (naming the files) when it holds uncommitted
+ * changes, frees the branch from another idle tree that has it checked out, switches, and
+ * cleans. A branch that does not exist yet starts at `baseSha`. The caller holds the clone lock.
+ * Returns whether the branch was made by this move.
+ */
+async function moveSeatTree(m: {
+  w: (args: string[]) => Promise<string>;
+  inClone: (args: string[], timeoutMs?: number) => Promise<string>;
+  common: string;
+  path: string;
+  worktreesRoot: string;
+  branch: string;
+  baseSha: string;
+  handoff: boolean;
+}): Promise<boolean> {
+  const dirty = await uncommitted(m.w);
+  if (dirty.length > 0) {
+    const shown = dirty.slice(0, 8).map((l) => l.slice(3));
+    const more = dirty.length > shown.length ? ` and ${dirty.length - shown.length} more` : "";
+    throw new CheckoutError(
+      "dirty",
+      `${m.path} has uncommitted changes (${shown.join(", ")}${more}); it was not moved to ${m.branch}`,
+      { detail: dirty.join("\n") },
+    );
+  }
+  const refSha = (ref: string) =>
+    m.inClone(["rev-parse", "--verify", "--quiet", "--end-of-options", `${ref}^{commit}`]).then(
+      (x) => x.trim(),
+      () => null,
+    );
+  const local = await refSha(`refs/heads/${m.branch}`);
+  const remote = local === null ? await refSha(`refs/remotes/origin/${m.branch}`) : null;
+  if (m.handoff && local === null && remote === null)
+    throw new CheckoutError("path", "the handoff branch is missing; it was not recreated");
+  await freeBranch(m.inClone, m.common, m.path, m.branch);
+  const args =
+    local !== null
+      ? ["switch", "--quiet", "--ignore-other-worktrees", "--no-guess", m.branch]
+      : remote !== null
+        ? ["switch", "--quiet", "--track", "-c", m.branch, `refs/remotes/origin/${m.branch}`]
+        : ["switch", "--quiet", "--no-track", "-c", m.branch, m.baseSha];
+  try {
+    // a branch another tree holds was detached from it just above; --ignore-other-worktrees only
+    // covers the registration a detached tree can leave until its next prune
+    await m.w(args);
+  } catch (e) {
+    throw new CheckoutError("worktree", `could not move ${m.path} to ${m.branch}`, {
+      cause: e,
+      detail: gitReason(e),
+    });
+  }
+  await cleanOutsideGit(m.w);
+  return local === null && remote === null;
+}
+
+/**
+ * A branch can be checked out in one tree only. If an idle crew tree (a seat's, not a per-ticket
+ * one) still has `branch`, it is detached there so this tree can take it; one holding
+ * uncommitted changes is refused.
+ */
+async function freeBranch(
+  inClone: (args: string[], timeoutMs?: number) => Promise<string>,
+  common: string,
+  except: string,
+  branch: string,
+): Promise<void> {
+  const listed = await inClone(["worktree", "list", "--porcelain"]);
+  for (const block of listed.split("\n\n")) {
+    const lines = block.split("\n");
+    if (!lines.includes(`branch refs/heads/${branch}`)) continue;
+    const other = lines.find((l) => l.startsWith("worktree "))?.slice("worktree ".length);
+    if (other === undefined || other === except) continue;
+    // a per-ticket tree (`{seat}-{issue}`) is another run's own: not taken from it
+    if (!isSeatTree(other))
+      throw new CheckoutError("path", `${branch} is checked out in ${other}; it was not moved`);
+    const gitDir = await adminDirOf(common, other);
+    if (gitDir === null) continue;
+    const o = (args: string[]) => crewGit(other, args, common, { gitDir });
+    const dirty = await uncommitted(o);
+    if (dirty.length > 0) {
+      throw new CheckoutError(
+        "dirty",
+        `${other} holds ${branch} with uncommitted changes (${dirty
+          .slice(0, 8)
+          .map((l) => l.slice(3))
+          .join(", ")}); it was not taken`,
+      );
+    }
+    await o(["switch", "--quiet", "--detach"]);
+  }
+}
+
 /**
  * Gives a run its branch and worktree: reuses this ticket's worktree if it exists, else adds one
  * on the existing branch (local, or origin's tracked) or on a new branch from origin's default
@@ -1627,10 +1827,24 @@ export async function prepareCheckout(
   // a worktree made before sessions had folders is reused where it is
   let path =
     (await succeeds(lstat(inSession))) || !(await succeeds(lstat(flat))) ? inSession : flat;
-  if (i.handoff?.worktree && (await succeeds(lstat(i.handoff.worktree)))) {
-    path = (await checkedHandoffCheckout(i.checkout, i.handoff.worktree, branch, i.worktreesRoot))
-      .path;
+  const seatPath = seatTreePath(i.worktreesRoot, i.sessionId, i.seatId);
+  // A uv repo is not reinstalled in a moved tree, so it keeps a tree per ticket.
+  const seatTree =
+    i.seatTree === true && !(await succeeds(inClone(["cat-file", "-e", `${baseSha}:uv.lock`])));
+  // a seat start takes the seat's one tree, unless this ticket still has a per-ticket tree of its own
+  if (seatTree && !(await succeeds(lstat(path)))) path = seatPath;
+  // another seat's tree is never adopted: the branch is moved into this seat's own
+  const handoffTree =
+    i.handoff?.worktree && !(seatTree && isSeatTree(i.handoff.worktree))
+      ? i.handoff.worktree
+      : null;
+  if (handoffTree && (await succeeds(lstat(handoffTree)))) {
+    path = (await checkedHandoffCheckout(i.checkout, handoffTree, branch, i.worktreesRoot)).path;
   }
+  const stateFor =
+    seatTree && path === seatPath
+      ? { state: join(i.worktreesRoot, INSTALL_STATE_DIR, i.sessionId, basename(path)) }
+      : {};
   const rev = `refs/heads/${branch}`;
   const subject = `branch ${branch}`;
 
@@ -1655,7 +1869,21 @@ export async function prepareCheckout(
     let head = gitDir
       ? await crewGit(path, ["symbolic-ref", "--quiet", "HEAD"], common, { gitDir }).catch(() => "")
       : "";
-    if (gitDir !== null && i.handoff && head.trim() !== `refs/heads/${branch}`) {
+    let moved: { fresh: boolean } | null = null;
+    if (gitDir !== null && path === seatPath && head.trim() !== `refs/heads/${branch}`) {
+      const fresh = await moveSeatTree({
+        w: (args) => crewGit(path, args, common, { gitDir }),
+        inClone,
+        common,
+        path,
+        worktreesRoot: i.worktreesRoot,
+        branch,
+        baseSha,
+        handoff: i.handoff !== undefined,
+      });
+      moved = { fresh };
+      head = `refs/heads/${branch}`;
+    } else if (gitDir !== null && i.handoff && head.trim() !== `refs/heads/${branch}`) {
       // The seat that wrote the PR gets it back: its worktree sits on the local branch, the PR's
       // head is another ref. Taken over only when nothing in it is unpushed.
       await switchToHandoff((args) => crewGit(path, args, common, { gitDir }), branch, head.trim());
@@ -1698,9 +1926,14 @@ export async function prepareCheckout(
         subject,
         name: branch,
         worktreesRoot: i.worktreesRoot,
+        ...stateFor,
       },
       runInstall,
     );
+    if (moved !== null) {
+      // a tree moved onto a branch this call made is a new run's; onto an old one it is a reuse
+      return { branch, path, created: moved.fresh, baseSha, gitDir, leftoverChanges: [] };
+    }
     return { branch, path, created: false, baseSha, gitDir, leftoverChanges };
   }
 
@@ -1717,6 +1950,7 @@ export async function prepareCheckout(
   const remote = local === null ? await refSha(`refs/remotes/origin/${branch}`) : null;
   if (i.handoff && local === null && remote === null)
     throw new CheckoutError("path", "the handoff branch is missing; it was not recreated");
+  if (path === seatPath) await freeBranch(inClone, common, path, branch);
   const add =
     local !== null
       ? ["worktree", "add", "--quiet", "--", path, branch]
@@ -1766,6 +2000,7 @@ export async function prepareCheckout(
         subject,
         name: branch,
         worktreesRoot: i.worktreesRoot,
+        ...stateFor,
       },
       runInstall,
     );
@@ -1802,6 +2037,75 @@ export async function existingCheckout(
     throw notIt(e);
   }
   if (head.trim() !== `refs/heads/${branch}`) throw notIt();
+  return { branch, path, gitDir };
+}
+
+/**
+ * A set-aside run's branch back in its seat's tree. The tree may have moved on to another ticket
+ * meanwhile (#1679): then it is moved back (refused when it holds uncommitted changes), the branch
+ * kept its commits. Dependencies are reinstalled only when the inputs differ. The caller holds
+ * the clone lock.
+ */
+export async function resumeSeatCheckout(
+  i: {
+    checkout: string;
+    worktreesRoot: string;
+    sessionId: string;
+    seatId: string;
+    peers?: readonly RepoPeer[];
+  },
+  path: string,
+  branch: string,
+  runInstall: InstallRunner = execFileP,
+): Promise<Pick<Checkout, "branch" | "path" | "gitDir">> {
+  if (path !== seatTreePath(i.worktreesRoot, i.sessionId, i.seatId)) {
+    return existingCheckout(i.checkout, path, branch);
+  }
+  const { common, inClone, baseSha } = await fetchBaseAs(i, `${i.seatId}-tree`);
+  const gitDir = await adminDirOf(common, path);
+  if (gitDir === null) throw new CheckoutError("path", `${path} is not this run's checkout`);
+  const w = (args: string[]) => crewGit(path, args, common, { gitDir });
+  const head = (await w(["symbolic-ref", "--quiet", "HEAD"]).catch(() => "")).trim();
+  if (head !== `refs/heads/${branch}`) {
+    await checkSeatGitConfig(path);
+    const local = await succeeds(
+      inClone([
+        "rev-parse",
+        "--verify",
+        "--quiet",
+        "--end-of-options",
+        `refs/heads/${branch}^{commit}`,
+      ]),
+    );
+    if (!local) throw new CheckoutError("path", `${branch} is gone; it was not recreated`);
+    await moveSeatTree({
+      w,
+      inClone,
+      common,
+      path,
+      worktreesRoot: i.worktreesRoot,
+      branch,
+      baseSha,
+      handoff: true,
+    });
+  }
+  const rev = `refs/heads/${branch}`;
+  await installReusedPnpm(
+    {
+      checkout: i.checkout,
+      common,
+      inClone,
+      path,
+      rev,
+      base: baseSha,
+      compare: true,
+      subject: `branch ${branch}`,
+      name: branch,
+      worktreesRoot: i.worktreesRoot,
+      state: join(i.worktreesRoot, INSTALL_STATE_DIR, i.sessionId, basename(path)),
+    },
+    runInstall,
+  );
   return { branch, path, gitDir };
 }
 
@@ -1958,6 +2262,8 @@ export interface ScratchInput {
   reviewId: number;
   sha: string;
   peers?: readonly RepoPeer[];
+  /** Use the review seat's one tree (`{seat}-review`), moved to `sha`, not a tree per review. */
+  seatTree?: true;
 }
 
 export interface Scratch {
@@ -1997,7 +2303,6 @@ export async function prepareScratch(
     throw new CheckoutError("path", `${name} is not a review checkout name`);
   }
   const subject = `the PR head ${i.sha.slice(0, 7)}`;
-  const path = join(i.worktreesRoot, i.sessionId, name);
   const common = await cloneGitDir(i.checkout, i.peers);
   const inClone = (args: string[], timeoutMs?: number) =>
     crewGit(i.checkout, args, common, { gitDir: common, timeoutMs });
@@ -2006,11 +2311,21 @@ export async function prepareScratch(
   if (!(await succeeds(inClone(["cat-file", "-e", `${i.sha}^{commit}`])))) {
     throw new CheckoutError("base", "the PR's head commit is not in the clone");
   }
+  // A uv repo is not reinstalled in a moved tree, so it keeps a tree per review.
+  const seatTree =
+    i.seatTree === true && !(await succeeds(inClone(["cat-file", "-e", `${i.sha}:uv.lock`])));
+  const path = seatTree
+    ? reviewTreePath(i.worktreesRoot, i.sessionId, i.seatId)
+    : join(i.worktreesRoot, i.sessionId, name);
+  const state = seatTree
+    ? join(i.worktreesRoot, INSTALL_STATE_DIR, i.sessionId, basename(path))
+    : undefined;
   const cannotAdd = (e: unknown) =>
     new CheckoutError("worktree", `could not create a worktree for ${name}`, {
       cause: e,
       detail: gitReason(e),
     });
+  let reuse = false;
   if (await succeeds(lstat(path))) {
     if ((await adminDirOf(common, path)) === null) {
       throw new CheckoutError(
@@ -2019,15 +2334,34 @@ export async function prepareScratch(
         { detail: path },
       );
     }
-    await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch((e) => {
-      throw cannotAdd(e);
-    });
+    if (seatTree) reuse = true;
+    else
+      await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch((e) => {
+        throw cannotAdd(e);
+      });
   }
-  try {
-    await inClone(["worktree", "prune"]);
-    await inClone(["worktree", "add", "--quiet", "--detach", "--", path, i.sha], CREW_GIT_SLOW_MS);
-  } catch (e) {
-    throw cannotAdd(e);
+  if (reuse) {
+    // The review seat's tree: nothing in it is work to keep. It moves to the PR head, and what
+    // the last review left outside git goes; its install stays unless the inputs changed.
+    const gitDir = await adminDirOf(common, path);
+    if (gitDir === null) throw cannotAdd(new Error("not registered"));
+    const w = (args: string[]) => crewGit(path, args, common, { gitDir });
+    try {
+      await w(["switch", "--quiet", "--detach", "--force", "--", i.sha]);
+      await cleanOutsideGit(w);
+    } catch (e) {
+      throw cannotAdd(e);
+    }
+  } else {
+    try {
+      await inClone(["worktree", "prune"]);
+      await inClone(
+        ["worktree", "add", "--quiet", "--detach", "--", path, i.sha],
+        CREW_GIT_SLOW_MS,
+      );
+    } catch (e) {
+      throw cannotAdd(e);
+    }
   }
   try {
     const gitDir = await adminDirOf(common, path);
@@ -2043,21 +2377,22 @@ export async function prepareScratch(
     }
     let installNote: string | undefined;
     try {
-      await installAll(
-        {
-          checkout: i.checkout,
-          common,
-          inClone,
-          path,
-          rev: i.sha,
-          base: mergeBase,
-          compare: true,
-          subject,
-          name: subject,
-          worktreesRoot: i.worktreesRoot,
-        },
-        runInstall,
-      );
+      const verification = {
+        checkout: i.checkout,
+        common,
+        inClone,
+        path,
+        rev: i.sha,
+        base: mergeBase,
+        compare: true,
+        subject,
+        name: subject,
+        worktreesRoot: i.worktreesRoot,
+        ...(state === undefined ? {} : { state }),
+      };
+      await (reuse
+        ? installReusedPnpm(verification, runInstall)
+        : installAll(verification, runInstall));
     } catch (e) {
       // Nothing from the PR branch is installed. A branch whose only changed install inputs are
       // package.json and the lockfile is reviewed read-only, and reported as "reviewed, not
@@ -2069,13 +2404,23 @@ export async function prepareScratch(
         e.changed.every((f) => READ_ONLY_REVIEW_INPUTS.has(basename(f)))
       ) {
         installNote = `Reviewed, not installed: ${e.message}`;
+        // an earlier review's install is not this PR's: nothing of it stays to be read
+        if (reuse) {
+          await rm(join(path, PNPM_TOOL.installDir), { recursive: true, force: true });
+          if (state !== undefined) await rm(state, { force: true });
+        }
       } else {
         throw e;
       }
     }
     return { path, gitDir, baseSha, mergeBase, ...(installNote ? { installNote } : {}) };
   } catch (e) {
-    await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch(() => {});
+    // a start that made the tree takes it away again; the seat's own stays for its next review
+    if (!reuse) {
+      await inClone(["worktree", "remove", "--force", "--", path], CREW_GIT_SLOW_MS).catch(
+        () => {},
+      );
+    }
     throw e;
   }
 }
