@@ -2153,6 +2153,9 @@ describe("Codex restart", () => {
       ),
     );
     expect(store.run(runId)).toMatchObject({ status: "running", endedAt: null });
+    // an idle Codex keeper does not outlive its hub: a turn in flight keeps the resumed one alive
+    await second.sup.message("guido-1", "hold", { interrupt: false });
+    await until(() => expect(seatState("guido-1")).toBe("running"));
     await second.sup.stopAll();
     const spawns = recorded().filter((m) => m.type === "spawn").length;
     // the third hub is a new supervisor with no memory: its reattach fails the same way
