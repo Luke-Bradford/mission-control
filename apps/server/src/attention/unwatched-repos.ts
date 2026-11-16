@@ -7,7 +7,7 @@ import {
 import type { CcConfig } from "../config.ts";
 import { attentionItems, NO_LOCK } from "../hud/hud.ts";
 import type { Store } from "../store.ts";
-import { questionAskAt } from "./holds.ts";
+import { questionAskAt, releaseHold } from "./holds.ts";
 
 /** The repo an item was raised in: its ticket's, else the repo of the seat that raised it. */
 const itemRepo = (item: AttentionItem): string | null =>
@@ -35,7 +35,7 @@ export function closeUnwatchedRepoItems(d: {
     const repo = itemRepo(item);
     if (repo === null || watched.has(repo)) continue;
     const question = item.brief?.ask || item.text;
-    const stored = store.clearAttention({
+    const closure = {
       key: item.key,
       askAt: questionAskAt(item, item.brief),
       kind: "repo-unwatched",
@@ -45,8 +45,16 @@ export function closeUnwatchedRepoItems(d: {
       ticket: item.ticket,
       operator: true,
       at: now,
-    });
+    } as const;
+    const ask = /^ask:(\d+)$/.exec(item.key);
+    const stored = ask
+      ? store.closeQuestion(closure)
+      : store.clearAttention(closure);
     if (!stored) continue;
+    if (ask) store.answerQuestion(Number(ask[1]), now);
+    // Held sources must leave their hold as well as Needs you. Otherwise a later source with the
+    // same key would remain hidden behind an obsolete operator hold.
+    releaseHold(store, item.key, now);
     closed++;
     store.addFlightDecision({
       at: now,

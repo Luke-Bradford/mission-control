@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { COMMS_OPEN_PREFIX, REPO_UNWATCHED_REASON, type Run } from "@mc/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeUnwatchedRepoItems } from "../src/attention/unwatched-repos.ts";
+import { holdItem, holds } from "../src/attention/holds.ts";
 import type { CcConfig } from "../src/config.ts";
 import { attentionItems } from "../src/hud/hud.ts";
 import { Store } from "../src/store.ts";
@@ -87,6 +88,7 @@ describe("items from a repo the hub no longer watches", () => {
       by: "hub",
       ticket: "studio#7",
     });
+    expect(store.question(Number(gone.slice("ask:".length)))?.answeredAt).toBe(NOW);
     // FLIGHT's decisions show it
     expect(
       store
@@ -148,6 +150,7 @@ describe("items from a repo the hub no longer watches", () => {
       `${COMMS_OPEN_PREFIX}${blocker.id}`,
       "note:blocked:studio:9",
     ];
+    holdItem(store, "note:blocked:studio:9", "Wait for the studio", { kind: "manual" }, "CAPCOM", NOW - 1);
     expect(openKeys()).toEqual(expect.arrayContaining(keys));
 
     expect(closeUnwatchedRepoItems({ config: config(), store, now: NOW })).toBe(3);
@@ -164,6 +167,7 @@ describe("items from a repo the hub no longer watches", () => {
     expect(store.commsSettlement(question.id)).toMatchObject({ reason: REPO_UNWATCHED_REASON });
     expect(store.commsSettlement(blocker.id)).toMatchObject({ reason: REPO_UNWATCHED_REASON });
     expect(store.notes().find((n) => n.key === "blocked:studio:9")?.dismissedAt).toBe(NOW);
+    expect(holds(store)["note:blocked:studio:9"]?.releasedAt).toBe(NOW);
     expect(
       store.flightDecisions(0, 10).filter((d) => d.basis.includes("studio is not")),
     ).toHaveLength(3);
