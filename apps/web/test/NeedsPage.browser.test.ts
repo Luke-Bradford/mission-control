@@ -615,7 +615,7 @@ describeRendered("Needs you page", () => {
                 const look = () => {
                   const text = document.querySelector(".needs-list")?.textContent ?? "";
                   if (
-                    !text.includes("The studio switch-over is still open.") ||
+                    !text.includes("Should the old studio switch-over stay open?") ||
                     Date.now() - started > 5000
                   )
                     resolve(text);
@@ -626,7 +626,7 @@ describeRendered("Needs you page", () => {
             undefined,
           );
         const after = await listText();
-        expect(after).not.toContain("The studio switch-over is still open.");
+        expect(after).not.toContain("Should the old studio switch-over stay open?");
         expect(after).toContain("Waiting on you · 1");
         expect(
           await page.evaluate(
