@@ -14,12 +14,17 @@ history begins are `null`.
   telemetry series.
 - `apps/server/src/collectors/flow.ts`: retain observed board-column moves with each stored flow
   read.
-- `apps/server/src/store/schema.ts`, `apps/server/src/store/migrations.ts`, and
-  `apps/server/src/store.ts`: persist and read those moves.
+- `apps/server/src/store/schema.ts` and `apps/server/src/store.ts`: persist and read those moves.
 - `apps/server/src/telemetry/telemetry.ts`: calculate the local 14-day end-of-day series without
   network or git access.
 - `apps/server/test/telemetry.test.ts`, `apps/server/test/flow.test.ts`, and
-  `apps/server/test/store.test.ts`: prove the read and persisted source history.
+  `apps/server/test/api.test.ts`: prove the read and persisted source history.
+
+## Design
+
+Page question: how many tickets were in progress at the end of each of the last 14 local calendar
+days? KPI: tickets in progress is the number of tickets whose most recently stored column move by
+the day's end is `In progress`; its window is 14 local calendar days, and its unit is tickets.
 
 ## Acceptance checks
 
